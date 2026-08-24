@@ -19,6 +19,11 @@
     "orchestration"
   ],
   "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./dist/esm/platform/openclaw-entry.js"
+    ]
+  },
   "exports": {
     ".": {
       "import": {
@@ -76,6 +81,15 @@
       "optional": true
     }
   },
+  "bundleDependencies": [
+    "@anthropic-ai/claude-agent-sdk",
+    "@modelcontextprotocol/sdk",
+    "cron-parser",
+    "express",
+    "js-yaml",
+    "yaml",
+    "zod"
+  ],
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.235",
     "@modelcontextprotocol/sdk": "^1.30.0",

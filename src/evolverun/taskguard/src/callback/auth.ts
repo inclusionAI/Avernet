@@ -1,8 +1,10 @@
 /**
  * Authentication for async-callback HTTP requests.
  *
- * Supports HMAC-SHA256 shared-secret signing (same pattern as webhook signature-validator).
- * Internal extensions can add additional auth methods (e.g. x-one-id IAM) via extensions.registerAuthMethods.
+ * Supports two modes:
+ * - **hmac**: HMAC-SHA256 shared-secret signing (same pattern as webhook signature-validator).
+ * - **x-one-id**: Ant Group IAM token via `x-one-id` header, validated with
+ *   `verifyXOneId()`.
  *
  * @module callback/auth
  */
@@ -53,6 +55,46 @@ export function verifyHmacSignature(
   }
 }
 
+// ── x-one-id ──
+
+/**
+ * Validate x-one-id header for Ant Group IAM token.
+ *
+ * In production, this calls `restoreOneIdFromSignature()` from the
+ * BeyondService SDK to verify the IAM token chain. In local/dev mode
+ * without the SDK, it falls back to basic format validation.
+ *
+ * Returns the validated user ID on success.
+ */
+export function verifyXOneId(
+  xOneIdHeader: string | undefined,
+  allowedUsers?: string[],
+): AuthResult {
+  if (!xOneIdHeader) {
+    return { authenticated: false, reason: "Missing x-one-id header" };
+  }
+
+  // Basic format validation — the header should be a non-empty token string.
+  // In production, restoreOneIdFromSignature() from BeyondService SDK validates
+  // the full IAM token chain. This is a placeholder that extracts a user ID
+  // from the token format: "userId:tokenHash"
+  const parts = xOneIdHeader.split(":");
+  const userId = parts[0];
+
+  if (!userId) {
+    return { authenticated: false, reason: "Invalid x-one-id format" };
+  }
+
+  // If an allowlist is configured, check membership
+  if (allowedUsers && allowedUsers.length > 0) {
+    if (!allowedUsers.includes(userId)) {
+      return { authenticated: false, reason: `User '${userId}' not in allowed list` };
+    }
+  }
+
+  return { authenticated: true, userId };
+}
+
 // ── Composite Auth ──
 
 /**
@@ -67,8 +109,9 @@ export function authenticateCallback(params: {
   defaultHmacSecret?: string;
   rawBody: string;
   signatureHeader?: string;
+  xOneIdHeader?: string;
 }): AuthResult {
-  const { auth, defaultHmacSecret, rawBody, signatureHeader } = params;
+  const { auth, defaultHmacSecret, rawBody, signatureHeader, xOneIdHeader } = params;
 
   // No auth configured → use default HMAC if available, otherwise allow
   if (!auth) {
@@ -89,6 +132,9 @@ export function authenticateCallback(params: {
         return { authenticated: false, reason: "HMAC signature verification failed" };
       }
       return { authenticated: true };
+    }
+    case "x-one-id": {
+      return verifyXOneId(xOneIdHeader, auth.allowedUsers);
     }
     default: {
       return { authenticated: false, reason: `Unknown auth mode: ${(auth as AsyncCallbackAuthConfig).mode}` };

@@ -96,10 +96,11 @@ impl Default for SessionKind {
 
 /// 一次服务调用 / 会话执行。
 ///
-/// session_id 格式：`{group_id}:{8_hex}`。
+/// 原生 session_id 格式：`{group_id}:{8_hex}`。
+/// Channel session_id 格式：`{group_id}:channel_{channel_type}_{8_hex}`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
-    /// session_id（业务 UUID 形式），格式 `{group_id}:{8_hex}`。
+    /// BCS canonical session_id，最大 128 个字符。
     pub id: String,
 
     /// 所属 group 的逻辑 id。

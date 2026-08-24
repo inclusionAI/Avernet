@@ -15,3 +15,4 @@ export { FlowRunRepository, type FlowRunRow, type FlowRunInsert, type FlowRunCom
 export { ValidationTemplateRepository, type ValidationTemplateRow } from "./repositories/validation-template-repository.js";
 export { FacadeBindingRepository, type FacadeBindingRow, type FacadeBindingInsert } from "./repositories/facade-binding-repository.js";
 export { loadDatabaseConfig, resolveConfigPath } from "./config.js";
+export { safeJsonStringify } from "./safe-json.js";

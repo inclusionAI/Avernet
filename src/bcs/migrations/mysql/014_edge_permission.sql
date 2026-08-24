@@ -1,4 +1,4 @@
--- 012_edge_permission.sql — 08-12 A2A edge-permission tables (friend unification).
+-- 014_edge_permission.sql — 08-12 A2A edge-permission tables (friend unification).
 -- Spec: src/bcs/docs/superpowers/specs/2026-08-18-friend-edge-permission-reform.md §3.1.
 -- Applied externally (ops/CI); the bcs binary runs only SQLite migrations.
 --

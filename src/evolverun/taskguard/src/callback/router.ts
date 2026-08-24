@@ -97,6 +97,8 @@ export function createCallbackRouter(deps: CallbackRouterDeps): Router {
     // callback callers always send single-valued headers.
     const signatureHeader = typeof req.headers["x-signature-256"] === "string"
       ? req.headers["x-signature-256"] : undefined;
+    const xOneIdHeader = typeof req.headers["x-one-id"] === "string"
+      ? req.headers["x-one-id"] : undefined;
     const clientIp = (typeof req.headers["x-forwarded-for"] === "string"
       ? req.headers["x-forwarded-for"]
       : typeof req.headers["x-real-ip"] === "string"
@@ -110,6 +112,7 @@ export function createCallbackRouter(deps: CallbackRouterDeps): Router {
       defaultHmacSecret: deps.config.defaultHmacSecret,
       rawBody,
       signatureHeader,
+      xOneIdHeader,
     });
 
     if (!authResult.authenticated) {

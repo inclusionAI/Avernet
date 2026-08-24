@@ -2130,7 +2130,7 @@ async fn web_send_with_legacy_session_id_routes_v2_with_group_wire_id() {
 #[tokio::test]
 async fn web_send_with_session_id_routes_v3_with_explicit_bcs_session_id() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
-    let session_id = "group-1:abcdef12";
+    let session_id = "group-1:channel_dingtalk_abcdef12";
     support.registry.set_protocol_version("bot-driver", 3).await;
     let session = test_session(
         session_id,
@@ -2182,13 +2182,13 @@ async fn web_send_with_session_id_routes_v3_with_explicit_bcs_session_id() {
     let params = req.params.as_ref().expect("params");
     assert_eq!(params["bcs_group_id"], "group-1");
     assert_eq!(params["bcs_session_id"], session_id);
-    assert_eq!(params["session_key"], "group:group-1");
+    assert_eq!(params["session_key"], session_id);
 }
 
 #[tokio::test]
 async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
-    let session_id = "group-1:abcdef12";
+    let session_id = "group-1:channel_dingtalk_abcdef12";
     let mut group = support.group.get("group-1").await.expect("group exists");
     group
         .participants
@@ -2257,7 +2257,7 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
     let params = req.params.as_ref().expect("params");
     assert_eq!(params["bcs_group_id"], "group-1");
     assert_eq!(params["bcs_session_id"], session_id);
-    assert_eq!(params["session_key"], "group:group-1");
+    assert_eq!(params["session_key"], session_id);
     assert_eq!(params["tags"], json!(["session-tag", "tenant-a"]));
 }
 

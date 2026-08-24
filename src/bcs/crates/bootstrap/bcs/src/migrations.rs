@@ -946,6 +946,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 15,
         name: "group_participant_tags",
     },
+    SqliteMigration {
+        version: 16,
+        name: "expand_session_ids",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -1314,6 +1318,9 @@ async fn apply_sqlite_migration_body(
         // version 14 only records progress.
         14 => Ok(()),
         15 => add_sqlite_group_participant_tags_schema(db).await,
+        // SQLite stores session identifiers as unbounded TEXT, so version 16
+        // records dialect parity with the MySQL/OceanBase VARCHAR expansion.
+        16 => Ok(()),
         _ => Ok(()),
     }
 }
@@ -1741,6 +1748,11 @@ mod tests {
                     15,
                     "group_participant_tags".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    16,
+                    "expand_session_ids".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1753,7 +1765,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 15);
+        assert_eq!(report.pending_versions.len(), 16);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1804,6 +1816,8 @@ assert_eq!(report.pending_versions[10].version, 11);
             report.pending_versions[14].name,
             "group_participant_tags"
         );
+        assert_eq!(report.pending_versions[15].version, 16);
+        assert_eq!(report.pending_versions[15].name, "expand_session_ids");
         Ok(())
     }
 
@@ -1875,6 +1889,11 @@ assert_eq!(report.pending_versions[10].version, 11);
                     15,
                     "group_participant_tags".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    16,
+                    "expand_session_ids".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1896,9 +1915,9 @@ assert_eq!(report.pending_versions[10].version, 11);
 
         let before = check_sqlite_migrations(&db).await?;
         // Deleting only the v11 (group_opening_message) record leaves later
-        // migrations applied, so the max applied version stays 15 even though
+        // migrations applied, so the max applied version stays 16 even though
         // v11 is the sole pending re-apply.
-        assert_eq!(before.current_version, Some(15));
+        assert_eq!(before.current_version, Some(16));
         assert_eq!(
             before
                 .pending_versions
@@ -1916,7 +1935,7 @@ assert_eq!(report.pending_versions[10].version, 11);
                 .iter()
                 .any(|column| column == "opening_message_json")
         );
-// group_opening_message is no longer the tail migration (task_modes at v12
+        // group_opening_message is no longer the tail migration (task_modes at v12
         // follows it), so assert it was re-applied as the version-11 row rather than
         // as the last row. The column check above already proves the migration
         // re-added opening_message_json; this row check pins it to the right version.
