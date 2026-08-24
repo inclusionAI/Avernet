@@ -21,15 +21,15 @@ impl EdgeGrantRepoPort for NoopEdgeGrantRepo {
     async fn is_authorized(&self, _: &str, _: &str, _: &str) -> bool { false }
     async fn has_friend_edge(&self, _: &str, _: &str, _: &str) -> bool { false }
     async fn list_friends(&self, _: &str, _: &str) -> Vec<String> { vec![] }
-    async fn insert_grant(&self, _: EdgeGrant) -> ServiceResult<()> { Ok(()) }
-    async fn revoke_grant(&self, _: &str, _: &str) -> ServiceResult<()> { Ok(()) }
-    async fn get_default_profile_id(&self, _: &str, _: &str) -> Option<String> { None }
+    async fn insert_grant(&self, _: EdgeGrant) -> ServiceResult<u64> { Ok(1) }
+    async fn revoke_grant(&self, _: u64, _: &str) -> ServiceResult<()> { Ok(()) }
+    async fn get_default_profile_id(&self, _: &str, _: &str) -> Option<u64> { None }
 }
 
 pub struct NoopPermissionProfileRepo;
 #[async_trait]
 impl PermissionProfileRepoPort for NoopPermissionProfileRepo {
-    async fn ensure_default_profile(&self, _: &str, _: &str) -> ServiceResult<()> { Ok(()) }
+    async fn ensure_default_profile(&self, _: &str, _: &str) -> ServiceResult<u64> { Ok(1) }
     async fn get_active_default(&self, _: &str, _: &str) -> Option<PermissionProfile> { None }
     async fn upsert_revision(&self, _: PermissionProfile) -> ServiceResult<()> { Ok(()) }
 }
@@ -42,7 +42,7 @@ impl PermissionRequestRepoPort for NoopPermissionRequestRepo {
     async fn list_inbox(&self, _: &str, _: &str, _: Option<RequestStatus>) -> Vec<PermissionRequest> { vec![] }
     async fn list_sent(&self, _: &str, _: &str, _: Option<RequestStatus>) -> Vec<PermissionRequest> { vec![] }
     async fn decide(&self, _: &str, _: &str, _: RequestStatus, _: &str, _: Option<&str>) -> ServiceResult<()> { Ok(()) }
-    async fn backfill_edge_id(&self, _: &str, _: &str, _: &str) -> ServiceResult<()> { Ok(()) }
+    async fn backfill_edge_id(&self, _: &str, _: &str, _: u64) -> ServiceResult<()> { Ok(()) }
 }
 
 pub struct NoopConnectService;
@@ -51,13 +51,13 @@ impl ConnectService for NoopConnectService {
     async fn create_connect(&self, _: &str, _: &str, _: Option<String>) -> ServiceResult<ConnectResult> {
         Ok(ConnectResult { request_ids: vec![], edge_ids: vec![], status: ConnectStatus::Pending, auto_accepted: false })
     }
-    async fn approve(&self, _: &str, _: &str) -> ServiceResult<Vec<String>> { Ok(vec![]) }
+    async fn approve(&self, _: &str, _: &str) -> ServiceResult<Vec<u64>> { Ok(vec![]) }
     async fn reject(&self, _: &str, _: &str, _: Option<String>) -> ServiceResult<()> { Ok(()) }
     async fn cancel(&self, _: &str) -> ServiceResult<()> { Ok(()) }
     async fn get_request(&self, _: &str) -> ServiceResult<PermissionRequest> {
         Err(bcs_service_api::ServiceError::FriendRequestNotFound("noop".to_string()))
     }
-    async fn revoke_friend(&self, _: &str, _: &str) -> ServiceResult<Vec<String>> { Ok(vec![]) }
+    async fn revoke_friend(&self, _: &str, _: &str) -> ServiceResult<Vec<u64>> { Ok(vec![]) }
     async fn list_friends(&self, _: &str) -> ServiceResult<Vec<FriendListEntry>> { Ok(vec![]) }
     async fn list_requests(
         &self,

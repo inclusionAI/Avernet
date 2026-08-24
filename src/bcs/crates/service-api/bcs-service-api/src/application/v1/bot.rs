@@ -4,8 +4,9 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
-use super::{ApplicationError, AuthenticatedCaller, Page};
+use super::{ApplicationError, AuthenticatedCaller, FriendCheckInStrategy, Page, UserVisibility};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -82,6 +83,10 @@ pub struct PhysicalBot {
     pub agent_code: Option<String>,
     pub task_claim_mode: bool,
     pub task_dream_mode: bool,
+    pub user_visibility: UserVisibility,
+    #[serde(default)]
+    pub friend_ext: Map<String, Value>,
+    pub friend_check_in_strategy: FriendCheckInStrategy,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -96,6 +101,10 @@ pub struct HumanBot {
     pub env: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
+    pub user_visibility: UserVisibility,
+    #[serde(default)]
+    pub friend_ext: Map<String, Value>,
+    pub friend_check_in_strategy: FriendCheckInStrategy,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -133,7 +142,7 @@ pub struct BotCandidate {
 pub struct BotCandidateSearchItem {
     pub bot: PhysicalBot,
     pub is_friend: bool,
-    pub tags: BTreeMap<String, serde_json::Value>,
+    pub tags: BTreeMap<String, Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub score: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -214,6 +223,9 @@ pub struct BotPatch {
     pub descriptor: Option<BotDescriptorPatch>,
     pub task_claim_mode: Option<bool>,
     pub task_dream_mode: Option<bool>,
+    pub user_visibility: Option<UserVisibility>,
+    pub friend_ext: Option<Map<String, Value>>,
+    pub friend_check_in_strategy: Option<FriendCheckInStrategy>,
 }
 
 impl BotPatch {
@@ -224,6 +236,9 @@ impl BotPatch {
             && self.descriptor.is_none()
             && self.task_claim_mode.is_none()
             && self.task_dream_mode.is_none()
+            && self.user_visibility.is_none()
+            && self.friend_ext.is_none()
+            && self.friend_check_in_strategy.is_none()
     }
 }
 

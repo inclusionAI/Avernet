@@ -27,7 +27,7 @@ async fn sqlite_with_schema() -> Arc<dyn DbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("local sqlite"));
     db.execute(DbStatement::new(
         "CREATE TABLE permission_profiles (\
-            permission_profile_id VARCHAR(128) NOT NULL, \
+            id INTEGER PRIMARY KEY AUTOINCREMENT, \
             bot_id VARCHAR(128) NOT NULL, \
             env VARCHAR(32) NOT NULL, \
             name VARCHAR(128) NOT NULL DEFAULT 'default', \
@@ -41,7 +41,7 @@ async fn sqlite_with_schema() -> Arc<dyn DbPlugin> {
             updated_by VARCHAR(128), \
             gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
             gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-            PRIMARY KEY (permission_profile_id))",
+            UNIQUE (bot_id, env, is_default, status))",
     ))
     .await
     .expect("create permission_profiles");

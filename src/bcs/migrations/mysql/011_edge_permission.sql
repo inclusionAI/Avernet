@@ -12,19 +12,19 @@
 -- grant_kind=permission_profile 且 grant_ref_id == B 的默认 profile id（D12）。
 -- 同一 (A→B) 可携带多条边（默认 + writer + 内联 rules）。
 CREATE TABLE IF NOT EXISTS `edge_grants` (
-  `edge_id`                VARCHAR(48)  NOT NULL COMMENT 'PK；opaque id（eg_<md5>）',
+  `id`                    BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'PK；自增 bigint',
   `env`                    VARCHAR(16)  NOT NULL COMMENT '环境标签（仅标记写入，不参与查询隔离，§3.1）',
   `from_id`                VARCHAR(256) NOT NULL COMMENT '授权方 actor id（A）：human_<工号> 或 bot uuid',
   `to_id`                  VARCHAR(256) NOT NULL COMMENT '被授权目标（B）：bot uuid',
   `grant_kind`             VARCHAR(16)  NOT NULL COMMENT 'permission_profile | rules',
-  `grant_ref_id`           VARCHAR(128) NOT NULL COMMENT 'permission_profile -> 目标 profile id；rules -> 不透明 ref',
+  `grant_ref_id`          BIGINT       NOT NULL COMMENT 'permission_profile -> 目标 profile id；rules -> 不透明 ref',
   `rules`                  TEXT         DEFAULT NULL COMMENT '内联规则；grant_kind=rules 时非空（JSON 字符串）',
   `status`                 VARCHAR(16)  NOT NULL DEFAULT 'approved' COMMENT 'approved（生效）| revoked（撤回，不再授权）',
   `originator_policy_type` VARCHAR(16)  NOT NULL DEFAULT 'any' COMMENT 'any | same_as_from | specific | owner（friend 边恒为 any，D7）',
   `originator_policy_data` TEXT         DEFAULT NULL COMMENT 'policy_type=specific 时的发起方集合（JSON 字符串）',
   `gmt_create`             timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `gmt_modified`           timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`edge_id`),
+  PRIMARY KEY (`id`),
   UNIQUE KEY `uk_edge_from_to_env_ref` (`from_id`, `to_id`, `env`, `grant_ref_id`) COMMENT '每个 (A,B,env,ref) 至多一行',
   KEY `idx_edge_from_env_status` (`from_id`, `env`, `status`) COMMENT 'list_friends / 出边扫描',
   KEY `idx_edge_to_env_status` (`to_id`, `env`, `status`) COMMENT 'admission / 入边扫描'
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS `edge_grants` (
 -- 恰好 seed 一条 `default` profile（wildcard-allow，§5.1.1）。revision/digest 随
 -- upsert 递增，profile_id 不变（D12 rule 2：不覆盖、不 bump 既有 default）。
 CREATE TABLE IF NOT EXISTS `permission_profiles` (
-  `permission_profile_id` VARCHAR(48)  NOT NULL COMMENT 'PK；pp_<bot_uuid>_default 为默认 profile 约定',
+  `id`                    BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'PK；自增 bigint',
   `bot_id`                VARCHAR(256) NOT NULL COMMENT '所属 bot uuid（被授权方的默认权限）',
   `env`                   VARCHAR(16)  NOT NULL COMMENT '环境标签',
   `name`                  VARCHAR(64)  NOT NULL DEFAULT 'default' COMMENT '角色名：default | reader | writer | maintainer',
@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS `permission_profiles` (
   `updated_by`            VARCHAR(64)  DEFAULT NULL COMMENT '最近修订者（NULL 表示无人改过）',
   `gmt_create`            timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `gmt_modified`          timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`permission_profile_id`),
+  PRIMARY KEY (`id`),
   UNIQUE KEY `uk_profile_bot_env_default` (`bot_id`, `env`, `is_default`, `status`) COMMENT '每 (bot,env) 至多一条 active default',
   KEY `idx_profile_bot_env` (`bot_id`, `env`, `status`) COMMENT '默认 profile 查找'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -58,13 +58,14 @@ CREATE TABLE IF NOT EXISTS `permission_profiles` (
 -- connect/apply/revoke 请求记录。pending 时无 edge_id；approve 后回填 edge_id 并把
 -- decided_* 置位。Bot↔Bot 单次 accept 会连带批准反向 pending（AC-20，§4.1）。
 CREATE TABLE IF NOT EXISTS `permission_requests` (
-  `request_id`        VARCHAR(48)  NOT NULL COMMENT 'PK；req_<md5>',
-  `edge_id`           VARCHAR(48)  DEFAULT NULL COMMENT '批准后回填对应 edge_grants.edge_id；pending 时 NULL',
+  `id`               BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'PK；自增 bigint',
+  `request_id`       VARCHAR(64)  NOT NULL COMMENT '外部业务 id（裸 UUID v4）；内部 bigint PK 见 id 列',
+  `edge_id`          BIGINT       DEFAULT NULL COMMENT '批准后回填对应 edge_grants.id；pending 时 NULL',
   `env`               VARCHAR(16)  NOT NULL COMMENT '环境标签',
   `from_id`           VARCHAR(256) NOT NULL COMMENT '发起方 actor id',
   `to_id`             VARCHAR(256) NOT NULL COMMENT '目标 actor id',
   `request_kind`      VARCHAR(16)  NOT NULL COMMENT 'connect | permission_profile | rules | revoke',
-  `requested_ref_id`  VARCHAR(128) DEFAULT NULL COMMENT 'permission_profile/rules 请求的目标 ref；connect 时 NULL',
+  `requested_ref_id` BIGINT       DEFAULT NULL COMMENT 'permission_profile/rules 请求的目标 ref；connect 时 NULL',
   `requested_rules`   TEXT         DEFAULT NULL COMMENT 'rules 请求带的内联规则（JSON 字符串）',
   `message`           TEXT         DEFAULT NULL COMMENT '发起方留言',
   `status`            VARCHAR(16)  NOT NULL DEFAULT 'pending' COMMENT 'pending | approved | rejected | cancelled',
@@ -74,7 +75,8 @@ CREATE TABLE IF NOT EXISTS `permission_requests` (
   `decided_at`        timestamp    NULL DEFAULT NULL COMMENT '决定时刻（DB 托管，CURRENT_TIMESTAMP 写入）；未决定时 NULL',
   `gmt_create`        timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `gmt_modified`      timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`request_id`),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_permission_requests_request_id` (`request_id`) COMMENT '外部 request_id 全局唯一',
   KEY `idx_req_to_env_status` (`to_id`, `env`, `status`) COMMENT '收件箱（received）扫描',
   KEY `idx_req_from_env_status` (`from_id`, `env`, `status`) COMMENT '发件箱（sent）扫描',
   KEY `idx_req_edge` (`edge_id`) COMMENT '按边反查请求'
@@ -85,7 +87,7 @@ CREATE TABLE IF NOT EXISTS `permission_requests` (
 -- （source=agent_card）；**非** 默认/friend 访问的前提（friend 边用 wildcard-allow
 -- 默认 profile，与 capabilities 无关，§3.1）。
 CREATE TABLE IF NOT EXISTS `capabilities` (
-  `capability_id`     VARCHAR(48)  NOT NULL COMMENT 'PK',
+  `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'PK',
   `bot_id`            VARCHAR(256) NOT NULL COMMENT '所属 bot uuid',
   `env`               VARCHAR(16)  NOT NULL COMMENT '环境标签',
   `tool`              VARCHAR(64)  NOT NULL COMMENT '工具名（如 bcs_fuse）',
@@ -96,7 +98,7 @@ CREATE TABLE IF NOT EXISTS `capabilities` (
   `raw_metadata`      TEXT         DEFAULT NULL COMMENT '原始元数据（JSON 字符串，透传）',
   `gmt_create`        timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `gmt_modified`      timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`capability_id`),
+  PRIMARY KEY (`id`),
   KEY `idx_cap_bot_env` (`bot_id`, `env`, `status`) COMMENT '按 bot/env 列能力'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -104,7 +106,7 @@ CREATE TABLE IF NOT EXISTS `capabilities` (
 -- 准入决策审计日志（append-only）。记录某次 A→B 准入判定结果与命中的授权边，
 -- 供运营排查与 shadow 比对（§8.5/§8.6）。不计入业务查询路径，仅写入。
 CREATE TABLE IF NOT EXISTS `authz_decision_logs` (
-  `decision_id`   VARCHAR(48)  NOT NULL COMMENT 'PK',
+  `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'PK',
   `env`           VARCHAR(16)  NOT NULL COMMENT '环境标签',
   `task_id`       VARCHAR(128) DEFAULT NULL COMMENT '关联任务 id（可空）',
   `run_id`        VARCHAR(128) DEFAULT NULL COMMENT '关联 run id（可空）',
@@ -118,7 +120,7 @@ CREATE TABLE IF NOT EXISTS `authz_decision_logs` (
   `context_json`  TEXT         DEFAULT NULL COMMENT '决策上下文快照（JSON 字符串）',
   `gmt_create`    timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `gmt_modified`  timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`decision_id`),
+  PRIMARY KEY (`id`),
   KEY `idx_adl_env_from_to` (`env`, `from_id`, `to_id`) COMMENT '按对查决策历史'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
