@@ -328,6 +328,65 @@ Inputs come from the reader (assets, installed MCP codes) and the converged
 untouched. Assets now follow `bot_default_engine_types` Default-Set
 precedence (spec H.18).
 
+### Why the command services trigger the runtime projection
+
+The projection's *content* is indeed just what the reader answers — the
+command services never compute it. What they own is the *trigger* and the
+*failure handling*: the reader is passive and the engine never polls the
+database, so after a command commits new desired state, nothing would move
+the running Bot until some unrelated flow happened to reconcile. The
+published contract of every activation command is synchronous — success
+means the runtime converged, failure means desired state was compensated —
+and that contract can only be kept by the component that ran the command.
+The dependency chain is:
+
+```
+command service ──1──▶ UoW write (desired state)
+                ──2──▶ BotRuntimeProjectionReconciler.reconcile()
+                              └──▶ reader (flush + read Installation)
+                              └──▶ engine adapters (symlinks · MCP · Passport)
+```
+
+Two corollaries: right after a command, the flush inside step 2's read is a
+no-op — the UoW already wrote Installation eagerly; the flush earns its keep
+on reads that arrive over unflushed legacy data. And when the durable
+task-queue design lands (out of scope; the `skill_activation_sync_task`
+skeleton is its seam), it is exactly this synchronous trigger that moves onto
+the queue — the reconciler and the reader are unchanged by that move.
+
+## Migration scope — which surfaces land on the new components
+
+This refactor migrates **every activation-state read and write** — HTTP and
+background — onto the new components. What stays behind is non-activation
+content/admin tooling, explicitly listed.
+
+**On the new components after this refactor:**
+
+| Surface | Lands on |
+| --- | --- |
+| OpenAPI `/bots/{id}/skill-sets/*` (all routes) | `SkillSetManagementService` (already canonical; renamed) |
+| OpenAPI `/bots/{id}/skills/*` reads (listing, detail, content, parameters) | `SkillQueryService` |
+| OpenAPI `/bots/{id}/skills/{id}/activate\|deactivate` | `DirectActivationService` |
+| OpenAPI MCP direct activate/deactivate + installed listing | `DirectActivationService` / reader |
+| Internal `/api/skillsets/*` CRUD, membership, MCPs | already canonical; Default-Set remove/add gains the restored exclusion semantics |
+| Internal `/api/skills/skillset/{activate,deactivate,sync,active}` | already canonical |
+| Internal `/api/skills/{id}/activate\|deactivate` (legacy wire) | `DirectActivationService` via the legacy-reference resolution in `SkillQueryService` |
+| `/api/skills/deactivate-all`, deprecated `/skillset/current` | migrated in Group 9 |
+| Background: runtime reconciler, skills_pool convergence/recovery/reconcile/bridge-repair, Service-Bot build, symlink listener / propagation / provisioning, teclaw config-compose, MCP sync | reader (directly, or via the `get_active_skills` / `collect_bot_active_mcps` delegations) |
+
+**Deliberately not migrated (follow-up; they edit shared Set *content*
+upstream of the flush, not per-Bot activation):** the admin content tooling
+(`/api/skillsets/admin/init-and-sync`, `/admin/set-default-skills[-fast]`,
+`/admin/fix-git-path`) and the Default-Set bootstrap
+(`/default/ensure`, `/default/current`), which stay on the legacy
+repositories; and the legacy `SkillSetService` BFF display reads
+(`get_set_mcp_servers` merge, legacy listing helpers), which remain as a
+shrinking facade whose activation facts already come from the reader.
+
+**Dead, not migrated:** `/admin/set-skillset-active` (serves a dead feature,
+deprecated soon; the flush tolerates it until deletion) and the data-init
+activation step (deleted).
+
 ## Work items (→ task groups)
 
 1. **Renames** — the table above: files, classes, protocols, DI, tests;
