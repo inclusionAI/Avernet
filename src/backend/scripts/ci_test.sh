@@ -100,10 +100,14 @@ fi
 # supports well before 3.14. Set ``BACKEND_CI_COVERAGE_CORE=ctrace`` to fall back.
 export COVERAGE_CORE="${BACKEND_CI_COVERAGE_CORE:-sysmon}"
 
+# No ``-v``: at 14k tests it prints ~14k lines that GitHub then has to ingest,
+# for ~30s of the run and no information the job does not already keep. A
+# failure prints its full section at any verbosity, and the per-test record is
+# in the JUnit XML this step writes and the job uploads.
 set +e
 DEPLOY_PROFILE=test \
 PYTHONPATH="$backend_dir/src:$backend_dir:${PYTHONPATH:-}" \
-run_without_git_local_env "$backend_python" -m pytest tests/community -v \
+run_without_git_local_env "$backend_python" -m pytest tests/community \
   "${xdist_args[@]}" \
   --continue-on-collection-errors \
   --junitxml="$junit_report" \
