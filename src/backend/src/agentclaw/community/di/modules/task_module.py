@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import urlparse
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
@@ -37,6 +38,7 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
+from agentclaw.community.di.config import EconomyGovernanceConfig
 from agentclaw.community.di.profile import DeployProfile
 
 
@@ -126,16 +128,23 @@ class TaskModule(Module):
             bot_service = injector.get(BotServiceProtocol)
         except Exception:  # noqa: BLE101 未绑定 → dashboard 不附加 assignee 的 bot 归属/名
             bot_service = None
-        # 回投地址 = 本 backend 自身访问 URL(non-singlebox→BACKEND_URL / singlebox→SINGLEBOX_BACKEND_URL,
-        # 默认 localhost:8888;各环境真实后端地址由部署 env/corp overlay 注入,不在 community 源码内联),
-        # agent 回投结果往此 origin POST(自行拼 /api/v1/... 内部路径,不走 gateway 鉴权)。
+        # 回投 origin 复用 economy_governance.iframe_callback_url[_pre]:已在 ocb 按环境配成卡片回投
+        # 完整 URL(形如 <backend-host>/api/economy/governance/card-callback),由 EconomyGovernanceConfig
+        # 构造期按 env 选好 _pre/base(_is_pre)。取其 scheme://netloc 作 backend 自身访问 URL——既不内联
+        # 企业域名(满足架构门 test_shipped_config_no_corp_identifiers),又复用现成 env-aware 注入通道,
+        # 无需新增 config/yaml block。EconomyGovernanceModule 未装(纯内核/轻量测试列)→ 取不到 → 传空 → 兜底
+        # localhost。agent 回投结果往此 origin POST(自行拼 /api/v1/... 内部路径,不走 gateway 鉴权)。
+        try:
+            gov = injector.get(EconomyGovernanceConfig)
+        except Exception:  # noqa: BLE101 EconomyGovernanceModule 未装(纯内核/轻量测试列) → 取不到
+            gov = None
         return TaskService(
             graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
             bcn=bcn, bcs_identity=bcs_identity, task_info_repo=task_info_repo,
             callback_repo=callback_repo, task_node_repo=task_node_repo,
             task_node_run_info_repo=task_node_run_info_repo,
             bot_service=bot_service,
-            api_base_url=self._resolve_api_base_url(),
+            api_base_url=self._resolve_api_base_url(gov.iframe_callback_url if gov else ""),
         )
 
     @singleton
@@ -181,16 +190,26 @@ class TaskModule(Module):
         return auth
 
     @staticmethod
-    def _resolve_api_base_url() -> str:
+    def _resolve_api_base_url(iframe_callback_url: str = "") -> str:
         """返回本 backend 自身访问 URL(agent 回投结果往此 origin POST,自行拼 /api/v1/... 内部路径)。
 
-        代码只留中立兜底:non-singlebox 读 ``BACKEND_URL``、singlebox 读 ``SINGLEBOX_BACKEND_URL``,默认
-        http://localhost:8888。各环境真实后端地址(预发/生产)由部署 env / corp overlay 注入,不在
-        community 源码内联——架构门 test_shipped_config_no_corp_identifiers 禁止 community 出现企业域名。"""
+        复用 economy_governance 提供的环境感知 ``iframe_callback_url[_pre]``:已在 ocb 按环境配成卡片
+        回投完整 URL(形如 ``<backend-host>/api/economy/governance/card-callback``),并由
+        ``EconomyGovernanceConfig`` 构造期按 env 选好 _pre/base。去掉其路径取 ``scheme://netloc`` 即为
+        backend 自身访问 URL——既不内联企业域名(满足架构门 test_shipped_config_no_corp_identifiers),
+        又复用现成 env-aware 注入通道,无需新增 config/yaml block。
 
+        - singlebox(``DEPLOY_PROFILE``) → ``SINGLEBOX_BACKEND_URL``/localhost(本地直连);
+        - 其余 → 解析 ``iframe_callback_url`` 的 origin;
+        - 空值/非法(社区/dev/未配 economy_governance 或 EconomyGovernanceModule 未装)→ 回退 localhost:8888。"""
         if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == DeployProfile.SINGLEBOX.value:
             return os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-        return os.environ.get("BACKEND_URL", "http://localhost:8888")
+        if not iframe_callback_url:
+            return "http://localhost:8888"
+        parsed = urlparse(iframe_callback_url)
+        if not parsed.scheme or not parsed.netloc:
+            return "http://localhost:8888"
+        return f"{parsed.scheme}://{parsed.netloc}"
 
     @staticmethod
     def _resolve_ports():
