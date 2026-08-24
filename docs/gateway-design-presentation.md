@@ -147,6 +147,18 @@ route_security:
 
 ## 6. 转发设计：配置驱动的路由
 
+### 6.0 为什么转发在应用层，而不是 Nginx / L7 代理
+
+一个常见的第一反应是："转发不就是 Nginx/Envoy 配几条 `location`/路由规则的事吗，为什么要专门写一个应用来做？"
+
+原因是**转发和认证必须是同一个不可分割的动作，而认证逻辑没法完全下沉到通用 L7 代理里**：
+
+- 每条请求在转发前都要先跑完身份提取（§5.2）——判断凭证类型、按 flavor 调用不同的校验后端、必要时对 Principal 签名。这些逻辑本质是**业务/基础设施相关的代码**，而不是声明式的路由规则；尤其是 `sofa`（企业版）flavor，往往要调用公司内部的 SDK、连接内部的密钥管理/用户体系——这类深度定制在 Nginx/Envoy 这类通用网关里通常只能靠不太可控的插件机制（Lua 脚本、自定义模块）勉强实现，维护成本和风险都远高于一个原生应用。
+- 把"认证"和"转发"放进同一个进程、同一次请求处理里，才能保证**认证先于转发发生**这件事是结构性成立的，而不是靠两套系统之间的约定去维持。
+- 同一套 SPI/Plugin 架构（bare/sofa）在应用层下可以让社区版和企业版**共享同一份转发/路由代码**，差异只体现在认证依赖的插件实现上；如果转发在基础设施层、认证在应用层，两边就要各自维护一份路由声明，容易漂移。
+
+所以网关是一个真正的应用进程（FastAPI + httpx），路由/转发的决策和认证的决策**发生在同一份代码、同一次请求生命周期里**，而不是"Nginx 转发 + 应用只管鉴权"的两层架构。
+
 ### 6.1 核心概念：Domain
 
 - 请求路径 `base_path`（如 `/openapi/v1`）之后的**第一段**默认就是一个 **domain**，domain 决定转发到哪个上游 `server`。
@@ -169,21 +181,86 @@ upstreams:
     baas:    { base_url: "${baas_server_url}" }
 ```
 
-### 6.2 进阶能力
+### 6.2 进阶能力一览
 
 | 能力 | 说明 |
 |---|---|
-| `match` | 声明这个 domain 具体claim哪些路径（比默认的"整段前缀"更精细），可以把一个 domain 放在另一个 domain 的子路径下，转发到不同上游（如 `bots` 下的 `bots/messages/ws/**` 单独转发到 engine proxy） |
+| `match` | 声明这个 domain 具体 claim 哪些路径（比默认的"整段前缀"更精细），可以把一个 domain 放在另一个 domain 的子路径下，转发到不同上游 |
 | `protocols` | 声明这个 domain 服务哪个"平面"：`http`、`websocket`，或两者都要。没声明 `websocket` 的 domain 不会被 WS 握手命中 |
 | `rewrite` | 声明前缀替换（网关路径 → 上游路径不同时使用）。默认**路径原样转发**，只换 origin |
 | `schema` | 声明去哪里读这个 domain 的 OpenAPI 描述，用于生成对外文档（`file` 本地文件 / `object_store` 对象存储 / `http` 拉取），**纯文档用途，不影响路由/鉴权/转发** |
 
-### 6.3 启动期校验（保证"不会变成开放代理"）
+`match`、`protocols`、`rewrite` 三者共同决定"这条请求最终归哪个 domain"，下面两节分别展开最容易问到的两点：**`match` 如何实现"把一个 domain 嵌进另一个 domain 里"**，以及**多个 domain 都能匹配同一条路径时，网关到底怎么选**。
 
-- `match` 的前几段字面量必须钉死 `base_path` + 至少一个具体段，`match: /**` 这种写法**直接在启动时被拒绝**。
-- 两个 domain 如果在同一个路径 + 同一个平面上产生歧义，也会在启动时报错，而不是留到运行时才发现。
+### 6.3 `match`：如何声明子路径、"覆盖"父级 domain
 
-### 6.4 大请求体转发（Forwarder 契约 v2）
+**语法：** 一串**字面量段**，可选地接上若干 `{param}` 段（每个 `{param}` 只吃一段，之后还能再接字面量段），最后以 `**` 收尾。
+
+**不写 `match` 的默认值** 是 `<base_path>/<domain名>/**`——也就是"整段前缀路由"这个所有 domain 出场时都有的默认行为。一个什么都不声明的 domain，地址完全不变。
+
+**"覆盖"的真正含义：把一个 domain 放在另一个 domain 的路径之下，转发到不同的上游/走不同的平面。** 这不是配置意义上的"字段合并覆盖"，而是**整条规则互斥地取代**——一旦某个 domain 的 `match` 在某次请求上胜出，这次请求的 `server`/`protocols`/`rewrite`/`schema` **完全由这个胜出的 domain 决定**，跟它"父级"（路径更短的那个 domain）的配置**没有任何合并关系**。
+
+用仓库里 `bots` 这一组真实配置举例（都在 `application.yaml` 的 `upstreams.domains` 下）：
+
+```yaml
+domains:
+  bots:
+    server: backend                        # 隐式 match: /openapi/v1/bots/**
+    # 未声明 protocols → 默认 [http]，所以这个 domain 只服务 HTTP
+
+  repository-skills:
+    match: /openapi/v1/bots/skills/**       # 比 bots 多钉了一段字面量 "skills"
+    server: backend                         # 恰好也转发到 backend，但作为独立 domain
+                                             # 可以单独声明自己的 schema（对外文档粒度更细）
+
+  bots-messages-ws:
+    match: /openapi/v1/bots/messages/ws/**  # 嵌在 bots 路径之下
+    server: engine_proxy                    # 但转发到完全不同的上游！
+    protocols: [websocket]                  # 且只服务 WebSocket 平面
+    rewrite: { from: /openapi/v1/bots/messages/ws, to: /proxypass }
+
+  bots-loadtest-ws:
+    match: /openapi/v1/bots/loadtest/ws/**  # 同样嵌在 bots 路径之下
+    server: backend                         # 这次上游还是 backend（跟 bots 一样）
+    protocols: [websocket]                  # 但 bots 本身默认只服务 http，
+                                             # WebSocket 握手必须靠这个专门声明的 domain 才有地方落
+```
+
+这组例子说明了两件常被忽略的事：
+
+1. **"嵌套子路径"不一定是为了换上游。** `bots-loadtest-ws` 的上游服务器和 `bots` 完全一样，声明它的唯一原因是 `bots` 没有声明 `protocols`（因此只服务 `http`），WebSocket 握手需要一个明确声明了 `protocols: [websocket]` 的 domain 才能被接住——否则这类请求会直接 404（"no route for path"）。
+2. **一个更具体的 domain 完全不需要跟外层 domain 的配置保持一致。** `bots-messages-ws` 的上游、协议、路径改写规则都和 `bots` 毫不相关——它只是恰好复用了 `bots` 这个前缀下的一段子路径而已。这正是"把一个 domain 的运维（backend）和运行时（engine proxy）拆到不同上游，但对外呈现为同一个前缀"的手段（详见 `specs/2026-08-03-gateway-path-specific-domain-routing/spec.md`）。
+
+**启动期的两条硬性校验**（防止 `match` 被滥用）：
+
+- **禁止开放代理写法**：`match` 靠前的字面量段必须钉住 `base_path` 再加至少一个具体段；`{param}` 只能出现在这些字面量段**之后**。也就是说 `match: /**` 或 `match: /openapi/v1/{anything}/**` 这种"一上来就是通配符"的写法**在启动时直接被拒绝**——这就是让"配出一个开放代理"在配置语法层面就不可能表达的机制。
+- **禁止 `rewrite` 永远打不中的规则**：`rewrite.from` 必须是这个 domain 自己 `match` 前缀的**前缀**，否则这条改写规则永远不可能命中，启动时直接报错拒绝，而不是留到线上才发现改写从没生效过。
+
+### 6.4 多个 domain 都能命中同一路径时：具体度（specificity）怎么判
+
+`match` 允许多个 domain 的声明范围产生重叠（比如 `bots` 和 `repository-skills` 都能"够到"`/openapi/v1/bots/skills/list`），这时候网关按下面两步决定由谁来处理这条请求：
+
+**第一步 —— 先筛"平面"（候选集过滤，不是兜底重试）**
+
+对每条请求，先算出它的"平面"是 HTTP 还是 WebSocket（不是 URL scheme——`http`/`https` 算一类，`ws`/`wss` 算另一类；scheme 只说明是否走 TLS，不参与这层判断）。**只有 `protocols` 里声明了这个平面的 domain 才进入候选集**；不声明 `protocols` 默认只服务 `[http]`。
+
+> **重要：这是一次性过滤，不是"选中的 domain 如果不支持这个平面就退回去试下一个"的重试机制。** 一个 domain 只要不服务某个平面，它在这个平面上就**根本不是候选**，等价于它在这个维度上不存在——这样"最具体的候选获胜"这句话在过滤完之后依然成立，而不会出现"最具体的赢了，但它答不了这个平面，于是退而求其次转发到另一个 domain"这种会让权限/路由行为变得不确定的情况。
+
+**第二步 —— 候选集里比"具体度"，最具体者胜**
+
+具体度按下面的优先级比较：
+
+1. **字面量段数量更多者更具体。**（`repository-skills` 的 `/openapi/v1/bots/skills/**` 有 3 段字面量 `openapi/v1/bots/skills`，`bots` 的 `/openapi/v1/bots/**` 只有 2 段——严格来说是 base_path 之后各自多钉了几段，这里按"域名下自己声明的字面量段"直观理解即可。）
+2. **字面量段数量相同时，用参数段（`{param}`）数量打破平局**——参数段越多，说明这条规则往更深的路径层级"钉"得越准，视为更具体。
+
+**举例直觉：**
+
+- `/openapi/v1/bots/skills/list` 命中 `bots`（隐式 `/openapi/v1/bots/**`）和 `repository-skills`（`/openapi/v1/bots/skills/**`）两个 domain；`repository-skills` 字面量段更多 → 胜出，请求由它的配置（server/rewrite/schema）决定，`bots` 的配置在这条请求上完全不生效。
+- 假设（仓库当前配置里没有这种真实场景，纯粹用来讲清楚参数打平的规则）同时存在 `match: /openapi/v1/bots/**` 与 `match: /openapi/v1/bots/{bot_id}/**` 两个 domain：字面量段数量一样（都只钉了 `bots` 这一段），但后者多了一个 `{bot_id}` 参数段——按规则 2，后者更具体，会赢得所有 `/openapi/v1/bots/<任意bot_id>/...` 形状的请求。
+
+**启动期还会拒绝"平局无法判定"的配置**：如果两个 domain 在同一路径、同一平面上具体度**完全打平**（字面量段数和参数段数都相等），谁赢是未定义的——这种配置在启动时就会被拒绝并点名冲突的 domain，而不是留给运行时的一个隐藏的、不可预测的顺序去决定。
+
+### 6.5 大请求体转发（Forwarder 契约 v2）
 
 - 请求体以**流式**方式转发，不整体缓冲进内存，支持大文件上传且内存占用有界；一次性流不能被用于重定向/挑战认证/重试等场景的重放。
 
