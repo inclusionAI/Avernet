@@ -459,7 +459,7 @@ pub async fn patch_provider_bot(
             domains: req.domains,
             skills: req
                 .skills
-                .map(|skills| skills.into_iter().map(|name| to_core_skill(name.into())).collect()),
+                .map(|skills| skills.into_iter().map(to_core_skill).collect()),
             scopes: req.scopes,
             visibility: req.visibility,
         })

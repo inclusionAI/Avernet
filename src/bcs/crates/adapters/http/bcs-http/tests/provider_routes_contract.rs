@@ -1139,6 +1139,103 @@ async fn patch_provider_bot_clears_array_with_empty_vec_and_keeps_when_field_abs
 }
 
 #[tokio::test]
+async fn patch_provider_bot_accepts_structured_skills_and_round_trips() {
+    // PATCH skills use structured {name, description} objects only (the legacy
+    // bare-string form is rejected). The request shape matches the response so
+    // a client can round-trip it, and skill descriptions are mutable.
+    let TestApp { app, registry, _temp_dir, .. } = test_app();
+    let provider = register_provider(&app, json!({"mode": "static_bearer"})).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+    let bot = register_provider_bot(&app, provider_id, admin_token, "reviewer-v2").await;
+    let bot_uuid = bot["bot_uuid"].as_str().unwrap();
+
+    // Structured skills with a description are accepted and round-tripped in
+    // the response (objects, not strings).
+    let (status, body) = patch_provider_bot(
+        &app,
+        provider_id,
+        admin_token,
+        "reviewer-v2",
+        json!({
+            "skills": [
+                {"name": "code_review", "description": "Reviews submitted code"}
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["skills"],
+        json!([{"name": "code_review", "description": "Reviews submitted code"}])
+    );
+
+    // Persisted to the registry with the description intact.
+    let stored = registry.get(bot_uuid).await.expect("bot registered");
+    let skills = &stored.capabilities.skills;
+    assert_eq!(skills.len(), 1);
+    assert_eq!(skills[0].name, "code_review");
+    assert_eq!(skills[0].description.as_deref(), Some("Reviews submitted code"));
+
+    // A subsequent PATCH can update only the description.
+    let (status, body) = patch_provider_bot(
+        &app,
+        provider_id,
+        admin_token,
+        "reviewer-v2",
+        json!({
+            "skills": [{"name": "code_review", "description": "Senior code reviews"}]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["skills"],
+        json!([{"name": "code_review", "description": "Senior code reviews"}])
+    );
+
+    // Skills can be cleared entirely (empty array).
+    let (status, body) = patch_provider_bot(
+        &app,
+        provider_id,
+        admin_token,
+        "reviewer-v2",
+        json!({"skills": []}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["skills"], json!([]));
+    let cleared = registry.get(bot_uuid).await.expect("bot registered");
+    assert!(cleared.capabilities.skills.is_empty());
+}
+
+#[tokio::test]
+async fn patch_provider_bot_rejects_legacy_string_skills() {
+    // The legacy bare-string skill form (accepted by registration) is rejected
+    // on PATCH: skills must be structured {name, description} objects.
+    let TestApp { app, _temp_dir, .. } = test_app();
+    let provider = register_provider(&app, json!({"mode": "static_bearer"})).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+    register_provider_bot(&app, provider_id, admin_token, "reviewer-v2").await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/providers/{provider_id}/bots/reviewer-v2"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(json!({"skills": ["code_review"]}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
 async fn patch_provider_bot_rejects_invalid_visibility() {
     let TestApp { app, _temp_dir, .. } = test_app();
     let provider = register_provider(&app, json!({"mode": "static_bearer"})).await;
