@@ -84,6 +84,39 @@ def _seed_claude_code_bot_without_dima(world):
     template_svc = world.get(TemplateService)
     template_svc.create_template(bot_id="bot_claude_code", template_config={"foo": "bar"})
 
+
+
+def _seed_app_coding_bot_with_member_collaborator(world):
+    """ApplicationCoding bot with a MEMBER collaborator."""
+    make_staff_user(world, user_id="u_owner")
+    make_staff_user(world, user_id="u_member")
+    bot_repo = world.get(BotRepository)
+    bot_repo.insert({
+        "bot_id": "bot_app_coding_collab",
+        "bot_name": "AppBotCollab",
+        "owner_id": "u_owner",
+        "bot_type": "personal",
+        "status": "ACTIVE",
+        "entity_id": "u_owner",
+        "entity_type": "staff",
+        "creator_id": "u_owner",
+        "template_type": "applicationCoding",
+    })
+
+    template_svc = world.get(TemplateService)
+    template_svc.create_template(bot_id="bot_app_coding_collab", template_config={"foo": "bar"})
+
+    from tests.community.factories.bot_collaborator import make_collaborator
+
+    make_collaborator(
+        world,
+        bot_id="bot_app_coding_collab",
+        owner_id="u_owner",
+        user_id="u_member",
+        role="member",
+        operator_id="u_owner",
+    )
+
 # ── Cases ──────────────────────────────────────────────────────────────────
 
 
@@ -129,6 +162,28 @@ def create_dima_workspace_ok():
 )
 def create_dima_workspace_ok_for_claude_code_non_app_coding():
     """Happy path: non-applicationCoding claude_code bot can create DIMA workspace."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/aicoding/bot/{bot_id}/dima-workspace",
+    scenario="member_collaborator_allowed",
+    input=CaseInput(
+        path_params={"bot_id": "bot_app_coding_collab"},
+        query_params={"user_id": "u_owner"},
+        headers={"x-user-id": "u_member"},
+    ),
+    seed=_seed_app_coding_bot_with_member_collaborator,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "data": {"dima_space_id": "W_STUB_bot_app_coding_collab"},
+        },
+    ),
+)
+def create_dima_workspace_allows_member_collaborator():
+    """MEMBER collaborator can create DIMA workspace for the owner's coding bot."""
 
 
 @endpoint_test(
