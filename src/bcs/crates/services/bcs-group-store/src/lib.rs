@@ -720,6 +720,7 @@ impl MySqlGroupStore {
                     role: Self::str_to_role(&role_str),
                     actor_kind,
                     mode: Some(mode),
+                    tags: Vec::new(),
                 })
             })
             .collect()
@@ -873,6 +874,7 @@ impl MySqlGroupStore {
                         role: Self::str_to_role(&role_str),
                         actor_kind,
                         mode: Some(mode),
+                        tags: Vec::new(),
                     });
                 }
             }
@@ -2197,6 +2199,7 @@ impl GroupRepoPort for MySqlGroupStore {
                         role: Self::str_to_role(&role_str),
                         actor_kind,
                         mode: Some(mode),
+                        tags: Vec::new(),
                     });
                 }
             }
@@ -2374,6 +2377,7 @@ impl GroupRepoPort for MySqlGroupStore {
                         role: Self::str_to_role(&p_role),
                         actor_kind,
                         mode: Some(mode),
+                        tags: Vec::new(),
                     });
                 }
             }
@@ -2586,6 +2590,7 @@ impl GroupRepoPort for MySqlGroupStore {
                         role: Self::str_to_role(&p_role),
                         actor_kind,
                         mode: Some(mode),
+                        tags: Vec::new(),
                     });
                 }
             }
@@ -2843,6 +2848,7 @@ impl GroupRepoPort for MySqlGroupStore {
                         role: Self::str_to_role(&role_str),
                         actor_kind,
                         mode: Some(mode),
+                        tags: Vec::new(),
                     });
                 }
             }
@@ -3038,6 +3044,7 @@ impl GroupRepoPort for MySqlGroupStore {
                         role: Self::str_to_role(&p_role),
                         actor_kind,
                         mode: Some(mode),
+                        tags: Vec::new(),
                     });
                 }
             }
@@ -3564,6 +3571,7 @@ impl GroupRepoPort for MySqlGroupStore {
                         role: Self::str_to_role(&role_str),
                         actor_kind,
                         mode: Some(mode),
+                        tags: Vec::new(),
                     });
                 }
             }
@@ -3819,6 +3827,7 @@ mod tests {
                 kind: None,
                 role: ParticipantRole::Driver,
                 actor_kind: ActorKind::Bot,
+                tags: Vec::new(),
                 mode: None,
             },
             Participant {
@@ -3827,6 +3836,7 @@ mod tests {
                 kind: None,
                 role: ParticipantRole::Consultant,
                 actor_kind: ActorKind::Bot,
+                tags: Vec::new(),
                 mode: None,
             },
         ];

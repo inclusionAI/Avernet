@@ -899,6 +899,12 @@ impl SessionService for SessionServiceImpl {
             GroupStrategy::ManagerWorker => ParticipantRole::Worker,
             _ => ParticipantRole::Consultant,
         });
+        let tags = group
+            .participants
+            .iter()
+            .find(|p| p.bot_uuid == command.bot_uuid)
+            .map(|participant| participant.tags.clone())
+            .unwrap_or_default();
         let participant = Participant {
             bot_uuid: command.bot_uuid.clone(),
             bot_name: None,
@@ -906,6 +912,7 @@ impl SessionService for SessionServiceImpl {
             role,
             actor_kind: ActorKind::Bot,
             mode: Some(mode),
+            tags,
         };
         let mut updated = self
             .sessions
@@ -1227,6 +1234,7 @@ fn project_participant(participant: &Participant) -> SessionParticipant {
         actor_kind: participant.actor_kind,
         name: participant.bot_name.clone(),
         role: participant.role,
+        tags: participant.tags.clone(),
         mode: participant.effective_mode(),
         joined_at: None,
     }
@@ -1478,6 +1486,7 @@ mod tests {
             kind: None,
             role: ParticipantRole::Consultant,
             actor_kind: ActorKind::Human,
+            tags: Vec::new(),
             mode: Some(ParticipantMode::Present),
         };
         let projected = project_participant(&human);
@@ -1495,6 +1504,7 @@ mod tests {
             kind: None,
             role: ParticipantRole::Observer,
             actor_kind: ActorKind::Human,
+            tags: Vec::new(),
             mode: None,
         };
         let projected_absent = project_participant(&absent);
@@ -1508,6 +1518,7 @@ mod tests {
             kind: None,
             role: ParticipantRole::Driver,
             actor_kind: ActorKind::Bot,
+            tags: Vec::new(),
             mode: Some(ParticipantMode::Muted),
         };
         let projected_bot = project_participant(&bot);

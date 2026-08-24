@@ -70,6 +70,19 @@ pub trait SessionRepoPort: Send + Sync {
             request_id: None,
         })
     }
+    /// Create a session whose canonical id identifies the concrete channel source.
+    async fn create_channel(
+        &self,
+        group_id: &str,
+        channel_type: &str,
+        mut params: NewSessionParams,
+    ) -> ServiceResult<Session> {
+        let id = crate::core::session::new_channel_session_id(group_id, channel_type)
+            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
+        params.id = Some(id);
+        self.create(group_id, params).await
+    }
+
     async fn get(&self, session_id: &str) -> Option<Session>;
     async fn belongs_to_group(&self, session_id: &str, group_id: &str) -> bool;
     async fn list_by_group(
