@@ -601,7 +601,14 @@ class _DeviceResolver:
 
 
 def _replacement_service(
-    filesystem, repo, runtime, _unused_cleanup=None, guard=None, *, provider="local", sets=None
+    filesystem,
+    repo,
+    runtime,
+    _unused_cleanup=None,
+    guard=None,
+    *,
+    provider="local",
+    sets=None,
 ):
     return LocalSkillUploadService(
         repo,
@@ -828,9 +835,9 @@ async def test_multipart_single_zip_keeps_legacy_auto_extract_behavior():
     )
 
     assert result["skill"]["name"] == "archive-skill"
-    assert filesystem.files["/private/skills-local/archive-skill/SKILL.md"] == _skill_md(
-        "archive-skill"
-    )
+    assert filesystem.files[
+        "/private/skills-local/archive-skill/SKILL.md"
+    ] == _skill_md("archive-skill")
 
 
 @pytest.mark.asyncio
@@ -1182,54 +1189,79 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
 
 
 @pytest.mark.asyncio
-async def test_replacement_recreates_a_missing_canonical_package_for_a_stale_row():
+async def test_replacement_rejects_a_stale_row_with_no_authoritative_package():
     filesystem = _Filesystem()
     skill = _existing_skill(active=False)
     repo = _ReplacementRepo([skill])
 
-    result = await _replacement_service(
-        filesystem, repo, _ReplacementRuntime([True])
-    ).upload_local_skill(
-        bot_id="bot",
-        owner_id="owner",
-        actor_id="owner",
-        package=_zip(
-            {"SKILL.md": b"name: upload-skill\ndescription: restored\n"}
-        ),
-    )
+    with pytest.raises(LocalSkillStorageError):
+        await _replacement_service(
+            filesystem, repo, _ReplacementRuntime([True])
+        ).upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": b"name: upload-skill\ndescription: restored\n"}),
+        )
 
-    assert result["operation"] == "updated"
     assert skill["git_path"] == "local:///private/skills-local/upload-skill"
-    assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == (
-        b"name: upload-skill\ndescription: restored\n"
-    )
+    assert filesystem.files == {}
     assert not any(".replacement-" in path for path in filesystem.files)
 
 
 @pytest.mark.asyncio
-async def test_replacement_migrates_a_legacy_hidden_locator_to_the_canonical_path():
+async def test_replacement_rejects_a_noncanonical_existing_locator_without_writing():
     old_locator = "/private/skills-local/.upload-skill.replacement-old"
     filesystem = _Filesystem()
     filesystem.files[f"{old_locator}/SKILL.md"] = b"old"
     old = {**_existing_skill(active=False), "git_path": f"local://{old_locator}"}
     repo = _ReplacementRepo([old])
 
-    result = await _replacement_service(
-        filesystem, repo, _ReplacementRuntime([True])
-    ).upload_local_skill(
-        bot_id="bot",
-        owner_id="owner",
-        actor_id="owner",
-        package=_zip({"SKILL.md": b"name: upload-skill\ndescription: canonical\n"}),
-    )
+    with pytest.raises(LocalSkillStorageError):
+        await _replacement_service(
+            filesystem, repo, _ReplacementRuntime([True])
+        ).upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": b"name: upload-skill\ndescription: canonical\n"}),
+        )
 
     canonical = "/private/skills-local/upload-skill"
-    assert result["skill"]["git_path"] == f"local://{canonical}"
+    assert old["git_path"] == f"local://{old_locator}"
+    assert f"{canonical}/SKILL.md" not in filesystem.files
+    assert filesystem.files[f"{old_locator}/SKILL.md"] == b"old"
+    assert set(filesystem.files) == {f"{old_locator}/SKILL.md"}
+
+
+@pytest.mark.asyncio
+async def test_post_commit_temp_cleanup_failure_restores_old_package_and_metadata():
+    # canonical publish succeeds, then the first final temp cleanup fails once.
+    # The upload must restore the previous package before reporting failure.
+    filesystem = _Filesystem(cleanup_results=[True, False, True, True, True])
+    canonical = "/private/skills-local/upload-skill"
+    filesystem.files[f"{canonical}/SKILL.md"] = b"old"
+    old = _existing_skill(active=False)
+    repo = _ReplacementRepo([old])
+
+    with pytest.raises(LocalSkillStorageError):
+        await _replacement_service(
+            filesystem, repo, _ReplacementRuntime([True, True])
+        ).upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": _skill_md(description="new description")}),
+        )
+
     assert old["git_path"] == f"local://{canonical}"
-    assert filesystem.files[f"{canonical}/SKILL.md"] == (
-        b"name: upload-skill\ndescription: canonical\n"
+    assert old["description"] == "old description"
+    assert filesystem.files[f"{canonical}/SKILL.md"] == b"old"
+    assert not any(
+        marker in path
+        for path in filesystem.files
+        for marker in (".replacement-", ".rollback-")
     )
-    assert not any(".replacement-" in path for path in filesystem.files)
 
 
 @pytest.mark.asyncio
@@ -1276,41 +1308,10 @@ async def test_restore_replacement_requires_backup_after_canonical_publish():
         await service._restore_replacement(
             skill=skill,
             old_metadata={},
-            bot={"env": "test", "entity_id": "owner", "active_engine": "moltis"},
             owner_id="owner",
             bot_id="bot",
             staged=_Storage(filesystem, "/private/staged"),
-            staged_locator="/private/staged",
             canonical=_Storage(filesystem, "/private/canonical"),
-            canonical_locator="/private/canonical",
-            old_is_canonical=True,
-            backup=None,
-            canonical_published=True,
-            switched=False,
-            runtime_sync_attempted=False,
-        )
-
-
-@pytest.mark.asyncio
-async def test_restore_replacement_requires_noncanonical_publish_cleanup():
-    filesystem = _Filesystem(cleanup_results=[False])
-    skill = _existing_skill(active=False)
-    service = _replacement_service(
-        filesystem, _ReplacementRepo([skill]), _ReplacementRuntime([True])
-    )
-
-    with pytest.raises(LocalSkillStorageError):
-        await service._restore_replacement(
-            skill=skill,
-            old_metadata={},
-            bot={"env": "test", "entity_id": "owner", "active_engine": "moltis"},
-            owner_id="owner",
-            bot_id="bot",
-            staged=_Storage(filesystem, "/private/staged"),
-            staged_locator="/private/staged",
-            canonical=_Storage(filesystem, "/private/canonical"),
-            canonical_locator="/private/canonical",
-            old_is_canonical=False,
             backup=None,
             canonical_published=True,
             switched=False,

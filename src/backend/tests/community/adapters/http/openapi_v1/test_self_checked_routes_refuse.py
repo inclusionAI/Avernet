@@ -132,8 +132,8 @@ class _Services:
             "gmt_modified": datetime(2026, 8, 2),
         }
 
-    def list_local_skills(self, **_kwargs):
-        self._record("list_local_skills")
+    def list_bot_skills(self, **_kwargs):
+        self._record("list_bot_skills")
         return 0, []
 
     async def delete_local_skill(self, **_kwargs):

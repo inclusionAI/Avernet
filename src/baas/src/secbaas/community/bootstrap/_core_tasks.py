@@ -9,26 +9,14 @@ from dependency_injector import containers, providers
 from secbaas.community.core.service.scheduler import (
     BotRunRecoveryTask,
     BotRunRecoveryTaskConfig,
+    DeadlineRenewalScheduler,
+    DeadlineRenewalSchedulerConfig,
     DeviceTtlTimerTask,
     DeviceTtlTimerTaskConfig,
     FileTransferPoller,
     FileTransferPollerConfig,
 )
 from secbaas.community.core.utils.env_utils import get_current_env
-
-# ── Enterprise-only optional imports ─────────────────────────────────────
-# DeadlineRenewalScheduler lives in the enterprise flat tree. Community
-# builds that don't have the enterprise package on PYTHONPATH will see
-# _HAS_ENTERPRISE_RENEWAL = False and skip the deadline path.
-try:
-    from secbaas.enterprise.core.arca_ttl_renewal import (
-        DeadlineRenewalScheduler,
-        DeadlineRenewalSchedulerConfig,
-    )
-
-    _HAS_ENTERPRISE_RENEWAL = True
-except ImportError:
-    _HAS_ENTERPRISE_RENEWAL = False
 
 
 class CoreTaskContainer(containers.DeclarativeContainer):
@@ -42,7 +30,7 @@ class CoreTaskContainer(containers.DeclarativeContainer):
     ticket_repository = providers.Dependency()
     paas_service_facade = providers.Dependency()
     file_transfer_backend = providers.Dependency()
-    ttl_renewal_schedule_repository = providers.Dependency()
+    arca_ttl_schedule_repository = providers.Dependency()
 
     # ── DeviceTtlTimer task ──────────────────────────────────────────────────
 
@@ -104,27 +92,43 @@ class CoreTaskContainer(containers.DeclarativeContainer):
         paas_facade=paas_service_facade,
     )
 
-    # ── DeadlineRenewalScheduler (enterprise-only, conditional) ────────────
-    # Per D-04: if/else branch (not Plugin Selector). The enabled flag is
-    # derived from config.renewal_scheduler.engine: only True when "deadline".
-    # When enterprise is not installed, deadline_renewal_scheduler is None.
-    if _HAS_ENTERPRISE_RENEWAL:
-        deadline_renewal_config = providers.Singleton(
-            DeadlineRenewalSchedulerConfig,
-            enabled=providers.Callable(
-                lambda engine: engine == "deadline",
-                config.renewal_scheduler.engine,
-            ),
-            engine=config.renewal_scheduler.engine,
-            env=providers.Callable(get_current_env),
-        )
+    # ── DeadlineRenewal scheduler ──────────────────────────────────────────
 
-        deadline_renewal_scheduler = providers.Singleton(
-            DeadlineRenewalScheduler,
-            config=deadline_renewal_config,
-            lock_service=distributed_lock_service,
-            schedule_repo=ttl_renewal_schedule_repository,
-            paas_facade=paas_service_facade,
-        )
-    else:
-        deadline_renewal_scheduler = providers.Object(None)
+    deadline_renewal_config = providers.Singleton(
+        DeadlineRenewalSchedulerConfig,
+        enabled=providers.Callable(
+            lambda e: e == "deadline",
+            config.renewal_scheduler.engine,
+        ),
+        lock_name=config.renewal_scheduler.lock_name,
+        lock_expire_seconds=config.renewal_scheduler.lock_expire_seconds,
+        cron_interval_seconds=config.renewal_scheduler.cron_interval_seconds,
+        batch_size=config.renewal_scheduler.batch_size,
+        max_concurrency=config.renewal_scheduler.max_concurrency,
+        renew_threshold_hours=config.renewal_scheduler.renew_threshold_hours,
+        # Rule 14 (configuration-driven wiring): the TTL period comes from
+        # the arca config section, not hardcoded task constants. The
+        # fallback keeps overlays without an arca section (minimal test
+        # containers) on the 1440 default. WR-03: coerce to int — the
+        # value has no ArcaConfigSchema, so a quoted YAML number ("1440")
+        # would reach the scheduler as str and raise TypeError at the
+        # first cron run (default_ttl_minutes // 2).
+        default_ttl_minutes=providers.Callable(
+            lambda v: int(v) if v else 1440,
+            config.arca.default_ttl_minutes,
+        ),
+        retry_delay_minutes=config.renewal_scheduler.retry_delay_minutes,
+        max_fail_count=config.renewal_scheduler.max_fail_count,
+        ttl_safety_margin_minutes=config.renewal_scheduler.ttl_safety_margin_minutes,
+        anti_join_verify_interval_cycles=config.renewal_scheduler.anti_join_verify_interval_cycles,
+        engine=config.renewal_scheduler.engine,
+        env=providers.Callable(get_current_env),
+    )
+
+    deadline_renewal_task = providers.Singleton(
+        DeadlineRenewalScheduler,
+        config=deadline_renewal_config,
+        lock_service=distributed_lock_service,
+        schedule_repo=arca_ttl_schedule_repository,
+        paas_facade=paas_service_facade,
+    )

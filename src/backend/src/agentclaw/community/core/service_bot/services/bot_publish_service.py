@@ -985,18 +985,9 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             env=self._env,
         )
 
-        # 4. Any formal-publish history makes the service Bot permanent.  An
-        # offline operation creates a fresh DRAFT, so checking SUCCESS alone
-        # would let that new row delete a Bot whose prior version is RELEASED
-        # (or UPGRADED).  FAILED is intentionally not included: a never-live
-        # initial draft may fail and still be discarded.
-        published_history = {
-            PublishStatus.SUCCESS.value,
-            PublishStatus.UPGRADED.value,
-            PublishStatus.RELEASED.value,
-        }
+        # 4. 检查是否有发布成功的记录（排除当前记录）
         for p in all_publishes:
-            if p.id != publish_id and p.status in published_history:
+            if p.id != publish_id and p.status == PublishStatus.SUCCESS:
                 return False
 
         return True

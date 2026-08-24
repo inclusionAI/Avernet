@@ -237,6 +237,7 @@ class InteractionResolveAnswer(BaseModel):
             raise ValueError("interaction answer text fields must be non-empty")
         return value
 
+
 class InteractionResolveParams(BaseModel):
     """BCS Provider 2.0 kind-specific interaction resolution."""
 

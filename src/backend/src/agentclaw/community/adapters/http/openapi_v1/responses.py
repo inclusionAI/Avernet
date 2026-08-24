@@ -45,7 +45,10 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptTooLargeError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
+    ApplicationCodingUnavailableError,
     BotAccessRefusedError,
+    BotCombinationUnsupportedError,
+    BotTemplateInvalidError,
     CallerIdentityConflictError,
     CallerIdentityForbiddenError,
     CallerIdentityInvalidError,

@@ -7,12 +7,14 @@ internal names belong in ``#`` comments.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
+from agentclaw.community.adapters.http.openapi_v1.errors import BotTemplateInvalidError
 
 # Request bodies reject unknown keys. Pydantic's default is to *ignore* them,
 # which on a public API means a typo'd or immutable field (``engine`` on update)

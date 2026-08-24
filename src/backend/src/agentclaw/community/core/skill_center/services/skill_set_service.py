@@ -1124,15 +1124,31 @@ class SkillSetService:
             # Default skill set: write exclusion record instead of deleting
             if not user_id:
                 user_id = self.entity_id
-            self.skill_set_repo.add_default_skill_exclusion(
-                user_id=user_id,
+            # The exclusion alone does not stop the Installation row from
+            # providing the Skill, so both halves go through one repository
+            # call and commit together under the Set lock.
+            from agentclaw.community.utils.env_utils import get_current_env
+
+            excluded_skill = self.skill_repo.get_by_id(skill_id)
+            # Reused by the rollback below.
+            removal_env = str(
+                excluded_skill["env"]
+                if excluded_skill is not None
+                else get_current_env()
+            )
+            # Keyed on the Bot owner: both rows are the Bot's state. ``user_id``
+            # stays the caller, for device sync and the symlink deactivation.
+            created, uninstalled = self.skill_set_repo.exclude_default_set_skill(
+                owner_id=self.entity_id or user_id,
                 bot_id=self.bot_id,
                 skill_set_id=int(skill_set_id),
                 skill_id=int(skill_id),
+                env=removal_env,
             )
             logger.info(
                 f"[remove_skill_from_set] Excluded skill {skill_id} from default set "
-                f"{skill_set_id} for user={user_id}, bot={self.bot_id}"
+                f"{skill_set_id} for owner={self.entity_id}, caller={user_id}, "
+                f"bot={self.bot_id} (created={created}, uninstalled={uninstalled})"
             )
 
             # Deactivate the skill symlink (skill is not shared across sets,
@@ -1158,13 +1174,22 @@ class SkillSetService:
                         "[remove_skill_from_set] Failed to deactivate skill %s: %s",
                         link_name, e,
                     )
-                    # Rollback: remove the exclusion record
-                    self.skill_set_repo.remove_default_skill_exclusion(
-                        user_id=user_id,
-                        bot_id=self.bot_id,
-                        skill_set_id=int(skill_set_id),
-                        skill_id=int(skill_id),
-                    )
+                    # Undo exactly what this call wrote — a retry that found
+                    # the exclusion already there wrote neither half.
+                    if created:
+                        self.skill_set_repo.remove_default_skill_exclusion(
+                            user_id=self.entity_id or user_id,
+                            bot_id=self.bot_id,
+                            skill_set_id=int(skill_set_id),
+                            skill_id=int(skill_id),
+                        )
+                    if uninstalled and self._installations is not None:
+                        self._installations.install(
+                            env=removal_env,
+                            owner_id=self.entity_id or user_id,
+                            bot_id=self.bot_id,
+                            skill_id=skill_id,
+                        )
                     return False
 
             # Sync symlinks to device
@@ -1271,9 +1296,13 @@ class SkillSetService:
 
         # Default skill set: filter out user-excluded skills
         # (mirrors get_set_mcp_servers which filters ac_default_skillset_mcp_exclusion)
-        if skill_set.get('is_default') and user_id and self.bot_id:
+        # The Bot owner, matching how the exclusion is written and read.
+        exclusion_owner_id = self.entity_id or user_id
+        if skill_set.get('is_default') and exclusion_owner_id and self.bot_id:
             excluded = self.skill_set_repo.get_excluded_skills(
-                user_id=user_id, bot_id=self.bot_id, skill_set_id=int(skill_set_id)
+                user_id=exclusion_owner_id,
+                bot_id=self.bot_id,
+                skill_set_id=int(skill_set_id),
             )
             excluded_ids = set(excluded)
             if excluded_ids:
