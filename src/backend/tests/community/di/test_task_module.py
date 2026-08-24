@@ -9,6 +9,7 @@ from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
 )
+from agentclaw.community.di.config import GatewayEndpoint
 from agentclaw.community.di.modules.task_module import TaskModule
 
 
@@ -54,6 +55,11 @@ def test_resolve_ports_outside_singlebox_returns_the_two_port_contract(monkeypat
 
 def test_resolve_api_base_url_uses_neutral_config_default(monkeypatch):
     monkeypatch.setenv("DEPLOY_PROFILE", "community")
-    monkeypatch.delenv("TASK_API_BASE_URL", raising=False)
-
-    assert TaskModule._resolve_api_base_url() == "http://localhost:8888"
+    # 非单 box:回投 origin 取组合根解析的 GatewayEndpoint;base_url 空/未绑定 → 回退 localhost
+    assert TaskModule._resolve_api_base_url(None) == "http://localhost:8888"
+    assert TaskModule._resolve_api_base_url(GatewayEndpoint(base_url="")) == "http://localhost:8888"
+    # pre 网关(base_url_pre 由 corp overlay 注入)直传为回投 origin
+    assert (
+        TaskModule._resolve_api_base_url(GatewayEndpoint(base_url="https://teamclawgw-pre.alipay.com"))
+        == "https://teamclawgw-pre.alipay.com"
+    )

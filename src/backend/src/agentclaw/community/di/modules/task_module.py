@@ -37,6 +37,7 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
+from agentclaw.community.di.config import GatewayEndpoint
 from agentclaw.community.di.profile import DeployProfile
 
 
@@ -126,13 +127,21 @@ class TaskModule(Module):
             bot_service = injector.get(BotServiceProtocol)
         except Exception:  # noqa: BLE101 未绑定 → dashboard 不附加 assignee 的 bot 归属/名
             bot_service = None
+        # 回投入口 = backend 网关地址(组合根 config_module.gateway_endpoint 已按
+        # get_current_env() 选 pre/prod;agent 命中后往此 origin 回投任务结果,自行拼 /api/... 路径)。
+        # 轻量/纯内核测试 injector 未装 ConfigModule → 取不到 → None 回退本地(与 bcn 等
+        # 可选依赖同语义);community/未申请环境 GatewayEndpoint.base_url 为空亦回退 localhost。
+        try:
+            gateway = injector.get(GatewayEndpoint)
+        except Exception:  # noqa: BLE001 未绑定 → 回投地址回退 localhost:8888
+            gateway = None
         return TaskService(
             graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
             bcn=bcn, bcs_identity=bcs_identity, task_info_repo=task_info_repo,
             callback_repo=callback_repo, task_node_repo=task_node_repo,
             task_node_run_info_repo=task_node_run_info_repo,
             bot_service=bot_service,
-            api_base_url=self._resolve_api_base_url(),
+            api_base_url=self._resolve_api_base_url(gateway),
         )
 
     @singleton
@@ -178,13 +187,19 @@ class TaskModule(Module):
         return auth
 
     @staticmethod
-    def _resolve_api_base_url() -> str:
-        """Resolve the backend callback base URL from composition-root configuration."""
-        import os
-        from agentclaw.community.di.profile import DeployProfile
+    def _resolve_api_base_url(gateway: GatewayEndpoint | None) -> str:
+        """回投 base URL:agent 命中后往此 origin 回投任务结果(自行拼 /api/... 路径)。
+
+        singlebox → 本地直连 backend(``SINGLEBOX_BACKEND_URL``/8888;本地无真网关前置,
+        agent 直连 backend,不走 application-singlebox.yaml 的 gateway::9999)。
+        其余(corp pre/prod)→ 组合根已按 env(get_current_env()=="pre")解析的
+        ``GatewayEndpoint.base_url``(pre 覆盖 prod;与连接 endpoint 同款发布给 agent 的 backend 入口)。
+        空 gateway(community / 尚未申请入口的环境)→ 回退 localhost:8888(满足"其它环境可能还没有申请")。
+        """
         if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == DeployProfile.SINGLEBOX.value:
             return os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-        return os.environ.get("TASK_API_BASE_URL", "http://localhost:8888")
+        origin = (gateway.base_url or "").strip() if gateway is not None else ""
+        return origin or "http://localhost:8888"
 
     @staticmethod
     def _resolve_ports():
