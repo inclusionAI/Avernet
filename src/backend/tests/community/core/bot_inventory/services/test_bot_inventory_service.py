@@ -193,15 +193,74 @@ def test_service_bot_expands_to_publication_cards_before_pagination() -> None:
         keyword=None,
         engine=None,
         deploy_mode=DeployMode.CLOUD,
+        is_service=True,
         page=1,
         page_size=10,
     )
 
-    assert total == 3
+    assert total == 2
+    assert {item.bot_id for item in items} == {"s1"}
     service_items = [item for item in items if item.bot_id == "s1"]
     assert [item.publication_id for item in service_items] == [4, 3]
     assert [item.card_id for item in service_items] == ["service:s1:4", "service:s1:3"]
     lifecycle_port.cards_for_bots.assert_called_once_with(bots=[service_row])
+
+
+@pytest.mark.unit
+def test_non_service_filter_excludes_service_cards_before_total(service) -> None:
+    inventory, bot, _ = service
+    service_row = {
+        **CLOUD,
+        "id": 10,
+        "bot_id": "s1",
+        "bot_name": "Service",
+        "bot_type": "service",
+    }
+    bot.list_bots_by_conditions.return_value = {
+        "total": 2,
+        "items": [CLOUD, service_row],
+    }
+
+    items, total = inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=None,
+        deploy_mode=None,
+        is_service=False,
+        page=1,
+        page_size=10,
+    )
+
+    assert total == 2
+    assert {item.bot_id for item in items} == {"c1", "l1"}
+
+
+@pytest.mark.unit
+def test_local_deploy_with_service_filter_returns_empty_without_source_calls(
+    service,
+) -> None:
+    inventory, bot, desktop = service
+
+    items, total = inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.LOCAL,
+        is_service=True,
+        page=1,
+        page_size=10,
+    )
+
+    assert total == 0
+    assert items == []
+    bot.list_bots_by_conditions.assert_not_called()
+    desktop.list_user_bots.assert_not_called()
 
 
 @pytest.mark.unit
