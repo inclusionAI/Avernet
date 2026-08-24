@@ -76,11 +76,11 @@ except Exception:
 " 2>/dev/null || true)
 
     # 构建 SAN 扩展: 每个域名单独列出, 加上通配符形式
-    # 例如 antchat.alipay.com → DNS:antchat.alipay.com, DNS:*.alipay.com
+    # 例如 api.example.com → DNS:api.example.com, DNS:*.example.com
     local san_entries="DNS:localhost"
     for domain in ${san_domains}; do
         san_entries="${san_entries},DNS:${domain}"
-        # 自动加一级通配符: antchat.alipay.com → *.alipay.com
+        # 自动加一级通配符: api.example.com → *.example.com
         local parent="${domain#*.}"
         if [ "${parent}" != "${domain}" ]; then
             san_entries="${san_entries},DNS:*.${parent}"
