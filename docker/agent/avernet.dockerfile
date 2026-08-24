@@ -99,8 +99,7 @@ RUN groupadd --gid 10001 admin 2>/dev/null || true \
     && echo 'admin:*' | chpasswd -e \
     && echo 'admin ALL=(ALL) NOPASSWD: /usr/local/bin/supervisorctl *' > /etc/sudoers.d/admin-supervisorctl \
     && chmod 440 /etc/sudoers.d/admin-supervisorctl \
-    && mkdir -p /home/admin/.openclaw/workspace /home/admin/logs \
-    && chown -R admin:admin /home/admin
+    && su admin -s /bin/bash -c 'mkdir -p /home/admin/.openclaw/workspace /home/admin/logs'
 
 # Create symlink for CA bundle path expected by run.sh / Node (RHEL-style path on Debian).
 RUN ln -sf /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-bundle.crt
@@ -173,14 +172,11 @@ RUN groupadd --gid 10001 admin 2>/dev/null || true \
     && useradd --uid 10001 --gid admin --create-home --shell /bin/bash admin 2>/dev/null || true \
     && echo 'admin ALL=(ALL) NOPASSWD: /usr/local/bin/supervisorctl *' > /etc/sudoers.d/admin-supervisorctl \
     && chmod 440 /etc/sudoers.d/admin-supervisorctl \
-    && mkdir -p /home/admin/.openclaw/workspace \
-               /home/admin/.openclaw/extensions \
-               /home/admin/logs \
-               /var/log/supervisor \
-               /var/run/agentclaw \
+    && mkdir -p /var/log/supervisor /var/run/agentclaw \
+    && chown admin:admin /var/run/agentclaw \
+    && su admin -s /bin/bash -c 'mkdir -p /home/admin/.openclaw/workspace /home/admin/.openclaw/extensions /home/admin/logs' \
     && ln -sfn /opt/openclawExt/openclaw-channel-bcn \
-               /home/admin/.openclaw/extensions/openclaw-channel-bcn \
-    && chown -R admin:admin /home/admin /var/run/agentclaw
+               /home/admin/.openclaw/extensions/openclaw-channel-bcn
 
 # Supervisor configuration: engine(autostart=false) + openclaw(autostart=false).
 COPY docker/agent/avernet-supervisord.conf /etc/supervisor/supervisord.conf
