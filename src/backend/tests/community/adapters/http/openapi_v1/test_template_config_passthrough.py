@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.bot_management.create_errors import (
+from agentclaw.community.core.bot_management.errors import (
     BotTemplateInvalidError,
 )
-from agentclaw.community.core.bot_management.create_policy import (
+from agentclaw.community.core.bot_management.create_flow import (
     to_internal_template_config,
 )
 
@@ -57,7 +57,6 @@ def test_payload_is_deep_copied() -> None:
 @pytest.mark.parametrize(
     "reserved",
     [
-        "dima_space_id",
         "workspace_id",
         "template_uid",
         "bot_id",

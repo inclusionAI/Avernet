@@ -18,12 +18,10 @@ import pytest
 
 from agentclaw.community.core.bot_management.create_flow import (
     AuthPending,
-    BotCreateSpec,
-    create_bot_with_authorization,
-)
-from agentclaw.community.core.bot_management.create_policy import (
     BotCreateContext,
     BotCreateDeploymentMode,
+    BotCreateSpec,
+    create_bot_with_authorization,
 )
 from agentclaw.community.plugin_api.passport import PassportError
 

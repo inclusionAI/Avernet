@@ -161,8 +161,8 @@ class BotCreateTemplate(BaseModel):
     properties: dict[str, Any] = Field(
         description=(
             "Template-specific JSON properties. Passed through unchanged to the "
-            "template validator; server-managed fields such as dima_space_id, "
-            "workspace_id, template_uid and bot_id are not accepted."
+            "template validator; platform-managed identity and lifecycle fields "
+            "are not accepted."
         ),
     )
 

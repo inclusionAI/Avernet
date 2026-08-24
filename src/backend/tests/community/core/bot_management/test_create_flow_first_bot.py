@@ -8,13 +8,11 @@ import pytest
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_management.create_flow import (
+    BotCreateContext,
+    BotCreateDeploymentMode,
     BotCreateSpec,
     Created,
     create_bot_with_authorization,
-)
-from agentclaw.community.core.bot_management.create_policy import (
-    BotCreateContext,
-    BotCreateDeploymentMode,
 )
 from agentclaw.community.plugin_api.auth_relationship import (
     AuthRelationshipError,

@@ -780,7 +780,7 @@
         "properties": {
           "properties": {
             "additionalProperties": true,
-            "description": "Template-specific JSON properties. Passed through unchanged to the template validator; server-managed fields such as dima_space_id, workspace_id, template_uid and bot_id are not accepted.",
+            "description": "Template-specific JSON properties. Passed through unchanged to the template validator; platform-managed identity and lifecycle fields are not accepted.",
             "title": "Properties",
             "type": "object"
           },

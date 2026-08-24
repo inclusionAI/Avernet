@@ -7,20 +7,18 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.core.bot_management.create_errors import (
+from agentclaw.community.core.bot_management.errors import (
     ApplicationCodingUnavailableError,
     BotCombinationUnsupportedError,
     BotTemplateInvalidError,
 )
 from agentclaw.community.core.bot_management.create_flow import (
-    BotCreateSpec,
-    complete_bot_authorization,
-    create_bot_with_authorization,
-)
-from agentclaw.community.core.bot_management.create_policy import (
     APPLICATION_CODING_ENGINES,
     BotCreateContext,
     BotCreateDeploymentMode,
+    BotCreateSpec,
+    complete_bot_authorization,
+    create_bot_with_authorization,
     prepare_bot_create,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (

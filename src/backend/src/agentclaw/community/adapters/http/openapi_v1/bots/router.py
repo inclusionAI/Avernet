@@ -67,13 +67,11 @@ from agentclaw.community.core.bot_management.create_flow import (
     AuthPending,
     AuthStatus,
     AuthStatusUnavailableError,
+    BotCreateContext,
+    BotCreateDeploymentMode,
     BotCreateSpec,
     complete_bot_authorization,
     create_bot_with_authorization,
-)
-from agentclaw.community.core.bot_management.create_policy import (
-    BotCreateContext,
-    BotCreateDeploymentMode,
 )
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.repository.protocols.bot import BotRepository
