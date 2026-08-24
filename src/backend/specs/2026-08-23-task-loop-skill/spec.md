@@ -68,7 +68,7 @@
 - N2 单包多段：单 `SKILL.md` 承载 5 段；段体原文嵌入，顶层路由为唯一新增逻辑。
 - N3 可再生：`SKILL.md` 由 5 个源 SKILL.md + 路由模板拼装；附再生成步骤，源更新时按相同规则再生成。
 - N4 无行为漂移：除顶层路由外不动各段内部。
-- N5 双变体 + 部署清洗:`assemble.py` 常量 `DEPLOY_GATEWAY` 控制变体——置预发网关则生成预发部署包(recognition 段本地联调 `http://localhost:8888` → `https://teamclawgw-pre.alipay.com`),置 None 则保留源 localhost(本地 e2e 变体);源 SKILL.md 不动,两变体可再生。recognition 段体除该 URL 重定向外逐字节不变(零改硬约束的唯一下沉豁免)。
+- N5 双变体 + 部署清洗:`assemble.py` 常量 `DEPLOY_GATEWAY` 控制变体——置预发网关则生成预发部署包(recognition 段本地联调 `http://localhost:8888` → `https://teamclawgw-pre.alipay.com`,`本地联调`注释→`预发`),置 None 则保留源 localhost(本地 e2e 变体);源 SKILL.md 不动,两变体可再生。recognition 段体除该 URL 重定向外逐字节不变(零改硬约束的唯一下沉豁免)。
 
 ## 成功标准
 

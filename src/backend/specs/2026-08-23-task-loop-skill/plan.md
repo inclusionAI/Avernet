@@ -95,4 +95,4 @@
 
 ## 部署期清洗(本地 e2e vs 预发双变体)
 
-`assemble.py` 常量 `DEPLOY_GATEWAY` 控制变体:置 `https://teamclawgw-pre.alipay.com` → 生成预发部署包(本地联调 `http://localhost:8888` → 预发网关);置 `None` → 保留源 localhost(本地 e2e 变体)。源 SKILL.md 不动,两变体均可一键再生;校验脚本按 `deploy_strip(expected)` 比对。recognition 段体除该 URL 重定向外逐字节不变(零改硬约束的唯一下沉豁免)。`assemble.py` 暴露 `strip_frontmatter`/`demote_one`/`body` 与源路径常量供校验脚本 import(顶部 `if __name__` 守卫,import 无副作用)。
+`assemble.py` 常量 `DEPLOY_GATEWAY` 控制变体:置 `https://teamclawgw-pre.alipay.com` → 生成预发部署包(本地联调 `http://localhost:8888` → 预发网关;`本地联调`注释→`预发`);置 `None` → 保留源 localhost(本地 e2e 变体)。源 SKILL.md 不动,两变体均可一键再生;校验脚本按 `deploy_strip(expected)` 比对。recognition 段体除该 URL 重定向外逐字节不变(零改硬约束的唯一下沉豁免)。`assemble.py` 暴露 `strip_frontmatter`/`demote_one`/`body` 与源路径常量供校验脚本 import(顶部 `if __name__` 守卫,import 无副作用)。

@@ -44,7 +44,7 @@
 - [x] 7a.4 逐字节校验:arch-analysis/planning-arch 段体 == `demote(strip(源))`(仅标题降一级);两段体无 `---` HR
 - [x] 7a.5 frontmatter description 改 7 段单行(CSC002),tags 增 `arch-analysis`/`task-planning-arch`;README 改 7 段触发对照
 - [x] 7a.6 场景叠加层契约:SKILL.md 增 `## 场景叠加层` 子节(泛化主干段1~段5 默认不可改 + 案例叠加段信号门控可插拔 + 扩展契约);spec/plan 同步两层结构与 D6/R6
-- [x] 7b.1 部署期清洗:assemble.py 增 `DEPLOY_GATEWAY`+`deploy_strip`,预发包把 recognition 段 `http://localhost:8888` → `https://teamclawgw-pre.alipay.com`(源不动,`DEPLOY_GATEWAY=None` 留本地变体);verify 按 `deploy_strip(expected)` 比对通过
+- [x] 7b.1 部署期清洗:assemble.py 增 `DEPLOY_GATEWAY`+`deploy_strip`,预发包把 recognition 段 `http://localhost:8888` → `https://teamclawgw-pre.alipay.com`(+ `本地联调`注释→`预发`)(源不动,`DEPLOY_GATEWAY=None` 留本地变体);verify 按 `deploy_strip(expected)` 比对通过
 
 ## G7 包装校验、再生成脚本与 README
 - [x] 7.1 校验：顶部 frontmatter 仅一组 `---`；recognition 段保留源 `---` 横线(全文 `grep -c '^---$'` = 8：2 frontmatter + 6 HR);SkillParser 只解析顶部 frontmatter 不受影响
