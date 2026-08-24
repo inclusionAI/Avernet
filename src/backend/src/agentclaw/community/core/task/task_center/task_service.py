@@ -242,6 +242,11 @@ class TaskService:
         result: dict[str, Any] = {"success": success}
         if output is not None:
             result["data"] = output
+        if not success:
+            # 失败收敛须带 gaps:CallbackAdapter.adapt 对"success=False 且无 gaps"会产出
+            # exec_error(→ harness 重投),而非验收 FAIL(→ 终态 FAILED)。补一个 gap 让失败
+            # 正确翻态为 FAILED(失败详情已随 output 落 run_info.output)。
+            result["gaps"] = ["external collaboration ended without success"]
         data = TaskCallbackData(data={
             "loop_task_id": loop_task_id,
             "workflow_source": "bcn",
