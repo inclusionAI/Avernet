@@ -330,7 +330,7 @@ tags: [task, loop, orchestrate, task-recognition, task-planning, task-search, ta
 Skill 到 `task_ready` 即完成任务定义；用户点击「执行」后，**不再调用本 Skill**。平台层必须读取 `task_ready.task` 和本次 `/task` 指令解析出的任务模式，转换为任务协作中心请求并调用：
 
 ```http
-POST /api/v1/collaboration/tasks/execute  # 本地联调：https://teamclawgw-pre.alipay.com/api/v1/collaboration/tasks/execute
+POST /api/v1/collaboration/tasks/execute  # 预发：https://teamclawgw-pre.alipay.com/api/v1/collaboration/tasks/execute
 ```
 
 请求体类型为接口文档中的 `TaskRequest`：

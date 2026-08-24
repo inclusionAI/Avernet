@@ -69,10 +69,12 @@ def body(path):
         raw = f.read()
     return demote_one(strip_frontmatter(raw)).strip("\n")
 def deploy_strip(text):
-    """部署期清洗:本地联调 base url -> 预发网关(源保留 localhost 供本地 e2e)。DEPLOY_GATEWAY=None 时透传(本地变体)。"""
+    """部署期清洗:本地联调 base url -> 预发网关 + "本地联调"注释 -> "预发"(源保留 localhost 供本地 e2e)。DEPLOY_GATEWAY=None 时透传(本地变体)。"""
     if not DEPLOY_GATEWAY:
         return text
-    return text.replace("http://localhost:8888", DEPLOY_GATEWAY)
+    text = text.replace("http://localhost:8888", DEPLOY_GATEWAY)
+    text = text.replace("本地联调：", "预发：")  # 注释前缀随网关重定向:本地联调 -> 预发
+    return text
 
 
 HEADER = """---
