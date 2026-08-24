@@ -49,7 +49,7 @@ lands in the same group as the migration of its last caller.
 - [x] 2.3 Extend `flush_installations`: fast path checks skill and MCP
       deltas; write path applies both (SAVEPOINT-per-row inserts, delete
       `*_to_uninstall ∩ installed`).
-- [ ] 2.4 Repository tests: MCP rows follow Set activation; excluded member
+- [x] 2.4 Repository tests: MCP rows follow Set activation; excluded member
       rows removed (skill + MCP); malformed two-Set data errs safe (a row an
       active Set accounts for is kept); direct rows untouched; idempotent.
       Update the 2026-08-23 pinning test that asserted excluded rows are

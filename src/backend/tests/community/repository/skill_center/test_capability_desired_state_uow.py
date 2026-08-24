@@ -1907,3 +1907,124 @@ def test_removing_a_member_that_no_longer_resolves_retires_its_row():
     with db.orm_session() as session:
         assert session.query(SkillSetSkill).count() == 0
         assert session.query(BotSkillInstallation).count() == 0
+
+
+def test_flush_gives_and_takes_mcp_rows_with_set_activation():
+    """MCP Installation follows Set membership exactly as skills do.
+
+    An active Set's MCP member gains its row; an inactive Set's MCP member
+    loses the stale one; a directly-installed MCP no Set explains is left
+    alone in both directions; a second flush writes nothing.
+    """
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        active = SkillSet(
+            name="active",
+            bolt_id="bot",
+            user_id="owner",
+            engine_type="openclaw",
+            is_active=True,
+            env="dev",
+        )
+        inactive = SkillSet(
+            name="inactive",
+            bolt_id="bot",
+            user_id="owner",
+            engine_type="openclaw",
+            is_active=False,
+            env="dev",
+        )
+        session.add_all([active, inactive])
+        session.flush()
+        session.add_all(
+            [
+                SkillSetMCPServer(
+                    skill_set_id=active.id,
+                    server_code="missing-mcp",
+                    name="missing-mcp",
+                    env="dev",
+                ),
+                SkillSetMCPServer(
+                    skill_set_id=inactive.id,
+                    server_code="stale-mcp",
+                    name="stale-mcp",
+                    env="dev",
+                ),
+                BotMCPInstallation(
+                    bot_id="bot", owner_id="owner", server_code="stale-mcp", env="dev"
+                ),
+                # Direct desired state: no membership row anywhere.
+                BotMCPInstallation(
+                    bot_id="bot", owner_id="owner", server_code="direct-mcp", env="dev"
+                ),
+            ]
+        )
+
+    plan = _bridge(db)
+
+    assert plan.mcps_to_install == frozenset({"missing-mcp"})
+    assert plan.mcps_to_uninstall == frozenset({"stale-mcp"})
+    with db.orm_session() as session:
+        assert {
+            row.server_code for row in session.query(BotMCPInstallation).all()
+        } == {"missing-mcp", "direct-mcp"}
+
+    _bridge(db)
+    with db.orm_session() as session:
+        assert {
+            row.server_code for row in session.query(BotMCPInstallation).all()
+        } == {"missing-mcp", "direct-mcp"}
+
+
+def test_flush_removes_an_excluded_default_mcp_members_row():
+    """Default-Set MCP exclusion deactivates the member, like skills."""
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        platform_default = SkillSet(
+            name="platform-default",
+            bolt_id="",
+            user_id="",
+            engine_type="openclaw",
+            is_default=True,
+            env="dev",
+        )
+        session.add(platform_default)
+        session.flush()
+        session.add_all(
+            [
+                SkillSetMCPServer(
+                    skill_set_id=platform_default.id,
+                    server_code="kept-mcp",
+                    name="kept-mcp",
+                    env="dev",
+                ),
+                SkillSetMCPServer(
+                    skill_set_id=platform_default.id,
+                    server_code="excluded-mcp",
+                    name="excluded-mcp",
+                    env="dev",
+                ),
+                DefaultSkillsetMcpExclusion(
+                    user_id="owner",
+                    bot_id="bot",
+                    skill_set_id=platform_default.id,
+                    server_code="excluded-mcp",
+                ),
+                # The row a racing flush inserted before the exclusion landed.
+                BotMCPInstallation(
+                    bot_id="bot",
+                    owner_id="owner",
+                    server_code="excluded-mcp",
+                    env="dev",
+                ),
+            ]
+        )
+
+    plan = _bridge(db)
+
+    assert plan.mcps_to_install == frozenset({"kept-mcp"})
+    assert plan.mcps_to_uninstall == frozenset({"excluded-mcp"})
+    with db.orm_session() as session:
+        assert {
+            row.server_code for row in session.query(BotMCPInstallation).all()
+        } == {"kept-mcp"}
