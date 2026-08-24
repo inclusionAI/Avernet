@@ -12,33 +12,33 @@ ${HEADER_RULES_YAML}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: openclaw-${UID}
+  name: avernet-agent-${UID}
   namespace: ${NAMESPACE}
   labels:
-    app: openclaw
+    app: avernet-agent
     biz-id: "${UID}"
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: openclaw
+      app: avernet-agent
       biz-id: "${UID}"
   template:
     metadata:
       labels:
-        app: openclaw
+        app: avernet-agent
         biz-id: "${UID}"
     spec:
       initContainers:
       - name: init-dir
         image: ${INIT_IMAGE}
-        command: ["sh", "-c", "mkdir -p /mnt/data/${STORAGE_ID}"]
+        command: ["sh", "-c", "mkdir -p /mnt/data/${STORAGE_ID} && chmod 777 /mnt/data/${STORAGE_ID}"]
         volumeMounts:
         - name: data
           mountPath: /mnt/data
       containers:
-      - name: openclaw
-        image: ${OPENCLAW_IMAGE}
+      - name: avernet-agent
+        image: ${AGENT_IMAGE}
         ports:
         - containerPort: 20003
         volumeMounts:
@@ -47,13 +47,13 @@ spec:
           subPath: ${STORAGE_ID}
         resources:
           requests:
-            cpu: "${CPU_REQUEST}"
-            memory: "${MEMORY_REQUEST}"
+            cpu: "${CPU}"
+            memory: "${MEMORY}"
           limits:
-            cpu: "${CPU_LIMIT}"
-            memory: "${MEMORY_LIMIT}"
+            cpu: "${CPU}"
+            memory: "${MEMORY}"
       - name: envoy-sidecar
-        image: ${ENVOY_SIDECAR_IMAGE}
+        image: ${SIDECAR_IMAGE}
         ports:
         - containerPort: 38080
         - containerPort: 38081

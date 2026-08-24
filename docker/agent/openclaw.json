@@ -7,14 +7,14 @@
     "mode": "merge",
     "providers": {
       "openai-compatible": {
-        "baseUrl": "OPENCLAW_OPENAI_BASE_URL",
-        "apiKey": "OPENCLAW_OPENAI_API_KEY",
+        "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "apiKey": "Bearer ${API-KEY}",
         "auth": "api-key",
         "api": "openai-completions",
         "models": [
           {
-            "id": "OPENCLAW_OPENAI_MODEL_ID",
-            "name": "OPENCLAW_OPENAI_MODEL_NAME",
+            "id": "glm-5.2",
+            "name": "glm-5.2",
             "reasoning": false,
             "input": ["text"],
             "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
@@ -29,13 +29,13 @@
     "defaults": {
       "imageMaxDimensionPx": 4096,
       "model": {
-        "primary": "openai-compatible/OPENCLAW_OPENAI_MODEL_ID"
+        "primary": "openai-compatible/glm-5.2"
       },
       "imageModel": {
-        "primary": "openai-compatible/OPENCLAW_OPENAI_MODEL_ID"
+        "primary": "openai-compatible/glm-5.2"
       },
       "models": {
-        "openai-compatible/OPENCLAW_OPENAI_MODEL_ID": {}
+        "openai-compatible/glm-5.2": {}
       },
       "compaction": { "mode": "safeguard" },
       "maxConcurrent": 4,
@@ -90,9 +90,6 @@
   "channels": {
     "bcs": {
       "enabled": true,
-      "bcsUrl": "BCS_URL",
-      "botId": "BCS_BOT_ID",
-      "botName": "BCS_BOT_NAME",
       "capabilities": {
         "summary": "OpenClaw bot",
         "domains": ["general"],

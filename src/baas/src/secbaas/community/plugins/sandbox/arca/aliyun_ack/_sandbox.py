@@ -6,7 +6,6 @@ protocol. All Kubernetes API calls go through the injected ApiClient.
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
@@ -200,7 +199,9 @@ class AliyunAckSandbox(ArcaSandbox):
             )
             resp.run_forever(timeout=timeout_in_millis / 1000.0)
         except ApiException as e:
-            raise RuntimeError(f"exec_command failed ({e.status})") from e
+            raise RuntimeError(
+                f"exec_command failed ({e.status}): {e.body}"
+            ) from e
 
         elapsed = time.monotonic() - started
         result = _ExecResult()
@@ -215,31 +216,7 @@ class AliyunAckSandbox(ArcaSandbox):
         rule: OutBoundOperationRule,
         updated_mode: OutBoundOperationRuleUpdatedMode,
     ) -> Any:
-        """Apply an outbound rule to the backing Pod. Only REPLACE is supported."""
-        if updated_mode != OutBoundOperationRuleUpdatedMode.REPLACE:
-            raise NotImplementedError(
-                "ACK sandbox only supports REPLACE outbound rule updates, "
-                f"got {updated_mode}"
-            )
-        annotations = {
-            "avernet.arcasandbox/outbound-rule": json.dumps(
-                rule.model_dump(exclude_none=True)
-                if hasattr(rule, "model_dump")
-                else {}
-            )
-        }
-        try:
-            core_api = CoreV1Api(self._client)
-            core_api.patch_namespaced_pod(
-                name=self._pod_name,
-                namespace=self._namespace,
-                body={
-                    "metadata": {"annotations": annotations},
-                },
-            )
-            return True
-        except ApiException as e:
-            raise RuntimeError(f"update_outbound_rule failed ({e.status})") from e
+        raise NotImplementedError("update_outbound_rule not implemented")
 
     def extend_ttl(self, ttl_minutes: int) -> Any:
         """Extend the Pod TTL annotation by ``ttl_minutes``."""

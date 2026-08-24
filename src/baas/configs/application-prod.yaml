@@ -52,9 +52,10 @@ user_config:
   # 沙箱镜像配置（按引擎 template_id → 容器名 → 镜像地址）
   sandbox_images:
     ALIYUN_ACK_DEFAULT:
-      openclaw: "${OPENCLAW_IMAGE}"
-      api-key-proxy: "${API_KEY_PROXY_IMAGE}"
+      avernet-agent: "${AGENT_IMAGE}"
+      avernet-sidecar: "${SIDECAR_IMAGE}"
       init: "${INIT_IMAGE}"
+      nas-server: "${NAS_SERVER}"
 
   bot_service:
     proxy_base_url: "https://bot_service.example.com"
