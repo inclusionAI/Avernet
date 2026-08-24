@@ -1366,6 +1366,40 @@ impl BotRepoPort for PersistentBotRepo {
         Ok(())
     }
 
+    async fn update_capabilities(
+        &self,
+        bot_id: &str,
+        capabilities: BotCapabilities,
+    ) -> ServiceResult<()> {
+        info!(bot_id = %bot_id, name = ?capabilities.name, "update_capabilities: replacing capabilities",);
+        let session_token: Option<String> = {
+            let bots = self.bots.read().await;
+            bots.get(bot_id).and_then(|b| b.session_token.clone())
+        };
+        // `save_to_db` writes the capability arrays (domains/skills/scopes) to
+        // the DB verbatim, so a cleared (empty) array persists correctly there.
+        self.save_to_db(bot_id, &capabilities, session_token.as_deref(), None)
+            .await
+            .map_err(|e| {
+                warn!(bot_id = %bot_id, error = %e, "Failed to save bot to database during update_capabilities");
+                e
+            })?;
+        // Wholesale in-memory replacement (no `is_empty` skip, unlike
+        // `register`) so a PATCH that clears a field also takes effect in the
+        // live registry and runtime discovery, not only in the database.
+        // Session token / created_by / runtime state are on `RegisteredBotInner`
+        // and are left untouched here.
+        let mut bots = self.bots.write().await;
+        if let Some(existing) = bots.get_mut(bot_id) {
+            existing.last_heartbeat = Instant::now();
+            existing.capabilities = capabilities;
+            info!(bot_id = %bot_id, "update_capabilities: replaced capabilities in memory");
+            Ok(())
+        } else {
+            Err(ServiceError::BotNotFound(bot_id.to_string()))
+        }
+    }
+
     async fn register_with_owner_and_token(
         &self,
         bot_id: String,

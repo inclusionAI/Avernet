@@ -1082,7 +1082,9 @@ async fn patch_provider_bot_merges_and_preserves_unmodified_fields() {
 
 #[tokio::test]
 async fn patch_provider_bot_clears_array_with_empty_vec_and_keeps_when_field_absent() {
-    let TestApp { app, _temp_dir, .. } = test_app();
+    let TestApp {
+        app, registry, _temp_dir, ..
+    } = test_app();
     let provider = register_provider(&app, json!({"mode": "static_bearer"})).await;
     let provider_id = provider["provider_id"].as_str().unwrap();
     let admin_token = provider["provider_admin_token"].as_str().unwrap();
@@ -1106,6 +1108,11 @@ async fn patch_provider_bot_clears_array_with_empty_vec_and_keeps_when_field_abs
         json!({"domains": ["development"], "scopes": ["production"]}),
     )
     .await;
+    // Confirm they landed before clearing.
+    let seeded = registry.get(bot_uuid).await.expect("bot registered");
+    assert_eq!(seeded.capabilities.domains, vec!["development"]);
+    assert_eq!(seeded.capabilities.scopes, vec!["production"]);
+
     let (status, body) = patch_provider_bot(
         &app,
         provider_id,
@@ -1117,6 +1124,18 @@ async fn patch_provider_bot_clears_array_with_empty_vec_and_keeps_when_field_abs
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["domains"], json!([]));
     assert_eq!(body["scopes"], json!([]));
+    // Regression guard: the cleared arrays must persist in the *live* registry
+    // (not just the response / DB). Previously `register`'s empty-array skip
+    // left the in-memory bot with the old, non-empty arrays until restart.
+    let cleared = registry.get(bot_uuid).await.expect("bot registered");
+    assert!(cleared.capabilities.domains.is_empty(), "domains must be cleared in registry");
+    assert!(cleared.capabilities.scopes.is_empty(), "scopes must be cleared in registry");
+    // An unmodified field (e.g. visibility default) must be preserved.
+    assert!(
+        matches!(cleared.capabilities.visibility.as_str(), "public" | "protected" | "private"),
+        "visibility must remain valid, got {}",
+        cleared.capabilities.visibility
+    );
 }
 
 #[tokio::test]

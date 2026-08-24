@@ -1197,8 +1197,12 @@ impl ProviderBotCoreService for ProviderCore {
         }
         merged.agent_code = agent_code;
 
+        // Use `update_capabilities` (wholesale replacement) rather than
+        // `register`, whose existing-bot merge skips empty capability arrays
+        // — a PATCH that clears domains/skills/scopes must take effect in the
+        // live registry and runtime discovery, not only in the response.
         self.registry
-            .register(binding.bot_uuid.clone(), merged.clone())
+            .update_capabilities(&binding.bot_uuid, merged.clone())
             .await?;
         info!(
             provider_id = %provider.provider_id,
