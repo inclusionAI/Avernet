@@ -71,6 +71,26 @@ def test_interaction_resolve_request_accepts_bcs_ask_user_shape() -> None:
     assert request.params.answers["deploy_target"].header == ("Deployment environment")
 
 
+@pytest.mark.parametrize("values", [[], [""], ["   "], ["custom raw value"]])
+def test_interaction_resolve_request_accepts_custom_and_skipped_values(
+    values: list[str],
+) -> None:
+    request = InteractionResolveRequest.model_validate(
+        _interaction_resolve_body(
+            answers={
+                "question-1": {
+                    "header": "Question",
+                    "values": values,
+                    "question": "Question?",
+                }
+            }
+        )
+    )
+
+    assert request.params.answers is not None
+    assert request.params.answers["question-1"].values == values
+
+
 def test_interaction_resolve_is_registered_on_json_downlink() -> None:
     request_model, dispatcher = _METHOD_DISPATCH["interaction.resolve"]
 
@@ -132,16 +152,7 @@ async def test_dispatch_interaction_resolve_returns_finite_domain_error() -> Non
             "answers": {
                 "question-1": {
                     "header": "Question",
-                    "values": [],
-                    "question": "Question?",
-                },
-            }
-        },
-        {
-            "answers": {
-                "question-1": {
-                    "header": "Question",
-                    "values": [""],
+                    "values": [7],
                     "question": "Question?",
                 },
             }

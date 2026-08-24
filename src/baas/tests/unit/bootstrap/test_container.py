@@ -155,6 +155,36 @@ class TestRepositoryContainer:
         assert items == []
 
 
+class TestBotRunInteractionMariadbSelector:
+    """WR-04: bot_run_interaction_repository must carry a MARIADB_ORM key
+    like every sibling selector, or MARIADB_ORM deployments abort container
+    resolution with ``Selector has no 'MARIADB_ORM' provider``."""
+
+    def test_resolves_under_mariadb_orm(self):
+        """Resolving the repository with plugin_database=MARIADB_ORM succeeds.
+
+        Hermetic: only the CoreRepositoryContainer is built, not the global
+        ApplicationContainer singleton, so the test cannot leak config state
+        into the other tests in this module.
+        """
+        from secbaas.community.bootstrap._core_repository import (
+            CoreRepositoryContainer,
+        )
+        from secbaas.community.core.repository.bot_run_interaction import (
+            OrmBotRunInteractionRepository,
+        )
+
+        container = CoreRepositoryContainer()
+        container.config.from_dict(
+            {"plugins": {"database": {"plugin_database": "MARIADB_ORM"}}}
+        )
+
+        repo = container.bot_run_interaction_repository()
+
+        assert isinstance(repo, OrmBotRunInteractionRepository)
+        assert repo._database is not None
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Service container
 # ═══════════════════════════════════════════════════════════════════════════
@@ -377,19 +407,29 @@ class TestSelectRenewalTask:
         deadline = object()
         assert _select_renewal_task("deadline", legacy, deadline) is deadline
 
+    def test_select_deadline_none_falls_back_to_legacy(self) -> None:
+        from secbaas.community.bootstrap._container import _select_renewal_task
 
-class TestInjectEnterprisePluginsImportError:
+        legacy = object()
+        # None defense: a community-only build has no registered deadline
+        # task — engine="deadline" must fall back to legacy, never mount None.
+        assert _select_renewal_task("deadline", legacy, None) is legacy
+
+
+class TestApplyEnterprisePluginsImportError:
     def test_import_error_is_silently_caught(self) -> None:
         import sys
         from unittest.mock import patch
 
         from secbaas.community.bootstrap._container import (
-            _inject_enterprise_plugins,
+            _apply_enterprise_plugins,
         )
 
-        container = object()
+        # Empty-config container: engine resolves None, so no overlay work
+        # runs — only the ImportError-swallowing path is exercised.
+        container = ApplicationContainer()
         with patch.dict(sys.modules, {"secbaas.community.plugin_registry": None}):
-            _inject_enterprise_plugins(container)
+            _apply_enterprise_plugins(container)
 
 
 class TestBuildDbConfig:

@@ -270,6 +270,45 @@ async def test_handle_ask_user_resolve_normalizes_all_values_as_ordinary(
 
 
 @pytest.mark.asyncio
+async def test_handle_ask_user_resolve_preserves_skipped_values(
+    service, mock_interaction_service
+) -> None:
+    result = await service.handle_interaction_resolve(
+        _make_interaction_resolve_input(
+            answers={
+                "empty_array": BcnInteractionAnswer(
+                    values=(),
+                    question="Skip with an empty array?",
+                    header="Array",
+                ),
+                "empty_string": BcnInteractionAnswer(
+                    values=("",),
+                    question="Skip with an empty string?",
+                    header="Empty",
+                ),
+                "whitespace": BcnInteractionAnswer(
+                    values=("   ",),
+                    question="Skip with whitespace?",
+                    header="Blank",
+                ),
+            }
+        )
+    )
+
+    assert result.ok is True
+    resolution = mock_interaction_service.resolve.call_args.kwargs["resolution"]
+    assert resolution.answer == "；".join(["Array: ", "Empty: ", "Blank:    "])
+    assert resolution.message == resolution.answer
+    assert resolution.values == {"Array": "", "Empty": "", "Blank": "   "}
+    assert resolution.answers == {
+        "Skip with an empty array?": "",
+        "Skip with an empty string?": "",
+        "Skip with whitespace?": "   ",
+    }
+    assert resolution.selected_options == ((), ("",), ("   ",))
+
+
+@pytest.mark.asyncio
 async def test_handle_ask_user_resolve_duplicate_headers_last_write_wins_safely(
     service, mock_interaction_service, caplog
 ) -> None:
