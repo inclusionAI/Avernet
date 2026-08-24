@@ -465,8 +465,14 @@ class TaskGraphService:
             owner = root.run_info.extend_props.get("bbs_owner")
             if owner is not None and owner != bot_id:
                 raise TaskStateError(f"claim_bbs_owner: task={task_id} 已被 {owner} 占有")
-            if self._graph_repo is not None:
-                # 数据库行锁 CAS 是跨实例权威;in-mem 仅做缓存先行校验。
+            persisted = (
+                self._graph_repo is not None
+                and self._graph_repo.get_version(task_id) is not None
+            )
+            if persisted:
+                # 数据库行锁 CAS 是跨实例权威(仅对已落库图);in-mem 仅做缓存先行校验。
+                # 未落库图(lightweight/单测:initialize_graph 无 task_info 行 → create_graph
+                # no-op,无 run_info 行)无跨实例争用,走下方 in-mem CAS,与“无仓储”路径同语义。
                 if not self._graph_repo.claim_bbs_owner(task_id, bot_id):
                     _LOG.info("[bbs-claim] task=%s DB CAS 输者 bot=%s", task_id, bot_id)
                     raise TaskStateError(f"claim_bbs_owner: task={task_id} DB CAS 失败")
