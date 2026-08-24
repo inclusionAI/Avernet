@@ -111,7 +111,7 @@ static_resources:
                           request_id: "%REQ(X-REQUEST-ID)%"
 
   clusters:
-    # HTTPS MITM 后重新加密转发到原始目的地
+    # HTTPS MITM 后重新加密转发到原始目的地 (TLS upstream)
     - name: outbound_original_dst
       type: ORIGINAL_DST
       lb_policy: CLUSTER_PROVIDED
@@ -126,6 +126,11 @@ static_resources:
             validation_context:
               trusted_ca:
                 filename: /etc/ssl/certs/ca-certificates.crt
+
+    # HTTP 纯文本转发 (无 TLS upstream)
+    - name: outbound_original_dst_http
+      type: ORIGINAL_DST
+      lb_policy: CLUSTER_PROVIDED
 
     # TLS 透传: 原样 TCP 转发（不终止 TLS）
     - name: outbound_passthrough

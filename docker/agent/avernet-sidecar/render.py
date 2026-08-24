@@ -89,8 +89,13 @@ def render_headers_to_remove(rules: list[str], indent: str) -> str:
     return "\n" + "\n".join(items)
 
 
-def render_virtual_host(rule: OutboundRule, idx: int) -> str:
-    """Render a single VirtualHost."""
+def render_virtual_host(rule: OutboundRule, idx: int, cluster: str = "outbound_original_dst") -> str:
+    """Render a single VirtualHost.
+
+    cluster: the upstream cluster to route to. HTTP catch-all uses
+    outbound_original_dst_http (no TLS) while MITM uses
+    outbound_original_dst (with TLS re-encryption).
+    """
     item = "                    "   # 20 spaces: list-item dash indent
     prop = item + "  "             # 22 spaces: property indent
     child = prop + "  "            # 24 spaces: sub-list indent
@@ -103,7 +108,7 @@ def render_virtual_host(rule: OutboundRule, idx: int) -> str:
         f'{child}- match:\n'
         f'{child}    prefix: "/"\n'
         f'{child}  route:\n'
-        f'{child}    cluster: outbound_original_dst\n'
+        f'{child}    cluster: {cluster}\n'
         f'{child}    timeout: 0s'
     )
 
@@ -130,7 +135,7 @@ def render_virtual_host(rule: OutboundRule, idx: int) -> str:
     return vh
 
 
-def render_virtual_hosts(rules: list[OutboundRule]) -> str:
+def render_virtual_hosts(rules: list[OutboundRule], cluster: str = "outbound_original_dst") -> str:
     """Render all VirtualHosts, merging rules with identical domain sets.
 
     Envoy only permits a single wildcard domain per route, so multiple
@@ -155,7 +160,7 @@ def render_virtual_hosts(rules: list[OutboundRule]) -> str:
         g.remove.extend(r.remove)
 
     merged = [groups[k] for k in order]
-    return "\n" + "\n".join(render_virtual_host(r, i) for i, r in enumerate(merged))
+    return "\n" + "\n".join(render_virtual_host(r, i, cluster) for i, r in enumerate(merged))
 
 
 def extract_sni_domains(rules: list[OutboundRule]) -> list[str]:
@@ -200,7 +205,7 @@ def cmd_render(args):
 
     # Render VirtualHosts separately for MITM (HTTPS) and HTTP chains
     mitm_vhs = render_virtual_hosts(mitm_rules)
-    http_vhs = render_virtual_hosts(http_rules)
+    http_vhs = render_virtual_hosts(http_rules, cluster="outbound_original_dst_http")
 
     # MITM SNI domains: auto-derived from rules (exclude catch-all '*')
     sni_domains = extract_sni_domains(config.rules)
