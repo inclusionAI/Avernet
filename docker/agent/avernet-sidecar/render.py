@@ -172,8 +172,14 @@ def cmd_render(args):
 
     config = parse_config(rules_data)
 
-    # Render VirtualHosts
-    outbound_vhs = render_virtual_hosts(config.rules)
+    # Split rules: specific-domain rules go to MITM (HTTPS), wildcard '*'
+    # rules go to the HTTP catch-all only.
+    mitm_rules = [r for r in config.rules if any(d != "*" for d in r.domains)]
+    http_rules = [r for r in config.rules if any(d == "*" for d in r.domains)]
+
+    # Render VirtualHosts separately for MITM (HTTPS) and HTTP chains
+    mitm_vhs = render_virtual_hosts(mitm_rules)
+    http_vhs = render_virtual_hosts(http_rules)
 
     # MITM SNI domains: auto-derived from rules (exclude catch-all '*')
     sni_domains = extract_sni_domains(config.rules)
@@ -189,8 +195,8 @@ def cmd_render(args):
             "{{SIDECAR_PROXY_PORT}}": str(args.proxy_port),
             "{{MITM_CERT_PATH}}": mitm_cert_dir,
             "{{MITM_SNI_MATCH}}": mitm_sni_match,
-            "{{OUTBOUND_VIRTUAL_HOSTS}}": outbound_vhs,
-            "{{OUTBOUND_HTTPS_VIRTUAL_HOSTS}}": outbound_vhs,
+            "{{OUTBOUND_VIRTUAL_HOSTS}}": http_vhs,
+            "{{OUTBOUND_HTTPS_VIRTUAL_HOSTS}}": mitm_vhs,
         }
         for placeholder, value in replacements.items():
             result = result.replace(placeholder, value)
@@ -212,7 +218,7 @@ def cmd_render(args):
             "{{SIDECAR_ADMIN_PORT}}": str(args.admin_port),
             "{{SIDECAR_PROXY_PORT}}": str(args.proxy_port),
             "{{MITM_CERT_PATH}}": mitm_cert_dir,
-            "{{OUTBOUND_VIRTUAL_HOSTS}}": outbound_vhs,
+            "{{OUTBOUND_VIRTUAL_HOSTS}}": http_vhs,
         }
         for placeholder, value in replacements.items():
             result = result.replace(placeholder, value)
