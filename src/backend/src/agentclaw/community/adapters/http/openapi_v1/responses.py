@@ -122,6 +122,11 @@ from agentclaw.community.core.bot_inventory.errors import (
     BotInventoryPermissionError,
     BotInventoryUpstreamError,
 )
+from agentclaw.community.core.bot_management.errors import (
+    ApplicationCodingUnavailableError,
+    BotCombinationUnsupportedError,
+    BotTemplateInvalidError,
+)
 from agentclaw.community.core.bot_dormant.activate_service import InvalidBotStateError
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,

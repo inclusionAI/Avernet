@@ -586,7 +586,7 @@ def test_create_bot_202_pending(client, passport):
     assert body["data"]["iframe_url"] == "http://auth"
 
 
-def test_create_application_coding_requires_template_config(client, svc, passport):
+def test_create_application_coding_requires_engine_properties_template(client, svc, passport):
     response = client.post(
         "/openapi/v1/bots",
         json={
@@ -594,11 +594,87 @@ def test_create_application_coding_requires_template_config(client, svc, passpor
             "engine": "claude_code",
             "cluster_name": "ACRA",
             "bot_type": "personal",
-            "template_type": "applicationCoding",
+            "engine_properties": {},
         },
     )
     assert response.status_code == 422, response.json()
     passport.apply_first_agent_passport.assert_not_called()
+    svc.create_bot.assert_not_called()
+
+
+def test_create_application_coding_maps_template_to_internal_spec(
+    client, svc, passport
+):
+    properties = {
+        "devflow_workflow": "app-flow",
+        "yuque_kb_repos": [],
+        "code_repos": [],
+        "bot_template_config": {
+            "preset_capabilities": {},
+            "ext_config": {"thetaKey": "value"},
+        },
+    }
+    passport.apply_first_agent_passport.return_value = {
+        "token": "tok",
+        "agent_code": "ac",
+    }
+
+    with patch.object(bots_router, "generate_bot_id", return_value="default"):
+        response = client.post(
+            "/openapi/v1/bots",
+            json={
+                **_CREATE_BODY,
+                "engine": "claude_code",
+                "engine_properties": {"template": properties},
+            },
+        )
+
+    assert response.status_code == 201, response.json()
+    kwargs = svc.create_bot.call_args.kwargs
+    assert kwargs["template_type"] == "applicationCoding"
+    assert kwargs["template_config"] == properties
+
+
+def test_create_rejects_legacy_template_envelope(client, svc):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "template": {"type": "applicationCoding", "properties": {}},
+        },
+    )
+
+    assert response.status_code == 422
+    svc.create_bot.assert_not_called()
+
+
+def test_create_rejects_legacy_top_level_template_fields(client, svc):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "template_type": "applicationCoding",
+            "template_config": {},
+        },
+    )
+
+    assert response.status_code == 422
+    svc.create_bot.assert_not_called()
+
+
+def test_create_rejects_unknown_engine_properties_fields(client, svc):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine_properties": {
+                "template": {},
+                "template_uid": "caller-controlled",
+            },
+        },
+    )
+
+    assert response.status_code == 422
     svc.create_bot.assert_not_called()
 
 
@@ -749,7 +825,7 @@ def test_post_auth_status_preserves_create_attributes(client, svc, passport):
     assert kw["bot_type"] == "service"
 
 
-def test_post_auth_status_application_coding_requires_template_config(
+def test_post_auth_status_application_coding_requires_engine_properties_template(
     client, svc, passport
 ):
     response = client.post(
@@ -757,12 +833,35 @@ def test_post_auth_status_application_coding_requires_template_config(
         json={
             "engine": "claude_code",
             "cluster_name": "ACRA",
-            "template_type": "applicationCoding",
+            "engine_properties": {},
         },
     )
     assert response.status_code == 422, response.json()
     passport.query_auth_status.assert_not_called()
     svc.create_bot.assert_not_called()
+
+
+def test_post_auth_status_maps_template_to_internal_spec(client, svc, passport):
+    properties = {
+        "devflow_workflow": "app-flow",
+        "bot_template_config": {"ext_config": {"thetaKey": "value"}},
+    }
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    passport.query_agent_passport.return_value = {"agent_code": "ac"}
+
+    response = client.post(
+        "/openapi/v1/bots/b1/auth-status",
+        json={
+            "engine": "claude_code",
+            "cluster_name": "ACRA",
+            "engine_properties": {"template": properties},
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    kwargs = svc.create_bot.call_args.kwargs
+    assert kwargs["template_type"] == "applicationCoding"
+    assert kwargs["template_config"] == properties
 
 
 def test_post_auth_status_engine_cluster_mismatch_400(client, svc):
@@ -1167,6 +1266,23 @@ def test_create_schema_does_not_advertise_engine_options(client):
     """A generated client must not be able to compile a request we always reject."""
     schema = client.app.openapi()["components"]["schemas"]["BotCreate"]
     assert "engine_options" not in schema["properties"]
+
+
+def test_create_schema_nests_template_under_engine_properties(client):
+    schemas = client.app.openapi()["components"]["schemas"]
+    create_properties = schemas["BotCreate"]["properties"]
+    poll_properties = schemas["BotAuthStatusPoll"]["properties"]
+    engine_properties = schemas["BotCreateEngineProperties"]["properties"]
+
+    assert "engine_properties" in create_properties
+    assert "engine_properties" in poll_properties
+    assert "template" not in create_properties
+    assert "template" not in poll_properties
+    assert "template_type" not in create_properties
+    assert "template_config" not in create_properties
+    assert "template_type" not in poll_properties
+    assert "template_config" not in poll_properties
+    assert set(engine_properties) == {"template"}
 
 
 def test_auth_status_validates_cluster_against_default_engine(client, svc, passport):
