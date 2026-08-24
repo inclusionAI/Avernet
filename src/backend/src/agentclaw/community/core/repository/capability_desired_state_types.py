@@ -23,19 +23,23 @@ class DesiredStateMutation:
 
 
 @dataclass(frozen=True)
-class BotSkillSetBridge:
-    """The Skills one Bot reaches through its SkillSets, split by desired state.
+class InstallationFlushPlan:
+    """What the flush resolved from Set configuration — and applied.
 
-    ``members`` is what the Bot's Skill listing unions with the rows it owns
-    outright; Default-Set exclusions are already removed, and are the only
-    thing removed.
-
-    ``activate`` and ``deactivate`` are the Installation repair that membership
-    implies — a member of an active Set must hold a row, a member of an
-    inactive one must not. Both are subsets of ``members``, and an active claim
-    always wins.
+    ``skills_to_install`` are members of active (or Default) Sets;
+    ``skills_to_uninstall`` are members only inactive claims account for.
+    An excluded Default-Set member is an inactive claim — exclusion is the
+    Default Set's per-Bot deactivation. R3 keeps a capability in at most one
+    Set, so claims never truly compete; on historical malformed data the
+    flush errs safe and keeps a row an active Set accounts for.
+    ``mcps_to_install``/``mcps_to_uninstall`` are the identical split for the
+    same Sets' MCP members. ``member_skill_ids`` is the reachability union
+    the public listing needs — Default-Set exclusions are already removed,
+    and are the only thing removed.
     """
 
-    members: frozenset[int]
-    activate: frozenset[int]
-    deactivate: frozenset[int]
+    member_skill_ids: frozenset[int]
+    skills_to_install: frozenset[int]
+    skills_to_uninstall: frozenset[int]
+    mcps_to_install: frozenset[str] = frozenset()
+    mcps_to_uninstall: frozenset[str] = frozenset()

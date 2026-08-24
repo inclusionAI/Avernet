@@ -38,7 +38,7 @@ lands in the same group as the migration of its last caller.
 
 ## Group 2 — One flush: MCPs + new exclusion semantics, retire the materializer
 
-- [ ] 2.1 Reshape the bridge type into `InstallationFlushPlan`
+- [x] 2.1 Reshape the bridge type into `InstallationFlushPlan`
       (`member_skill_ids`, `skills_to_install`, `skills_to_uninstall`,
       `mcps_to_install`, `mcps_to_uninstall`) per plan component 1.
 - [ ] 2.2 `_resolve_bridge` → `_resolve_flush_plan`: collect MCP members per

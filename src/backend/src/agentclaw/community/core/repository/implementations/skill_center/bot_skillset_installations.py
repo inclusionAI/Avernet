@@ -20,7 +20,7 @@ from agentclaw.community.core.repository.implementations.skill_center.default_sk
     global_default_scope,
 )
 from agentclaw.community.core.repository.capability_desired_state_types import (
-    BotSkillSetBridge,
+    InstallationFlushPlan,
 )
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -88,7 +88,7 @@ class BotSkillSetInstallations:
         env: str,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
-    ) -> BotSkillSetBridge:
+    ) -> InstallationFlushPlan:
         """Make Installation say what SkillSet membership implies.
 
         Returns the bridge it applied, so the caller need not resolve twice.
@@ -106,7 +106,7 @@ class BotSkillSetInstallations:
             installed = self._installed_skill_ids(
                 session, bot_id=bot_id, owner_id=owner_id, env=env
             )
-        if not (bridge.activate - installed) and not (bridge.deactivate & installed):
+        if not (bridge.skills_to_install - installed) and not (bridge.skills_to_uninstall & installed):
             return bridge
 
         # There is something to write, so resolve again holding the Set rows —
@@ -124,12 +124,12 @@ class BotSkillSetInstallations:
                 session, bot_id=bot_id, owner_id=owner_id, env=env
             ).with_for_update()
             installed = {int(row.skill_id) for row in rows.all()}
-            for skill_id in sorted(bridge.activate - installed):
+            for skill_id in sorted(bridge.skills_to_install - installed):
                 self._install_one(
                     session, bot_id=bot_id, owner_id=owner_id, env=env,
                     skill_id=skill_id,
                 )
-            stale = sorted(bridge.deactivate & installed)
+            stale = sorted(bridge.skills_to_uninstall & installed)
             if stale:
                 rows.filter(BotSkillInstallation.skill_id.in_(stale)).delete(
                     synchronize_session=False
@@ -201,7 +201,7 @@ class BotSkillSetInstallations:
         engine_type: str | None,
         default_engine_types: tuple[str, ...] | None,
         locked: bool = False,
-    ) -> BotSkillSetBridge:
+    ) -> InstallationFlushPlan:
         """What Installation should say, given the Sets this Bot has.
 
         Runs in the caller's session so a repair can resolve and write in one
@@ -239,12 +239,12 @@ class BotSkillSetInstallations:
                 members.add(member_id)
                 claimed = activate if is_default or bool(row.is_active) else inactive
                 claimed.add(member_id)
-        return BotSkillSetBridge(
-            members=frozenset(members),
-            activate=frozenset(activate),
+        return InstallationFlushPlan(
+            member_skill_ids=frozenset(members),
+            skills_to_install=frozenset(activate),
             # An active claim wins, so a stale inactive membership cannot
             # uninstall a live member.
-            deactivate=frozenset(inactive - activate),
+            skills_to_uninstall=frozenset(inactive - activate),
         )
 
     def ensure_active_skillset_installations(

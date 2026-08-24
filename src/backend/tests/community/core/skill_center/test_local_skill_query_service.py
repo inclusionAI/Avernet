@@ -5,15 +5,15 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.core.repository.capability_desired_state_types import (
-    BotSkillSetBridge,
+    InstallationFlushPlan,
 )
 from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 from agentclaw.community.core.skill_center.services.local_skill_query_service import (
     LocalSkillQueryService,
 )
 
-_EMPTY = BotSkillSetBridge(
-    members=frozenset(), activate=frozenset(), deactivate=frozenset()
+_EMPTY = InstallationFlushPlan(
+    member_skill_ids=frozenset(), skills_to_install=frozenset(), skills_to_uninstall=frozenset()
 )
 
 _BOT = {
@@ -38,11 +38,11 @@ class _Bots:
 class _SkillSets:
     """Stands in for the repository seam that owns resolution *and* repair."""
 
-    def __init__(self, bridge: BotSkillSetBridge) -> None:
+    def __init__(self, bridge: InstallationFlushPlan) -> None:
         self._bridge = bridge
         self.calls: list[dict] = []
 
-    def flush_installations(self, **kwargs) -> BotSkillSetBridge:
+    def flush_installations(self, **kwargs) -> InstallationFlushPlan:
         self.calls.append(kwargs)
         return self._bridge
 
@@ -66,7 +66,7 @@ class _Collaborators:
 
 def _service(
     *,
-    bridge: BotSkillSetBridge,
+    bridge: InstallationFlushPlan,
     bot: dict | None = _BOT,
     allowed: bool = True,
 ):
@@ -95,10 +95,10 @@ def _list(service, *, actor_id: str = "owner"):
 def test_the_repair_runs_before_the_page_is_cut():
     """`active` is a filter, so the repair cannot happen after the query."""
     service, skills, sets, _bots = _service(
-        bridge=BotSkillSetBridge(
-            members=frozenset({1, 2}),
-            activate=frozenset({1}),
-            deactivate=frozenset({2}),
+        bridge=InstallationFlushPlan(
+            member_skill_ids=frozenset({1, 2}),
+            skills_to_install=frozenset({1}),
+            skills_to_uninstall=frozenset({2}),
         ),
     )
 

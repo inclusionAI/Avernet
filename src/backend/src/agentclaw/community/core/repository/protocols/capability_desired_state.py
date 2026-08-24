@@ -10,7 +10,7 @@ if TYPE_CHECKING:
         LegacySkillSetScope,
     )
     from agentclaw.community.core.repository.capability_desired_state_types import (
-        BotSkillSetBridge,
+        InstallationFlushPlan,
         CapabilityDesiredState,
         DesiredStateMutation,
     )
@@ -37,7 +37,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         env: str,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
-    ) -> BotSkillSetBridge:
+    ) -> InstallationFlushPlan:
         """Atomically make Installation agree with SkillSet membership.
 
         ``default_engine_types`` scopes both halves: which platform Default the

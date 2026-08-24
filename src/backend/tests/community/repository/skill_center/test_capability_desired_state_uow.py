@@ -917,10 +917,10 @@ def test_repair_reads_every_set_that_reaches_the_bot_and_no_other():
     # 1/2/3 are the members of own-active, own-default and platform-default;
     # 4 and 5 belong to another owner's Bot and another Bot, so neither the
     # listing nor the repair may see them.
-    assert bridge.members == frozenset({1, 2, 3})
+    assert bridge.member_skill_ids == frozenset({1, 2, 3})
     # own-default carries ``is_active=False`` and is still active here.
-    assert bridge.activate == frozenset({1, 2, 3})
-    assert bridge.deactivate == frozenset()
+    assert bridge.skills_to_install == frozenset({1, 2, 3})
+    assert bridge.skills_to_uninstall == frozenset()
 
 
 def test_repair_marks_an_inactive_ordinary_sets_members_for_removal():
@@ -945,9 +945,9 @@ def test_repair_marks_an_inactive_ordinary_sets_members_for_removal():
     bridge = _bridge(db)
 
     # Still listed — an inactive Skill is a Skill the Bot has.
-    assert bridge.members == frozenset({1})
-    assert bridge.activate == frozenset()
-    assert bridge.deactivate == frozenset({1})
+    assert bridge.member_skill_ids == frozenset({1})
+    assert bridge.skills_to_install == frozenset()
+    assert bridge.skills_to_uninstall == frozenset({1})
 
 
 def test_repair_lets_an_active_claim_win_over_an_inactive_one():
@@ -982,8 +982,8 @@ def test_repair_lets_an_active_claim_win_over_an_inactive_one():
 
     bridge = _bridge(db)
 
-    assert bridge.activate == frozenset({1})
-    assert bridge.deactivate == frozenset()
+    assert bridge.skills_to_install == frozenset({1})
+    assert bridge.skills_to_uninstall == frozenset()
 
 
 def test_repair_drops_only_the_owners_own_default_exclusions():
@@ -1052,11 +1052,11 @@ def test_repair_drops_only_the_owners_own_default_exclusions():
 
     # 1 kept, 2 excluded by this Bot's own row, 3 kept because the exclusion
     # naming an ordinary Set has no effect.
-    assert bridge.members == frozenset({1, 3})
-    assert bridge.activate == frozenset({1, 3})
+    assert bridge.member_skill_ids == frozenset({1, 3})
+    assert bridge.skills_to_install == frozenset({1, 3})
     # The excluded one is absent from the listing, and the repair speaks for it
     # in neither direction — it belongs to direct activate/deactivate now.
-    assert bridge.deactivate == frozenset()
+    assert bridge.skills_to_uninstall == frozenset()
 
 
 def test_repair_does_not_branch_on_a_skills_source_prefix():
@@ -1119,8 +1119,8 @@ def test_repair_does_not_branch_on_a_skills_source_prefix():
 
     bridge = _bridge(db)
 
-    assert bridge.members == frozenset({1, 2, 3})
-    assert bridge.activate == frozenset({1, 2, 3})
+    assert bridge.member_skill_ids == frozenset({1, 2, 3})
+    assert bridge.skills_to_install == frozenset({1, 2, 3})
 
 
 def test_repair_ignores_a_membership_pointing_outside_the_env():
@@ -1152,8 +1152,8 @@ def test_repair_ignores_a_membership_pointing_outside_the_env():
 
     bridge = _bridge(db)
 
-    assert bridge.members == frozenset({1})
-    assert bridge.activate == frozenset({1})
+    assert bridge.member_skill_ids == frozenset({1})
+    assert bridge.skills_to_install == frozenset({1})
 
 
 def test_repair_writes_exactly_the_difference_membership_implies():
@@ -1210,8 +1210,8 @@ def test_repair_writes_exactly_the_difference_membership_implies():
         bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
     )
 
-    assert bridge.activate == frozenset({1, 2})
-    assert bridge.deactivate == frozenset({3})
+    assert bridge.skills_to_install == frozenset({1, 2})
+    assert bridge.skills_to_uninstall == frozenset({3})
     with db.orm_session() as session:
         assert {
             row.skill_id for row in session.query(BotSkillInstallation).all()
@@ -1325,7 +1325,7 @@ def test_repair_takes_no_lock_and_opens_no_transaction_when_converged():
         db.transactional_orm_session = original
         del db.orm_session
 
-    assert bridge.activate == frozenset({1})
+    assert bridge.skills_to_install == frozenset({1})
     assert writes == []
 
 
@@ -1377,7 +1377,7 @@ def test_repair_resolves_again_under_lock_before_it_writes():
         db.transactional_orm_session = original
 
     # Re-resolved under lock: the Set is inactive now, so nothing is installed.
-    assert bridge.activate == frozenset()
+    assert bridge.skills_to_install == frozenset()
     with db.orm_session() as session:
         assert session.query(BotSkillInstallation).count() == 0
 
@@ -1442,7 +1442,7 @@ def test_repair_survives_a_concurrent_listing_winning_the_same_insert():
     finally:
         db.transactional_orm_session = original
 
-    assert bridge.activate == frozenset({1, 2})
+    assert bridge.skills_to_install == frozenset({1, 2})
     with db.orm_session() as session:
         # The lost insert is skipped, and Skill 2's still lands.
         assert {
@@ -1502,8 +1502,8 @@ def test_repair_leaves_an_excluded_members_installation_to_direct_control():
 
     # Absent from the listing, and its Installation row left exactly as the
     # last direct command left it.
-    assert bridge.members == frozenset({2})
-    assert bridge.deactivate == frozenset()
+    assert bridge.member_skill_ids == frozenset({2})
+    assert bridge.skills_to_uninstall == frozenset()
     with db.orm_session() as session:
         assert {
             row.skill_id for row in session.query(BotSkillInstallation).all()
@@ -1555,9 +1555,9 @@ def test_an_active_ordinary_set_outranks_a_default_exclusion():
 
     bridge = _bridge(db)
 
-    assert bridge.activate == frozenset({1})
-    assert bridge.deactivate == frozenset()
-    assert bridge.members == frozenset({1})
+    assert bridge.skills_to_install == frozenset({1})
+    assert bridge.skills_to_uninstall == frozenset()
+    assert bridge.member_skill_ids == frozenset({1})
 
 
 def test_repair_resolves_a_center_member_by_uuid_not_by_stored_skill_id():
@@ -1607,8 +1607,8 @@ def test_repair_resolves_a_center_member_by_uuid_not_by_stored_skill_id():
 
     bridge = _bridge(db)
 
-    assert bridge.members == frozenset({1})
-    assert bridge.activate == frozenset({1})
+    assert bridge.member_skill_ids == frozenset({1})
+    assert bridge.skills_to_install == frozenset({1})
     with db.orm_session() as session:
         assert {
             row.skill_id for row in session.query(BotSkillInstallation).all()
@@ -1722,7 +1722,7 @@ def test_repair_ignores_a_membership_row_from_another_environment():
 
     bridge = _bridge(db)
 
-    assert bridge.members == frozenset({1})
+    assert bridge.member_skill_ids == frozenset({1})
     with db.orm_session() as session:
         assert {
             row.skill_id for row in session.query(BotSkillInstallation).all()

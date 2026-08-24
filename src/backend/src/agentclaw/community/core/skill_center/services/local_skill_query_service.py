@@ -79,7 +79,7 @@ class LocalSkillQueryService(LocalSkillQueryServiceProtocol):
         return self._skill_repo.list_bot_skills(
             bot_id=bot_id,
             user_id=owner_id,
-            skill_set_member_ids=bridge.members,
+            skill_set_member_ids=bridge.member_skill_ids,
             page=page,
             page_size=page_size,
             active=active,
