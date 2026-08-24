@@ -146,7 +146,10 @@ if [[ "$coverage" -eq 1 ]]; then
   cleanup() { rm -f "$tmp_nextest"; }
   trap cleanup EXIT
   cp .config/nextest.toml "$tmp_nextest"
-  printf '\n[profile.ci.junit]\npath = "%s/testresult/junit.xml"\n' "$bcs_dir" >> "$tmp_nextest"
+  # nextest resolves profile JUnit paths relative to its profile store directory.
+  # Keep the configured path relative, then copy the generated report to the
+  # stable artifact location consumed by cov_gate.py and CI uploads.
+  printf '\n[profile.ci.junit]\npath = "junit.xml"\n' >> "$tmp_nextest"
   # Disk optimization (full instrumented build can fill the disk easily).
   export CARGO_PROFILE_DEV_DEBUG=line-tables-only
   export CARGO_PROFILE_TEST_DEBUG=line-tables-only
@@ -157,6 +160,18 @@ if [[ "$coverage" -eq 1 ]]; then
     --cobertura --output-path ./testresult/cobertura.xml
   status=$?
   set -e
+
+  # cargo-nextest stores profile reports below its target/nextest store.
+  # Normalize the report location so the downstream coverage gate never
+  # depends on a tool-specific target directory.
+  junit_source="$(find "$bcs_dir/target" -type f -name junit.xml -print -quit 2>/dev/null || true)"
+  if [[ -n "$junit_source" && "$junit_source" != "$bcs_dir/testresult/junit.xml" ]]; then
+    cp "$junit_source" ./testresult/junit.xml
+  fi
+  if [[ ! -s ./testresult/junit.xml ]]; then
+    echo "BCS unit test report was not generated: ./testresult/junit.xml" >&2
+    [[ "$status" -eq 0 ]] && status=1
+  fi
 else
   echo "--- running cargo nextest (single-pass, 100% required) ---"
   set +e
