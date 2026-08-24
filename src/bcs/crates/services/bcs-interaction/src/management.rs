@@ -750,6 +750,8 @@ fn validate_ask_user_resolution(
             let allow_other = question
                 .get("allowOther")
                 .and_then(Value::as_bool)
+                // Provider 2.0 permits omission; BaaS commonly omits the field
+                // when Engine does not send it. Only explicit false opts out.
                 .unwrap_or(true);
             if has_custom_value && !allow_other {
                 return Err(format!(
@@ -1761,7 +1763,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ask_user_submit_classifies_declared_and_custom_values() {
+    async fn ask_user_submit_defaults_missing_allow_other_to_true() {
         let (service, _store, provider, _frontend) = service(true);
         let mut ask = requested("ask-custom");
         ask.kind = InteractionKind::AskUser;

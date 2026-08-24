@@ -468,7 +468,8 @@ Cancel：
 - `questions` 必填，1～4 项；`questionId/question` 必填且 questionId 唯一。
 - `header` 可选，是短标题或分组标签，与完整问题 `question` 不同；协议不设置字符数限制。
 - `multiSelect` 可选，省略为 false。`allowOther` 可选；对于带 options 的问题，BCS
-  在字段缺失时按 true 处理，只有显式 false 才禁止自定义输入。
+  在字段缺失时按 true 处理，只有显式 false 才禁止自定义输入。BaaS 在 Engine 未提供
+  `allowOther` 时会省略该字段，因此缺失是正常的 Provider 2.0 消息形态。
 - question 的 `options` 可选；存在时 1～4 项，`value/label` 必填，
   `description` 可选，不定义 `optionId`。
 - 省略 options 表示自由文本题，同时应省略 `allowOther`，答案仍放单元素
