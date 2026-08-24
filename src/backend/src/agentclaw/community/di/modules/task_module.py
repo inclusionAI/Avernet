@@ -38,6 +38,7 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.di.profile import DeployProfile
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 class TaskModule(Module):
@@ -126,8 +127,8 @@ class TaskModule(Module):
             bot_service = injector.get(BotServiceProtocol)
         except Exception:  # noqa: BLE101 未绑定 → dashboard 不附加 assignee 的 bot 归属/名
             bot_service = None
-        # 回投地址 = 本 backend 自身访问 URL(singlebox→SINGLEBOX_BACKEND_URL / 其余→BACKEND_URL,
-        # 单值、各环境部署 overlay 注入当前环境 backend 地址),agent 回投结果往此 origin POST(自行拼 /api/v1/...)。
+        # 回投地址 = 本 backend 自身访问 URL(按环境固定映射:singlebox→localhost / pre→agentclaw-pre /
+        # prod→agentclaw-prod;未匹配→localhost),agent 回投结果往此 origin POST(自行拼 /api/v1/... 内部路径,不走 gateway 鉴权)。
         return TaskService(
             graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
             bcn=bcn, bcs_identity=bcs_identity, task_info_repo=task_info_repo,
@@ -181,16 +182,23 @@ class TaskModule(Module):
 
     @staticmethod
     def _resolve_api_base_url() -> str:
-        """返回本 backend 自身访问 URL(agent 回投结果往此 origin POST,自行拼 /api/v1/... 路径)。
+        """返回本 backend 自身访问 URL(agent 回投结果往此 origin POST,自行拼 /api/v1/... 内部路径)。
 
-        复用 task_discovery 既有约定,不引入新 env:单值 ``BACKEND_URL``(非 singlebox,各环境部署
-        overlay 注入当前环境 backend 地址,如预发注入预发后端;空 → localhost:8888 表示未配置/本地默认),
-        ``SINGLEBOX_BACKEND_URL``(singlebox 直连,与 _resolve_ports 同源)。代码不按 env 分支:环境差异
-        由 overlay 注入的单值决定,符合组合根裸 env 读取约束。"""
+        按运行环境固定映射(应用部署固定值,内部 /api 路径不走 gateway 鉴权):单机 localhost:8888 /
+        预发 agentclaw-pre / 生产 agentclaw-prod;未匹配环境(community/dev/未识别)回退 localhost:8888。
+        环境由 ``get_current_env()`` 感知(SERVER_ENV>REAL_SERVER_ENV>ALIPAY_APP_ENV)。
+
+        NOTE: 三条后端地址内联于此,偏离 AGENTS「禁止硬编码外部 URL、保持 OSS 无企业域名」约束,
+        属该功能点的显式例外;由应用部署 owner 拥有,后续迁入 deploy overlay 再行合规。"""
 
         if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == DeployProfile.SINGLEBOX.value:
-            return os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-        return os.environ.get("BACKEND_URL", "http://localhost:8888")
+            return "http://localhost:8888"
+        env = get_current_env()
+        if env == "pre":
+            return "https://agentclaw-pre.alipay.com"
+        if env == "prod":
+            return "https://agentclaw-prod.alipay.com"
+        return "http://localhost:8888"
 
     @staticmethod
     def _resolve_ports():

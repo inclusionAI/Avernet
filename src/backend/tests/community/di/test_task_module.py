@@ -52,16 +52,24 @@ def test_resolve_ports_outside_singlebox_returns_the_two_port_contract(monkeypat
     assert TaskModule._resolve_ports() == (None, None)
 
 
-def test_resolve_api_base_url_single_value_backend_url(monkeypatch):
-    # 非 singlebox:单值 BACKEND_URL,按环境由部署 overlay 注入,代码不按 env 分支。
-    monkeypatch.setenv("DEPLOY_PROFILE", "community")
-    monkeypatch.delenv("BACKEND_URL", raising=False)
-    assert TaskModule._resolve_api_base_url() == "http://localhost:8888"  # 未配置 → 中立兜底
-    monkeypatch.setenv("BACKEND_URL", "https://backend.example.test")
-    assert TaskModule._resolve_api_base_url() == "https://backend.example.test"  # 用 overlay 注入值
+def test_resolve_api_base_url_env_fixed_mapping(monkeypatch):
+    # 先清掉 env 感知变量,确保从干净态出发
+    for k in ("SERVER_ENV", "REAL_SERVER_ENV", "ALIPAY_APP_ENV"):
+        monkeypatch.delenv(k, raising=False)
 
-    # singlebox:走 SINGLEBOX_BACKEND_URL(与 _resolve_ports 同源),与 BACKEND_URL 无关。
+    # singlebox → localhost:8888
     monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
-    monkeypatch.setenv("SINGLEBOX_BACKEND_URL", "http://singlebox.local:8888")
-    monkeypatch.setenv("BACKEND_URL", "https://backend.example.test")  # singlebox 不读这个
-    assert TaskModule._resolve_api_base_url() == "http://singlebox.local:8888"
+    assert TaskModule._resolve_api_base_url() == "http://localhost:8888"
+
+    # 非 singlebox + pre → agentclaw-pre
+    monkeypatch.setenv("DEPLOY_PROFILE", "community")
+    monkeypatch.setenv("SERVER_ENV", "pre")
+    assert TaskModule._resolve_api_base_url() == "https://agentclaw-pre.alipay.com"
+
+    # 非 singlebox + prod → agentclaw-prod
+    monkeypatch.setenv("SERVER_ENV", "prod")
+    assert TaskModule._resolve_api_base_url() == "https://agentclaw-prod.alipay.com"
+
+    # 其余(dev/未识别)→ localhost 兜底
+    monkeypatch.delenv("SERVER_ENV", raising=False)
+    assert TaskModule._resolve_api_base_url() == "http://localhost:8888"
