@@ -18,7 +18,7 @@ pub enum FriendConnectNotificationKind {
 pub struct FriendConnectNotificationCommand {
     pub kind: FriendConnectNotificationKind,
     pub env: String,
-    pub request_ids: Vec<u64>,
+    pub request_ids: Vec<String>,
     pub applicant_actor_id: String,
     pub target_bot_id: String,
     pub recipient_user_ids: Vec<String>,

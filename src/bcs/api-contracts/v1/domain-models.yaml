@@ -1761,7 +1761,8 @@ FriendConnectionCreateResult:
     edge_ids:
       type: array
       items:
-        type: string
+        type: integer
+        format: int64
     status:
       $ref: "#/FriendConnectionCreateStatus"
     auto_accepted:
@@ -1780,7 +1781,8 @@ FriendConnectionRequest:
     request_id:
       type: string
     edge_id:
-      type: string
+      type: integer
+      format: int64
     from_actor:
       $ref: "#/FriendConnectionActor"
     to_actor:

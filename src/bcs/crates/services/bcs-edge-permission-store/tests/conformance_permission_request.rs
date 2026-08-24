@@ -28,6 +28,7 @@ async fn sqlite_with_schema() -> Arc<dyn DbPlugin> {
     db.execute(DbStatement::new(
         "CREATE TABLE permission_requests (\
             id INTEGER PRIMARY KEY AUTOINCREMENT, \
+            request_id VARCHAR(64) NOT NULL, \
             edge_id INTEGER, \
             env VARCHAR(32) NOT NULL, \
             from_id VARCHAR(128) NOT NULL, \

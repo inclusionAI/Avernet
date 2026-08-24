@@ -458,7 +458,7 @@ impl FriendConnectionService for FakeFriendConnectionService {
 
 fn friend_connection_create_result() -> FriendConnectionCreateResult {
     FriendConnectionCreateResult {
-        request_ids: vec![1],
+        request_ids: vec!["1".to_string()],
         edge_ids: vec![11],
         status: FriendConnectionCreateStatus::Pending,
         auto_accepted: false,
@@ -467,7 +467,7 @@ fn friend_connection_create_result() -> FriendConnectionCreateResult {
 
 fn friend_connection_request_view() -> FriendConnectionRequestView {
     FriendConnectionRequestView {
-        request_id: 1,
+        request_id: "1".to_string(),
         edge_id: Some(11),
         from_actor: FriendConnectionActor {
             actor_type: FriendConnectionActorType::Bot,
@@ -851,7 +851,7 @@ fn openapi_test_router(service: Arc<FakeFriendConnectionService>) -> axum::Route
 async fn openapi_friend_connection_routes_forward_commands_and_serialize_responses() {
     let service = Arc::new(FakeFriendConnectionService::default());
     *service.create_result.lock().expect("create result lock") = FriendConnectionCreateResult {
-        request_ids: vec![99],
+        request_ids: vec!["99".to_string()],
         edge_ids: vec![199],
         status: FriendConnectionCreateStatus::Approved,
         auto_accepted: true,
@@ -875,7 +875,7 @@ async fn openapi_friend_connection_routes_forward_commands_and_serialize_respons
     let body = response_json(create_response).await;
     assert_eq!(body["code"], 20_100);
     assert_eq!(body["data"]["status"], "approved");
-    assert_eq!(body["data"]["request_ids"], serde_json::json!([99]));
+    assert_eq!(body["data"]["request_ids"], serde_json::json!(["99"]));
     assert_eq!(body["data"]["edge_ids"], serde_json::json!([199]));
     assert_eq!(body["data"]["auto_accepted"], true);
     {
@@ -982,7 +982,7 @@ async fn openapi_friend_connection_routes_support_default_query_values_and_optio
         let rejected = service.rejected_request.lock().expect("reject lock");
         let rejected = rejected.as_ref().expect("reject command");
         assert_eq!(rejected.reason.as_deref(), Some("no thanks"));
-        assert_eq!(rejected.request_id, 2);
+        assert_eq!(rejected.request_id, "2".to_string());
     }
 }
 
@@ -1002,12 +1002,12 @@ async fn openapi_friend_connection_routes_forward_decisions_and_delete() {
         .expect("accept response");
     assert_eq!(accept_response.status(), StatusCode::OK);
     let body = response_json(accept_response).await;
-    assert_eq!(body["data"]["request_id"], 1);
+    assert_eq!(body["data"]["request_id"], "1");
     {
         let accepted = service.accepted_request.lock().expect("accept lock");
         let accepted = accepted.as_ref().expect("accept command");
         assert_eq!(accepted.caller.user.as_ref().expect("user").id, "staff-1");
-        assert_eq!(accepted.request_id, 1);
+        assert_eq!(accepted.request_id, "1".to_string());
     }
 
     let reject_response = app
@@ -1043,7 +1043,7 @@ async fn openapi_friend_connection_routes_forward_decisions_and_delete() {
     {
         let cancelled = service.cancelled_request.lock().expect("cancel lock");
         let cancelled = cancelled.as_ref().expect("cancel command");
-        assert_eq!(cancelled.request_id, 1);
+        assert_eq!(cancelled.request_id, "1".to_string());
     }
 
     let delete_response = app

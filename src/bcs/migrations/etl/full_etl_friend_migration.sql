@@ -97,11 +97,12 @@ WHERE f.status = 'ACCEPTED';
 
 -- 2b. approved permission_requests（connect）
 INSERT IGNORE INTO permission_requests
-  (edge_id, env, from_id, to_id, request_kind,
+  (request_id, edge_id, env, from_id, to_id, request_kind,
    requested_ref_id, requested_rules, message, status,
    decision_reason, created_by, decided_by,
    decided_at)
 SELECT
+  REPLACE(UUID(), '-', ''),
   eg.id,
   f.env,
   CONCAT('human_', f.requester_entity_id),
@@ -131,11 +132,12 @@ WHERE f.status = 'ACCEPTED';
 -- 脚本 3 — System A: ac_bot_friend PENDING/REJECTED/CANCELLED → permission_requests (无 edge)
 -- =========================================================================
 INSERT IGNORE INTO permission_requests
-  (env, from_id, to_id, request_kind,
+  (request_id, env, from_id, to_id, request_kind,
    requested_ref_id, requested_rules, message, status,
    decision_reason, created_by, decided_by,
    decided_at)
 SELECT
+  REPLACE(UUID(), '-', ''),
   f.env,
   CONCAT('human_', f.requester_entity_id),
   m.bot_uuid,
@@ -206,11 +208,12 @@ FROM (
 
 -- 4b. 配套 approved permission_requests (每对 2 条, decided_by = 对端 bot 的 created_by)
 INSERT IGNORE INTO permission_requests
-  (edge_id, env, from_id, to_id, request_kind,
+  (request_id, edge_id, env, from_id, to_id, request_kind,
    requested_ref_id, requested_rules, message, status,
    decision_reason, created_by, decided_by,
    decided_at)
 SELECT
+  REPLACE(UUID(), '-', ''),
   eg.id,
   fs.env, fs.from_id, fs.to_id, 'connect',
   NULL, NULL, NULL, 'approved',
@@ -240,11 +243,12 @@ JOIN edge_grants eg
 -- 脚本 5 — System B: bcs_friend_requests pending/rejected → permission_requests (accepted 已被脚本 4 覆盖)
 -- =========================================================================
 INSERT IGNORE INTO permission_requests
-  (env, from_id, to_id, request_kind,
+  (request_id, env, from_id, to_id, request_kind,
    requested_ref_id, requested_rules, message, status,
    decision_reason, created_by, decided_by,
    decided_at)
 SELECT
+  REPLACE(UUID(), '-', ''),
   env, from_bot, to_bot, 'connect',
   NULL, NULL, NULL,
   CASE status
