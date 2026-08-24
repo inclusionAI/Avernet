@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING, Any
 
 from secbaas.community.api.bot_runtime import BotBindingInfo
+from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import BotBindingData
 
 from ._bot_binding_resolver import _normalize_engine_type
@@ -10,6 +11,8 @@ from ._bot_binding_resolver import _normalize_engine_type
 if TYPE_CHECKING:
     from secbaas.community.api.bot_runtime import BotChatContext
     from secbaas.community.core.repository.bot_run import BotRunRecord
+
+logger = get_logger("core-bot-run")
 
 
 def resolve_user_id(
@@ -79,12 +82,18 @@ def resolve_bot_id(bot_id: str, binding_info: BotBindingInfo | None) -> str:
 
 
 def extract_lifecycle_stage(metadata: dict[str, Any] | None) -> str:
-    """从 metadata 中提取 lifecycle_stage"""
+    """从 metadata 中提取 lifecycle_stage
+
+    支持 "eval" 返回值：当 metadata["bot_options"]["lifecycle_stage"] == "eval"
+    时返回 "eval"，供 BotBindingResolver 走 eval binding 路由。
+    """
     if not metadata:
         return "online"
     bot_options = metadata.get("bot_options")
     if isinstance(bot_options, dict):
-        return bot_options.get("lifecycle_stage") or "online"
+        stage = bot_options.get("lifecycle_stage")
+        if stage:
+            return stage
     return "online"
 
 
@@ -157,10 +166,13 @@ def binding_data_to_info(data: BotBindingData) -> BotBindingInfo:
 def build_chat_metadata(
     metadata: dict[str, Any] | None,
     run_id: str,
+    eval_session_log: Any | None = None,
 ) -> dict[str, str] | None:
     """从 metadata 中构造 chat_metadata，用于透传到 WS chat 请求。
 
     参考 _report_log_relation 的取值逻辑，提取 biz_task_id / biz_scene。
+    当 metadata 中包含 eval_id / default_tag 时，通过
+    EvalSessionLogProtocol Plugin 增加观测字段。
     """
     metadata = metadata or {}
     biz_task_id = (
@@ -168,13 +180,32 @@ def build_chat_metadata(
         if metadata.get("biz_task_id") is not None
         else run_id
     )
-    biz_scene = (
-        metadata.get("biz_scene")
-        if metadata.get("biz_scene") is not None
-        else "default"
-    )
+    # eval 场景：default_tag 非空时 biz_scene 设为 "eval:{default_tag}"
+    default_tag = metadata.get("default_tag")
+    if default_tag:
+        biz_scene = f"eval:{default_tag}"
+    else:
+        biz_scene = (
+            metadata.get("biz_scene")
+            if metadata.get("biz_scene") is not None
+            else "default"
+        )
     chat_metadata: dict[str, str] = {
         "biz_task_id": str(biz_task_id),
         "biz_scene": str(biz_scene),
     }
+    # eval 观测字段注入 — 委托 Plugin
+    if eval_session_log is not None:
+        enriched = eval_session_log.enrich_chat_metadata(
+            metadata=chat_metadata,
+            run_id=run_id,
+        )
+        return enriched
+    # Plugin 未注入：记录告警，eval 观测字段不注入（生产环境应注入 Real Plugin）
+    if metadata.get("eval_id") or default_tag:
+        logger.warning(
+            "build_chat_metadata: eval_session_log not injected, "
+            "skipping eval metadata enrichment for run_id=%s",
+            run_id,
+        )
     return chat_metadata

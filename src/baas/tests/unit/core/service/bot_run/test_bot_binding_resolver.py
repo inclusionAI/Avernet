@@ -16,6 +16,7 @@ from secbaas.community.core.repository.ac_bot import AcBotRecord
 from secbaas.community.core.repository.device_binding import (
     DeviceBindingRecord,
 )
+from secbaas.community.api.eval_env import DYNAMIC_ENV_TAG_KEY
 from secbaas.community.core.service.bot_run import BotBindingResolver
 
 # ==================== Fixtures ====================
@@ -739,3 +740,343 @@ class TestTemplateTypeNormalization:
         result = resolver.resolve(bot_id=BOT_ID, entity_id=ENTITY_ID, env=ENV)
         assert result is not None
         assert result.engine_type == "hermes"
+
+
+# ==================== Tests: eval lifecycle_stage ====================
+
+
+_MISSING = object()
+
+
+def _make_eval_binding_resolver_plugin(enabled=True, resolved_id=_MISSING):
+    """创建 mock EvalBindingResolverProtocol。"""
+    from secbaas.community.spi.eval_env import EvalBindingResolverProtocol
+
+    plugin = MagicMock(spec=EvalBindingResolverProtocol)
+    plugin.is_eval_env_enabled.return_value = enabled
+    if resolved_id is _MISSING:
+        plugin.resolve_eval_binding.return_value = 100099
+    else:
+        plugin.resolve_eval_binding.return_value = resolved_id
+    return plugin
+
+
+class TestServiceBotEvalStage:
+    """Tests for service bot eval lifecycle_stage — Plugin 委托验证。
+
+    评测绑定的详细过滤逻辑（优先选 eval tag、过滤 RELEASED 等）已
+    迁移至 EvalBindingResolverProtocol Plugin，由 RealEvalBindingResolver
+    实现。此处仅验证 BotBindingResolver 对 Plugin 的委托行为。
+    """
+
+    BINDING_ID_EVAL = 100099
+
+    def _make_eval_resolver(
+        self,
+        mock_ac_bot_repo,
+        mock_publish_repo,
+        mock_binding_repo,
+        *,
+        resolved_id=_MISSING,
+    ):
+        """创建带 eval_binding_resolver 的 BotBindingResolver。"""
+        eval_plugin = _make_eval_binding_resolver_plugin(
+            enabled=True,
+            resolved_id=resolved_id,
+        )
+        resolver = BotBindingResolver(
+            ac_bot_repo=mock_ac_bot_repo,
+            publish_repo=mock_publish_repo,
+            binding_repo=mock_binding_repo,
+            eval_binding_resolver=eval_plugin,
+        )
+        return resolver, eval_plugin
+
+    def test_eval_stage_delegates_to_plugin(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """lifecycle_stage='eval' 委托 EvalBindingResolverPlugin 解析 binding。"""
+        resolver, eval_plugin = self._make_eval_resolver(
+            mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+        )
+        mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
+            _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
+        )
+        eval_binding = _make_binding_record(
+            device_provider="baas",
+            device_id="eval-uuid-001",
+            binding_id=self.BINDING_ID_EVAL,
+            props={DYNAMIC_ENV_TAG_KEY: "eval", "bot_id": BOT_ID},
+        )
+        mock_binding_repo.get_by_id.return_value = eval_binding
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is not None
+        assert result.binding_id == self.BINDING_ID_EVAL
+        # 验证委托调用
+        eval_plugin.resolve_eval_binding.assert_called_once_with(
+            bot_id=BOT_ID, entity_id=ENTITY_ID, env=ENV,
+        )
+        # 走 eval 路径，不应查 publish 表
+        mock_publish_repo.get_binding_id.assert_not_called()
+
+    def test_eval_stage_plugin_returns_none(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """Plugin 返回 None → resolve 返回 None。"""
+        resolver, _ = self._make_eval_resolver(
+            mock_ac_bot_repo, mock_publish_repo, mock_binding_repo,
+            resolved_id=None,
+        )
+        mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
+            _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
+        )
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is None
+
+
+# ==================== Tests: eval 开关降级 ====================
+
+
+class TestEvalSwitchControl:
+    """Tests for eval 环境开关降级逻辑。
+
+    当 Plugin 未注入、功能关闭或异常时，eval/default lifecycle_stage
+    降级走 online binding；当 Plugin 启用时，走 eval binding。
+    """
+
+    BINDING_ID_EVAL = 100099
+
+    def _make_resolver_with_plugin(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, eval_plugin
+    ):
+        """创建带 eval_binding_resolver 的 BotBindingResolver。"""
+        return BotBindingResolver(
+            ac_bot_repo=mock_ac_bot_repo,
+            publish_repo=mock_publish_repo,
+            binding_repo=mock_binding_repo,
+            eval_binding_resolver=eval_plugin,
+        )
+
+    def _setup_service_bot(self, mock_ac_bot_repo):
+        """设置 service bot 记录。"""
+        mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
+            _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
+        )
+
+    def _setup_online_binding(self, mock_publish_repo, mock_binding_repo):
+        """设置 online binding 返回。"""
+        mock_publish_repo.get_binding_id.return_value = BINDING_ID_ONLINE
+        mock_binding_repo.get_by_id.return_value = _make_binding_record(
+            device_provider="baas",
+            device_id=DEVICE_ID_BAAS,
+            binding_id=BINDING_ID_ONLINE,
+        )
+
+    def _setup_eval_binding(self, mock_binding_repo):
+        """设置 eval binding 返回。"""
+        eval_binding = _make_binding_record(
+            device_provider="baas",
+            device_id="eval-uuid-001",
+            binding_id=self.BINDING_ID_EVAL,
+            props={DYNAMIC_ENV_TAG_KEY: "eval", "bot_id": BOT_ID},
+        )
+        mock_binding_repo.get_by_id.return_value = eval_binding
+
+    # ---------- 1. eval stage + Plugin disabled → 降级走 online binding ----------
+
+    def test_eval_stage_disabled_falls_back(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """lifecycle_stage='eval' + Plugin disabled → 降级走 online binding。"""
+        eval_plugin = _make_eval_binding_resolver_plugin(enabled=False)
+        resolver = self._make_resolver_with_plugin(
+            mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, eval_plugin
+        )
+        self._setup_service_bot(mock_ac_bot_repo)
+        self._setup_online_binding(mock_publish_repo, mock_binding_repo)
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is not None
+        assert result.binding_id == BINDING_ID_ONLINE
+        # 降级走 online，应查询 publish_repo
+        mock_publish_repo.get_binding_id.assert_called_once_with(
+            source_bot_id=BOT_ID, status="success", owner_id=ENTITY_ID
+        )
+
+    # ---------- 2. default stage + Plugin disabled → 降级走 online binding ----------
+
+    def test_default_stage_disabled_falls_back(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """lifecycle_stage='default' + Plugin disabled → 降级走 online binding。"""
+        eval_plugin = _make_eval_binding_resolver_plugin(enabled=False)
+        resolver = self._make_resolver_with_plugin(
+            mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, eval_plugin
+        )
+        self._setup_service_bot(mock_ac_bot_repo)
+        self._setup_online_binding(mock_publish_repo, mock_binding_repo)
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="default",
+        )
+
+        assert result is not None
+        assert result.binding_id == BINDING_ID_ONLINE
+        mock_publish_repo.get_binding_id.assert_called_once_with(
+            source_bot_id=BOT_ID, status="success", owner_id=ENTITY_ID
+        )
+
+    # ---------- 3. Plugin enabled → 走 eval binding ----------
+
+    def test_eval_stage_enabled_uses_eval_binding(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """Plugin enabled → lifecycle_stage='eval' 走 eval binding。"""
+        eval_plugin = _make_eval_binding_resolver_plugin(
+            enabled=True, resolved_id=self.BINDING_ID_EVAL,
+        )
+        resolver = self._make_resolver_with_plugin(
+            mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, eval_plugin
+        )
+        self._setup_service_bot(mock_ac_bot_repo)
+        self._setup_eval_binding(mock_binding_repo)
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is not None
+        assert result.binding_id == self.BINDING_ID_EVAL
+        # 走 eval 路径，不应查询 publish_repo
+        mock_publish_repo.get_binding_id.assert_not_called()
+
+    # ---------- 4. eval_binding_resolver=None → 降级走 online ----------
+
+    def test_no_plugin_defaults_disabled(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """eval_binding_resolver=None → 降级走 online binding。"""
+        resolver = BotBindingResolver(
+            ac_bot_repo=mock_ac_bot_repo,
+            publish_repo=mock_publish_repo,
+            binding_repo=mock_binding_repo,
+        )
+        self._setup_service_bot(mock_ac_bot_repo)
+        self._setup_online_binding(mock_publish_repo, mock_binding_repo)
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is not None
+        assert result.binding_id == BINDING_ID_ONLINE
+        mock_publish_repo.get_binding_id.assert_called_once_with(
+            source_bot_id=BOT_ID, status="success", owner_id=ENTITY_ID
+        )
+
+    # ---------- 5. is_eval_env_enabled 抛异常 → 降级走 online ----------
+
+    def test_plugin_exception_defaults_disabled(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """is_eval_env_enabled() 抛异常 → 降级走 online binding。"""
+        eval_plugin = _make_eval_binding_resolver_plugin(enabled=False)
+        eval_plugin.is_eval_env_enabled.side_effect = Exception("service unavailable")
+
+        resolver = self._make_resolver_with_plugin(
+            mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, eval_plugin
+        )
+        self._setup_service_bot(mock_ac_bot_repo)
+        self._setup_online_binding(mock_publish_repo, mock_binding_repo)
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        # 异常导致 is_eval_env_enabled 返回 falsy → 降级走 online
+        assert result is not None
+        assert result.binding_id == BINDING_ID_ONLINE
+        mock_publish_repo.get_binding_id.assert_called_once_with(
+            source_bot_id=BOT_ID, status="success", owner_id=ENTITY_ID
+        )
+
+    # ---------- 6. 降级走 online 但 online 也找不到 → 返回 None ----------
+
+    def test_eval_disabled_online_binding_not_found_returns_none(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """Plugin disabled → 降级走 online，但 online binding 不存在 → 返回 None。"""
+        eval_plugin = _make_eval_binding_resolver_plugin(enabled=False)
+        resolver = self._make_resolver_with_plugin(
+            mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, eval_plugin
+        )
+        self._setup_service_bot(mock_ac_bot_repo)
+        # online binding 查不到
+        mock_publish_repo.get_binding_id.return_value = None
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is None
+
+    # ---------- 7. online stage 不受 Plugin 影响 ----------
+
+    def test_online_stage_not_affected(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """lifecycle_stage='online' 不受 eval Plugin 影响，始终走 online binding。"""
+        eval_plugin = _make_eval_binding_resolver_plugin(enabled=True)
+        resolver = self._make_resolver_with_plugin(
+            mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, eval_plugin
+        )
+        self._setup_service_bot(mock_ac_bot_repo)
+        self._setup_online_binding(mock_publish_repo, mock_binding_repo)
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="online",
+        )
+
+        assert result is not None
+        assert result.binding_id == BINDING_ID_ONLINE
+        mock_publish_repo.get_binding_id.assert_called_once_with(
+            source_bot_id=BOT_ID, status="success", owner_id=ENTITY_ID
+        )

@@ -23,6 +23,7 @@ user_config:
     bot_service: "stub"     # real | local | stub
     engine_adapter: "stub"  # stub | real (aicoding/hermes/claude_code engine adapter)
     file_transfer: "stub"  # stub | real
+    eval_env: "stub"      # stub（社区默认）| real（由企业层注入）
     database:
       plugin_database: "SQLITE_ORM"    # ZDAS_ORM (production ORM) | SQLITE_ORM (test only)
       database_url: "sqlite:////tmp/secbaas.db"
