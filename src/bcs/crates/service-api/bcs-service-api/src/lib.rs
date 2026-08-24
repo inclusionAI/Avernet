@@ -115,9 +115,9 @@ pub use bot_use_cases::{
     BotLeaveResult, BotListCommand, BotListEntry, BotListResult, BotManagementService,
     BotPagedListCommand, BotPagedListResult, BotQueryByIdsCommand, BotQueryByIdsResult,
     BotQueryEntry, BotQueryService, BotSearchResult, BotStatusUpdateCommand, BotStatusUpdateResult,
-    BotTaskModeListEntry, BotUseCaseError, BotVisibilityCommand, BotVisibilityQueryCommand,
-    BotVisibilityQueryResult, BotVisibilityResult, MyBotsCommand, SearchBotsCommand,
-    SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult,
+    BotUseCaseError, BotVisibilityCommand, BotVisibilityQueryCommand, BotVisibilityQueryResult,
+    BotVisibilityResult, MyBotsCommand, SearchBotsCommand, SwitchDeliveryToProviderCommand,
+    SwitchDeliveryToProviderResult,
 };
 pub use friends::{
     CreateFriendRequestCommand, FriendListEntry, FriendRequestDecisionCommand, FriendService,

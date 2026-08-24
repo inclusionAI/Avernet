@@ -4,8 +4,7 @@ use bcs_service_api::{
     BotConnectCommand, BotConnectResult, BotDetailCommand, BotDetailResult, BotLeaveCommand,
     BotLeaveResult, BotListCommand, BotListResult, BotManagementService, BotPagedListCommand,
     BotPagedListResult, BotQueryByIdsCommand, BotQueryByIdsResult, BotQueryService,
-    BotSearchResult, BotStatusUpdateCommand, BotStatusUpdateResult, BotTaskModeListEntry,
-    BotTaskModesQuery, BotUseCaseError,
+    BotSearchResult, BotStatusUpdateCommand, BotStatusUpdateResult, BotUseCaseError,
     BotVisibilityCommand, BotVisibilityQueryCommand, BotVisibilityQueryResult,
     BotVisibilityResult, MyBotsCommand, SearchBotsCommand, ServiceError,
     SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult,
@@ -21,7 +20,6 @@ pub struct RecordingBotQueryService {
     pub my_bots_commands: Mutex<Vec<MyBotsCommand>>,
     pub query_by_ids_commands: Mutex<Vec<BotQueryByIdsCommand>>,
     pub search_commands: Mutex<Vec<SearchBotsCommand>>,
-    pub task_mode_queries: Mutex<Vec<BotTaskModesQuery>>,
     pub list_result: Result<BotListResult, BotUseCaseError>,
     pub detail_result: Result<BotDetailResult, BotUseCaseError>,
     pub visibility_result: Result<BotVisibilityQueryResult, BotUseCaseError>,
@@ -29,7 +27,6 @@ pub struct RecordingBotQueryService {
     pub my_bots_result: Result<BotPagedListResult, BotUseCaseError>,
     pub query_by_ids_result: Result<BotQueryByIdsResult, BotUseCaseError>,
     pub search_result: Result<BotSearchResult, BotUseCaseError>,
-    pub task_mode_result: Result<Vec<BotTaskModeListEntry>, BotUseCaseError>,
 }
 
 impl Default for RecordingBotQueryService {
@@ -42,7 +39,6 @@ impl Default for RecordingBotQueryService {
             my_bots_commands: Mutex::new(Vec::new()),
             query_by_ids_commands: Mutex::new(Vec::new()),
             search_commands: Mutex::new(Vec::new()),
-            task_mode_queries: Mutex::new(Vec::new()),
             list_result: Err(not_configured(
                 "RecordingBotQueryService::list_bots is not configured",
             )),
@@ -63,9 +59,6 @@ impl Default for RecordingBotQueryService {
             )),
             search_result: Err(not_configured(
                 "RecordingBotQueryService::search_bots is not configured",
-            )),
-            task_mode_result: Err(not_configured(
-                "RecordingBotQueryService::list_bots_by_task_modes is not configured",
             )),
         }
     }
@@ -121,14 +114,6 @@ impl BotQueryService for RecordingBotQueryService {
     ) -> Result<BotSearchResult, BotUseCaseError> {
         self.search_commands.lock().await.push(command);
         clone_result(&self.search_result)
-    }
-
-    async fn list_bots_by_task_modes(
-        &self,
-        query: BotTaskModesQuery,
-    ) -> Result<Vec<BotTaskModeListEntry>, BotUseCaseError> {
-        self.task_mode_queries.lock().await.push(query);
-        clone_result(&self.task_mode_result)
     }
 }
 

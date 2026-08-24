@@ -1434,20 +1434,6 @@ print("1" if any(i.get("bot_uuid") == target for i in d.get("items", [])) else "
 ' "$provider_bot_uuid" 2>/dev/null || echo 0)
     assert_eq "published provider agent appears in provider list" "$listed_bot" "1"
 
-    api_request_headers GET "/bots/by-task-modes" "" \
-        "Authorization: Bearer ${admin_token}"
-    require_status "operator lists global task-mode roster" "200" || return
-    local global_roster_items
-    global_roster_items=$(printf '%s' "$RESPONSE" | python3 -c '
-import json,sys
-try:
-    d=json.load(sys.stdin)
-    print("1" if isinstance(d.get("items"), list) else "0")
-except Exception:
-    print("0")
-' 2>/dev/null || echo 0)
-    assert_eq "global task-mode roster returns an items array" "$global_roster_items" "1"
-
     api_request_headers GET "/providers/${provider_id}/bots/by-task-modes" "" \
         "Authorization: Bearer ${admin_token}"
     require_status "operator lists task-mode roster" "200" || return

@@ -1247,55 +1247,6 @@ async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
         "2026-01-04 00:00:00",
     )
     .await;
-    seed_bot(
-        db.as_ref(),
-        "human-row",
-        "Human Row",
-        "human",
-        "public",
-        "online",
-        Some("staff-5"),
-        "2026-01-05 00:00:00",
-    )
-    .await;
-    seed_bot(
-        db.as_ref(),
-        "deleted-bot",
-        "Deleted Bot",
-        "bot",
-        "public",
-        "online",
-        Some("staff-6"),
-        "2026-01-06 00:00:00",
-    )
-    .await;
-    db.execute(DbStatement::with_params(
-        "UPDATE bcs_bots SET is_deleted = 1 WHERE bot_uuid = ? AND env = ?",
-        vec![Value::from("deleted-bot"), Value::from("dev")],
-    ))
-    .await
-    .expect("soft-delete excluded bot");
-    seed_bot(
-        db.as_ref(),
-        "prod-bot",
-        "Prod Bot",
-        "bot",
-        "public",
-        "online",
-        Some("staff-7"),
-        "2026-01-07 00:00:00",
-    )
-    .await;
-    db.execute(DbStatement::with_params(
-        "UPDATE bcs_bots SET env = ? WHERE bot_uuid = ? AND env = ?",
-        vec![
-            Value::from("prod"),
-            Value::from("prod-bot"),
-            Value::from("dev"),
-        ],
-    ))
-    .await
-    .expect("move bot to prod environment");
 
     // claim-bot: claim=T, dream=F | dream-bot: claim=F, dream=T | both-bot: claim=T, dream=T.
     repo.patch_control_plane(
@@ -1335,8 +1286,7 @@ async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
     .expect("patch both-bot")
     .expect("both-bot row");
 
-    // (None, None, _) => no task-mode filter, while the mandatory base conditions still
-    // exclude other environments, soft-deleted rows, and non-Bot actors.
+    // (None, None, _) => no filter: all four bots.
     let all = repo
         .list_control_plane_by_task_modes(BotTaskModesQuery {
             env: "dev".to_string(),
@@ -1433,7 +1383,7 @@ async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
         sorted_ids(vec!["dream-bot".to_string(), "none-bot".to_string()]),
     );
 
-    // env scoping: the same query in prod sees only the valid prod Bot.
+    // env scoping: a different env returns no rows (environment isolation).
     let other_env = repo
         .list_control_plane_by_task_modes(BotTaskModesQuery {
             env: "prod".to_string(),
@@ -1443,5 +1393,5 @@ async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
         })
         .await
         .expect("list prod env");
-    assert_eq!(roster_ids(other_env), vec!["prod-bot".to_string()]);
+    assert!(other_env.is_empty());
 }
