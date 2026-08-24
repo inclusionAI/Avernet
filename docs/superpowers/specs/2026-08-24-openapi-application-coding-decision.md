@@ -414,6 +414,8 @@ template_config
 
 该方案的边界是：模板参数仍由客户端在 auth-status 中回传，不保证服务重启后的 pending 意图恢复，也不新增并发 claim 机制。若后续需要跨进程恢复、严格并发幂等或审计，再单独建设持久化 intent。
 
+**GET / POST 契约**：Application Coding 的模板恢复只走 **POST** `/{bot_id}/auth-status`（`BotAuthStatusPoll` 接收 `template_type`/`template_config`）；已退休的 **GET** 同路径**仅兼容普通 Bot**——它没有模板 query 参数，用它轮询 Application Coding 会因缺模板字段而静默创建普通 Bot，属于**不支持**的用法。Application Coding 接入方必须使用 POST。
+
 ### 8.3 幂等要求
 
 本期不新增 `Idempotency-Key` 公共请求头。继续沿用现有 `bot_id`、Passport 授权状态和创建逻辑处理重复查询；严格的跨请求幂等、创建意图持久化和并发 claim 不在本期范围。

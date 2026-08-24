@@ -151,6 +151,7 @@ old_template = {
 - 本期不新增 `Idempotency-Key` 公共请求头，不把 response `request_id` 当作业务幂等键；
 - 不新增 create-intent 表，不新增 migration；
 - 授权失败或参数非法时不创建 Bot；普通 Bot 的现有授权行为保持不变。
+- **GET / POST 契约**：Application Coding 的模板透传只在 **POST** `/{bot_id}/auth-status`；已退休的 **GET** 同路径**仅兼容普通 Bot**（无模板参数，用它轮询 Application Coding 会静默创建普通 Bot，不支持）。已在 `deprecated/auth_status.py` 的 GET docstring 中标注。
 
 **已知边界（过渡态）**：本 Task 复用 `auth-status` echo（与 decision §8.2 一致），标注为**过渡态**——客户端丢失参数、服务重启后的 pending 意图恢复、并发 poll 的严格单写 claim 不在本期范围，后续若有要求再单独建设持久化 intent。
 
