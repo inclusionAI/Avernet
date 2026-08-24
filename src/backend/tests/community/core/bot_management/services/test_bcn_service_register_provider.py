@@ -119,6 +119,41 @@ class TestRegisterProviderBotEnvSelection:
 
     @patch(
         "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="pre",
+    )
+    def test_pre_env_plugin_mode_serializes_connection_mode(self, _mock_env, service, http):
+        """Plugin provider registrations must explicitly select BCN plugin mode."""
+        http.set_response("post", _ok_response(200, {"bot_uuid": "u1"}))
+
+        service.register_provider_bot(
+            teamclaw_bot_uuid="bot-uuid",
+            owner_workno="123",
+            name="Plugin Bot",
+            summary="",
+            connection_mode="plugin",
+        )
+
+        assert http.calls_to("post")[0].kwargs["json"]["connection_mode"] == "plugin"
+
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="pre",
+    )
+    def test_pre_env_default_registration_omits_connection_mode(self, _mock_env, service, http):
+        """Gateway-default registrations must not send a connection-mode override."""
+        http.set_response("post", _ok_response(200, {"bot_uuid": "u1"}))
+
+        service.register_provider_bot(
+            teamclaw_bot_uuid="bot-uuid",
+            owner_workno="123",
+            name="Gateway Bot",
+            summary="",
+        )
+
+        assert "connection_mode" not in http.calls_to("post")[0].kwargs["json"]
+
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
         return_value="prod",
     )
     def test_prod_env_uses_prod_provider_credentials(self, _mock_env, service, http):
