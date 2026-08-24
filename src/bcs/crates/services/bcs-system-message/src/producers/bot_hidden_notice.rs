@@ -94,6 +94,7 @@ mod tests {
                     role: ParticipantRole::Driver,
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::Auto),
+                    tags: Vec::new(),
                 },
                 Participant {
                     bot_uuid: "bot-hidden".into(),
@@ -102,6 +103,7 @@ mod tests {
                     role: ParticipantRole::Consultant,
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::Auto),
+                    tags: Vec::new(),
                 },
             ],
             messages: vec![],
@@ -162,6 +164,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::Auto),
+                tags: Vec::new(),
             }],
             messages: vec![],
             workspace: Default::default(),

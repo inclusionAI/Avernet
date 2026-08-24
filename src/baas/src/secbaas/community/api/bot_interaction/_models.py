@@ -39,7 +39,7 @@ class InteractionResolution:
                         "interaction resolution selectedOptions entries cannot be empty"
                     )
                 for option in options:
-                    _require_non_empty_string(option, "selectedOptions value")
+                    _require_string(option, "selectedOptions value")
 
     def to_dict(self) -> dict[str, object]:
         """Encode the durable JSON shape, omitting absent optional fields."""
@@ -87,10 +87,26 @@ class InteractionDispatch:
 
 
 @dataclass(frozen=True, slots=True)
+class InteractionRequestedResult:
+    """Public identity and persistence outcome for an Engine request event."""
+
+    baas_interaction_id: str
+    created: bool
+
+
+@dataclass(frozen=True, slots=True)
 class InteractionResolveResult:
-    """Successful state transition returned to an uplink adapter."""
+    """Public interaction identity accepted from an uplink adapter."""
 
     interaction_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class InteractionResolvedResult:
+    """Public identity and transition outcome for an Engine terminal event."""
+
+    baas_interaction_id: str
+    applied: bool
 
 
 def _required_string_field(value: dict[str, object], key: str) -> str:
@@ -118,7 +134,7 @@ def _optional_string_map_field(
     result: dict[str, str] = {}
     for map_key, map_value in item.items():
         _require_non_empty_string(map_key, f"{key} key")
-        _require_non_empty_string(map_value, f"{key} value")
+        _require_string(map_value, f"{key} value")
         result[map_key] = map_value
     if not result:
         raise ValueError(f"interaction resolution {key} cannot be empty")
@@ -155,7 +171,12 @@ def _validate_optional_string_map(value: dict[str, str] | None, name: str) -> No
         raise ValueError(f"interaction resolution {name} cannot be empty")
     for map_key, map_value in value.items():
         _require_non_empty_string(map_key, f"{name} key")
-        _require_non_empty_string(map_value, f"{name} value")
+        _require_string(map_value, f"{name} value")
+
+
+def _require_string(value: object, name: str) -> None:
+    if not isinstance(value, str):
+        raise ValueError(f"interaction resolution {name} must be a string")
 
 
 def _require_non_empty_string(value: object, name: str) -> None:

@@ -78,6 +78,7 @@ mod tests {
             role: ParticipantRole::Observer,
             actor_kind: ActorKind::Human,
             mode: None,
+            tags: Vec::new(),
         };
         let event = SystemMessageEvent::HumanJoined { group_id: "g1".into(), actor };
 
@@ -100,6 +101,7 @@ mod tests {
             role: ParticipantRole::Observer,
             actor_kind: ActorKind::Human,
             mode: None,
+            tags: Vec::new(),
         };
         let event = SystemMessageEvent::HumanJoined { group_id: "g1".into(), actor };
 

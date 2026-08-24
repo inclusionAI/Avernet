@@ -222,6 +222,7 @@ async fn make_human_bot_dm(support: &support::FlowTestSupport) {
             role: ParticipantRole::Observer,
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::Present),
+            tags: Vec::new(),
         },
         Participant {
             bot_uuid: "bot-driver".to_string(),
@@ -230,6 +231,7 @@ async fn make_human_bot_dm(support: &support::FlowTestSupport) {
             role: ParticipantRole::Driver,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
+            tags: Vec::new(),
         },
     ];
     support.group.upsert(group).await.unwrap();
@@ -1067,6 +1069,7 @@ async fn history_requests_provider_target_without_ws_connection() {
                 role: ParticipantRole::Observer,
                 actor_kind: ActorKind::Human,
                 mode: Some(ParticipantMode::Present),
+                tags: Vec::new(),
             },
         ],
     );
@@ -1445,6 +1448,7 @@ async fn web_send_delivers_to_registered_provider_target_without_ws_connection()
                 role: ParticipantRole::Observer,
                 actor_kind: ActorKind::Human,
                 mode: Some(ParticipantMode::Present),
+                tags: Vec::new(),
             },
         ],
     );
@@ -1705,6 +1709,7 @@ async fn install_provider_driver_group(
                     role: ParticipantRole::Observer,
                     actor_kind: ActorKind::Human,
                     mode: Some(ParticipantMode::Present),
+                    tags: Vec::new(),
                 },
             ],
         ))
@@ -1726,6 +1731,7 @@ async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
             role: ParticipantRole::Manager,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
+            tags: Vec::new(),
         },
         Participant {
             bot_uuid: "bot-observer".to_string(),
@@ -1734,6 +1740,7 @@ async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
             role: ParticipantRole::Worker,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
+            tags: Vec::new(),
         },
         Participant {
             bot_uuid: "human_1".to_string(),
@@ -1742,6 +1749,7 @@ async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
             role: ParticipantRole::Observer,
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::Present),
+            tags: Vec::new(),
         },
     ];
     support.group.upsert(group).await.unwrap();
@@ -2181,6 +2189,14 @@ async fn web_send_with_session_id_routes_v3_with_explicit_bcs_session_id() {
 async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let session_id = "group-1:abcdef12";
+    let mut group = support.group.get("group-1").await.expect("group exists");
+    group
+        .participants
+        .iter_mut()
+        .find(|participant| participant.bot_uuid == "bot-driver")
+        .expect("driver participant")
+        .tags = vec!["group-tag".to_string()];
+    support.group.upsert(group).await.expect("update group tags");
     support
         .registry
         .set_delivery_target(
@@ -2188,11 +2204,13 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
             support::FakeRegistryService::provider_target("bot-driver"),
         )
         .await;
+    let mut provider = Participant::bot("bot-driver", ParticipantRole::Driver);
+    provider.tags = vec!["session-tag".to_string(), "tenant-a".to_string()];
     let session = test_session(
         session_id,
         "group-1",
         vec![
-            Participant::bot("bot-driver", ParticipantRole::Driver),
+            provider,
             {
                 let mut human = Participant::human("human_1", ParticipantRole::Observer);
                 human.mode = Some(ParticipantMode::Present);
@@ -2240,6 +2258,7 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
     assert_eq!(params["bcs_group_id"], "group-1");
     assert_eq!(params["bcs_session_id"], session_id);
     assert_eq!(params["session_key"], "group:group-1");
+    assert_eq!(params["tags"], json!(["session-tag", "tenant-a"]));
 }
 
 #[tokio::test]
@@ -2959,6 +2978,7 @@ async fn persistent_group_send_delivers_to_registered_provider_target_without_ws
                 role: ParticipantRole::Observer,
                 actor_kind: ActorKind::Human,
                 mode: Some(ParticipantMode::Present),
+                tags: Vec::new(),
             },
         ],
     );

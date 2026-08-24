@@ -413,6 +413,7 @@ impl GroupCoreService for GroupCore {
                     role,
                     actor_kind: actor.actor_kind,
                     mode: Some(mode),
+                    tags: Vec::new(),
                 }
             })
             .collect();

@@ -35,6 +35,7 @@ class BotRunInteractionModel(Base):
     __tablename__ = "baas_bot_run_interaction"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
+    baas_interaction_id = Column(String(160), nullable=False)
     session_key = Column(String(512), nullable=False)
     interaction_id = Column(String(160), nullable=False)
     state = Column(String(32), nullable=False)
@@ -45,6 +46,7 @@ class BotRunInteractionModel(Base):
     )
 
     __table_args__ = (
+        UniqueConstraint("baas_interaction_id", name="uk_baas_interaction_id"),
         UniqueConstraint(
             "session_key", "interaction_id", name="uk_session_interaction"
         ),
@@ -69,6 +71,7 @@ class BotRunInteractionModel(Base):
             raise ValueError(f"invalid interaction state: {self.state}")
         return BotRunInteractionRecord(
             id=self.id,
+            baas_interaction_id=self.baas_interaction_id,
             session_key=self.session_key,
             interaction_id=self.interaction_id,
             state=cast(InteractionState, self.state),

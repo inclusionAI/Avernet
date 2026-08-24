@@ -1049,6 +1049,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Driver,
                     actor_kind: bcs_service_api::ActorKind::default(),
+                    tags: Vec::new(),
                     mode: None,
                 },
                 Participant {
@@ -1057,6 +1058,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Consultant,
                     actor_kind: bcs_service_api::ActorKind::default(),
+                    tags: Vec::new(),
                     mode: None,
                 },
             ],
@@ -1431,6 +1433,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Driver,
                     actor_kind: bcs_service_api::ActorKind::default(),
+                    tags: Vec::new(),
                     mode: None,
                 },
                 Participant {
@@ -1439,6 +1442,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Consultant,
                     actor_kind: bcs_service_api::ActorKind::default(),
+                    tags: Vec::new(),
                     mode: None,
                 },
                 Participant {
@@ -1447,6 +1451,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Consultant,
                     actor_kind: bcs_service_api::ActorKind::default(),
+                    tags: Vec::new(),
                     mode: None,
                 },
             ],
@@ -1660,6 +1665,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Driver,
                     actor_kind: bcs_service_api::ActorKind::default(),
+                    tags: Vec::new(),
                     mode: None,
                 },
                 Participant {
@@ -1668,6 +1674,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Consultant,
                     actor_kind: bcs_service_api::ActorKind::default(),
+                    tags: Vec::new(),
                     mode: None,
                 },
                 Participant {
@@ -1676,6 +1683,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Consultant,
                     actor_kind: bcs_service_api::ActorKind::default(),
+                    tags: Vec::new(),
                     mode: None,
                 },
             ],
@@ -1955,6 +1963,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Driver,
                     actor_kind: bcs_service_api::ActorKind::default(),
+                    tags: Vec::new(),
                     mode: None,
                 },
                 Participant {
@@ -1963,6 +1972,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Consultant,
                     actor_kind: bcs_service_api::ActorKind::default(),
+                    tags: Vec::new(),
                     mode: None,
                 },
             ],
@@ -2222,6 +2232,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Driver,
                     actor_kind: ActorKind::Bot,
+                    tags: Vec::new(),
                     mode: None,
                 },
                 Participant {
@@ -2230,6 +2241,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Consultant,
                     actor_kind: ActorKind::Bot,
+                    tags: Vec::new(),
                     mode: None,
                 },
                 Participant {
@@ -2238,6 +2250,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Consultant,
                     actor_kind: ActorKind::Human,
+                    tags: Vec::new(),
                     mode: Some(ParticipantMode::Present),
                 },
                 Participant {
@@ -2246,6 +2259,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Consultant,
                     actor_kind: ActorKind::Bot,
+                    tags: Vec::new(),
                     mode: None,
                 },
             ],
@@ -2309,6 +2323,7 @@ mod tests {
                 kind: None,
                 role: ParticipantRole::Observer,
                 actor_kind: ActorKind::Human,
+                tags: Vec::new(),
                 mode: Some(ParticipantMode::Present),
             },
             Participant {
@@ -2317,6 +2332,7 @@ mod tests {
                 kind: None,
                 role: ParticipantRole::Driver,
                 actor_kind: ActorKind::Bot,
+                tags: Vec::new(),
                 mode: Some(ParticipantMode::Auto),
             },
         ];
@@ -2335,6 +2351,7 @@ mod tests {
                 kind: None,
                 role: ParticipantRole::Driver,
                 actor_kind: ActorKind::Bot,
+                tags: Vec::new(),
                 mode: Some(ParticipantMode::Auto),
             },
             Participant {
@@ -2343,6 +2360,7 @@ mod tests {
                 kind: None,
                 role: ParticipantRole::Consultant,
                 actor_kind: ActorKind::Bot,
+                tags: Vec::new(),
                 mode: Some(ParticipantMode::Auto),
             },
         ];
@@ -2762,6 +2780,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Manager,
                     actor_kind: ActorKind::Bot,
+                    tags: Vec::new(),
                     mode: None,
                 },
                 Participant {
@@ -2770,6 +2789,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Worker,
                     actor_kind: ActorKind::Bot,
+                    tags: Vec::new(),
                     mode: None,
                 },
                 Participant {
@@ -2778,6 +2798,7 @@ mod tests {
                     kind: None,
                     role: ParticipantRole::Worker,
                     actor_kind: ActorKind::Bot,
+                    tags: Vec::new(),
                     mode: None,
                 },
             ],

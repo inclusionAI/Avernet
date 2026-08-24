@@ -50,6 +50,8 @@ pub struct ConfirmProposalResponse {
 pub struct ParticipantInfo {
     pub bot_uuid: String,
     pub role: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 /// Participant slot binding for state-machine group creation.

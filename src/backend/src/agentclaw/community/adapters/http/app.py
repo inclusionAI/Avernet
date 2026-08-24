@@ -128,6 +128,8 @@ from agentclaw.community.adapters.http.task import (  # noqa: E402
     task_callback_router,
     task_internal_router,
 )
+from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router  # noqa: E402
+from agentclaw.community.adapters.http.openapi_v1.task.router import task_callback_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_render_screen.router import router as render_screen_router  # noqa: E402
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
 from agentclaw.community.adapters.http.antcode.router import router as antcode_router  # noqa: E402
@@ -153,6 +155,7 @@ from agentclaw.community.adapters.http.session_resources import (  # noqa: E402
 from agentclaw.community.adapters.http.mcp import router as mcp_router  # noqa: E402
 from agentclaw.community.adapters.http.cron import router as cron_router  # noqa: E402
 from agentclaw.community.adapters.http.cron.cron_noauth_router import router as cron_noauth_router  # noqa: E402
+from agentclaw.community.adapters.http.openapi_v1.task.discovery import router as task_discovery_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding import notify_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding.architect_rebind_router import router as architect_rebind_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_management import router as bot_management_router  # noqa: E402
@@ -378,6 +381,8 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     Forbidden:             403,
     NotFound:              404,
     Conflict:              409,
+    CallbackAuthError:     401,
+    CallbackCorrelationError: 400,
     InternalError:         500,
     CallerIdentityPermissionError: 403,
     CallerIdentityAmbiguousError: 409,
@@ -895,6 +900,7 @@ app.include_router(channel_router)
 app.include_router(quality_router)
 app.include_router(task_internal_router)
 app.include_router(task_callback_router)
+app.include_router(task_router)
 try:
     app.include_router(render_screen_router)
     logger.info("[RenderScreen] Router registered successfully: prefix=%s", render_screen_router.prefix)
@@ -944,6 +950,7 @@ app.include_router(sync.router)
 app.include_router(batch_sync.router)
 app.include_router(cron_router)
 app.include_router(cron_noauth_router)
+app.include_router(task_discovery_router)
 app.include_router(notify_router)
 # Harness Engineering: patch template management & diagnosis
 app.include_router(harness_router)

@@ -980,6 +980,7 @@ pub fn build_chat_send_frame(
     from_bot_name: &str,
     mentions: &[String],
     target_bot: &str,
+    tags: &[String],
     attachments: &Option<Vec<Attachment>>,
     thinking: &Option<String>,
     is_self: bool,
@@ -1031,7 +1032,7 @@ pub fn build_chat_send_frame(
         } else {
             None
         },
-        tags: Vec::new(),
+        tags: tags.to_vec(),
         attachments: attachments.clone().unwrap_or_default(),
     };
     let mut params = serde_json::to_value(send).unwrap_or_else(|error| {
@@ -2038,8 +2039,9 @@ mod tests {
     #[test]
     fn build_chat_send_frame_with_bcs_session_id_and_high_version() {
         let ctx = test_group_context_input();
+        let tags = vec!["tenant-a".to_string(), "scene-review".to_string()];
         let frame = build_chat_send_frame(
-            "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target",
+            "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target", &tags,
             &None, &None, false, 3, None, None, Some("grp-test:abc12345"),
         );
         match frame {
@@ -2052,6 +2054,7 @@ mod tests {
                 assert_eq!(p.channel.user_id.as_deref(), Some("Bot1"));
                 assert_eq!(p.channel.actor_id.as_deref(), Some("b1"));
                 assert_eq!(p.channel.actor_name.as_deref(), Some("Bot1"));
+                assert_eq!(p.tags, tags);
             }
             _ => panic!("expected Request frame"),
         }
@@ -2061,7 +2064,7 @@ mod tests {
     fn build_chat_send_frame_with_bcs_session_id_and_low_version() {
         let ctx = test_group_context_input();
         let frame = build_chat_send_frame(
-            "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target",
+            "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target", &[],
             &None, &None, false, 2, None, None, Some("grp-test:abc12345"),
         );
         match frame {
@@ -2080,7 +2083,7 @@ mod tests {
     fn build_chat_send_frame_with_legacy_session_id_and_low_version_keeps_group_id() {
         let ctx = test_group_context_input();
         let frame = build_chat_send_frame(
-            "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target",
+            "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target", &[],
             &None, &None, false, 2, None, None, Some("grp-test:00000000"),
         );
         match frame {
@@ -2097,7 +2100,7 @@ mod tests {
     fn build_chat_send_frame_without_bcs_session_id() {
         let ctx = test_group_context_input();
         let frame = build_chat_send_frame(
-            "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target",
+            "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target", &[],
             &None, &None, false, 3, None, None, None,
         );
         match frame {

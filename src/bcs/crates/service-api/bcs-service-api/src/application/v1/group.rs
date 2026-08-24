@@ -97,6 +97,8 @@ pub struct Participant {
     pub name: Option<String>,
     pub role: ParticipantRole,
     pub mode: ParticipantMode,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -268,6 +270,7 @@ pub struct ListGroups {
 pub struct CreateParticipant {
     pub actor_id: String,
     pub role: ParticipantRole,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

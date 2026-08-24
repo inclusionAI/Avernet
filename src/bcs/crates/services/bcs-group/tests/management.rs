@@ -1423,6 +1423,7 @@ async fn create_dm_creates_and_reuses_human_bot_pair() {
         .expect("human participant");
     assert_eq!(human.actor_kind, ActorKind::Human);
     assert_eq!(human.mode, Some(bcs_service_api::ParticipantMode::Present));
+    assert!(human.tags.is_empty());
     let bot = stored
         .participants
         .iter()
@@ -1891,6 +1892,7 @@ async fn participant_mode_update_authorizes_self_or_creator_and_inserts_human() 
         .expect("human participant should be inserted on first mode update");
     assert_eq!(human.actor_kind, ActorKind::Human);
     assert_eq!(human.mode, Some(bcs_service_api::ParticipantMode::Present));
+    assert!(human.tags.is_empty());
 
     let forbidden = service
         .update_participant_mode(GroupParticipantModeCommand {
@@ -2503,6 +2505,7 @@ fn participant(bot_id: &str, role: Option<&str>) -> GroupCreateParticipantComman
     GroupCreateParticipantCommand {
         bot_id: bot_id.to_string(),
         role: role.map(str::to_string),
+        tags: Vec::new(),
     }
 }
 

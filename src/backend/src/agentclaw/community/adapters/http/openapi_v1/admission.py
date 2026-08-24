@@ -795,6 +795,11 @@ SKILL_SCOPED_OPERATIONS = frozenset()
 #: harness owner/collaborator access dependency runs.
 HARNESS_SCOPED_OPERATIONS = frozenset()
 
+#: No current harness operation self-checks an app-only grant. Harness is a
+#: user-only surface for now, so app-only callers are refused before the
+#: harness owner/collaborator access dependency runs.
+HARNESS_SCOPED_OPERATIONS = frozenset()
+
 #: The modes that admit a caller naming no end user. Everything else refuses at
 #: ``require_principal``, which is what a route inherits by saying nothing.
 ADMITTING_MODES = frozenset(
