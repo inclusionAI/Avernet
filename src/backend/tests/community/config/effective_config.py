@@ -72,6 +72,7 @@ _PROVIDER_METHODS = (
     "device_allocation",
     "bcsfuse",
     "ecb",
+    "task_callback",
     "gateway",
     "baas",
     "workspace_hosting",

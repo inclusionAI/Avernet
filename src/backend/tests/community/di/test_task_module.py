@@ -9,7 +9,7 @@ from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
 )
-from agentclaw.community.di.config import GatewayEndpoint
+from agentclaw.community.di.config import TaskCallbackConfig
 from agentclaw.community.di.modules.task_module import TaskModule
 
 
@@ -55,11 +55,22 @@ def test_resolve_ports_outside_singlebox_returns_the_two_port_contract(monkeypat
 
 def test_resolve_api_base_url_uses_neutral_config_default(monkeypatch):
     monkeypatch.setenv("DEPLOY_PROFILE", "community")
-    # 非单 box:回投 origin 取组合根解析的 GatewayEndpoint;base_url 空/未绑定 → 回退 localhost
+    # 非单 box:回投 origin 取 TaskCallbackConfig(get_current_env 选 _pre/base);空/未绑定 → 回退 localhost
+    monkeypatch.setenv("SERVER_ENV", "prod")  # get_current_env() -> "prod"
     assert TaskModule._resolve_api_base_url(None) == "http://localhost:8888"
-    assert TaskModule._resolve_api_base_url(GatewayEndpoint(base_url="")) == "http://localhost:8888"
-    # pre 网关(base_url_pre 由 corp overlay 注入)直传为回投 origin
+    assert TaskModule._resolve_api_base_url(TaskCallbackConfig()) == "http://localhost:8888"
+    # prod -> base_url
     assert (
-        TaskModule._resolve_api_base_url(GatewayEndpoint(base_url="https://teamclawgw-pre.alipay.com"))
-        == "https://teamclawgw-pre.alipay.com"
+        TaskModule._resolve_api_base_url(TaskCallbackConfig(
+            base_url="https://teamclawgw.alipay.com",
+            base_url_pre="https://teamclawgw-pre.alipay.com",
+        )) == "https://teamclawgw.alipay.com"
+    )
+    monkeypatch.setenv("SERVER_ENV", "pre")  # get_current_env() -> "pre"
+    # pre -> base_url_pre override
+    assert (
+        TaskModule._resolve_api_base_url(TaskCallbackConfig(
+            base_url="https://teamclawgw.alipay.com",
+            base_url_pre="https://teamclawgw-pre.alipay.com",
+        )) == "https://teamclawgw-pre.alipay.com"
     )

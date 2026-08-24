@@ -340,6 +340,20 @@ class ConfigModule(Module):
 
     @singleton
     @provider
+    def task_callback(self) -> cfg.TaskCallbackConfig:
+        """本 backend 被外部执行体(agent)回投的入口 origin(``task_callback``
+        user_config 块)。中立空默认;corp env overlay 注真实公网入口(pre 用
+        ``base_url_pre`` override,与 bcn/ecb/gateway 同款 prod/pre 双值)。singlebox
+        走本地直连,通常不读此块。"""
+        block = _block("task_callback")
+        defaults = cfg.TaskCallbackConfig()
+        return cfg.TaskCallbackConfig(
+            base_url=block.get("base_url", defaults.base_url),
+            base_url_pre=block.get("base_url_pre", defaults.base_url_pre),
+        )
+
+    @singleton
+    @provider
     def gateway(self) -> cfg.GatewayConfig:
         """Public API gateway hosts (neutral empty; corp env overlays set the
         ``gateway`` yaml block)."""
