@@ -167,16 +167,33 @@ async fn sqlite_delivery_patches_persist_canonical_routing_policy_json() {
         .await
         .expect("migrate sqlite");
     let repo = MySqlGroupStore::sqlite(db.clone(), PROVISIONING_ENV.to_string());
-    let mut group = GroupBuilder::new("driver").id("routing-policy-group").build();
+    let mut group = GroupBuilder::new("driver")
+        .id("routing-policy-group")
+        .build();
     group.routing_policy = Some(RoutingPolicy {
         mode: RoutingMode::Mention,
         default_bot_final_delivery: DefaultDelivery::SendToDriver,
-        sender_routes: HashMap::from([(
-            "driver".to_string(),
-            vec!["observer".to_string()],
-        )]),
+        sender_routes: HashMap::from([("driver".to_string(), vec!["observer".to_string()])]),
     });
     repo.upsert(group).await.expect("persist group");
+
+    let concurrent_policy = RoutingPolicy {
+        mode: RoutingMode::Structured,
+        default_bot_final_delivery: DefaultDelivery::SendToDriver,
+        sender_routes: HashMap::from([("driver".to_string(), vec!["new-observer".to_string()])]),
+    };
+    let concurrent_policy_json =
+        serde_json::to_string(&concurrent_policy).expect("serialize concurrent routing policy");
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_groups SET routing_policy_json = ? WHERE env = ? AND group_id = ?",
+        vec![
+            DbValue::from(concurrent_policy_json),
+            DbValue::from(PROVISIONING_ENV),
+            DbValue::from("routing-policy-group"),
+        ],
+    ))
+    .await
+    .expect("simulate a concurrent routing update behind the repository cache");
 
     repo.patch_mutable_fields(
         "routing-policy-group",
@@ -193,14 +210,14 @@ async fn sqlite_delivery_patches_persist_canonical_routing_policy_json() {
         .expect("load directly updated group")
         .expect("group");
     let direct_policy = directly_updated.routing_policy.expect("routing policy");
-    assert_eq!(direct_policy.mode, RoutingMode::Mention);
+    assert_eq!(direct_policy.mode, RoutingMode::Structured);
     assert_eq!(
         direct_policy.default_bot_final_delivery,
         DefaultDelivery::InjectObservers
     );
     assert_eq!(
         direct_policy.sender_routes.get("driver"),
-        Some(&vec!["observer".to_string()])
+        Some(&vec!["new-observer".to_string()])
     );
 
     let transactionally_updated = repo
@@ -230,14 +247,14 @@ async fn sqlite_delivery_patches_persist_canonical_routing_policy_json() {
         .await
         .expect("apply repeated transactional delivery patch");
     let repeated_policy = repeatedly_updated.routing_policy.expect("routing policy");
-    assert_eq!(repeated_policy.mode, RoutingMode::Mention);
+    assert_eq!(repeated_policy.mode, RoutingMode::Structured);
     assert_eq!(
         repeated_policy.default_bot_final_delivery,
         DefaultDelivery::InjectObservers
     );
     assert_eq!(
         repeated_policy.sender_routes.get("driver"),
-        Some(&vec!["observer".to_string()])
+        Some(&vec!["new-observer".to_string()])
     );
 
     let rows = db
@@ -250,21 +267,23 @@ async fn sqlite_delivery_patches_persist_canonical_routing_policy_json() {
         ))
         .await
         .expect("query stored routing policy");
-    let stored_json = db_get_column::<String>(&rows[0], "routing_policy_json")
-        .expect("routing_policy_json");
-    assert!(serde_json::from_str::<serde_json::Value>(&stored_json)
-        .expect("valid JSON")
-        .is_object());
+    let stored_json =
+        db_get_column::<String>(&rows[0], "routing_policy_json").expect("routing_policy_json");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&stored_json)
+            .expect("valid JSON")
+            .is_object()
+    );
     let stored_policy =
         serde_json::from_str::<RoutingPolicy>(&stored_json).expect("routing policy object");
-    assert_eq!(stored_policy.mode, RoutingMode::Mention);
+    assert_eq!(stored_policy.mode, RoutingMode::Structured);
     assert_eq!(
         stored_policy.default_bot_final_delivery,
         DefaultDelivery::InjectObservers
     );
     assert_eq!(
         stored_policy.sender_routes.get("driver"),
-        Some(&vec!["observer".to_string()])
+        Some(&vec!["new-observer".to_string()])
     );
 }
 
