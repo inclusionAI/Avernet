@@ -3525,6 +3525,7 @@ async fn get_preserves_human_participant_from_legacy_invitation_join() {
                         role: ParticipantRole::Consultant,
                         actor_kind: ActorKind::Human,
                         mode: Some(ParticipantMode::Present),
+                        tags: Vec::new(),
                     },
                 ],
                 group_version: Some(group.version),
