@@ -108,9 +108,9 @@ class CronRelaySessionInitiator:
         first_task = tasks[0]
         task_count = len(tasks)
         title = (
-            f"为你发现了 {task_count} 件可能有意义的事情"
+            f"[DreamMode] 发现 {task_count} 件可能有意义的事情"
             if task_count > 1
-            else first_task.project_name
+            else f"[DreamMode] {first_task.project_name}"
         )
 
         # ── Step 1: 创建 session ──────────────────────────────
@@ -164,6 +164,33 @@ class CronRelaySessionInitiator:
                 bot_id,
             )
         else:
+            # ── Step 2.5: 更新 session title（engine 创建时 title 不生效，需单独 HTTP 调 update）
+            try:
+                base = engine_target
+                if not base.startswith("http"):
+                    base = f"http://{base}"
+                async with httpx.AsyncClient(timeout=10.0) as cli:
+                    upd_resp = await cli.post(
+                        f"{base}/api/sessions/{session_id}/update",
+                        params={"title": title},
+                        headers={"x-user-id": owner_id},
+                    )
+                    if upd_resp.status_code == 200:
+                        logger.info(
+                            "[task_discovery] session title updated: id=%s title=%s",
+                            session_id, title,
+                        )
+                    else:
+                        logger.warning(
+                            "[task_discovery] session title update failed (non-fatal): "
+                            "HTTP %s — %s",
+                            upd_resp.status_code, upd_resp.text[:200],
+                        )
+            except Exception as exc:
+                logger.warning(
+                    "[task_discovery] session title update error (non-fatal): %s", exc,
+                )
+
             # ── Step 3: WebSocket 注入发现消息 ────────────────
             discovery_prompt = self._build_discovery_prompt(tasks)
             await self._ws_send_message(
@@ -333,12 +360,16 @@ class CronRelaySessionInitiator:
         return "\n".join(lines)
 
     def _build_session_url(self, session_id: str, agent_id: str) -> str:
-        """构建前端 workbench session URL。"""
+        """构建前端 workbench session URL。
+
+        前端路由格式: ``/assistant?botId={bot_id}&sessionId={session_id}``
+        sessionId 需 URL encode（如 ``agent:main:main`` 含冒号）。
+        """
+        from urllib.parse import quote
+
         base = self._frontend_url.rstrip("/")
-        return (
-            f"{base}/bcn/chat/session"
-            f"?bot_uuid={agent_id}&id={agent_id}&session={session_id}"
-        )
+        encoded_sid = quote(session_id, safe="")
+        return f"{base}/assistant?botId={agent_id}&sessionId={encoded_sid}"
 
 
 __all__ = ["SessionInitiator", "CronRelaySessionInitiator"]
