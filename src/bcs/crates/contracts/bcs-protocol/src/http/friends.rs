@@ -28,7 +28,7 @@ pub struct CreateFriendRequestBody {
 /// `POST /friends/request` response.
 #[derive(Debug, Clone, Serialize)]
 pub struct CreateFriendRequestResponse {
-    pub request_ids: Vec<u64>,
+    pub request_ids: Vec<String>,
     /// "pending" | "approved" | "public_no_edge"
     pub status: String,
     pub edge_ids: Vec<u64>,

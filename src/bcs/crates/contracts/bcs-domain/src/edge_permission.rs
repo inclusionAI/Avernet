@@ -195,7 +195,10 @@ pub enum RequestStatus {
 /// A connect/apply/revoke request record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PermissionRequest {
-    pub request_id: u64,
+    /// External business id (a bare UUID v4, simple form); the internal bigint
+    /// PK (`id`) stays in the DB row for FK joins and is not exposed on this
+    /// struct.
+    pub request_id: String,
     /// Back-filled after approval creates the edge; `None` while pending.
     #[serde(default)]
     pub edge_id: Option<u64>,
@@ -366,7 +369,7 @@ mod tests {
     #[test]
     fn permission_request_pending_has_no_edge() {
         let r = PermissionRequest {
-            request_id: 3, edge_id: None, env: "prod".into(),
+            request_id: "1".into(), edge_id: None, env: "prod".into(),
             from_id: "human_88001".into(), to_id: "b".into(),
             request_kind: RequestKind::Connect, requested_ref_id: None,
             requested_rules: None, message: None, status: RequestStatus::Pending,

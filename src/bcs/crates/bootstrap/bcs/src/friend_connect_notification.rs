@@ -76,7 +76,7 @@ struct FriendWorkOrderEventRequest {
 
 #[derive(Debug, Serialize)]
 struct FriendWorkOrderBizData {
-    request_ids: Vec<u64>,
+    request_ids: Vec<String>,
     applicant_actor_id: String,
     target_bot_id: String,
     notification_kind: String,
@@ -258,7 +258,7 @@ mod tests {
             .notify(FriendConnectNotificationCommand {
                 kind: FriendConnectNotificationKind::Reviewed,
                 env: "dev".to_string(),
-                request_ids: vec![3],
+                request_ids: vec!["3".to_string()],
                 applicant_actor_id: "bot_1001".to_string(),
                 target_bot_id: "bot_2001".to_string(),
                 recipient_user_ids: Vec::new(),
@@ -275,7 +275,7 @@ mod tests {
             .notify(FriendConnectNotificationCommand {
                 kind: FriendConnectNotificationKind::ApprovalRequested,
                 env: "dev".to_string(),
-                request_ids: vec![1],
+                request_ids: vec!["1".to_string()],
                 applicant_actor_id: "human_1001".to_string(),
                 target_bot_id: "bot_2001".to_string(),
                 recipient_user_ids: vec!["user_2001".to_string()],
@@ -290,7 +290,7 @@ mod tests {
         let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::ApprovalRequested,
             env: "dev".to_string(),
-            request_ids: vec![1],
+            request_ids: vec!["1".to_string()],
             applicant_actor_id: "human_1001".to_string(),
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
@@ -313,7 +313,7 @@ mod tests {
         assert_eq!(
             payload.biz_data,
             Some(serde_json::json!({
-                "request_ids": [1],
+                "request_ids": ["1"],
                 "applicant_actor_id": "human_1001",
                 "target_bot_id": "bot_2001",
                 "notification_kind": "approval_requested",
@@ -327,7 +327,7 @@ mod tests {
         let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::AutoApproved,
             env: "dev".to_string(),
-            request_ids: vec![2],
+            request_ids: vec!["2".to_string()],
             applicant_actor_id: "bot_1001".to_string(),
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
@@ -347,7 +347,7 @@ mod tests {
         let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::ApprovalRequested,
             env: "dev".to_string(),
-            request_ids: vec![4],
+            request_ids: vec!["4".to_string()],
             applicant_actor_id: "bot_1001".to_string(),
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
@@ -372,7 +372,7 @@ mod tests {
         let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::Reviewed,
             env: "dev".to_string(),
-            request_ids: vec![5],
+            request_ids: vec!["5".to_string()],
             applicant_actor_id: "human_1001".to_string(),
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
@@ -408,7 +408,7 @@ mod tests {
         let pending = FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::ApprovalRequested,
             env: "dev".to_string(),
-            request_ids: vec![1],
+            request_ids: vec!["1".to_string()],
             applicant_actor_id: "human_1001".to_string(),
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
@@ -419,7 +419,7 @@ mod tests {
         let notice = FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::Reviewed,
             env: "dev".to_string(),
-            request_ids: vec![1],
+            request_ids: vec!["1".to_string()],
             applicant_actor_id: "bot_1001".to_string(),
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],

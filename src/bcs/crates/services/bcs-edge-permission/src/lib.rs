@@ -26,6 +26,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use uuid::Uuid;
 use bcs_domain::actor::ActorKind;
 use bcs_domain::edge_permission::{
     AdmissionReason, AdmissionResult, AuthzContext, AuthzGrantRef, EdgeGrant, EdgeStatus,
@@ -45,6 +46,14 @@ use bcs_service_api::port::repo::{
     PermissionRequestRepoPort,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
+
+/// Generate a fresh external request id (a bare UUID v4, simple form — no
+/// prefix). The internal bigint PK (`permission_requests.id`) is assigned by
+/// the DB; this string is the client-facing stable id stored in the
+/// `request_id` column.
+fn new_request_id() -> String {
+    Uuid::new_v4().simple().to_string()
+}
 
 /// DB-backed `ConnectService` implementation.
 ///
@@ -187,7 +196,7 @@ impl ConnectService for DbConnectService {
         // Pending (don't re-insert, don't 409 — return the existing state).
         let pending = self.find_pending_connect(caller, to_bot).await;
         if !pending.is_empty() {
-            let request_ids: Vec<u64> = pending.into_iter().map(|r| r.request_id).collect();
+            let request_ids: Vec<String> = pending.into_iter().map(|r| r.request_id).collect();
             return Ok(ConnectResult {
                 request_ids,
                 edge_ids: vec![],
@@ -267,7 +276,7 @@ impl ConnectService for DbConnectService {
         }
     }
 
-    async fn approve(&self, request_id: u64, decider: &str) -> ServiceResult<Vec<u64>> {
+    async fn approve(&self, request_id: &str, decider: &str) -> ServiceResult<Vec<u64>> {
         let req = self
             .requests
             .get(request_id, &self.env)
@@ -307,12 +316,12 @@ impl ConnectService for DbConnectService {
         let forward_edge = edge_ids.first().cloned();
         if let Some(eid) = forward_edge.as_ref() {
             self.requests
-                .backfill_edge_id(req.request_id, &self.env, *eid)
+                .backfill_edge_id(req.request_id.as_str(), &self.env, *eid)
                 .await?;
         }
         self.requests
             .decide(
-                req.request_id,
+                req.request_id.as_str(),
                 &self.env,
                 RequestStatus::Approved,
                 decider,
@@ -329,12 +338,12 @@ impl ConnectService for DbConnectService {
             for r in reverse_pending {
                 if let Some(eid) = reverse_edge.as_ref() {
                     self.requests
-                        .backfill_edge_id(r.request_id, &self.env, *eid)
+                        .backfill_edge_id(r.request_id.as_str(), &self.env, *eid)
                         .await?;
                 }
                 self.requests
                     .decide(
-                        r.request_id,
+                        r.request_id.as_str(),
                         &self.env,
                         RequestStatus::Approved,
                         decider,
@@ -349,7 +358,7 @@ impl ConnectService for DbConnectService {
 
     async fn reject(
         &self,
-        request_id: u64,
+        request_id: &str,
         decider: &str,
         reason: Option<String>,
     ) -> ServiceResult<()> {
@@ -369,7 +378,7 @@ impl ConnectService for DbConnectService {
 
         self.requests
             .decide(
-                req.request_id,
+                req.request_id.as_str(),
                 &self.env,
                 RequestStatus::Rejected,
                 decider,
@@ -388,7 +397,7 @@ impl ConnectService for DbConnectService {
             for r in reverse_pending {
                 self.requests
                     .decide(
-                        r.request_id,
+                        r.request_id.as_str(),
                         &self.env,
                         RequestStatus::Rejected,
                         decider,
@@ -400,7 +409,7 @@ impl ConnectService for DbConnectService {
         Ok(())
     }
 
-    async fn cancel(&self, request_id: u64) -> ServiceResult<()> {
+    async fn cancel(&self, request_id: &str) -> ServiceResult<()> {
         let req = self
             .requests
             .get(request_id, &self.env)
@@ -430,7 +439,7 @@ impl ConnectService for DbConnectService {
         let decider = req.created_by.as_str();
         self.requests
             .decide(
-                req.request_id,
+                req.request_id.as_str(),
                 &self.env,
                 RequestStatus::Cancelled,
                 decider,
@@ -449,7 +458,7 @@ impl ConnectService for DbConnectService {
             for r in reverse_pending {
                 self.requests
                     .decide(
-                        r.request_id,
+                        r.request_id.as_str(),
                         &self.env,
                         RequestStatus::Cancelled,
                         decider,
@@ -461,7 +470,7 @@ impl ConnectService for DbConnectService {
         Ok(())
     }
 
-    async fn get_request(&self, request_id: u64) -> ServiceResult<PermissionRequest> {
+    async fn get_request(&self, request_id: &str) -> ServiceResult<PermissionRequest> {
         self.requests
             .get(request_id, &self.env)
             .await
@@ -570,13 +579,13 @@ impl ConnectService for DbConnectService {
                 // so chaining inbox then sent preserves recency within each
                 // direction (a global re-sort would need a row timestamp the
                 // domain `PermissionRequest` no longer carries).
-                let mut seen: HashSet<u64> =
+                let mut seen: HashSet<String> =
                     HashSet::new();
                 let mut combined: Vec<PermissionRequest> = Vec::with_capacity(
                     inbox.len() + sent.len(),
                 );
                 for r in inbox.into_iter().chain(sent.into_iter()) {
-                    if seen.insert(r.request_id) {
+                    if seen.insert(r.request_id.clone()) {
                         combined.push(r);
                     }
                 }
@@ -669,7 +678,7 @@ impl DbConnectService {
     async fn emit_friend_connect_notification(
         &self,
         kind: FriendConnectNotificationKind,
-        request_ids: Vec<u64>,
+        request_ids: Vec<String>,
         applicant_actor_id: &str,
         target_bot_id: &str,
         recipient_user_ids: Vec<String>,
@@ -718,13 +727,14 @@ impl DbConnectService {
         caller_kind: ActorKind,
         target_kind: ActorKind,
         message: Option<String>,
-    ) -> ServiceResult<Vec<u64>> {
+    ) -> ServiceResult<Vec<String>> {
         let mut ids = Vec::new();
 
         // Forward: caller → to_bot.
-        let fwd_id = self.requests
+        let fwd_request_id = new_request_id();
+        self.requests
             .insert(PermissionRequest {
-                request_id: 0,
+                request_id: fwd_request_id.clone(),
                 edge_id: None,
                 env: self.env.clone(),
                 from_id: caller.to_string(),
@@ -740,13 +750,14 @@ impl DbConnectService {
                 decided_at: None,
             })
             .await?;
-        ids.push(fwd_id);
+        ids.push(fwd_request_id);
 
         // Reverse: to_bot → caller (Bot↔Bot only).
         if caller_kind == ActorKind::Bot && target_kind == ActorKind::Bot {
-            let rev_id = self.requests
+            let rev_request_id = new_request_id();
+            self.requests
                 .insert(PermissionRequest {
-                    request_id: 0,
+                    request_id: rev_request_id.clone(),
                     edge_id: None,
                     env: self.env.clone(),
                     from_id: to_bot.to_string(),
@@ -762,7 +773,7 @@ impl DbConnectService {
                     decided_at: None,
                 })
                 .await?;
-            ids.push(rev_id);
+            ids.push(rev_request_id);
         }
 
         Ok(ids)
@@ -877,14 +888,14 @@ impl DbConnectService {
         edge_ids: &[u64],
         default_refs: &[u64; 2],
         message: Option<&str>,
-    ) -> ServiceResult<Vec<u64>> {
+    ) -> ServiceResult<Vec<String>> {
         let mut request_ids = Vec::new();
 
         // Forward approved snapshot.
-        let fwd_req_id = self
-            .requests
+        let fwd_request_id = new_request_id();
+        self.requests
             .insert(PermissionRequest {
-                request_id: 0,
+                request_id: fwd_request_id.clone(),
                 edge_id: Some(edge_ids[0]),
                 env: self.env.clone(),
                 from_id: caller.to_string(),
@@ -901,17 +912,17 @@ impl DbConnectService {
                 decided_at: None,
             })
             .await?;
-        request_ids.push(fwd_req_id);
+        request_ids.push(fwd_request_id);
 
         // Reverse approved snapshot (Bot↔Bot only).
         if caller_kind == ActorKind::Bot
             && target_kind == ActorKind::Bot
             && edge_ids.len() == 2
         {
-            let rev_req_id = self
-                .requests
+            let rev_request_id = new_request_id();
+            self.requests
                 .insert(PermissionRequest {
-                    request_id: 0,
+                    request_id: rev_request_id.clone(),
                     edge_id: Some(edge_ids[1]),
                     env: self.env.clone(),
                     from_id: to_bot.to_string(),
@@ -927,7 +938,7 @@ impl DbConnectService {
                     decided_at: None,
                 })
                 .await?;
-            request_ids.push(rev_req_id);
+            request_ids.push(rev_request_id);
         }
 
         Ok(request_ids)
@@ -1261,6 +1272,7 @@ mod tests {
         db.execute(DbStatement::new(
             "CREATE TABLE permission_requests (\
                 id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                request_id VARCHAR(64) NOT NULL, \
                 edge_id BIGINT, \
                 env VARCHAR(32) NOT NULL, \
                 from_id VARCHAR(128) NOT NULL, \
@@ -1526,7 +1538,7 @@ mod tests {
         assert!(eg.has_friend_edge("human_1", "x:pub", "dev").await);
         let active = eg.list_active_grants("human_1", "x:pub", "dev").await;
         assert_eq!(active.len(), 1, "public auto should create a durable edge");
-        let r = rq.get(res.request_ids[0], "dev").await.expect("approved req");
+        let r = rq.get(&res.request_ids[0], "dev").await.expect("approved req");
         assert_eq!(r.status, RequestStatus::Approved);
         assert_eq!(r.edge_id, Some(res.edge_ids[0]));
     }
@@ -1576,7 +1588,7 @@ mod tests {
         assert!(res.auto_accepted);
         assert_eq!(res.edge_ids.len(), 1);
         assert_eq!(res.request_ids.len(), 1);
-        let req = rq.get(res.request_ids[0], "dev").await.expect("approved req");
+        let req = rq.get(&res.request_ids[0], "dev").await.expect("approved req");
         assert_eq!(req.status, RequestStatus::Approved);
     }
 
@@ -1623,7 +1635,7 @@ mod tests {
         assert_eq!(res.status, ConnectStatus::Pending);
         assert!(res.edge_ids.is_empty());
         assert_eq!(res.request_ids.len(), 1);
-        let req = rq.get(res.request_ids[0], "dev").await.expect("pending req");
+        let req = rq.get(&res.request_ids[0], "dev").await.expect("pending req");
         assert_eq!(req.status, RequestStatus::Pending);
     }
 
@@ -1684,8 +1696,8 @@ mod tests {
         assert!(res.edge_ids.is_empty());
         // default profile should NOT have been seeded (no edge built).
         assert!(pp.get_active_default("x:man", "dev").await.is_none());
-        let id = res.request_ids[0];
-        let r = rq.get(id, "dev").await.expect("pending request exists");
+        let id = res.request_ids[0].clone();
+        let r = rq.get(&id, "dev").await.expect("pending request exists");
         assert_eq!(r.status, RequestStatus::Pending);
         assert_eq!(r.from_id, "human_1");
         assert_eq!(r.to_id, "x:man");
@@ -1714,7 +1726,7 @@ mod tests {
         assert!(eg.has_friend_edge("human_1", "x:auto1", "dev").await);
 
         // The request is approved, decided_by=auto, backfilled with edge_id.
-        let r = rq.get(res.request_ids[0], "dev").await.expect("approved req");
+        let r = rq.get(&res.request_ids[0], "dev").await.expect("approved req");
         assert_eq!(r.status, RequestStatus::Approved);
         assert_eq!(r.decided_by.as_deref(), Some("auto"));
         assert_eq!(r.edge_id, Some(res.edge_ids[0]));
@@ -1800,12 +1812,12 @@ mod tests {
             .await
             .expect("manual pending");
         assert_eq!(pending.status, ConnectStatus::Pending);
-        let rid = pending.request_ids[0];
+        let rid = pending.request_ids[0].clone();
 
-        let edge_ids = svc.approve(rid, "85020").await.expect("approve ok");
+        let edge_ids = svc.approve(&rid, "85020").await.expect("approve ok");
         assert_eq!(edge_ids.len(), 1, "Human→Bot approve: 1 edge");
         // Original pending request is now approved + edge_id backfilled.
-        let r = rq.get(rid, "dev").await.expect("request still exists");
+        let r = rq.get(&rid, "dev").await.expect("request still exists");
         assert_eq!(r.status, RequestStatus::Approved);
         assert_eq!(r.edge_id, Some(edge_ids[0]));
         assert!(eg.has_friend_edge("human_1", "x:appr", "dev").await);
@@ -1824,9 +1836,9 @@ mod tests {
             .create_connect("human_1", "x:nodupe", None)
             .await
             .expect("manual pending");
-        let rid = pending.request_ids[0];
+        let rid = pending.request_ids[0].clone();
 
-        svc.approve(rid, "85020").await.expect("approve ok");
+        svc.approve(&rid, "85020").await.expect("approve ok");
 
         // The bot's inbox (to_id=x:nodupe) should contain exactly 1 request
         // for this connect (the original, now approved) — not 2.
@@ -1850,15 +1862,15 @@ mod tests {
             .await
             .expect("manual pending Bot↔Bot");
         assert_eq!(pending.request_ids.len(), 2);
-        let fwd_id = pending.request_ids[0];
+        let fwd_id = pending.request_ids[0].clone();
 
-        let edge_ids = svc.approve(fwd_id, "owner").await.expect("approve ok");
+        let edge_ids = svc.approve(&fwd_id, "owner").await.expect("approve ok");
         assert_eq!(edge_ids.len(), 2, "Bot↔Bot approve: 2 edges");
 
         // BOTH pending requests are now approved (single accept, §4.1).
-        let fwd = rq.get(fwd_id, "dev").await.expect("fwd present");
+        let fwd = rq.get(&fwd_id, "dev").await.expect("fwd present");
         let rev = rq
-            .get(pending.request_ids[1], "dev")
+            .get(&pending.request_ids[1], "dev")
             .await
             .expect("rev present");
         assert_eq!(fwd.status, RequestStatus::Approved);
@@ -1875,11 +1887,11 @@ mod tests {
             .create_connect("human_1", "x:rej", None)
             .await
             .expect("manual pending");
-        let rid = pending.request_ids[0];
-        svc.reject(rid, "85020", Some("no thanks".into()))
+        let rid = pending.request_ids[0].clone();
+        svc.reject(&rid, "85020", Some("no thanks".into()))
             .await
             .expect("reject ok");
-        let r = rq.get(rid, "dev").await.expect("request present");
+        let r = rq.get(&rid, "dev").await.expect("request present");
         assert_eq!(r.status, RequestStatus::Rejected);
         assert!(r.edge_id.is_none());
         let active = eg.list_active_grants("human_1", "x:rej", "dev").await;
@@ -1896,11 +1908,11 @@ mod tests {
             .create_connect("x:rbA", "x:rbB", None)
             .await
             .expect("pending");
-        svc.reject(pending.request_ids[0], "owner", None)
+        svc.reject(&pending.request_ids[0], "owner", None)
             .await
             .expect("reject ok");
-        let fwd = rq.get(pending.request_ids[0], "dev").await.expect("fwd");
-        let rev = rq.get(pending.request_ids[1], "dev").await.expect("rev");
+        let fwd = rq.get(&pending.request_ids[0], "dev").await.expect("fwd");
+        let rev = rq.get(&pending.request_ids[1], "dev").await.expect("rev");
         assert_eq!(fwd.status, RequestStatus::Rejected);
         assert_eq!(rev.status, RequestStatus::Rejected);
     }
@@ -1914,14 +1926,14 @@ mod tests {
             .create_connect("human_1", "x:canc", None)
             .await
             .expect("pending");
-        let rid = pending.request_ids[0];
-        svc.cancel(rid).await.expect("cancel ok");
-        let r = rq.get(rid, "dev").await.expect("request still exists");
+        let rid = pending.request_ids[0].clone();
+        svc.cancel(&rid).await.expect("cancel ok");
+        let r = rq.get(&rid, "dev").await.expect("request still exists");
         assert_eq!(r.status, RequestStatus::Cancelled);
         // cancelling an already-cancelled request is idempotent (B4e): Ok, not
         // an error. Spec says "已 rejected/cancelled 幂等".
-        svc.cancel(rid).await.expect("idempotent cancel ok");
-        let r2 = rq.get(rid, "dev").await.expect("request still exists");
+        svc.cancel(&rid).await.expect("idempotent cancel ok");
+        let r2 = rq.get(&rid, "dev").await.expect("request still exists");
         assert_eq!(r2.status, RequestStatus::Cancelled);
     }
 
@@ -2321,7 +2333,7 @@ mod tests {
             .create_connect("human_1", "x:sa", Some("hi".into()))
             .await
             .expect("pending");
-        let rid = pending.request_ids[0];
+        let rid = pending.request_ids[0].clone();
 
         // Sent: the human caller's outbox has the pending request.
         let sent = svc
@@ -2356,7 +2368,7 @@ mod tests {
 
         // Approve, then All from the bot's view: inbox (1 approved) ∪ sent
         // (the bot sent nothing) ⇒ total 1, status approved.
-        svc.approve(rid, "85020").await.expect("approve");
+        svc.approve(&rid, "85020").await.expect("approve");
         let all_bot = svc
             .list_requests("x:sa", RequestDirection::All, None, 1, 20)
             .await

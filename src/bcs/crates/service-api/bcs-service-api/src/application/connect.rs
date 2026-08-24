@@ -19,7 +19,7 @@ pub enum ConnectStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectResult {
-    pub request_ids: Vec<u64>,
+    pub request_ids: Vec<String>,
     pub edge_ids: Vec<u64>,
     pub status: ConnectStatus,
     pub auto_accepted: bool,
@@ -57,20 +57,20 @@ pub trait ConnectService: Send + Sync {
 
     /// Owner (or auto) approves; same-tx builds edge(s) + back-fills request.edge_id.
     /// Returns created edge_ids. Idempotent on already-approved.
-    async fn approve(&self, request_id: u64, decider: &str) -> ServiceResult<Vec<u64>>;
+    async fn approve(&self, request_id: &str, decider: &str) -> ServiceResult<Vec<u64>>;
 
     async fn reject(
         &self,
-        request_id: u64,
+        request_id: &str,
         decider: &str,
         reason: Option<String>,
     ) -> ServiceResult<()>;
 
     /// Caller withdraws a pending request.
-    async fn cancel(&self, request_id: u64) -> ServiceResult<()>;
+    async fn cancel(&self, request_id: &str) -> ServiceResult<()>;
 
     /// Fetch a request by id for delivery-layer authorization checks.
-    async fn get_request(&self, request_id: u64) -> ServiceResult<PermissionRequest>;
+    async fn get_request(&self, request_id: &str) -> ServiceResult<PermissionRequest>;
 
     /// Unfriend: revoke friend edge(s) only (human→bot 1 / bot↔bot 2). Other edges untouched.
     /// Returns the revoked edge_ids.

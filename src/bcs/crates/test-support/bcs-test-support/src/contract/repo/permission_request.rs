@@ -17,8 +17,9 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
     repo: &T,
     env: &str,
 ) {
+    let request_id = "contract-1".to_string();
     let req = PermissionRequest {
-        request_id: 0,
+        request_id: request_id.clone(),
         edge_id: None,
         env: env.into(),
         from_id: "human_1".into(),
@@ -33,10 +34,10 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
         decided_by: None,
         decided_at: None,
     };
-    let request_id = repo.insert(req).await.expect("insert request");
+    repo.insert(req).await.expect("insert request");
 
     // get — pending request round-trips, edge_id unset.
-    let got = repo.get(request_id, env).await.expect("found");
+    let got = repo.get(&request_id, env).await.expect("found");
     assert_eq!(got.request_id, request_id);
     assert_eq!(got.status, RequestStatus::Pending);
     assert!(got.edge_id.is_none(), "pending → no edge_id");
@@ -73,7 +74,7 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
 
     // decide — status, decided_by, decided_at mutate.
     repo.decide(
-        request_id,
+        &request_id,
         env,
         RequestStatus::Approved,
         "owner",
@@ -81,7 +82,7 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
     )
     .await
     .expect("decide");
-    let got2 = repo.get(request_id, env).await.expect("found after decide");
+    let got2 = repo.get(&request_id, env).await.expect("found after decide");
     assert_eq!(got2.status, RequestStatus::Approved, "status → approved");
     assert_eq!(got2.decided_by.as_deref(), Some("owner"), "decided_by set");
     // decided_at is a DB-managed timestamp set at decision time.
@@ -89,10 +90,10 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
     assert_eq!(got2.decision_reason.as_deref(), Some("ok"), "decision_reason set");
 
     // backfill_edge_id — annotate the approved request with its new edge.
-    repo.backfill_edge_id(request_id, env, 3001)
+    repo.backfill_edge_id(&request_id, env, 3001)
         .await
         .expect("backfill_edge_id");
-    let got3 = repo.get(request_id, env).await.expect("found after backfill");
+    let got3 = repo.get(&request_id, env).await.expect("found after backfill");
     assert_eq!(
         got3.edge_id,
         Some(3001),
@@ -101,7 +102,7 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
 
     // Missing request → None (non-fallible).
     assert!(
-        repo.get(9999, env).await.is_none(),
+        repo.get("missing", env).await.is_none(),
         "missing request → None"
     );
 }

@@ -59,10 +59,10 @@ pub async fn accept_friend_request(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
-    Path(id): Path<u64>,
+    Path(id): Path<String>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
-    let edge_ids = state.connect.approve(id, &caller).await?;
+    let edge_ids = state.connect.approve(&id, &caller).await?;
     Ok(Json(envelope(&AcceptFriendRequestResponse { edge_ids })))
 }
 
@@ -71,13 +71,13 @@ pub async fn reject_friend_request(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
-    Path(id): Path<u64>,
+    Path(id): Path<String>,
     body: Option<Json<DecisionBody>>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
     // Body is optional: bcs-cli POSTs reject with no body / no content-type.
     let reason = body.and_then(|Json(b)| b.reason);
-    state.connect.reject(id, &caller, reason).await?;
+    state.connect.reject(&id, &caller, reason).await?;
     Ok(Json(envelope(&StatusResponse {
         status: "rejected".into(),
     })))
@@ -88,19 +88,19 @@ pub async fn cancel_friend_request(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
-    Path(id): Path<u64>,
+    Path(id): Path<String>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     // Caller identity is resolved for auth-area consistency; the caller may
     // only cancel requests they originally created.
     let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
-    let req = state.connect.get_request(id).await?;
+    let req = state.connect.get_request(&id).await?;
     if req.created_by != caller {
         return Err(HttpAdapterError::Forbidden(format!(
             "not authorized to cancel request '{}'",
             id
         )));
     }
-    state.connect.cancel(id).await?;
+    state.connect.cancel(&id).await?;
     Ok(Json(envelope(&StatusResponse {
         status: "cancelled".into(),
     })))

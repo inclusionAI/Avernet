@@ -86,19 +86,19 @@ impl ConnectService for RecordingSearchConnectService {
         })
     }
 
-    async fn approve(&self, _: u64, _: &str) -> ServiceResult<Vec<u64>> {
+    async fn approve(&self, _: &str, _: &str) -> ServiceResult<Vec<u64>> {
         Ok(vec![])
     }
 
-    async fn reject(&self, _: u64, _: &str, _: Option<String>) -> ServiceResult<()> {
+    async fn reject(&self, _: &str, _: &str, _: Option<String>) -> ServiceResult<()> {
         Ok(())
     }
 
-    async fn cancel(&self, _: u64) -> ServiceResult<()> {
+    async fn cancel(&self, _: &str) -> ServiceResult<()> {
         Ok(())
     }
 
-    async fn get_request(&self, _: u64) -> ServiceResult<PermissionRequest> {
+    async fn get_request(&self, _: &str) -> ServiceResult<PermissionRequest> {
         Err(ServiceError::FriendRequestNotFound("not configured".to_string()))
     }
 

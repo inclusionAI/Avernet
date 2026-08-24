@@ -651,60 +651,52 @@ impl DbPermissionRequestStore {
         match self.flavor {
             EdgeGrantSqlFlavor::Mysql => {
                 "INSERT INTO permission_requests \
-                 (edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+                 (request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                   requested_rules, message, status, decision_reason, created_by, decided_by, \
                   decided_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
                          CASE WHEN ? IN ('approved','rejected','cancelled') \
                               THEN CURRENT_TIMESTAMP ELSE NULL END)"
             }
             EdgeGrantSqlFlavor::Sqlite => {
                 "INSERT INTO permission_requests \
-                 (edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+                 (request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                   requested_rules, message, status, decision_reason, created_by, decided_by, \
                   decided_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
                          CASE WHEN ? IN ('approved','rejected','cancelled') \
                               THEN CURRENT_TIMESTAMP ELSE NULL END)"
             }
         }
     }
 
-    const SELECT_INSERTED_REQUEST_SQL: &'static str =
-        "SELECT id FROM permission_requests WHERE env = ? AND from_id = ? AND to_id = ? \
-         AND request_kind = ? AND status = ? AND created_by = ? \
-         AND edge_id IS NOT DISTINCT FROM ? AND requested_ref_id IS NOT DISTINCT FROM ? \
-         AND requested_rules IS NOT DISTINCT FROM ? AND message IS NOT DISTINCT FROM ? \
-         AND decision_reason IS NOT DISTINCT FROM ? AND decided_by IS NOT DISTINCT FROM ? \
-         ORDER BY id DESC LIMIT 1";
-
     const SELECT_REQUEST_SQL: &'static str =
-        "SELECT id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+        "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
                 decided_at \
-         FROM permission_requests WHERE id = ? AND env = ? LIMIT 1";
+         FROM permission_requests WHERE request_id = ? AND env = ? LIMIT 1";
 
     const LIST_INBOX_ALL_SQL: &'static str =
-        "SELECT id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+        "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
                 decided_at \
          FROM permission_requests WHERE to_id = ? AND env = ? ORDER BY gmt_modified DESC";
 
     const LIST_INBOX_STATUS_SQL: &'static str =
-        "SELECT id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+        "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
                 decided_at \
          FROM permission_requests WHERE to_id = ? AND env = ? AND status = ? \
          ORDER BY gmt_modified DESC";
 
     const LIST_SENT_ALL_SQL: &'static str =
-        "SELECT id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+        "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
                 decided_at \
          FROM permission_requests WHERE from_id = ? AND env = ? ORDER BY gmt_modified DESC";
 
     const LIST_SENT_STATUS_SQL: &'static str =
-        "SELECT id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+        "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
                 decided_at \
          FROM permission_requests WHERE from_id = ? AND env = ? AND status = ? \
@@ -713,9 +705,9 @@ impl DbPermissionRequestStore {
 
 #[async_trait]
 impl PermissionRequestRepoPort for DbPermissionRequestStore {
-    async fn insert(&self, request: PermissionRequest) -> ServiceResult<u64> {
+    async fn insert(&self, request: PermissionRequest) -> ServiceResult<()> {
         let PermissionRequest {
-            request_id: _,
+            request_id,
             edge_id,
             env,
             from_id,
@@ -730,12 +722,13 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
             decided_by,
             decided_at: _,
         } = request;
-        let result = self
+        self
             .execute_result(
                 "insert_request",
                 DbStatement::with_params(
                     self.insert_request_sql(),
                     vec![
+                        DbValue::from(request_id),
                         match edge_id {
                             Some(id) => DbValue::from(id),
                             None => DbValue::Null,
@@ -760,55 +753,10 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
                 ),
             )
             .await?;
-        if let Some(id) = result.last_insert_id {
-            if id != 0 {
-                return Ok(id);
-            }
-        }
-        self.query(
-            "insert_request_lookup",
-            DbStatement::with_params(
-                Self::SELECT_INSERTED_REQUEST_SQL,
-                vec![
-                    DbValue::from(env),
-                    DbValue::from(from_id),
-                    DbValue::from(to_id),
-                    DbValue::from(request_kind_str(request_kind)),
-                    DbValue::from(request_status_str(status)),
-                    DbValue::from(created_by),
-                    match edge_id {
-                        Some(value) => DbValue::from(value),
-                        None => DbValue::Null,
-                    },
-                    match requested_ref_id {
-                        Some(value) => DbValue::from(value),
-                        None => DbValue::Null,
-                    },
-                    json_to_db_value(&requested_rules),
-                    match message {
-                        Some(value) => DbValue::from(value),
-                        None => DbValue::Null,
-                    },
-                    match decision_reason {
-                        Some(value) => DbValue::from(value),
-                        None => DbValue::Null,
-                    },
-                    match decided_by {
-                        Some(value) => DbValue::from(value),
-                        None => DbValue::Null,
-                    },
-                ],
-            ),
-        )
-        .await?
-        .into_iter()
-        .next()
-        .and_then(|row| row.get_i64("id").ok().flatten())
-        .and_then(|id| if id < 0 { None } else { Some(id as u64) })
-        .ok_or_else(|| ServiceError::InternalError("permission_requests insert did not return an id".to_string()))
+        Ok(())
     }
 
-    async fn get(&self, request_id: u64, env: &str) -> Option<PermissionRequest> {
+    async fn get(&self, request_id: &str, env: &str) -> Option<PermissionRequest> {
         let rows = self
             .query(
                 "get_request",
@@ -941,7 +889,7 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
 
     async fn decide(
         &self,
-        request_id: u64,
+        request_id: &str,
         env: &str,
         status: RequestStatus,
         decided_by: &str,
@@ -955,7 +903,7 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
                 "UPDATE permission_requests SET status = ?, decided_by = ?, \
                      decision_reason = ?, decided_at = CURRENT_TIMESTAMP, \
                      gmt_modified = CURRENT_TIMESTAMP \
-                 WHERE id = ? AND env = ?",
+                 WHERE request_id = ? AND env = ?",
                 vec![
                     DbValue::from(request_status_str(status)),
                     DbValue::from(decided_by),
@@ -973,7 +921,7 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
 
     async fn backfill_edge_id(
         &self,
-        request_id: u64,
+        request_id: &str,
         env: &str,
         edge_id: u64,
     ) -> ServiceResult<()> {
@@ -982,7 +930,7 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
             DbStatement::with_params(
                 "UPDATE permission_requests SET edge_id = ?, \
                      gmt_modified = CURRENT_TIMESTAMP \
-                 WHERE id = ? AND env = ?",
+                 WHERE request_id = ? AND env = ?",
                 vec![
                     DbValue::from(edge_id),
                     DbValue::from(request_id),
@@ -1089,7 +1037,7 @@ fn row_to_permission_request(row: &DbRow) -> ServiceResult<PermissionRequest> {
     let decided_at = optional_string(row, "decided_at")?
         .and_then(|s| parse_timestamp_epoch_ms(&s));
     Ok(PermissionRequest {
-        request_id: required_u64(row, "id")?,
+        request_id: required_string(row, "request_id")?,
         edge_id: optional_u64(row, "edge_id")?,
         env: required_string(row, "env")?,
         from_id: required_string(row, "from_id")?,
@@ -1725,6 +1673,7 @@ mod tests {
         db.execute(DbStatement::new(
             "CREATE TABLE permission_requests (\
                 id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                request_id VARCHAR(64) NOT NULL, \
                 edge_id INTEGER, \
                 env VARCHAR(32) NOT NULL, \
                 from_id VARCHAR(128) NOT NULL, \
@@ -1746,9 +1695,18 @@ mod tests {
         DbPermissionRequestStore::sqlite(Arc::new(db))
     }
 
+    static REQUEST_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    fn next_test_request_id() -> String {
+        format!(
+            "test_{}",
+            REQUEST_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        )
+    }
+
     fn sample_request(env: &str) -> PermissionRequest {
         PermissionRequest {
-            request_id: 0,
+            request_id: next_test_request_id(),
             edge_id: None,
             env: env.to_string(),
             from_id: "human_a".to_string(),
@@ -1768,23 +1726,29 @@ mod tests {
     #[tokio::test]
     async fn request_insert_and_get() {
         let store = request_store().await;
-        let request_id = store.insert(sample_request("dev")).await.expect("insert");
-        let got = store.get(request_id, "dev").await.expect("found");
+        let req = sample_request("dev");
+        let request_id = req.request_id.clone();
+        store.insert(req).await.expect("insert");
+        let got = store.get(&request_id, "dev").await.expect("found");
         assert_eq!(got.request_id, request_id);
         assert_eq!(got.status, RequestStatus::Pending);
         assert!(got.edge_id.is_none(), "pending → no edge_id");
         assert_eq!(got.request_kind, RequestKind::Connect);
-        assert!(store.get(999_999, "dev").await.is_none(), "missing → None");
+        assert!(store.get("missing", "dev").await.is_none(), "missing → None");
     }
 
     #[tokio::test]
     async fn request_list_inbox_all_and_status_filter() {
         let store = request_store().await;
-        let r1 = store.insert(sample_request("dev")).await.expect("insert r1");
-        let r2 = store.insert(sample_request("dev")).await.expect("insert r2");
+        let r1 = sample_request("dev");
+        let r1_id = r1.request_id.clone();
+        store.insert(r1).await.expect("insert r1");
+        let r2 = sample_request("dev");
+        let r2_id = r2.request_id.clone();
+        store.insert(r2).await.expect("insert r2");
         // decide r2 → approved
         store
-            .decide(r2, "dev", RequestStatus::Approved, "85020", Some("ok"))
+            .decide(&r2_id, "dev", RequestStatus::Approved, "85020", Some("ok"))
             .await
             .expect("decide");
         let all = store.list_inbox("bot_b", "dev", None).await;
@@ -1793,12 +1757,12 @@ mod tests {
             .list_inbox("bot_b", "dev", Some(RequestStatus::Pending))
             .await;
         assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].request_id, r1);
+        assert_eq!(pending[0].request_id, r1_id);
         let approved = store
             .list_inbox("bot_b", "dev", Some(RequestStatus::Approved))
             .await;
         assert_eq!(approved.len(), 1);
-        assert_eq!(approved[0].request_id, r2);
+        assert_eq!(approved[0].request_id, r2_id);
         assert_eq!(approved[0].decided_by.as_deref(), Some("85020"));
         assert!(
             approved[0].decided_at.is_some(),
@@ -1809,12 +1773,14 @@ mod tests {
     #[tokio::test]
     async fn request_backfill_edge_id() {
         let store = request_store().await;
-        let request_id = store.insert(sample_request("dev")).await.expect("insert");
+        let req = sample_request("dev");
+        let request_id = req.request_id.clone();
+        store.insert(req).await.expect("insert");
         store
-            .backfill_edge_id(request_id, "dev", 1001)
+            .backfill_edge_id(&request_id, "dev", 1001)
             .await
             .expect("backfill");
-        let got = store.get(request_id, "dev").await.expect("found");
+        let got = store.get(&request_id, "dev").await.expect("found");
         assert_eq!(got.edge_id, Some(1001));
     }
 
