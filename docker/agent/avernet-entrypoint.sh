@@ -58,34 +58,37 @@ echo "     Logs:     ${LOG_DIR}"
 
 if [ ! -f "${CONFIG_FILE}" ]; then
     echo "===> generating ${CONFIG_FILE} from template"
-    cp "${TEMPLATE_FILE}" "${CONFIG_FILE}"
 
-    # Substitute env-var placeholders in the JSON.
-    # Unset env vars become "UNSET" so the config is syntactically valid
-    # but clearly indicates the missing value.
-    _sub() {
-        local val
-        val="${!1:-UNSET}"
-        # Escape forward slashes for sed
-        val="${val//\//\\/}"
-        sed -i "s/${2}/${val}/g" "${CONFIG_FILE}"
+    # Run config generation as admin so the file is admin-owned directly.
+    _gen_config() {
+        cp "${TEMPLATE_FILE}" "${CONFIG_FILE}"
+
+        _sub() {
+            local val
+            val="${!1:-UNSET}"
+            val="${val//\//\\/}"
+            sed -i "s/${2}/${val}/g" "${CONFIG_FILE}"
+        }
+
+        _sub OPENCLAW_OPENAI_BASE_URL  OPENCLAW_OPENAI_BASE_URL
+        _sub OPENCLAW_OPENAI_API_KEY   OPENCLAW_OPENAI_API_KEY
+        _sub OPENCLAW_OPENAI_MODEL_ID  OPENCLAW_OPENAI_MODEL_ID
+        _sub OPENCLAW_OPENAI_MODEL_NAME OPENCLAW_OPENAI_MODEL_NAME
+        _sub OPENCLAW_GATEWAY_TOKEN    OPENCLAW_GATEWAY_TOKEN
+        _sub BCS_URL                   BCS_URL
+        _sub BCS_BOT_ID                BCS_BOT_ID
+        _sub BCS_BOT_NAME              BCS_BOT_NAME
+
+        if [ "${OPENCLAW_GATEWAY_TOKEN:-UNSET}" = "UNSET" ]; then
+            sed -i '/"auth": {/{N;s/"mode": "token", "token": "UNSET"//' "${CONFIG_FILE}" 2>/dev/null || true
+        fi
     }
+    export -f _gen_config
+    export TEMPLATE_FILE CONFIG_FILE OPENCLAW_OPENAI_BASE_URL OPENCLAW_OPENAI_API_KEY \
+           OPENCLAW_OPENAI_MODEL_ID OPENCLAW_OPENAI_MODEL_NAME OPENCLAW_GATEWAY_TOKEN \
+           BCS_URL BCS_BOT_ID BCS_BOT_NAME
+    su admin -s /bin/bash -c '_gen_config'
 
-    _sub OPENCLAW_OPENAI_BASE_URL  OPENCLAW_OPENAI_BASE_URL
-    _sub OPENCLAW_OPENAI_API_KEY   OPENCLAW_OPENAI_API_KEY
-    _sub OPENCLAW_OPENAI_MODEL_ID  OPENCLAW_OPENAI_MODEL_ID
-    _sub OPENCLAW_OPENAI_MODEL_NAME OPENCLAW_OPENAI_MODEL_NAME
-    _sub OPENCLAW_GATEWAY_TOKEN    OPENCLAW_GATEWAY_TOKEN
-    _sub BCS_URL                   BCS_URL
-    _sub BCS_BOT_ID                BCS_BOT_ID
-    _sub BCS_BOT_NAME              BCS_BOT_NAME
-
-    # If no gateway token, disable token auth
-    if [ "${OPENCLAW_GATEWAY_TOKEN:-UNSET}" = "UNSET" ]; then
-        sed -i '/"auth": {/{N;s/"mode": "token", "token": "UNSET"//' "${CONFIG_FILE}" 2>/dev/null || true
-    fi
-
-    chown admin:admin "${CONFIG_FILE}" 2>/dev/null || true
     echo "    config written"
 else
     echo "===> using existing ${CONFIG_FILE} (mounted or pre-built)"
