@@ -17,18 +17,25 @@ SRC = {
     "search": "/Users/shangjian.msj/Github/Avernet/src/backend/tests/community/core/task/singlebox_e2e/skills/search/SKILL.md",
     "acceptance": "/Users/shangjian.msj/Github/Avernet/src/backend/tests/community/core/task/singlebox_e2e/skills/acceptance/SKILL.md",
     "bbs": "/Users/shangjian.msj/Github/Avernet/src/backend/specs/2026-08-09-task-goal-driven-bbs-active-relay/bbs-relay-single-task/SKILL.md",
+    "arch_analysis": "/Users/shangjian.msj/Github/Avernet/src/backend/tests/community/core/task/singlebox_e2e/skills/arch-analysis/SKILL.md",
+    "planning_arch": "/Users/shangjian.msj/Github/Avernet/src/backend/tests/community/core/task/singlebox_e2e/skills/planning-arch/SKILL.md",
 }
 BBSREF = "/Users/shangjian.msj/Github/Avernet/src/backend/specs/2026-08-09-task-goal-driven-bbs-active-relay/bbs-relay-single-task/references"
 RECODIR = "/Users/shangjian.msj/Desktop/task-recognition"
 
 SEG_MARKER = {
     "recognition": "> 段1 · 任务识别(recognition;触发 /task 或 [RESUME_TASK] 或仅副屏标签)",
-    "planning": "> 段2 · 任务规划(planning;触发 框架 [planning])",
+    "planning": "> 段2 · 任务规划(planning;触发 框架 [planning],非 arch 场景)",
     "search": "> 段3 · 任务派发搜推(search;触发 框架 [search])",
     "acceptance": "> 段4 · 任务验收(acceptance;worker 叶子自验收)",
     "bbs": "> 段5 · BBS 接力(bbs-relay-single-task;触发 引擎 BBS 通知;参考文档见 references/)",
+    "arch_analysis": "> 段6 · 架构师名册 mock(arch-analysis;触发 叶子 instruction 含「某某某公司」;不联网返伪造名册)",
+    "planning_arch": "> 段7 · 任务规划·arch 场景(planning-arch;触发 框架 [planning] 且 prompt 含「某某某公司」;确定式按根验收交付物集合 + done_children 查表)",
 }
-ORDER = ["recognition", "planning", "search", "acceptance", "bbs"]
+ORDER = ["recognition", "planning", "search", "acceptance", "bbs", "arch_analysis", "planning_arch"]
+
+# 部署期清洗:预发包把本地联调 URL 重定向到预发网关;置 None 则保留源 localhost(本地 e2e 变体)。
+DEPLOY_GATEWAY = "https://teamclawgw-pre.alipay.com"
 
 
 def strip_frontmatter(text):
@@ -61,29 +68,32 @@ def body(path):
     with open(path, encoding="utf-8") as f:
         raw = f.read()
     return demote_one(strip_frontmatter(raw)).strip("\n")
+def deploy_strip(text):
+    """部署期清洗:本地联调 base url -> 预发网关(源保留 localhost 供本地 e2e)。DEPLOY_GATEWAY=None 时透传(本地变体)。"""
+    if not DEPLOY_GATEWAY:
+        return text
+    return text.replace("http://localhost:8888", DEPLOY_GATEWAY)
 
 
 HEADER = """---
 name: task-loop
-description: |
-  任务目标驱动执行闭环预装 skill。整合任务识别 / 规划 / 派发搜推 / 验收 / BBS 接力五段为单一 skill,
-  预装到所有 bot 即等同各段单独安装到对应 bot;每段按各自触发词自门控,仅命中段执行。
-  触发: 用户面 /task 或 [RESUME_TASK] 或仅副屏标签 -> 任务识别; 框架 [planning] -> 规划;
-  框架 [search] -> 派发搜推; worker 叶子执行后自验收 -> 验收; 引擎 BBS 通知 -> BBS 接力。
+description: 任务目标驱动执行闭环预装 skill,整合任务识别/规划/派发搜推/验收/BBS 接力/arch 场景规划变体(planning-arch)与架构师名册 mock(arch-analysis)共七段为单一 skill,预装到所有 bot 等同各段单独安装到对应 bot;各段按各自触发词自门控仅命中段执行(用户面 /task 或 [RESUME_TASK] 或副屏标签命中识别;框架 [planning] 命中规划,arch 场景含「某某某公司」命中 planning-arch 变体;框架 [search] 命中派发搜推;worker 叶子自验收命中验收;引擎 BBS 通知命中接力,其 scoped 叶子 instruction 含「某某某公司」时按 arch-analysis 产架构师名册)。
 version: 1.0.0
 author: avernet-task-framework
-tags: [task, loop, orchestrate, task-recognition, task-planning, task-search, task-acceptance, bbs-relay]
+tags: [task, loop, orchestrate, task-recognition, task-planning, task-search, task-acceptance, bbs-relay, arch-analysis, task-planning-arch]
 ---
 
 # task-loop
 
-预装到所有 bot 的任务目标驱动执行闭环 skill。本 skill 内含五段,**只执行被触发词命中的那一段**,其余段不参与;给任一 bot 预装本 skill 等同把对应段单独安装到该 bot。
+预装到所有 bot 的任务目标驱动执行闭环 skill。本 skill 内含七段,**只执行被触发词命中的那一段**,其余段不参与;给任一 bot 预装本 skill 等同把对应段单独安装到该 bot。
 
 - 任务识别(recognition):对话 bot 用户面——`/task` 或平台 `[RESUME_TASK]` 回传或仅副屏标签
-- 任务规划(planning):owner bot——框架 prompt 头部 `[planning]`
+- 任务规划(planning):owner bot——框架 prompt 头部 `[planning]`(非 arch 场景)
+- 任务规划·arch 场景(planning-arch):owner bot——框架 `[planning]` 且 prompt 含「某某某公司」,按根验收交付物集合 + done_children 确定式查表
 - 任务派发搜推(search):owner bot——框架 prompt 头部 `[search]`
 - 任务验收(acceptance):worker bot——叶子执行后自验收
 - BBS 接力(bbs-relay-single-task):中继 bot——引擎主动通知
+- 架构师名册 mock(arch-analysis):中继/worker bot——叶子 instruction 含「某某某公司」,返伪造架构师名册
 
 段体取自各段真源 SKILL.md,仅标题层级统一降一级并入;各段逻辑 / 规则 / 卡片格式 / 触发与输出契约保持原样。先读下面"路由规则"确定本该执行哪段,再只跑那一段。
 
@@ -94,16 +104,30 @@ tags: [task, loop, orchestrate, task-recognition, task-planning, task-search, ta
 | 触发 / 上下文 | 命中段 | 执行要点 |
 |---|---|---|
 | 用户消息以 `/task` 开头;或上下文含 `[RESUME_TASK]`;或消息仅 `<AixUI type="panel" component="task-loop" ...>` 副屏标签 | 段1 任务识别 | 出 AixUI 卡片(cardId 固定 card_3e31e1f1),到 task_ready 为止;执行由平台层调 POST /api/v1/collaboration/tasks/execute |
-| prompt 头部标记 `[planning]`,含目标节点 node_id 与任务态快照 | 段2 任务规划 | 返回 JSON 对象 {tasks: List[TaskSpec], has_gap, gap_detail};tasks 为空即 gap 闭=验收通过 |
+| prompt 头部标记 `[planning]`,含目标节点 node_id 与任务态快照,**且 prompt 不含「某某某公司」**(非 arch 场景) | 段2 任务规划 | 返回 JSON 对象 {tasks: List[TaskSpec], has_gap, gap_detail};tasks 为空即 gap 闭=验收通过 |
+| prompt 头部标记 `[planning]`,**且 prompt 含「某某某公司」**(arch 场景;交付物含架构师名册/技术栈概览/双视角分析等) | 段7 任务规划·arch 场景 | 同段2 输出契约;按根验收交付物集合 + done_children 确定式查表产 N_tech_stack / N_dual_view / N_architects |
 | prompt 头部标记 `[search]`,含子任务需求与候选集 catalog | 段3 任务派发搜推 | 返回 4 态 JSON(HIT_SINGLE / HIT_GROUP / HIT_MULTI_BOTS / MISS) |
 | 你是 worker bot,刚执行完叶子子任务,需按其 goal.acceptances 自验收(已收到 goal / instruction / sibling_outputs / execute_output) | 段4 任务验收 | 折叠进回投 result={success, data, gaps};不独立回投 |
 | 收到引擎主动发的 BBS 任务消息(含 task_id + 后端 base url + 自身 bot_id,且引擎已替你占根) | 段5 BBS 接力 | 跳过 scan / claim / 自判,直接 attach -> 执行 -> result |
+| 叶子执行输入(instruction)含关键词「某某某公司」,且非框架 `[planning]`/`[search]` 头 | 段6 架构师名册 mock | 不联网,直接返 mock 伪造架构师名册 JSON(domain/architects[]/note) |
 
-**优先级**(实际多互斥,显式定义避免歧义):段5(引擎 BBS 通知) > 段2/段3(框架 `[planning]` / `[search]` 头) > 段4(worker 叶子自验收) > 段1(`/task` / `[RESUME_TASK]` / 副屏标签)。
+**优先级**(实际多互斥,显式定义避免歧义):段5(引擎 BBS 通知) > 段7/段2/段3(框架 `[planning]`/`[search]` 头;arch 场景「某某某公司」命中段7,优先于段2) > 段4(worker 叶子自验收) > 段1(`/task` / `[RESUME_TASK]` / 副屏标签) > 段6(叶子 instruction 含「某某某公司」)。
+
+**段5 ↔ 段6 并用(arch 接力链路唯一例外)**:段5 命中(BBS 通知)时,其 attach 的 scoped 叶子若 instruction 含「某某某公司」,叶子产出按**段6 arch-analysis** 规则(mock 名册),段5 仍管 attach / result 协议。除此之外严格"只跑命中段"。
 
 **未命中任何段**:静默结束本轮——不虚构任务、不追问、不输出卡片、不乱执行(相当于 return / no-op)。反例:`[planning]` / `[search]` 是框架执行期 prompt,不是用户任务提交,不要走段1。
 
-**只跑命中段**:命中某段即按该段全部规则执行,其余段规则不参与。
+**只跑命中段**:命中某段即按该段全部规则执行,其余段规则不参与(段5↔段6 arch 接力并用为唯一例外)。
+
+## 场景叠加层(泛化主干 + 演示案例优化)
+
+本 skill 分两层,在保证泛化的同时承载演示案例的针对性优化:
+
+- **泛化主干**:段1~段5(识别 / 规划 / 派发搜推 / 验收 / BBS 接力),默认行为,段体逐字节取自通用真源、不可改;未命中任何案例信号时即纯主干,可处理任意任务(泛化性来源)。
+- **案例叠加段**:段6 arch-analysis / 段7 planning-arch,由**案例信号**(当前为 prompt/instruction 含「某某某公司」)门控,命中才激活——段7 在 arch 场景覆盖段2(同输出契约,换确定式剧本),段6 为 arch 专用叶子执行器(段5 接力时并用)。未命中案例信号 → 叠加段不参与,主干照常运行。
+- **扩展契约**:新增演示案例 = 追加其叠加段 + 注册其案例信号(强特征关键词/上下文),不改段1~段5;移除全部叠加段即回退为纯泛化 task-loop。案例信号须用强特征(如「某某某公司」)以免误命中通用任务。
+
+> 泛化性由主干保证(默认 + 不可改);针对性优化由叠加段提供(信号门控、可插拔、零侵入主干)。
 
 """
 
@@ -114,6 +138,7 @@ def main():
         parts.append(SEG_MARKER[k] + "\n\n")
         parts.append(body(SRC[k]) + "\n\n")
     skillmd = "".join(parts).rstrip("\n") + "\n"
+    skillmd = deploy_strip(skillmd)  # 部署期清洗:localhost->预发网关(recognition 段体仅此处重定向,余零改)
     with open(os.path.join(PKG, "SKILL.md"), "w", encoding="utf-8") as f:
         f.write(skillmd)
 
@@ -128,43 +153,49 @@ def main():
 
     README = """# task-loop 预装 skill 包
 
-    任务目标驱动执行闭环的单一预装 skill,整合 5 段(识别 / 规划 / 派发搜推 / 验收 / BBS 接力),
-    预装到所有 bot 即等同各段单独安装到对应 bot;每段按各自触发词自门控,仅命中段执行。
+任务目标驱动执行闭环的单一预装 skill,整合 7 段(识别 / 规划 / arch 场景规划变体 / 派发搜推 / 验收 / BBS 接力 / 架构师名册 mock),
+预装到所有 bot 即等同各段单独安装到对应 bot;每段按各自触发词自门控,仅命中段执行(段5↔段6 arch 接力链路并用为唯一例外)。
 
-    ## 结构
+## 结构
 
-    ```
-    task-loop/
-    ├── SKILL.md          # frontmatter + # task-loop + 路由规则 + 段1..段5
-    ├── references/
-    │   ├── bbs-task-api.md
-    │   ├── bbs-judge-rubric.md
-    │   ├── bbs-idempotency.md
-    │   ├── recognition-card-format.md
-    │   └── recognition-platform-protocol.md
-    └── README.md
-    ```
+```
+task-loop/
+├── SKILL.md          # frontmatter + # task-loop + 路由规则 + 段1..段7
+├── references/
+│   ├── bbs-task-api.md
+│   ├── bbs-judge-rubric.md
+│   ├── bbs-idempotency.md
+│   ├── recognition-card-format.md
+│   └── recognition-platform-protocol.md
+└── README.md
+```
 
-    ## 触发与段对照
+## 触发与段对照
 
-    | 触发 | 段 | 来源真源 |
-    |---|---|---|
-    | /task 或 [RESUME_TASK] 或仅副屏标签 | 段1 任务识别 | ~/Desktop/task-recognition/SKILL.md |
-    | 框架 [planning] | 段2 任务规划 | Avernet singlebox_e2e/skills/planning/SKILL.md |
-    | 框架 [search] | 段3 派发搜推 | Avernet singlebox_e2e/skills/search/SKILL.md |
-    | worker 叶子自验收 | 段4 任务验收 | Avernet singlebox_e2e/skills/acceptance/SKILL.md |
-    | 引擎 BBS 通知 | 段5 BBS 接力 | Avernet specs/2026-08-09-.../bbs-relay-single-task/SKILL.md |
+| 触发 | 段 | 来源真源 |
+|---|---|---|
+| /task 或 [RESUME_TASK] 或仅副屏标签 | 段1 任务识别 | ~/Desktop/task-recognition/SKILL.md |
+| 框架 [planning](非 arch 场景) | 段2 任务规划 | Avernet singlebox_e2e/skills/planning/SKILL.md |
+| 框架 [planning] 且 prompt 含「某某某公司」 | 段7 任务规划·arch 场景 | Avernet singlebox_e2e/skills/planning-arch/SKILL.md |
+| 框架 [search] | 段3 派发搜推 | Avernet singlebox_e2e/skills/search/SKILL.md |
+| worker 叶子自验收 | 段4 任务验收 | Avernet singlebox_e2e/skills/acceptance/SKILL.md |
+| 引擎 BBS 通知 | 段5 BBS 接力 | Avernet specs/2026-08-09-.../bbs-relay-single-task/SKILL.md |
+| 叶子 instruction 含「某某某公司」 | 段6 架构师名册 mock | Avernet singlebox_e2e/skills/arch-analysis/SKILL.md |
 
-    ## 再生成
+## 再生成
 
-    在本 feature dir 运行 `./assemble.sh`,从上述 5 段真源重新拼出 SKILL.md 与 references/。
-    段体规则:剥各自 frontmatter 取正文,标题统一降一级并入,正文文本与 HR 零改(任务识别段逻辑零改)。
-    源更新后重跑 assemble.sh 即可对齐。
+在本 feature dir 运行 `./assemble.sh`,从上述 7 段真源重新拼出 SKILL.md 与 references/。
+段体规则:剥各自 frontmatter 取正文,标题统一降一级并入,正文文本与 HR 零改(任务识别段逻辑零改;arch-analysis/planning-arch 段原样嵌入)。
+源更新后重跑 assemble.sh 即可对齐。
 
-    ## 上传 / 预装
+## 上传 / 预装
 
-    将 `task-loop/` 打包上传到 skills,activate 给所有 bot(预装即齐备)。
-    """
+将 `task-loop/` 打包上传到 skills,activate 给所有 bot(预装即齐备;arch e2e 场景:owner 用段7 规划、中继 bot 用段5+段6 产架构师名册)。
+
+## 部署变体(预发 / 本地 e2e)
+
+`assemble.py` 常量 `DEPLOY_GATEWAY` 控制变体:置预发网关 `https://teamclawgw-pre.alipay.com` 则把 recognition 段本地联调 URL 重定向到预发(生成预发部署包);置 `None` 则保留源 localhost(本地 e2e 变体)。源 SKILL.md 不动,两变体一键再生。
+"""
     with open(os.path.join(PKG, "README.md"), "w", encoding="utf-8") as f:
         f.write(README)
 

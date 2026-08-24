@@ -1,24 +1,22 @@
 ---
 name: task-loop
-description: |
-  任务目标驱动执行闭环预装 skill。整合任务识别 / 规划 / 派发搜推 / 验收 / BBS 接力五段为单一 skill,
-  预装到所有 bot 即等同各段单独安装到对应 bot;每段按各自触发词自门控,仅命中段执行。
-  触发: 用户面 /task 或 [RESUME_TASK] 或仅副屏标签 -> 任务识别; 框架 [planning] -> 规划;
-  框架 [search] -> 派发搜推; worker 叶子执行后自验收 -> 验收; 引擎 BBS 通知 -> BBS 接力。
+description: 任务目标驱动执行闭环预装 skill,整合任务识别/规划/派发搜推/验收/BBS 接力/arch 场景规划变体(planning-arch)与架构师名册 mock(arch-analysis)共七段为单一 skill,预装到所有 bot 等同各段单独安装到对应 bot;各段按各自触发词自门控仅命中段执行(用户面 /task 或 [RESUME_TASK] 或副屏标签命中识别;框架 [planning] 命中规划,arch 场景含「某某某公司」命中 planning-arch 变体;框架 [search] 命中派发搜推;worker 叶子自验收命中验收;引擎 BBS 通知命中接力,其 scoped 叶子 instruction 含「某某某公司」时按 arch-analysis 产架构师名册)。
 version: 1.0.0
 author: avernet-task-framework
-tags: [task, loop, orchestrate, task-recognition, task-planning, task-search, task-acceptance, bbs-relay]
+tags: [task, loop, orchestrate, task-recognition, task-planning, task-search, task-acceptance, bbs-relay, arch-analysis, task-planning-arch]
 ---
 
 # task-loop
 
-预装到所有 bot 的任务目标驱动执行闭环 skill。本 skill 内含五段,**只执行被触发词命中的那一段**,其余段不参与;给任一 bot 预装本 skill 等同把对应段单独安装到该 bot。
+预装到所有 bot 的任务目标驱动执行闭环 skill。本 skill 内含七段,**只执行被触发词命中的那一段**,其余段不参与;给任一 bot 预装本 skill 等同把对应段单独安装到该 bot。
 
 - 任务识别(recognition):对话 bot 用户面——`/task` 或平台 `[RESUME_TASK]` 回传或仅副屏标签
-- 任务规划(planning):owner bot——框架 prompt 头部 `[planning]`
+- 任务规划(planning):owner bot——框架 prompt 头部 `[planning]`(非 arch 场景)
+- 任务规划·arch 场景(planning-arch):owner bot——框架 `[planning]` 且 prompt 含「某某某公司」,按根验收交付物集合 + done_children 确定式查表
 - 任务派发搜推(search):owner bot——框架 prompt 头部 `[search]`
 - 任务验收(acceptance):worker bot——叶子执行后自验收
 - BBS 接力(bbs-relay-single-task):中继 bot——引擎主动通知
+- 架构师名册 mock(arch-analysis):中继/worker bot——叶子 instruction 含「某某某公司」,返伪造架构师名册
 
 段体取自各段真源 SKILL.md,仅标题层级统一降一级并入;各段逻辑 / 规则 / 卡片格式 / 触发与输出契约保持原样。先读下面"路由规则"确定本该执行哪段,再只跑那一段。
 
@@ -29,16 +27,30 @@ tags: [task, loop, orchestrate, task-recognition, task-planning, task-search, ta
 | 触发 / 上下文 | 命中段 | 执行要点 |
 |---|---|---|
 | 用户消息以 `/task` 开头;或上下文含 `[RESUME_TASK]`;或消息仅 `<AixUI type="panel" component="task-loop" ...>` 副屏标签 | 段1 任务识别 | 出 AixUI 卡片(cardId 固定 card_3e31e1f1),到 task_ready 为止;执行由平台层调 POST /api/v1/collaboration/tasks/execute |
-| prompt 头部标记 `[planning]`,含目标节点 node_id 与任务态快照 | 段2 任务规划 | 返回 JSON 对象 {tasks: List[TaskSpec], has_gap, gap_detail};tasks 为空即 gap 闭=验收通过 |
+| prompt 头部标记 `[planning]`,含目标节点 node_id 与任务态快照,**且 prompt 不含「某某某公司」**(非 arch 场景) | 段2 任务规划 | 返回 JSON 对象 {tasks: List[TaskSpec], has_gap, gap_detail};tasks 为空即 gap 闭=验收通过 |
+| prompt 头部标记 `[planning]`,**且 prompt 含「某某某公司」**(arch 场景;交付物含架构师名册/技术栈概览/双视角分析等) | 段7 任务规划·arch 场景 | 同段2 输出契约;按根验收交付物集合 + done_children 确定式查表产 N_tech_stack / N_dual_view / N_architects |
 | prompt 头部标记 `[search]`,含子任务需求与候选集 catalog | 段3 任务派发搜推 | 返回 4 态 JSON(HIT_SINGLE / HIT_GROUP / HIT_MULTI_BOTS / MISS) |
 | 你是 worker bot,刚执行完叶子子任务,需按其 goal.acceptances 自验收(已收到 goal / instruction / sibling_outputs / execute_output) | 段4 任务验收 | 折叠进回投 result={success, data, gaps};不独立回投 |
 | 收到引擎主动发的 BBS 任务消息(含 task_id + 后端 base url + 自身 bot_id,且引擎已替你占根) | 段5 BBS 接力 | 跳过 scan / claim / 自判,直接 attach -> 执行 -> result |
+| 叶子执行输入(instruction)含关键词「某某某公司」,且非框架 `[planning]`/`[search]` 头 | 段6 架构师名册 mock | 不联网,直接返 mock 伪造架构师名册 JSON(domain/architects[]/note) |
 
-**优先级**(实际多互斥,显式定义避免歧义):段5(引擎 BBS 通知) > 段2/段3(框架 `[planning]` / `[search]` 头) > 段4(worker 叶子自验收) > 段1(`/task` / `[RESUME_TASK]` / 副屏标签)。
+**优先级**(实际多互斥,显式定义避免歧义):段5(引擎 BBS 通知) > 段7/段2/段3(框架 `[planning]`/`[search]` 头;arch 场景「某某某公司」命中段7,优先于段2) > 段4(worker 叶子自验收) > 段1(`/task` / `[RESUME_TASK]` / 副屏标签) > 段6(叶子 instruction 含「某某某公司」)。
+
+**段5 ↔ 段6 并用(arch 接力链路唯一例外)**:段5 命中(BBS 通知)时,其 attach 的 scoped 叶子若 instruction 含「某某某公司」,叶子产出按**段6 arch-analysis** 规则(mock 名册),段5 仍管 attach / result 协议。除此之外严格"只跑命中段"。
 
 **未命中任何段**:静默结束本轮——不虚构任务、不追问、不输出卡片、不乱执行(相当于 return / no-op)。反例:`[planning]` / `[search]` 是框架执行期 prompt,不是用户任务提交,不要走段1。
 
-**只跑命中段**:命中某段即按该段全部规则执行,其余段规则不参与。
+**只跑命中段**:命中某段即按该段全部规则执行,其余段规则不参与(段5↔段6 arch 接力并用为唯一例外)。
+
+## 场景叠加层(泛化主干 + 演示案例优化)
+
+本 skill 分两层,在保证泛化的同时承载演示案例的针对性优化:
+
+- **泛化主干**:段1~段5(识别 / 规划 / 派发搜推 / 验收 / BBS 接力),默认行为,段体逐字节取自通用真源、不可改;未命中任何案例信号时即纯主干,可处理任意任务(泛化性来源)。
+- **案例叠加段**:段6 arch-analysis / 段7 planning-arch,由**案例信号**(当前为 prompt/instruction 含「某某某公司」)门控,命中才激活——段7 在 arch 场景覆盖段2(同输出契约,换确定式剧本),段6 为 arch 专用叶子执行器(段5 接力时并用)。未命中案例信号 → 叠加段不参与,主干照常运行。
+- **扩展契约**:新增演示案例 = 追加其叠加段 + 注册其案例信号(强特征关键词/上下文),不改段1~段5;移除全部叠加段即回退为纯泛化 task-loop。案例信号须用强特征(如「某某某公司」)以免误命中通用任务。
+
+> 泛化性由主干保证(默认 + 不可改);针对性优化由叠加段提供(信号门控、可插拔、零侵入主干)。
 
 > 段1 · 任务识别(recognition;触发 /task 或 [RESUME_TASK] 或仅副屏标签)
 
@@ -318,7 +330,7 @@ tags: [task, loop, orchestrate, task-recognition, task-planning, task-search, ta
 Skill 到 `task_ready` 即完成任务定义；用户点击「执行」后，**不再调用本 Skill**。平台层必须读取 `task_ready.task` 和本次 `/task` 指令解析出的任务模式，转换为任务协作中心请求并调用：
 
 ```http
-POST /api/v1/collaboration/tasks/execute  # 本地联调：http://localhost:8888/api/v1/collaboration/tasks/execute
+POST /api/v1/collaboration/tasks/execute  # 本地联调：https://teamclawgw-pre.alipay.com/api/v1/collaboration/tasks/execute
 ```
 
 请求体类型为接口文档中的 `TaskRequest`：
@@ -566,7 +578,7 @@ interface TaskRequest {
 - `[EXPLICIT_TASK]` 不再作为任务入口；自然语言“发起任务/做个任务/转任务”也不再自动触发 Skill
 - 输出格式为结构化文本块（非 JSON），各引擎模型对文本模板的遵循度高于 JSON
 
-> 段2 · 任务规划(planning;触发 框架 [planning])
+> 段2 · 任务规划(planning;触发 框架 [planning],非 arch 场景)
 
 ## task-planning
 
@@ -798,3 +810,165 @@ worker bot 收到 execute 指令(框架 `format_execute` 组装的 prompt:目标
 
 - `bot_id` 必须用消息中给的"你自身 bot_id",不用引擎账号。
 - backend base url 从消息里取,不假设。
+
+> 段6 · 架构师名册 mock(arch-analysis;触发 叶子 instruction 含「某某某公司」;不联网返伪造名册)
+
+## arch-analysis — 某某某公司架构师分析(mock)
+
+### 触发
+
+输入(prompt / 子任务 instruction)中**含关键词「某某某公司」**即触发本 skill。触发后**不联网、不做真实组织推断**,直接返回下述 **mock 伪造数据**。
+
+> 用途:e2e 演练接力 mechanics,绝不在产出中带任何真实公司/真实人员信息。关键词刻意用占位「某某某公司」。
+
+### 输入
+
+被问的技术架构方向(由调用方在 prompt 里给出,例:基础架构 / 中间件架构 / 数据架构 等)。
+
+### 输出(仅一个 ```json 代码块)
+
+按以下模板输出,**把 `<方向>` 替换成被问的方向**,其余姓名/角色/职责**照抄 mock 值**(均为伪造,不要改写为真实信息):
+
+```json
+{
+  "domain": "<被问的方向>",
+  "architects": [
+    {
+      "name": "工程师甲",
+      "role": "<被问的方向>首席架构师",
+      "responsibility": "mock:负责某某某公司<被问的方向>的整体技术架构与演进规划"
+    },
+    {
+      "name": "工程师乙",
+      "role": "<被问的方向>高级架构师",
+      "responsibility": "mock:负责某某某公司<被问的方向>核心模块设计与技术评审"
+    },
+    {
+      "name": "工程师丙",
+      "role": "<被问的方向>技术负责人",
+      "responsibility": "mock:负责某某某公司<被问的方向>团队技术管理与落地推进"
+    }
+  ],
+  "note": "mock 伪造数据,仅用于 e2e 演练,不代表任何真实人员"
+}
+```
+
+### 规则(硬约束)
+
+- **关键词触发**:无「某某某公司」关键词时不触发;触发即返上述 mock,不掺杂真实信息。
+- **输出仅一个 ```json 代码块**,字段固定 `domain` / `architects[]` / `note`,便于上游解析。
+- **每个方向固定返 3 条 mock 架构师**(工程师甲/乙/丙),姓名/职责为伪造占位,不得替换为真实姓名。
+- 不得联网,不得臆造真实姓名,不得在输出中出现除「某某某公司」外的任何真实公司名。
+
+> 段7 · 任务规划·arch 场景(planning-arch;触发 框架 [planning] 且 prompt 含「某某某公司」;确定式按根验收交付物集合 + done_children 查表)
+
+## task-planning-arch
+
+任务目标驱动的**任务规划** skill,运行在 **owner bot**(owner_bot_id)。框架投递 planning prompt
+(prompt 含 `{goal, context, target_node, graph_snapshot, gaps}` + 返回格式约定;详见框架
+`GapBasedPlanningStrategy._compose_planning_prompt`),本 skill 读 prompt 中的目标节点 `node_id`,
+按 **arch 场景确定式剧本**产出下一批子任务——参照 `task-planning` 的 storage 特例:**按根目标的验收交付物集合
++ `done_children` 查表**,不靠自由 LLM 分解(避免拆子数/拆法飘忽)。
+
+### 环境约束(必须遵守)
+
+> **禁止联网搜索**。本 skill 运行在 singlebox 本地 teamclaw bot,**无任何联网能力**:
+> 不得调用任何 web_search / 联网检索 / 外部 HTTP 工具;不得在 instruction 中要求子任务联网查资料。
+> 一切判断基于 prompt 中已提供的 `{goal, context, snapshot, done_children, gaps}` 与你自身知识进行,
+> 缺数据用合理假设/占位补全并标注。
+
+### 触发条件
+
+收到 prompt 头部 `[planning]` 标记的指令,且 prompt 含 `目标节点 node_id=...` 与 `任务态快照{...}`。
+
+### 输入(框架组装,prompt 内嵌)
+
+| 字段 | 含义 |
+|---|---|
+| `node_id` | 当前计算 gap 的目标节点(node_id=... 形式;根 task_id 由服务端生成,不作为场景判据) |
+| `goal.objective` / `goal.acceptances[]` | 节点自身目标与验收标准 |
+| `context.background` | 任务背景 |
+| `gaps` | 上一轮验收 FAIL 的 gaps(补救规划时非空) |
+| `graph_snapshot.loop_round` | 当前 BBS 上升轮次 |
+
+### 输出(返回格式约定)
+
+返回 JSON 字符串,结构为对象 `{"tasks": List[TaskSpec], "has_gap": bool, "gap_detail": str}`:
+
+```json
+{"tasks": [{"metadata": {"task_id": "<子节点node_id>", "title": "<标题>", "instruction": "<指令>"},
+             "context": {"background": "<背景>", "extend_props": {}},
+             "goal": {"objective": "<目标>", "acceptances": [{"id": "<ac_id>", "description": "<描述>"}]}}],
+ "has_gap": true,
+ "gap_detail": ""}
+```
+
+- `tasks` = 下一批可执行子任务;`metadata.task_id` 即子节点 `node_id`(须唯一,不与已存重复);
+- gap 已闭(验收通过)→ `{"tasks": [], "has_gap": false, "gap_detail": "done"}`;
+- 有 gap 但拆不出子 → `{"tasks": [], "has_gap": true, "gap_detail": "<原因>"}`;
+- `done_children` 已列出已 DONE 子节点及产出,据此不重复产已 DONE 的。
+
+### 确定式分解剧本(arch 场景:按根目标交付物集合 + `done_children`)
+
+框架二轮起 target 恒为根(根从初始规划后一直 PLANNING)。按根 `goal.acceptances` 的**交付物集合** + 快照 `done_children`
+(已 DONE 子节点 + 其 `output` 产出)联合返回下一批:
+
+#### 单一交付物:架构师名册(预期 MISS→升 BBS 中继)
+
+| 目标 node_id | done_children | 返回 children |
+|---|---|---|
+| 根验收仅含架构师名册 | `[]`(初始) | `[N_architects]`  <!-- 无 bot → MISS@MAX→升 BBS,金庸中继收口 --> |
+| 根验收仅含架构师名册 | done 产出**已含架构师名册**(可能来自 `run_mode=="bbs"` 中继 scoped 节点) | `[]`(`has_gap=false`,gap 闭) |
+| 根验收仅含架构师名册 | 仍缺架构师名册 | `[]`(`has_gap=true`,`gap_detail="缺架构师名册"`,等 BBS 中继) |
+
+#### 两份交付物:技术栈概览 + 架构师名册
+
+| 目标 node_id | done_children | 返回 children |
+|---|---|---|
+| 根验收含技术栈概览 + 架构师名册 | `[]`(初始) | `[N_tech_stack, N_architects]`  <!-- tech_stack 命中 bot(single_bot);architects MISS→BBS --> |
+| 根验收含技术栈概览 + 架构师名册 | done 产出**已含技术栈概览 + 架构师名册** | `[]`(`has_gap=false`,gap 闭) |
+| 根验收含技术栈概览 + 架构师名册 | 仍缺任一份 | `[]`(`has_gap=true`,`gap_detail="<缺哪份>"`) |
+
+#### 三份交付物:技术栈概览 + 业务/数据双视角分析 + 架构师名册
+
+| 目标 node_id | done_children | 返回 children |
+|---|---|---|
+| 根验收含技术栈概览 + 双视角分析 + 架构师名册 | `[]`(初始) | `[N_tech_stack, N_dual_view, N_architects]`  <!-- tech_stack single_bot;dual_view coop_group;architects MISS→BBS --> |
+| 根验收含技术栈概览 + 双视角分析 + 架构师名册 | done 产出**已含技术栈概览 + 双视角分析 + 架构师名册** | `[]`(`has_gap=false`,gap 闭) |
+| 根验收含技术栈概览 + 双视角分析 + 架构师名册 | 仍缺任一份 | `[]`(`has_gap=true`,`gap_detail="<缺哪份>"`) |
+
+#### FAIL+gaps 叶补救 / 其它
+
+| 情形 | 返回 |
+|---|---|
+| target=FAIL 叶节点且 `gaps` 非空(补救规划) | `[N_<叶>_remediate]`(按 gaps 描述产 1 个补救子) |
+| 其它 / 无可规划 | `[]` |
+
+#### 子任务规格(固定 node_id + task_spec)
+
+```json
+[
+  {"metadata": {"task_id": "N_tech_stack", "title": "基础架构方向技术栈概览",
+                "instruction": "给出某某某公司基础架构方向的技术栈概览:列出计算/存储/网络等分层与每层核心组件,简要说明。基于自身知识即可,不联网。"},
+   "context": {"background": "某某某公司基础架构方向技术栈梳理", "extend_props": {}},
+   "goal": {"objective": "产出基础架构方向技术栈概览(分层+核心组件)",
+            "acceptances": [{"id": "ac_tech", "description": "给出基础架构方向技术栈概览(计算/存储/网络等层与核心组件)"}]}},
+  {"metadata": {"task_id": "N_dual_view", "title": "业务架构与数据架构双视角深度分析",
+                "instruction": "从**业务架构与数据架构双视角**深度分析某某某公司基础架构的现状与演进(需业务架构、数据架构两个视角的专家协作完成)。基于自身知识即可,不联网。"},
+   "context": {"background": "某某某公司基础架构双视角分析", "extend_props": {}},
+   "goal": {"objective": "从业务架构与数据架构双视角深度分析基础架构现状与演进",
+            "acceptances": [{"id": "ac_dual", "description": "从业务架构与数据架构双视角深度分析基础架构现状与演进"}]}},
+  {"metadata": {"task_id": "N_architects", "title": "基础架构方向架构师名册",
+                "instruction": "整理某某某公司基础架构方向的 3 位核心技术架构师,给出每位架构师的姓名/角色 + 主要职责。基于自身知识即可,不联网。"},
+   "context": {"background": "某某某公司基础架构方向架构师梳理", "extend_props": {}},
+   "goal": {"objective": "整理基础架构方向 3 位核心架构师(姓名/角色 + 职责)",
+            "acceptances": [{"id": "ac_arch", "description": "给出基础架构方向 3 位架构师的姓名/角色 + 职责"}]}}
+]
+```
+> 各 case 初始批次按根验收交付物集合取其中若干:仅架构师名册→`[N_architects]`;技术栈概览+架构师名册→`[N_tech_stack, N_architects]`;
+> 三份交付物齐全→`[N_tech_stack, N_dual_view, N_architects]`。
+
+> **gap 闭判据(二轮 owner 复核根 gap 用)**:读 `done_children[].output`——若各交付物(技术栈概览 / 双视角分析 /
+> 架构师名册,架构师名册可能由 `run_mode=="bbs"` 中继 scoped 节点的 `architects` 产出)均已出现 → `has_gap=false`
+> 收口;任一缺失 → `has_gap=true`。不重复产已 DONE 的;`N_architects` 被 BBS recover 清掉后由中继 scoped 节点补其产出。
+> 节点名由本 skill 决定,**框架代码零 case 知识**(框架 grep 不得出现这些字面量,知识只在本 skill)。
