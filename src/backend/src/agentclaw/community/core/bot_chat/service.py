@@ -195,13 +195,7 @@ class BotChatService:
             from_date = _as_utc(from_date)
         if to_date is not None:
             to_date = _as_utc(to_date)
-        if group_mode:
-            # A group is the aggregation boundary for the legacy logs UI.  The
-            # old frontend passes the currently selected bot_id and omits
-            # time_scope=all, but neither should narrow the group's history.
-            from_date = datetime(1970, 1, 1, tzinfo=timezone.utc)
-            to_date = now
-        elif time_scope == "all":
+        if time_scope == "all":
             from_date = from_date or datetime(1970, 1, 1, tzinfo=timezone.utc)
             to_date = to_date or now
         else:

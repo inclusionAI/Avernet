@@ -533,18 +533,18 @@ class TestBotChatServiceListSessions:
         assert kwargs["bot_id"] == "bot-a"
 
     @pytest.mark.asyncio
-    async def test_group_query_uses_group_as_scope_and_reads_all_history(self, service):
-        """Group mode is open across bots/owners and reads the full group history."""
+    async def test_group_query_uses_group_as_scope_and_keeps_default_time_window(self, service):
+        """Group mode is open across bots/owners but keeps the default time window."""
         sessions = [
             ConversationSession(
                 id="trace-bot-a",
                 name="Bot A",
-                timestamp="2020-01-01T00:00:00Z",
+                timestamp="2026-08-21T00:00:00Z",
             ),
             ConversationSession(
                 id="trace-bot-b",
                 name="Bot B",
-                timestamp="2020-01-01T00:00:01Z",
+                timestamp="2026-08-21T00:00:01Z",
             ),
         ]
         service._db_repo = MagicMock()
@@ -554,8 +554,6 @@ class TestBotChatServiceListSessions:
             owner_id="viewer-user",
             bot_id="bot-a",
             group_id="group-fixture",
-            from_date=datetime(2026, 8, 1, tzinfo=timezone.utc),
-            to_date=datetime(2026, 8, 21, tzinfo=timezone.utc),
         )
 
         assert result.sessions == sessions
@@ -565,8 +563,8 @@ class TestBotChatServiceListSessions:
         assert kwargs["bot_id"] is None
         assert kwargs["group_id"] == "group-fixture"
         assert kwargs["query_scope"] == QueryScope.OPEN
-        assert kwargs["from_ms"] == 0
-        assert kwargs["to_ms"] > 0
+        assert kwargs["from_ms"] > 0
+        assert kwargs["to_ms"] > kwargs["from_ms"]
 
     @pytest.mark.asyncio
     async def test_group_query_time_scope_all_reads_all_history(self, service):
