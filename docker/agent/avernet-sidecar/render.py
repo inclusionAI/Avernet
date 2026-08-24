@@ -131,10 +131,31 @@ def render_virtual_host(rule: OutboundRule, idx: int) -> str:
 
 
 def render_virtual_hosts(rules: list[OutboundRule]) -> str:
-    """Render all VirtualHosts."""
+    """Render all VirtualHosts, merging rules with identical domain sets.
+
+    Envoy only permits a single wildcard domain per route, so multiple
+    '*' rules must be merged into one VirtualHost. Same-domain rules are
+    also merged to avoid duplicate matchers.
+    """
     if not rules:
         return "[]"
-    return "\n" + "\n".join(render_virtual_host(r, i) for i, r in enumerate(rules))
+
+    # Group rules by their domain tuple (sorted for stable key).
+    groups: dict[tuple[str, ...], OutboundRule] = {}
+    order: list[tuple[str, ...]] = []
+    for r in rules:
+        key = tuple(sorted(r.domains))
+        if key not in groups:
+            groups[key] = OutboundRule(
+                name=r.name, domains=r.domains, set_rules=[], remove=[]
+            )
+            order.append(key)
+        g = groups[key]
+        g.set_rules.extend(r.set_rules)
+        g.remove.extend(r.remove)
+
+    merged = [groups[k] for k in order]
+    return "\n" + "\n".join(render_virtual_host(r, i) for i, r in enumerate(merged))
 
 
 def extract_sni_domains(rules: list[OutboundRule]) -> list[str]:
