@@ -87,6 +87,14 @@ fn assert_empty_logical_db(logical_db: &str) -> DbResult<()> {
     }
 }
 
+fn transaction_lock_row_is_missing(error: &DbError) -> bool {
+    matches!(
+        error,
+        DbError::InvalidInput(message)
+            if message.contains("references missing row 0 from step 0")
+    )
+}
+
 fn db_timestamp_from_millis(timestamp_ms: u64) -> ServiceResult<String> {
     let timestamp_ms = i64::try_from(timestamp_ms)
         .map_err(|_| ServiceError::InternalError("Group timestamp is out of range".to_string()))?;
@@ -1634,9 +1642,18 @@ impl GroupRepoPort for MySqlGroupStore {
                 ),
             ));
         }
-        self.db.plugin().transaction(steps).await.map_err(|error| {
-            ServiceError::InternalError(format!("Eventful Group mutation failed: {error}"))
-        })?;
+        if let Err(error) = self.db.plugin().transaction(steps).await {
+            if routing_policy_snapshot.is_some() && transaction_lock_row_is_missing(&error) {
+                self.cache.write().await.remove(&command.group_id);
+                return Err(ServiceError::Conflict(format!(
+                    "Group '{}' routing policy changed concurrently",
+                    command.group_id
+                )));
+            }
+            return Err(ServiceError::InternalError(format!(
+                "Eventful Group mutation failed: {error}"
+            )));
+        }
         self.cache.write().await.remove(&command.group_id);
         if deleting {
             return Ok(terminal);
@@ -3744,6 +3761,7 @@ mod tests {
         query_rows: Vec<DbRow>,
         query_results: StdMutex<VecDeque<Vec<DbRow>>>,
         transaction_error: Option<String>,
+        missing_transaction_lock_row: bool,
     }
 
     impl RecordingDbPlugin {
@@ -3773,6 +3791,14 @@ mod tests {
                 transaction_error: Some(
                     "UNIQUE constraint failed: bcs_groups.env, bcs_groups.dm_pair_key".into(),
                 ),
+                ..Self::default()
+            }
+        }
+
+        fn with_missing_transaction_lock_row(query_rows: Vec<DbRow>) -> Self {
+            Self {
+                query_rows,
+                missing_transaction_lock_row: true,
                 ..Self::default()
             }
         }
@@ -3810,6 +3836,11 @@ mod tests {
             &self,
             steps: Vec<DbTransactionStep>,
         ) -> DbResult<Vec<DbTransactionStepResult>> {
+            if self.missing_transaction_lock_row {
+                return Err(DbError::InvalidInput(
+                    "transaction parameter 2 references missing row 0 from step 0".to_string(),
+                ));
+            }
             if let Some(error) = &self.transaction_error {
                 return Err(DbError::Backend(error.clone()));
             }
@@ -4012,6 +4043,48 @@ mod tests {
         assert!(
             matches!(error, ServiceError::Conflict(message) if message.contains("concurrently"))
         );
+    }
+
+    #[tokio::test]
+    async fn eventful_mutable_patch_reports_a_missing_routing_lock_as_a_conflict() {
+        let policy = RoutingPolicy {
+            mode: bcs_service_api::RoutingMode::Mention,
+            default_bot_final_delivery: DefaultDelivery::SendToDriver,
+            sender_routes: HashMap::new(),
+        };
+        let stored_policy_json =
+            serde_json::to_string(&policy).expect("serialize stored routing policy");
+        let routing_row = DbRow::new(BTreeMap::from([(
+            "routing_policy_json".to_string(),
+            Value::from(stored_policy_json),
+        )]));
+        let db = Arc::new(RecordingDbPlugin::with_missing_transaction_lock_row(vec![
+            routing_row,
+        ]));
+        let repo = MySqlGroupStore::new(db, "local".to_string());
+        let mut group = Group::new("group-1", "driver", Vec::new());
+        group.routing_policy = Some(policy);
+        let expected_version = group.version;
+        repo.cache.write().await.insert(group.id.clone(), group);
+
+        let error = repo
+            .commit_eventful_mutation(CommitGroupEventfulMutation {
+                group_id: "group-1".to_string(),
+                expected_version,
+                mutated_at_ms: 1,
+                mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch {
+                    default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+                    ..Default::default()
+                }),
+                event: None,
+            })
+            .await
+            .expect_err("a missing guarded lock row must be reported as a conflict");
+
+        assert!(
+            matches!(error, ServiceError::Conflict(message) if message.contains("concurrently"))
+        );
+        assert!(repo.cache.read().await.get("group-1").is_none());
     }
 
     #[tokio::test]
