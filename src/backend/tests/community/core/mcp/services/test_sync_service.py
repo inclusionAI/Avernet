@@ -142,8 +142,8 @@ class TestRefreshMcpScope:
         )
 
         result = await service.refresh_mcp_scope(
-            user_id="owner-1",
-            entity_id="entity-1",
+            user_id="caller-1",
+            entity_id="owner-1",
             bot_id="default",
             entity_type="staff",
             engine_type="claude_code",
@@ -191,14 +191,15 @@ class TestRefreshMcpScope:
         )
 
         result = await service.refresh_mcp_scope(
-            user_id="owner-1",
-            entity_id="entity-1",
+            user_id="caller-1",
+            entity_id="owner-1",
             bot_id="default",
             entity_type="staff",
             engine_type="openclaw",
         )
 
         assert result["success"] is True
+        bot_repository.get_by_id_and_owner.assert_called_once_with("default", "owner-1")
         caller_identity_repository.list_draft_call_types.assert_not_called()
         assert passport_update.update_passport.call_args.kwargs["resource_scope"][
             "mcp_items"

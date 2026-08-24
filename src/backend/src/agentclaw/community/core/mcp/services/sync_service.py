@@ -484,6 +484,7 @@ class MCPSyncService:
         passport_result = await self._update_passport(
             bot_id=bot_id,
             user_id=user_id,
+            owner_id=entity_id,
             synced_mcps=active_mcps,
             engine_type=effective_engine,
         )
@@ -898,6 +899,7 @@ class MCPSyncService:
         self,
         bot_id: str,
         user_id: str,
+        owner_id: str,
         synced_mcps: list[dict[str, Any]],
         engine_type: Optional[str] = None,
     ) -> dict[str, Any]:
@@ -907,7 +909,7 @@ class MCPSyncService:
         template_type: Optional[str] = None
         template_config: Optional[Mapping[str, Any]] = None
         try:
-            bot = self.bot_repository.get_by_id_and_owner(bot_id, user_id)
+            bot = self.bot_repository.get_by_id_and_owner(bot_id, owner_id)
             if bot:
                 bot_name = bot.get("bot_name")
                 bot_desc = bot.get("bot_desc")
