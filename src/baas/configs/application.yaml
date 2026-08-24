@@ -121,6 +121,16 @@ user_config:
   # "legacy": DeviceTtlTimerTask 运行，DeadlineRenewalScheduler 不启动
   # "deadline": DeadlineRenewalScheduler 运行，DeviceTtlTimerTask 不启动
   renewal_scheduler:
+    lock_name: "deadline_renewal_scheduler_lock"
+    lock_expire_seconds: 1800
+    cron_interval_seconds: 1800
+    batch_size: 500
+    max_concurrency: 20
+    renew_threshold_hours: 12
+    retry_delay_minutes: 2
+    max_fail_count: 10
+    ttl_safety_margin_minutes: 1
+    anti_join_verify_interval_cycles: 48
     engine: "legacy"
 
   # 设备 TTL 定时器配置（每 30 分钟扫描整个到期队列并续期+探活）

@@ -363,6 +363,19 @@ class ArcaPaasService(PaasService):
                 info.status.value if hasattr(info.status, "value") else str(info.status)
             )
 
+            # CR-01: extract sandbox expiration timestamp (ms epoch, same unit
+            # as info.ttl_timestamp). Numeric guard required: mock sandbox info
+            # objects are MagicMock, so a missing ttl_timestamp yields a
+            # MagicMock child via getattr — passing it through would pollute
+            # pydantic validation. Non-numeric values fall back to None
+            # (discovery scan then uses its now+12h fallback).
+            raw_ttl_timestamp = getattr(info, "ttl_timestamp", None)
+            ttl_expiration_time = (
+                int(raw_ttl_timestamp)
+                if isinstance(raw_ttl_timestamp, (int, float))
+                else None
+            )
+
             return ArcaCreationResult(
                 platform="arca",
                 status=status,
@@ -370,6 +383,7 @@ class ArcaPaasService(PaasService):
                 sandbox_id=info.sandbox_id,
                 resources=info.resources,
                 ttl_in_minutes=info.ttl_in_minutes,
+                ttl_expiration_time=ttl_expiration_time,
                 envs=info.envs,
                 snapshot_id=info.snapshot_id,
                 metadata=info.metadata,
