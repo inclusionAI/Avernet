@@ -117,6 +117,15 @@ Artifact build; it never
 deletes rows, reads historical Default exclusions, or runs in HTTP GET/list,
 Pool convergence, or file-snapshot paths.
 
+`GET /openapi/v1/bots/{bot_id}/skills` is the one deliberate exception, through
+`repair_bot_skillset_installations` rather than the materializer. It lists every
+Skill a Bot reaches — the rows it owns plus the ones a SkillSet bridges — and
+`active` is a *filter*, deciding `total` and the page boundary, so the listing
+repairs before it filters. Unlike the materializer this repair also deletes rows
+and reads Default exclusions. It writes only the difference, in one transaction,
+after the caller's Bot access has been checked, and never reconciles runtime.
+See `specs/2026-08-23-openapi-v1-bot-skill-listing/`.
+
 MCP Direct activation and ordinary SkillSet MCP membership share the same
 active-only desired-state and compensation boundary as Skills.  The MCP
 catalogue, user configuration, and permission grant remain separate facts;

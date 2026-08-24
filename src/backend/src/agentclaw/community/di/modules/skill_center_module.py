@@ -404,12 +404,14 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         skill_repo: SkillRepository,
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
+        skill_sets: SkillSetControlPlaneRepositoryProtocol,
     ) -> LocalSkillQueryServiceProtocol:
-        """Bind the public Local-Skill desired-state query service."""
+        """Bind the public Bot-Skill desired-state query service."""
         return LocalSkillQueryService(
             skill_repo=skill_repo,
             bot_repo=bot_repo,
             collaborator_service=collaborator_service,
+            skill_sets=skill_sets,
         )
 
     @singleton

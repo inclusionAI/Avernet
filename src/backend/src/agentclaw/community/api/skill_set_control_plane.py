@@ -140,10 +140,6 @@ class SkillSetControlPlaneServiceProtocol(Protocol):
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> dict[str, Any]: ...
 
-    async def switch(
-        self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
-    ) -> dict[str, Any]: ...
-
     async def sync(
         self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
     ) -> dict[str, Any]: ...

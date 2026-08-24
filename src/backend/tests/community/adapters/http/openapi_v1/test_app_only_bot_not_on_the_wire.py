@@ -159,7 +159,7 @@ class _Skills:
             skill_id=skill_id, actor_id=user_id, active=active
         )
 
-    def list_local_skills(
+    def list_bot_skills(
         self, *, bot_id, owner_id, actor_id, page, page_size, active=None, keyword=None
     ):
         self.listed.append((bot_id, owner_id))

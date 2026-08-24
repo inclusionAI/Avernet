@@ -44,6 +44,7 @@ statement shape and predicates:
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from datetime import datetime
 from typing import List, Optional
 
@@ -398,24 +399,41 @@ class SkillRepository(
             return _skill_to_dict(row) if row is not None else None
 
     @staticmethod
-    def _public_local_skill(row, active: bool) -> dict:
+    def _public_bot_skill(row, active: bool) -> dict:
         data = _skill_to_dict(row)
         data["active"] = bool(active)
         return data
 
-    def list_bot_local_skills(
+    def list_bot_skills(
         self,
         *,
         bot_id: str,
         user_id: str,
+        skill_set_member_ids: Iterable[int],
         page: int,
         page_size: int,
         active: bool | None,
         keyword: str | None,
     ) -> tuple[int, list[dict]]:
-        """Page exact Bot-owned ``local://`` rows by desired active state."""
+        """Page every Skill one Bot reaches, by desired active state.
+
+        A Bot reaches a Skill three ways, and this answers for all of them: it
+        owns the row outright (``bolt_id``/``user_id``, which is every
+        ``local://`` asset it ever uploaded); one of its SkillSets bridges a
+        shared ``git://``/``center://`` asset to it; or it activated such an
+        asset directly, which writes an Installation row and nothing else.
+        ``skill_set_member_ids`` carries the second already resolved — the
+        SkillSet control plane owns which Sets a Bot has and which Default
+        members its owner excluded, and this method deliberately does not
+        re-derive either.
+
+        ``active`` is read from the Installation fact alone, so the answer
+        holds while the Bot is offline and cannot drift from what an
+        activate/deactivate command wrote.
+        """
         from agentclaw.community.core.models.skill import BotSkillInstallation
 
+        member_ids = {int(value) for value in skill_set_member_ids}
         with self._db.orm_session() as db:
             installed = (
                 db.query(BotSkillInstallation.id)
@@ -429,11 +447,21 @@ class SkillRepository(
                 )
                 .exists()
             )
-            query = db.query(self.Skill, installed.label("active")).filter(
-                self.Skill.env == get_current_env(),
+            owned = and_(
                 self.Skill.bolt_id == bot_id,
                 self.Skill.user_id == _normalize_user_id(user_id),
-                self.Skill.git_path.like("local://%"),
+            )
+            # Three ways, not two. A shared Skill the Bot activated directly
+            # belongs to no SkillSet and carries another owner's ``bolt_id``,
+            # so neither of the first two predicates finds it — yet
+            # ``list_bot_active_assets`` puts it in the runtime projection, so
+            # leaving it out would hide a Skill the Bot is running.
+            reachable = [owned, installed]
+            if member_ids:
+                reachable.append(self.Skill.id.in_(member_ids))
+            query = db.query(self.Skill, installed.label("active")).filter(
+                self.Skill.env == get_current_env(),
+                or_(*reachable),
             )
             if keyword and keyword.strip():
                 term = f"%{keyword.strip().lower()}%"
@@ -455,7 +483,7 @@ class SkillRepository(
                 .all()
             )
             return total, [
-                self._public_local_skill(row, is_active) for row, is_active in rows
+                self._public_bot_skill(row, is_active) for row, is_active in rows
             ]
 
     def get_bot_local_skill(
@@ -488,7 +516,7 @@ class SkillRepository(
                 )
                 .one_or_none()
             )
-            return self._public_local_skill(*row) if row else None
+            return self._public_bot_skill(*row) if row else None
 
     def list_bot_installed_skills(
         self, *, env: str, owner_id: str, bot_id: str
@@ -563,10 +591,11 @@ class SkillRepository(
     ):
         """Return active SkillSet assets plus direct Installation assets.
 
-        The Default SkillSet's historical Local exclusion is read only by the
-        one-shot migration.  Runtime projection instead consumes the
-        active-only Installation fact, so an API command and its subsequent
-        reconciliation cannot disagree about whether a Local Skill is active.
+        A Local asset's activity comes from the Installation fact alone, so an
+        API command and its subsequent reconciliation cannot disagree about it.
+        Every other Default Set member is active unless its Bot's owner
+        excluded it — the rest of the same rule, and what stops a deactivate
+        from reporting success while this projection keeps the Skill running.
         """
 
         from agentclaw.community.core.skills_pool.models import (
@@ -588,14 +617,33 @@ class SkillRepository(
                 env=env,
             )
             if skill_set.get("is_default"):
-                # System Default is an independent input to the Resolver.
-                # The historical per-Bot Local exclusion is migration-only
-                # compatibility data and must never decide a runtime entry.
-                # Bot-owned Local assets are selected solely by Installation.
+                # Two separate rules for a Default Set, and both are the ones
+                # ``includes_default_skill_member`` states.
+                #
+                # A Bot-owned Local asset is selected solely by Installation,
+                # so Default membership never speaks for it here.
+                #
+                # Every other member is active unless this Bot's owner excluded
+                # it. Removing a Skill from a shared Default Set is recorded as
+                # an exclusion rather than by deleting the row, because the Set
+                # is shared and no one Bot may edit it — so a projection that
+                # ignored exclusions would keep running a Skill its owner
+                # removed, and would contradict both the Bot Skill listing and
+                # ``SkillSetControlPlaneRepository.list_skills``, which have
+                # always applied them.
+                excluded = {
+                    int(value)
+                    for value in skill_sets.get_excluded_skills(
+                        user_id=owner_id,
+                        bot_id=bot_id,
+                        skill_set_id=int(skill_set["id"]),
+                    )
+                }
                 rows = [
                     row
                     for row in rows
                     if not str(row.get("git_path") or "").startswith("local://")
+                    and int(row["id"]) not in excluded
                 ]
             for row in rows:
                 git_path = str(row.get("git_path") or "")
@@ -1958,6 +2006,72 @@ class SkillSetRepository(
                 )
                 result = db.execute(stmt)
             return result.rowcount > 0
+
+    def exclude_default_set_skill(
+        self,
+        *,
+        owner_id: str,
+        bot_id: str,
+        skill_set_id: int,
+        skill_id: int,
+        env: str,
+    ) -> tuple[bool, bool]:
+        """Exclude a Skill from a Default Set and retire its Installation.
+
+        Both rows are the Bot's state, so ``owner_id`` is the Bot owner rather
+        than the acting caller. One transaction holding the Set row — the same
+        lock the repair takes — because the two halves are one fact.
+
+        Returns ``(created, uninstalled)``. When the Skill was already
+        excluded, ``created`` is false and the Installation row is left alone:
+        its owner may have activated it directly since, and a repeated removal
+        must not undo that.
+        """
+        from agentclaw.community.core.models.skill import BotSkillInstallation
+        from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
+
+        tenant = get_current_avernet_tenant()
+        with self._db.transactional_orm_session() as db:
+            # Same row, same order as the repair's ``_bot_sets``.
+            db.query(self.SkillSet).filter(
+                self.SkillSet.id == int(skill_set_id)
+            ).with_for_update().all()
+            row = (
+                db.query(DefaultSkillsetSkillExclusion)
+                .filter(
+                    DefaultSkillsetSkillExclusion.avernet_tenant == tenant,
+                    DefaultSkillsetSkillExclusion.user_id == owner_id,
+                    DefaultSkillsetSkillExclusion.bot_id == bot_id,
+                    DefaultSkillsetSkillExclusion.skill_set_id == int(skill_set_id),
+                    DefaultSkillsetSkillExclusion.skill_id == int(skill_id),
+                )
+                .with_for_update()
+                .first()
+            )
+            if row is not None:
+                row.gmt_modified = func.now()
+                return False, False
+            db.add(
+                DefaultSkillsetSkillExclusion(
+                    avernet_tenant=tenant,
+                    user_id=owner_id,
+                    bot_id=bot_id,
+                    skill_set_id=int(skill_set_id),
+                    skill_id=int(skill_id),
+                )
+            )
+            uninstalled = (
+                db.query(BotSkillInstallation)
+                .filter(
+                    BotSkillInstallation.avernet_tenant == tenant,
+                    BotSkillInstallation.env == env,
+                    BotSkillInstallation.owner_id == owner_id,
+                    BotSkillInstallation.bot_id == bot_id,
+                    BotSkillInstallation.skill_id == int(skill_id),
+                )
+                .delete(synchronize_session=False)
+            )
+            return True, bool(uninstalled)
 
     def remove_default_skill_exclusion(
         self,
