@@ -211,6 +211,7 @@ Module gates are selected from the committed files in the resulting diff:
 | `src/engine/` | Engine SAST, unit tests, and changed-line coverage |
 | `src/bcs/` | BCS/BCN unit tests in fast-fail mode, then unified singlebox coverage with BCS user-story E2E |
 | `src/frontend/` | Frontend CI |
+| `src/proxy/` | sandbox-proxy lint, unit tests, and changed-line coverage |
 | singlebox scripts and Backend/BaaS acceptance or E2E paths | singlebox coverage |
 
 The hook only checks committed changes in the pushed ref. Uncommitted working

@@ -179,6 +179,11 @@ if matches_any '^src/gateway/'; then
   run_heavy "$repo_root/src/gateway/scripts/ci_test.sh" --base "$base" --head "$head"
 fi
 
+if matches_any '^src/proxy/'; then
+  # sandbox-proxy CI: ruff lint + pytest + coverage + diff coverage (>=90%).
+  run_heavy "$repo_root/src/proxy/scripts/ci_test.sh" --base "$base" --head "$head"
+fi
+
 if matches_any '^src/frontend/'; then
   # Frontend 也通过模块自己的 ci_test.sh 作为统一入口。
   run_heavy "$repo_root/src/frontend/scripts/ci_test.sh" --base "$base" --head "$head"
