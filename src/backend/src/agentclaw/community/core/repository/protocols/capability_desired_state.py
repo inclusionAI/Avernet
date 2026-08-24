@@ -11,8 +11,8 @@ if TYPE_CHECKING:
     )
     from agentclaw.community.core.repository.capability_desired_state_types import (
         BotSkillSetBridge,
-        SkillSetDesiredState,
-        SkillSetMutation,
+        CapabilityDesiredState,
+        DesiredStateMutation,
     )
 
 
@@ -29,7 +29,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         default_engine_types: tuple[str, ...] | None = None,
     ) -> list[dict]: ...
     @abstractmethod
-    def repair_bot_skillset_installations(
+    def flush_installations(
         self,
         *,
         bot_id: str,
@@ -117,7 +117,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         skill_id: str,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
-    ) -> SkillSetMutation: ...
+    ) -> DesiredStateMutation: ...
     @abstractmethod
     def remove_skill(
         self,
@@ -128,7 +128,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         skill_id: str,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
-    ) -> SkillSetMutation: ...
+    ) -> DesiredStateMutation: ...
     @abstractmethod
     def add_mcp(
         self,
@@ -139,7 +139,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         server_code: str,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
-    ) -> SkillSetMutation: ...
+    ) -> DesiredStateMutation: ...
     @abstractmethod
     def remove_mcp(
         self,
@@ -150,21 +150,21 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         server_code: str,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
-    ) -> SkillSetMutation: ...
+    ) -> DesiredStateMutation: ...
     @abstractmethod
-    def activate_mcp_direct(
+    def install_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str, engine_type: str | None = None
-    ) -> SkillSetMutation: ...
+    ) -> DesiredStateMutation: ...
     @abstractmethod
-    def deactivate_mcp_direct(
+    def uninstall_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str, engine_type: str | None = None
-    ) -> SkillSetMutation: ...
+    ) -> DesiredStateMutation: ...
     @abstractmethod
     def list_installed_mcps(
         self, *, bot_id: str, owner_id: str, engine_type: str | None = None
     ) -> set[str]: ...
     @abstractmethod
-    def set_active(
+    def set_skill_set_active(
         self,
         *,
         bot_id: str,
@@ -173,17 +173,17 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         active: bool,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
-    ) -> SkillSetMutation: ...
+    ) -> DesiredStateMutation: ...
     @abstractmethod
     def snapshot_desired_state(
         self, *, bot_id: str, owner_id: str, engine_type: str | None = None
-    ) -> SkillSetDesiredState: ...
+    ) -> CapabilityDesiredState: ...
     @abstractmethod
     def restore_desired_state(
         self,
         *,
         bot_id: str,
         owner_id: str,
-        state: SkillSetDesiredState,
+        state: CapabilityDesiredState,
         engine_type: str | None = None,
     ) -> None: ...

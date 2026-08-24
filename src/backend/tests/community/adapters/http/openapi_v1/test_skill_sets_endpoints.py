@@ -88,7 +88,7 @@ class _ControlPlane:
             "changed": True,
         }
 
-    def resources(self, **_kwargs):
+    def list_resources(self, **_kwargs):
         return []
 
 

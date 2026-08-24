@@ -12,8 +12,8 @@ from types import SimpleNamespace
 import pytest
 
 from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
-    SkillSetDesiredState,
-    SkillSetMutation,
+    CapabilityDesiredState,
+    DesiredStateMutation,
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
@@ -46,12 +46,12 @@ class _Repository:
         self.update_calls.append(kwargs)
         return {"id": kwargs["set_id"], "is_default": False}
 
-    def set_active(self, **kwargs) -> SkillSetMutation:
+    def set_skill_set_active(self, **kwargs) -> DesiredStateMutation:
         self.set_active_calls.append(kwargs)
-        return SkillSetMutation(
+        return DesiredStateMutation(
             item={"id": "set-1", "name": "set", "is_default": False, "is_active": True},
             changed=True,
-            previous_state=SkillSetDesiredState(set(), {}, {}),
+            previous_state=CapabilityDesiredState(set(), {}, {}),
         )
 
     def restore_desired_state(self, **kwargs) -> None:
@@ -100,8 +100,8 @@ class _InactiveMembershipRepository(_Repository):
         self.membership_calls: list[tuple[str, dict]] = []
 
     @staticmethod
-    def _mutation() -> SkillSetMutation:
-        return SkillSetMutation(
+    def _mutation() -> DesiredStateMutation:
+        return DesiredStateMutation(
             item={
                 "id": "set-1",
                 "name": "draft",
@@ -109,34 +109,34 @@ class _InactiveMembershipRepository(_Repository):
                 "is_active": False,
             },
             changed=True,
-            previous_state=SkillSetDesiredState(set(), {}, {}),
+            previous_state=CapabilityDesiredState(set(), {}, {}),
         )
 
     def get_set(self, **_kwargs):
         return {"id": "set-1", "is_default": False, "is_active": False}
 
-    def add_skill(self, **kwargs) -> SkillSetMutation:
+    def add_skill(self, **kwargs) -> DesiredStateMutation:
         self.membership_calls.append(("add_skill", kwargs))
         return self._mutation()
 
-    def remove_skill(self, **kwargs) -> SkillSetMutation:
+    def remove_skill(self, **kwargs) -> DesiredStateMutation:
         self.membership_calls.append(("remove_skill", kwargs))
         return self._mutation()
 
-    def add_mcp(self, **kwargs) -> SkillSetMutation:
+    def add_mcp(self, **kwargs) -> DesiredStateMutation:
         self.membership_calls.append(("add_mcp", kwargs))
         return self._mutation()
 
-    def remove_mcp(self, **kwargs) -> SkillSetMutation:
+    def remove_mcp(self, **kwargs) -> DesiredStateMutation:
         self.membership_calls.append(("remove_mcp", kwargs))
         return self._mutation()
 
 
 class _ActiveMembershipRepository(_InactiveMembershipRepository):
     @staticmethod
-    def _mutation() -> SkillSetMutation:
+    def _mutation() -> DesiredStateMutation:
         mutation = _InactiveMembershipRepository._mutation()
-        return SkillSetMutation(
+        return DesiredStateMutation(
             item={**mutation.item, "is_active": True},
             changed=mutation.changed,
             previous_state=mutation.previous_state,
@@ -355,9 +355,9 @@ class _McpRepository(_Repository):
         super().__init__()
         self.direct_calls: list[dict] = []
 
-    def activate_mcp_direct(self, **kwargs) -> SkillSetMutation:
+    def install_mcp(self, **kwargs) -> DesiredStateMutation:
         self.direct_calls.append(kwargs)
-        return SkillSetMutation({}, True, SkillSetDesiredState(set(), {}, {}))
+        return DesiredStateMutation({}, True, CapabilityDesiredState(set(), {}, {}))
 
 
 class _ResourceRepository(_Repository):
@@ -1084,7 +1084,7 @@ async def test_legacy_sync_activates_additively_without_replacing_other_sets():
         mcp_auth=_McpAuth(allowed=True),
     )
 
-    await service.sync(
+    await service.legacy_activate(
         bot_id="bot-1",
         owner_id="true-owner",
         actor_id="true-owner",
@@ -1120,7 +1120,7 @@ async def test_legacy_default_sync_uses_owner_qualified_bot_lookup():
         mcp_auth=_McpAuth(allowed=True),
     )
 
-    await service.sync(
+    await service.legacy_activate(
         bot_id="default",
         owner_id=owner_id,
         actor_id=owner_id,

@@ -11,7 +11,7 @@ from agentclaw.community.core.repository.implementations.skill_center.default_sk
     excluded_mcp_codes,
 )
 from agentclaw.community.core.repository.capability_desired_state_types import (
-    SkillSetMutation,
+    DesiredStateMutation,
 )
 from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
@@ -64,7 +64,7 @@ class McpSkillSetControlPlaneCommands:
         self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
-    ) -> SkillSetMutation:
+    ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
             row = self._set(session, bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type=engine_type, default_engine_types=default_engine_types, locked=True)
             self._ordinary(row)
@@ -75,7 +75,7 @@ class McpSkillSetControlPlaneCommands:
                 .first()
             )
             if current is not None:
-                return SkillSetMutation(self._as_item(row), False, old)
+                return DesiredStateMutation(self._as_item(row), False, old)
             if server_code in old.mcp_installations:
                 raise SkillSetControlPlaneConflictError("RESOURCE_DIRECT_ACTIVE")
             owner = (
@@ -102,13 +102,13 @@ class McpSkillSetControlPlaneCommands:
                     avernet_tenant=get_current_avernet_tenant(),
                 ))
             session.flush()
-            return SkillSetMutation(self._as_item(row), True, old)
+            return DesiredStateMutation(self._as_item(row), True, old)
 
     def remove_mcp(
         self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
-    ) -> SkillSetMutation:
+    ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
             row = self._set(session, bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type=engine_type, default_engine_types=default_engine_types, locked=True)
             self._ordinary(row)
@@ -119,7 +119,7 @@ class McpSkillSetControlPlaneCommands:
                 .first()
             )
             if membership is None:
-                return SkillSetMutation(self._as_item(row), False, old)
+                return DesiredStateMutation(self._as_item(row), False, old)
             session.delete(membership)
             if row.is_active:
                 self._scope(session.query(BotMCPInstallation), BotMCPInstallation).filter(
@@ -128,9 +128,9 @@ class McpSkillSetControlPlaneCommands:
                     BotMCPInstallation.server_code == server_code,
                 ).delete(synchronize_session=False)
             session.flush()
-            return SkillSetMutation(self._as_item(row), True, old)
+            return DesiredStateMutation(self._as_item(row), True, old)
 
-    def activate_mcp_direct(self, *, bot_id: str, owner_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
+    def install_mcp(self, *, bot_id: str, owner_id: str, server_code: str, engine_type: str | None = None) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             if self._mcp_has_ordinary_membership(
@@ -138,15 +138,15 @@ class McpSkillSetControlPlaneCommands:
             ):
                 raise SkillSetControlPlaneConflictError("RESOURCE_MANAGED_BY_SKILL_SET")
             if server_code in old.mcp_installations:
-                return SkillSetMutation({}, False, old)
+                return DesiredStateMutation({}, False, old)
             session.add(BotMCPInstallation(
                 bot_id=bot_id, owner_id=owner_id, server_code=server_code, env=get_current_env(),
                 avernet_tenant=get_current_avernet_tenant(),
             ))
             session.flush()
-            return SkillSetMutation({}, True, old)
+            return DesiredStateMutation({}, True, old)
 
-    def deactivate_mcp_direct(self, *, bot_id: str, owner_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
+    def uninstall_mcp(self, *, bot_id: str, owner_id: str, server_code: str, engine_type: str | None = None) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             if self._mcp_has_ordinary_membership(
@@ -159,7 +159,7 @@ class McpSkillSetControlPlaneCommands:
                 BotMCPInstallation.server_code == server_code,
             ).delete(synchronize_session=False) > 0
             session.flush()
-            return SkillSetMutation({}, changed, old)
+            return DesiredStateMutation({}, changed, old)
 
     def list_installed_mcps(self, *, bot_id: str, owner_id: str, engine_type: str | None = None) -> set[str]:
         with self._db.orm_session() as session:

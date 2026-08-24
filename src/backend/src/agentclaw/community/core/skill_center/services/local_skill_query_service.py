@@ -69,7 +69,7 @@ class LocalSkillQueryService(LocalSkillQueryServiceProtocol):
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
         # Returns the bridge it applied, so the page need not resolve again.
-        bridge = self._skill_sets.repair_bot_skillset_installations(
+        bridge = self._skill_sets.flush_installations(
             bot_id=bot_id,
             owner_id=owner_id,
             env=str(bot["env"]),

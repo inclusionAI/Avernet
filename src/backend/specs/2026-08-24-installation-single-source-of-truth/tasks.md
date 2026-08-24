@@ -10,11 +10,11 @@ lands in the same group as the migration of its last caller.
       `skill_set_management_service.py`; `api/skill_set_control_plane.py` →
       `api/skill_set_management_service.py` (protocol renamed); DI bindings,
       routers' `Injected(...)` types, tests. Error class names unchanged.
-- [~] 1.2 `SkillSetControlPlaneRepository` → `CapabilityDesiredStateRepository`:
+- [x] 1.2 `SkillSetControlPlaneRepository` → `CapabilityDesiredStateRepository`:
       implementation file, `core/repository/protocols/skill_set_control_plane.py`
       → `capability_desired_state.py`, `skill_set_control_plane_types.py` →
       `capability_desired_state_types.py`; all importers.
-- [ ] 1.2b Method/type renames per the plan's method-rename table (zero
+- [x] 1.2b Method/type renames per the plan's method-rename table (zero
       behavior): `SkillSetDesiredState` → `CapabilityDesiredState`,
       `SkillSetMutation` → `DesiredStateMutation`;
       `repair_bot_skillset_installations` → `flush_installations`;

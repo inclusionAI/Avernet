@@ -353,7 +353,7 @@ def test_ensure_active_skillset_installations_does_not_resurrect_deactivated_set
         )
 
     repository = CapabilityDesiredStateRepository(db)
-    repository.set_active(bot_id="bot", owner_id="owner", set_id="1", active=False)
+    repository.set_skill_set_active(bot_id="bot", owner_id="owner", set_id="1", active=False)
 
     assert (
         repository.ensure_active_skillset_installations(bot_id="bot", owner_id="owner")
@@ -502,7 +502,7 @@ def test_activation_rolls_back_all_membership_installations_when_nth_insert_fail
     event.listen(BotSkillInstallation, "before_insert", fail_second_install)
     try:
         with pytest.raises(RuntimeError, match="second installation"):
-            CapabilityDesiredStateRepository(db).set_active(
+            CapabilityDesiredStateRepository(db).set_skill_set_active(
                 bot_id="bot", owner_id="owner", set_id="1", active=True
             )
     finally:
@@ -536,7 +536,7 @@ def test_activation_rejects_runtime_name_conflict_before_installation_write():
         )
 
     with pytest.raises(SkillRuntimeNameConflictError):
-        CapabilityDesiredStateRepository(db).set_active(
+        CapabilityDesiredStateRepository(db).set_skill_set_active(
             bot_id="bot", owner_id="owner", set_id="1", active=True
         )
 
@@ -584,7 +584,7 @@ def test_default_projection_is_always_active_even_for_historical_false_row():
     assert repository.list_sets(
         bot_id="bot", owner_id="owner", engine_type="openclaw"
     )[0]["is_active"] is True
-    result = repository.set_active(
+    result = repository.set_skill_set_active(
         bot_id="bot",
         owner_id="owner",
         set_id="1",
@@ -674,7 +674,7 @@ def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
         session.add(skill_set)
         session.flush()
 
-    assert repository.activate_mcp_direct(
+    assert repository.install_mcp(
         bot_id="bot", owner_id="owner", server_code="mcp.weather"
     ).changed
     with pytest.raises(
@@ -683,7 +683,7 @@ def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
         repository.add_mcp(
             bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather"
         )
-    assert repository.deactivate_mcp_direct(
+    assert repository.uninstall_mcp(
         bot_id="bot", owner_id="owner", server_code="mcp.weather"
     ).changed
     assert repository.add_mcp(
@@ -692,7 +692,7 @@ def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
     with pytest.raises(
         SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_SKILL_SET"
     ):
-        repository.activate_mcp_direct(
+        repository.install_mcp(
             bot_id="bot", owner_id="owner", server_code="mcp.weather"
         )
 
@@ -701,13 +701,13 @@ def test_direct_mcp_installation_isolated_by_owner_for_shared_bot_id():
     db = _Database()
     repository = CapabilityDesiredStateRepository(db)
 
-    assert repository.activate_mcp_direct(
+    assert repository.install_mcp(
         bot_id="default", owner_id="owner-a", server_code="mcp.weather"
     ).changed
-    assert repository.activate_mcp_direct(
+    assert repository.install_mcp(
         bot_id="default", owner_id="owner-b", server_code="mcp.weather"
     ).changed
-    assert repository.deactivate_mcp_direct(
+    assert repository.uninstall_mcp(
         bot_id="default", owner_id="owner-a", server_code="mcp.weather"
     ).changed
 
@@ -896,7 +896,7 @@ def _bridge_fixture(db) -> None:
 
 def _bridge(db, **overrides):
     """Drive the repair, which is what the listing calls, and read its answer."""
-    return CapabilityDesiredStateRepository(db).repair_bot_skillset_installations(
+    return CapabilityDesiredStateRepository(db).flush_installations(
         **{
             "bot_id": "bot",
             "owner_id": "owner",
@@ -1206,7 +1206,7 @@ def test_repair_writes_exactly_the_difference_membership_implies():
         )
 
     repository = CapabilityDesiredStateRepository(db)
-    bridge = repository.repair_bot_skillset_installations(
+    bridge = repository.flush_installations(
         bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
     )
 
@@ -1245,7 +1245,7 @@ def test_repair_is_convergent_and_leaves_another_bots_rows_alone():
         )
 
     repository = CapabilityDesiredStateRepository(db)
-    repository.repair_bot_skillset_installations(
+    repository.flush_installations(
         bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
     )
     with db.orm_session() as session:
@@ -1254,7 +1254,7 @@ def test_repair_is_convergent_and_leaves_another_bots_rows_alone():
             for row in session.query(BotSkillInstallation).all()
         }
 
-    repository.repair_bot_skillset_installations(
+    repository.flush_installations(
         bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
     )
     with db.orm_session() as session:
@@ -1318,7 +1318,7 @@ def test_repair_takes_no_lock_and_opens_no_transaction_when_converged():
     db.orm_session = _read_only
     db.transactional_orm_session = _recording
     try:
-        bridge = repository.repair_bot_skillset_installations(
+        bridge = repository.flush_installations(
             bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
         )
     finally:
@@ -1370,7 +1370,7 @@ def test_repair_resolves_again_under_lock_before_it_writes():
 
     db.transactional_orm_session = _deactivate_first
     try:
-        bridge = repository.repair_bot_skillset_installations(
+        bridge = repository.flush_installations(
             bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
         )
     finally:
@@ -1436,7 +1436,7 @@ def test_repair_survives_a_concurrent_listing_winning_the_same_insert():
 
     db.transactional_orm_session = _rival_inserts_first
     try:
-        bridge = repository.repair_bot_skillset_installations(
+        bridge = repository.flush_installations(
             bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
         )
     finally:
@@ -1676,7 +1676,7 @@ def test_repair_re_raises_an_integrity_error_that_is_not_a_lost_race():
     db.transactional_orm_session = _failing_write
     try:
         with pytest.raises(IntegrityError):
-            repository.repair_bot_skillset_installations(
+            repository.flush_installations(
                 bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
             )
     finally:
@@ -1771,7 +1771,7 @@ def test_deactivating_a_set_removes_the_center_version_the_repair_installed():
     db = _Database()
     _stale_center_membership(db)
     repository = CapabilityDesiredStateRepository(db)
-    repository.repair_bot_skillset_installations(
+    repository.flush_installations(
         bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
     )
     with db.orm_session() as session:
@@ -1779,7 +1779,7 @@ def test_deactivating_a_set_removes_the_center_version_the_repair_installed():
             row.skill_id for row in session.query(BotSkillInstallation).all()
         } == {1}
 
-    repository.set_active(
+    repository.set_skill_set_active(
         bot_id="bot", owner_id="owner", set_id=1, active=False, engine_type="openclaw"
     )
 
@@ -1795,7 +1795,7 @@ def test_activating_a_set_installs_the_center_version_the_repair_would():
         session.query(SkillSet).filter(SkillSet.id == 1).one().is_active = False
     repository = CapabilityDesiredStateRepository(db)
 
-    repository.set_active(
+    repository.set_skill_set_active(
         bot_id="bot", owner_id="owner", set_id=1, active=True, engine_type="openclaw"
     )
 
@@ -1854,7 +1854,7 @@ def test_deactivating_a_set_retires_a_member_that_no_longer_resolves():
     db = _Database()
     _offlined_center_member(db)
 
-    CapabilityDesiredStateRepository(db).set_active(
+    CapabilityDesiredStateRepository(db).set_skill_set_active(
         bot_id="bot",
         owner_id="owner",
         set_id="1",
@@ -1874,7 +1874,7 @@ def test_activating_a_set_still_installs_only_what_resolves():
         session.query(SkillSet).filter(SkillSet.id == 1).one().is_active = False
         session.query(BotSkillInstallation).delete()
 
-    CapabilityDesiredStateRepository(db).set_active(
+    CapabilityDesiredStateRepository(db).set_skill_set_active(
         bot_id="bot",
         owner_id="owner",
         set_id="1",

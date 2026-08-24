@@ -121,7 +121,7 @@ async def resources(
         SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[list[SkillSetResourceItem]]:
-    items = service.resources(
+    items = service.list_resources(
         bot_id=bot_id,
         owner_id=owner_id,
         user_id=user_id,
@@ -324,7 +324,7 @@ async def mcp_permissions(
         SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[list[SkillSetMcpPermission]]:
-    items = service.mcp_permissions(
+    items = service.list_mcp_permissions(
         bot_id=bot_id,
         owner_id=owner_id,
         user_id=user_id,

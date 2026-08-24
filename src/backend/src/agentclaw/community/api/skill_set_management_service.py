@@ -86,7 +86,7 @@ class SkillSetManagementServiceProtocol(Protocol):
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> list[dict[str, Any]]: ...
 
-    def mcp_permissions(
+    def list_mcp_permissions(
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> list[dict[str, Any]]: ...
 
@@ -140,10 +140,10 @@ class SkillSetManagementServiceProtocol(Protocol):
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> dict[str, Any]: ...
 
-    async def sync(
+    async def legacy_activate(
         self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
     ) -> dict[str, Any]: ...
 
-    def resources(
+    def list_resources(
         self, *, bot_id: str, owner_id: str, user_id: str
     ) -> list[dict[str, Any]]: ...

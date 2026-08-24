@@ -1147,7 +1147,7 @@ async def sync_skill_set(
         control_plane=control_plane,
     )
 
-    result = await control_plane.sync(
+    result = await control_plane.legacy_activate(
         bot_id=effective_bot_id,
         owner_id=effective_entity_id,
         actor_id=ctx.user_id,

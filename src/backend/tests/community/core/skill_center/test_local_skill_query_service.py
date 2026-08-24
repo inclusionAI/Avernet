@@ -42,7 +42,7 @@ class _SkillSets:
         self._bridge = bridge
         self.calls: list[dict] = []
 
-    def repair_bot_skillset_installations(self, **kwargs) -> BotSkillSetBridge:
+    def flush_installations(self, **kwargs) -> BotSkillSetBridge:
         self.calls.append(kwargs)
         return self._bridge
 

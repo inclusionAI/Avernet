@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
-class SkillSetDesiredState:
+class CapabilityDesiredState:
     installations: set[int]
     set_active: dict[int, bool]
     memberships: dict[int, tuple[tuple[int, str | None, str | None], ...]]
@@ -15,10 +15,10 @@ class SkillSetDesiredState:
 
 
 @dataclass(frozen=True)
-class SkillSetMutation:
+class DesiredStateMutation:
     item: dict
     changed: bool
-    previous_state: SkillSetDesiredState
+    previous_state: CapabilityDesiredState
     details: dict = field(default_factory=dict)
 
 

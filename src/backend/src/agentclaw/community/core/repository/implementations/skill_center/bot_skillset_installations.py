@@ -80,7 +80,7 @@ class BotSkillSetInstallations:
     """Mixed into the control-plane repository; uses its ``_db``, ``_scope``,
     ``_owned_set_scope`` and ``_installation_repository``."""
 
-    def repair_bot_skillset_installations(
+    def flush_installations(
         self,
         *,
         bot_id: str,

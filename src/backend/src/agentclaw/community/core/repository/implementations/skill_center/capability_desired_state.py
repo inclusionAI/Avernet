@@ -44,8 +44,8 @@ from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_
 )
 from agentclaw.community.core.repository.implementations.skill_center.legacy_skill_set_scope import LegacySkillSetScopeQueries
 from agentclaw.community.core.repository.capability_desired_state_types import (
-    SkillSetDesiredState,
-    SkillSetMutation,
+    CapabilityDesiredState,
+    DesiredStateMutation,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
@@ -303,7 +303,7 @@ class CapabilityDesiredStateRepository(
         skill_id: str,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
-    ) -> SkillSetMutation:
+    ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
             row = self._set(
                 session,
@@ -338,7 +338,7 @@ class CapabilityDesiredStateRepository(
                 .first()
             )
             if current is not None:
-                return SkillSetMutation(_item(row), False, old)
+                return DesiredStateMutation(_item(row), False, old)
             # An installed skill without an ordinary Membership is Direct-active.
             if skill.id in old.installations:
                 raise SkillSetControlPlaneConflictError("RESOURCE_DIRECT_ACTIVE")
@@ -384,7 +384,7 @@ class CapabilityDesiredStateRepository(
                     )
                 )
             session.flush()
-            return SkillSetMutation(_item(row), True, old)
+            return DesiredStateMutation(_item(row), True, old)
 
     def remove_skill(
         self,
@@ -395,7 +395,7 @@ class CapabilityDesiredStateRepository(
         skill_id: str,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
-    ) -> SkillSetMutation:
+    ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
             row = self._set(
                 session,
@@ -419,7 +419,7 @@ class CapabilityDesiredStateRepository(
                 .first()
             )
             if membership is None:
-                return SkillSetMutation(_item(row), False, old)
+                return DesiredStateMutation(_item(row), False, old)
             # The difference is what this membership was providing.
             before = self._teardown_ids(session, {int(row.id)})
             session.delete(membership)
@@ -435,9 +435,9 @@ class CapabilityDesiredStateRepository(
                         BotSkillInstallation.skill_id.in_(sorted(retired)),
                     ).delete(synchronize_session=False)
             session.flush()
-            return SkillSetMutation(_item(row), True, old)
+            return DesiredStateMutation(_item(row), True, old)
 
-    def set_active(
+    def set_skill_set_active(
         self,
         *,
         bot_id: str,
@@ -446,7 +446,7 @@ class CapabilityDesiredStateRepository(
         active: bool,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
-    ) -> SkillSetMutation:
+    ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
             row = self._set(
                 session,
@@ -460,7 +460,7 @@ class CapabilityDesiredStateRepository(
             if row.is_default:
                 if not active:
                     raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")
-                return SkillSetMutation(
+                return DesiredStateMutation(
                     _item(row),
                     False,
                     self._snapshot(
@@ -530,14 +530,14 @@ class CapabilityDesiredStateRepository(
                     BotMCPInstallation.server_code.in_(mcp_codes),
                 ).delete(synchronize_session=False)
             session.flush()
-            return SkillSetMutation(_item(row), changed, old)
+            return DesiredStateMutation(_item(row), changed, old)
 
     def restore_desired_state(
         self,
         *,
         bot_id: str,
         owner_id: str,
-        state: SkillSetDesiredState,
+        state: CapabilityDesiredState,
         engine_type: str | None = None,
     ) -> None:
         """Atomically restore Membership, set-state and Installation facts."""
@@ -630,7 +630,7 @@ class CapabilityDesiredStateRepository(
 
     def snapshot_desired_state(
         self, *, bot_id: str, owner_id: str, engine_type: str | None = None
-    ) -> SkillSetDesiredState:
+    ) -> CapabilityDesiredState:
         with self._db.orm_session() as session:
             return self._snapshot(
                 session, bot_id, owner_id, engine_type=engine_type
@@ -794,7 +794,7 @@ class CapabilityDesiredStateRepository(
         owner_id: str,
         *,
         engine_type: str | None = None,
-    ) -> SkillSetDesiredState:
+    ) -> CapabilityDesiredState:
         """Lock and capture every ordinary-set desired fact for this Bot."""
         query = self._scope(session.query(SkillSet), SkillSet).filter(
             SkillSet.bolt_id == bot_id,
@@ -833,7 +833,7 @@ class CapabilityDesiredStateRepository(
                 mcp_memberships[int(member.skill_set_id)].append(
                     str(member.server_code)
                 )
-        return SkillSetDesiredState(
+        return CapabilityDesiredState(
             installations=self._installations(session, bot_id, owner_id),
             set_active={int(row.id): bool(row.is_active) for row in sets},
             memberships={set_id: tuple(items) for set_id, items in memberships.items()},

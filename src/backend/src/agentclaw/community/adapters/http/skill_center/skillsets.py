@@ -398,7 +398,7 @@ async def list_skill_sets_with_mcps(
                 for m in item.get("mcps", [])
             ],
         )
-        for item in control_plane.resources(
+        for item in control_plane.list_resources(
             bot_id=effective_bot_id,
             owner_id=effective_entity_id,
             user_id=_legacy_actor(ctx, user_id or entity_id),
@@ -464,7 +464,7 @@ async def list_skill_set_resources(
             ],
             clis=[CLIInSetResponse(**cli) for cli in item.get("clis", [])],
         )
-        for item in control_plane.resources(
+        for item in control_plane.list_resources(
             bot_id=effective_bot_id,
             owner_id=effective_entity_id,
             user_id=_legacy_actor(ctx, user_id or entity_id),

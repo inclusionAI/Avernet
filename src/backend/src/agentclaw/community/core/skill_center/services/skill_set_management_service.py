@@ -17,7 +17,7 @@ from agentclaw.community.core.repository.protocols.capability_desired_state impo
     CapabilityDesiredStateRepositoryProtocol,
 )
 from agentclaw.community.core.repository.capability_desired_state_types import (
-    SkillSetMutation,
+    DesiredStateMutation,
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
@@ -349,7 +349,7 @@ class SkillSetManagementService:
             default_engine_types=self._default_engine_types(bot),
         )
 
-    def mcp_permissions(
+    def list_mcp_permissions(
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> list[dict]:
         mcps = self.list_mcps(
@@ -466,7 +466,7 @@ class SkillSetManagementService:
             bot_id=bot_id,
             actor_id=user_id,
             action="mcp_direct_activate",
-            mutation=lambda: self._repository.activate_mcp_direct(
+            mutation=lambda: self._repository.install_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
                 server_code=server_code,
@@ -483,7 +483,7 @@ class SkillSetManagementService:
             bot_id=bot_id,
             actor_id=user_id,
             action="mcp_direct_deactivate",
-            mutation=lambda: self._repository.deactivate_mcp_direct(
+            mutation=lambda: self._repository.uninstall_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
                 server_code=server_code,
@@ -519,7 +519,7 @@ class SkillSetManagementService:
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_activate",
-            mutation=lambda: self._repository.set_active(
+            mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
                 set_id=set_id,
@@ -538,7 +538,7 @@ class SkillSetManagementService:
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_deactivate",
-            mutation=lambda: self._repository.set_active(
+            mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
                 set_id=set_id,
@@ -548,7 +548,7 @@ class SkillSetManagementService:
             ),
         )
 
-    async def sync(
+    async def legacy_activate(
         self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
     ) -> dict:
         """Compatibility command that adds this Set without disabling peers."""
@@ -560,7 +560,7 @@ class SkillSetManagementService:
             bot_id=bot_id,
             actor_id=actor_id,
             action="skill_set_sync",
-            mutation=lambda: self._repository.set_active(
+            mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
                 set_id=set_id,
@@ -570,7 +570,7 @@ class SkillSetManagementService:
             ),
         )
 
-    def resources(self, *, bot_id: str, owner_id: str, user_id: str) -> list[dict]:
+    def list_resources(self, *, bot_id: str, owner_id: str, user_id: str) -> list[dict]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         owner_id = str(bot["owner_id"])
         # Resource reads preserve the legacy graceful degradation: a passport-provider
@@ -680,7 +680,7 @@ class SkillSetManagementService:
         bot: dict,
         bot_id: str,
         actor_id: str,
-        mutation: SkillSetMutation,
+        mutation: DesiredStateMutation,
         previous_mappings: Sequence[PoolSkillMapping],
     ) -> dict:
         owner_id = str(bot["owner_id"])
