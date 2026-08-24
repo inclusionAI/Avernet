@@ -680,6 +680,17 @@
             ],
             "description": "Echo of the business space the bot was requested with; omitted resolves the caller's current space, exactly as on create.",
             "title": "Space Id"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotCreateTemplate"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo of the business template the bot was requested with."
           }
         },
         "title": "BotAuthStatusPoll",
@@ -740,6 +751,17 @@
             ],
             "description": "Business space to associate with the bot, when applicable.",
             "title": "Space Id"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotCreateTemplate"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional business template. Omit for a plain bot; use type 'applicationCoding' with its template-specific properties for an application-coding bot."
           }
         },
         "required": [
@@ -750,6 +772,30 @@
           "bot_type"
         ],
         "title": "BotCreate",
+        "type": "object"
+      },
+      "BotCreateTemplate": {
+        "additionalProperties": false,
+        "description": "Optional business template applied while creating a bot.",
+        "properties": {
+          "properties": {
+            "additionalProperties": true,
+            "description": "Template-specific JSON properties. Passed through unchanged to the template validator; server-managed fields such as dima_space_id, workspace_id, template_uid and bot_id are not accepted.",
+            "title": "Properties",
+            "type": "object"
+          },
+          "type": {
+            "const": "applicationCoding",
+            "description": "Template type. The creation API currently accepts 'applicationCoding'.",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "properties"
+        ],
+        "title": "BotCreateTemplate",
         "type": "object"
       },
       "BotEditorRequestCreated": {

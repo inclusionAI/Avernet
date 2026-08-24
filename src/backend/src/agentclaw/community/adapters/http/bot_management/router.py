@@ -71,6 +71,15 @@ from agentclaw.community.core.bot_management.create_flow import (
     complete_bot_authorization,
     create_bot_with_authorization,
 )
+from agentclaw.community.core.bot_management.create_errors import (
+    ApplicationCodingUnavailableError,
+    BotCombinationUnsupportedError,
+    BotTemplateInvalidError,
+)
+from agentclaw.community.core.bot_management.create_policy import (
+    BotCreateContext,
+    BotCreateDeploymentMode,
+)
 # Re-exported so ``test_bot_passport`` can keep importing it from this module.
 from agentclaw.community.core.bot_management.create_flow import (  # noqa: F401
     _get_bot_mcp_codes,
@@ -961,12 +970,16 @@ async def create_bot(
             nick_name=nick_name,
             bot_id=bot_id,
             spec=_bot_create_spec(data, user_id),
+            context=BotCreateContext(
+                deployment_mode=BotCreateDeploymentMode.CLOUD,
+                space_kind="personal",
+            ),
             cookie=cookie,
             bot_service=bot_service,
             passport_plugin=passport_plugin,
             auth_rel_plugin=auth_rel_plugin,
             skill_set_factory=skill_set_factory,
-        )
+            )
 
         # Passport not yet issued → guide the user through authorization.
         if isinstance(outcome, AuthPending):
@@ -998,6 +1011,20 @@ async def create_bot(
             },
         )
 
+    except BotTemplateInvalidError as e:
+        logger.warning(f"[bot_router.create_bot] Invalid template: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=400, data=None)
+    except BotCombinationUnsupportedError as e:
+        logger.warning(f"[bot_router.create_bot] Unsupported create combination: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=409, data=None)
+    except ApplicationCodingUnavailableError as e:
+        logger.error(f"[bot_router.create_bot] Application Coding unavailable: {e}")
+        return ApiResponse(
+            success=False,
+            message="Application Coding is unavailable",
+            error_code=503,
+            data=None,
+        )
     except DefaultBotTeclawNotAllowedError as e:
         logger.warning(
             f"[bot_router.create_bot] Default Bot cannot use Teclaw Cloud: {e}"
@@ -1133,11 +1160,15 @@ async def get_auth_status(
             nick_name=nick_name,
             bot_id=bot_id,
             spec=_bot_create_spec(data, user_id),
+            context=BotCreateContext(
+                deployment_mode=BotCreateDeploymentMode.CLOUD,
+                space_kind="personal",
+            ),
             cookie=cookie,
             bot_service=bot_service,
             passport_plugin=passport_plugin,
             auth_rel_plugin=auth_rel_plugin,
-        )
+            )
 
         if result.status == AuthStatus.PENDING:
             return ApiResponse(
@@ -1157,6 +1188,24 @@ async def get_auth_status(
             data={"status": result.status},
         )
 
+    except BotTemplateInvalidError as e:
+        logger.warning(f"[bot_router.get_auth_status] Invalid template: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=400, data=None)
+    except BotCombinationUnsupportedError as e:
+        logger.warning(
+            f"[bot_router.get_auth_status] Unsupported create combination: {e}"
+        )
+        return ApiResponse(success=False, message=str(e), error_code=409, data=None)
+    except ApplicationCodingUnavailableError as e:
+        logger.error(
+            f"[bot_router.get_auth_status] Application Coding unavailable: {e}"
+        )
+        return ApiResponse(
+            success=False,
+            message="Application Coding is unavailable",
+            error_code=503,
+            data=None,
+        )
     except DefaultBotTeclawNotAllowedError as e:
         logger.warning(
             f"[bot_router.get_auth_status] Default Bot cannot use Teclaw Cloud: {e}"

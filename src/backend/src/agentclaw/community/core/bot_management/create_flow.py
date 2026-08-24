@@ -19,10 +19,17 @@ ownership of id allocation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from agentclaw.community.core.bot_management.create_errors import (
+    ApplicationCodingUnavailableError,
+)
+from agentclaw.community.core.bot_management.create_policy import (
+    BotCreateContext,
+    prepare_bot_create,
+)
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     validate_bot_name,
@@ -155,6 +162,28 @@ class BotCreateSpec:
     # rather than growing an attribute per engine; anything meaningful to only
     # one engine goes in this bag.
     extra_properties: dict[str, Any] = field(default_factory=dict)
+
+
+def _prepare_create(
+    *,
+    spec: BotCreateSpec,
+    context: BotCreateContext,
+    bot_service: BotService,
+) -> BotCreateSpec:
+    """Apply shared creation policy before any external or persistence effects."""
+    prepared = prepare_bot_create(
+        template_type=spec.template_type,
+        template_config=spec.template_config,
+        bot_type=spec.bot_type,
+        engine_type=spec.engine_type,
+        context=context,
+    )
+    if (
+        prepared.requires_workspace_hosting
+        and not bot_service.is_workspace_hosting_available()
+    ):
+        raise ApplicationCodingUnavailableError()
+    return replace(spec, template_config=prepared.template_config)
 
 
 def _get_bot_mcp_codes(
@@ -319,6 +348,7 @@ def create_bot_with_authorization(
     nick_name: str,
     bot_id: str,
     spec: BotCreateSpec,
+    context: BotCreateContext,
     cookie: str | None = None,  # see the note on cookies below
     bot_service: BotService,
     passport_plugin: PassportPlugin,
@@ -342,6 +372,10 @@ def create_bot_with_authorization(
     cookie". Remove the parameter entirely once the internal path stops needing
     it.
     """
+    # Creation policy is evaluated here, rather than in either transport, so no
+    # caller can bypass template/combination rules before Passport or writes.
+    spec = _prepare_create(spec=spec, context=context, bot_service=bot_service)
+
     # Validate the name up front so an invalid one never reaches Passport or
     # create. An unset name stays unset — create_bot applies default naming.
     bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
@@ -449,6 +483,7 @@ def complete_bot_authorization(
     nick_name: str,
     bot_id: str,
     spec: BotCreateSpec,
+    context: BotCreateContext,
     cookie: str | None = None,  # see the note on cookies below
     bot_service: BotService,
     passport_plugin: PassportPlugin,
@@ -467,6 +502,10 @@ def complete_bot_authorization(
     note. Kept only for the internal ``/api/bots`` path; the public
     ``/openapi/v1`` surface does not pass it.
     """
+    # Re-run the same policy on authorization completion because callers echo
+    # the creation attributes and must not bypass the original create contract.
+    spec = _prepare_create(spec=spec, context=context, bot_service=bot_service)
+
     auth_status = passport_plugin.query_auth_status(bot_id=bot_id, owner_workno=user_id)
     if not auth_status:
         raise AuthStatusUnavailableError("query auth status returned nothing")
@@ -503,5 +542,4 @@ def complete_bot_authorization(
         auth_rel_plugin, user_id=user_id, agent_code=agent_code,
         nick_name=nick_name, bot_id=bot_id,
     )
-
     return AuthStatusResult(status=AuthStatus.ISSUED, bot=result)

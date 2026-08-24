@@ -161,7 +161,7 @@ engine = claude_code 且 template_type 为其他 Coding 模板
 - 服务 Bot 是否使用可服务化引擎；
 - 通过授权后进入统一创建流程。
 
-缺口是：OpenAPI 没有接收并传递 `template_type` 与 `template_config`。
+缺口是：OpenAPI 没有接收模板创建参数，并将公共 `template.type` / `template.properties` 转换为内部 `template_type` / `template_config`。
 
 ### 5.2 内部创建层
 
@@ -172,6 +172,8 @@ template_type: str | None
 template_config: dict[str, Any] | None
 extra_properties: dict[str, Any]
 ```
+
+内部共享创建契约继续使用既有的 `template_type` / `template_config`，避免让公共 HTTP DTO 反向污染 core。只有 OpenAPI adapter 使用嵌套 `template`；内部 `/api/bots` 的既有 `personalCoding` 等模板输入仍由 core 兼容处理。
 
 `BotService.create_bot()` 已经能够：
 
@@ -200,9 +202,9 @@ extra_properties: dict[str, Any]
 
 ## 6. OpenAPI 契约设计
 
-### 6.1 推荐方案：最小兼容扩展
+### 6.1 推荐方案：语义化嵌套模板对象
 
-在 `POST /openapi/v1/bots` 的请求体增加两个可选字段：
+在 `POST /openapi/v1/bots` 的请求体增加一个可选的 `template` 对象。模板专属参数不平铺到 Bot 创建请求顶层：
 
 ```json
 {
@@ -212,15 +214,17 @@ extra_properties: dict[str, Any]
   "cluster_name": "ACRA",
   "bot_type": "personal",
   "space_id": "personal-space-id",
-  "template_type": "applicationCoding",
-  "template_config": {
-    "devflow_workflow": "app-flow",
-    "yuque_kb_repos": [],
-    "code_repos": [],
-    "token": "caller-supplied-business-token",
-    "bot_template_config": {
-      "preset_capabilities": {},
-      "ext_config": {"thetaKey": "caller-supplied-business-value"}
+  "template": {
+    "type": "applicationCoding",
+    "properties": {
+      "devflow_workflow": "app-flow",
+      "yuque_kb_repos": [],
+      "code_repos": [],
+      "token": "caller-supplied-business-token",
+      "bot_template_config": {
+        "preset_capabilities": {},
+        "ext_config": {"thetaKey": "caller-supplied-business-value"}
+      }
     }
   }
 }
@@ -236,17 +240,17 @@ BotCreateSpec(
     bot_name=body.bot_name,
     bot_desc=body.bot_desc,
     space_id=current_space.numeric_id,
-    template_type=body.template_type,
-    template_config=body.template_config,
+    template_type=body.template.type if body.template else None,
+    template_config=(body.template.properties if body.template else None),
 )
 ```
 
 > **转换说明**：`owner_id` 来自 `UserIdDep`（已验证调用者）；`current_space = space_context.resolve_current(owner_id=owner_id, header_space_id=body.space_id)`。
 > `cluster_name` **不在 `BotCreateSpec` 上** —— 它仅在请求期做 `validate_engine_cluster(body.engine, body.cluster_name)` 校验，不进入创建 spec。
 > `space_id` 在 `BotCreateSpec` 上是 `int | None`（numeric id，个人空间时为 `None`），必须经 `resolve_current` 解析，不能用 `body.space_id` 这个 `str | None` 直传。
-> 新增的 `template_type`/`template_config` 与既有字段并列即可，不改变 `entity_id`/`engine_type`/`space_id` 的既有解析路径。
+> 公共请求只新增 `template`；HTTP adapter 将其拆成内部 `template_type`/`template_config`，不改变 `entity_id`/`engine_type`/`space_id` 的既有解析路径，也不复用运行时派生的 `extra_properties`。
 
-### 6.2 `template_config` 不做猜测性强 DTO
+### 6.2 `template.properties` 不做猜测性强 DTO
 
 历史 Application Coding 的真实 fixture 位于
 `src/backend/tests/community/acceptance/bot_management/test_bot_live_lifecycle.py`：
@@ -271,7 +275,7 @@ BotCreateSpec(
 }
 ```
 
-这说明 `template_config` 是历史兼容的自由字典，而不是可以抽象成
+这说明公共 `template.properties`（内部仍为 `template_config`）是历史兼容的自由字典，而不是可以抽象成
 `model/runtime/repos/config` 的稳定 DTO。第一期采用受控薄透传：
 
 ```python
@@ -281,7 +285,7 @@ template_config: dict[str, Any] | None
 边界规则：
 
 - 只接受 JSON object；不做字段重命名、扁平化或自动包装；
-- `to_internal_template_config()` 只做深拷贝/JSON 归一化，保证上述扁平和嵌套结构原样进入内部 `BotCreateSpec`；
+- `to_internal_template_config()` 只对 `template.properties` 做深拷贝/JSON 归一化，保证上述扁平和嵌套结构原样进入内部 `BotCreateSpec.template_config`；
 - 拒绝客户端写入服务端字段：顶层 `dima_space_id`、`template_uid`、Bot ID、workspace 状态字段；
 - `template_key` 不作为本期公共字段单独定义；模板身份由既有 resolver/服务端逻辑决定；
 - 其余字段由既有 Application Coding/模板校验器解释，校验失败返回 `OPENAPI_BOT_TEMPLATE_INVALID`，未知业务字段不得被静默丢弃。
@@ -290,11 +294,7 @@ template_config: dict[str, Any] | None
 
 ### 6.3 普通 Bot 的兼容行为
 
-当 `template_type` 未传时：
-
-- 按现有普通 Bot 流程创建；
-- `template_config` 不应单独传入；
-- 若只传 `template_config` 而未传 `template_type`，请求应被拒绝，而不是静默忽略配置。
+当 `template` 未传时，按现有普通 Bot 流程创建。传入 `template` 时，嵌套的 `type` 与 `properties` 均为必填；旧的顶层 `template_type` / `template_config` 继续由 `extra="forbid"` 拒绝，避免公共契约出现两套表达。
 
 当前仅允许的模板类型：
 
@@ -345,7 +345,7 @@ WorkspaceHostingService 已绑定且可用
 | `template_type=applicationCoding` + 服务 Bot | 拒绝，服务生命周期未支持 |
 | `template_type=applicationCoding` + 团队空间 | 第一期拒绝，先收敛到个人空间 |
 | `template_type=applicationCoding` + 非 Coding 引擎 | 拒绝，模板与引擎不兼容 |
-| `template_type` 未传但传 `template_config` | 拒绝，参数关系非法 |
+| `template` 缺少 `type` 或 `properties` | 拒绝，参数关系非法 |
 | 未配置 Workspace Hosting | 创建前拒绝，不产生副作用 |
 | 不支持的 `template_type` | 拒绝 |
 
@@ -406,7 +406,7 @@ template_config
 
 本期不新增 `create_intent` 表，继续复用现有 `auth-status` echo 流程：
 
-- `BotAuthStatusPoll` 增加可选的 `template_type` / `template_config` 字段；
+- `BotAuthStatusPoll` 增加与创建请求相同的可选 `template` 对象；
 - `auth-status` 根据轮询请求恢复完整 `BotCreateSpec`；
 - POST 和 auth-status 使用同一套模板 DTO、组合校验和 Workspace Hosting 绑定检查；
 - 保留现有 `bot_id`、`space_id` 等字段，兼容已有客户端；
@@ -414,7 +414,7 @@ template_config
 
 该方案的边界是：模板参数仍由客户端在 auth-status 中回传，不保证服务重启后的 pending 意图恢复，也不新增并发 claim 机制。若后续需要跨进程恢复、严格并发幂等或审计，再单独建设持久化 intent。
 
-**GET / POST 契约**：Application Coding 的模板恢复只走 **POST** `/{bot_id}/auth-status`（`BotAuthStatusPoll` 接收 `template_type`/`template_config`）；已退休的 **GET** 同路径**仅兼容普通 Bot**——它没有模板 query 参数，用它轮询 Application Coding 会因缺模板字段而静默创建普通 Bot，属于**不支持**的用法。Application Coding 接入方必须使用 POST。
+**GET / POST 契约**：Application Coding 的模板恢复只走 **POST** `/{bot_id}/auth-status`（`BotAuthStatusPoll` 接收嵌套 `template` 对象）；已退休的 **GET** 同路径**仅兼容普通 Bot**——它没有模板 query 参数，用它轮询 Application Coding 会因缺模板字段而静默创建普通 Bot，属于**不支持**的用法。Application Coding 接入方必须使用 POST。
 
 ### 8.3 幂等要求
 
@@ -592,9 +592,9 @@ OpenAPI 是公共服务契约，前端工作台的枚举不能作为唯一控制
 
 覆盖：
 
-- `template_type`/`template_config` 正常解析；
+- `template.type`/`template.properties` 正常解析并转换到内部字段；
 - 未知字段仍被拒绝；
-- `template_config` 单独传入被拒绝；
+- `template` 缺少 `type` 或 `properties` 被拒绝；
 - `template_config` 中的历史扁平字段和 `bot_template_config` 嵌套字段原样透传；
 - `dima_space_id`、`template_uid` 等服务端字段被拒绝；
 - 不支持模板类型被拒绝；
@@ -653,7 +653,7 @@ OpenAPI 是公共服务契约，前端工作台的枚举不能作为唯一控制
 ### Phase 0：能力探测与契约准备
 
 1. 复用 Workspace Hosting Service 的绑定检查，不新增独立 capability probe；
-2. 增加 `template_type` 和 `template_config` 的契约定义；
+2. 增加嵌套 `template` 契约，并在 HTTP adapter 转换为内部 `template_type` 和 `template_config`；
 3. 定义稳定错误码；
 4. 补齐组合策略单测。
 
@@ -723,7 +723,7 @@ src/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/router.py
 src/backend/src/agentclaw/community/core/bot_management/create_flow.py
 src/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
 src/backend/src/agentclaw/community/core/bot_management/readiness.py
-src/backend/src/agentclaw/community/core/bot_inventory/policies/combo_policy.py
+src/backend/src/agentclaw/community/core/bot_management/create_policy.py
 src/backend/tests/community/adapters/http/openapi_v1/test_bots_endpoints.py
 相关 workspace hosting、授权参数透传和集成测试文件
 ```
@@ -735,13 +735,14 @@ src/backend/tests/community/adapters/http/openapi_v1/test_bots_endpoints.py
 1. **可以支持 Application Coding。**
 2. 第一阶段只支持：**云端 + 个人空间 + 非服务 Bot**。
 3. 不新增 `claudecode-app` 引擎值。
-4. 使用：
+4. 公共请求使用：
    ```text
    engine = claude_code
-   template_type = applicationCoding
+   template.type = applicationCoding
    ```
+   HTTP adapter 再映射为内部 `template_type=applicationCoding`。
 5. `claude_code + applicationCoding` 延续历史逻辑，运行时路由到 aicoding adapter。
-6. OpenAPI 必须补齐 `template_type`、`template_config`，并保证 202 异步授权流程不丢参数；本期复用 auth-status echo，不新增 intent 表。
+6. OpenAPI 必须补齐嵌套 `template` 对象，并保证 202 异步授权流程不丢失 `type` 与 `properties`；本期复用 auth-status echo，不新增 intent 表。
 7. Workspace Hosting 未绑定或不可用时，创建前失败；workspace 创建失败时沿用现有清理路径，不新增 workspace 资源表。
 8. Application Coding 的可用状态必须等待 workspace 初始化完成，不能仅以 `ACTIVE` 判断。
 9. 本地、团队、服务 Application Coding 第一阶段全部拒绝；这既要前端不展示，也要后端组合策略强校验。

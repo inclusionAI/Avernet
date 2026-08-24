@@ -5,16 +5,13 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.core.bot_inventory.policies.combo_policy import (
-    APPLICATION_CODING_ENGINES,
     LOCAL_CAPABLE_ENGINES,
     PERSONAL_CLOUD_CAPABLE_ENGINES,
     SERVICE_CAPABLE_ENGINES,
-    assert_application_coding_create,
     assert_local_create,
     assert_personal_cloud_create,
     assert_service_upgrade,
 )
-from agentclaw.community.core.bot_inventory.types import DeployMode
 
 
 @pytest.mark.unit
@@ -75,55 +72,3 @@ def test_service_upgrade_engine_matrix() -> None:
     rejected = assert_service_upgrade("hermes")
     assert not rejected.ok
     assert rejected.reason == "engine cannot be serviced: hermes"
-
-
-@pytest.mark.unit
-def test_application_coding_engine_matrix() -> None:
-    assert APPLICATION_CODING_ENGINES == frozenset({"claude_code"})
-
-
-@pytest.mark.unit
-def test_application_coding_supported_combination() -> None:
-    ok = assert_application_coding_create(
-        engine="claude_code",
-        bot_type="personal",
-        space_kind="personal",
-        deployment_mode=DeployMode.CLOUD,
-    )
-    assert ok.ok
-
-
-@pytest.mark.unit
-def test_application_coding_rejects_aicoding_engine() -> None:
-    # aicoding is the internal adapter, not an external engine value — the only
-    # external engine for applicationCoding is claude_code.
-    rejected = assert_application_coding_create(
-        engine="aicoding",
-        bot_type="personal",
-        space_kind="personal",
-        deployment_mode=DeployMode.CLOUD,
-    )
-    assert not rejected.ok
-    assert "aicoding" in (rejected.reason or "")
-
-
-@pytest.mark.unit
-def test_application_coding_rejects_service_team_and_local() -> None:
-    assert not assert_application_coding_create(
-        engine="claude_code",
-        bot_type="service",
-        space_kind="personal",
-        deployment_mode=DeployMode.CLOUD,
-    ).ok
-    assert not assert_application_coding_create(
-        engine="claude_code",
-        bot_type="personal",
-        space_kind="team",
-        deployment_mode=DeployMode.CLOUD,
-    ).ok
-    assert not assert_application_coding_create(
-        engine="claude_code",
-        bot_type="personal",
-        space_kind="personal",
-        deployment_mode=DeployMode.LOCAL,
-    ).ok

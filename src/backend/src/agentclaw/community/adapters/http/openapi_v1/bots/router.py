@@ -36,9 +36,6 @@ from agentclaw.community.adapters.http.openapi_v1.clusters import (
     validate_engine_cluster,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
-    ApplicationCodingUnavailableError,
-    BotCombinationUnsupportedError,
-    BotTemplateInvalidError,
     StartupScriptUnsupportedError,
     UnsupportedEngineError,
 )
@@ -74,6 +71,10 @@ from agentclaw.community.core.bot_management.create_flow import (
     complete_bot_authorization,
     create_bot_with_authorization,
 )
+from agentclaw.community.core.bot_management.create_policy import (
+    BotCreateContext,
+    BotCreateDeploymentMode,
+)
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import (
@@ -106,7 +107,6 @@ from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
 )
 from agentclaw.community.core.bot_inventory.policies.combo_policy import (
-    assert_application_coding_create,
     assert_service_upgrade,
 )
 from agentclaw.community.core.bot_inventory.types import (
@@ -145,7 +145,6 @@ from .schemas import (
     Passport,
     StartupScript,
     StartupScriptWrite,
-    to_internal_template_config,
 )
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
@@ -181,47 +180,6 @@ def _require_service_capable_engine(bot_type: str, engine: str) -> None:
         raise ServicePublicationUnsupportedError(
             decision.reason or "engine cannot be used by a service bot"
         )
-
-
-def _application_coding_preflight(
-    *,
-    template_type: str | None,
-    template_config: dict[str, Any] | None,
-    bot_type: str,
-    engine: str,
-    space_kind: str,
-    bot_service: BotServiceProtocol,
-) -> dict[str, Any] | None:
-    """Validate an applicationCoding create before any side effect.
-
-    Returns the passed-through template_config for a coding bot, or ``None`` for
-    a plain bot. Raises a mapped public error otherwise: 422 for a malformed
-    template pairing, 409 for an unsupported combination, 503 when the
-    deployment has no Workspace Hosting.
-    """
-    if template_type is None:
-        if template_config is not None:
-            raise BotTemplateInvalidError("template_config requires template_type")
-        return None
-    if template_type != "applicationCoding":
-        raise BotTemplateInvalidError(f"unsupported template type: {template_type}")
-    if template_config is None:
-        raise BotTemplateInvalidError(
-            "template_config is required for applicationCoding"
-        )
-    decision = assert_application_coding_create(
-        engine=engine,
-        bot_type=bot_type,
-        space_kind=space_kind,
-        deployment_mode=CoreDeployMode.CLOUD,
-    )
-    if not decision.ok:
-        raise BotCombinationUnsupportedError(
-            decision.reason or "application coding combination is not supported"
-        )
-    if not bot_service.is_workspace_hosting_available():
-        raise ApplicationCodingUnavailableError()
-    return to_internal_template_config(template_config)
 
 
 def _to_bot(d: dict[str, Any]) -> Bot:
@@ -437,13 +395,12 @@ async def create_bot(
 
     On a 202, have the user complete authorization at one of the returned
     URLs, then poll the auth-status endpoint — the bot is only created there,
-    on ISSUED. Engine-specific options are not accepted here; engine
-    configuration is managed through the engine-config endpoints after
+    on ISSUED. Template-specific creation properties belong under "template";
+    engine configuration is managed through the engine-config endpoints after
     creation.
     """
-    # Engine-specific inputs belong in BotCreateSpec.extra_properties, but
-    # nothing downstream reads that bag yet, so the request model does not
-    # expose an `engine_options` field for it — see BotCreate.
+    # Template-specific public input is unpacked by this HTTP adapter below;
+    # core creation keeps its established template_type/template_config contract.
     # Validate the engine against the configured registry FIRST: the cluster rule
     # below treats every non-teclaw value as ACRA, so an unknown engine would
     # otherwise sail through, allocate an id, apply for a Passport, and only fail
@@ -457,15 +414,10 @@ async def create_bot(
         owner_id=owner_id,
         header_space_id=body.space_id,
     )
-    template_config = _application_coding_preflight(
-        template_type=body.template_type,
-        template_config=body.template_config,
-        bot_type=body.bot_type,
-        engine=body.engine,
-        space_kind=current_space.kind,
-        bot_service=bot_service,
+    template_type = body.template.type if body.template is not None else None
+    template_properties = (
+        body.template.properties if body.template is not None else None
     )
-
     bot_id = generate_bot_id(owner_id, bot_repo)
     outcome = create_bot_with_authorization(
         user_id=owner_id,
@@ -478,8 +430,12 @@ async def create_bot(
             bot_name=body.bot_name,
             bot_desc=body.bot_desc,
             space_id=current_space.numeric_id,
-            template_type=body.template_type,
-            template_config=template_config,
+            template_type=template_type,
+            template_config=template_properties,
+        ),
+        context=BotCreateContext(
+            deployment_mode=BotCreateDeploymentMode.CLOUD,
+            space_kind=current_space.kind,
         ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,
@@ -1054,14 +1010,6 @@ def _complete_auth_status(
         owner_id=owner_id,
         header_space_id=space_id,
     )
-    resolved_template_config = _application_coding_preflight(
-        template_type=template_type,
-        template_config=template_config,
-        bot_type=bot_type or "personal",
-        engine=effective_engine,
-        space_kind=current_space.kind,
-        bot_service=bot_service,
-    )
     try:
         result = complete_bot_authorization(
             user_id=owner_id,
@@ -1075,12 +1023,16 @@ def _complete_auth_status(
                 bot_desc=bot_desc,
                 space_id=current_space.numeric_id,
                 template_type=template_type,
-                template_config=resolved_template_config,
+                template_config=template_config,
+            ),
+            context=BotCreateContext(
+                deployment_mode=BotCreateDeploymentMode.CLOUD,
+                space_kind=current_space.kind,
             ),
             bot_service=bot_service,
             passport_plugin=passport_plugin,
             auth_rel_plugin=auth_rel_plugin,
-        )
+            )
     except AuthStatusUnavailableError:
         # The passport service answered with no status at all — typically the
         # apply is still propagating and the Passport is not ready yet. On this
@@ -1158,8 +1110,10 @@ async def poll_bot_auth_status(
         bot_desc=body.bot_desc,
         bot_type=body.bot_type,
         space_id=body.space_id,
-        template_type=body.template_type,
-        template_config=body.template_config,
+        template_type=body.template.type if body.template is not None else None,
+        template_config=(
+            body.template.properties if body.template is not None else None
+        ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,
         auth_rel_plugin=auth_rel_plugin,

@@ -1414,6 +1414,23 @@ class TestRepairDefaultPassportForOthers:
 # ---------------------------------------------------------------------------
 
 class TestCreateBot:
+    def test_application_coding_policy_error_is_mapped_before_passport(self, client):
+        tc, svc, passport = client
+        svc.is_workspace_hosting_available.return_value = False
+
+        resp = tc.post(
+            "/api/bots",
+            json={
+                "bot_name": "Coding Bot",
+                "engine_type": "claude_code",
+                "template_type": "applicationCoding",
+            },
+        )
+
+        assert resp.json()["error_code"] == 503
+        passport.apply_first_agent_passport.assert_not_called()
+        passport.apply_agent_passport.assert_not_called()
+
     def test_needs_authorization_when_no_token(self, client):
         tc, svc, passport = client
         passport.apply_first_agent_passport.return_value = {"iframe_url": "http://auth", "token": None}

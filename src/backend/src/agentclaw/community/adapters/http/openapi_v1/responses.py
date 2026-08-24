@@ -45,10 +45,7 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptTooLargeError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
-    ApplicationCodingUnavailableError,
     BotAccessRefusedError,
-    BotCombinationUnsupportedError,
-    BotTemplateInvalidError,
     CallerIdentityConflictError,
     CallerIdentityForbiddenError,
     CallerIdentityInvalidError,
@@ -121,6 +118,11 @@ from agentclaw.community.core.bot_inventory.errors import (
     BotInventoryOperationNotAllowedError,
     BotInventoryPermissionError,
     BotInventoryUpstreamError,
+)
+from agentclaw.community.core.bot_management.create_errors import (
+    ApplicationCodingUnavailableError,
+    BotCombinationUnsupportedError,
+    BotTemplateInvalidError,
 )
 from agentclaw.community.core.bot_dormant.activate_service import InvalidBotStateError
 from agentclaw.community.core.devices.services.device_context import (

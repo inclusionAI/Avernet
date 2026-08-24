@@ -796,6 +796,34 @@ Bot 核心路由已接到内部服务上。这里保留下来，是作为其余�
 | GET | `/openapi/v1/bots/{bot_id}/engine/config` | 读取引擎配置（自由格式 JSON） | `Envelope[dict]` |
 | PUT | `/openapi/v1/bots/{bot_id}/engine/config` | 写入引擎配置（自由格式 JSON） | `Envelope[dict]` |
 
+#### 创建 Application Coding Bot
+
+Application Coding 使用 `engine=claude_code`，模板专属参数统一收在 `template` 下，不平铺到 Bot 创建请求顶层：
+
+```json
+{
+  "bot_name": "my-app-coding-bot",
+  "bot_desc": "application coding bot",
+  "engine": "claude_code",
+  "cluster_name": "ACRA",
+  "bot_type": "personal",
+  "template": {
+    "type": "applicationCoding",
+    "properties": {
+      "devflow_workflow": "app-flow",
+      "yuque_kb_repos": [],
+      "code_repos": [],
+      "bot_template_config": {
+        "preset_capabilities": {},
+        "ext_config": {"thetaKey": "value"}
+      }
+    }
+  }
+}
+```
+
+若创建返回 202，POST `/{bot_id}/auth-status` 时必须原样回传同一个 `template` 对象。旧的顶层 `template_type` / `template_config` 不属于公共契约，会返回 422。HTTP adapter 会把嵌套对象转换为内部创建契约；它不会与服务端派生的运行时 `extra_properties` 混用。
+
 #### 变更归属业务空间
 
 `PUT /openapi/v1/bots/{bot_id}/space` 显式要求查询参数 `user_id`，请求体必须包含
@@ -818,7 +846,7 @@ Space/协作团队共同建设 Migration Application Service。需重新生成
 `src/gateway/configs/schemas/bots.openapi.json`，并把 schema 与匹配的路由/鉴权配置同步到独立
 维护的 OCB/Sofapy Gateway；Avernet 现有宽泛的 `/openapi/v1/bots/**` 规则已覆盖该路径。
 
-_bots 上**刻意不暴露**的字段：创建时的 `engine_options`（下游目前没有任何代码会读
+_bots 上**刻意不暴露**的字段：创建时的顶层 `template_type`/`template_config` 和 `engine_options`（下游目前没有任何代码会读
 `BotCreateSpec.extra_properties`，暴露它等于承诺一个服务端其实会忽略的东西），以及更新时的
 `cluster_name`/`engine_options`。有了 `extra="forbid"`，这些字段现在会得到 422，而不是被
 悄悄丢弃。_

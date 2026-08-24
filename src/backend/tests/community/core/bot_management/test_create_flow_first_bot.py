@@ -12,6 +12,10 @@ from agentclaw.community.core.bot_management.create_flow import (
     Created,
     create_bot_with_authorization,
 )
+from agentclaw.community.core.bot_management.create_policy import (
+    BotCreateContext,
+    BotCreateDeploymentMode,
+)
 from agentclaw.community.plugin_api.auth_relationship import (
     AuthRelationshipError,
 )
@@ -19,6 +23,11 @@ from agentclaw.community.plugin_api.passport import PassportError
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 pytestmark = pytest.mark.unit
+
+_CONTEXT = BotCreateContext(
+    deployment_mode=BotCreateDeploymentMode.CLOUD,
+    space_kind="personal",
+)
 
 
 def _spec(bot_type: str = "personal") -> BotCreateSpec:
@@ -57,6 +66,7 @@ def _run(
         nick_name="Alice",
         bot_id="20260805_ab12cd34",
         spec=_spec(bot_type),
+        context=_CONTEXT,
         bot_service=bot_service,
         passport_plugin=passport,
         auth_rel_plugin=MagicMock(),
@@ -147,6 +157,7 @@ def test_owner_relationship_failure_is_not_acknowledged_as_created():
             nick_name="Alice",
             bot_id="20260805_ab12cd34",
             spec=_spec(),
+            context=_CONTEXT,
             bot_service=bot_service,
             passport_plugin=passport,
             auth_rel_plugin=auth_relationship,
@@ -168,6 +179,7 @@ def test_issued_passport_without_agent_code_does_not_create_bot():
             nick_name="Alice",
             bot_id="20260805_ab12cd34",
             spec=_spec(),
+            context=_CONTEXT,
             bot_service=bot_service,
             passport_plugin=passport,
             auth_rel_plugin=MagicMock(),

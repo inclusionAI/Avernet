@@ -7,14 +7,12 @@ internal names belong in ``#`` comments.
 
 from __future__ import annotations
 
-from copy import deepcopy
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
-from agentclaw.community.adapters.http.openapi_v1.errors import BotTemplateInvalidError
 
 # Request bodies reject unknown keys. Pydantic's default is to *ignore* them,
 # which on a public API means a typo'd or immutable field (``engine`` on update)
@@ -150,39 +148,23 @@ class BotMetadata(BaseModel):
     status: str = Field(description="Current lifecycle status.")
 
 
-_TEMPLATE_SERVER_RESERVED_FIELDS = frozenset(
-    {
-        "dima_space_id",
-        "workspace_id",
-        "template_uid",
-        "bot_id",
-        "workspace_status",
-        "workspace_state",
-        "start_status",
-    }
-)
+class BotCreateTemplate(BaseModel):
+    """Optional business template applied while creating a bot."""
 
+    model_config = ConfigDict(extra="forbid")
 
-def to_internal_template_config(
-    value: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Validate and pass through a template payload unchanged.
-
-    The public ``template_config`` is a thin passthrough into the owning template
-    adapter's own structure: legacy applicationCoding is a flat dict while
-    template-factory configurations are nested, with no stable common field set,
-    so this deliberately does not map fields. It rejects the server-managed keys
-    that must never originate from a caller and deep-copies so the downstream
-    Workspace Hosting write-back cannot mutate the request object.
-    """
-    if value is None:
-        return None
-    reserved = sorted(_TEMPLATE_SERVER_RESERVED_FIELDS.intersection(value))
-    if reserved:
-        raise BotTemplateInvalidError(
-            f"template_config contains server-managed fields: {reserved}"
-        )
-    return deepcopy(value)
+    type: Literal["applicationCoding"] = Field(
+        description=(
+            "Template type. The creation API currently accepts 'applicationCoding'."
+        ),
+    )
+    properties: dict[str, Any] = Field(
+        description=(
+            "Template-specific JSON properties. Passed through unchanged to the "
+            "template validator; server-managed fields such as dima_space_id, "
+            "workspace_id, template_uid and bot_id are not accepted."
+        ),
+    )
 
 
 class BotCreate(BaseModel):
@@ -214,21 +196,12 @@ class BotCreate(BaseModel):
         default=None,
         description="Business space to associate with the bot, when applicable.",
     )
-    template_type: str | None = Field(
+    template: BotCreateTemplate | None = Field(
         default=None,
         description=(
-            "Coding mode template: omit for a plain bot, or 'applicationCoding' "
-            "for an application-coding bot (requires a workspace-capable "
-            "deployment). Any other value is refused (422)."
-        ),
-    )
-    template_config: dict[str, Any] | None = Field(
-        default=None,
-        description=(
-            "Template payload supplied with 'applicationCoding'; must be omitted "
-            "for a plain bot. Passed through unchanged to the template validator. "
-            "Server-managed fields (dima_space_id, template_uid, bot_id) are not "
-            "accepted."
+            "Optional business template. Omit for a plain bot; use type "
+            "'applicationCoding' with its template-specific properties for an "
+            "application-coding bot."
         ),
     )
     # ``engine_options`` is deliberately absent. Nothing downstream consumes
@@ -396,13 +369,9 @@ class BotAuthStatusPoll(BaseModel):
         description="Echo of the business space the bot was requested with; "
         "omitted resolves the caller's current space, exactly as on create.",
     )
-    template_type: str | None = Field(
+    template: BotCreateTemplate | None = Field(
         default=None,
-        description="Echo of the coding template the bot was requested with.",
-    )
-    template_config: dict[str, Any] | None = Field(
-        default=None,
-        description="Echo of the template payload the bot was requested with.",
+        description="Echo of the business template the bot was requested with.",
     )
 
 
