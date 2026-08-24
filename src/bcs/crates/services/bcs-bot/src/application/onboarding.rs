@@ -1545,12 +1545,12 @@ mod tests {
                 &self,
                 bot_uuid: &str,
                 env: &str,
-            ) -> ServiceResult<()> {
+            ) -> ServiceResult<u64> {
                 self.calls
                     .lock()
                     .await
                     .push((bot_uuid.to_string(), env.to_string()));
-                Ok(())
+                Ok(1)
             }
 
             async fn get_active_default(

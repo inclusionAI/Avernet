@@ -8,7 +8,7 @@ use crate::core::error::ServiceResult;
 pub trait PermissionProfileRepoPort: Send + Sync {
     /// Idempotent: seed bot's default profile (wildcard-allow) if absent.
     /// Never overwrites or bumps revision of an existing default (D12 rule 2).
-    async fn ensure_default_profile(&self, bot_id: &str, env: &str) -> ServiceResult<()>;
+    async fn ensure_default_profile(&self, bot_id: &str, env: &str) -> ServiceResult<u64>;
 
     async fn get_active_default(&self, bot_id: &str, env: &str) -> Option<PermissionProfile>;
 
