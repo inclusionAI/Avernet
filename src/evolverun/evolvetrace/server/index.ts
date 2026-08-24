@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { initDatabase, closeDatabase, resolveSignatureConfig, resolveAdminConfig } from "./db.js";
+import type { EvolvetraceExtensions } from "./extensions/types.js";
 import { FlowRunRepository } from "./repositories/flow-run-repository.js";
 import { NodeExecutionRepository } from "./repositories/node-execution-repository.js";
 import { FlowEventRepository } from "./repositories/event-repository.js";
@@ -62,8 +63,11 @@ function resolvePort(): number {
 
 const PORT = resolvePort();
 
-async function main(): Promise<void> {
-  const db = await initDatabase();
+async function main(extensions?: EvolvetraceExtensions): Promise<void> {
+  // 数据库初始化 — 优先使用扩展提供的 createDatabase，否则回退社区默认
+  const db = extensions?.createDatabase
+    ? await extensions.createDatabase(undefined)
+    : await initDatabase();
   await initSchema(db);
 
   const hasDb = db.dbType !== "noop";
@@ -103,6 +107,9 @@ async function main(): Promise<void> {
 
   app.use(requestLogger);
 
+  // 企业扩展中间件注册（在标准中间件之后、路由注册之前）
+  extensions?.registerMiddleware?.(app);
+
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", db: db.dbType });
   });
@@ -121,6 +128,9 @@ async function main(): Promise<void> {
   app.use("/api/tclog", createTCLogRouter(db, flowRunRepo, botPermRepo));
   app.use("/api/sandbox-query", createSandboxQueryRouter({ sandboxQueryService }));
 
+  // 企业扩展路由注册（在标准路由注册之后）
+  extensions?.registerRoutes?.(app);
+
   const internalRepos: InternalRepos = {
     flowRunRepo,
     nodeExecRepo,
@@ -128,6 +138,7 @@ async function main(): Promise<void> {
     facadeBindingRepo: facadeRepo,
     workflowSpecRepo,
     botWorkflowPermissionRepo: botPermRepo,
+    workflowDeployHistoryRepo: wfdhRepo,
   };
   const sigConfig = resolveSignatureConfig();
   app.use("/api/internal", signatureMiddleware(sigConfig), createInternalRouter(internalRepos));
@@ -190,7 +201,8 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 }
 
-main().catch((err) => {
+const extensions: EvolvetraceExtensions | undefined = undefined; // 社区版不注入扩展
+main(extensions).catch((err) => {
   console.error("[evolvetrace] Failed to start server:", err);
   process.exit(1);
 });

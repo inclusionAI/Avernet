@@ -283,7 +283,7 @@ type OpenClawPluginConfig = Omit<Partial<YamlAppConfig>, "database">;
 const CONFIG_FILENAME = "application.yaml";
 
 /** Plugin ID as defined in openclaw.plugin.json */
-const PLUGIN_ID = "clawmind";
+const PLUGIN_ID = "taskguard";
 
 /**
  * Known OpenClaw extension directories (local dev + production).
@@ -906,7 +906,7 @@ function buildConfigFromMergedYaml(yaml: YamlAppConfig): { database: DatabaseCon
   // ── Diagnostics: log version and parsed configs (stderr only — stdout is
   //    captured by Claude Code's SessionStart hook and injected as LLM context;
   //    config diagnostics MUST NOT pollute that context) ──
-  console.error(`[config] clawmind v${app.version}`);
+  console.error(`[config] taskguard v${app.version}`);
 
   // ── Diagnostics: log parsed compression configs ──
   console.error(
