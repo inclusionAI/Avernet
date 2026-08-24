@@ -62,7 +62,7 @@ and client compatibility plan.
 | Persisted notification category | `APPROVAL`, `NOTICE` |
 | List category filter | `ALL`, `APPROVAL`, `NOTICE` |
 | List query type | `PENDING_FOR_ME`, `INITIATED_BY_ME`, `PROCESSED_BY_ME` |
-| Supported business type | `SPACE_JOIN` for the currently implemented Space handler; the unified Service API accepts business-module-defined `biz_type` values. |
+| Declared business type values | `SPACE_JOIN`, `BOT_COLLABORATOR`, and `SKILL_COLLABORATOR`; the unified Service API also accepts business-module-defined `biz_type` values. |
 
 `ALL` is a query-only filter and must never be persisted as a notification
 category. `WorkOrderEventType` is also a persisted whitelist. Approval events are
@@ -70,9 +70,10 @@ classified centrally in `APPROVAL_EVENT_TYPES` and currently include
 `SPACE_JOIN_APPLIED`, `BOT_COLLABORATOR_APPLIED`,
 `SKILL_COLLABORATOR_APPLIED`, `HUMAN2BOT_FRIEND_APPLIED`, and
 `BOT2BOT_FRIEND_APPLIED`; all reviewed/member-added/public-order events are
-classified as `NOTICE`. This phase implements only the `SPACE_JOIN` handler;
-the remaining event values reserve the names defined by the system design for
-later business handlers.
+classified as `NOTICE`. This phase implements the `SPACE_JOIN` handler.
+`SKILL_COLLABORATOR` is currently supported for generic creation, persistence,
+querying, and response pass-through; it does not add a Skill-specific approval
+side effect.
 
 ## Space-join message templates
 

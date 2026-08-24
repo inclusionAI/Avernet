@@ -41,10 +41,12 @@ class WorkOrderBizType(_DocumentedEnum):
 
     SPACE_JOIN = "SPACE_JOIN"
     BOT_COLLABORATOR = "BOT_COLLABORATOR"
+    SKILL_COLLABORATOR = "SKILL_COLLABORATOR"
 
     __descriptions__ = {
         "SPACE_JOIN": "A request to join a Space.",
         "BOT_COLLABORATOR": "A request to jointly edit a Bot.",
+        "SKILL_COLLABORATOR": "A request to collaborate on a Skill.",
     }
 
 

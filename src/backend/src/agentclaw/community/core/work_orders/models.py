@@ -34,6 +34,7 @@ class WorkOrderApproverStatus(StrEnum):
 class WorkOrderBizType(StrEnum):
     SPACE_JOIN = "SPACE_JOIN"
     BOT_COLLABORATOR = "BOT_COLLABORATOR"
+    SKILL_COLLABORATOR = "SKILL_COLLABORATOR"
 
 
 class NotificationCategory(StrEnum):
