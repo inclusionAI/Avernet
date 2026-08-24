@@ -97,6 +97,17 @@ class TestDeadlineEngineAssembly:
         assert task._config.enabled is True
         assert task._config.engine == "deadline"
 
+    def test_deadline_task_coerces_string_ttl_to_int(self):
+        """WR-03: arca.default_ttl_minutes arrives untyped (no
+        ArcaConfigSchema) — a quoted YAML number must resolve to an int in
+        the scheduler config, not raise TypeError at the first cron run."""
+        container = _container_with("deadline")
+        container.config.from_dict({"arca": {"default_ttl_minutes": "1440"}})
+        set_container(container)
+
+        task = container.tasks().deadline_renewal_task()
+        assert task._config.default_ttl_minutes == 1440
+
     def test_device_service_overridden_with_schedule_aware_wrapper(self):
         """services.device_service resolves to the schedule-aware wrapper."""
         container = _container_with("deadline")

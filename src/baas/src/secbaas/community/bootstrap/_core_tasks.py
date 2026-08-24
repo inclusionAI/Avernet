@@ -109,9 +109,12 @@ class CoreTaskContainer(containers.DeclarativeContainer):
         # Rule 14 (configuration-driven wiring): the TTL period comes from
         # the arca config section, not hardcoded task constants. The
         # fallback keeps overlays without an arca section (minimal test
-        # containers) on the 1440 default.
+        # containers) on the 1440 default. WR-03: coerce to int — the
+        # value has no ArcaConfigSchema, so a quoted YAML number ("1440")
+        # would reach the scheduler as str and raise TypeError at the
+        # first cron run (default_ttl_minutes // 2).
         default_ttl_minutes=providers.Callable(
-            lambda v: v if v else 1440,
+            lambda v: int(v) if v else 1440,
             config.arca.default_ttl_minutes,
         ),
         retry_delay_minutes=config.renewal_scheduler.retry_delay_minutes,

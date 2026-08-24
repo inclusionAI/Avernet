@@ -556,9 +556,13 @@ class DeadlineRenewalScheduler:
         # TTL period comes from the configured default_ttl_minutes (1440:
         # identical to the former 86400-second constant); the safety margin
         # is subtracted so an extension never lands exactly on the expiry.
-        ttl_minutes = (
+        # WR-03: clamp to a 1-minute floor — when the operator configures a
+        # default_ttl_minutes below renew_threshold_hours the raw formula
+        # can go 0/negative, which extend_ttl must never receive.
+        ttl_minutes = max(
+            1,
             int((self._config.default_ttl_minutes * 60 - remaining_hours * 3600) / 60)
-            - self._config.ttl_safety_margin_minutes
+            - self._config.ttl_safety_margin_minutes,
         )
 
         try:

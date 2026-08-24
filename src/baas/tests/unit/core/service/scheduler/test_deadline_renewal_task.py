@@ -900,6 +900,28 @@ class TestTtlWindowDerivation:
         mock_facade.extend_ttl.assert_awaited_once_with("sb-1", 2159)
 
     @pytest.mark.asyncio
+    async def test_negative_ttl_minutes_clamped_to_one(self):
+        """WR-03: default_ttl_minutes=600 (10h period) with ~10h remaining
+        computes int((600*60 - 10*3600)/60) - 1 = -1 — the Step 3(h)
+        formula clamps to a 1-minute floor instead of passing a
+        non-positive value to extend_ttl."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(
+            enabled=True,
+            config_overrides={"default_ttl_minutes": 600},
+        )
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(10))
+        )
+        mock_facade.extend_ttl = AsyncMock(return_value=True)
+        mock_repo.update_after_success = MagicMock()
+
+        result = await scheduler._renew_one(_renewal_record())
+
+        assert result == "success"
+        mock_facade.extend_ttl.assert_awaited_once_with("sb-1", 1)
+
+    @pytest.mark.asyncio
     async def test_discovery_register_target_derives_from_default_ttl_minutes(self):
         """default_ttl_minutes=2880 -> discovery register = ttl_utc - 24h."""
         scheduler, mock_repo, _, _ = _make_scheduler(
