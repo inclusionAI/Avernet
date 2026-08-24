@@ -142,10 +142,10 @@ def mock_bot_service():
 @pytest.fixture
 def mock_passport():
     p = MagicMock()
-    p.apply_first_agent_passport.return_value = {"token": "tok123"}
-    p.apply_agent_passport.return_value = {"token": "tok123"}
+    p.apply_first_agent_passport.return_value = {"token": "tok123", "agent_code": "agent-test"}
+    p.apply_agent_passport.return_value = {"token": "tok123", "agent_code": "agent-test"}
     p.query_auth_status.return_value = {"status": "ISSUED", "token": "tok123"}
-    p.query_agent_passport.return_value = {"status": "ISSUED", "token": "tok123"}
+    p.query_agent_passport.return_value = {"agent_code": "agent-test"}
     p.update_passport.return_value = None
     return p
 
@@ -500,8 +500,8 @@ class TestGetBotStatus:
             "status": "ACTIVE",
             "active_engine": "aicoding",
             "template_type": "applicationCoding",
-            # start_status 缺失 / 仍在 STARTING：仓库还没 clone 完
-            "ext": {},
+            # 明确仍在初始化：仓库还没 clone 完。
+            "ext": {"start_status": "PENDING"},
         }
         resp = tc.get("/api/bots/default/status")
         data = resp.json()
@@ -567,13 +567,31 @@ class TestGetBotStatus:
 
     # claude_code + applicationCoding 在创建链路里被路由成 aicoding 引擎，
     # 但 ac_bots.active_engine 写库时保留 claude_code。两种取值都要覆盖。
-    def test_claude_code_app_bot_repos_gating(self, client):
+    def test_claude_code_app_bot_active_binding_backfills_missing_marker(self, client):
         tc, svc, _ = client
         svc.get_bot.return_value = {
             **BOT_SAMPLE,
             "status": "ACTIVE",
             "active_engine": "claude_code",
             "template_type": "applicationCoding",
+            "device_binding": {
+                "status": "ACTIVE",
+                "device_id": "BOT-ready",
+                "device_provider": "baas",
+            },
+            "ext": {},
+        }
+        resp = tc.get("/api/bots/default/status")
+        assert resp.json()["data"]["is_ready"] is True
+
+    def test_app_bot_missing_marker_without_active_binding_is_not_ready(self, client):
+        tc, svc, _ = client
+        svc.get_bot.return_value = {
+            **BOT_SAMPLE,
+            "status": "ACTIVE",
+            "active_engine": "claude_code",
+            "template_type": "applicationCoding",
+            "device_binding": {"status": "PENDING", "device_provider": "baas"},
             "ext": {},
         }
         resp = tc.get("/api/bots/default/status")
@@ -1582,7 +1600,7 @@ class TestCreateBot:
 
     def test_default_teclaw_service_guard_preserves_business_message(self, client):
         tc, svc, passport = client
-        passport.apply_first_agent_passport.return_value = {"token": "tok123"}
+        passport.apply_first_agent_passport.return_value = {"token": "tok123", "agent_code": "agent-test"}
         svc.create_bot.side_effect = DefaultBotTeclawNotAllowedError()
 
         resp = tc.post(
@@ -1599,14 +1617,14 @@ class TestCreateBot:
 
     def test_device_allocation_error(self, client):
         tc, svc, passport = client
-        passport.apply_first_agent_passport.return_value = {"token": "tok123"}
+        passport.apply_first_agent_passport.return_value = {"token": "tok123", "agent_code": "agent-test"}
         svc.create_bot.side_effect = DeviceAllocationError("fail")
         resp = tc.post("/api/bots", json={"bot_name": "NewBot"})
         assert resp.json()["error_code"] == 500
 
     def test_device_limit_error(self, client):
         tc, svc, passport = client
-        passport.apply_first_agent_passport.return_value = {"token": "tok123"}
+        passport.apply_first_agent_passport.return_value = {"token": "tok123", "agent_code": "agent-test"}
         svc.create_bot.side_effect = DeviceLimitError("limit")
         resp = tc.post("/api/bots", json={"bot_name": "NewBot"})
         assert resp.json()["error_code"] == 429
@@ -1688,7 +1706,7 @@ class TestCreateBot:
     def test_valid_name_under_limit_succeeds(self, client):
         """A: 合法名 + 未到上限 → 正常走完 passport+create 流程。"""
         tc, svc, passport = client
-        passport.apply_first_agent_passport.return_value = {"token": "tok123"}
+        passport.apply_first_agent_passport.return_value = {"token": "tok123", "agent_code": "agent-test"}
         resp = tc.post("/api/bots", json={"bot_name": "My Bot 1"})
         data = resp.json()
         assert data["success"] is True
@@ -1698,7 +1716,7 @@ class TestCreateBot:
     def test_bot_name_missing_is_allowed(self, client):
         """B: 不传 bot_name → 走默认命名规则，不被 400 拦截。"""
         tc, svc, passport = client
-        passport.apply_first_agent_passport.return_value = {"token": "tok123"}
+        passport.apply_first_agent_passport.return_value = {"token": "tok123", "agent_code": "agent-test"}
         resp = tc.post("/api/bots", json={})
         data = resp.json()
         assert data["success"] is True
@@ -1710,7 +1728,7 @@ class TestCreateBot:
     def test_bot_name_surrounding_whitespace_is_trimmed(self, client):
         """C: 首尾空格被 trim 后再传给 service / passport。"""
         tc, svc, passport = client
-        passport.apply_first_agent_passport.return_value = {"token": "tok123"}
+        passport.apply_first_agent_passport.return_value = {"token": "tok123", "agent_code": "agent-test"}
         resp = tc.post("/api/bots", json={"bot_name": "  Bot 1  "})
         assert resp.json()["success"] is True
         # service 收到 trim 后的 "Bot 1"
@@ -1723,7 +1741,7 @@ class TestCreateBot:
     def test_bot_name_at_32_char_boundary_passes(self, client):
         """D: 32 字符为允许的最长长度，不应被 400 拦截。"""
         tc, svc, passport = client
-        passport.apply_first_agent_passport.return_value = {"token": "tok123"}
+        passport.apply_first_agent_passport.return_value = {"token": "tok123", "agent_code": "agent-test"}
         name = "a" * 32
         resp = tc.post("/api/bots", json={"bot_name": name})
         data = resp.json()

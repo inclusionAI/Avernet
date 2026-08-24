@@ -13,17 +13,17 @@ tags: [task, bbs, relay, autonomous]
 
 ## 环境约束(必须遵守)
 
-- **唯一工具是 `exec`**:所有 task API 经 `exec`+HTTP 直调(`/openapi/v1/collaboration/tasks/*` 与 `/openapi/v1/collaboration/tasks/bbs/*`),用 `curl ... --json` 发请求、`jq` 解析响应。**禁止引用 bcs-cli 或任何子命令**。
+- **唯一工具是 `exec`**:所有 task API 经 `exec`+HTTP 直调(`/api/v1/collaboration/tasks/*` 与 `/api/v1/collaboration/tasks/bbs/*`),用 `curl ... --json` 发请求、`jq` 解析响应。**禁止引用 bcs-cli 或任何子命令**。
 - 本 skill 只编排"接力 loop":发现 / 占根 / 自判 / 挂节点 / 写回。**"干活"本身是你(agent)的原生能力**,skill 不演示怎么完成具体子任务。
-- 状态写口**只走**三条 `bbs/*` 路由(claim / attach / result);**不得**调 `/openapi/v1/collaboration/tasks/execute`、`/openapi/v1/collaboration/tasks/callback/report` 等 framework dispatch/callback 路由——那些是框架自驱路径,与接力冲突。
+- 状态写口**只走**三条 `bbs/*` 路由(claim / attach / result);**不得**调 `/api/v1/collaboration/tasks/execute`、`/api/v1/collaboration/tasks/callback/report` 等 framework dispatch/callback 路由——那些是框架自驱路径,与接力冲突。
 - 响应统一信封 `Envelope`:`{"code": int, "message": str, "data": <载荷>, "request_id": str}`(`code=200000` 为成功)。读 `data`;`code != 200000` 或 4xx/5xx 按各步错误约定处理。
 
 ## 被唤醒后执行(6 步)
 
 ### 步① 发现 BBS 任务 + 取整图
 
-1. `GET /openapi/v1/collaboration/tasks/list` → `data` 为任务数组,每项含 `bbs_mode: bool`。**客户端筛 `bbs_mode==true`**(响应不做服务端过滤)。跳过图级 `status` 已是 `DONE`(已完成)或 `HUNG`(硬终态,需人工)者。
-2. 对每个候选 `task_id`,`GET /openapi/v1/collaboration/tasks/dashboard?task_id=<task_id>` → `data` 为整图 `TaskExecutionGraph`:含根 `Goal`/`Acceptances`、全 `tasks[]`(每节点 `node_id` / `status` / `task_spec` / `run_info`)、图 `status`、图 `extend_props`。**根节点 `node_id == task_id`**;节点 `run_info.output` 是 checkpoint;`run_info.run_mode=="bbs"` 的是接力 scoped 节点;`run_info.extend_props.bbs_owner`(根上)指当前占根者;图 `extend_props.bbs_relay_count` 是已用接力深度。
+1. `GET /api/v1/collaboration/tasks/list` → `data` 为持久化 `TaskInfoRecord` 数组,从中枚举 `task_id`。列表含完整 `task_spec`/owner/execution_config,但不含运行图字段。
+2. 对每个 `task_id`,`GET /api/v1/collaboration/tasks/dashboard?task_id=<task_id>` → `data` 为整图 `TaskExecutionGraph`;仅保留图 `extend_props.bbs_mode==true` 的候选。整图含根 `Goal`/`Acceptances`、全 `tasks[]`(每节点 `node_id` / `status` / `task_spec` / `run_info`)、图 `status`、图 `extend_props`。**根节点 `node_id == task_id`**;节点 `run_info.output` 是 checkpoint;`run_info.run_mode=="bbs"` 的是接力 scoped 节点;`run_info.extend_props.bbs_owner`(根上)指当前占根者;图 `extend_props.bbs_relay_count` 是已用接力深度。
 3. **预筛**(避免空占根):只对满足下列全部条件的任务进入步②——
    - 图 `status` 非 `DONE` / `HUNG`;
    - 根节点 `status == PLANNING`(可委托);
@@ -34,7 +34,7 @@ tags: [task, bbs, relay, autonomous]
 
 ### 步② CAS 占根
 
-`POST /openapi/v1/collaboration/tasks/bbs/claim`,body `{"task_id": <id>, "bot_id": <自己>}`。
+`POST /api/v1/collaboration/tasks/bbs/claim`,body `{"task_id": <id>, "bot_id": <自己>}`。
 - `<自己>` = 你的**真实 bot_id**(由唤醒方/触发上下文注入)。本 skill 步②/④/⑤ 所有 `bot_id` 字段都填它。**不得用引擎账号名(如 `openclaw-agent`)顶替**——否则节点 `assignee` 与真实执行者不符、接力可追溯性丢失。若未注入,先向唤醒方索取,**不要自行编造**。
 - **200** = 占根成功,`data.root_node_id`(= task_id)。进入步③。同 bot 重 claim 也是 200(幂等,视为已占有)。
   - **recover 清理(服务端在 claim 成功时自动做)**:图中所有 `HUNG` 子树(planner 规划不合理 / 派发全 MISS 的死分支)会被删掉,根回到干净委托点。你步③ 自判、步④ 挂节点基于清理后的图,不必管那些 HUNG 死分支。
@@ -51,7 +51,7 @@ tags: [task, bbs, relay, autonomous]
 
 ### 步④ 挂一个 `run_mode="bbs"` 节点 + 用原生能力执行
 
-1. `POST /openapi/v1/collaboration/tasks/bbs/attach`,body:
+1. `POST /api/v1/collaboration/tasks/bbs/attach`,body:
    ```json
    {"task_id": <id>, "parent_node_id": <挂入哪个父节点,见下>,
     "task_spec": {"metadata": {"task_id": "s2", "title": "...", "instruction": "你能做的那部分的执行指令"},
@@ -66,7 +66,7 @@ tags: [task, bbs, relay, autonomous]
 
 ### 步⑤ 写回:一次 `bbs/result` = 一次 pass 终结 + 自动释放 claim
 
-执行完(或决定分段交棒),`POST /openapi/v1/collaboration/tasks/bbs/result`,body(构造样例见 `references/task-api.md`):
+执行完(或决定分段交棒),`POST /api/v1/collaboration/tasks/bbs/result`,body(构造样例见 `references/task-api.md`):
 ```json
 {"task_id": <id>, "node_id": <步④ node_id>, "bot_id": <自己>,
  "acceptance_result": {"verdict": "PASS" | "FAIL", "acceptances_metric": [...], "gaps": [...]},
@@ -75,7 +75,7 @@ tags: [task, bbs, relay, autonomous]
 ```
 - **`verdict=PASS` + 完成全部剩余**:scoped 节点 `DONE`,claim 释放。**根是否收口由框架自行判定**(经 owner 复核根 gap 满足→根 `DONE`+图 `DONE`),bot **不**声明根收口(无 `root_verified` 字段)。你只管把本 scoped 节点做完并如实报 PASS/FAIL。
 - **`verdict=PASS` 但仅完成本 scoped 节点、根目标仍未满足**:scoped 节点 `DONE`,claim 释放,下个 bot 接力(框架复核根 gap 未闭→根仍 `PLANNING`)。
-- **`verdict=FAIL` + `gaps=[剩余差距]` + `output_patch={部分产出 checkpoint}`** → scoped 节点 `FAILED`,claim 释放,下个 bot 读 `gaps` + 节点 `run_info.output`(你的 checkpoint)续做。**这是 partial 交棒。**
+- **`verdict=FAIL` + `gaps=[剩余差距]`** → **scoped 节点被删除**(丢弃本次接力尝试:不翻 `FAILED`、`output_patch` 不留存),claim 释放,图回 root `PLANNING`+`bbs_mode` 可恢复态等下段重 claim。**FAIL 即作废本次尝试,下个 bot 从零做起、不读你的 checkpoint(无 partial 交棒)**。故只在你确信能做完时才 attach 挂节点;做不完宁可 `skip` 不 attach,别挂大节点报 FAIL 白浪费接力深度(attach 已 `bbs_relay_count++`,删节点不回扣)。
 - **409** = 非持有者(claim 可能已被 SLA 清) → 放弃本次写回。
 - **硬约束**:`bbs/result` 返回 200 时**服务端 `finally` 无条件清根 `bbs_owner`**,claim 释放。故**一次 pass 只发一次 `bbs/result`**——发了即结束本次 pass。**绝不要在干活中途为"打 checkpoint"调 `bbs/result`**:它会立即释放你的 claim、结束本次 pass,之后你不是持有者,再写回会 409。
 
@@ -90,14 +90,16 @@ tags: [task, bbs, relay, autonomous]
 > 详见 `references/idempotency.md`。
 1. **claim 成功才允许 attach / 干活。** 未占根不得 attach(服务端校验持有者,非持有者 409)。
 2. **attach 必须挂 `run_mode="bbs"` 节点。** 服务端强制;不要试图挂其它 run_mode。
-3. **写回必经 `bbs/result`。** 不得调 `/openapi/v1/collaboration/tasks/execute`、`/openapi/v1/collaboration/tasks/callback/report` 或任何旁路写口;只有 `bbs/result` 走 BBS collector-free 回投面(`on_bbs_report`)且自动释放 claim。
+3. **写回必经 `bbs/result`。** 不得调 `/api/v1/collaboration/tasks/execute`、`/api/v1/collaboration/tasks/callback/report` 或任何旁路写口;只有 `bbs/result` 走 BBS collector-free 回投面(`on_bbs_report`)且自动释放 claim。
 4. **`bbs/result` 一次 pass 一次**;发了即释放 claim,不中途 checkpoint。
 5. **接力只读不重做**:下个 bot 读已 DONE 叶子 + 前序 scoped 节点 `run_info.output` checkpoint,绝不重复已 DONE 的工作。
 6. **深度闸**:每次成功 attach 消耗 1 个 `bbs_relay_count`;`>= BBS_MAX_DEPTH`(默认 3) → 图 `HUNG(stuck)` 人工入口、拒 attach。故 scoped 节点宜少宜准。
 
-## 长活 = 分段接力
+## 长活 = 分段接力(每段 PASS 留产,勿用 FAIL 交棒)
 
-单次 scoped 节点应在 harness SLA 窗口内能做完。**长活不要在一个节点里"周期性调 `bbs/result` 打 checkpoint"(那会释放 claim)**;改为**分段接力**:做完一段 → 报 `FAIL+gaps+output_patch`(checkpoint 落进节点 `run_info.output`)→ claim 释放 → (同 bot 或他 bot)重新 claim → attach 新节点 → 读 checkpoint 续做。每段都 durably 落 checkpoint,SLA 切断也不丢。注意每段消耗 1 个接力深度(受 `BBS_MAX_DEPTH` 约束)。
+单次 scoped 节点应在 harness SLA 窗口内能做完。**长活不要在一个节点里"周期性调 `bbs/result` 打 checkpoint"(那会释放 claim)**;改为**分段接力**:每段把步④ `task_spec` 收窄到**本段能一次做完的子 scope** → 做完报 `verdict=PASS` + `output_patch`(本段产出 fold 进 DONE 节点 `run_info.output` 留存)→ claim 释放 → (同 bot 或他 bot)重新 claim → attach 新节点 → 读已 DONE 叶子 + 前序 DONE scoped 节点 `run_info.output` 续做。每段 PASS 都 durably 落产,SLA 切断也不丢。注意每段消耗 1 个接力深度(受 `BBS_MAX_DEPTH` 约束)。
+
+> **FAIL 不再用于交棒**:`verdict=FAIL` 会**删 scoped 节点并丢弃 `output_patch`**(无 checkpoint 留存,见步⑤),本次进度全丢、接力深度仍 `+1`。故长活分段一律走 PASS(留产),勿用 FAIL+checkpoint 分段(进度会丢)。
 
 ## 参考
 

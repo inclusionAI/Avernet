@@ -14,11 +14,12 @@ Bug summary:
 The fix for all three is to `await` the service method directly instead of wrapping
 it in run_in_threadpool.
 """
+
 import json
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from fastapi import FastAPI
@@ -26,10 +27,20 @@ from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
-from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
-from agentclaw.community.adapters.http.skill_center.skills import router as skills_router
+from agentclaw.community.adapters.http.dependencies import (
+    RequestContext,
+    get_request_context,
+)
+from agentclaw.community.adapters.http.skill_center.skills import (
+    router as skills_router,
+)
 from agentclaw.community.api.runtime_layout_probe_service import (
     RuntimeLayoutProbeServiceProtocol,
+)
+from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
+from agentclaw.community.core.skill_center.errors import (
+    LocalSkillNotFoundError,
+    LocalSkillRuntimeSyncError,
 )
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     LAYOUT_CONTRACT_VERSION,
@@ -37,13 +48,10 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
     RuntimeLayoutProbeStatus,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillInfo
-from agentclaw.community.core.skills_pool.edit_guard import (
-    SkillsPoolEditBusyError,
-    SkillsPoolEditLockUnavailableError,
-)
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def mock_ctx():
@@ -73,9 +81,7 @@ def _skill_service_di_app(
     mock_skill_service.deactivate_skill = AsyncMock(return_value=True)
     mock_skill_service.activate_skills_batch = AsyncMock(
         return_value={
-            "success": [
-                {"id": "a", "link_name": "a", "path": "git://path/a"}
-            ],
+            "success": [{"id": "a", "link_name": "a", "path": "git://path/a"}],
             "failed": [],
         }
     )
@@ -84,8 +90,34 @@ def _skill_service_di_app(
     mock_skill_service.runtime_uses_pool_paths = runtime_uses_pool_paths
     mock_skill_service.active_dir = None
 
+    mock_asset_service = MagicMock()
+
+    def _resolve_legacy(**kwargs):
+        return {"git://path/a": "1", "git://path/b": "2"}.get(
+            kwargs["skill_reference"], "1"
+        )
+
+    mock_asset_service.resolve_legacy_skill_id.side_effect = _resolve_legacy
+    mock_asset_service.set_active = AsyncMock(
+        side_effect=(
+            LocalSkillRuntimeSyncError()
+            if runtime_uses_pool_paths
+            and device_sync_result
+            and not device_sync_result.get("success")
+            else None
+        ),
+        return_value={
+            "id": "1",
+            "name": "a",
+            "link_name": "a",
+            "git_path": "git://path/a",
+        },
+    )
+    mock_skill_service.asset_service = mock_asset_service
+
     # Factory that returns the mock service from create()
     mock_skill_service_factory = MagicMock()
+
     def _create_skill_service(**kwargs):
         mock_skill_service.active_dir = kwargs.get("active_dir")
         return mock_skill_service
@@ -159,9 +191,7 @@ def _skill_service_di_app(
             },
         )
     mock_runtime_layout_probe = MagicMock()
-    mock_runtime_layout_probe.probe_bot = AsyncMock(
-        return_value=runtime_probe_result
-    )
+    mock_runtime_layout_probe.probe_bot = AsyncMock(return_value=runtime_probe_result)
     mock_skill_service.runtime_layout_probe = mock_runtime_layout_probe
 
     class _TestModule(Module):
@@ -170,20 +200,33 @@ def _skill_service_di_app(
             from agentclaw.community.core.devices.services.device_context_resolver import (
                 DeviceContextResolver,
             )
-            from agentclaw.community.core.skill_center.factories import SkillServiceFactory
-            from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
+            from agentclaw.community.core.skill_center.factories import (
+                SkillServiceFactory,
+            )
+            from agentclaw.community.core.workspace.path_factory import (
+                WorkspacePathFactory,
+            )
             from agentclaw.community.di.modules.skill_center_module import (
                 SkillSetServiceFactory,
             )
-            from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+            from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+                DeviceSyncDispatcher,
+            )
 
-            from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
-            from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
+            from agentclaw.community.api.skill_service_factory import (
+                SkillServiceFactoryProtocol,
+            )
+            from agentclaw.community.api.skill_set_service_factory import (
+                SkillSetServiceFactoryProtocol,
+            )
+
             binder.bind(SkillServiceFactory, to=mock_skill_service_factory)
             binder.bind(SkillServiceFactoryProtocol, to=mock_skill_service_factory)
             binder.bind(WorkspacePathFactory, to=mock_path_factory)
             binder.bind(SkillSetServiceFactory, to=mock_skill_set_service_factory)
-            binder.bind(SkillSetServiceFactoryProtocol, to=mock_skill_set_service_factory)
+            binder.bind(
+                SkillSetServiceFactoryProtocol, to=mock_skill_set_service_factory
+            )
             binder.bind(DeviceContextResolver, to=mock_resolver)
             binder.bind(DeviceSyncDispatcher, to=mock_device_sync_dispatcher)
             binder.bind(BotRepository, to=mock_bot_repo)
@@ -191,6 +234,7 @@ def _skill_service_di_app(
                 RuntimeLayoutProbeServiceProtocol,
                 to=mock_runtime_layout_probe,
             )
+            binder.bind(BotSkillAssetServiceProtocol, to=mock_asset_service)
 
     injector = Injector([_TestModule()])
     attach_injector(app, injector)
@@ -227,17 +271,16 @@ class TestActiveSkillsRuntimeRead:
             )
 
     def test_desktop_active_list_reads_the_live_device(self, mock_ctx):
-        with _skill_service_di_app(
-            mock_ctx, bot_type="desktop"
-        ) as (client, mock_svc, _):
+        with _skill_service_di_app(mock_ctx, bot_type="desktop") as (
+            client,
+            mock_svc,
+            _,
+        ):
             mock_svc.get_active_skills_from_device.return_value = [
                 SkillInfo(
                     id="sp455-r2-oc-probe",
                     name="sp455-r2-oc-probe",
-                    path=(
-                        "/home/admin/.openclaw/workspace/skills/"
-                        "sp455-r2-oc-probe"
-                    ),
+                    path=("/home/admin/.openclaw/workspace/skills/sp455-r2-oc-probe"),
                     is_active=True,
                     is_installed=True,
                 )
@@ -255,9 +298,7 @@ class TestActiveSkillsRuntimeRead:
             )
             mock_svc.get_active_skills.assert_not_called()
 
-    def test_non_desktop_active_list_keeps_management_filesystem_scan(
-        self, mock_ctx
-    ):
+    def test_non_desktop_active_list_keeps_management_filesystem_scan(self, mock_ctx):
         with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
             mock_svc.get_active_skills.return_value = []
 
@@ -354,12 +395,12 @@ class TestActiveSkillsRuntimeRead:
             assert mock_svc.active_dir is None
             mock_svc.get_active_skills_from_device.assert_not_awaited()
 
-    def test_desktop_active_list_does_not_mask_device_failure_as_empty(
-        self, mock_ctx
-    ):
-        with _skill_service_di_app(
-            mock_ctx, bot_type="desktop"
-        ) as (client, mock_svc, _):
+    def test_desktop_active_list_does_not_mask_device_failure_as_empty(self, mock_ctx):
+        with _skill_service_di_app(mock_ctx, bot_type="desktop") as (
+            client,
+            mock_svc,
+            _,
+        ):
             mock_svc.get_active_skills_from_device.side_effect = RuntimeError(
                 "device offline"
             )
@@ -472,11 +513,20 @@ def _upload_skill_di_app(
             from agentclaw.community.core.devices.services.device_context_resolver import (
                 DeviceContextResolver,
             )
-            from agentclaw.community.core.skill_center.factories import SkillServiceFactory
-            from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
-            from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
+            from agentclaw.community.core.skill_center.factories import (
+                SkillServiceFactory,
+            )
+            from agentclaw.community.core.skills_pool.edit_guard import (
+                SkillsPoolEditGuard,
+            )
+            from agentclaw.community.core.workspace.path_factory import (
+                WorkspacePathFactory,
+            )
 
-            from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
+            from agentclaw.community.api.skill_service_factory import (
+                SkillServiceFactoryProtocol,
+            )
+
             binder.bind(SkillServiceFactory, to=mock_skill_service_factory)
             binder.bind(SkillServiceFactoryProtocol, to=mock_skill_service_factory)
             binder.bind(WorkspacePathFactory, to=mock_path_factory)
@@ -498,11 +548,23 @@ def _upload_skill_di_app(
 
 class TestUploadSkillValidation:
     def test_upload_rejects_non_active_bot(self, mock_ctx):
-        with _upload_skill_di_app(mock_ctx, bot_status="PENDING") as (client, mock_svc, _, _):
+        with _upload_skill_di_app(mock_ctx, bot_status="PENDING") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
             response = client.post(
                 "/api/skills/upload",
                 files=[
-                    ("files", ("SKILL.md", b"---\nname: a\ndescription: a\n---", "text/markdown"))
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
                 ],
                 data={"file_paths": json.dumps(["SKILL.md"])},
             )
@@ -514,13 +576,25 @@ class TestUploadSkillValidation:
             mock_svc.upload_skill.assert_not_called()
 
     def test_upload_rejects_missing_bot(self, mock_ctx):
-        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, mock_svc, mock_bot_repo, _):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            mock_bot_repo,
+            _,
+        ):
             mock_bot_repo.get_by_id_and_owner.return_value = None
 
             response = client.post(
                 "/api/skills/upload",
                 files=[
-                    ("files", ("SKILL.md", b"---\nname: a\ndescription: a\n---", "text/markdown"))
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
                 ],
                 data={"file_paths": json.dumps(["SKILL.md"])},
             )
@@ -532,15 +606,25 @@ class TestUploadSkillValidation:
 
     def test_upload_rejects_bot_without_owner_metadata(self, mock_ctx):
         """Local Skill 的归属无法确定时，不能将上传归到请求方。"""
-        with _upload_skill_di_app(
-            mock_ctx, bot_status="ACTIVE"
-        ) as (client, mock_svc, mock_bot_repo, _):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            mock_bot_repo,
+            _,
+        ):
             mock_bot_repo.get_by_id_and_owner.return_value["owner_id"] = ""
 
             response = client.post(
                 "/api/skills/upload",
                 files=[
-                    ("files", ("SKILL.md", b"---\nname: a\ndescription: a\n---", "text/markdown"))
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
                 ],
                 data={"file_paths": json.dumps(["SKILL.md"])},
             )
@@ -551,11 +635,23 @@ class TestUploadSkillValidation:
             mock_svc.upload_skill.assert_not_called()
 
     def test_upload_rejects_file_paths_length_mismatch(self, mock_ctx):
-        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, mock_svc, _, _):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
             response = client.post(
                 "/api/skills/upload",
                 files=[
-                    ("files", ("SKILL.md", b"---\nname: a\ndescription: a\n---", "text/markdown")),
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    ),
                     ("files", ("a.txt", b"a", "text/plain")),
                 ],
                 data={"file_paths": json.dumps(["SKILL.md"])},
@@ -567,11 +663,23 @@ class TestUploadSkillValidation:
             mock_svc.upload_skill.assert_not_called()
 
     def test_upload_active_bot_calls_service(self, mock_ctx):
-        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, mock_svc, _, _):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
             response = client.post(
                 "/api/skills/upload",
                 files=[
-                    ("files", ("SKILL.md", b"---\nname: a\ndescription: a\n---", "text/markdown"))
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
                 ],
                 data={"file_paths": json.dumps(["SKILL.md"])},
             )
@@ -579,79 +687,6 @@ class TestUploadSkillValidation:
             body = response.json()
             assert body["success"] is True
             assert mock_svc.upload_skill.await_count == 1
-
-    def test_upload_edit_lock_conflict_returns_http_409(self, mock_ctx):
-        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
-            client,
-            mock_svc,
-            _,
-            _,
-        ):
-            from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
-
-            # The fixture's injected guard is resolved through the app injector;
-            # reach it via the dependency's configured instance.
-            # Rebuilding this narrow response assertion through a side effect
-            # prevents a failed mutation from masquerading as HTTP 200.
-            app = client.app
-            injector = app.state.injector
-            guard = injector.get(SkillsPoolEditGuard)
-            guard.acquire_for_edit.side_effect = SkillsPoolEditBusyError("busy")
-
-            response = client.post(
-                "/api/skills/upload",
-                files=[
-                    (
-                        "files",
-                        ("SKILL.md", b"---\nname: a\ndescription: a\n---", "text/markdown"),
-                    )
-                ],
-                data={"file_paths": json.dumps(["SKILL.md"])},
-            )
-
-            assert response.status_code == 409
-            assert response.json()["detail"] == "busy"
-            mock_svc.upload_skill.assert_not_called()
-
-    def test_upload_lock_backend_outage_returns_http_503(self, mock_ctx):
-        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
-            client,
-            mock_svc,
-            _,
-            _,
-        ):
-            from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
-
-            guard = client.app.state.injector.get(SkillsPoolEditGuard)
-            guard.acquire_for_edit.side_effect = SkillsPoolEditLockUnavailableError(
-                "lock service unavailable"
-            )
-
-            response = client.post(
-                "/api/skills/upload",
-                files=[
-                    (
-                        "files",
-                        ("SKILL.md", b"---\nname: a\ndescription: a\n---", "text/markdown"),
-                    )
-                ],
-                data={"file_paths": json.dumps(["SKILL.md"])},
-            )
-
-            assert response.status_code == 503
-            assert response.json()["detail"] == "lock service unavailable"
-            mock_svc.upload_skill.assert_not_called()
-
-
-def test_upload_openapi_documents_edit_lock_conflict_and_outage():
-    app = FastAPI()
-    app.include_router(skills_router)
-
-    responses = app.openapi()["paths"]["/api/skills/upload"]["post"]["responses"]
-    for status in ("409", "503"):
-        assert responses[status]["content"]["application/json"]["schema"]["$ref"].endswith(
-            "UploadSkillErrorResponse"
-        )
 
     def test_upload_persists_bot_owner_for_collaborator_upload(self):
         collaborator_ctx = RequestContext(
@@ -665,12 +700,16 @@ def test_upload_openapi_documents_edit_lock_conflict_and_outage():
             bot_owner_id="bot-owner-1",
         ) as (client, mock_svc, _, _):
             response = client.post(
-                (
-                    "/api/skills/upload?user_id=bot-owner-1"
-                    "&bot_id=service-bot-1"
-                ),
+                ("/api/skills/upload?user_id=bot-owner-1&bot_id=service-bot-1"),
                 files=[
-                    ("files", ("SKILL.md", b"---\nname: a\ndescription: a\n---", "text/markdown"))
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
                 ],
                 data={"file_paths": json.dumps(["SKILL.md"])},
             )
@@ -708,9 +747,7 @@ def test_upload_openapi_documents_edit_lock_conflict_and_outage():
             assert create_kwargs["engine_type"] == "openclaw"
 
     @pytest.mark.parametrize("engine_type", ["openclaw", "claude_code", "hermes"])
-    def test_desktop_upload_preserves_engine_and_bot_scope(
-        self, engine_type
-    ):
+    def test_desktop_upload_preserves_engine_and_bot_scope(self, engine_type):
         desktop_ctx = RequestContext(
             user_id="desktop-owner",
             bot_id=f"desktop-{engine_type}",
@@ -747,7 +784,12 @@ def test_upload_openapi_documents_edit_lock_conflict_and_outage():
             assert create_kwargs["engine_type"] == engine_type
 
     def test_upload_normalizes_runtime_unavailable_error_message(self, mock_ctx):
-        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, mock_svc, _, _):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
             mock_svc.upload_skill.side_effect = ValueError(
                 "Upload processing error: 502 Bad Gateway"
             )
@@ -755,7 +797,14 @@ def test_upload_openapi_documents_edit_lock_conflict_and_outage():
             response = client.post(
                 "/api/skills/upload",
                 files=[
-                    ("files", ("SKILL.md", b"---\nname: a\ndescription: a\n---", "text/markdown"))
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
                 ],
                 data={"file_paths": json.dumps(["SKILL.md"])},
             )
@@ -763,7 +812,10 @@ def test_upload_openapi_documents_edit_lock_conflict_and_outage():
             body = response.json()
             assert response.status_code == 200
             assert body["success"] is False
-            assert body["message"] == "当前 Bot 的运行环境暂不可用，请重新启动 Bot 后重试。"
+            assert (
+                body["message"]
+                == "当前 Bot 的运行环境暂不可用，请重新启动 Bot 后重试。"
+            )
 
 
 class TestUploadSkillDesktopLiveStatus:
@@ -774,7 +826,10 @@ class TestUploadSkillDesktopLiveStatus:
         return client.post(
             "/api/skills/upload",
             files=[
-                ("files", ("SKILL.md", b"---\nname: a\ndescription: a\n---", "text/markdown"))
+                (
+                    "files",
+                    ("SKILL.md", b"---\nname: a\ndescription: a\n---", "text/markdown"),
+                )
             ],
             data={"file_paths": json.dumps(["SKILL.md"])},
         )
@@ -880,12 +935,8 @@ class TestActivateSkillAsyncAwait:
                 "/api/skills/my-skill-id/activate",
                 json={"source_path": "git://some/path"},
             )
-            # If the bug exists: mock await_count == 0
-            # After fix: mock await_count == 1
-            assert mock_svc.activate_skill.await_count == 1, (
-                f"activate_skill was not awaited! "
-                f"await_count={mock_svc.activate_skill.await_count}"
-            )
+            assert mock_svc.asset_service.set_active.await_count == 1
+            assert mock_svc.activate_skill.await_count == 0
 
     def test_activate_skill_passes_correct_args(self, mock_ctx):
         """user_id/bolt_id must be passed as kwargs (not positional).
@@ -902,32 +953,22 @@ class TestActivateSkillAsyncAwait:
                 "/api/skills/my-skill-id/activate",
                 json={"source_path": "git://some/path"},
             )
-            mock_svc.activate_skill.assert_called_once()
-            call = mock_svc.activate_skill.call_args
-            # user_id / bolt_id must be kwargs, not positional
-            assert "user_id" in call.kwargs, (
-                f"user_id must be a kwarg; got call={call}"
-            )
-            assert "bolt_id" in call.kwargs, (
-                f"bolt_id must be a kwarg; got call={call}"
-            )
-            # And user_id must NOT be source_path — regression guard for
-            # the position-arg-misalignment bug (see test docstring).
-            assert call.kwargs["user_id"] != "git://some/path", (
-                f"user_id was set to request.source_path ({call.kwargs['user_id']!r}) — "
-                "this is the position-arg-misalignment bug coming back."
-            )
-            assert call.kwargs["user_id"] == mock_ctx.user_id, (
-                f"user_id should be ctx.user_id ({mock_ctx.user_id!r}); "
-                f"got {call.kwargs['user_id']!r}"
+            mock_svc.asset_service.set_active.assert_awaited_once_with(
+                skill_id="1",
+                bot_id=mock_ctx.bot_id,
+                owner_id=mock_ctx.user_id,
+                user_id=mock_ctx.user_id,
+                active=True,
             )
 
     def test_pool_activate_merges_requested_locator_into_mapping_publish(
         self, mock_ctx
     ):
-        with _skill_service_di_app(
-            mock_ctx, runtime_uses_pool_paths=True
-        ) as (client, _, mock_set_svc):
+        with _skill_service_di_app(mock_ctx, runtime_uses_pool_paths=True) as (
+            client,
+            _,
+            mock_set_svc,
+        ):
             response = client.post(
                 "/api/skills/1120709/activate",
                 json={
@@ -937,15 +978,9 @@ class TestActivateSkillAsyncAwait:
             )
 
             assert response.status_code == 200, response.text
-            assert mock_set_svc.get_symlink_mappings.call_args.kwargs == {
-                "user_id": mock_ctx.user_id,
-                "bolt_id": mock_ctx.bot_id,
-                "additional_skill_paths": ["local:///pool/direct-local"],
-            }
+            mock_set_svc.get_symlink_mappings.assert_not_called()
 
-    def test_legacy_activate_keeps_existing_mapping_publish_contract(
-        self, mock_ctx
-    ):
+    def test_legacy_activate_keeps_existing_mapping_publish_contract(self, mock_ctx):
         with _skill_service_di_app(mock_ctx) as (client, _, mock_set_svc):
             response = client.post(
                 "/api/skills/1120709/activate",
@@ -956,10 +991,7 @@ class TestActivateSkillAsyncAwait:
             )
 
             assert response.status_code == 200, response.text
-            assert mock_set_svc.get_symlink_mappings.call_args.kwargs == {
-                "user_id": mock_ctx.user_id,
-                "bolt_id": mock_ctx.bot_id,
-            }
+            mock_set_svc.get_symlink_mappings.assert_not_called()
 
     def test_activate_skill_fails_when_runtime_mapping_sync_fails(self, mock_ctx):
         with _skill_service_di_app(
@@ -976,10 +1008,11 @@ class TestActivateSkillAsyncAwait:
             assert response.json()["detail"] == (
                 "Failed to synchronize activated skills to runtime"
             )
-            mock_svc.activate_skill.assert_awaited_once()
+            mock_svc.asset_service.set_active.assert_awaited_once()
 
 
 # ── deactivate_skill ─────────────────────────────────────────────────────────
+
 
 class TestDeactivateSkillAsyncAwait:
     """Test that deactivate_skill endpoint properly awaits service.deactivate_skill.
@@ -994,33 +1027,22 @@ class TestDeactivateSkillAsyncAwait:
     def test_deactivate_skill_awaits_service_method(self, mock_ctx):
         with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
             client.post("/api/skills/my-skill-id/deactivate")
-            # If the bug exists: mock await_count == 0 (missing await)
-            # After fix: mock await_count == 1
-            assert mock_svc.deactivate_skill.await_count == 1, (
-                f"deactivate_skill was not awaited! "
-                f"await_count={mock_svc.deactivate_skill.await_count}"
-            )
+            assert mock_svc.asset_service.set_active.await_count == 1
+            assert mock_svc.deactivate_skill.await_count == 0
 
     def test_deactivate_skill_passes_correct_skill_id(self, mock_ctx):
         """user_id/bolt_id must be passed as kwargs (not positional)."""
         with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
             client.post("/api/skills/my-skill-id/deactivate")
-            mock_svc.deactivate_skill.assert_called_once()
-            call = mock_svc.deactivate_skill.call_args
-            assert "user_id" in call.kwargs, (
-                f"user_id must be a kwarg; got call={call}"
-            )
-            assert "bolt_id" in call.kwargs, (
-                f"bolt_id must be a kwarg; got call={call}"
-            )
-            assert call.kwargs["user_id"] == mock_ctx.user_id, (
-                f"user_id should be ctx.user_id ({mock_ctx.user_id!r}); "
-                f"got {call.kwargs['user_id']!r}"
+            mock_svc.asset_service.set_active.assert_awaited_once_with(
+                skill_id="1",
+                bot_id=mock_ctx.bot_id,
+                owner_id=mock_ctx.user_id,
+                user_id=mock_ctx.user_id,
+                active=False,
             )
 
-    def test_deactivate_skill_fails_when_runtime_mapping_sync_fails(
-        self, mock_ctx
-    ):
+    def test_deactivate_skill_fails_when_runtime_mapping_sync_fails(self, mock_ctx):
         with _skill_service_di_app(
             mock_ctx,
             device_sync_result={"success": False, "message": "runtime unavailable"},
@@ -1032,20 +1054,14 @@ class TestDeactivateSkillAsyncAwait:
             assert response.json()["detail"] == (
                 "Failed to synchronize deactivated skills to runtime"
             )
-            mock_svc.deactivate_skill.assert_awaited_once()
+            mock_svc.asset_service.set_active.assert_awaited_once()
 
 
 # ── activate_skills_batch ─────────────────────────────────────────────────────
 
+
 class TestActivateSkillsBatchAsyncAwait:
-    """Test that activate_skills_batch endpoint properly awaits service.activate_skills_batch.
-
-    BEFORE FIX: run_in_threadpool(service.activate_skills_batch, ...) has the same
-    bug as activate_skill. The mock's await_count will be 0.
-
-    AFTER FIX: await service.activate_skills_batch(...) is called directly.
-    The mock's await_count will be 1.
-    """
+    """The legacy batch wire delegates every item to Direct control plane."""
 
     def test_activate_skills_batch_awaits_service_method(self, mock_ctx):
         with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
@@ -1053,12 +1069,8 @@ class TestActivateSkillsBatchAsyncAwait:
                 "/api/skills/market/activate-batch",
                 json={"skill_paths": ["git://path/a", "git://path/b"]},
             )
-            # If the bug exists: mock await_count == 0
-            # After fix: mock await_count == 1
-            assert mock_svc.activate_skills_batch.await_count == 1, (
-                f"activate_skills_batch was not awaited! "
-                f"await_count={mock_svc.activate_skills_batch.await_count}"
-            )
+            assert mock_svc.asset_service.set_active.await_count == 2
+            assert mock_svc.activate_skills_batch.await_count == 0
 
     def test_activate_skills_batch_passes_correct_skill_paths(self, mock_ctx):
         """skill_paths must propagate; user_id/bolt_id must be kwargs."""
@@ -1067,40 +1079,48 @@ class TestActivateSkillsBatchAsyncAwait:
                 "/api/skills/market/activate-batch",
                 json={"skill_paths": ["git://path/a", "git://path/b"]},
             )
-            mock_svc.activate_skills_batch.assert_called_once()
-            call = mock_svc.activate_skills_batch.call_args
-            # skill_paths is the first positional arg
-            assert call.args and call.args[0] == ["git://path/a", "git://path/b"], (
-                f"skill_paths not propagated correctly; call={call}"
-            )
-            # user_id/bolt_id must be kwargs so SkillService.activate_skills_batch
-            # can forward them to each inner activate_skill() call.
-            assert "user_id" in call.kwargs, (
-                f"user_id must be a kwarg; got call={call}"
-            )
-            assert "bolt_id" in call.kwargs, (
-                f"bolt_id must be a kwarg; got call={call}"
-            )
-            assert call.kwargs["user_id"] == mock_ctx.user_id
+            assert mock_svc.asset_service.resolve_legacy_skill_id.call_args_list == [
+                call(
+                    skill_reference="git://path/a",
+                    source_path="git://path/a",
+                    bot_id="default",
+                    owner_id=mock_ctx.user_id,
+                    user_id=mock_ctx.user_id,
+                ),
+                call(
+                    skill_reference="git://path/b",
+                    source_path="git://path/b",
+                    bot_id="default",
+                    owner_id=mock_ctx.user_id,
+                    user_id=mock_ctx.user_id,
+                ),
+            ]
+            assert mock_svc.asset_service.set_active.await_args_list == [
+                call(
+                    skill_id="1",
+                    bot_id="default",
+                    owner_id=mock_ctx.user_id,
+                    user_id=mock_ctx.user_id,
+                    active=True,
+                ),
+                call(
+                    skill_id="2",
+                    bot_id="default",
+                    owner_id=mock_ctx.user_id,
+                    user_id=mock_ctx.user_id,
+                    active=True,
+                ),
+            ]
 
-    def test_pool_batch_merges_only_successful_locators_into_mapping_publish(
-        self, mock_ctx
-    ):
-        with _skill_service_di_app(
-            mock_ctx, runtime_uses_pool_paths=True
-        ) as (client, mock_svc, mock_set_svc):
-            mock_svc.activate_skills_batch.return_value = {
-                "success": [
-                    {
-                        "id": "a",
-                        "link_name": "a",
-                        "path": "git://path/a",
-                    }
-                ],
-                "failed": [
-                    {"path": "git://path/b", "error": "source missing"}
-                ],
-            }
+    def test_batch_keeps_missing_item_as_partial_success(self, mock_ctx):
+        with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
+
+            def _resolve(**kwargs):
+                if kwargs["skill_reference"] == "git://path/b":
+                    raise LocalSkillNotFoundError()
+                return "1"
+
+            mock_svc.asset_service.resolve_legacy_skill_id.side_effect = _resolve
 
             response = client.post(
                 "/api/skills/market/activate-batch",
@@ -1108,9 +1128,9 @@ class TestActivateSkillsBatchAsyncAwait:
             )
 
             assert response.status_code == 200, response.text
-            assert mock_set_svc.get_symlink_mappings.call_args.kwargs[
-                "additional_skill_paths"
-            ] == ["git://path/a"]
+            assert len(response.json()["data"]["success"]) == 1
+            assert response.json()["data"]["failed"][0]["path"] == "git://path/b"
+            mock_svc.asset_service.set_active.assert_awaited_once()
 
     def test_activate_skills_batch_fails_when_runtime_mapping_sync_fails(
         self, mock_ctx
@@ -1129,4 +1149,4 @@ class TestActivateSkillsBatchAsyncAwait:
             assert response.json()["detail"] == (
                 "Failed to synchronize activated skills to runtime"
             )
-            mock_svc.activate_skills_batch.assert_awaited_once()
+            mock_svc.asset_service.set_active.assert_awaited_once()

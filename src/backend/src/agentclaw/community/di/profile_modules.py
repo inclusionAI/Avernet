@@ -40,6 +40,9 @@ def _common_test_doubles() -> list[Module]:
     from agentclaw.community.di.modules.infrastructure.test.approval_workflow import (
         TestApprovalWorkflowModule,
     )
+    from agentclaw.community.di.modules.infrastructure.test.staff_dept import (
+        TestStaffDeptModule,
+    )
     from agentclaw.community.di.modules.infrastructure.test.bot_publish_approval import (
         TestBotPublishApprovalModule,
     )
@@ -56,6 +59,7 @@ def _common_test_doubles() -> list[Module]:
     return [  # noqa: FLA002 — a fixed module list, not many distinct return values
         # Per-concern overrides for non-infrastructure concerns.
         TestApprovalWorkflowModule(),
+        TestStaffDeptModule(),
         TestBotPublishApprovalModule(),
         # WorkspaceHostingService stub (offline DIMA) — corp-free.
         TestingAicodingModule(),
@@ -273,6 +277,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.approval_workflow import (
             CommunityApprovalWorkflowModule,
         )
+        from agentclaw.community.di.modules.infrastructure.community.staff_dept import (
+            CommunityStaffDeptModule,
+        )
         from agentclaw.community.di.modules.infrastructure.community.bot_publish_approval import (
             CommunityBotPublishApprovalModule,
         )
@@ -308,6 +315,7 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             CommunityAppServicesModule(),
             # Approval workflow + publish-approval strategy (B7).
             CommunityApprovalWorkflowModule(),
+            CommunityStaffDeptModule(),
             CommunityBotPublishApprovalModule(),
             # Notify sender — no-op (no DingTalk in community; B11 Phase A).
             CommunityNotifyModule(),

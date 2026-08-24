@@ -490,3 +490,18 @@ class DeviceInstanceService:
             request_id=request_id,
         )
         return {"publish_id": data.get("publish_id")}
+
+    def restart_device_by_bot(
+        self,
+        *,
+        bot_id: str,
+        device_uuid: str,
+        operator: OperatorContext,
+    ) -> dict[str, Any]:
+        """Resolve the live binding for ``bot_id`` and restart one instance."""
+        binding_id = self._resolve_binding_id_by_bot_id(bot_id)
+        return self.restart_device(
+            binding_id=binding_id,
+            device_uuid=device_uuid,
+            operator=operator,
+        )

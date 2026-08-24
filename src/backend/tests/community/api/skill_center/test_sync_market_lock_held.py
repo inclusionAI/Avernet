@@ -36,7 +36,7 @@ def _sync_market_di_app(mock_ctx, sync_repo_result):
     mock_skill_service = MagicMock()
     # sync_repo_with_lock 是同步方法（run_in_threadpool 调用）→ 普通 MagicMock
     mock_skill_service.sync_repo_with_lock = MagicMock(return_value=sync_repo_result)
-    # sync_skills_from_git 只在 synced=True 时才会被调用；这里锁占用/失败用例不会触发
+    # Unified GitSyncService owns scan/cache refresh; adapter must not call this again.
     mock_skill_service.sync_skills_from_git = MagicMock(
         return_value={"created": 0, "updated": 0, "deleted": 0, "failed": 0}
     )
@@ -70,10 +70,13 @@ def _sync_market_di_app(mock_ctx, sync_repo_result):
             from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 
             from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
+            from agentclaw.community.api.repository_catalog_service import RepositoryCatalogServiceProtocol
+            from agentclaw.community.core.skill_center.services.repository_catalog_service import RepositoryCatalogService
             binder.bind(SkillServiceFactory, to=mock_skill_service_factory)
             binder.bind(SkillServiceFactoryProtocol, to=mock_skill_service_factory)
             binder.bind(WorkspacePathFactory, to=mock_path_factory)
             binder.bind(BotRepository, to=mock_bot_repo)
+            binder.bind(RepositoryCatalogServiceProtocol, to=RepositoryCatalogService(mock_skill_service_factory))
 
     injector = Injector([_TestModule()])
     attach_injector(app, injector)
@@ -113,8 +116,8 @@ class TestSyncMarketLockHeld:
         assert resp.status_code == 500
         assert resp.json()["detail"] == "Git fetch failed: boom"
 
-    def test_success_returns_200_and_runs_db_sync(self, mock_ctx):
-        """成功且实际同步过 → 200，且触发 DB 同步。"""
+    def test_success_returns_200_without_a_second_db_scan(self, mock_ctx):
+        """GitSyncService has already scanned; adapter must not repeat it."""
         result = {
             "success": True,
             "synced": True,
@@ -130,4 +133,4 @@ class TestSyncMarketLockHeld:
         body = resp.json()
         assert body["success"] is True
         assert body["data"]["synced"] is True
-        svc.sync_skills_from_git.assert_called_once()
+        svc.sync_skills_from_git.assert_not_called()

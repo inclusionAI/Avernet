@@ -129,6 +129,7 @@ impl GroupService for FakeGroupService {
             actor_kind: ActorKind::Bot,
             name: None,
             role: ParticipantRole::Consultant,
+            tags: Vec::new(),
             mode: ParticipantMode::Auto,
         })
     }
@@ -146,6 +147,7 @@ impl GroupService for FakeGroupService {
             actor_kind: ActorKind::Bot,
             name: None,
             role: ParticipantRole::Consultant,
+            tags: Vec::new(),
             mode: command.mode,
         })
     }
@@ -353,6 +355,7 @@ fn group_detail() -> GroupDetail {
             actor_kind: ActorKind::Bot,
             name: Some("Bot 1".into()),
             role: ParticipantRole::Driver,
+            tags: Vec::new(),
             mode: ParticipantMode::Auto,
         }],
         driver_bot_uuid: "bot-1".into(),
@@ -825,6 +828,39 @@ async fn patch_rejects_explicit_null_for_every_mutable_field() {
     }
 
     assert!(service.updated.lock().expect("update lock").is_none());
+}
+
+#[tokio::test]
+async fn patch_forwards_context_to_the_group_service() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "PATCH",
+            "/openapi/v1/collaboration/groups/group-1",
+            json!({
+                "name": "Renamed",
+                "context": "updated context"
+            }),
+        ))
+        .await
+        .expect("patch response");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let command = service
+        .updated
+        .lock()
+        .expect("update lock")
+        .as_ref()
+        .expect("update command")
+        .clone();
+    assert_eq!(command.group_id, "group-1");
+    assert_eq!(command.patch.name.as_deref(), Some("Renamed"));
+    assert_eq!(command.patch.context.as_deref(), Some("updated context"));
+    assert!(command.patch.delivery_policy.is_none());
+    assert!(command.patch.visibility.is_none());
+    assert!(command.patch.opening_message.is_none());
 }
 
 #[tokio::test]

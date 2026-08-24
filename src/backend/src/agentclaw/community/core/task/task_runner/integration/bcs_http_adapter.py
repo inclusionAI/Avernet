@@ -5,16 +5,28 @@ create_group 三态(chat/manager_worker/state_machine);state_machine 强制 star
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
+import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, AsyncIterator
 
 import httpx
 
 from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import BcsTokenProvider
+
+
+logger = logging.getLogger(__name__)
+
+
+def _response_summary(resp: httpx.Response) -> str:
+    """Return a bounded response summary without leaking auth headers or large bodies."""
+    text = (resp.text or "").replace("\n", " ")
+    return text[:500]
 
 
 class BcsClientError(Exception):
@@ -50,6 +62,8 @@ class BcsCreateGroupRequest:
     start_initial_run: bool | None = None
     originator: str | None = None
     visibility: str | None = None
+    opening_message: dict[str, Any] | None = None
+    event_subscriptions: list[dict[str, Any]] | None = None    # 内联事件订阅(回调 webhook);BCS 把 CloudEvent 推到 sink.url
 
 
 @dataclass
@@ -58,6 +72,20 @@ class BcsCreateGroupResult:
     session_id: str | None = None
     run_id: str | None = None
     definition_ref: dict[str, Any] | None = None
+
+
+@dataclass
+class BotTaskModeRoster:
+    """任务模式 roster 本地 DTO(不复用 backend 已有领域对象)。
+
+    来自 BCS 内部 provider 路由 ``GET /providers/{provider_id}/bots/by-task-modes``。
+    """
+
+    bot_id: str
+    name: str
+    env: str
+    task_claim_mode: bool
+    task_dream_mode: bool
 
 
 def _map_status(resp: httpx.Response) -> None:
@@ -72,7 +100,51 @@ def _map_status(resp: httpx.Response) -> None:
 class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing + REST); exercised by singlebox/corp acceptance / 联调, not CI LOCAL line coverage
     def __init__(self, token: BcsTokenProvider, *, http_client: httpx.AsyncClient | None = None) -> None:
         self._t = token
+        self._owns_client = http_client is None
         self._client = http_client or httpx.AsyncClient(base_url=token.base_url)
+        # An httpx AsyncClient/connection pool is not safe to share across
+        # asyncio event loops. The task module has a FastAPI loop plus poller
+        # and harness loops, so keep the owned client pinned to the first loop
+        # and use a short-lived client whenever a different loop calls us.
+        self._client_loop: asyncio.AbstractEventLoop | None = None
+
+    @asynccontextmanager
+    async def _client_for_current_loop(self) -> AsyncIterator[httpx.AsyncClient]:
+        """Yield an AsyncClient that belongs to the current event loop."""
+        current_loop = asyncio.get_running_loop()
+        if not self._owns_client:
+            # Injected clients are test/custom transport ownership; preserve
+            # their lifecycle and behavior exactly as before.
+            yield self._client
+            return
+
+        if self._client_loop is None:
+            self._client_loop = current_loop
+            yield self._client
+            return
+
+        if self._client_loop is current_loop:
+            yield self._client
+            return
+
+        # Do not move the persistent pool to another loop. A per-call client
+        # is safe here and is closed on the loop that created it.
+        logger.warning(
+            "[bcs_http] event loop changed; using isolated client previous_loop=%s current_loop=%s",
+            id(self._client_loop),
+            id(current_loop),
+        )
+        client = httpx.AsyncClient(base_url=self._t.base_url)
+        try:
+            yield client
+        finally:
+            await client.aclose()
+
+    @property
+    def provider_id(self) -> str:
+        # 复用点:provider_id 取自构造期注入的 token(singlebox=SINGLEBOX_BCS_PROVIDER_ID;corp overlay=
+        # BcnConfig)。空=该 BCS client 未配任务模式 roster 圈定 → 调用方按"圈定关闭"处理(沿用全部候选)。
+        return self._t.provider_id
 
     def _sign(self, method: str, path: str, ts: str) -> dict[str, str]:
         sig = hmac.new(self._t.secret.encode(), f"{ts}{method}{path}".encode(), hashlib.sha256).hexdigest()
@@ -86,8 +158,28 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
             headers["Idempotency-Key"] = idempotency_key
         if extra_headers:
             headers.update(extra_headers)
-        r = await self._client.request(method, path, json=json, headers=headers)
-        _map_status(r)
+        logger.info(
+            "[bcs_http] request method=%s path=%s json_keys=%s idempotency=%s",
+            method, path, sorted((json or {}).keys()), bool(idempotency_key),
+        )
+        try:
+            async with self._client_for_current_loop() as client:
+                r = await client.request(method, path, json=json, headers=headers)
+        except Exception:
+            logger.exception("[bcs_http] request transport failed method=%s path=%s", method, path)
+            raise
+        logger.info(
+            "[bcs_http] response method=%s path=%s status=%s body=%s",
+            method, path, r.status_code, _response_summary(r),
+        )
+        try:
+            _map_status(r)
+        except Exception:
+            logger.exception(
+                "[bcs_http] response rejected method=%s path=%s status=%s body=%s",
+                method, path, r.status_code, _response_summary(r),
+            )
+            raise
         return r
 
     async def create_group(self, req: BcsCreateGroupRequest) -> BcsCreateGroupResult:
@@ -95,13 +187,19 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         is_sm = req.group_strategy == "state_machine" or req.collaboration_definition_yaml
         if is_sm:
             body["group_strategy"] = "state_machine"
-            body["start_initial_run"] = False
+            # 透传调用方(form_coop_group)的 start_initial_run;未设时默认 False(向后兼容)。
+            # 不得硬编码 False —— state_machine + event_subscriptions 时 BCS 要求自动启动(groups.rs:627)。
+            body["start_initial_run"] = req.start_initial_run if req.start_initial_run is not None else False
             if req.collaboration_definition_yaml:
                 body["collaboration_definition_yaml"] = req.collaboration_definition_yaml
             if req.participant_bindings:
                 body["participant_bindings"] = req.participant_bindings
+            if req.opening_message:
+                body["opening_message"] = req.opening_message
         elif req.group_strategy:
             body["group_strategy"] = req.group_strategy
+        if req.event_subscriptions:
+            body["event_subscriptions"] = req.event_subscriptions
         for opt in ("context", "topic", "service_spec", "originator", "visibility"):
             v = getattr(req, opt)
             if v is not None:
@@ -135,7 +233,8 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         params: dict[str, Any] = {"limit": limit}
         if since_msg_id:
             params["since_msg_id"] = since_msg_id
-        r = await self._client.request("GET", path, params=params, headers=headers)
+        async with self._client_for_current_loop() as client:
+            r = await client.request("GET", path, params=params, headers=headers)
         _map_status(r)
         return r.json()
 
@@ -159,3 +258,36 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
 
     async def validate_definition(self, definition_yaml: str) -> None:
         await self._req("POST", "/collaboration/definitions/validate", json={"yaml": definition_yaml})
+
+    async def list_bots_by_task_modes(self, *, claim: bool | None = None,
+                                      dream: bool | None = None, match: str = "any") -> list[BotTaskModeRoster]:
+        """查询满足任务模式开关的 provider bot roster(BCS 内部 provider 路由,Bearer provider_admin_token)。
+
+        ``provider_id`` 复用本 client 构造期注入的 token(``self.provider_id``),不作为入参暴露。
+        ``claim``/``dream`` 为 ``None`` 表示该开关不过滤(有意哨兵);``match`` 为 any|all。路径照搬
+        ``get_session_messages``:HMAC 签 path 不含 query,query 走 httpx ``params``(provider 路由只读
+        Bearer,忽略 X-ECB,故 HMAC 签串约定无关)。
+        """
+        provider_id = self.provider_id
+        if not provider_id:
+            raise BcsClientError("task-mode roster provider_id not configured on this BCS client")
+        path = f"/providers/{provider_id}/bots/by-task-modes"
+        ts = str(int(time.time()))
+        headers = self._sign("GET", path, ts)
+        headers["Authorization"] = f"Bearer {self._t.provider_admin_token}"
+        params: dict[str, str] = {"match": match}
+        if claim is not None:
+            params["task_claim_mode"] = "true" if claim else "false"
+        if dream is not None:
+            params["task_dream_mode"] = "true" if dream else "false"
+        async with self._client_for_current_loop() as client:
+            r = await client.request("GET", path, params=params, headers=headers)
+        _map_status(r)
+        items = r.json().get("items", [])
+        return [BotTaskModeRoster(
+            bot_id=str(it.get("bot_id", "")),
+            name=str(it.get("name", "")),
+            env=str(it.get("env", "")),
+            task_claim_mode=bool(it.get("task_claim_mode", False)),
+            task_dream_mode=bool(it.get("task_dream_mode", False)),
+        ) for it in items]

@@ -42,8 +42,8 @@ def _task_info(task_id: str = "t1") -> TaskInfo:
             context=Context(background="bg"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
-        source_channel_type="bot",
-        source_channel_id="b1",
+        source_type="bot",
+        owner_bot_id="b1",
     )
 
 
@@ -60,6 +60,10 @@ def _node(node_id: str, task_id: str = "t1") -> TaskNode:
 
 def _patch(task_id: str, node_id: str, **kw) -> TaskNodePatch:
     return TaskNodePatch(task_id=task_id, node_id=node_id, **kw)
+
+
+def test_status_includes_cancelled():
+    assert Status.CANCELLED.value == "CANCELLED"
 
 
 @pytest.fixture

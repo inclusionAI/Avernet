@@ -1064,6 +1064,7 @@ async fn bot_final_event_in_human_bot_dm_does_not_self_relay_to_sender_bot() {
             role: ParticipantRole::Observer,
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::Present),
+            tags: Vec::new(),
         },
         Participant {
             bot_uuid: "bot-observer".to_string(),
@@ -1072,6 +1073,7 @@ async fn bot_final_event_in_human_bot_dm_does_not_self_relay_to_sender_bot() {
             role: ParticipantRole::Driver,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
+            tags: Vec::new(),
         },
     ];
     support.group.upsert(group).await.unwrap();
@@ -5495,6 +5497,77 @@ async fn bot_error_terminal_flushes_buffered_chat_segment() {
         json!("部分回复，还没说完"),
         "the flushed content must be the accumulated segment text"
     );
+}
+
+#[tokio::test]
+async fn direct_chat_segment_boundaries_do_not_persist_group_history() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let repo = Arc::new(RecordingMessageRepo::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_message_repo(repo.clone());
+    let session_id = "bcs-cli:caller-bot:abcdef12";
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "direct-run".to_string(),
+        group_id: String::new(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({ "state": "delta", "delta_text": "临时直聊回复" }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some(session_id.to_string()),
+    })
+    .await
+    .unwrap();
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "direct-run".to_string(),
+        group_id: String::new(),
+        event_type: "agent".to_string(),
+        event_payload: json!({
+            "stream": "thinking",
+            "data": { "stream": "thinking", "delta": "思考中" },
+        }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some(session_id.to_string()),
+    })
+    .await
+    .unwrap();
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "direct-run".to_string(),
+        group_id: String::new(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({
+            "state": "final",
+            "message": {
+                "role": "assistant",
+                "content": [{ "type": "text", "text": "直聊完成" }],
+            },
+        }),
+        state: ChatEventState::Final,
+        bcs_session_id: Some(session_id.to_string()),
+    })
+    .await
+    .unwrap();
+
+    assert!(
+        repo.appended().await.is_empty(),
+        "Direct A2A events must never be written to Group message history"
+    );
+    let frontend_commands = support.frontend_delivery.commands().await;
+    assert_eq!(frontend_commands.len(), 3);
+    assert!(frontend_commands.iter().all(|command| {
+        command.target
+            == FrontendDeliveryTarget::Session {
+                session_id: session_id.to_string(),
+            }
+    }));
 }
 
 /// Regression: a TASK run (its run_id resolves to a dispatched task) that streams

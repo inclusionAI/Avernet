@@ -11,7 +11,7 @@ def _schema() -> dict:
     return app.openapi()
 
 
-def test_openapi_exposes_exactly_the_six_ratified_skills_operations() -> None:
+def test_openapi_exposes_local_compatibility_and_skill_asset_operations() -> None:
     schema = _schema()
     skill_paths = {
         path: set(operations)
@@ -22,9 +22,12 @@ def test_openapi_exposes_exactly_the_six_ratified_skills_operations() -> None:
 
     assert skill_paths == {
         "/openapi/v1/bots/{bot_id}/skills": {"get", "post"},
+        "/openapi/v1/bots/{bot_id}/skills/upload-folder": {"post"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}": {"get", "delete"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate": {"post"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate": {"post"},
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content": {"get"},
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters": {"get", "put"},
     }
 
 
@@ -47,6 +50,10 @@ def test_collection_and_upload_are_bot_addressed_contracts() -> None:
     assert upload_parameters["bot_id"]["in"] == "path"
     assert upload_parameters["owner_id"]["required"] is False
     assert set(upload["requestBody"]["content"]) == {"application/zip"}
+
+    folder_upload = paths["/openapi/v1/bots/{bot_id}/skills/upload-folder"]["post"]
+    assert folder_upload["parameters"][0]["name"] == "bot_id"
+    assert set(folder_upload["requestBody"]["content"]) == {"multipart/form-data"}
 
 
 def test_operation_responses_use_the_ratified_local_skill_models() -> None:

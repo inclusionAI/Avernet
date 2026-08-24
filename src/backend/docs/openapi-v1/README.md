@@ -35,8 +35,8 @@ that file holds the inventory.
 **Goal:** implement the public `/openapi/v1` API, whose callers are **external
 registered tenants**. It lives under
 `src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`. The **bots**,
-**mcp**, and **skills** categories have implemented handlers; the remaining
-categories retain their independently tracked readiness states below.
+**mcp**, **channels**, and **skills** categories have implemented handlers; the
+remaining categories retain their independently tracked readiness states below.
 
 > 🔒 **The surface is still not callable end-to-end, but no longer because of a
 > stub.** `require_principal` now really verifies the gateway's signed
@@ -70,7 +70,8 @@ The work therefore splits into **three tracks**:
 - **Track C — Engine (runtime) surface.** _Added 2026-07-30._ Wrap the engine
   adapter's client-facing HTTP behind `/openapi/v1/bots/{bot_id}/…`, and replace
   the `get_device_connection` hand-off with one sanitised socket-info endpoint.
-  **16 endpoints — implemented, PR #630.**
+  **18 endpoints across six groups — implemented** (PR #630 baseline; engine
+  restart and read-only nodes added later).
 
 > ⚠️ **The one confusion to avoid:** "isolation Stage N is done" does **not**
 > mean any API endpoint was implemented. A Track A stage is plumbing only (the
@@ -138,7 +139,7 @@ must implement._
 |---|---|---|---|---|---|
 | 1 | Bot records (`ac_bots` / `BotModel`) | totalfrank | P1 | ✅ **DONE — PR #456 merged 2026-07-27** | — |
 | 2 | Resources (`ac_resource`) | lucas-xzp | P1 | ✅ DONE — Phase 0 (branch `rongzhi_0727`) | column + guards + tests green; internal API unchanged — verified: `to_dict()` excludes tenant, guard uses direct expression not lambda |
-| 3 | Channels (`ac_channel_config`) | — | ❌ **DROPPED** | Stage never started; its Track B component was removed 2026-08-03 | n/a |
+| 3 | Channels (`ac_channel_config`) | Bot Workshop | P1 | ✅ **IMPLEMENTED 2026-08-19; DDL PENDING** | tenant column + tenant-leading index + guards + isolation tests; deploy DDL before code |
 | 4 | Skills (skill tables) | totalfrank + lucas-xzp | P3 | ⬜ TODO | same |
 | 5 | MCP configuration (`ac_user_mcp_config` + `ac_bot_mcp_call_config`) | totalfrank | P1 | ✅ DONE — **PR #564** | PR #564 merges |
 | 6 | Routines | lucas-xzp | P1 | ⬜ TODO | same |
@@ -151,14 +152,15 @@ _Ordered by priority tier._
 | Category | Owner | Pri | Router | State | Depends on |
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE — PR #494 merged 2026-07-29** (13/13 endpoints) | ~~Track A stage 1~~ ✅ |
+| token / caller identity | liaoxianhao | P1 | `openapi_v1/token/router.py` | 🔧 IN PROGRESS — both capabilities migrated; OCB Gateway SOFA sync pending | User principal + browser HttpOnly `IAM_TOKEN` cookie |
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE — PR #610** (6/6 endpoints) | ~~Track A stage 5~~ ✅ (PR #564) |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS (PARTIAL) — 7 handlers all wired but DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0); Track B all 7 endpoints wired stub→service, files-only and path-addressed; gated on auth workstream (gateway principal seam) + DDL deploy before public exposure |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(stub)* | ⬜ TODO | Track A routines (lucas-xzp) |
-| channels | — | ❌ **REMOVED (2026-08-03)** | *(deleted)* | Router, schemas and both published paths deleted — see the channels section below | n/a |
+| channels | Bot Workshop | P1 | `openapi_v1/channels/router.py` | ✅ **IMPLEMENTED 2026-08-19** — 6/6 draft DingTalk Channel operations | Track A stage 3 code ✅; deploy-before-code DDL below; OCB/Sofapy schema copy remains independent |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(stub)* | ⬜ TODO | bots isolation (Stage 1 ✅) |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` | 🔧 **IMPLEMENTATION + CI COMPLETE; RELEASE PENDING** — six ratified Local Skill operations | #725 cleanup-work DDL must deploy before code; [pre-production acceptance runbook](skills-track-b-preprod-acceptance.md) remains **PRE-PROD PENDING** |
 
-### Track C — Engine (runtime) surface (5 of 5 groups implemented — PR #630)
+### Track C — Engine (runtime) surface (6 of 6 groups implemented)
 _All groups depend only on **bots isolation (Stage 1 ✅)** — no Track A stage, no
 DDL. Full ruling and per-endpoint mapping in
 **[`engine-surface.md`](engine-surface.md)**._
@@ -166,10 +168,11 @@ DDL. Full ruling and per-endpoint mapping in
 | Group | Endpoints | Owner | Pri | Router | State |
 |---|---|---|---|---|---|
 | sessions | 7 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **IMPLEMENTED — PR #630**; operators + stages 2026-08-09 |
-| engine (read-only) | 3 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **IMPLEMENTED — PR #630** |
+| engine (read/write) | 4 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **IMPLEMENTED — PR #630**; process restart added 2026-08-17 |
 | connection | 1 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/connection/` | ✅ **IMPLEMENTED — PR #630** |
 | approvals | 3 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/approvals/` | ✅ **IMPLEMENTED — PR #630** |
 | models | 2 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/models/` | ✅ **IMPLEMENTED — PR #630** |
+| nodes | 1 | joseph | P2 | `openapi_v1/engine_runtime/nodes/` | ✅ **IMPLEMENTED — 2026-08-19**; read-only list matching the frontend |
 
 > **Scope rule (why only these).** Wrap engine HTTP the frontend reaches
 > **directly** through proxypass (`src/frontend/src/requestConfig.ts:189-205`).
@@ -177,15 +180,20 @@ DDL. Full ruling and per-endpoint mapping in
 > the `routines` category), `/api/file`, `/api/skills`, `/api/mcp`,
 > `/api/resource-materializations`, `/api/bash`, `/api/bot/config`,
 > `/api/work-items` — are already fronted by a backend contract and stay out.
-> AICoding-only routes stay out. **WebSockets are not wrapped**: the new
+> The read-only `/api/nodes` inventory is wrapped because the current frontend
+> reaches it directly; no node write operations exist in either frontend or
+> Engine HTTP today. AICoding-only routes stay out. **WebSockets are not wrapped**: the new
 > `…/connection` endpoint returns one complete socket URL, credential included,
 > and the caller builds the connection itself.
 >
-> `engine/switch` and `engine/restart` are deliberately excluded — wrapping
-> `switch` would be a back door around #494's `engine`-immutability ruling on
-> `PUT /openapi/v1/bots/{bot_id}`, and `restart` would give one bot two restart
-> verbs. `session-favorites` and the `/api/openclaw` HTTP trio are **deferred,
-> not cancelled** (both additive later). Reasons in `engine-surface.md`.
+> `engine/switch` remains deliberately excluded: wrapping it would be a back
+> door around #494's `engine`-immutability ruling on
+> `PUT /openapi/v1/bots/{bot_id}`. Engine-process restart is now exposed as
+> `POST /openapi/v1/bots/{bot_id}/engine/restart`; it relays the daemon restart
+> and is distinct from the bot-level `/restart`, which re-provisions the whole
+> container. Because this operation was introduced after bot-first addressing,
+> it has no component-first retiring alias. `session-favorites` and the
+> `/api/openclaw` HTTP trio remain **deferred, not cancelled**.
 >
 > **Routines is Track C's worked precedent, not a Track B one.** Backend
 > `/api/cron` → `CronRelayService` → `DeviceAdapterTransport` → engine has been
@@ -202,7 +210,7 @@ DDL. Full ruling and per-endpoint mapping in
 | Background/scheduled work revisit | ⬜ TODO | before a 2nd tenant holds real data |
 | **Bot identity keys collide across tenants** ([#556](https://github.com/inclusionAI/Avernet/issues/556)) | ⬜ TODO (totalfrank) | Passport, auth relationships, BCN, policy row are keyed on `bot_id`/`owner_id` with no tenant axis, and every owner's first bot is literally `"default"`. **Should gate enabling multi-tenancy.** Stopgapped in #494 by `sync_to_bcn=False` on the public update path |
 | Async create ≠ authorized bot ([#559](https://github.com/inclusionAI/Avernet/issues/559)) | ⬜ TODO (totalfrank) | the pending create spec is never persisted; completion rebuilds it from the polling request. Pre-existing on `dev`; latent (community Passport always issues) |
-| Swallowed external identity writes ([#560](https://github.com/inclusionAI/Avernet/issues/560)) | ⬜ TODO (totalfrank) | owner-grant on create and Passport metadata on update log-and-continue, against `AGENTS.md:203-204`. One ruling settles both sites; recommendation is *report partial success* |
+| Swallowed external identity writes ([#560](https://github.com/inclusionAI/Avernet/issues/560)) | 🔧 PARTIAL | Owner-grant writes in shared cloud create/auth completion and Local Bot completion now propagate failures, and an issued Passport identity without `agent_code` fails closed; public OpenAPI Passport metadata updates are normalized to a 502 envelope instead of returning success. The legacy internal update route still logs and continues, and no durable cross-system repair/reconciliation workflow exists yet. |
 
 > The three issues above came out of #494's review and are **pre-existing on
 > `dev`**, not regressions — they're recorded here because they are decisions
@@ -210,12 +218,13 @@ DDL. Full ruling and per-endpoint mapping in
 > that must be settled before a second tenant holds real data.
 | **Stage 5 unique-key swap on `ac_user_mcp_config`** | ⬜ TODO (DDL below) | **before a 2nd tenant writes MCP config** — not before deploy |
 
-> **❌ Channels removed (2026-08-03).** Parked since 2026-07-29 as a
-> deprioritization; now deleted outright. Parking was the wrong shape for it:
-> the component was *published*, so a parked stub was not a dormant row on a
-> board — it was six operations in the document the gateway serves, each
-> answering 500. The Track A stage was never started, so there is no data work
-> to unwind. See the channels section under **Endpoints** for what was removed.
+> **✅ Channels restored (2026-08-19).** The 2026-08-03 deletion remains in
+> the changelog as historical context: the old published stubs were correctly
+> removed because they returned 500. The component has now returned as a fully
+> implemented Bot-first API with tenant-isolated persistence, explicit caller
+> admission, safe secret projection, and tests. It is not deployable until the
+> Stage 3 DDL below has been applied; the OCB/Sofapy gateway schema is a separate
+> copy and must be synchronized independently.
 
 ---
 
@@ -225,13 +234,51 @@ Per the standing decision, tenant-isolation schema changes are applied on the
 platform out of band, so **these statements are the authoritative record**.
 Hand them to whoever applies DDL together with the ordering notes.
 
-**Stage 1 — `ac_bots`** (already applied):
+**Stage 1 — `ac_bots`** (tenant column already applied; Bot Workshop space column pending platform execution):
 
 ```sql
 ALTER TABLE ac_bots
   ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
     COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
+
+-- Bot Workshop Business Space ownership. Run this before deploying code that
+-- contains BotModel.space_id: ORM SELECTs read the column, so a missing column
+-- breaks Bot reads and creation. NULL represents a legacy row with no explicit
+-- space assignment; the public Inventory interprets it as personal:{owner_id},
+-- so no one-time backfill is required. The compatibility column may remain
+-- during code rollback; platform owners should assess DROP COLUMN only after no
+-- deployed version uses it.
+ALTER TABLE ac_bots
+  ADD COLUMN space_id BIGINT UNSIGNED NULL
+    COMMENT 'Bot owning space id, references ac_space.id; NULL uses the owner personal-space fallback';
 ```
+
+The delivery record for `space_id` must identify the environment, change/version
+record, execution time, rollback owner, and result. Team-space support is not
+release-ready until that evidence exists.
+
+**Stage 3 — Channels (`ac_channel_config`)**. Both statements must land
+**before deploying the Channels code**: the ORM selects `avernet_tenant`, so a
+code-first deployment breaks all Channel reads. The default backfills existing
+rows into the internal `teamclaw` tenant. The replacement index leads with the
+same tenant axis used by the ORM guard, preventing same-owner/same-Bot records
+from different tenants from sharing an unscoped lookup path.
+
+```sql
+ALTER TABLE ac_channel_config
+  ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
+
+ALTER TABLE ac_channel_config
+  DROP INDEX idx_type_id_d_bbi,
+  ADD INDEX idx_tenant_env_type_id_d_bbi
+    (avernet_tenant, env, type, identity_id, deleted, bind_bot_id);
+```
+
+Apply the column addition before the index replacement if the platform executes
+one statement at a time. A rollback may keep the additive tenant column, but
+must not deploy code that references it before the column exists. Record the
+environment, change/version record, execution time, result, and rollback owner.
 
 **Stage 5 — MCP configuration** (PR #564). Three statements, **two different
 deadlines**:
@@ -349,11 +396,17 @@ route dependency        → require_principal(request)       ─┘  cache on sc
   That name **defaults**, so a deployment configures only the *value*: the corp
   secret store (corp overlays also override the name),
   or `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE` (community).
-  **Singlebox resolves nothing** — no secret store, no local stand-in — so
-  `/openapi/v1` denies there and no config knob changes that; giving singlebox a
-  key is a deliberate change, not a config line. There is no dev fallback key on
-  this side on purpose: a committed shared secret is a committed credential. The
-  key is resolved once at boot, so rotating it needs a restart on both sides.
+  **The backend itself resolves nothing in singlebox** — no secret store, no
+  local stand-in, and no backend config knob changes that. The deliberate
+  change lives in the *launcher*: `scripts/modules/backend.sh` arms the
+  community env var with the same NOT-FOR-PROD dev key the gateway signs with
+  (`scripts/modules/gateway.sh`) and BCS verifies with
+  (`scripts/modules/bcs.sh`), so a locally forwarded `/openapi/v1` request
+  verifies instead of always-401. Export the variable yourself (e.g. in
+  `.env.local`) to override it. The application still ships no dev fallback
+  key on purpose: a committed shared secret is a committed credential, and the
+  launcher default authenticates nothing outside a dev box. The key is
+  resolved once at boot, so rotating it needs a restart on both sides.
 
   **An unresolvable key behaves differently by environment**, and the
   difference is the whole point:
@@ -737,6 +790,17 @@ messages channel; operating it stays with its team. Anyone else is answered
 lookup refuses (fail closed). Both ids are logged at the refusal; the
 response carries neither.
 
+The **sessions** group additionally serves a human who has an accepted BCN
+friendship with the addressed Bot. This is a conversation path, not an
+operator grant: it is draft-only, exposes only that human's Backend-owned
+Expert Chat sessions, and continues to use Expert Chat's existing session,
+message, connection, and runtime adapters. BCN is consulted on every request
+as the friendship authority; its failure is fail-closed, and Backend's legacy
+chat-list row is only a compatibility projection. All non-session
+engine-runtime groups keep the owner/collaborator rule above. Friend callers
+must name `owner_id` until BCN provides an exact Bot lookup that resolves the
+qualified `{bot_id}:{owner_id}` identity.
+
 Two optional query parameters name the target, following the same placement
 rule as `user_id` (query string, never a body field or a path segment):
 
@@ -849,7 +913,10 @@ public authorization); `stage` as a path segment; a required `owner_id`.
 
 Deferred, not lost — filed as issues: collaborator access to the data
 categories ([#906](https://github.com/inclusionAI/Avernet/issues/906),
-[#907](https://github.com/inclusionAI/Avernet/issues/907)), routines' stage
+[#907](https://github.com/inclusionAI/Avernet/issues/907) — since 2026-08-21
+these are table edits: flip those groups' `OWNER_SCOPED` rows to
+`Check(level)` once the bar is decided, see **Declaring authorization**),
+routines' stage
 pin ([#908](https://github.com/inclusionAI/Avernet/issues/908)), publish
 lifecycle ([#909](https://github.com/inclusionAI/Avernet/issues/909)),
 visibility/collaborator management
@@ -860,7 +927,7 @@ group's `owner_entity_id` locator predated `owner_id`; it was reconciled to
 addresses still publish the old name (spec Open Question 1, closed).
 
 `tests/…/openapi_v1/engine_runtime/test_operator_access.py` sweeps the
-operator matrix across all sixteen operations;
+operator matrix across all runtime operations covered by the shared sweep;
 `…/test_stage_addressing.py` pins the stage behaviour and asserts the two
 parameters sit on exactly the operations listed above — optional, in the query,
 and on no retiring address that did not already have them;
@@ -869,6 +936,190 @@ and on no retiring address that did not already have them;
 including that their retiring twins still read the draft.
 
 ---
+
+## Declaring authorization (`AUTHORIZATION`, and why not on the route)
+
+**Every public operation declares what governs it in one table, and nowhere
+else** — `openapi_v1/authorization.py`. A handler declares nothing. The router
+class reads the row and attaches what it calls for.
+
+This is a deliberate **reversal** of the convention its neighbour
+`admission.py` follows, where a route also names its own dependency and
+`test_admission_inventory.py` holds the two in step. That redundancy is
+valuable: a mislabelled table entry still refuses at the route. It was traded
+for a single source, because two declarations for one fact is two things to
+keep in step and 43 hand-written ones had already accumulated. If you are
+adding an operation, this is the difference that will surprise you: **there is
+nothing to write on the route.**
+
+What replaces the lost redundancy is that omission is not survivable:
+
+```text
+PublicRouteNotAuthorized: GET /openapi/v1/bots/{bot_id}/new-thing has no row in
+AUTHORIZATION. Every public operation must declare what governs it; add a row in
+openapi_v1/authorization.py.
+```
+
+That is raised while the route's own module is *importing* — earlier than
+assembly, far earlier than a request — so the application does not start. A CI
+assertion catches the same mistake one step later; this catches it before
+anything runs.
+
+### The five modes, two of which are permanent
+
+| mode | who enforces | seam attaches |
+| --- | --- | --- |
+| `Check(level)` | **the seam** | yes |
+| `NoCheck(reason)` | nobody, deliberately | no |
+| `ServiceChecked(level, where)` | a service, elsewhere — *scaffolding* | no |
+| `OWNER_SCOPED` | nobody yet; resolves `(bot_id, caller)` — *scaffolding* | no |
+| `INHERITED` | the address that replaced it — *scaffolding* | no |
+
+`Check`'s level is a parameter rather than five more modes because the bars
+really do differ per operation — MEMBER to drive a bot's sessions, ADMIN to
+write a channel, OWNER to restart a container or delete the bot.
+`NoCheck`'s reason is required because it covers two different situations: an
+operation with no bot dimension at all, and one that is bot-scoped and
+*intentionally* unguarded (render-screen reads serve share viewers who hold no
+Editor relation). Without a written reason a reviewer cannot tell the second
+from an oversight.
+
+`INHERITED` carries nothing because there is nothing of its own to carry: a
+`deprecated/` address is the replacement's *own endpoint function* re-registered
+at the old path, so the row that governs it is the replacement's row. It was
+called `SELF_CHECKED` until 2026-08-22, a name that claimed a check no legacy
+route performs and collided with `deprecated`'s unrelated `SELF_CHECKED_ROUTES`
+— which really does mean a router that checks the grant itself.
+
+The other three are scaffolding and are deleted when their last row leaves
+them. `scaffolding_row_count()` publishes how many remain, and a test fails if
+a *new* row is ever added in one — the quiet way the final shape becomes
+unreachable.
+
+### What the seam does, and what it does not
+
+`openapi_v1/bot_access.py`, on a `Check` row only:
+
+- resolves the bot from `{bot_id}` on the path and the owner from `OwnerIdDep`
+  — **the same values the handler acts on**, so no arrangement of query
+  parameters aims the check at one bot while the handler acts on another;
+- refuses below the level with the masked 404, byte-identical to a bot that
+  does not exist;
+- **fails closed on every failure.** An unresolvable bot, an unreadable
+  collaborator table, an unwired injector: all refuse. The internal
+  interceptor does the opposite here (`permission_skipped`, then proceeds) and
+  that is not ported;
+- writes one `ac_bot_collab_log` row for a non-owner action on a non-read
+  method. Reads are not audited — measured against the internal surface, where
+  36 of 36 `GET` routes disable the audit and 54 of 54 non-`GET` routes write
+  one. An audit failure is logged and dropped: the action already happened, and
+  erroring would make a retrying client apply the mutation twice.
+
+**It carries no edit lock**, deliberately for this iteration. Locks that
+channels and service publications enforce today are untouched and still fire;
+a test asserts that so "no lock in the seam" cannot drift into "no lock
+anywhere".
+
+Two things stay outside on purpose: bot-*type* gating (`SUPPORTED_BOT_TYPES`,
+answered 501) is a capability question, and whether a *machine* caller is
+admitted is `admission.py`'s, with its own seam.
+
+### A router that exists but is not mounted
+
+`openapi_v1/task` declares three operations that `build_public_router` never
+mounts — collaboration answers under `/api/v1` today, and its `/openapi/v1`
+twin waits for the gateway to declare that domain. It still carries the route
+class, so it still needs rows, and `UNMOUNTED_OPERATIONS` names them so the
+orphan check does not read them as decisions left behind by a rename.
+
+Keeping the route class on an unmounted router is the point: **whoever mounts
+it later cannot do so unguarded** — they have to replace its placeholder rows
+with a real decision. Dropping the class would have been the smaller diff and
+would have let the surface grow an unchecked group the day someone wired it up.
+A test asserts none of those operations is live, so mounting one must delete
+its entry.
+
+### Adopting it: what the migration found
+
+82 rows are `Check` today. `ServiceChecked` fell from 92 to **25**, and those
+25 are named in `_DEFERRED_OPERATIONS` with a reason each — the burn-down test
+asserts that set exactly, so a row cannot join it quietly.
+
+The plan expected 10 deferrals and got 25. Every addition came from tracing a
+group rather than reading its row, which is the lesson worth keeping:
+
+- **A recorded level is documentation, and documentation is wrong sometimes.**
+  Three skills rows cited a module that never checked them. Re-read the cited
+  code before flipping; a keyword search is not a trace.
+- **A bar is not always a level.** Ten session operations ask for
+  owner-or-collaborator **or**, at draft stage, a BCN-verified friendship. The
+  seam adjudicates one level, so `Check` there would have closed a real path
+  instead of relocating it.
+- **A check with more than one caller does not move, it gets joined.**
+  `bot_skill_asset_service` is reached from `/openapi/v1`, from the retiring
+  twins, and from `/api/skills` — which no row governs. Deleting its check to
+  "finish" the migration would have stripped authorization from two surfaces.
+  The row still moves: it names who the *declared* authority is.
+  **And a service that is reached only through the seam today can still be the
+  wrong place to delete from.** `ServicePublicationFacadeProtocol` has no caller
+  outside `/openapi/v1`, but its Service API contract says "Resolve, authorize
+  and orchestrate" — deleting the refusal left the contract promising a
+  behaviour the implementation had lost, to every future caller.
+  `CollaboratorService`'s editor methods are the same story without even the
+  docstring to catch it: who may remove an editor is collaboration policy, and
+  `AGENTS.md` says delivery adapters do not own domain policy, so an HTTP table
+  cannot be its only home. Contracts and layering are the authority;
+  **reachability today is not the test.**
+
+  **Ask this of every group, every time.** `skill_set_control_plane` got the
+  same treatment as an afterthought and its check was deleted; `/api/skillsets`
+  reaches it on four routes with no `CollaboratorPermissionInterceptor`, taking
+  `entity_id` and `bot_id` from the query string, so the deletion opened another
+  owner's SkillSet to any authenticated caller — a read on three routes and a
+  write on one. A P1 review finding caught it. The difference between the two
+  groups was one question asked and not asked: *who else calls this?*
+- **Two gates at one bar cannot be told apart by their answers.** Where a
+  service check stays, a test makes the two disagree and asserts the seam is
+  the one that decided.
+- **A joined check is paid for twice, so price it rather than assume it.** The
+  26 engine-runtime rows resolve the bot in the seam and again in
+  `EngineRuntimeRelay.resolve_bot`. Per admitted request that is one extra
+  `BotService.get_bot` — row read, device-binding fetch, template fetch — plus,
+  **for a collaborator only**, one role query; both level resolvers
+  short-circuit on `user_id == owner_id`, so the owner path adds no
+  adjudication query at all. Caching the seam's read would recover only the row
+  read, because `BotFacts` is built from the binding and template the seam
+  never fetches. The removable half is the relay's `require_bot_operator`, and
+  it is load-bearing for the **deferred** session rows: `_resolve_session_backend`
+  turns its refusal into the draft-stage friendship check. So the redundancy
+  ends when those rows migrate — not through a cache, and not through a
+  "the seam already checked" flag, which is the bypass argument this whole
+  mechanism exists to remove. `engine_runtime/gating.py` carries the accounting
+  at the call site.
+
+  **Price it, then delete the ones nothing depends on.** Render-screens is the
+  other half of the same rule: its handlers each called `resolve_readable_bot`,
+  discarding the result, and on the three `Check(MEMBER)` mutations that was a
+  pure re-read of what the seam had just proved. Removable where engine-runtime
+  was not, because nothing else stood on it — one caller, no retiring twin, and
+  an adapter-local helper rather than a Service API contract. The read keeps it:
+  its row is `NoCheck` by design, so it is the only gate that route has. **The
+  question to ask of a duplicate is not "is it redundant today" but "what
+  breaks when it is gone"** — for `require_bot_operator` the answer was the
+  deferred sessions fallback; here it was nothing.
+
+What did not move, and why, is in that feature's `spec.md` *Out of Scope*:
+6 harness, 10 sessions, 3 skills, 3 authorized-apps, 2 product chats, 1
+connection.
+
+- **An `OWNER_SCOPED` group** ([#906](https://github.com/inclusionAI/Avernet/issues/906),
+  [#907](https://github.com/inclusionAI/Avernet/issues/907)) is still ahead, and
+  is **not** a migration: it changes behaviour, because collaborators start
+  getting through where they used to get a 404.
+
+Specs: `specs/2026-08-21-openapi-v1-collaborator-authorization-seam/` (the
+mechanism) and `specs/2026-08-22-openapi-v1-adopt-collaborator-seam/` (the
+adoption).
 
 ## Addressing rule
 
@@ -934,18 +1185,21 @@ literals the routes actually publish:
 
 <!-- reserved-component-names -->
 ```text
-approvals  authorized  ceiling  check-name  connection  engine  identity
-loadtest  logs  mcp  models  resources  routines  sessions  skills
+all  approvals  authorized  catalog  ceiling  check-name  connection  engine  identity
+loadtest  local  logs  market  metadata  mcp  models  resources  routines  sessions  skills  spaces
+work-order-notifications  work-orders
 ```
 
-Nine of those fifteen — `approvals`, `connection`, `engine`, `identity`,
-`models`, `resources`, `routines`, `sessions`, `skills` — are held **only by the
+Eight of those twenty-three — `approvals`, `connection`, `engine`, `identity`,
+`models`, `resources`, `routines`, and `sessions` — are held **only by the
 retiring addresses**. Bot-first addressing moved every bot-scoped component out
-of that segment, so once the deprecated addresses are removed the list is the
-six that remain:
+of that segment. The tenant-level Skill Workbench status route now keeps
+`skills` current at this level, so once the deprecated addresses are removed the
+list is the fifteen that remain:
 
 ```text
-authorized  ceiling  check-name  loadtest  logs  mcp
+all  authorized  catalog  ceiling  check-name  loadtest  local  logs  market  metadata  mcp  skills
+spaces  work-order-notifications  work-orders
 ```
 
 They are still reserved today, and the list above is the accurate one: a bot
@@ -1046,8 +1300,8 @@ the `session_key` it never read.
 All responses use the `Envelope[T]` / `Page[T]` shapes from
 `openapi_v1/contracts.py` unless noted (binary streams bypass the envelope).
 
-### ✅ totalfrank · P1 — bots (17 endpoints) · `openapi_v1/bots/router.py` — **IMPLEMENTED (PR #494; startup script #926)**
-All 17 wired to the internal bot services. Kept here as the reference shape for
+### ✅ totalfrank · P1 — bots · `openapi_v1/bots/router.py` — **IMPLEMENTED (PR #494; startup script #926)**
+The Bot core routes are wired to internal services. Kept here as the reference shape for
 the other six: this is what "done" looks like per category.
 
 | Method | Path | Purpose | Success |
@@ -1058,6 +1312,7 @@ the other six: this is what "done" looks like per category.
 | GET | `/openapi/v1/bots/ceiling` | Bot-creation quota ceiling | `Envelope[Ceiling]` |
 | GET | `/openapi/v1/bots/{bot_id}` | Bot details | `Envelope[Bot]` |
 | PUT | `/openapi/v1/bots/{bot_id}` | Update bot (engine immutable) | `Envelope[Bot]` |
+| PUT | `/openapi/v1/bots/{bot_id}/space` | Change the Bot's owning Business Space | `Envelope[BotSpaceAssignment]` |
 | DELETE | `/openapi/v1/bots/{bot_id}` | Delete bot | `Envelope[Deleted]` |
 | POST | `/openapi/v1/bots/{bot_id}/restart` | Restart (re-provision device) | `Envelope[Bot]` |
 | POST | `/openapi/v1/bots/{bot_id}/auth-status` | Poll Passport auth (attributes echoed in the body); completes creation when ISSUED — a write, hence a POST | `Envelope[BotAuthStatus]` |
@@ -1069,6 +1324,38 @@ the other six: this is what "done" looks like per category.
 | GET | `/openapi/v1/bots/{bot_id}/startup-script` | Read the bot's startup script | `Envelope[StartupScript]` |
 | PUT | `/openapi/v1/bots/{bot_id}/startup-script` | Set/replace it; takes effect next start | `Envelope[StartupScript]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/startup-script` | Clear it | `Envelope[Deleted]` |
+
+#### Owning Business Space reassignment
+
+`PUT /openapi/v1/bots/{bot_id}/space` explicitly requires `user_id` and a JSON
+body containing one numeric `space_id >= 1`. The target id comes from
+`GET /openapi/v1/spaces`; moving a Bot back to personal ownership uses that
+user's numeric PERSONAL Space id rather than `null` or an implicit sentinel.
+Only the Bot owner may perform the mutation. The owner must still be a member
+of the target Space, and a PERSONAL target must belong to that owner. An
+application is admitted with `GRANT_CHECKED_OWN_BOT`, so it must hold a live
+grant from the acting user for that user's owned Bot. Desktop/local Bots cannot
+move to TEAM Spaces and return 409. Repeating the current assignment is a
+successful no-op with `changed=false`; a real persistence failure is propagated
+rather than reported as success.
+
+Production now binds `BusinessSpaceContextProtocol` to the Spaces
+Service-API-backed adapter. Bot creation and `/openapi/v1/bots/all` therefore
+resolve numeric PERSONAL/TEAM Space ids through the same membership-gated
+contract; accounts whose PERSONAL Space has not yet been initialized retain the
+legacy `personal:<user_id>` read fallback without creating data as a GET side
+effect.
+
+This operation is deliberately a **narrow assignment update**, not the full
+cross-space migration described by the Bot Workshop integration plan. It does
+not reconcile collaborators/editors or provide a multi-domain transaction and
+compensation workflow. Do not mark “Bot migrate” complete or use this operation
+where target-Space membership must replace existing collaborator grants; that
+requires the B-line migration Application Service owned jointly with the
+Business Space/collaboration team. Regenerate
+`src/gateway/configs/schemas/bots.openapi.json`, then copy the schema and matching
+route/security configuration to the independently managed OCB/Sofapy Gateway;
+Avernet's broad `/openapi/v1/bots/**` rule already covers this path.
 
 #### Startup script — the promises a caller cannot infer from the schema
 
@@ -1225,16 +1512,37 @@ registry widened to include the bot's own active engine; update's duplicate-name
 check compares owner **and** `bot_id` together; deleting the default bot raises
 `BotOperationNotAllowedError` (internal response shape unchanged, public → 409)._
 
-### ❌ channels — **REMOVED (2026-08-03)**
-The component is deleted: router, schemas, package, mounted entry and its two
-published paths. It was never implemented, and unlike an unwritten component it
-was **published** — an integrator reading the served document saw a channels API
-and got a 500 on every call. Parking it kept that cost with none of the benefit.
+### ✅ Bot Workshop · P1 — channels (6 endpoints) · `openapi_v1/channels/router.py` — **IMPLEMENTED (2026-08-19)**
+Bot-scoped draft DingTalk Channel configuration. Every operation requires an
+explicit `user_id`; `owner_id` is optional and addresses a Bot shared with the
+caller. Human and application callers are admitted through
+`GRANT_CHECKED_ADDRESSED_BOT`, so an application must hold a live grant for the
+addressed `(owner_id, bot_id)` pair. Reads allow the owner or an operable
+collaborator; writes additionally require `ADMIN` collaborator permission. If the
+Bot has collaborators, the caller must also hold its Bot edit lock; otherwise
+the write returns the standard `423 Edit lock required` envelope.
 
-Nothing was lost that a re-add would need: the six operations (DingTalk config
-CRUD + a status toggle) are recorded above in the `2026-07-27` history and in the
-PR that removed them. If channels come back, they come back as a designed
-component, not as a resurrected stub.
+Only `dingding` and the `draft` stage are public. `verify` and `online` remain
+publication outputs. Creates start `inactive`; status changes synchronize the
+runtime, and deleting an active Channel deactivates it first. `client_secret`
+is write-only and reads expose only `has_client_secret`; the internal
+`aix_preview_url` is never projected. The collection is intentionally
+unpaginated (`Envelope[list[Channel]]`) because the current product contract
+manages the Bot's small configured set rather than a tenant-wide inventory.
+
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/{bot_id}/channels` | List draft DingTalk Channels | `Envelope[list[Channel]]` |
+| POST | `/openapi/v1/bots/{bot_id}/channels` | Create an inactive Channel | `201 Envelope[Channel]` |
+| GET | `/openapi/v1/bots/{bot_id}/channels/{channel_id}` | Read one Channel | `Envelope[Channel]` |
+| PATCH | `/openapi/v1/bots/{bot_id}/channels/{channel_id}` | Partially update config | `Envelope[Channel]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/channels/{channel_id}` | Deactivate and delete | `Envelope[Deleted]` |
+| PUT | `/openapi/v1/bots/{bot_id}/channels/{channel_id}/status` | Activate or deactivate | `Envelope[Channel]` |
+
+**Release gates:** deploy the Stage 3 DDL before Backend code and copy the
+regenerated `bots.openapi.json` plus matching route/security configuration to
+the independently managed OCB/Sofapy Gateway. Avernet's broad
+`/openapi/v1/bots/**` forwarding/security rule already covers these paths.
 
 ### ✅ totalfrank · P1 — mcp (6 endpoints) · `openapi_v1/mcp/router.py` — **IMPLEMENTED (PR #610)**
 Marketplace + tenants + the caller's unified per-server config. All 6 wired to
@@ -1398,7 +1706,7 @@ later falls outside it by construction.
 > a tenant-scoped read under the default tenant is a data-isolation failure
 > rather than a missing log.
 
-### ⬜ unassigned · Track C — engine runtime (16 endpoints)
+### Track C — engine runtime (18 endpoints)
 Not a Track B category — these wrap the **engine adapter** on the bot's device
 rather than a backend service. The per-endpoint checklist, the engine route each
 one maps to, and the ruling on the ~72 engine routes that are *not* wrapped live
@@ -1407,8 +1715,9 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 | Group | Endpoints | Public paths |
 |---|---|---|
 | sessions | 7 | `/openapi/v1/bots/{bot_id}/sessions…` — owner/collaborator operators |
-| engine | 3 | `/openapi/v1/bots/{bot_id}/engine/{status,capabilities,available}` |
+| engine | 4 | `/openapi/v1/bots/{bot_id}/engine/{status,capabilities,available,restart}` |
 | models | 2 | `/openapi/v1/bots/{bot_id}/models`, `…/models/{model_id}` |
+| nodes | 1 | `/openapi/v1/bots/{bot_id}/nodes` — read-only node inventory |
 | approvals | 3 | `/openapi/v1/bots/{bot_id}/approvals/mode` (GET/PUT), `…/modes` |
 | connection | 1 | `/openapi/v1/bots/{bot_id}/connection` — complete WS URL, replaces `get_device_connection` |
 
@@ -1436,11 +1745,10 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 7. **Cross-tenant external identity settled ([#556](https://github.com/inclusionAI/Avernet/issues/556))** — Passport, auth
    relationships and BCN carry a tenant axis, so the BCN sync can be re-enabled
    on the public path. — _⬜ (added 2026-07-29; gates enabling multi-tenancy)._
-8. **Track C:** the five engine-runtime groups (16 endpoints) implemented,
+8. **Track C:** the six engine-runtime groups (18 endpoints) implemented,
    owner-scoped and capability-aware, and `…/connection` returning socket URLs
    so no external caller ever sees a proxypass target or a raw device token.
-   — _✅ 5 of 5 (PR #630). Like every other category it answers 401 until item 6
-   lands; the singlebox E2E flow is blocked on the same event._
+   — _✅ 6 of 6 (PR #630 baseline; later engine restart and nodes additions)._
 
 ---
 
@@ -1529,6 +1837,109 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 ---
 
 ## Changelog (append a dated line whenever you move the board)
+
+- **2026-08-23** — **The seam gets its adopters.** 60 `ServiceChecked` rows and
+  8 `INHERITED` twins become `Check`, so `ServiceChecked` falls from 92 to 25
+  and `Check` rises from 0 to 82; `scaffolding_row_count()` goes 181 → 99.
+  Migrated: render-screens (3), the skill-centre capability hook (19), the
+  bot-skill `{skill_id}` assets (7), engine-runtime and diagnostics (16) with
+  eight path-addressed twins, the service-publication facade (16), channels (6)
+  and editors (5). Each group's service-local check was deleted only where the
+  seam is its sole caller; where it also serves a retiring twin or a surface
+  outside `/openapi/v1`, the check stays and the row records that the seam is
+  the *declared* authority. Two services fall in that second class —
+  `bot_skill_asset_service` and `skill_set_control_plane`, the latter only after
+  a P1 review finding caught its check being deleted while `/api/skillsets` was
+  still relying on it. Two caller-visible changes on the public surface, both
+  intended. **A revoked Team-Space
+  editor is now refused on 58 of the 82 rows**: the seam resolves through
+  `resolve_operable_permission_level`, which checks live Space membership on top
+  of the collaborator role, where skill-centre, bot-skill, channels and
+  engine-runtime previously asked for the raw role alone. A convergence rather
+  than a new policy — render-screens, editors and the publication facade were
+  already strict, so there was no single prior behaviour to preserve. The 19
+  skill-centre operations also move a denied collaborator from **403** to the
+  seam's masked **404** (closing a probing oracle), and the 7 bot-skill operations
+  change error code within 404. The burn-down assertion stops being an `xfail`
+  and becomes a strict equality against `_DEFERRED_OPERATIONS`. See **Adopting
+  it** above.
+
+- **2026-08-22** — **`SELF_CHECKED` renamed to `INHERITED`.** Naming only; no
+  row changed mode, no route changed behaviour, and the count in each mode is
+  what it was. The old name asserted a property no `deprecated/` route has —
+  none of them checks itself, because each is the replacement's own endpoint
+  function re-registered at the path it used to have, so what governs it is the
+  replacement's row. It also collided with `deprecated`'s `SELF_CHECKED_ROUTES`,
+  an unrelated admission concept that *does* mean "this router checks the grant
+  itself"; that one keeps its name. See **The five modes** above.
+
+- **2026-08-21** — **One authorization seam, inert on arrival.** Every public
+  operation now declares what governs it in `openapi_v1/authorization.py`, and
+  `PublicAPIRoute` applies the row itself — a handler declares nothing, and an
+  operation with no row raises while its module imports, so the application
+  cannot start. 229 rows: 92 `ServiceChecked`, 56 `NoCheck`, 42 `SELF_CHECKED`,
+  39 `OWNER_SCOPED`, and **no `Check`** — this change builds the mechanism and
+  adopts it nowhere, so no answer changed for any caller (proved by asserting
+  no live operation carries the gate, not by sampling statuses). The seam
+  (`openapi_v1/bot_access.py`) carries permission level and audit, fails closed
+  on every lookup failure, and deliberately carries **no edit lock**; the locks
+  channels and service publications enforce are untouched. Reads are not
+  audited, matching the internal surface as measured. Adoption is per-group
+  follow-up work: a `ServiceChecked` row flips mechanically, an `OWNER_SCOPED`
+  row is #906 / #907 and changes behaviour. See **Declaring authorization**
+  above. The harness group's check-versus-act defect was found during this work
+  and is filed for that group's owner, not fixed here.
+
+- **2026-08-19** — **Bot ownership-Space reassignment added.** Added
+  `PUT /openapi/v1/bots/{bot_id}/space` with explicit `user_id`, a numeric
+  target `space_id`, owner and target-membership enforcement,
+  `GRANT_CHECKED_OWN_BOT` application admission, desktop-to-TEAM refusal,
+  idempotent `changed=false` no-op behavior, and tenant/owner-scoped
+  persistence whose failures are not swallowed. Production Bot Inventory now
+  consumes numeric PERSONAL/TEAM Spaces through the membership-gated Spaces
+  Service API adapter. This remains a narrow assignment update; collaborator
+  reconciliation and rollback belong to the pending B-line migration workflow.
+
+- **2026-08-19** — **Bot Workshop Channels restored as a complete public API.**
+  Added six Bot-first DingTalk draft-configuration operations under
+  `/openapi/v1/bots/{bot_id}/channels`, with explicit `user_id`, optional
+  shared-Bot `owner_id`, `GRANT_CHECKED_ADDRESSED_BOT` application admission,
+  operable-collaborator reads, and ADMIN-gated writes that preserve the existing
+  Bot edit-lock rule (423 when a collaborative Bot is not locked by the caller).
+  Secrets are write-only; runtime synchronization failures normalize to 502.
+  Track A now adds an
+  `avernet_tenant` guard and tenant-leading Channel index, with four isolation
+  tests. The Stage 3 DDL is deploy-before-code. The 2026-08-03 deletion entry is
+  retained below because it records why the former published stubs were removed.
+
+- **2026-08-18** — **Data-init trigger/status contract completed.** The public
+  trigger now forwards the `IAM_TOKEN` cookie through the HTTP boundary into a
+  typed `DataInitServiceProtocol`; the service persists it only when an
+  initialization attempt will actually run. Added
+  `GET /openapi/v1/bots/{bot_id}/data-init` for polling the bounded public state
+  (`not_started`, `pending_init`, `in_progress`, `completed`, or `failed`)
+  without exposing the Bot `ext` bag, credentials, or downstream sync details.
+  Regenerated the Gateway `bots.openapi.json`; the independent OCB/Sofapy copy
+  and real IAM/Engine/downstream E2E remain deployment verification items.
+
+- **2026-08-17** — **TC bot workshop and local workflows.** Added the
+  aggregated `/bots/all` inventory, personal-local device/create/read/restart/
+  delete/open-folder workflows, dormant activation, cold-start data
+  initialization, and engine-process restart. Local and aggregate inventory
+  remain human-only at both Gateway and backend admission; the remaining bot
+  surface continues to admit an application only within its live grants. The
+  engine restart has only its bot-first address because no earlier public route
+  existed to retire. Regenerated Gateway `bots.openapi.json` is the release
+  artifact for this surface and must be copied unchanged to the OCB Gateway.
+
+- **2026-08-18** — Migrated the legacy `/api/v1/token/iam` IAM-token return and
+  optional Caller preparation as one Bot-scoped operation:
+  `POST /openapi/v1/bots/{bot_id}/iam-token`. The client supplies only Bot and
+  runtime context; Backend decides whether Caller exchange is required. The
+  operation requires a Gateway user principal, re-checks `user_id`, refuses
+  app-only callers, uses the standard Envelope, and disables response caching
+  through shared middleware. The OCB Gateway SOFA config still needs the
+  corresponding deployment-side update.
 
 - **2026-08-15** — **Bot-first addressing.** Every bot-scoped operation moved
   to `/openapi/v1/bots/{bot_id}/<component>/…`, reversing the component-first
@@ -1713,6 +2124,12 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   and on `route_security.yaml` admitting this surface's real callers; and `app` /
   `access_key` callers 401 until somebody rules on what they own. SDD:
   `src/backend/specs/2026-07-30-gateway-principal-verifier/`.
+- **2026-08-19** — **Read-only Node OpenAPI added.** The frontend and Engine
+  currently support only `GET /api/nodes`, so the public API adds exactly
+  `GET /openapi/v1/bots/{bot_id}/nodes`, with the same owner/editor, grant and
+  stage gates as the other runtime groups. It forwards `status`, `platform`,
+  `limit` and `offset`, publishes only stable node fields, and does not invent
+  register/unregister/status-write operations.
 - **2026-07-30** — **Track C implemented (PR #630)** — all 16 engine-runtime
   endpoints across five groups, plus `core/engine_runtime/` (the relay and the
   connection service) and its Service API Protocols. Seven things worth knowing
@@ -1944,3 +2361,59 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   a body field holding a credential, add its name substring to
   `_SENSITIVE_NAME_PARTS`.** No status code, response body, or envelope shape
   changed.
+
+## Changelog
+
+- **2026-08-20** — Added authenticated Bot catalog reads at
+  `GET /openapi/v1/bots/catalog/search` and `/discover`. User and App
+  principals see the same allowlisted public projection.
+  `/search` maps its current request page to BCS `/v2/bots/search` with
+  `tc_bot=true`, parses each `bot_uuid` as the tenant-scoped `(bot_id, entity_id)`
+  join key, and exposes only the exact public Backend matches. Its `total` is
+  the current page's joined count; BCS failures or invalid response shapes return
+  `502000 / Catalog service unavailable`, with no Backend-only fallback.
+
+- **2026-08-19 — Bot Editors CRUD.** The public surface now exposes
+  `GET/POST /openapi/v1/bots/{bot_id}/editors`,
+  `PATCH/DELETE /openapi/v1/bots/{bot_id}/editors/{editor_id}`, and
+  `DELETE /openapi/v1/bots/{bot_id}/editors/me`. All five operations admit an
+  application with a live grant on the addressed Bot; the App acts with the
+  delegating user's current permission, re-adjudicated on every request. The
+  acting user remains the required `user_id` query parameter, while a create body names its target as
+  `editor_user_id`. Roles are the closed `admin | member` enum. Reads require
+  Member access; mutations require Owner/Admin, and a non-owner Admin leaves
+  through `/me` rather than deleting their own record through the admin route.
+  Every `{editor_id}` mutation rebinds the record to the addressed Bot primary
+  key, Bot id, Owner and environment before writing; mismatches are the same
+  fixed 404 as absence. When a Bot carries a Team Space reference, adding or
+  promoting an editor requires that user to remain a live member of the Space;
+  unknown Space references fail closed. The Owner remains outside the editor
+  table, so this contract intentionally permits zero or multiple collaborator
+  Admins and does not couple membership changes to the draft edit lock.
+
+- **2026-08-19 — Bot Workshop adopts the canonical Spaces contract.** Bot
+  creation, local-workflow operations and `GET /openapi/v1/bots/all` now use a
+  numeric Space primary key for `space_id` / `X-Space-Id`; `space_code` remains
+  a separate stable external code. Inventory cards expose the same
+  `space_id`, `space_code`, `space_name`, `space_type` shape as the Spaces API,
+  replacing the provisional string `space_id`, `name`, `kind` shape. This is a
+  coordinated breaking schema correction and the Gateway artifact is published
+  through the compatibility gate with `--allow-breaking`. A Team Space view
+  includes every supported cloud Bot assigned to that Space across Bot Owners;
+  Space membership grants visibility only. Bot Owner/Editor relations still
+  decide actions, Team Editors must remain live Space members, Personal Spaces
+  allow Editors, and Bot Owners retain their Bot permissions after leaving a
+  Team Space.
+
+- **2026-08-19 — Render-screen configuration CRUD.** Added
+  `GET/POST /openapi/v1/bots/{bot_id}/render-screens` and
+  `PATCH/DELETE /openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}`.
+  The collection read returns the non-sensitive component-library name → UMD
+  CDN URL mappings needed to render a Bot's side panels. An authenticated human
+  may read an explicitly addressed Bot without being its Editor; an application
+  may call every operation only while a live grant covers that Bot. Mutations
+  require the delegating user's live effective Editor permission at `MEMBER` or
+  above, including the Team Space membership recheck. Every public record id is bound
+  back to the addressed Bot id, Owner and environment before update or delete;
+  mismatches use the same fixed 404 as absence. Request bodies are strict and
+  accept only HTTP(S) CDN URLs.

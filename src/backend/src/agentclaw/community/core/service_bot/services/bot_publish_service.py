@@ -1075,8 +1075,14 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 f"[offline_publish] Publish status updated to draft: publish_id={publish_id}"
             )
 
-        # Step 5: 异步执行销毁流程（仅 ONLINE 阶段，VERIFY 阶段无需销毁）
+        # Step 5: both verify cancellation and online offline must tear down the
+        # corresponding runtime.  Merely changing VALIDATING -> DRAFT leaves the
+        # verify container alive and makes a later staging publish race a stale
+        # runtime.  The durable destroy task is idempotent for both stages.
         if stage == PublishStage.VERIFY.value:
+            publish_flow_service.enqueue_offline_destroy(
+                publish_id=publish_id, stage=stage, operator="system"
+            )
             result["message"] = f"验证环境已下线，发布单已回退到草稿状态: publish_id={publish_id}"
 
             logger.info(

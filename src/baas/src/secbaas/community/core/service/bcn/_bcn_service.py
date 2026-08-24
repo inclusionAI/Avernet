@@ -94,10 +94,6 @@ def _normalize_interaction_resolution(
             or not source_answer.question.strip()
         ):
             raise ValueError("ask_user answer identity must be non-empty")
-        if not source_answer.values or any(
-            not value.strip() for value in source_answer.values
-        ):
-            raise ValueError("ask_user answer values must be non-empty")
         joined_values = "，".join(source_answer.values)
         summaries.append(f"{source_answer.header}: {joined_values}")
         if source_answer.header in values:
@@ -154,8 +150,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         """Normalize and durably queue one BCS interaction resolution."""
         resolution = _normalize_interaction_resolution(resolve_input)
         self._interaction_service.resolve(
-            session_key=resolve_input.session_id,
-            interaction_id=resolve_input.interaction_id,
+            baas_interaction_id=resolve_input.interaction_id,
             resolution=resolution,
             request_envelope=resolve_input.request_envelope,
             idempotency_key=resolve_input.idempotency_key,

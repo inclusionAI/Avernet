@@ -9,6 +9,7 @@ purpose: "Single-user bot chat domain — errors, schemas, service entry points 
 provides:
   - "BotChatService"
   - "Errors + request/response schemas"
+  - "BcnHumanBotFriendshipService"
 consumes:
   - "(low fanout — mostly self-contained today)"
 internal_dependencies:
@@ -20,6 +21,8 @@ internal_dependencies:
   - agentclaw.community.log
   - agentclaw.community.plugin_api.database
   - agentclaw.community.plugin_api.models
+  - agentclaw.community.plugin_api.http_client
+  - agentclaw.community.api.human_bot_friendship_service
   - agentclaw.community.utils.env_utils
 ```
 

@@ -390,8 +390,7 @@ async def resolve_message_interaction(
     envelope = request.model_dump(by_alias=True)
     try:
         result = interaction_service.resolve(
-            session_key=request.params.session_key,
-            interaction_id=request.params.interaction_id,
+            baas_interaction_id=request.params.interaction_id,
             resolution=InteractionResolution(decision=request.params.decision),
             request_envelope=envelope,
         )

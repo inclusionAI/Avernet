@@ -57,6 +57,18 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
     ) -> None:
         return None
 
+    def refresh_restart_authorization(
+        self,
+        ctx: BotProvisioningContext,
+        bot: dict[str, object],
+        extra_configs: dict[str, object] | None,
+        *,
+        passport_plugin: object,
+        skill_set_factory: object,
+        template_service: object,
+    ) -> None:
+        return None
+
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         return None
 

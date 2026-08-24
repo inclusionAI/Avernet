@@ -13,6 +13,9 @@ from typing import Annotated
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.content_scanner_service import ContentScannerProtocol
+from agentclaw.community.api.health_diagnosis_service import (
+    HealthDiagnosisServiceProtocol,
+)
 from agentclaw.community.api.patch_engine_service import PatchEngineProtocol
 from agentclaw.community.api.patch_library_service import PatchLibraryProtocol
 from agentclaw.community.api.patch_planner_service import PatchPlannerProtocol
@@ -22,6 +25,9 @@ from agentclaw.community.core.repository.protocols.harness import HarnessPatchRe
 from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 from agentclaw.community.core.harness.services.bot_profile import BotProfile
 from agentclaw.community.core.harness.services.content_scanner import ContentScanner
+from agentclaw.community.core.harness.services.health_diagnosis_service import (
+    HealthDiagnosisService,
+)
 from agentclaw.community.core.harness.services.llm import LLM
 from agentclaw.community.di.config import BcsFuseConfig, KbConfig, LLMHarnessConfig
 from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_GENERAL
@@ -183,6 +189,17 @@ class HarnessModule(Module):
             scan_record_repo=scan_record_repo,
         )
 
+    @singleton
+    @provider
+    @inject
+    def health_diagnosis_service(
+        self,
+        scanner: ContentScannerProtocol,
+        scan_repo: HarnessScanRecordRepository,
+    ) -> HealthDiagnosisService:
+        """Construct the Core service without making Core depend on api/."""
+        return HealthDiagnosisService(scanner=scanner, scan_repo=scan_repo)
+
     # ── Service API Protocol aliases ────────────────────────────────────
     # Each @provider below resolves the concrete singleton and returns it
     # under the Protocol type, so ``Injected(<X>Protocol)`` in adapters/
@@ -192,6 +209,15 @@ class HarnessModule(Module):
     @provider
     @inject
     def _content_scanner_protocol(self, svc: ContentScanner) -> ContentScannerProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _health_diagnosis_protocol(
+        self,
+        svc: HealthDiagnosisService,
+    ) -> HealthDiagnosisServiceProtocol:
         return svc
 
     @singleton

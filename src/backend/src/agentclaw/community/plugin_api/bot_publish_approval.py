@@ -81,7 +81,7 @@ class BotPublishCallbacks:
 
     # Run the public-approval callback (used by prod strategy's
     # COMPLETED short-circuit). Returns the callback result dict.
-    handle_approval_callback: Callable[[str, str, str, str], Dict[str, Any]]
+    handle_approval_callback: Callable[..., Dict[str, Any]]
 
     # Re-fetch a bot after a downstream mutation (e.g. after the
     # COMPLETED short-circuit). Returns the bot dict or None.

@@ -1,8 +1,8 @@
 """Endpoint tests for task-discovery public routes.
 
 Covers:
-- POST /openapi/v1/collaboration/tasks/discovery/discover (happy + error)
-- GET  /openapi/v1/collaboration/tasks/discovery/status  (happy + error)
+- POST /api/v1/collaboration/tasks/discovery/discover (happy + error)
+- GET  /api/v1/collaboration/tasks/discovery/status  (happy + error)
 
 Happy cases assert only ``{"code": 200000}`` — the handler returns the
 unified success ``Envelope`` when the discovery flow runs end-to-end,
@@ -20,7 +20,19 @@ try/except; the handler re-raises it as ``InternalError`` → the app's
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
+from agentclaw.community.core.task.task_discovery.discovery_service import (
+    DiscoveryResult,
+    DiscoveryService,
+)
+from agentclaw.community.core.task.task_discovery.models import (
+    DiscoveredTask,
+    DiscoverySession,
+)
+from agentclaw.community.core.task.task_discovery.task_reader import (
+    init_discovered_tasks_db,
+)
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -28,11 +40,11 @@ from tests.community.framework import (
     endpoint_test,
 )
 
-# ---- POST /openapi/v1/collaboration/tasks/discovery/discover ----
+# ---- POST /api/v1/collaboration/tasks/discovery/discover ----
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/discovery/discover",
+    path="/api/v1/collaboration/tasks/discovery/discover",
     scenario="happy_ok",
     input=CaseInput(query_params={"bot_id": "td-bot-1", "owner_id": "td-owner-1"}),
     expect=ExpectSuccess(
@@ -46,7 +58,7 @@ def discover_tasks_happy_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/discovery/discover",
+    path="/api/v1/collaboration/tasks/discovery/discover",
     scenario="err_missing_bot_id",
     input=CaseInput(query_params={"owner_id": "td-owner-1"}),
     expect=ExpectError(status=422),
@@ -55,11 +67,11 @@ def discover_tasks_err_missing_bot_id():
     """Error path: missing required bot_id -> FastAPI 422."""
 
 
-# ---- GET /openapi/v1/collaboration/tasks/discovery/status ----
+# ---- GET /api/v1/collaboration/tasks/discovery/status ----
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/collaboration/tasks/discovery/status",
+    path="/api/v1/collaboration/tasks/discovery/status",
     scenario="happy_ok",
     expect=ExpectSuccess(
         status=200,
@@ -99,7 +111,7 @@ def _cleanup_status_error_env(response, world) -> None:
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/collaboration/tasks/discovery/status",
+    path="/api/v1/collaboration/tasks/discovery/status",
     scenario="err_db_path_is_directory",
     seed=_seed_status_error_dir,
     extra_assertions=(_cleanup_status_error_env,),
@@ -107,3 +119,91 @@ def _cleanup_status_error_env(response, world) -> None:
 )
 def get_status_err_db_path_is_directory():
     """Error path: DB path is a directory -> sqlite3.connect raises -> InternalError -> 500."""
+
+
+# Exercise the status aggregation loop with both a task that has an in-memory
+# discovery result and one that has not been discovered in this process.
+_STATUS_COVERAGE_DB = Path(
+    os.environ.get("TMPDIR", "/tmp"),
+    "task_discovery_status_coverage.db",
+)
+_STATUS_DISCOVERED_TASK_ID = "status-discovered"
+_STATUS_PENDING_TASK_ID = "status-pending"
+
+
+def _status_task(task_id: str) -> dict:
+    return {
+        "task_id": task_id,
+        "bot_id": "status-bot",
+        "owner_id": "status-owner",
+        "dt": "2026-08-20",
+        "project_name": task_id,
+        "description": "status coverage",
+        "business_scenario": "testing",
+        "discovery_basis": "changed-line coverage",
+        "priority": "medium",
+        "status": "pending_confirmation",
+    }
+
+
+def _seed_status_with_discovered_and_pending_tasks(world) -> None:
+    init_discovered_tasks_db(
+        _STATUS_COVERAGE_DB,
+        [
+            _status_task(_STATUS_DISCOVERED_TASK_ID),
+            _status_task(_STATUS_PENDING_TASK_ID),
+        ],
+    )
+    os.environ["TASK_DISCOVERY_DATA_FILE"] = str(_STATUS_COVERAGE_DB)
+    service = world.get(DiscoveryService)
+    task = DiscoveredTask(**_status_task(_STATUS_DISCOVERED_TASK_ID))
+    service._discoveries[_STATUS_DISCOVERED_TASK_ID] = DiscoveryResult(
+        task=task,
+        session=DiscoverySession(
+            task_id=task.task_id,
+            session_id="status-session",
+            session_url="http://localhost/session/status-session",
+        ),
+        notification_sent=True,
+    )
+
+
+def _cleanup_status_coverage(response, world) -> None:
+    os.environ.pop("TASK_DISCOVERY_DATA_FILE", None)
+    _STATUS_COVERAGE_DB.unlink(missing_ok=True)
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/v1/collaboration/tasks/discovery/status",
+    scenario="happy_discovered_and_pending",
+    seed=_seed_status_with_discovered_and_pending_tasks,
+    extra_assertions=(_cleanup_status_coverage,),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "total": 2,
+                "discovered": 1,
+                "tasks": [
+                    {
+                        "task_id": _STATUS_DISCOVERED_TASK_ID,
+                        "discovered": True,
+                        "session_id": "status-session",
+                        "notification_sent": True,
+                    },
+                    {
+                        "task_id": _STATUS_PENDING_TASK_ID,
+                        "discovered": False,
+                        "session_id": None,
+                        "notification_sent": False,
+                        "error": None,
+                    },
+                ],
+            },
+        },
+    ),
+)
+def get_status_happy_discovered_and_pending():
+    """Status joins persisted tasks with process-local discovery results."""

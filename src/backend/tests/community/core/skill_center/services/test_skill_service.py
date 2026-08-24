@@ -170,6 +170,42 @@ class TestSkillServiceActivation:
 class TestSkillServiceSync:
     """sync_skills_from_git"""
 
+    def test_sync_accepts_repo_folder_name_distinct_from_manifest_name(
+        self, skill_dirs, mock_skill_repo
+    ):
+        repo_dir = skill_dirs["repo_dir"]
+        _make_skill_dir(
+            repo_dir,
+            "infra/dima-mcp",
+            skill_md_content=(
+                "---\n"
+                "name: dima\n"
+                "description: Dima integration\n"
+                "---\n"
+            ),
+        )
+        mock_skill_repo.list_skills.return_value = []
+
+        svc = SkillService(
+            skill_repo=mock_skill_repo,
+            skill_repo_sync=_lenient_skill_repo_sync(),
+            category_repo=MagicMock(),
+            active_dir=skill_dirs["active_dir"],
+            repo_dir=repo_dir,
+            local_dir=skill_dirs["local_dir"],
+            market_cache=MagicMock(),
+            device_fs_factory=MagicMock(),
+            git_sync_service_factory=MagicMock(),
+        )
+
+        result = svc.sync_skills_from_git()
+
+        assert result["failed"] == 0
+        assert result["created"] == 1
+        created = mock_skill_repo.create.call_args.args[0]
+        assert created["git_path"] == "git://infra/dima-mcp"
+        assert created["name"] == "dima"
+
     def test_sync_creates_new_skills(self, skill_dirs, mock_skill_repo):
         repo_dir = skill_dirs["repo_dir"]
         _make_skill_dir(repo_dir, "infra/demo")
@@ -1178,3 +1214,29 @@ class TestSyncRepoWithLock:
         assert result["success"] is False
         assert result["error"] == "Git fetch failed: boom"
         assert result["message"] == "Git fetch failed: boom"
+
+    def test_database_scan_failure_propagates_structured_result(
+        self, skill_dirs, mock_skill_repo
+    ):
+        database = {
+            "created": 0,
+            "updated": 0,
+            "deleted": 0,
+            "failed": 1,
+            "skipped": 3,
+            "errors": ["invalid manifest"],
+        }
+        svc = self._make_svc(
+            skill_dirs,
+            mock_skill_repo,
+            {
+                "success": False,
+                "error": "Database scan failed",
+                "database": database,
+            },
+        )
+
+        result = svc.sync_repo_with_lock()
+
+        assert result["success"] is False
+        assert result["database"] == database

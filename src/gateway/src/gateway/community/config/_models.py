@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -69,6 +70,118 @@ class PrincipalSignerPluginConfig(BaseModel):
     ttl_seconds: int = 60
 
 
+#: Probes for a CORS pattern that admits origins its author never enumerated.
+#: Every host is under ``.invalid`` (RFC 2606), which no real deployment can
+#: serve from, so a pattern pinned to a real host suffix cannot match one by
+#: accident. Both schemes a browser origin can carry are probed, with and
+#: without a port: a catch-all is a catch-all whether it is written
+#: ``https://.*``, ``http://.*`` or ``https://.*:8443``, and probing only one
+#: shape would refuse that shape while admitting its neighbours.
+_CANARY_ORIGINS = (
+    "https://canary-origin.invalid",
+    "http://canary-origin.invalid",
+    "https://canary-origin.invalid:8443",
+    "http://canary-origin.invalid:8080",
+)
+
+
+class CorsConfig(BaseModel):
+    """Browser CORS allow-list for the gateway's own edge (``user_config.cors``).
+
+    The gateway is the origin a browser actually talks to, so it is the only hop
+    that can answer a preflight: the request that carries no credential and must
+    never reach authentication. An upstream's own allow-list governs callers that
+    reach *it* directly and says nothing about the gateway's address, which is
+    why this list lives here rather than being inherited from a component.
+
+    Neutral default = localhost origins only, so a single-box UI works out of the
+    box; every deployment adds its own frontend origin through the ``cors`` block
+    of its ``application-<env>.yaml`` overlay. Origins are enumerated exactly or
+    matched by one of ``allow_origin_regex``; either field is REFUSED at load
+    time when it would admit an arbitrary origin (see
+    :meth:`_reject_wildcard_origin` and :meth:`_reject_universal_regex`).
+    """
+
+    model_config = {"extra": "allow"}
+    allow_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost",
+            "http://localhost:3000",
+            "http://localhost:8000",
+            "http://localhost:8080",
+            "http://localhost:8888",
+        ]
+    )
+    allow_origin_regex: list[str] = Field(default_factory=list)
+
+    @field_validator("allow_origins")
+    @classmethod
+    def _reject_wildcard_origin(cls, origins: list[str]) -> list[str]:
+        """Refuse ``"*"`` at load time rather than serving it.
+
+        The edge always answers with ``Access-Control-Allow-Credentials: true``,
+        and a wildcard does not fail loudly under that setting: Starlette
+        replaces ``"*"`` with whichever origin asked (``CORSMiddleware.send``
+        takes the ``allow_all_origins and allow_credentials`` branch), so a
+        deployment that wrote the conventional ``allow_origins: ["*"]`` would
+        boot, look correct, and admit every site on the internet to credentialed
+        calls through the gateway. A config error a browser cannot catch for us
+        is one this boundary has to catch itself.
+        """
+        if any(origin.strip() == "*" for origin in origins):
+            raise ValueError(
+                'cors.allow_origins must not contain "*": the gateway sends '
+                "Access-Control-Allow-Credentials: true, so a wildcard admits "
+                "every origin to credentialed calls. List each origin, or match "
+                "them with cors.allow_origin_regex."
+            )
+        return origins
+
+    @field_validator("allow_origin_regex")
+    @classmethod
+    def _reject_universal_regex(cls, patterns: list[str]) -> list[str]:
+        """Refuse a pattern that would admit an origin nobody configured.
+
+        The sibling check above points an operator at this field, so this field
+        must not be the way back into the hole it closes: with credentials
+        enabled, ``allow_origin_regex: [".*"]`` — a plausible shorthand for "any
+        localhost port" — admits every site on the internet exactly as ``"*"``
+        would, and boots just as quietly.
+
+        The probes are canaries rather than a proof: a pattern that
+        ``fullmatch``es a host under the reserved ``.invalid`` TLD (RFC 2606 —
+        never resolvable, so no real allow-list names it) is matching things its
+        author did not enumerate. Both schemes are probed, with and without a
+        port, so a catch-all is caught however it is spelled. That covers the
+        ``.*`` / ``.+`` / ``<scheme>://.*`` shapes an operator actually writes;
+        a deliberately broad pattern that dodges every probe is not claimed to
+        be caught. A pattern that pins anything real — ``http://localhost:[0-9]+``,
+        a host suffix — matches no probe and passes.
+
+        Compiling here is the second half of the boundary: a malformed pattern
+        fails at config load, naming the entry, rather than at middleware
+        construction — where it would take the whole gateway down at boot.
+        """
+        for pattern in patterns:
+            try:
+                compiled = re.compile(pattern)
+            except re.error as exc:
+                raise ValueError(
+                    f"cors.allow_origin_regex entry {pattern!r} is not a valid "
+                    f"regular expression: {exc}"
+                ) from exc
+            for canary in _CANARY_ORIGINS:
+                if compiled.fullmatch(canary):
+                    raise ValueError(
+                        f"cors.allow_origin_regex entry {pattern!r} matches the "
+                        f"arbitrary origin {canary!r}: the gateway sends "
+                        "Access-Control-Allow-Credentials: true, so a pattern "
+                        "this broad admits every origin to credentialed calls. "
+                        "Pin the host suffix each environment actually serves."
+                    )
+        return patterns
+
+
 class PluginConfig(BaseSettings):
     """Plugin selection config for gateway DI container.
 
@@ -101,6 +214,7 @@ class UserConfig(BaseModel):
     upstream_vars: dict[str, str] = Field(default_factory=dict)
     identity_strategies: dict[str, list[str]] = Field(default_factory=dict)
     route_security: dict[str, dict[str, str]] = Field(default_factory=dict)
+    cors: CorsConfig = Field(default_factory=CorsConfig)
     upstreams: dict[str, Any] = Field(default_factory=dict)
 
     def get(self, key: str, default: Any = None) -> Any:

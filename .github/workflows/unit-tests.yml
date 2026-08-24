@@ -4,11 +4,13 @@ on:
   pull_request:
     branches:
       - dev
+      - dev_refactory_collaboration
       - main
       - 'REL*'
   push:
     branches:
       - dev
+      - dev_refactory_collaboration
       - main
   workflow_dispatch:
 
@@ -182,7 +184,7 @@ jobs:
           # Diff the base ref against the working tree. PR runs check out a merge commit,
           # for which "<base>...HEAD" collapses to nothing; diffing base against the tree
           # sees all PR-introduced changes regardless of the merge-commit checkout.
-          mapfile -t files < <(git diff --name-only "${BACKEND_BASE_REF}" -- src/backend || true)
+          mapfile -t files < <(git diff --name-only "${BACKEND_BASE_REF}" -- src/backend scripts/ci/legacy_skill_compatibility.sh .github/workflows/unit-tests.yml || true)
           n=${#files[@]}
           if [ "$n" -eq 0 ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -212,6 +214,11 @@ jobs:
         # ci_test.sh runs pytest with coverage and enforces the case-pass-rate /
         # line-coverage / changed-line-coverage gates via scripts/ci/report_check.py.
         run: bash scripts/ci_test.sh --base "$BACKEND_BASE_REF"
+
+      - name: Enforce Legacy Skill compatibility gate
+        if: steps.changes.outputs.skip != 'true'
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/legacy_skill_compatibility.sh
 
       - name: Upload backend test results
         if: always() && steps.changes.outputs.skip != 'true'

@@ -23,8 +23,10 @@ Step2 改造(状态机解耦 + PlanResult + 显式 target + harness 执行报错
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
+from dataclasses import dataclass
 
 from agentclaw.community.core.task.domain.errors import NodeNotFoundError, TaskStateError
 from agentclaw.community.core.task.domain.models import (
@@ -38,11 +40,20 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskNodeQueryCriteria,
 )
+from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
 
 
 logger = logging.getLogger("task.engine")
 
 _DEFAULT_MAX_HARNESS = 3  # 执行报错 harness 重投上限(达上限→HUNG)
+
+
+@dataclass(frozen=True)
+class CoopGroupStart:
+    """Result of starting a BCN coop group: the group id + its initial session_id."""
+    group_id: str
+    session_id: str | None
 
 
 class ExecutionEngine:
@@ -54,15 +65,27 @@ class ExecutionEngine:
     跨 task 并行。投递/拉群 IO 锁外 await,gather+Semaphore 并发。loop_round 仅升 BBS 时 ++。
     测试可经 facade/engine 子类覆写 ``_build_*`` 注入 stub 策略/投递(测试 seam)。"""
 
-    def __init__(self, graph, *, bot=None, bcs=None, discover=None, bcs_identity=None) -> None:
+    def __init__(self, graph, *, bot=None, bcs=None, discover=None, bcs_identity=None,
+                 bot_public=None, api_base_url: str = "") -> None:
         """graph: TaskGraphService;bot: OpenApiBotPort;bcs: BcsClientPort;discover: BotDiscoverServiceProtocol。
+        bot_public: BotPublicServiceProtocol|None(TEMP e2e)供 bbs_runner 按关键字取 dream bot roster(替代
+        bcs.list_bots_by_task_modes)。
         端口由 DI 从配置注入(local/prod/double 只换端口实现,引擎代码不变)。prod 必传;测试子类覆写
-        ``_build_*`` 注入 stub 策略/投递时可省略(走 super 路径默认 berth)。"""
+        ``_build_*`` 注入 stub 策略/投递时可省略(走 super 路径默认 berth)。
+
+        任务模式 roster 圈定的 provider 取自 ``bcs.provider_id``(端口自带凭据,组合根注入;空=圈定关闭,
+        旧行为)。引擎不再透传 task_provider_id。
+
+        ``api_base_url``:任务后端 base url,经 _build_executor 透传给 TaskExecutor→bbs_runner.notify,
+        拼成发给胜出 bot 的任务消息(spec §5:主动触发回投路径)。"""
         self._graph = graph
         self._bot = bot
         self._bcs = bcs
         self._discover = discover
         self._bcs_identity = bcs_identity
+        self._bot_public = bot_public
+        self._api_base_url = api_base_url
+        self._bg_tasks: set[asyncio.Task] = set()
         self._locks: dict[str, threading.RLock] = {}
         self._locks_guard = threading.RLock()
         from agentclaw.community.core.task.task_runner.callback_adapter import CallbackAdapter
@@ -72,6 +95,19 @@ class ExecutionEngine:
         self._planner = self._build_planner()
         self._dispatcher = self._build_dispatcher()
         self._runner = self._build_runner()
+
+    # ===== 任务类型分流 seams(委托 self._runner;TaskService.execute 调用)=====
+    async def trigger_single_bot_workflow(self, *, task_id: str, bot_id: str,
+                                          message: str) -> BotSendResult:
+        """Single-bot workflow trigger; returns the conversation session_id."""
+        return await self._runner.trigger_workflow(
+            bot_id=bot_id, message=message, metadata={"biz_task_id": task_id})
+
+    async def start_coop_group(self, gf: GroupFormation) -> CoopGroupStart:
+        """Create the BCN coop group and fetch its initial session_id by default."""
+        group_id = await self._runner.form_coop_group(gf)
+        session_id = await self._runner.get_group_session(group_id)
+        return CoopGroupStart(group_id=group_id, session_id=session_id)
 
     # ===== protected 工厂方法(测试子类可覆写注入 stub 策略/投递;引擎自带默认接真实端口)=====
     def _build_executor(self):
@@ -89,6 +125,7 @@ class ExecutionEngine:
         exe = TaskExecutor(
             bot=self._bot, bcs=self._bcs, formatter=PromptFormatterImpl(),
             context=self, sink=self, poller=poller, identity_resolver=self._bcs_identity,
+            graph=self._graph, bot_public=self._bot_public, api_base_url=self._api_base_url,
         )
         import threading as _t
         self._poller_thread = _t.Thread(target=poller.run_poll_loop, daemon=True, name="task-exec-poller")
@@ -114,7 +151,8 @@ class ExecutionEngine:
         )
         pool = [DirectDispatchStrategy()]
         if self._bot is not None and self._discover is not None:
-            pool.append(SearchBasedDispatchStrategy(self._bot, self._discover))
+            pool.append(SearchBasedDispatchStrategy(
+                self._bot, self._discover, bcs=self._bcs))
         else:
             pool.append(SearchBasedDispatchStrategy())
         return TaskDispatcher(self._graph, pool=pool)
@@ -224,7 +262,7 @@ class ExecutionEngine:
     def _mark_planning(self, task_id: str, node_id: str) -> None:
         """节点进入规划委托态:PENDING→PLANNING(幂等,已 PLANNING 不重翻)。
         规划是编排态(Status.PLANNING),不是执行模式:run_mode/assignee 保持 None。
-        规划者(owner bot)隐式来自 graph.extend_props.source_channel_id,不落节点 run_info。
+        规划者(owner bot)隐式来自 graph.extend_props.owner_bot_id,不落节点 run_info。
         叶子派发执行时由 _prepare_into 覆写为 single_bot/coop_group/bbs+worker。"""
         graph = self._graph.query_task_dashboard(task_id)
         node = next((n for n in graph.tasks if n.node_id == node_id), None)
@@ -372,7 +410,9 @@ class ExecutionEngine:
         不再有 ``root_verified``:根目标是否满足由框架经 owner 复核(``_on_pass_collect``→``plan(root)``→
         ``has_gap=False``→``_maybe_finish_graph``)判定,**不由接力 bot 自报**。scoped 节点 PASS→DONE 走正常
         PASS 传播(parent=root;守卫对 ``run_mode=="bbs"`` 触发的 root 复核放行,见 §10.5 seam 对应处);
-        FAIL+gaps→FAILED 走 FAIL 传播。最后清根 ``bbs_owner`` 释放 claim。
+        FAIL+gaps→**删 scoped 节点**(丢弃本次接力尝试:不翻 FAILED、不 ``output_patch`` fold);
+        图回到 root ``PLANNING``+``bbs_mode`` 可恢复态等下段重新 claim/attach,**不进 FAIL 传播**。
+        最后清根 ``bbs_owner`` 释放 claim。
 
         持有者校验:``root.run_info.extend_props['bbs_owner']`` 须 == ``patch.assignee``(调用方
         ``report_bbs_result`` 设 ``patch.assignee=bot_id``);非持有者 → ``TaskStateError``(在校验抛,
@@ -389,16 +429,34 @@ class ExecutionEngine:
             root = next((n for n in graph.tasks if n.node_id == patch.task_id), None)
             if root is None or root.run_info.extend_props.get("bbs_owner") != patch.assignee:
                 raise TaskStateError(f"on_bbs_report: 非claim持有者 task={patch.task_id}")
+            # FAIL:丢弃本次接力尝试——删 scoped 节点(不翻 FAILED、不 fold output_patch/gaps 作 checkpoint);
+            # 图回 root PLANNING+bbs_mode 可恢复态等下段重 claim/attach,不进 PASS/FAIL 传播。
+            # PASS / fold-only(无 acceptance):scoped 终态翻转(PASS→DONE)或 fold(output_patch/exec_error)走原路径。
+            is_fail = (patch.acceptance_result is not None
+                       and patch.acceptance_result.verdict == AcceptanceVerdict.FAIL)
             try:
-                # scoped 节点终态翻转(acceptance→DONE/FAILED)或 fold(output_patch/exec_error)
-                result = self._graph.update_task_node_info(patch)
+                if is_fail:
+                    if not patch.acceptance_result.gaps:
+                        raise TaskStateError("on_bbs_report: FAIL 验收强制要求 gaps")
+                    prev = next((n for n in graph.tasks if n.node_id == patch.node_id), None)
+                    self._graph.delete_task_node(patch.task_id, patch.node_id)
+                    result = NodeOpResult(
+                        task_id=patch.task_id, node_id=patch.node_id, success=True,
+                        prev_status=(prev.status if prev else None), new_status=None)
+                    logger.info("[on_bbs_report] task=%s FAIL → 删 scoped 节点 %s(gaps=%s),claim 释放",
+                                patch.task_id, patch.node_id, patch.acceptance_result.gaps)
+                else:
+                    # scoped 节点终态翻转(acceptance→DONE)或 fold(output_patch/exec_error)
+                    result = self._graph.update_task_node_info(patch)
             finally:
-                # 无论翻态是否抛,都清根 bbs_owner 释放 claim
+                # 无论 FAIL 删节点 / PASS 翻态是否抛,都清根 bbs_owner 释放 claim
                 self._graph.update_task_node_info(
                     TaskNodePatch(task_id=patch.task_id, node_id=patch.task_id,
                                   extend_props_patch={"bbs_owner": None}))
-            # 收口交 engine 既有路径:scoped DONE→PASS 传播(parent=root,owner 复核根 gap);FAILED→FAIL 传播
-            if self._is_graph_terminal(patch.task_id):
+            # 收口:FAIL 已删节点(无 DONE/FAILED 可传播);PASS → scoped DONE→owner 复核根 gap 收口
+            if is_fail:
+                pass  # 图回可恢复态,等下段重 claim;无 PASS/FAIL 传播
+            elif self._is_graph_terminal(patch.task_id):
                 logger.info("[on_bbs_report] task=%s 图已终态,不再驱动", patch.task_id)
             else:
                 node = next((n for n in self._graph.query_task_dashboard(patch.task_id).tasks
@@ -626,6 +684,28 @@ class ExecutionEngine:
         # 传 hung_reason:_maybe_propagate_hung 依据它判"可恢复 vs 硬死锁"(spec §10.5)
         self._maybe_propagate_hung(task_id, node_id, hung_reason)
 
+    def _on_bg_done(self, bg: "asyncio.Task") -> None:
+        """后台 run_bbs 完成:脱离跟踪集 + 异常可见(记 log,不抛,不阻塞 on_*)。"""
+        self._bg_tasks.discard(bg)
+        if bg.cancelled():
+            return
+        exc = bg.exception()
+        if exc is not None:
+            logger.error("[engine] run_bbs bg task 异常: %s", exc, exc_info=exc)
+
+    def _schedule_bbs_notify(self, task_id: str, execution_graph) -> None:
+        """可恢复拦截点(spec §5):fire-and-forget ``runner.run_bbs(execution_graph)``。
+
+        命中根 BBS 可恢复态(miss_depth_exhausted + bbs_mode + 未 claim)时调用——主动 bid→select→claim→
+        dispatch 给 dream-mode bot。不持锁、不阻塞 ``on_*``/``_maybe_propagate_hung`` 汇报路径:``asyncio.create_task``
+        调度后台协程,异常经 ``_on_bg_done`` 记 log。端口不全(无 runner/bot/bcs,如单测 stub)→ 静默跳过。"""
+        if self._runner is None or self._bot is None or self._bcs is None:
+            return
+        bg = asyncio.create_task(self._runner.run_bbs(execution_graph))
+        self._bg_tasks.add(bg)
+        bg.add_done_callback(self._on_bg_done)
+        logger.info("[engine] task=%s 升BBS可恢复态→主动通知 dream-mode bot", task_id)
+
     def _maybe_propagate_hung(self, task_id: str, node_id: str, hung_reason: str = "") -> None:
         """自 node 往上:若父的子全终态且含 HUNG → 父 HUNG(不计额外 loop_round,纯冒泡)→ 继续上行。
         到根 → 图终态收口(HUNG)。若图已 HUNG(loop_exhausted 等已收口)→ 不覆盖 hung_reason。
@@ -654,6 +734,7 @@ class ExecutionEngine:
                             and not g.extend_props.get("bbs_owner")):
                         logger.info("[hung-propagate] task=%s 根冒泡被 BBS 可恢复态拦截(reason=%s),保持根原态",
                                     task_id, hung_reason)
+                        self._schedule_bbs_notify(task_id, g)
                         return
                     self._graph.update_task_graph_info(
                         task_id, TaskGraphPatch(status=Status.HUNG, extend_props_patch={"hung_reason": "root_stuck"}))
@@ -672,6 +753,7 @@ class ExecutionEngine:
                         and not _g_now.extend_props.get("bbs_owner")):
                     logger.info("[hung-propagate] task=%s 根可恢复态拦截(miss_depth_exhausted),根保持 PLANNING",
                                 task_id)
+                    self._schedule_bbs_notify(task_id, _g_now)
                     return
                 self._graph.update_task_node_info(
                     TaskNodePatch(task_id=task_id, node_id=parent.node_id, status=Status.HUNG,
@@ -757,11 +839,30 @@ class ExecutionEngine:
                 run_nodes.extend(payload[0])
             elif kind == "group":
                 node, gf = payload
-                logger.info("[drain] task=%s node=%s 拉群(collab=%s)", task_id, node.node_id, gf.collab_mode)
+                logger.info(
+                    "[drain] task=%s node=%s 拉群开始 collab=%s bot_ids=%s members=%s",
+                    task_id,
+                    node.node_id,
+                    gf.collab_mode,
+                    list(getattr(gf, "bot_ids", []) or []),
+                    list(getattr(gf, "members_info", []) or []),
+                )
                 try:
                     gid = await self._runner.form_coop_group(gf)
+                    logger.info(
+                        "[drain] task=%s node=%s 拉群成功 group_id=%s collab=%s",
+                        task_id, node.node_id, gid, gf.collab_mode,
+                    )
                 except Exception as ex:  # noqa: BLE001  拉群异常→清 dispatching 留 PENDING 交 harness
-                    logger.warning("[drain] task=%s node=%s 拉群异常:%s→留 PENDING 待 harness", task_id, node.node_id, ex)
+                    logger.exception(
+                        "[drain] task=%s node=%s 拉群失败 exc_type=%s exc=%s collab=%s bot_ids=%s",
+                        task_id,
+                        node.node_id,
+                        type(ex).__name__,
+                        ex,
+                        gf.collab_mode,
+                        list(getattr(gf, "bot_ids", []) or []),
+                    )
                     with self._lock_for(task_id):
                         self._graph.update_task_node_info(
                             TaskNodePatch(task_id=task_id, node_id=node.node_id, run_mode="", assignee="",

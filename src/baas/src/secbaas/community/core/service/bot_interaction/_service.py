@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 
 from secbaas.community.api.bot_interaction import (
@@ -10,7 +12,9 @@ from secbaas.community.api.bot_interaction import (
     InteractionConflictError,
     InteractionDispatch,
     InteractionNotFoundError,
+    InteractionRequestedResult,
     InteractionResolution,
+    InteractionResolvedResult,
     InteractionResolveResult,
     InteractionServiceError,
 )
@@ -27,7 +31,9 @@ __all__ = [
     "BotInteractionService",
     "DefaultBotInteractionService",
     "InteractionDispatch",
+    "InteractionRequestedResult",
     "InteractionResolveResult",
+    "InteractionResolvedResult",
     "InteractionServiceError",
 ]
 
@@ -51,8 +57,13 @@ class DefaultBotInteractionService(BotInteractionService):
         envelope: JsonObject,
         allowed_decisions: tuple[str, ...],
         expires_at_ms: int | None,
-    ) -> bool:
+    ) -> InteractionRequestedResult:
+        baas_interaction_id = self._build_baas_interaction_id(
+            session_key=session_key,
+            interaction_id=interaction_id,
+        )
         result = self._repo.create_requested(
+            baas_interaction_id=baas_interaction_id,
             session_key=session_key,
             interaction_id=interaction_id,
             payload=BotRunInteractionPayload(
@@ -61,18 +72,22 @@ class DefaultBotInteractionService(BotInteractionService):
                 expires_at_ms=expires_at_ms,
             ),
         )
-        return result.created
+        return InteractionRequestedResult(
+            baas_interaction_id=result.record.baas_interaction_id,
+            created=result.created,
+        )
 
     def resolve(
         self,
         *,
-        session_key: str,
-        interaction_id: str,
+        baas_interaction_id: str,
         resolution: InteractionResolution,
         request_envelope: JsonObject,
         idempotency_key: str | None = None,
     ) -> InteractionResolveResult:
-        record = self._repo.get(session_key=session_key, interaction_id=interaction_id)
+        record = self._repo.get_by_baas_interaction_id(
+            baas_interaction_id=baas_interaction_id
+        )
         if record is None:
             raise InteractionNotFoundError("interaction not found")
         resolution_payload = resolution.to_dict()
@@ -82,10 +97,19 @@ class DefaultBotInteractionService(BotInteractionService):
                 idempotency_key=idempotency_key,
                 resolution_payload=resolution_payload,
             ):
-                return InteractionResolveResult(interaction_id=interaction_id)
+                return InteractionResolveResult(
+                    interaction_id=record.baas_interaction_id
+                )
             raise InteractionConflictError(f"interaction state is {record.state}")
         if self._is_expired(record.payload.expires_at_ms):
-            self.mark_expired(session_key=session_key, interaction_id=interaction_id)
+            self._repo.transition_by_baas_interaction_id(
+                baas_interaction_id=baas_interaction_id,
+                from_states=frozenset({"requested", "queued"}),
+                to_state="expired",
+                patch=BotRunInteractionPayloadPatch(
+                    expire_reason="interaction deadline elapsed"
+                ),
+            )
             raise InteractionConflictError("interaction expired")
         allowed_decisions = record.payload.allowed_decisions
         if (
@@ -96,9 +120,8 @@ class DefaultBotInteractionService(BotInteractionService):
                 "decision is not allowed by interaction options"
             )
 
-        updated = self._repo.transition(
-            session_key=session_key,
-            interaction_id=interaction_id,
+        updated = self._repo.transition_by_baas_interaction_id(
+            baas_interaction_id=baas_interaction_id,
             from_states=frozenset({"requested"}),
             to_state="queued",
             patch=BotRunInteractionPayloadPatch(
@@ -109,18 +132,19 @@ class DefaultBotInteractionService(BotInteractionService):
             ),
         )
         if updated is None:
-            latest = self._repo.get(
-                session_key=session_key,
-                interaction_id=interaction_id,
+            latest = self._repo.get_by_baas_interaction_id(
+                baas_interaction_id=baas_interaction_id,
             )
             if latest is not None and self._is_idempotent_replay(
                 latest.payload,
                 idempotency_key=idempotency_key,
                 resolution_payload=resolution_payload,
             ):
-                return InteractionResolveResult(interaction_id=interaction_id)
+                return InteractionResolveResult(
+                    interaction_id=latest.baas_interaction_id
+                )
             raise InteractionConflictError("interaction already resolved or queued")
-        return InteractionResolveResult(interaction_id=interaction_id)
+        return InteractionResolveResult(interaction_id=updated.baas_interaction_id)
 
     def claim_for_dispatch(
         self, *, session_key: str, interaction_id: str
@@ -202,16 +226,28 @@ class DefaultBotInteractionService(BotInteractionService):
         session_key: str,
         interaction_id: str,
         envelope: JsonObject,
-    ) -> bool:
-        return (
-            self._repo.transition(
-                session_key=session_key,
-                interaction_id=interaction_id,
-                from_states=frozenset({"requested", "queued", "dispatching"}),
-                to_state="resolved",
-                patch=BotRunInteractionPayloadPatch(resolved=envelope),
+    ) -> InteractionResolvedResult | None:
+        updated = self._repo.transition(
+            session_key=session_key,
+            interaction_id=interaction_id,
+            from_states=frozenset({"requested", "queued", "dispatching"}),
+            to_state="resolved",
+            patch=BotRunInteractionPayloadPatch(resolved=envelope),
+        )
+        if updated is not None:
+            return InteractionResolvedResult(
+                baas_interaction_id=updated.baas_interaction_id,
+                applied=True,
             )
-            is not None
+        existing = self._repo.get(
+            session_key=session_key,
+            interaction_id=interaction_id,
+        )
+        if existing is None:
+            return None
+        return InteractionResolvedResult(
+            baas_interaction_id=existing.baas_interaction_id,
+            applied=False,
         )
 
     def mark_expired(self, *, session_key: str, interaction_id: str) -> bool:
@@ -258,3 +294,13 @@ class DefaultBotInteractionService(BotInteractionService):
     @staticmethod
     def _is_expired(expires_at_ms: int | None) -> bool:
         return expires_at_ms is not None and int(time.time() * 1000) > expires_at_ms
+
+    @staticmethod
+    def _build_baas_interaction_id(*, session_key: str, interaction_id: str) -> str:
+        source = json.dumps(
+            [session_key, interaction_id],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        suffix = hashlib.sha256(source).hexdigest()[:32]
+        return f"BAAS-INTERACTION-{suffix}"

@@ -124,7 +124,8 @@ class DataInitService:
         entity_id: str,
         entity_type: str,
         force: bool = False,
-    ) -> dict:
+        iam_token: str | None = None,
+    ) -> dict[str, str]:
         """触发 Bot 数据初始化流程。
 
         根据 Bot 当前状态决定立即执行还是标记 pending_init：
@@ -139,6 +140,7 @@ class DataInitService:
             entity_id: 关联实体 ID
             entity_type: 关联实体类型（staff/proj/team）
             force: 是否强制重新初始化（忽略 completed 状态）
+            iam_token: HTTP 边界传入的临时 IAM 凭证；仅在本次初始化需要时暂存
 
         Returns:
             dict with keys: status, message
@@ -190,11 +192,15 @@ class DataInitService:
                 )
                 return {"status": "skipped", "message": "初始化正在进行中"}
 
-            # Bot 已就绪，设为 in_progress 并记录开始时间，直接 await 执行
-            bot_service.update_bot_ext(bot_id, owner_id, {
+            # Bot 已就绪。状态与临时凭证在同一次持久化调用中写入，避免
+            # 第二次并发幂等检查判定跳过后仍遗留凭证。
+            active_update = {
                 "data_init_status": "in_progress",
                 "data_init_started_at": datetime.now(timezone.utc).isoformat(),
-            })
+            }
+            if iam_token:
+                active_update["iam_token"] = iam_token
+            bot_service.update_bot_ext(bot_id, owner_id, active_update)
             logger.info(
                 f"bot_id={bot_id} trigger_init branch_active awaiting_execution"
             )
@@ -208,13 +214,40 @@ class DataInitService:
             else:
                 return {"status": "failed", "message": "初始化失败，所有重试已耗尽"}
         else:
-            # Bot 还没就绪，标记 pending_init，等设备心跳回调触发
-            bot_service.update_bot_ext(bot_id, owner_id, {"data_init_status": "pending_init"})
+            # Bot 还没就绪，标记 pending_init，等设备心跳回调触发。凭证与
+            # 状态同写，确保设备回调可用且不会先留下孤立 secret。
+            pending_update = {"data_init_status": "pending_init"}
+            if iam_token:
+                pending_update["iam_token"] = iam_token
+            bot_service.update_bot_ext(bot_id, owner_id, pending_update)
             logger.info(
                 f"bot_id={bot_id} trigger_init branch_pending "
                 f"bot_status={bot_status} marked=pending_init waiting=device_callback"
             )
             return {"status": "pending_init", "message": "等待 Bot 就绪后自动执行"}
+
+
+    def get_status(self, bot_id: str, owner_id: str) -> dict[str, str | None]:
+        """Return the public-safe data-init state without exposing ``bot.ext``."""
+        bot = self._bot_service_provider().get_bot(bot_id, owner_id)
+        ext = bot.get("ext") or {}
+        if isinstance(ext, str):
+            try:
+                ext = json.loads(ext)
+            except (json.JSONDecodeError, TypeError):
+                ext = {}
+        if not isinstance(ext, dict):
+            ext = {}
+
+        raw_status = ext.get("data_init_status")
+        known = {"pending_init", "in_progress", "completed", "failed"}
+        status = str(raw_status) if raw_status in known else "not_started"
+        started_at = ext.get("data_init_started_at")
+        return {
+            "bot_id": bot_id,
+            "status": status,
+            "started_at": str(started_at) if started_at else None,
+        }
 
     async def _async_execute_with_retry(
         self,
@@ -512,7 +545,7 @@ class DataInitService:
         bot = bot_service.get_bot(bot_id, owner_id)
         link_resources = self._collect_link_resources(bot_id, owner_id)
 
-        # 从 bot.ext 中读取存储的 iam_token（由 router 层在触发 data_init 前写入）
+        # 从 bot.ext 中读取临时 iam_token（由 trigger_init 在确认本次需要执行后写入）
         ext = bot.get("ext") or {}
         if isinstance(ext, str):
             try:

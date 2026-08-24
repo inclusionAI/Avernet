@@ -1,6 +1,6 @@
 from injector import Injector, Module, provider, singleton
 
-from agentclaw.community.adapters.http.openapi_v1.task.auth import (
+from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator, NoopCallbackAuthenticator,
 )
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
@@ -44,3 +44,16 @@ def test_task_module_binds_callback_singletons():
     assert inj.get(TaskServiceProtocol) is inj.get(TaskServiceProtocol)
     assert inj.get(CallbackCorrelationRegistry) is inj.get(CallbackCorrelationRegistry)
     assert inj.get(CallbackAuthenticator) is inj.get(CallbackAuthenticator)
+
+
+def test_resolve_ports_outside_singlebox_returns_the_two_port_contract(monkeypatch):
+    monkeypatch.setenv("DEPLOY_PROFILE", "community")
+
+    assert TaskModule._resolve_ports() == (None, None)
+
+
+def test_resolve_api_base_url_uses_neutral_config_default(monkeypatch):
+    monkeypatch.setenv("DEPLOY_PROFILE", "community")
+    monkeypatch.delenv("TASK_API_BASE_URL", raising=False)
+
+    assert TaskModule._resolve_api_base_url() == "http://localhost:8888"

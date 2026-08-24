@@ -245,16 +245,32 @@ class FileTransferPollerConfigSchema(ConfigSchema):
 
 
 class RenewalSchedulerConfigSchema(ConfigSchema):
-    """Deadline renewal scheduler engine selection.
+    """Deadline renewal scheduler configuration (D-12').
 
-    Controls whether the legacy DeviceTtlTimerTask or the new
-    DeadlineRenewalScheduler handles ARCA TTL renewal.
+    ``engine`` selects the ARCA TTL renewal implementation:
 
     - "legacy": DeviceTtlTimerTask runs, DeadlineRenewalScheduler cron is off.
     - "deadline": DeadlineRenewalScheduler runs, DeviceTtlTimerTask cron is off.
+
+    The remaining fields configure the DeadlineRenewalScheduler; every
+    default matches ``DeadlineRenewalSchedulerConfig`` byte-for-byte so
+    legacy deployments see zero behavior change (D-03': this schema is
+    permanent). ``enabled`` is derived at assembly time
+    (``engine == "deadline"``) and ``env`` is injected at runtime — neither
+    lives in this schema.
     """
 
     config_section = "renewal_scheduler"
+    lock_name: str = Field(default="deadline_renewal_scheduler_lock")
+    lock_expire_seconds: int = Field(default=1800, ge=1)
+    cron_interval_seconds: int = Field(default=1800, ge=1)
+    batch_size: int = Field(default=500, ge=1)
+    max_concurrency: int = Field(default=20, ge=1)
+    renew_threshold_hours: int = Field(default=12, ge=1)
+    retry_delay_minutes: int = Field(default=2, ge=1)
+    max_fail_count: int = Field(default=10, ge=1)
+    ttl_safety_margin_minutes: int = Field(default=1, ge=1)
+    anti_join_verify_interval_cycles: int = Field(default=48, ge=1)
     engine: str = Field(default="legacy", pattern=r"^(legacy|deadline)$")
 
 

@@ -82,6 +82,13 @@ fn event_timestamp(milliseconds: u64) -> Result<String, CollaborationRuntimeErro
     })
 }
 
+fn predecessor_node_ids(compiled: &CompiledStateMachine, node_id: &str) -> Vec<String> {
+    let mut predecessor_node_ids = compiled.upstreams.get(node_id).cloned().unwrap_or_default();
+    predecessor_node_ids.sort();
+    predecessor_node_ids.dedup();
+    predecessor_node_ids
+}
+
 fn content_value(value: Value) -> Result<Value, CollaborationRuntimeError> {
     let size = serde_json::to_vec(&value)
         .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
@@ -534,6 +541,10 @@ impl CollaborationRuntime {
             ("node_id".to_string(), serde_json::json!(node_id)),
             ("attempt".to_string(), serde_json::json!(node_run.attempt)),
             (
+                "predecessor_node_ids".to_string(),
+                serde_json::json!(predecessor_node_ids(compiled, node_id)),
+            ),
+            (
                 "started_at".to_string(),
                 serde_json::json!(event_timestamp(now)?),
             ),
@@ -720,6 +731,10 @@ impl CollaborationRuntime {
                 ("node_id".to_string(), serde_json::json!(node_id)),
                 ("attempt".to_string(), serde_json::json!(attempt)),
                 (
+                    "predecessor_node_ids".to_string(),
+                    serde_json::json!(predecessor_node_ids(compiled, node_id)),
+                ),
+                (
                     "assignee_id".to_string(),
                     serde_json::json!(assignee_bot_id.clone()),
                 ),
@@ -813,6 +828,29 @@ impl CollaborationRuntime {
             delivery_request_id = %delivery_request_id,
             "state_machine: node dispatch started"
         );
+        let target = if let Some(registry) = self.bot_registry.as_ref() {
+            registry.resolve_delivery_target(&assignee_bot_id).await?
+        } else {
+            BotDeliveryTarget::WebSocket {
+                bot_id: assignee_bot_id.clone(),
+            }
+        };
+        let provider_tags = if target.is_http_provider() {
+            self.sessions
+                .get(&run.session_id)
+                .await
+                .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
+                .and_then(|session| {
+                    session
+                        .participants
+                        .into_iter()
+                        .find(|participant| participant.bot_uuid == assignee_bot_id)
+                })
+                .map(|participant| participant.tags)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let mut frame = build_chat_send_frame(
             &delivery_request_id,
             &group.id,
@@ -822,6 +860,7 @@ impl CollaborationRuntime {
             BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
             &[],
             &assignee_bot_id,
+            &provider_tags,
             &None,
             &None,
             false,
@@ -837,13 +876,6 @@ impl CollaborationRuntime {
                 }
             }
         }
-        let target = if let Some(registry) = self.bot_registry.as_ref() {
-            registry.resolve_delivery_target(&assignee_bot_id).await?
-        } else {
-            BotDeliveryTarget::WebSocket {
-                bot_id: assignee_bot_id.clone(),
-            }
-        };
         let delivery_result = match self
             .bot_delivery
             .deliver(BotDeliveryCommand {

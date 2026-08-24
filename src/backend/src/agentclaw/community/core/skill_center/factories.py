@@ -19,24 +19,30 @@ from typing import Any, Callable, Mapping, Optional, TYPE_CHECKING
 
 from injector import inject
 
-from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.mcp.services.config_service import MCPConfigService
-from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
-from agentclaw.community.core.skill_center.services.git_sync import GitSyncService
-from agentclaw.community.core.repository.protocols.skill_center import (
-    SkillSetRepository,
-)
-from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.repository.protocols.skill_center import (
-    SkillCategoryRepository,
-)
-from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
-from agentclaw.community.core.skill_center.path_resolution import (
-    build_pool_local_path_adapter,
-)
+from agentclaw.community.core.bot_management.engines.registry import get_default_skill_set_selection_policy
+from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
 from agentclaw.community.core.config_compose.teclaw_paths import (
     to_local_skill_engine_path,
 )
+from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
+from agentclaw.community.core.mcp.services.config_service import MCPConfigService
+from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillCategoryRepository,
+)
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillSetRepository,
+)
+from agentclaw.community.core.repository.protocols.skill_installation import (
+    SkillInstallationRepositoryProtocol,
+)
+from agentclaw.community.core.skill_center.path_resolution import (
+    build_pool_local_path_adapter,
+)
+from agentclaw.community.core.skill_center.services.git_sync import GitSyncService
+from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
 from agentclaw.community.core.skill_center.services.skill_parameter_service import (
     SkillParameterService,
 )
@@ -45,9 +51,6 @@ from agentclaw.community.core.skill_center.services.skill_set_service import (
     SkillSetService,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
-from agentclaw.community.core.bot_management.engines.registry import get_default_skill_set_selection_policy
-from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 
@@ -58,17 +61,7 @@ if TYPE_CHECKING:
     # type hints — the string annotations below are never resolved at
     # runtime, making the TYPE_CHECKING import sufficient and the
     # core->di boundary intact.
-    from agentclaw.community.core.devices.services.device_context_resolver import (
-        DeviceContextResolver,
-    )
-    from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
-    from agentclaw.community.di.modules.skill_center_module import (
-        DeviceFilesystemDispatcher,
-    )
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import (
-        DeviceSyncDispatcher,
-    )
-
+    pass
 
 logger = get_logger()
 
@@ -108,6 +101,18 @@ class LocalSkillPackageStorage:
     async def exists(self) -> bool:
         """Whether this storage currently has an authoritative package."""
         return await self._filesystem.exists(self._device_directory)
+
+    async def read_file(self, relative_path: str) -> bytes | None:
+        """Read one validated package-relative file without exposing its locator."""
+        if (
+            not relative_path
+            or relative_path.startswith("/")
+            or ".." in relative_path.split("/")
+        ):
+            raise ValueError("Local Skill package path is invalid")
+        return await self._filesystem.read_file(
+            f"{self._device_directory}/{relative_path}"
+        )
 
     async def verify(self) -> bool:
         """Read and validate every package file without changing storage."""
@@ -482,6 +487,7 @@ class SkillSetServiceFactory:
             tuple[str, str, str] | None,
         ],
         ext_info_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
+        installations: SkillInstallationRepositoryProtocol | None = None,
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
@@ -496,6 +502,7 @@ class SkillSetServiceFactory:
         self._path_factory = path_factory
         self._pool_layout_paths = pool_layout_paths
         self._ext_info_provider = ext_info_provider
+        self._installations = installations
 
     def create(
         self,
@@ -615,6 +622,7 @@ class SkillSetServiceFactory:
             default_skill_set_selection_policy=get_default_skill_set_selection_policy(),
             path_factory=self._path_factory,
             pool_layout_paths=self._pool_layout_paths,
+            installations=self._installations,
         )
 
 

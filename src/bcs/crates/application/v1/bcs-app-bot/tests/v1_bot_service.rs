@@ -66,6 +66,8 @@ fn v1_bot_commands_expose_the_approved_control_plane_surface() {
                 skills: None,
                 scopes: None,
             }),
+            task_claim_mode: None,
+            task_dream_mode: None,
         },
     };
     let _ = ListMyBots {
@@ -290,8 +292,13 @@ async fn ownership_denial_precedes_provider_hydration() {
                 scopes: Vec::new(),
             },
             agent_code: None,
+            task_claim_mode: false,
+            task_dream_mode: false,
             created_at: 1,
             updated_at: 1,
+            user_visibility: Default::default(),
+            friend_ext: Default::default(),
+            friend_check_in_strategy: Default::default(),
         },
     });
     let service = BotServiceImpl::new(
@@ -1031,6 +1038,20 @@ async fn update_requires_created_by_and_rejects_descriptor_for_human() {
         .expect_err("human descriptor update");
     assert_eq!(error.code(), "invalid_bot_kind");
 
+    let error = fixture
+        .service
+        .update(UpdateBot {
+            caller: human_caller("staff-1"),
+            bot_id: "human_staff-1".to_string(),
+            patch: BotPatch {
+                task_claim_mode: Some(true),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect_err("human task-mode update");
+    assert_eq!(error.code(), "invalid_bot_kind");
+
     let updated = fixture
         .service
         .update(UpdateBot {
@@ -1045,6 +1066,8 @@ async fn update_requires_created_by_and_rejects_descriptor_for_human() {
                     scopes: Some(vec!["new-scope".to_string()]),
                     ..Default::default()
                 }),
+                task_claim_mode: None,
+                task_dream_mode: None,
             },
         })
         .await

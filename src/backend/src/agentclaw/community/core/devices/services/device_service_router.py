@@ -977,3 +977,18 @@ class DeviceServiceRouter(DeviceService):
             device_uuid=device_uuid,
             operator=operator,
         )
+
+    @override
+    def restart_device_by_bot(
+        self,
+        *,
+        bot_id: str,
+        device_uuid: str,
+        operator: OperatorContext,
+    ) -> dict[str, Any]:
+        """指定 Bot 的运行实例重启。委托 DeviceInstanceService。"""
+        return self._instance_service().restart_device_by_bot(
+            bot_id=bot_id,
+            device_uuid=device_uuid,
+            operator=operator,
+        )

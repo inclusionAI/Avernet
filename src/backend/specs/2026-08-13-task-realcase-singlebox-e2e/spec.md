@@ -42,9 +42,9 @@
   - **plan/dispatch 同步收 result**（`await apply()` 当返回值直接拿，引擎锁内已 await，**不需异步回投**）。
   - **execute/verify 经 `report_result` 异步回投**（投递给 bot → bot 凭已装 skill 执行完上报 → `POST /openapi/v1/collaboration/tasks/callback/report` → `on_report` 翻态推进）。
 - **skill 宿主划分**（bot 侧黑盒，框架不感知 skill 存在，只投 payload 给指定 bot）：
-  - `planning` + `search`（验收决策类 skill）→ **owner bot**（`source_channel_id`）。
+  - `planning` + `search`（验收决策类 skill）→ **owner bot**（`owner_bot_id`）。
   - `execute`（执行操作；**叶子节点的自验收 verdict 折叠进 execute 回投**）→ **worker bot**（`assignee`）。
-  - `verify`/验收（**聚合结构子 output + goal/acceptances，含根终验**）→ **owner bot**（`source_channel_id`）——对齐框架 2026-08-09 §聚合收敛/§5（owner/master bot 经 source_channel 回投 verdict；engine 不主动验，无 `OwnerBotVerifyPort`）。
+  - `verify`/验收（**聚合结构子 output + goal/acceptances，含根终验**）→ **owner bot**（`owner_bot_id`）——对齐框架 2026-08-09 §聚合收敛/§5（owner/master bot 经 source_channel 回投 verdict；engine 不主动验，无 `OwnerBotVerifyPort`）。
 - 所有"与 bot 通信"经 `OpenApiBotPort`（Protocol，`integration/ports.py`）隔离；plan/dispatch 用 `send_and_wait_async` 同步取结果，execute 用 `send_message`+旁路 poller 回投。
 
 ### G2. 后端接线（DI + HTTP，补齐运行时可达性缺口）
@@ -138,5 +138,5 @@
 - **R5 singlebox 启停开销**：重型、慢；需 gated + 可单独跑 + 复用 coverage harness。
 - **R6 worker bot catalog 规模**：案例多角色 bot；需创建多少 worker bot、搜推 skill 如何映射 node→bot。需 plan 定。
 - **OQ-1**：skill-backed 策略/投递激活方式——按 **能力** env `TASK_ENGINE=skill` 在 DI 装配时注入真实实现到 `ExecutionEngine`（非环境 flag、非引擎子类）；`OpenApiBotPort` 经 `ApiKeyProvider` 配置注入（local→localhost / prod→prod URL）。singlebox 起停属测试 harness。
-- **OQ-2（已定，方案 A）**：验收 skill 宿主 = **owner bot**（`source_channel_id`），对齐框架 §聚合收敛/§5；叶子自验收折叠进 execute 回投（worker）。
+- **OQ-2（已定，方案 A）**：验收 skill 宿主 = **owner bot**（`owner_bot_id`），对齐框架 §聚合收敛/§5；叶子自验收折叠进 execute 回投（worker）。
 - **OQ-3（已定）**：coop_group 拉群走真实 BCS（singlebox 起栈含 BCS）；`form_coop_group` 对接 BCS `POST /groups`，`group_strategy` 三态对齐 `CollaborationRuntimeDefinition::{Chat,ManagerWorker,StateMachine}`。

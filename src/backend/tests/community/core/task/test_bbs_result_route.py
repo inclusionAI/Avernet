@@ -1,4 +1,4 @@
-"""BBS result HTTP 路由契约测试(FR-PICK-05):POST /openapi/v1/collaboration/tasks/bbs/result。
+"""BBS result HTTP 路由契约测试(FR-PICK-05):POST /api/v1/collaboration/tasks/bbs/result。
 
 独立 TestClient + 小型 test injector(TaskModule + stub discover),不拉起 singlebox 全栈,
 不依赖 SINGLEBOX_TASK_E2E=1。验证:
@@ -16,9 +16,12 @@ from fastapi_injector import attach_injector
 from fastapi.testclient import TestClient
 from injector import Injector, Module, provider, singleton
 
+from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.task.router import router as task_internal_router
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.core.repository.protocols.task import TaskInfoRepositoryProtocol
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
@@ -29,6 +32,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskInfo,
     TaskSpec,
 )
+from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
 
 
@@ -53,6 +57,11 @@ class _StubDiscoverModule(Module):
 
         return _B()  # type: ignore[return-value]
 
+    @provider
+    def task_info_repo(self) -> TaskInfoRepositoryProtocol:
+        # 路由契约测不验持久化(execute 未走);facade 构造需 protocol 绑定 → None 跳过 persist。
+        return None  # type: ignore[return-value]
+
 
 @pytest.fixture
 def client():
@@ -62,6 +71,8 @@ def client():
     injector = Injector([TaskModule(), _StubDiscoverModule()])
     app = FastAPI()
     app.include_router(task_router)
+    app.include_router(task_internal_router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "bbs-test-user"}
     attach_injector(app, injector)
     return TestClient(app), injector
 
@@ -80,8 +91,8 @@ def _bbs_task_planning(injector: Injector, task_id: str) -> None:
             context=Context(background="", extend_props={}),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
-        source_channel_type="bot",
-        source_channel_id="b1",
+        source_type="bot",
+        owner_bot_id="b1",
         execution_config={},
     ))
     graph_svc.update_task_graph_info(task_id, TaskGraphPatch(extend_props_patch={"bbs_mode": True}))
@@ -124,9 +135,9 @@ def bbs_task_with_claimed_node(client):
     c, inj = client
     task_id = f"bbs-r8-{uuid.uuid4().hex[:6]}"
     _bbs_task_planning(inj, task_id)
-    r_claim = c.post("/openapi/v1/collaboration/tasks/bbs/claim", json={"task_id": task_id, "bot_id": "botA"})
+    r_claim = c.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": task_id, "bot_id": "botA"})
     assert r_claim.status_code == 200, r_claim.text
-    r_attach = c.post("/openapi/v1/collaboration/tasks/bbs/attach", json=_attach_body(task_id, task_id, "botA"))
+    r_attach = c.post("/api/v1/collaboration/tasks/bbs/attach", json=_attach_body(task_id, task_id, "botA"))
     assert r_attach.status_code == 200, r_attach.text
     node_id = r_attach.json()["data"]["node_id"]
     assert node_id.startswith("bbs-")
@@ -137,7 +148,7 @@ def test_result_route_pass_marks_scoped_done_and_releases_claim(bbs_task_with_cl
     """claim 持有者 report PASS → 200,scoped 节点 DONE + claim 释放。根收口由框架经 owner 复核(单测无
     owner bot → 不收 DONE,见 live e2e)。"""
     c, task_id, node_id, bot = bbs_task_with_claimed_node
-    r = c.post("/openapi/v1/collaboration/tasks/bbs/result", json=_result_body(task_id, node_id, bot))
+    r = c.post("/api/v1/collaboration/tasks/bbs/result", json=_result_body(task_id, node_id, bot))
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["code"] == 200000
@@ -151,7 +162,11 @@ def test_result_route_pass_marks_scoped_done_and_releases_claim(bbs_task_with_cl
 
 
 def test_result_route_non_owner_409(bbs_task_with_claimed_node):
-    """非 claim 持有者 report → 409(TaskStateError;owner 校验抛,不释放他卡)。"""
+    """非 claim 持有者 report → 被拒(409 ErrorEnvelope;owner 校验抛,不释放他卡)。
+
+    ``@envelope_errors`` 经 ``ENVELOPE_ERRORS`` 把 TaskStateError 映射为 409 envelope。
+    """
     c, task_id, node_id, bot = bbs_task_with_claimed_node
-    r = c.post("/openapi/v1/collaboration/tasks/bbs/result", json=_result_body(task_id, node_id, "botOTHER"))
+    r = c.post("/api/v1/collaboration/tasks/bbs/result", json=_result_body(task_id, node_id, "botOTHER"))
     assert r.status_code == 409, r.text
+    assert r.json()["code"] == 409000

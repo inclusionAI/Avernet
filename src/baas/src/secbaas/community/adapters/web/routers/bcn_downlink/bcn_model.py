@@ -226,7 +226,7 @@ class ChatHistoryRequest(BaseModel):
 class InteractionResolveAnswer(BaseModel):
     """One ask-user answer forwarded by BCS."""
 
-    values: list[str] = Field(..., min_length=1)
+    values: list[str]
     question: str
     header: str
 
@@ -236,13 +236,6 @@ class InteractionResolveAnswer(BaseModel):
         if not value.strip():
             raise ValueError("interaction answer text fields must be non-empty")
         return value
-
-    @field_validator("values")
-    @classmethod
-    def _values_must_be_non_empty(cls, values: list[str]) -> list[str]:
-        if any(not value.strip() for value in values):
-            raise ValueError("interaction answer values must be non-empty strings")
-        return values
 
 
 class InteractionResolveParams(BaseModel):

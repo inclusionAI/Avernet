@@ -63,7 +63,7 @@ class DumpOpenApiTests(unittest.TestCase):
             for method in path_item
             if method.lower() in HTTP_METHODS
         ]
-        self.assertEqual(len(operations), 49)
+        self.assertEqual(len(operations), 56)
         collection = contract["paths"][
             "/openapi/v1/collaboration/sessions/{session_id}/collect"
         ]
@@ -110,7 +110,7 @@ class DumpOpenApiTests(unittest.TestCase):
             for method in path_item
             if method.lower() in HTTP_METHODS
         ]
-        self.assertEqual(len(operations), 10)
+        self.assertEqual(len(operations), 13)
         self.assertTrue(
             all(path.startswith("/api/v1/collaboration/") for _, path in operations)
         )
@@ -120,5 +120,10 @@ class DumpOpenApiTests(unittest.TestCase):
         )
         self.assertIn(
             "/api/v1/collaboration/bots/{bot_id}/candidates/search",
+            contract["paths"],
+        )
+        self.assertIn("/api/v1/collaboration/templates", contract["paths"])
+        self.assertIn(
+            "/api/v1/collaboration/templates/{template_id}",
             contract["paths"],
         )

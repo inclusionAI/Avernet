@@ -1408,6 +1408,18 @@ story_provider_operator_publishes_agent() {
     assert_json_eq "provider agent keeps provider ref" "$RESPONSE" "provider_bot_ref" "$provider_bot_ref"
     [[ -n "$provider_bot_uuid" && -n "$runtime_token" ]] || return
 
+    # This fixture Provider is intentionally not in the backend-only allowlist.
+    # Exercise both endpoints and freeze the fail-closed boundary before any
+    # attribute write can reach the shared control-plane service.
+    api_request_headers GET "/providers/${provider_id}/bots/${provider_bot_uuid}/attributes" "" \
+        "Authorization: Bearer ${admin_token}"
+    require_status "unapproved provider cannot read Bot attributes" "403" || return
+
+    api_request_headers PATCH "/providers/${provider_id}/bots/${provider_bot_uuid}/attributes" \
+        '{"user_visibility":"public"}' \
+        "Authorization: Bearer ${admin_token}"
+    require_status "unapproved provider cannot update Bot attributes" "403" || return
+
     _story_provider_manages_organization "$provider_id" "$admin_token" "$provider_bot_uuid" || return
 
     api_request_headers GET "/providers/${provider_id}/bots" "" \
@@ -1421,6 +1433,20 @@ target=sys.argv[1]
 print("1" if any(i.get("bot_uuid") == target for i in d.get("items", [])) else "0")
 ' "$provider_bot_uuid" 2>/dev/null || echo 0)
     assert_eq "published provider agent appears in provider list" "$listed_bot" "1"
+
+    api_request_headers GET "/providers/${provider_id}/bots/by-task-modes" "" \
+        "Authorization: Bearer ${admin_token}"
+    require_status "operator lists task-mode roster" "200" || return
+    local roster_items
+    roster_items=$(printf '%s' "$RESPONSE" | python3 -c '
+import json,sys
+try:
+    d=json.load(sys.stdin)
+    print("1" if isinstance(d.get("items"), list) else "0")
+except Exception:
+    print("0")
+' 2>/dev/null || echo 0)
+    assert_eq "task-mode roster returns an items array" "$roster_items" "1"
 
     api_request_headers POST "/providers/agentpass/resolve" '{}' \
         "X-BCN-Provider-Id: ${provider_id}" \

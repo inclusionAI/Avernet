@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use bcs_db_api::{DbPlugin, DbStatement, DbValue, db_get_column};
@@ -18,8 +18,8 @@ use bcs_service_api::types::{
     EventSubject, EventSubscriptionScope, EventSubscriptionScopeType, EventSubscriptionStatus,
 };
 use bcs_service_api::{
-    GroupKind, GroupMutableFieldsPatch, GroupStatus, GroupStrategy, Participant, ParticipantRole,
-    ServiceError,
+    DefaultDelivery, GroupKind, GroupMutableFieldsPatch, GroupStatus, GroupStrategy, Participant,
+    ParticipantRole, RoutingMode, RoutingPolicy, ServiceError,
 };
 
 #[path = "../../../bootstrap/bcs/src/migrations.rs"]
@@ -158,6 +158,196 @@ async fn sqlite_group_opening_message_round_trips_and_can_be_cleared() {
             .opening_message,
         None
     );
+}
+
+#[tokio::test]
+async fn sqlite_delivery_patches_persist_canonical_routing_policy_json() {
+    let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    bootstrap_migrations::run_sqlite_migrations(db.as_ref())
+        .await
+        .expect("migrate sqlite");
+    let repo = MySqlGroupStore::sqlite(db.clone(), PROVISIONING_ENV.to_string());
+    let mut group = GroupBuilder::new("driver")
+        .id("routing-policy-group")
+        .build();
+    group.routing_policy = Some(RoutingPolicy {
+        mode: RoutingMode::Mention,
+        default_bot_final_delivery: DefaultDelivery::SendToDriver,
+        sender_routes: HashMap::from([("driver".to_string(), vec!["observer".to_string()])]),
+    });
+    repo.upsert(group).await.expect("persist group");
+
+    let concurrent_policy = RoutingPolicy {
+        mode: RoutingMode::Structured,
+        default_bot_final_delivery: DefaultDelivery::SendToDriver,
+        sender_routes: HashMap::from([("driver".to_string(), vec!["new-observer".to_string()])]),
+    };
+    let concurrent_policy_json =
+        serde_json::to_string(&concurrent_policy).expect("serialize concurrent routing policy");
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_groups SET routing_policy_json = ? WHERE env = ? AND group_id = ?",
+        vec![
+            DbValue::from(concurrent_policy_json),
+            DbValue::from(PROVISIONING_ENV),
+            DbValue::from("routing-policy-group"),
+        ],
+    ))
+    .await
+    .expect("simulate a concurrent routing update behind the repository cache");
+
+    repo.patch_mutable_fields(
+        "routing-policy-group",
+        GroupMutableFieldsPatch {
+            default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("apply direct delivery patch");
+    let directly_updated = repo
+        .try_get("routing-policy-group")
+        .await
+        .expect("load directly updated group")
+        .expect("group");
+    let direct_policy = directly_updated.routing_policy.expect("routing policy");
+    assert_eq!(direct_policy.mode, RoutingMode::Structured);
+    assert_eq!(
+        direct_policy.default_bot_final_delivery,
+        DefaultDelivery::InjectObservers
+    );
+    assert_eq!(
+        direct_policy.sender_routes.get("driver"),
+        Some(&vec!["new-observer".to_string()])
+    );
+
+    let transactionally_updated = repo
+        .commit_eventful_mutation(CommitGroupEventfulMutation {
+            group_id: "routing-policy-group".to_string(),
+            expected_version: directly_updated.version,
+            mutated_at_ms: 1_787_028_100_000,
+            mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch {
+                default_bot_final_delivery: Some(DefaultDelivery::SendToDriver),
+                ..Default::default()
+            }),
+            event: None,
+        })
+        .await
+        .expect("apply transactional delivery patch");
+    let repeatedly_updated = repo
+        .commit_eventful_mutation(CommitGroupEventfulMutation {
+            group_id: "routing-policy-group".to_string(),
+            expected_version: transactionally_updated.version,
+            mutated_at_ms: 1_787_028_200_000,
+            mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch {
+                default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+                ..Default::default()
+            }),
+            event: None,
+        })
+        .await
+        .expect("apply repeated transactional delivery patch");
+    let repeated_policy = repeatedly_updated.routing_policy.expect("routing policy");
+    assert_eq!(repeated_policy.mode, RoutingMode::Structured);
+    assert_eq!(
+        repeated_policy.default_bot_final_delivery,
+        DefaultDelivery::InjectObservers
+    );
+    assert_eq!(
+        repeated_policy.sender_routes.get("driver"),
+        Some(&vec!["new-observer".to_string()])
+    );
+
+    let rows = db
+        .query(DbStatement::with_params(
+            "SELECT routing_policy_json FROM bcs_groups WHERE env = ? AND group_id = ?",
+            vec![
+                DbValue::from(PROVISIONING_ENV),
+                DbValue::from("routing-policy-group"),
+            ],
+        ))
+        .await
+        .expect("query stored routing policy");
+    let stored_json =
+        db_get_column::<String>(&rows[0], "routing_policy_json").expect("routing_policy_json");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&stored_json)
+            .expect("valid JSON")
+            .is_object()
+    );
+    let stored_policy =
+        serde_json::from_str::<RoutingPolicy>(&stored_json).expect("routing policy object");
+    assert_eq!(stored_policy.mode, RoutingMode::Structured);
+    assert_eq!(
+        stored_policy.default_bot_final_delivery,
+        DefaultDelivery::InjectObservers
+    );
+    assert_eq!(
+        stored_policy.sender_routes.get("driver"),
+        Some(&vec!["new-observer".to_string()])
+    );
+}
+
+#[tokio::test]
+async fn sqlite_transactional_delivery_patch_rejects_stringified_routing_policy_json() {
+    let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    bootstrap_migrations::run_sqlite_migrations(db.as_ref())
+        .await
+        .expect("migrate sqlite");
+    let repo = MySqlGroupStore::sqlite(db.clone(), PROVISIONING_ENV.to_string());
+    let group = GroupBuilder::new("driver")
+        .id("invalid-routing-policy-group")
+        .build();
+    let expected_version = group.version;
+    repo.upsert(group).await.expect("persist group");
+
+    let embedded_policy = serde_json::json!({
+        "mode": "mention",
+        "default_bot_final_delivery": "send_to_driver",
+        "sender_routes": {"driver": ["observer"]}
+    })
+    .to_string();
+    let stringified_policy =
+        serde_json::to_string(&embedded_policy).expect("stringify routing policy object");
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_groups SET routing_policy_json = ? WHERE env = ? AND group_id = ?",
+        vec![
+            DbValue::from(stringified_policy.as_str()),
+            DbValue::from(PROVISIONING_ENV),
+            DbValue::from("invalid-routing-policy-group"),
+        ],
+    ))
+    .await
+    .expect("persist historical stringified routing policy");
+
+    let uncached_repo = MySqlGroupStore::sqlite(db.clone(), PROVISIONING_ENV.to_string());
+    let error = uncached_repo
+        .commit_eventful_mutation(CommitGroupEventfulMutation {
+            group_id: "invalid-routing-policy-group".to_string(),
+            expected_version,
+            mutated_at_ms: 1_787_028_300_000,
+            mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch {
+                default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+                ..Default::default()
+            }),
+            event: None,
+        })
+        .await
+        .expect_err("stringified routing policy must not be overwritten");
+    assert!(error.to_string().contains("before patch"));
+
+    let rows = db
+        .query(DbStatement::with_params(
+            "SELECT routing_policy_json FROM bcs_groups WHERE env = ? AND group_id = ?",
+            vec![
+                DbValue::from(PROVISIONING_ENV),
+                DbValue::from("invalid-routing-policy-group"),
+            ],
+        ))
+        .await
+        .expect("reload stringified routing policy");
+    let stored_json =
+        db_get_column::<String>(&rows[0], "routing_policy_json").expect("routing_policy_json");
+    assert_eq!(stored_json, stringified_policy);
 }
 
 #[tokio::test]

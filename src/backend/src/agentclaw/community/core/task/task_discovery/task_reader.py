@@ -21,6 +21,9 @@ logger = get_logger()
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS discovered_tasks (
     task_id            TEXT PRIMARY KEY,
+    bot_id             TEXT NOT NULL,
+    owner_id           TEXT NOT NULL,
+    dt                 TEXT NOT NULL,
     project_name       TEXT NOT NULL,
     description        TEXT,
     business_scenario  TEXT,
@@ -30,16 +33,34 @@ CREATE TABLE IF NOT EXISTS discovered_tasks (
     discovered_at      TEXT,
     status             TEXT DEFAULT 'pending_confirmation'
 );
+CREATE INDEX IF NOT EXISTS idx_discovered_tasks_bot_owner_dt
+    ON discovered_tasks(bot_id, owner_id, dt);
 """
 
 #: 查询全量任务的 SQL
-_SELECT_ALL_SQL = "SELECT task_id, project_name, description, business_scenario, discovery_basis, work_item_url, priority, discovered_at, status FROM discovered_tasks;"
+_SELECT_ALL_SQL = (
+    "SELECT task_id, bot_id, owner_id, dt, project_name, description, "
+    "business_scenario, discovery_basis, work_item_url, priority, "
+    "discovered_at, status FROM discovered_tasks;"
+)
+
+#: 按 (bot_id, owner_id, dt) 查询待确认任务的 SQL
+_SELECT_PENDING_FOR_BOT_SQL = (
+    "SELECT task_id, bot_id, owner_id, dt, project_name, description, "
+    "business_scenario, discovery_basis, work_item_url, priority, "
+    "discovered_at, status FROM discovered_tasks "
+    "WHERE bot_id = ? AND owner_id = ? AND dt = ? "
+    "AND status = 'pending_confirmation';"
+)
 
 
 def _row_to_task(row: sqlite3.Row) -> DiscoveredTask:
     """将 sqlite3.Row 映射为 DiscoveredTask。"""
     return DiscoveredTask(
         task_id=row["task_id"],
+        bot_id=row["bot_id"],
+        owner_id=row["owner_id"],
+        dt=row["dt"],
         project_name=row["project_name"],
         description=row["description"] or "",
         business_scenario=row["business_scenario"] or "",
@@ -65,16 +86,20 @@ def init_discovered_tasks_db(db_path: str | Path, tasks: list[dict]) -> None:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     try:
-        conn.execute(_CREATE_TABLE_SQL)
+        conn.executescript(_CREATE_TABLE_SQL)
         conn.execute("DELETE FROM discovered_tasks;")
         conn.executemany(
             "INSERT INTO discovered_tasks "
-            "(task_id, project_name, description, business_scenario, "
-            " discovery_basis, work_item_url, priority, discovered_at, status) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
+            "(task_id, bot_id, owner_id, dt, project_name, description, "
+            " business_scenario, discovery_basis, work_item_url, priority, "
+            " discovered_at, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
             [
                 (
                     t["task_id"],
+                    t.get("bot_id", ""),
+                    t.get("owner_id", ""),
+                    t.get("dt", ""),
                     t["project_name"],
                     t.get("description", ""),
                     t.get("business_scenario", ""),
@@ -145,6 +170,37 @@ class SqliteTaskReader:
         """只返回 ``pending_confirmation`` 状态的任务。"""
         return [t for t in self.read_discovered_tasks() if t.needs_confirmation]
 
+    def read_pending_tasks_for_bot(
+        self, bot_id: str, owner_id: str, dt: str,
+    ) -> list[DiscoveredTask]:
+        """返回指定 bot 当天的待确认任务。"""
+        if not self._db_path.exists():
+            logger.warning(
+                "[task_discovery] db file not found: %s", self._db_path
+            )
+            return []
+
+        conn = sqlite3.connect(str(self._db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.execute(
+                _SELECT_PENDING_FOR_BOT_SQL, (bot_id, owner_id, dt),
+            )
+            tasks = [_row_to_task(row) for row in cursor.fetchall()]
+        except sqlite3.DatabaseError as exc:
+            logger.error(
+                "[task_discovery] failed to read %s: %s", self._db_path, exc
+            )
+            return []
+        finally:
+            conn.close()
+
+        logger.info(
+            "[task_discovery] read %d pending tasks for bot=%s owner=%s dt=%s",
+            len(tasks), bot_id, owner_id, dt,
+        )
+        return tasks
+
 
 class MockTaskReader:
     """从本地 JSON 文件读取已发现任务的 mock 实现(向后兼容)。
@@ -154,7 +210,10 @@ class MockTaskReader:
         {
           "tasks": [
             {
-              "task_id": "task-001",
+              "task_id": "discover_task_bot-001_user-001_2026-08-19",
+              "bot_id": "bot-001",
+              "owner_id": "user-001",
+              "dt": "2026-08-19",
               "project_name": "...",
               "description": "...",
               "business_scenario": "...",
@@ -197,6 +256,9 @@ class MockTaskReader:
                 tasks.append(
                     DiscoveredTask(
                         task_id=item["task_id"],
+                        bot_id=item.get("bot_id", ""),
+                        owner_id=item.get("owner_id", ""),
+                        dt=item.get("dt", ""),
                         project_name=item["project_name"],
                         description=item.get("description", ""),
                         business_scenario=item.get("business_scenario", ""),
@@ -220,6 +282,15 @@ class MockTaskReader:
     def read_pending_tasks(self) -> list[DiscoveredTask]:
         """只返回 ``pending_confirmation`` 状态的任务。"""
         return [t for t in self.read_discovered_tasks() if t.needs_confirmation]
+
+    def read_pending_tasks_for_bot(
+        self, bot_id: str, owner_id: str, dt: str,
+    ) -> list[DiscoveredTask]:
+        """返回指定 bot 当天的待确认任务。"""
+        return [
+            t for t in self.read_pending_tasks()
+            if t.bot_id == bot_id and t.owner_id == owner_id and t.dt == dt
+        ]
 
 
 __all__ = [

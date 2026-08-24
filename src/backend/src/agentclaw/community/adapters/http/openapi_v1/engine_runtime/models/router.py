@@ -40,8 +40,9 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.engine_runtime.errors import EngineResourceNotFoundError
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/models", tags=["models"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/models", tags=["models"], route_class=PublicAPIRoute)
 
 #: The path parameter naming the model an operation addresses.
 ModelIdPath = Annotated[

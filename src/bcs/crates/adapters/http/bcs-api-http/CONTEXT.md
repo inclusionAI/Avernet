@@ -41,7 +41,7 @@
 
 - Production bootstrap mounts this Router directly at its contract-owned
   `/openapi/v1/collaboration/**` paths and injects completed V1 application
-  services plus the Gateway Principal verifier.
+  services behind the Gateway Principal boundary.
 - Bootstrap injects the Session File application facade and a validated public
   collaboration base URL. The adapter does not infer public URLs from request
   headers.

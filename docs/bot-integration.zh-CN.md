@@ -280,8 +280,9 @@ BCN 通过 `chat.send` 请求向 bot 发送需要回复的消息：
   "id": "chat-001",
   "method": "chat.send",
   "params": {
-    "session_key": "sess-123",
+    "session_key": "grp-456:channel_dingtalk_abcdef12",
     "bcs_group_id": "grp-456",
+    "bcs_session_id": "grp-456:channel_dingtalk_abcdef12",
     "message": {
       "role": "user",
       "content": [{"type": "text", "text": "请分析这个死锁"}],
@@ -311,6 +312,11 @@ BCN 通过 `chat.send` 请求向 bot 发送需要回复的消息：
 ```json
 {"type": "res", "id": "chat-001", "ok": true, "payload": {"run_id": "run-001"}}
 ```
+
+协议 v3 中，如果消息已绑定到 BCS session，`session_key` 与
+`bcs_session_id` 相同。原生会话格式为 `{group_id}:{8_hex}`；由 Channel
+创建的会话格式为 `{group_id}:channel_{channel_type}_{8_hex}`。引擎应使用
+完整值隔离本地会话历史。旧协议版本继续使用原有的群维度 key。
 
 ### 5.2 接收 `chat.inject`（静默观察）
 `chat.inject` 表示消息仅供观察，bot 不应回复：

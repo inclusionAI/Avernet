@@ -305,6 +305,45 @@ class SessionResourceService:
         )
         raise ValueError("engine_content_unavailable")
 
+    async def open_session_file_content(
+        self,
+        *,
+        owner_id: str,
+        bot_id: str,
+        session_key: str,
+        resource_id: str,
+        disposition: str,
+    ) -> tuple[SessionResourceRecord, DeviceAdapterStreamResponse]:
+        if disposition not in {"inline", "attachment"}:
+            raise ValueError("invalid_disposition")
+        record = self._owned(
+            resource_id,
+            owner_id,
+            bot_id,
+            hash_identifier(session_key),
+        )
+        if record.status is not SessionResourceStatus.READY:
+            raise ValueError("resource_not_ready")
+        context = self._resolve_record_context(record)
+        response = await self._adapter_transport.stream(
+            context.conn_info,
+            "GET",
+            f"/api/session-files/{record.resource_id}/content",
+            params={
+                "sessionKey": session_key,
+                "disposition": disposition,
+            },
+            timeout=60.0,
+        )
+        if 200 <= response.status_code < 300:
+            return record, response
+        await response.close()
+        if response.status_code in {404, 409}:
+            raise ValueError("resource_missing")
+        if response.status_code == 413:
+            raise ValueError("resource_preview_too_large")
+        raise ValueError("engine_content_unavailable")
+
     def reference(
         self,
         *,

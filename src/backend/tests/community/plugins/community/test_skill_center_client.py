@@ -4,10 +4,18 @@ Skill Center marketplace is unsupported in the community build: every method
 raises ``SkillCenterUnsupportedError`` so a caller fails loudly rather than
 silently receiving a fake result.
 """
+
 from __future__ import annotations
 
 import pytest
 
+from agentclaw.community.plugin_api.skill_center_client import (
+    SkillCenterMarketSearchRequest,
+    SkillCenterTeamCreateError,
+    SkillCenterTeamCreateRequest,
+    SkillCenterTeamQueryError,
+    SkillCenterTeamQueryRequest,
+)
 from agentclaw.community.plugins.community.skill_center_client import (
     CommunitySkillCenterClient,
     SkillCenterUnsupportedError,
@@ -16,6 +24,22 @@ from agentclaw.community.plugins.community.skill_center_client import (
 
 def _client() -> CommunitySkillCenterClient:
     return CommunitySkillCenterClient()
+
+
+def test_create_team_raises_stable_sync_error():
+    request = SkillCenterTeamCreateRequest(
+        team_code="spc-0123456789abcdef0123",
+        team_name="Demo Team",
+        ref_source_id="7",
+    )
+    with pytest.raises(SkillCenterTeamCreateError):
+        _client().create_team(request)
+
+
+def test_get_team_by_ref_source_raises_stable_query_error():
+    request = SkillCenterTeamQueryRequest(source="OCB", ref_source_id="7")
+    with pytest.raises(SkillCenterTeamQueryError):
+        _client().get_team_by_ref_source(request)
 
 
 def test_upload_and_publish_raises():
@@ -35,7 +59,7 @@ def test_list_versions_raises():
 
 def test_search_market_skills_raises():
     with pytest.raises(SkillCenterUnsupportedError):
-        _client().search_market_skills(keyword="x")
+        _client().search_market_skills(SkillCenterMarketSearchRequest(keyword="x"))
 
 
 def test_get_market_tags_raises():

@@ -174,6 +174,7 @@ def test_modules_for_community_is_isolated():
         "CommunityBotPublishApprovalModule",
         "CommunityEvalEnvModule",
         "CommunityNotifyModule",
+        "CommunityStaffDeptModule",
     }
 
 

@@ -57,7 +57,7 @@ type YamlAppConfig = {
 const CONFIG_FILENAME = "application.yaml";
 
 /** Plugin ID as defined in openclaw.plugin.json */
-const PLUGIN_ID = "clawmind";
+const PLUGIN_ID = "taskguard";
 
 /**
  * Known OpenClaw extension directories (local dev + production).

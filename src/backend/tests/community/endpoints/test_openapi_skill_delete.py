@@ -21,6 +21,9 @@ from agentclaw.community.core.skill_center.services.local_skill_delete_service i
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_installation import (
+    SkillInstallationRepositoryProtocol,
+)
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -173,7 +176,11 @@ def _seed_delete(world, *, active: bool) -> None:
         world.get(SkillSetRepository).add_skill_to_set(
             default_set["id"], skill["id"], user_id=_OWNER
         )
-        if not active:
+        if active:
+            world.get(SkillInstallationRepositoryProtocol).install(
+                env="dev", owner_id=_OWNER, bot_id=_BOT_ID, skill_id=skill["id"]
+            )
+        else:
             world.get(SkillSetRepository).add_default_skill_exclusion(
                 _OWNER, _BOT_ID, int(default_set["id"]), int(skill["id"])
             )
