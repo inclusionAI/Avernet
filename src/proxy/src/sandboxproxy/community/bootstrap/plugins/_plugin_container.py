@@ -22,8 +22,9 @@ class PluginContainer(containers.DeclarativeContainer):
         baas=providers.Singleton(
             BaasRelayClient,
             baas_host=config.user_config.baas.host,
-            route_info=providers.Dict(host=config.user_config.baas.host),
             instance=config.instance,
+            worker_pid=config.worker_pid,
+            socket_path=config.socket_path,
         ),
         stub=providers.Singleton(StubRelayClient),
     )

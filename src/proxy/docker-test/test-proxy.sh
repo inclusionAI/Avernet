@@ -23,7 +23,7 @@ PROJECT="proxytest"
 
 export SANDBOXPROXY_PORT="${SANDBOXPROXY_PORT:-8888}"
 export SANDBOXPROXY_JWT_SECRET="${SANDBOXPROXY_JWT_SECRET:-proxy-test-secret-not-for-prod}"
-HOST_PORT="${HOST_PORT:-18889}"
+HOST_PORT="${HOST_PORT:-18887}"
 
 log() { printf "\n==> %s\n" "$*"; }
 

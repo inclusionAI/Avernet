@@ -48,6 +48,8 @@ def bootstrap_app(*, return_container: bool = False) -> Any:
 
 
 def _container_config_dict(loaded: Config) -> dict[str, Any]:
+    from sandboxproxy.community.api.identity import resolve_worker_pid
+
     user_config = loaded.user_config
     return {
         "user_config": user_config.model_dump(),
@@ -56,6 +58,8 @@ def _container_config_dict(loaded: Config) -> dict[str, Any]:
             "relay_client": user_config.plugins.relay_client,
         },
         "instance": resolve_instance_id(),
+        "worker_pid": resolve_worker_pid(),
+        "socket_path": None,
     }
 
 

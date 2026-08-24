@@ -29,7 +29,9 @@ class TestBaasRelayClientLifecycle:
             return httpx.Response(200, json={"ok": True})
 
         transport = _RecordingTransport(handler)
-        client = BaasRelayClient("http://baas.test", instance="127.0.0.1")
+        client = BaasRelayClient(
+            "http://baas.test", instance="127.0.0.1", worker_pid=4242
+        )
         client._client = httpx.AsyncClient(transport=transport)  # noqa: SLF001
 
         ok = await client.upsert_route_active("sess-1")
@@ -38,7 +40,7 @@ class TestBaasRelayClientLifecycle:
             {
                 "status": "active",
                 "connected_server_instance": "127.0.0.1",
-                "connected_route_info": {"host": "127.0.0.1"},
+                "connected_route_info": {"worker_pid": 4242, "socket_path": None},
             }
         ]
 

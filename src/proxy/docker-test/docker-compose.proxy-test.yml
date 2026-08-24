@@ -7,7 +7,7 @@ services:
       # Test-only JWT secret (community reads it from config/env overlay).
       SANDBOXPROXY_JWT_SECRET: "${SANDBOXPROXY_JWT_SECRET:-proxy-test-secret-not-for-prod}"
     ports:
-      - "${HOST_PORT:-18889}:8888"
+      - "${HOST_PORT:-18887}:8888"
     networks:
       - proxy-net
 

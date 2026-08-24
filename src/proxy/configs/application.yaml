@@ -19,6 +19,9 @@ user_config:
     api_server: https://ack.internal.example
     token: ${ALIYUN_ACK_TOKEN:-}
     namespace: default
+    api_keys:
+      "0": ${ARCA_API_KEY_0:-}
+      "1": ${ARCA_API_KEY_1:-}
 
   baas:
     host: http://baas.internal.example
