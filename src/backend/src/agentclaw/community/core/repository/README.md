@@ -95,8 +95,8 @@ provides:
   - RenderScreenRepository
   - TemplateRepository
   - UserMCPConfigRepository
-  - SkillSetControlPlaneRepositoryProtocol
-  - SkillSetControlPlaneRepository
+  - CapabilityDesiredStateRepositoryProtocol
+  - CapabilityDesiredStateRepository
   # spaces / market_favorites
   - SpaceRepositoryProtocol
   - MarketFavoriteRepositoryProtocol

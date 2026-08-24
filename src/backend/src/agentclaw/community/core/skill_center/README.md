@@ -20,7 +20,7 @@ provides:
   - "LocalSkillStateService"
   - "LocalSkillDeleteService"
   - "BotCapabilityAuthorizationHookProtocol"
-  - "SkillSetControlPlaneService"
+  - "SkillSetManagementService"
   - "SkillInstallationRepositoryProtocol"
   - "BotSkillAssetService"
   - "RuntimeProjectionResolver"
@@ -52,7 +52,7 @@ consumes:
   - "SkillRepoSyncPlugin"
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
-  - "BotRuntimeProjectionReconcilerProtocol"
+  - "BotRuntimeProjectorProtocol"
 internal_dependencies:
   - agentclaw.community.api.skill_parameter_service_factory
   - agentclaw.community.api.skill_market_service
@@ -64,8 +64,8 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
   - agentclaw.community.core.repository.protocols.skill_installation
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module
-  - agentclaw.community.core.repository.protocols.skill_set_control_plane
-  - agentclaw.community.core.repository.skill_set_control_plane_types
+  - agentclaw.community.core.repository.protocols.capability_desired_state
+  - agentclaw.community.core.repository.capability_desired_state_types
   - agentclaw.community.core.access
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_collaborator

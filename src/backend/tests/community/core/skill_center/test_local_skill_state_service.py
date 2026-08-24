@@ -878,7 +878,7 @@ async def test_runtime_reconciler_failure_also_compensates_before_fixed_failure(
     async def fail_reconcile(**_kwargs):
         raise RuntimeError("private runtime resolution")
 
-    service._runtime_reconciler.reconcile = fail_reconcile
+    service._runtime_reconciler.project = fail_reconcile
     with pytest.raises(LocalSkillRuntimeSyncError):
         await service.set_local_skill_active(
             skill_id="9", actor_id="owner", active=True

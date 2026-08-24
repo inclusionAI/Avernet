@@ -106,7 +106,7 @@ def _bind_skillset_deps(app):
     control.list_sets.return_value = [MOCK_SKILLSET_ROW]
     control.get_set.return_value = MOCK_SKILLSET_ROW
     control.list_skills.return_value = [MOCK_SKILL_ROW]
-    control.resources.return_value = [{
+    control.list_resources.return_value = [{
         **MOCK_SKILLSET_ROW,
         "mcps": [MOCK_MCP_ROW],
         "clis": mock_passport.query_passport_clis.return_value,
