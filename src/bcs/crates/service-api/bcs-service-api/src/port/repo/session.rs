@@ -22,7 +22,7 @@ pub struct NewSessionParams {
     pub input: Option<serde_json::Value>,
     pub created_by: Option<String>,
     pub session_title: Option<String>,
-    /// 显式指定 session_id；不传则由实现层生成 `{group_id}:{8_hex}`。
+    /// 显式指定 session_id；不传则由实现层生成原生 `{group_id}:{8_hex}` ID。
     pub id: Option<String>,
     pub meta: Option<serde_json::Value>,
 }
@@ -69,6 +69,19 @@ pub trait SessionRepoPort: Send + Sync {
             message: "Eventful Session creation is not configured".to_string(),
             request_id: None,
         })
+    }
+
+    /// Create a Session whose canonical id identifies the concrete Channel source.
+    async fn create_channel(
+        &self,
+        group_id: &str,
+        channel_type: &str,
+        mut params: NewSessionParams,
+    ) -> ServiceResult<Session> {
+        let id = crate::core::session::new_channel_session_id(group_id, channel_type)
+            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
+        params.id = Some(id);
+        self.create(group_id, params).await
     }
     async fn get(&self, session_id: &str) -> Option<Session>;
     async fn belongs_to_group(&self, session_id: &str, group_id: &str) -> bool;
