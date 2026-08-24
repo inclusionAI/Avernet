@@ -1,7 +1,6 @@
 /**
  * Internal API routes — aggregates core internal sub-routers for ClawMind.
- * Simplified for Evolvetrace: only runs, node-executions, events, facades,
- * bot-workflow-permissions are mounted.
+ * Mounts: runs, node-executions, events, facades, bot-workflow-permissions, deploy-history.
  */
 import { Router } from "express";
 import type { FlowRunRepository } from "../../repositories/flow-run-repository.js";
@@ -10,12 +9,14 @@ import type { FlowEventRepository } from "../../repositories/event-repository.js
 import type { FacadeBindingRepository } from "../../repositories/facade-binding-repository.js";
 import type { WorkflowSpecRepository } from "../../repositories/workflow-spec-repository.js";
 import type { BotWorkflowPermissionRepository } from "../../repositories/bot-workflow-permission-repository.js";
+import type { WorkflowDeployHistoryRepository } from "../../repositories/workflow-deploy-history-repository.js";
 
 import { createInternalRunsRouter } from "./runs.js";
 import { createInternalNodeExecutionsRouter } from "./node-executions.js";
 import { createInternalEventsRouter } from "./events.js";
 import { createInternalFacadesRouter } from "./facades.js";
 import { createInternalBotWorkflowPermissionsRouter } from "./bot-workflow-permissions.js";
+import { createInternalDeployHistoryRouter } from "./deploy-history.js";
 
 export type InternalRepos = {
   flowRunRepo: FlowRunRepository | null;
@@ -24,6 +25,7 @@ export type InternalRepos = {
   facadeBindingRepo: FacadeBindingRepository | null;
   workflowSpecRepo: WorkflowSpecRepository | null;
   botWorkflowPermissionRepo: BotWorkflowPermissionRepository | null;
+  workflowDeployHistoryRepo: WorkflowDeployHistoryRepository | null;
 };
 
 export function createInternalRouter(repos: InternalRepos): Router {
@@ -34,6 +36,7 @@ export function createInternalRouter(repos: InternalRepos): Router {
   router.use("/events", createInternalEventsRouter(repos.eventRepo));
   router.use("/facades", createInternalFacadesRouter(repos.facadeBindingRepo));
   router.use("/bot-workflow-permissions", createInternalBotWorkflowPermissionsRouter(repos.botWorkflowPermissionRepo));
+  router.use("/deploy-history", createInternalDeployHistoryRouter(repos.workflowDeployHistoryRepo));
 
   // Health check
   router.get("/health", (_req, res) => {

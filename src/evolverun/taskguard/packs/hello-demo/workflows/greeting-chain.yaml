@@ -1,0 +1,144 @@
+id: greeting-chain
+version: "1.0.0"
+title: Greeting Chain
+
+description: |
+  A 4-phase workflow demonstrating chained data passing.
+  It analyzes the input, generates a greeting, personalizes it, and composes a final message.
+
+input:
+  mode: mixed
+  requiredParams: [name]
+  optionalParams:
+    - style
+  sources:
+    params: true
+    message: true
+
+identity:
+  key: "{{input.params.name}}"
+  label: "Greet {{input.params.name}}"
+  duplicatePolicy: allow
+
+outputs:
+  finalMessage:
+    from: "{{nodeOutput.compose-final.finalMessage}}"
+    public: true
+    description: "Final composed greeting message"
+
+defaults:
+  progress:
+    enabled: true
+    sink: chat
+
+messages:
+  onCreated: "Greeting chain started for: {{input.params.name}}"
+  onFinished: "Greeting chain finished."
+
+nodes:
+  - id: analyze
+    title: Analyze Input
+    phase: P1
+    dependsOn: []
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        Analyze the user message and parameters.
+        Name: {{input.params.name}}
+        Style hint: {{input.params.style || 'casual'}}
+        User message: {{input.message}}
+
+        Return JSON:
+        {
+          "tone": "casual|formal|playful",
+          "audience": "self|friend|colleague",
+          "language": "zh|en"
+        }
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [tone, audience, language]
+        properties:
+          tone:
+            type: string
+            enum: [casual, formal, playful]
+          audience:
+            type: string
+            enum: [self, friend, colleague]
+          language:
+            type: string
+            enum: [zh, en]
+
+  - id: generate-greeting
+    title: Generate Greeting
+    phase: P2
+    dependsOn: [analyze]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        Generate a {{nodeOutput.analyze.tone}} greeting in {{nodeOutput.analyze.language}}
+        for a {{nodeOutput.analyze.audience}} audience.
+
+        Return JSON:
+        {
+          "baseGreeting": "the generated greeting"
+        }
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [baseGreeting]
+        properties:
+          baseGreeting:
+            type: string
+
+  - id: personalize
+    title: Personalize
+    phase: P3
+    dependsOn: [generate-greeting]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        Personalize the greeting for {{input.params.name}}.
+        Base greeting: {{nodeOutput.generate-greeting.baseGreeting}}
+
+        Return JSON:
+        {
+          "personalizedGreeting": "the greeting with the name inserted naturally"
+        }
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [personalizedGreeting]
+        properties:
+          personalizedGreeting:
+            type: string
+
+  - id: compose-final
+    title: Compose Final Message
+    phase: P4
+    dependsOn: [personalize]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        Compose a final friendly message from this personalized greeting:
+        {{nodeOutput.personalize.personalizedGreeting}}
+
+        Return JSON:
+        {
+          "finalMessage": "the final message"
+        }
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [finalMessage]
+        properties:
+          finalMessage:
+            type: string
