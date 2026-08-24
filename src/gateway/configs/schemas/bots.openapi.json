@@ -15920,6 +15920,19 @@
             "title": "Creator User Id",
             "type": "string"
           },
+          "creator_user_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Snapshot of the creator's user name, when available.",
+            "title": "Creator User Name"
+          },
           "current_user_role": {
             "anyOf": [
               {
