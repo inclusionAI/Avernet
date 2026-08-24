@@ -17,7 +17,7 @@ local time was judged NOT due by SQLite's UTC clock).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 
 def naive_utc_now() -> datetime:
@@ -28,3 +28,16 @@ def naive_utc_now() -> datetime:
 def naive_utc_fromtimestamp(ts: float) -> datetime:
     """Epoch seconds (or millis) → naive UTC wall-clock datetime."""
     return datetime.fromtimestamp(ts, tz=UTC).replace(tzinfo=None)
+
+
+def renewal_window(default_ttl_minutes: int) -> timedelta:
+    """Renewal lead window before TTL expiry — half the configured TTL period.
+
+    Single source of truth for the lead window shared by
+    ``DeadlineRenewalScheduler._renewal_window`` (discovery scan, postpone
+    and success paths) and the lifecycle wrapper's register target, so a
+    reconfigured ``arca.default_ttl_minutes`` keeps every writer coherent
+    (WR-02). The default 1440 minutes resolves to 12h — byte-identical to
+    the former hardcoded ``timedelta(hours=12)``.
+    """
+    return timedelta(minutes=int(default_ttl_minutes) // 2)

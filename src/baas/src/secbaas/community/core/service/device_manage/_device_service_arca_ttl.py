@@ -26,11 +26,12 @@ discovery scan is the safety net for that window.
 
 from __future__ import annotations
 
-from datetime import timedelta
-
 from secbaas.community.core.repository.arca_ttl import TtlRenewalScheduleRepository
 from secbaas.community.core.utils.env_utils import get_current_env
-from secbaas.community.core.utils.time_utils import naive_utc_fromtimestamp
+from secbaas.community.core.utils.time_utils import (
+    naive_utc_fromtimestamp,
+    renewal_window,
+)
 from secbaas.community.logger import get_logger
 
 from ._device_service import (
@@ -52,9 +53,20 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
     """
 
     def __init__(
-        self, schedule_repo: TtlRenewalScheduleRepository, *args, **kwargs
+        self,
+        schedule_repo: TtlRenewalScheduleRepository,
+        default_ttl_minutes: int = 1440,
+        *args,
+        **kwargs,
     ) -> None:
         self._schedule_repo = schedule_repo
+        # WR-02: the register target's lead window follows the same
+        # config-derived rule as the scheduler (half of the configured TTL
+        # period) instead of a hardcoded 12h — the container wires this
+        # from config.arca.default_ttl_minutes; the 1440 default keeps
+        # direct construction (tests, non-DI callers) on the former 12h
+        # semantics.
+        self._renewal_window = renewal_window(default_ttl_minutes)
         super().__init__(*args, **kwargs)
 
     def _try_register_schedule(self, response, device_uuid) -> None:
@@ -84,7 +96,7 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
                 sandbox_id=response.provider_device_id,
                 source_table="baas_device",
                 source_id=response.id,
-                next_renew_at=expiration_dt - timedelta(hours=12),
+                next_renew_at=expiration_dt - self._renewal_window,
             )
         except Exception:
             log.critical(

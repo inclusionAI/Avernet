@@ -119,6 +119,32 @@ class TestDeadlineEngineAssembly:
         # Singleton-cached override: repeat resolution is the same object
         assert container.services().device_service() is svc
 
+    def test_wrapper_receives_configured_ttl_for_register_window(self):
+        """WR-02: the override wires arca.default_ttl_minutes into the
+        wrapper's register lead window — a quoted YAML number ("2880") is
+        still coerced and derives a 24h window (half the TTL period)."""
+        from datetime import timedelta
+
+        container = _container_with("deadline")
+        container.config.from_dict({"arca": {"default_ttl_minutes": "2880"}})
+        set_container(container)
+
+        svc = container.services().device_service()
+        assert isinstance(svc, ArcaScheduleAwareDeviceService)
+        assert svc._renewal_window == timedelta(hours=24)
+
+    def test_wrapper_defaults_to_12h_window_without_arca_section(self):
+        """WR-02: overlays without an arca section keep the former
+        hardcoded semantics — 1440-minute default -> 12h lead window."""
+        from datetime import timedelta
+
+        container = _container_with("deadline")
+        set_container(container)
+
+        svc = container.services().device_service()
+        assert isinstance(svc, ArcaScheduleAwareDeviceService)
+        assert svc._renewal_window == timedelta(hours=12)
+
     def test_cron_selection_returns_deadline_scheduler(self):
         """The cron task-list selector picks the DeadlineRenewalScheduler."""
         container = _container_with("deadline")

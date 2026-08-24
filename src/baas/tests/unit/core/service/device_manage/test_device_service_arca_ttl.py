@@ -11,7 +11,8 @@ No bootstrap_init import, no database, no container.
 
 Pins the exact INTG-01/INTG-02 semantics replicated by the wrapper:
 - create: register(env, sandbox_id, source_table="baas_device",
-  source_id, next_renew_at) once, next_renew_at = expiration - 12h,
+  source_id, next_renew_at) once, next_renew_at = expiration - lead
+  window (WR-02: half of default_ttl_minutes, 12h at the 1440 default),
   defensive try/except (failure never blocks device creation, CRITICAL
   + [arca_ttl_metrics] register_error=1 logged), ARCA/ttl guards.
 - stop / destroy: set_status(env, source_table="baas_device",
@@ -65,8 +66,13 @@ def _expiration_dt() -> datetime:
     return datetime.fromtimestamp(_TTL_MS / 1000, tz=UTC).replace(tzinfo=None)
 
 
-def _make_service() -> tuple[ArcaScheduleAwareDeviceService, MagicMock, MagicMock]:
+def _make_service(
+    default_ttl_minutes: int = 1440,
+) -> tuple[ArcaScheduleAwareDeviceService, MagicMock, MagicMock]:
     """Build the wrapper with fully mocked schedule repo + parent deps.
+
+    default_ttl_minutes feeds the config-derived register lead window
+    (WR-02); the 1440 default keeps the former 12h semantics.
 
     Returns (service, mock_schedule_repo, mock_device_repository).
     """
@@ -74,6 +80,7 @@ def _make_service() -> tuple[ArcaScheduleAwareDeviceService, MagicMock, MagicMoc
     mock_device_repo = MagicMock()
     svc = ArcaScheduleAwareDeviceService(
         schedule_repo=mock_schedule_repo,
+        default_ttl_minutes=default_ttl_minutes,
         paas_facade=MagicMock(),
         repository=mock_device_repo,
         device_template_service=MagicMock(),
@@ -160,6 +167,31 @@ class TestStartDeviceHook:
         # Pass-through by identity — never re-mapped or swallowed
         assert result is response
         expected_next = _expiration_dt() - timedelta(hours=12)
+        mock_schedule_repo.register.assert_called_once_with(
+            "test",
+            sandbox_id="sandbox-abc123",
+            source_table="baas_device",
+            source_id=response.id,
+            next_renew_at=expected_next,
+        )
+
+    @pytest.mark.asyncio
+    async def test_register_window_derives_from_configured_ttl(self):
+        """WR-02: the register lead window is half the configured TTL period
+        (default_ttl_minutes=2880 -> expiry-24h), matching the scheduler's
+        config-derived rule instead of a hardcoded 12h."""
+        svc, mock_schedule_repo, _ = _make_service(default_ttl_minutes=2880)
+        response = _response()
+
+        with patch.object(
+            DefaultDeviceService, "start_device", new=AsyncMock(return_value=response)
+        ):
+            result = await svc.start_device(
+                tenant="test-tenant", device_uuid="DEVICE-test-001"
+            )
+
+        assert result is response
+        expected_next = _expiration_dt() - timedelta(hours=24)
         mock_schedule_repo.register.assert_called_once_with(
             "test",
             sandbox_id="sandbox-abc123",

@@ -398,6 +398,17 @@ def _apply_enterprise_plugins(container: ApplicationContainer) -> None:
             device_service=providers.Singleton(
                 ArcaScheduleAwareDeviceService,
                 schedule_repo=container.repository().arca_ttl_schedule_repository(),
+                # WR-02: the wrapper's register lead window must follow the
+                # same config-driven rule as the scheduler (half of the
+                # arca TTL period), not a hardcoded 12h — otherwise a
+                # reconfigured arca.default_ttl_minutes would diverge the
+                # lifecycle writes from scheduler/discovery writes until
+                # the next self-healing pass. Same int coercion as
+                # _core_tasks (WR-03: no ArcaConfigSchema).
+                default_ttl_minutes=providers.Callable(
+                    lambda v: int(v) if v else 1440,
+                    container.config.arca.default_ttl_minutes,
+                ),
                 paas_facade=container.services().paas_facade(),
                 repository=container.repository().device_repository(),
                 device_template_service=container.services().device_template_service(),

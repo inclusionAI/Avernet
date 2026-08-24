@@ -19,6 +19,7 @@ from secbaas.community.core.service.paas import PaasServiceFacade
 from secbaas.community.core.utils.time_utils import (
     naive_utc_fromtimestamp,
     naive_utc_now,
+    renewal_window,
 )
 from secbaas.community.logger import get_logger
 
@@ -77,10 +78,11 @@ class DeadlineRenewalScheduler:
         ``arca.default_ttl_minutes`` in _core_tasks.py), so the schedule
         targets written by the discovery scan, the postpone branches, and
         the success path all stay coherent with the configured TTL.
-        Defaults: 1440 minutes -> 12h, i.e. byte-identical behavior to
-        the former hardcoded ``hours=12``.
+        Shares ``time_utils.renewal_window`` with the lifecycle wrapper so
+        both writers stay in lock-step (WR-02). Default: 1440 minutes ->
+        12h, byte-identical to the former hardcoded ``hours=12``.
         """
-        return timedelta(minutes=self._config.default_ttl_minutes // 2)
+        return renewal_window(self._config.default_ttl_minutes)
 
     async def run(self) -> RenewalRunReport | None:
         """Execute one scheduler run (lock acquisition + _run_once dispatch).
