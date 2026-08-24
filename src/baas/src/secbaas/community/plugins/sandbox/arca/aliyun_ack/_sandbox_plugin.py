@@ -104,8 +104,11 @@ def _build_template_vars(
         "UID": uid,
         "NAMESPACE": namespace,
         "OPENCLAW_IMAGE": images.get("openclaw", "openclaw:latest"),
-        "API_KEY_PROXY_IMAGE": images.get("api-key-proxy", "nginx:alpine"),
+        "ENVOY_SIDECAR_IMAGE": images.get(
+            "envoy-sidecar", "envoyproxy/envoy:v1.30-latest"
+        ),
         "INIT_IMAGE": images.get("init", "busybox:latest"),
+        "NAS_SERVER": images.get("nas-server", ""),
         "STORAGE_ID": storage_id,
         "STORAGE_SIZE": storage_size,
         "MOUNT_PATH": mount_path,
@@ -114,6 +117,43 @@ def _build_template_vars(
         "MEMORY_REQUEST": memory,
         "MEMORY_LIMIT": memory,
     }
+
+
+def _convert_outbound_rules(rule: OutBoundOperationRule | None) -> str:
+    """Convert OutBoundOperationRule to envoy sidecar header-rules.yaml format.
+
+    Groups header_operation_rules by their domains, then maps each action
+    (replace/set → set, remove → remove) into the header-rules YAML structure.
+    Returns the YAML content (indented for embedding inside a ConfigMap data
+    block, i.e. 2-space indented).
+    """
+    if not rule or not rule.header_operation_rules:
+        return "  rules: []"
+
+    # Group rules by domain tuple so rules sharing the same domains
+    # merge into one outbound rule entry.
+    domain_groups: dict[tuple[str, ...], dict[str, Any]] = {}
+    for h in rule.header_operation_rules:
+        key = tuple(sorted(h.domains))
+        if key not in domain_groups:
+            domain_groups[key] = {
+                "name": h.domains[0],
+                "domains": list(h.domains),
+                "set": [],
+                "remove": [],
+            }
+        action = (h.action or "").lower()
+        if action in ("replace", "set"):
+            domain_groups[key]["set"].append(
+                {"header": h.header_name, "value": h.value}
+            )
+        elif action == "remove":
+            domain_groups[key]["remove"].append(h.header_name)
+
+    rules_data = {"rules": list(domain_groups.values())}
+    header_yaml = yaml.safe_dump(rules_data, default_flow_style=False, sort_keys=False)
+    # Indent each line by 2 spaces for ConfigMap data block embedding.
+    return "\n".join(f"  {line}" for line in header_yaml.strip().splitlines())
 
 
 class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
@@ -164,6 +204,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         namespace: str,
         storage: Storage | None,
         resource_spec: ResourceSpecification | None,
+        outbound_operation_rule: OutBoundOperationRule | None = None,
     ) -> tuple[str, str]:
         """Render the template YAML and apply it to the cluster.
 
@@ -177,6 +218,9 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             images,
             storage=storage,
             resource_spec=resource_spec,
+        )
+        variables["HEADER_RULES_YAML"] = _convert_outbound_rules(
+            outbound_operation_rule
         )
         rendered = _render_template(template_id, variables)
 
@@ -225,7 +269,8 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         sandbox_id = f"{template_id}-{uuid.uuid4().hex[:12]}"
         uid = _sanitize_pod_name(sandbox_id)
         deployment_name, container_name = self._create_deployment(
-            uid, template_id, namespace, storage, resource_spec
+            uid, template_id, namespace, storage, resource_spec,
+            outbound_operation_rule=outbound_operation_rule,
         )
         try:
             core_api = CoreV1Api(self._client())

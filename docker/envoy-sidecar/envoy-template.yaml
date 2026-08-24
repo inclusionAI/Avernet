@@ -1,0 +1,133 @@
+# envoy-template.yaml
+# Envoy 出站透明代理配置模板
+# {{PLACEHOLDER}} 由 config-renderer 根据 header-rules.yaml 渲染
+
+admin:
+  address:
+    socket_address:
+      address: 127.0.0.1
+      port_value: {{SIDECAR_ADMIN_PORT}}
+
+static_resources:
+  listeners:
+    - name: outbound_proxy
+      address:
+        socket_address:
+          address: 127.0.0.1
+          port_value: {{SIDECAR_PROXY_PORT}}
+
+      listener_filters:
+        - name: envoy.filters.listener.original_dst
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.listener.original_dst.v3.OriginalDst
+        - name: envoy.filters.listener.tls_inspector
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.listener.tls_inspector.v3.TlsInspector
+
+      filter_chains:
+        # HTTPS MITM: SNI 匹配的域名 → TLS 终止 → 操作 header → 重新加密
+        - filter_chain_match:
+            server_names: {{MITM_SNI_MATCH}}
+            transport_protocol: tls
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_certificates:
+                  - certificate_chain:
+                      filename: "{{MITM_CERT_PATH}}/server/server.crt"
+                    private_key:
+                      filename: "{{MITM_CERT_PATH}}/server/server.key"
+          filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: outbound_https_mitm
+                route_config:
+                  name: outbound_https_mitm_route
+                  virtual_hosts: {{OUTBOUND_HTTPS_VIRTUAL_HOSTS}}
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+                stream_idle_timeout: 300s
+                access_log:
+                  - name: envoy.access_loggers.file
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
+                      path: /var/log/envoy/access.log
+                      log_format:
+                        json_format:
+                          timestamp: "%START_TIME%"
+                          method: "%REQ(:METHOD)%"
+                          path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+                          protocol: "%PROTOCOL%"
+                          response_code: "%RESPONSE_CODE%"
+                          response_flags: "%RESPONSE_FLAGS%"
+                          duration: "%DURATION%"
+                          upstream_cluster: "%UPSTREAM_CLUSTER%"
+                          request_id: "%REQ(X-REQUEST-ID)%"
+
+        # TLS 透传: SNI 不匹配的 HTTPS 流量直接 TCP 转发，不做 MITM
+        - filter_chain_match:
+            transport_protocol: tls
+          filters:
+            - name: envoy.filters.network.tcp_proxy
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+                stat_prefix: outbound_tls_passthrough
+                cluster: outbound_passthrough
+
+        # 纯 HTTP 出站流量 (catch-all，非 TLS)
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: outbound_http
+                route_config:
+                  name: outbound_route
+                  virtual_hosts: {{OUTBOUND_VIRTUAL_HOSTS}}
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+                stream_idle_timeout: 300s
+                access_log:
+                  - name: envoy.access_loggers.file
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
+                      path: /var/log/envoy/access.log
+                      log_format:
+                        json_format:
+                          timestamp: "%START_TIME%"
+                          method: "%REQ(:METHOD)%"
+                          path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+                          protocol: "%PROTOCOL%"
+                          response_code: "%RESPONSE_CODE%"
+                          response_flags: "%RESPONSE_FLAGS%"
+                          duration: "%DURATION%"
+                          upstream_cluster: "%UPSTREAM_CLUSTER%"
+                          request_id: "%REQ(X-REQUEST-ID)%"
+
+  clusters:
+    # HTTPS MITM 后重新加密转发到原始目的地
+    - name: outbound_original_dst
+      type: ORIGINAL_DST
+      lb_policy: CLUSTER_PROVIDED
+      upstream_http_protocol_options:
+        auto_sni: true
+        auto_san_validation: true
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          common_tls_context:
+            validation_context:
+              trusted_ca:
+                filename: /etc/ssl/certs/ca-certificates.crt
+
+    # TLS 透传: 原样 TCP 转发（不终止 TLS）
+    - name: outbound_passthrough
+      type: ORIGINAL_DST
+      lb_policy: CLUSTER_PROVIDED
