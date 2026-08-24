@@ -31,6 +31,7 @@ base=""
 head="HEAD"
 coverage=0
 fast_fail=0
+report_error=0
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -172,7 +173,11 @@ if [[ "$coverage" -eq 1 ]]; then
   fi
   if [[ ! -s ./testresult/junit.xml ]]; then
     echo "BCS unit test report was not generated: ./testresult/junit.xml" >&2
-    [[ "$status" -eq 0 ]] && status=1
+    report_error=1
+  fi
+  if [[ ! -s ./testresult/cobertura.xml ]]; then
+    echo "BCS coverage report was not generated: ./testresult/cobertura.xml" >&2
+    report_error=1
   fi
 else
   echo "--- running cargo nextest (single-pass, 100% required) ---"
@@ -184,9 +189,12 @@ fi
 
 echo "========== BCS pre-push gate finished (status=$status) =========="
 if [[ "$fast_fail" -eq 0 ]]; then
-  # Non-fast-fail (CI coverage scenario): do not block. Test results are still written
-  # to junit/cobertura (if --coverage); the pass rate is delegated to a downstream
-  # ACI checkRule (e.g. casePassRate >= 90).
+  # Non-fast-fail (CI coverage scenario): test failures are delegated to the
+  # downstream pass-rate gate, but missing coverage artifacts are a hard error.
+  if [[ "$report_error" -ne 0 ]]; then
+    echo "BCS coverage artifacts are missing; refusing to continue to cov_gate.py." >&2
+    exit 1
+  fi
   if [[ "$status" -ne 0 ]]; then
     echo "BCS unit tests have failures, but non-fast-fail mode does not block. See the Summary above / junit.xml for the pass rate; downstream gate will judge." >&2
   fi
