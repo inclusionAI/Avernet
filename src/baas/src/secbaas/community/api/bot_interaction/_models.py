@@ -34,10 +34,6 @@ class InteractionResolution:
                     "interaction resolution selectedOptions cannot be empty"
                 )
             for options in self.selected_options:
-                if not options:
-                    raise ValueError(
-                        "interaction resolution selectedOptions entries cannot be empty"
-                    )
                 for option in options:
                     _require_string(option, "selectedOptions value")
 

@@ -997,7 +997,9 @@ class TestResolveMessageInteraction:
         )
 
         service = MagicMock()
-        service.resolve.return_value = InteractionResolveResult(interaction_id="int-1")
+        service.resolve.return_value = InteractionResolveResult(
+            interaction_id="BAAS-INTERACTION-public-1"
+        )
 
         response = await resolve_message_interaction(
             request=InteractionResolveEnvelope(
@@ -1006,7 +1008,7 @@ class TestResolveMessageInteraction:
                 method="interaction.resolve",
                 params={
                     "sessionKey": "s-1",
-                    "interactionId": "int-1",
+                    "interactionId": "BAAS-INTERACTION-public-1",
                     "decision": "allow-once",
                 },
             ),
@@ -1019,8 +1021,7 @@ class TestResolveMessageInteraction:
         assert body["id"] == "req-1"
         assert body["ok"] is True
         service.resolve.assert_called_once_with(
-            session_key="s-1",
-            interaction_id="int-1",
+            baas_interaction_id="BAAS-INTERACTION-public-1",
             resolution=InteractionResolution(decision="allow-once"),
             request_envelope={
                 "type": "req",
@@ -1028,7 +1029,7 @@ class TestResolveMessageInteraction:
                 "method": "interaction.resolve",
                 "params": {
                     "sessionKey": "s-1",
-                    "interactionId": "int-1",
+                    "interactionId": "BAAS-INTERACTION-public-1",
                     "decision": "allow-once",
                 },
             },

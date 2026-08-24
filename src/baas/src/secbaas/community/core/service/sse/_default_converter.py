@@ -557,16 +557,8 @@ def _transform_exec_requested(
     run_id: str,
 ) -> bool:
     command = _non_empty_str(payload.get("command"))
-    if command is None:
-        _warn_interaction(
-            run_id=run_id,
-            interaction_id=data["interactionId"],
-            kind=data["kind"],
-            field_path="payload.command",
-            error_type="missing_required_field",
-        )
-        return False
-    data["command"] = command
+    if command is not None:
+        data["command"] = command
     _copy_present(payload, data, ("cwd",))
 
     if "options" not in payload:

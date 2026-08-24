@@ -40,6 +40,7 @@ from agentclaw.community.core.task_queue.services.registry import (
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
+from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
 from agentclaw.community.core.task_queue.types import Fail, TaskStatus
 
 ENV = "dev"
@@ -331,7 +332,11 @@ def queue(monkeypatch):
         "agentclaw.community.core.task_queue.services.task_queue_service.get_current_env",
         lambda: ENV,
     )
-    return TaskQueueService(TaskQueueRepository(_InMemorySqliteDB(engine)))
+    return TaskQueueService(
+        TaskQueueRepository(_InMemorySqliteDB(engine)),
+        HandlerRegistry(),
+        WorkerWakeup(),
+    )
 
 
 @pytest.mark.integration

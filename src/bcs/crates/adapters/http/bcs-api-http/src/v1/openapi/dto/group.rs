@@ -85,6 +85,8 @@ impl ListGroupsQuery {
 pub struct ParticipantRequest {
     pub actor_id: String,
     pub role: ParticipantRole,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -233,6 +235,7 @@ impl CreateGroupRequest {
                         .map(|participant| CreateParticipant {
                             actor_id: participant.actor_id,
                             role: participant.role,
+                            tags: participant.tags,
                         })
                         .collect(),
                     collaboration: collaboration.into(),

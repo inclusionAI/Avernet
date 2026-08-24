@@ -180,6 +180,18 @@ class _Filesystem:
             raise OSError("private path")
         self.files[path] = content
 
+    async def read_file(self, path):
+        return self.files.get(path)
+
+    async def list_dir(self, path, *, recursive=False):
+        prefix = f"{path}/"
+        entries = [
+            {"relative_path": file_path[len(prefix) :], "is_dir": False}
+            for file_path in self.files
+            if file_path.startswith(prefix)
+        ]
+        return entries or None
+
     async def delete_tree(self, path):
         self.deleted.append(path)
         result = next(self.cleanup_results, True)
@@ -261,6 +273,32 @@ class _Storage:
     async def cleanup(self):
         return await self.filesystem.delete_tree(self.directory)
 
+    async def exists(self):
+        return await self.filesystem.exists(self.directory)
+
+    async def verify(self):
+        entries = await self.filesystem.list_dir(self.directory, recursive=True)
+        if not entries:
+            raise OSError("missing package")
+        return True
+
+    async def copy_to(self, target, *, replace=False):
+        prefix = f"{self.directory}/"
+        files = [
+            (path[len(prefix) :], content)
+            for path, content in self.filesystem.files.items()
+            if path.startswith(prefix)
+        ]
+        if not files:
+            raise OSError("missing package")
+        if await self.filesystem.exists(target.directory):
+            if not replace:
+                raise OSError("target exists")
+            if not await target.cleanup():
+                raise OSError("cleanup failed")
+        await target.write(files)
+        await target.verify()
+
 
 @pytest.mark.asyncio
 async def test_package_storage_prepare_accepts_an_absent_first_upload_directory():
@@ -269,6 +307,61 @@ async def test_package_storage_prepare_accepts_an_absent_first_upload_directory(
         filesystem, "/private/skills-local/upload-skill"
     ).prepare()
     assert filesystem.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_package_storage_copy_to_preserves_source_and_verifies_target():
+    filesystem = _Filesystem()
+    filesystem.files["/private/source/SKILL.md"] = b"skill"
+    source = LocalSkillPackageStorage(filesystem, "/private/source")
+    target = LocalSkillPackageStorage(filesystem, "/private/target")
+
+    await source.copy_to(target)
+
+    assert filesystem.files["/private/source/SKILL.md"] == b"skill"
+    assert filesystem.files["/private/target/SKILL.md"] == b"skill"
+
+
+@pytest.mark.asyncio
+async def test_package_storage_copy_to_rejects_an_existing_target_without_replace():
+    filesystem = _Filesystem()
+    filesystem.files["/private/source/SKILL.md"] = b"new"
+    filesystem.files["/private/target/SKILL.md"] = b"old"
+
+    with pytest.raises(OSError, match="copy target already exists"):
+        await LocalSkillPackageStorage(filesystem, "/private/source").copy_to(
+            LocalSkillPackageStorage(filesystem, "/private/target")
+        )
+
+    assert filesystem.files["/private/target/SKILL.md"] == b"old"
+
+
+@pytest.mark.asyncio
+async def test_package_storage_copy_to_requires_existing_target_cleanup():
+    filesystem = _Filesystem(cleanup_results=[False])
+    filesystem.files["/private/source/SKILL.md"] = b"new"
+    filesystem.files["/private/target/SKILL.md"] = b"old"
+
+    with pytest.raises(OSError, match="unable to clear Local Skill copy target"):
+        await LocalSkillPackageStorage(filesystem, "/private/source").copy_to(
+            LocalSkillPackageStorage(filesystem, "/private/target"), replace=True
+        )
+
+    assert filesystem.files["/private/target/SKILL.md"] == b"old"
+
+
+@pytest.mark.asyncio
+async def test_package_storage_copy_to_rejects_failed_target_verification():
+    filesystem = _Filesystem()
+    filesystem.files["/private/source/SKILL.md"] = b"new"
+    target = LocalSkillPackageStorage(filesystem, "/private/target")
+
+    async def fail_restore(_files):
+        return False
+
+    target._restore_contents = fail_restore
+    with pytest.raises(OSError, match="Local Skill copy verification failed"):
+        await LocalSkillPackageStorage(filesystem, "/private/source").copy_to(target)
 
 
 class _Collaborators:
@@ -394,7 +487,6 @@ class _ReplacementRepo(_Repo):
         self.rows = rows
         self.updates = []
         self.atomic_replacements = []
-        self.cleanup = None
 
     def list_bot_active_assets(self, **_kwargs):
         from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
@@ -453,11 +545,7 @@ class _ReplacementRepo(_Repo):
                 "user_id": kwargs["owner_id"],
             }
         )
-        self.cleanup.commit_preparing(
-            kwargs["cleanup_work_id"],
-            requires_runtime_restore=kwargs["requires_runtime_restore"],
-        )
-        return kwargs["cleanup_work_id"]
+        return row
 
 
 class _ConcurrentRepo(_ReplacementRepo):
@@ -513,10 +601,8 @@ class _DeviceResolver:
 
 
 def _replacement_service(
-    filesystem, repo, runtime, cleanup=None, guard=None, *, provider="local", sets=None
+    filesystem, repo, runtime, _unused_cleanup=None, guard=None, *, provider="local", sets=None
 ):
-    cleanup = cleanup or _Cleanup()
-    repo.cleanup = cleanup
     return LocalSkillUploadService(
         repo,
         sets or _Sets(),
@@ -525,7 +611,6 @@ def _replacement_service(
         _ReplacementFactory(filesystem),
         _Audit(),
         guard or _Guard(),
-        cleanup,
         lambda: _DeviceResolver(provider),
         runtime,
     )
@@ -552,7 +637,6 @@ def _service(
         factory or _Factory(filesystem),
         audit or _Audit(),
         guard or _Guard(),
-        _Cleanup(),
         lambda: _DeviceResolver(provider),
         _RuntimeFactory(),
     )
@@ -852,6 +936,73 @@ def test_zip_rejects_missing_multiple_outside_wrapper_and_normalized_duplicates(
         _service(_Filesystem())._unpack(_zip(entries))
 
 
+def test_zip_explains_when_multiple_skill_files_are_present():
+    with pytest.raises(LocalSkillInvalidPackageError) as error:
+        _service(_Filesystem())._unpack(
+            _zip(
+                {
+                    "SKILL.md": b"name: one\ndescription: one\n",
+                    "nested/SKILL.md": b"name: one\ndescription: two\n",
+                }
+            )
+        )
+
+    assert error.value.public_message == (
+        "Skill package must contain exactly one SKILL.md file"
+    )
+
+
+def test_zip_explains_when_an_archive_entry_cannot_be_read(monkeypatch):
+    class _UnreadableArchive:
+        def infolist(self):
+            return [zipfile.ZipInfo("SKILL.md")]
+
+        def read(self, _info):
+            raise OSError("injected archive read failure")
+
+    monkeypatch.setattr(
+        upload_module.zipfile, "ZipFile", lambda *_args: _UnreadableArchive()
+    )
+
+    with pytest.raises(LocalSkillInvalidPackageError) as error:
+        _service(_Filesystem())._unpack(b"not-read")
+
+    assert error.value.public_message == "Skill package could not be read"
+
+
+def test_zip_explains_when_wrapper_directory_does_not_match_skill_name():
+    with pytest.raises(LocalSkillInvalidPackageError) as error:
+        _service(_Filesystem())._unpack(
+            _zip(
+                {
+                    "wrong-directory/SKILL.md": (
+                        b"name: actual-skill\ndescription: valid\n"
+                    )
+                }
+            )
+        )
+
+    assert error.value.public_message == (
+        "Skill directory name must match SKILL.md name"
+    )
+
+
+def test_zip_rejects_a_file_that_conflicts_with_its_wrapper_directory():
+    with pytest.raises(LocalSkillInvalidPackageError) as error:
+        _service(_Filesystem())._unpack(
+            _zip(
+                {
+                    "wrapped/SKILL.md": b"name: wrapped\ndescription: valid\n",
+                    "wrapped": b"not a directory",
+                }
+            )
+        )
+
+    assert error.value.public_message == (
+        "Skill package files must be under one Skill directory"
+    )
+
+
 @pytest.mark.parametrize("name", ["skills-center", "skills-local", "skills-repo"])
 def test_zip_rejects_reserved_content_store_names(name):
     with pytest.raises(LocalSkillInvalidPackageError):
@@ -1020,14 +1171,155 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
     assert result["skill"]["id"] == "9"
     assert result["skill"]["user_id"] == "owner"
     assert result["skill"]["active"] is False
-    assert result["skill"]["git_path"] != "local:///private/skills-local/upload-skill"
+    assert result["skill"]["git_path"] == "local:///private/skills-local/upload-skill"
     assert sets.exclusions == []
     assert runtime.calls == 1
     assert "/private/skills-local/upload-skill" in filesystem.deleted
-    assert any("replacement-" in path for path in filesystem.files)
+    assert not any("replacement-" in path for path in filesystem.files)
+    assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == (
+        _skill_md(description="new description")
+    )
 
 
 @pytest.mark.asyncio
+async def test_replacement_recreates_a_missing_canonical_package_for_a_stale_row():
+    filesystem = _Filesystem()
+    skill = _existing_skill(active=False)
+    repo = _ReplacementRepo([skill])
+
+    result = await _replacement_service(
+        filesystem, repo, _ReplacementRuntime([True])
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip(
+            {"SKILL.md": b"name: upload-skill\ndescription: restored\n"}
+        ),
+    )
+
+    assert result["operation"] == "updated"
+    assert skill["git_path"] == "local:///private/skills-local/upload-skill"
+    assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == (
+        b"name: upload-skill\ndescription: restored\n"
+    )
+    assert not any(".replacement-" in path for path in filesystem.files)
+
+
+@pytest.mark.asyncio
+async def test_replacement_migrates_a_legacy_hidden_locator_to_the_canonical_path():
+    old_locator = "/private/skills-local/.upload-skill.replacement-old"
+    filesystem = _Filesystem()
+    filesystem.files[f"{old_locator}/SKILL.md"] = b"old"
+    old = {**_existing_skill(active=False), "git_path": f"local://{old_locator}"}
+    repo = _ReplacementRepo([old])
+
+    result = await _replacement_service(
+        filesystem, repo, _ReplacementRuntime([True])
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip({"SKILL.md": b"name: upload-skill\ndescription: canonical\n"}),
+    )
+
+    canonical = "/private/skills-local/upload-skill"
+    assert result["skill"]["git_path"] == f"local://{canonical}"
+    assert old["git_path"] == f"local://{canonical}"
+    assert filesystem.files[f"{canonical}/SKILL.md"] == (
+        b"name: upload-skill\ndescription: canonical\n"
+    )
+    assert not any(".replacement-" in path for path in filesystem.files)
+
+
+@pytest.mark.asyncio
+async def test_replacement_discards_staging_and_backup_when_backup_copy_fails(
+    monkeypatch,
+):
+    filesystem = _Filesystem()
+    canonical = "/private/skills-local/upload-skill"
+    rollback = "/private/skills-local/.upload-skill.rollback-backup"
+    filesystem.files[f"{canonical}/SKILL.md"] = b"old"
+    filesystem.files[f"{rollback}/stale.txt"] = b"stale"
+    repo = _ReplacementRepo([_existing_skill(active=False)])
+    ids = iter([SimpleNamespace(hex="staged"), SimpleNamespace(hex="backup")])
+    monkeypatch.setattr(upload_module, "uuid4", lambda: next(ids))
+
+    with pytest.raises(LocalSkillStorageError):
+        await _replacement_service(
+            filesystem, repo, _ReplacementRuntime([True])
+        ).upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip(
+                {"SKILL.md": b"name: upload-skill\ndescription: replacement\n"}
+            ),
+        )
+
+    assert rollback in filesystem.deleted
+    assert "/private/skills-local/.upload-skill.replacement-staged" in (
+        filesystem.deleted
+    )
+    assert repo.atomic_replacements == []
+
+
+@pytest.mark.asyncio
+async def test_restore_replacement_requires_backup_after_canonical_publish():
+    filesystem = _Filesystem()
+    skill = _existing_skill(active=False)
+    service = _replacement_service(
+        filesystem, _ReplacementRepo([skill]), _ReplacementRuntime([True])
+    )
+
+    with pytest.raises(LocalSkillStorageError):
+        await service._restore_replacement(
+            skill=skill,
+            old_metadata={},
+            bot={"env": "test", "entity_id": "owner", "active_engine": "moltis"},
+            owner_id="owner",
+            bot_id="bot",
+            staged=_Storage(filesystem, "/private/staged"),
+            staged_locator="/private/staged",
+            canonical=_Storage(filesystem, "/private/canonical"),
+            canonical_locator="/private/canonical",
+            old_is_canonical=True,
+            backup=None,
+            canonical_published=True,
+            switched=False,
+            runtime_sync_attempted=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_restore_replacement_requires_noncanonical_publish_cleanup():
+    filesystem = _Filesystem(cleanup_results=[False])
+    skill = _existing_skill(active=False)
+    service = _replacement_service(
+        filesystem, _ReplacementRepo([skill]), _ReplacementRuntime([True])
+    )
+
+    with pytest.raises(LocalSkillStorageError):
+        await service._restore_replacement(
+            skill=skill,
+            old_metadata={},
+            bot={"env": "test", "entity_id": "owner", "active_engine": "moltis"},
+            owner_id="owner",
+            bot_id="bot",
+            staged=_Storage(filesystem, "/private/staged"),
+            staged_locator="/private/staged",
+            canonical=_Storage(filesystem, "/private/canonical"),
+            canonical_locator="/private/canonical",
+            old_is_canonical=False,
+            backup=None,
+            canonical_published=True,
+            switched=False,
+            runtime_sync_attempted=False,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_replacement_is_blocked_while_the_same_skill_has_delete_repair_work():
     filesystem = _Filesystem()
     filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
@@ -1147,8 +1439,10 @@ async def test_active_replacement_runtime_failure_restores_old_metadata_and_runt
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_active_replacement_restore_sync_failure_keeps_original_authority_and_records_staged_cleanup():
-    filesystem = _Filesystem(cleanup_results=[False])
+    filesystem = _Filesystem(cleanup_results=[True, True])
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
     old = _existing_skill(active=True)
     cleanup = _Cleanup()
     with pytest.raises(LocalSkillRuntimeSyncError):
@@ -1169,7 +1463,7 @@ async def test_active_replacement_restore_sync_failure_keeps_original_authority_
     )
     assert staged_work["requires_runtime_restore"] is True
     assert cleanup.cancelled == [1]
-    assert filesystem.deleted == []
+    assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == b"old"
 
 
 @pytest.mark.asyncio
@@ -1210,8 +1504,10 @@ async def test_foreign_owner_same_name_is_excluded_from_this_owner_scope():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_post_switch_obsolete_cleanup_failure_is_recorded_without_undoing_update():
-    filesystem = _Filesystem(cleanup_results=[False])
+    filesystem = _Filesystem(cleanup_results=[True, False])
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
     repo = _ReplacementRepo([_existing_skill(active=False)])
     cleanup = _Cleanup()
     result = await _replacement_service(
@@ -1223,19 +1519,13 @@ async def test_post_switch_obsolete_cleanup_failure_is_recorded_without_undoing_
         package=_zip({"SKILL.md": _skill_md(description="new description")}),
     )
     assert result["operation"] == "updated"
-    assert cleanup.rows == [
-        {
-            "env": "test",
-            "owner_id": "owner",
-            "bot_id": "bot",
-            "skill_id": "9",
-            "package_locator": "/private/skills-local/upload-skill",
-            "requires_runtime_restore": True,
-        }
-    ]
+    assert len(cleanup.rows) == 1
+    assert cleanup.rows[0]["requires_runtime_restore"] is True
+    assert ".upload-skill.rollback-" in cleanup.rows[0]["package_locator"]
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_cleanup_registration_failure_restores_old_authority_before_runtime_or_purge():
     filesystem = _Filesystem()
     filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
@@ -1260,9 +1550,11 @@ async def test_cleanup_registration_failure_restores_old_authority_before_runtim
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_later_serialized_upload_retries_durable_cleanup_work():
     filesystem = _Filesystem()
     filesystem.files["/private/skills-local/obsolete/SKILL.md"] = b"obsolete"
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
     cleanup = _PendingCleanup()
     result = await _replacement_service(
         filesystem,
@@ -1281,6 +1573,7 @@ async def test_later_serialized_upload_retries_durable_cleanup_work():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_cleanup_skips_a_locator_reused_by_a_current_local_skill():
     filesystem = _Filesystem()
     locator = "/private/skills-local/upload-skill"
@@ -1312,6 +1605,7 @@ async def test_cleanup_skips_a_locator_reused_by_a_current_local_skill():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cleanup_results", [None, [False]])
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_cleanup_progress_write_failure_blocks_the_next_replacement(
     cleanup_results,
 ):
@@ -1334,9 +1628,11 @@ async def test_cleanup_progress_write_failure_blocks_the_next_replacement(
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_runtime_restore_work_keeps_staged_bytes_until_old_mapping_is_restored():
     filesystem = _Filesystem()
     filesystem.files["/private/skills-local/staged/SKILL.md"] = b"staged"
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
     cleanup = _RuntimeRestoreCleanup()
     runtime = _ReplacementRuntime([True, True])
     await _replacement_service(
@@ -1356,6 +1652,7 @@ async def test_runtime_restore_work_keeps_staged_bytes_until_old_mapping_is_rest
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_runtime_restore_failure_blocks_the_next_local_skill_mutation():
     filesystem = _Filesystem()
     filesystem.files["/private/skills-local/staged/SKILL.md"] = b"staged"

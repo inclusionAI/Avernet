@@ -54,6 +54,27 @@ def test_interaction_resolution_round_trips_ask_user_payload() -> None:
     assert InteractionResolution.from_dict(payload) == resolution
 
 
+def test_interaction_resolution_round_trips_skipped_ask_user_values() -> None:
+    resolution = InteractionResolution(
+        kind="ask_user",
+        decision="submit",
+        answer="Array: ；Empty: ；Blank:    ",
+        message="Array: ；Empty: ；Blank:    ",
+        values={"Array": "", "Empty": "", "Blank": "   "},
+        answers={
+            "Skip with an empty array?": "",
+            "Skip with an empty string?": "",
+            "Skip with whitespace?": "   ",
+        },
+        selected_options=((), ("",), ("   ",)),
+    )
+
+    payload = resolution.to_dict()
+
+    assert payload["selectedOptions"] == [[], [""], ["   "]]
+    assert InteractionResolution.from_dict(payload) == resolution
+
+
 def test_interaction_resolution_omits_absent_optional_fields() -> None:
     resolution = InteractionResolution(kind="exec", decision="deny")
 
@@ -69,6 +90,8 @@ from secbaas.community.core.service.bot_run._interaction_protocol import (
     EngineInteractionRequestedEvent,
 )
 
+BAAS_INTERACTION_ID = "BAAS-INTERACTION-f6489adf6a916257a4b9a56bd056bf58"
+
 
 class FakeRepo:
     def __init__(self) -> None:
@@ -78,6 +101,7 @@ class FakeRepo:
     def create_requested(
         self,
         *,
+        baas_interaction_id: str,
         session_key: str,
         interaction_id: str,
         payload: BotRunInteractionPayload,
@@ -88,6 +112,7 @@ class FakeRepo:
             return BotRunInteractionCreateResult(existing, created=False)
         record = BotRunInteractionRecord(
             id=self.next_id,
+            baas_interaction_id=baas_interaction_id,
             session_key=session_key,
             interaction_id=interaction_id,
             state="requested",
@@ -101,6 +126,18 @@ class FakeRepo:
         self, *, session_key: str, interaction_id: str
     ) -> BotRunInteractionRecord | None:
         return self.rows.get((session_key, interaction_id))
+
+    def get_by_baas_interaction_id(
+        self, *, baas_interaction_id: str
+    ) -> BotRunInteractionRecord | None:
+        return next(
+            (
+                record
+                for record in self.rows.values()
+                if record.baas_interaction_id == baas_interaction_id
+            ),
+            None,
+        )
 
     def transition(
         self,
@@ -122,6 +159,27 @@ class FakeRepo:
         )
         self.rows[key] = updated
         return updated
+
+    def transition_by_baas_interaction_id(
+        self,
+        *,
+        baas_interaction_id,
+        from_states,
+        to_state,
+        patch,
+    ):
+        record = self.get_by_baas_interaction_id(
+            baas_interaction_id=baas_interaction_id
+        )
+        if record is None:
+            return None
+        return self.transition(
+            session_key=record.session_key,
+            interaction_id=record.interaction_id,
+            from_states=from_states,
+            to_state=to_state,
+            patch=patch,
+        )
 
     def merge_payload(
         self,
@@ -164,7 +222,7 @@ def _record_requested(repo: FakeRepo, service: DefaultBotInteractionService) -> 
         allowed_decisions=("allow-once", "deny"),
         expires_at_ms=int(time.time() * 1000) + 60_000,
     )
-    assert created is True
+    assert created.created is True
 
 
 def _resolve(
@@ -181,15 +239,14 @@ def _resolve(
         "method": "interaction.resolve",
         "params": {
             "sessionKey": "s-1",
-            "interactionId": "int-1",
+            "interactionId": BAAS_INTERACTION_ID,
             "decision": resolution.decision,
         },
     }
     if idempotency_key is not None:
         request["params"]["idempotencyKey"] = idempotency_key
     return service.resolve(
-        session_key="s-1",
-        interaction_id="int-1",
+        baas_interaction_id=BAAS_INTERACTION_ID,
         resolution=resolution,
         request_envelope=request,
         idempotency_key=idempotency_key,
@@ -218,6 +275,71 @@ def test_record_requested_uses_explicit_identity_not_envelope_identity() -> None
     )
 
 
+def test_record_requested_returns_deterministic_baas_interaction_id() -> None:
+    repo = FakeRepo()
+    service = DefaultBotInteractionService(repo)
+
+    result = service.record_requested(
+        session_key="s-1",
+        interaction_id="int-1",
+        envelope=_requested_envelope(),
+        allowed_decisions=("allow-once",),
+        expires_at_ms=None,
+    )
+
+    assert result.baas_interaction_id == BAAS_INTERACTION_ID
+    assert result.created is True
+
+
+def test_same_engine_interaction_id_in_another_session_gets_another_baas_id() -> None:
+    repo = FakeRepo()
+    service = DefaultBotInteractionService(repo)
+
+    first = service.record_requested(
+        session_key="s-1",
+        interaction_id="int-1",
+        envelope=_requested_envelope(),
+        allowed_decisions=("allow-once",),
+        expires_at_ms=None,
+    )
+    second = service.record_requested(
+        session_key="s-2",
+        interaction_id="int-1",
+        envelope=_requested_envelope(),
+        allowed_decisions=("allow-once",),
+        expires_at_ms=None,
+    )
+
+    assert first.baas_interaction_id == BAAS_INTERACTION_ID
+    assert second.baas_interaction_id == (
+        "BAAS-INTERACTION-41bca94003b2c4897af521fa6ae9b376"
+    )
+
+
+def test_redelivered_request_returns_persisted_legacy_public_id() -> None:
+    repo = FakeRepo()
+    repo.rows[("s-1", "int-1")] = BotRunInteractionRecord(
+        id=1,
+        baas_interaction_id="legacy-engine-id-exposed-before-migration",
+        session_key="s-1",
+        interaction_id="int-1",
+        state="requested",
+        payload=BotRunInteractionPayload(requested=_requested_envelope()),
+    )
+    service = DefaultBotInteractionService(repo)
+
+    result = service.record_requested(
+        session_key="s-1",
+        interaction_id="int-1",
+        envelope=_requested_envelope(),
+        allowed_decisions=("allow-once",),
+        expires_at_ms=None,
+    )
+
+    assert result.baas_interaction_id == ("legacy-engine-id-exposed-before-migration")
+    assert result.created is False
+
+
 def test_duplicate_requested_is_idempotent() -> None:
     repo = FakeRepo()
     service = DefaultBotInteractionService(repo)
@@ -229,8 +351,8 @@ def test_duplicate_requested_is_idempotent() -> None:
         "expires_at_ms": None,
     }
 
-    assert service.record_requested(**kwargs) is True
-    assert service.record_requested(**kwargs) is False
+    assert service.record_requested(**kwargs).created is True
+    assert service.record_requested(**kwargs).created is False
     assert len(repo.rows) == 1
 
 
@@ -241,7 +363,7 @@ def test_http_resolve_moves_requested_to_queued() -> None:
 
     result = _resolve(service)
 
-    assert result.interaction_id == "int-1"
+    assert result.interaction_id == BAAS_INTERACTION_ID
     record = repo.get(session_key="s-1", interaction_id="int-1")
     assert record is not None
     assert record.state == "queued"
@@ -277,8 +399,8 @@ def test_provider_resolve_same_key_and_resolution_is_idempotent() -> None:
     first = _resolve(service, resolution=resolution, idempotency_key="idem-1")
     second = _resolve(service, resolution=resolution, idempotency_key="idem-1")
 
-    assert first.interaction_id == "int-1"
-    assert second.interaction_id == "int-1"
+    assert first.interaction_id == BAAS_INTERACTION_ID
+    assert second.interaction_id == BAAS_INTERACTION_ID
     record = repo.get(session_key="s-1", interaction_id="int-1")
     assert record is not None
     assert record.state == "queued"
@@ -302,7 +424,7 @@ def test_provider_resolve_same_key_remains_idempotent_after_terminal_state(
         idempotency_key="idem-1",
     )
 
-    assert result.interaction_id == "int-1"
+    assert result.interaction_id == BAAS_INTERACTION_ID
 
 
 def test_provider_resolve_rereads_after_lost_transition_race() -> None:
@@ -310,7 +432,7 @@ def test_provider_resolve_rereads_after_lost_transition_race() -> None:
     service = DefaultBotInteractionService(repo)
     _record_requested(repo, service)
     resolution = InteractionResolution(kind="exec", decision="allow-once")
-    original_transition = repo.transition
+    original_transition = repo.transition_by_baas_interaction_id
 
     def transition_as_concurrent_winner(**kwargs):
         updated = original_transition(**kwargs)
@@ -318,7 +440,9 @@ def test_provider_resolve_rereads_after_lost_transition_race() -> None:
             return None
         return updated
 
-    repo.transition = transition_as_concurrent_winner  # type: ignore[method-assign]
+    repo.transition_by_baas_interaction_id = (  # type: ignore[method-assign]
+        transition_as_concurrent_winner
+    )
 
     result = _resolve(
         service,
@@ -326,7 +450,7 @@ def test_provider_resolve_rereads_after_lost_transition_race() -> None:
         idempotency_key="idem-1",
     )
 
-    assert result.interaction_id == "int-1"
+    assert result.interaction_id == BAAS_INTERACTION_ID
 
 
 def test_provider_resolve_same_key_with_different_resolution_conflicts() -> None:
@@ -398,6 +522,7 @@ def test_legacy_payload_without_allowed_decisions_remains_unrestricted() -> None
     assert "allowedDecisions" not in payload.to_dict()
     repo.rows[("s-1", "int-1")] = BotRunInteractionRecord(
         id=1,
+        baas_interaction_id=BAAS_INTERACTION_ID,
         session_key="s-1",
         interaction_id="int-1",
         state="requested",
@@ -406,7 +531,7 @@ def test_legacy_payload_without_allowed_decisions_remains_unrestricted() -> None
 
     result = _resolve(service, decision="legacy-decision")
 
-    assert result.interaction_id == "int-1"
+    assert result.interaction_id == BAAS_INTERACTION_ID
     record = repo.get(session_key="s-1", interaction_id="int-1")
     assert record is not None
     assert record.state == "queued"
@@ -426,6 +551,7 @@ def test_explicit_empty_allowed_decisions_round_trip_and_reject_all() -> None:
     assert payload.to_dict()["allowedDecisions"] == []
     repo.rows[("s-1", "int-1")] = BotRunInteractionRecord(
         id=1,
+        baas_interaction_id=BAAS_INTERACTION_ID,
         session_key="s-1",
         interaction_id="int-1",
         state="requested",
@@ -464,7 +590,7 @@ def test_ask_user_fixed_actions_can_be_queued(decision: str) -> None:
 
     result = _resolve(service, decision=decision)
 
-    assert result.interaction_id == "int-1"
+    assert result.interaction_id == BAAS_INTERACTION_ID
     record = repo.get(session_key="s-1", interaction_id="int-1")
     assert record is not None
     assert record.state == "queued"
@@ -527,7 +653,7 @@ def test_parsed_hidden_decision_is_rejected_but_visible_decision_resolves() -> N
         _resolve(service, decision="hidden")
 
     result = _resolve(service, decision="allow-once")
-    assert result.interaction_id == "int-1"
+    assert result.interaction_id == BAAS_INTERACTION_ID
     record = repo.get(session_key="s-1", interaction_id="int-1")
     assert record is not None
     assert record.state == "queued"
@@ -557,6 +683,7 @@ def test_claim_legacy_queued_payload_builds_decision_only_resolution() -> None:
     service = DefaultBotInteractionService(repo)
     repo.rows[("s-1", "int-1")] = BotRunInteractionRecord(
         id=1,
+        baas_interaction_id=BAAS_INTERACTION_ID,
         session_key="s-1",
         interaction_id="int-1",
         state="queued",
@@ -585,18 +712,19 @@ def test_duplicate_resolved_transition_is_suppressed() -> None:
         "payload": {"interactionId": "different-id"},
     }
 
-    assert (
-        service.mark_resolved(
-            session_key="s-1", interaction_id="int-1", envelope=envelope
-        )
-        is True
+    first = service.mark_resolved(
+        session_key="s-1", interaction_id="int-1", envelope=envelope
     )
-    assert (
-        service.mark_resolved(
-            session_key="s-1", interaction_id="int-1", envelope=envelope
-        )
-        is False
+    second = service.mark_resolved(
+        session_key="s-1", interaction_id="int-1", envelope=envelope
     )
+
+    assert first is not None
+    assert first.baas_interaction_id == BAAS_INTERACTION_ID
+    assert first.applied is True
+    assert second is not None
+    assert second.baas_interaction_id == BAAS_INTERACTION_ID
+    assert second.applied is False
     record = repo.get(session_key="s-1", interaction_id="int-1")
     assert record is not None
     assert record.payload.resolved == envelope

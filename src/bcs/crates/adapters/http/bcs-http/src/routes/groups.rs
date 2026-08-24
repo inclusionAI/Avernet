@@ -615,6 +615,7 @@ fn legacy_create_group_spec(
                     strategy,
                 )?,
                 actor_id: participant.bot_id,
+                tags: participant.tags,
             })
         })
         .collect::<Result<Vec<_>, HttpAdapterError>>()?;
@@ -1692,6 +1693,7 @@ fn group_create_participants(
                 } else {
                     participant.role.clone()
                 },
+                tags: normalize_participant_tags(&participant.tags),
             })
             .collect());
     }
@@ -1744,6 +1746,7 @@ fn group_create_participants(
         participants.push(GroupCreateParticipantCommand {
             bot_id: bot_id.to_string(),
             role: Some(role),
+            tags: Vec::new(),
         });
     }
 
@@ -1782,6 +1785,7 @@ fn group_create_participants_from_runtime_bindings(
             participants.push(GroupCreateParticipantCommand {
                 bot_id: bot_id.to_string(),
                 role: Some(inferred_participant_role_wire(bot_id, driver_bot).to_string()),
+                tags: Vec::new(),
             });
         }
     }
@@ -1796,6 +1800,13 @@ fn group_create_participants_from_runtime_bindings(
         ));
     }
     Ok(participants)
+}
+
+fn normalize_participant_tags(tags: &[String]) -> Vec<String> {
+    tags.iter()
+        .map(|tag| tag.trim().to_string())
+        .filter(|tag| !tag.is_empty())
+        .collect()
 }
 
 fn validate_participant_binding_members(
