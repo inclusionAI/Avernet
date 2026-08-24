@@ -130,12 +130,6 @@ user_config:
   gateway:
     base_url: "http://127.0.0.1:9999"
 
-  # task 回投入口(外部执行体/agent 回投任务结果的 origin)—— singlebox 走本地直连
-  # (DEPLOY_PROFILE=singlebox 短路读 SINGLEBOX_BACKEND_URL/8888,本块通常不被读;同款
-  # economy_governance.iframe_callback_url 之 localhost:8888 取值留档)。空 → 回退 8888。
-  task_callback:
-    base_url: "http://localhost:8888"
-
   # BaaS — singlebox 模式下唯一的真本机依赖
   # template/tenant relocated from the (now-neutral) application.yaml base — value
   # preserved as-is (pre-existing: singlebox never overrode these; out of scope

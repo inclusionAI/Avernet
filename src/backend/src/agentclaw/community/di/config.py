@@ -312,26 +312,6 @@ class EcbConfig:
 
 
 @dataclass(frozen=True)
-class TaskCallbackConfig:
-    """本 backend 对外被回投的入口 origin(外部执行实体/agent 回投任务结果)。
-
-    与 :class:`GatewayConfig`(租户公开 openapi 网关)解耦:task 回投端点
-    ``/api/v1/collaboration/tasks/callback/report`` 在内部 ``/api`` 面,不经 gateway
-    spanner(见 adapters/http/app.py、adapters/http/task/__init__.py)。本地 singlebox
-    直连 backend 8888(``SINGLEBOX_BACKEND_URL`` 短路);corp pre/prod 由 corp overlay
-    注入真实公网入口(pre 即 backend 新申请的 ``teamclawgw-pre`` 等)。中立空默认 —
-    community/test 不发 corp 标识(shipped-config guard);空 → 回退 localhost:8888
-    (其它环境可能尚未申请),与 economy_governance.iframe_callback_url 同款语义(外部
-    主体 POST 回 backend 内部端点,非 tenant 网关)。
-
-    Env-aware: ``base_url_pre`` 在 env=='pre' 时覆盖 ``base_url``。
-    """
-
-    base_url: str = ""
-    base_url_pre: str = ""
-
-
-@dataclass(frozen=True)
 class BaasConfig:
     """BaaS service config — backend's outbound HTTP client for the BaaS API."""
 

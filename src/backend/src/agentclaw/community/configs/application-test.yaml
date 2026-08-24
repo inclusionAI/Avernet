@@ -34,9 +34,3 @@ user_config:
   # so only the config key's presence matters (the yuque verify endpoint reads it).
   yuque:
     user_api: "http://127.0.0.1:9999/api/v2/user"
-
-  # task 回投入口 — neutral stand-in (the suite mocks the callback; only the key's
-  # presence/shape matters, not where it points; corp supply real values via overlay).
-  task_callback:
-    base_url: ""
-    base_url_pre: ""

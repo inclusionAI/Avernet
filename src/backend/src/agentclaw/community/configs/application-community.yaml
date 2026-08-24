@@ -76,13 +76,6 @@ user_config:
     base_url: ""
     base_url_pre: ""
 
-  # task 回投入口(外部执行体/agent 回投任务结果的 origin)—— 与 front-no-gateway 同义,留空
-  # → 回退 localhost:8888(community 不发 corp 标识,shipped-config guard);corp pre/prod
-  # 由 corp overlay 注入真实公网入口(同 bcn/ecb/gateway 的 prod/pre 双值)。
-  task_callback:
-    base_url: ""
-    base_url_pre: ""
-
   # Dormant-bot recycle: dry-run by default (never mutates without opt-in).
   dormant:
     dry_run: true

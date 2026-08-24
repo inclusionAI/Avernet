@@ -37,7 +37,6 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
-from agentclaw.community.di.config import TaskCallbackConfig
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -128,22 +127,15 @@ class TaskModule(Module):
             bot_service = injector.get(BotServiceProtocol)
         except Exception:  # noqa: BLE101 未绑定 → dashboard 不附加 assignee 的 bot 归属/名
             bot_service = None
-        # 回投入口 = backend 自己被回投的入口 origin(解析自 TaskCallbackConfig,与
-        # GatewayConfig/租户联网网关解耦:task 回投端点在内部 /api 面,不经 gateway spanner
-        # —— 见 adapters/http/task/__init__.py;同 economy_governance.iframe_callback_url
-        # 同款语义)。轻量/纯内核测试 injector 未装 ConfigModule → 取不到 → None 回退本地
-        # (与 bcn 等可选依赖同语义);community/未申请环境 base_url 为空亦回退 localhost。
-        try:
-            task_callback = injector.get(TaskCallbackConfig)
-        except Exception:  # noqa: BLE001 未绑定 → 回投地址回退 localhost:8888
-            task_callback = None
+        # 回投地址 = backend 访问 URL(SINGLEBOX_BACKEND_URL / TASK_API_BASE_URL[_PRE]),
+        # 由各环境部署注入;agent 回投结果往此 origin POST(自行拼 /api/v1/... 路径)。
         return TaskService(
             graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
             bcn=bcn, bcs_identity=bcs_identity, task_info_repo=task_info_repo,
             callback_repo=callback_repo, task_node_repo=task_node_repo,
             task_node_run_info_repo=task_node_run_info_repo,
             bot_service=bot_service,
-            api_base_url=self._resolve_api_base_url(task_callback),
+            api_base_url=self._resolve_api_base_url(),
         )
 
     @singleton
@@ -189,25 +181,17 @@ class TaskModule(Module):
         return auth
 
     @staticmethod
-    def _resolve_api_base_url(task_callback: TaskCallbackConfig | None) -> str:
-        """回投 base URL:agent 命中后往此 origin 回投任务结果(自行拼 /api/v1/... 路径)。
+    def _resolve_api_base_url() -> str:
+        """返回本 backend 的访问 URL(agent 回投结果往此 origin POST,自行拼 /api/v1/... 路径)。
 
-        本地址 = 走到承载 `/api/v1/collaboration/tasks` 的 backend 进程的入口,与
-        ``GatewayConfig``/连接端点用的租户 openapi 网关解耦:task 回投端点在内部
-        ``/api`` 面,不经 gateway spanner(见 adapters/http/task/__init__.py)。
-        singlebox → 本地直连 backend(``SINGLEBOX_BACKEND_URL``/8888)。其余(corp
-        pre/prod)→ ``TaskCallbackConfig`` 按 get_current_env() 选 ``base_url_pre``/
-        ``base_url``(corp overlay 注真实公网入口;与 economy_governance.iframe_callback_url
-        同款)。空(community / 尚未申请环境)→ 回退 localhost:8888(其它环境可能尚未申请)。
-        """
+        复用旧的裸 env 机制,不引入新 config:singlebox → 本地直连(``SINGLEBOX_BACKEND_URL``/8888);
+        其余按 get_current_env() 选 ``TASK_API_BASE_URL_PRE``(pre)/``TASK_API_BASE_URL``(其余),由各环境
+        部署注入;空 → 回退 localhost:8888(未配置 / 尚未申请)。"""
+
         if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == DeployProfile.SINGLEBOX.value:
             return os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-        if task_callback is None:
-            return "http://localhost:8888"
-        origin = (
-            task_callback.base_url_pre if get_current_env() == "pre" else task_callback.base_url
-        ).strip()
-        return origin or "http://localhost:8888"
+        key = "TASK_API_BASE_URL_PRE" if get_current_env() == "pre" else "TASK_API_BASE_URL"
+        return os.environ.get(key) or "http://localhost:8888"
 
     @staticmethod
     def _resolve_ports():
