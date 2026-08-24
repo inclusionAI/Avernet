@@ -16,6 +16,7 @@ from collections.abc import Iterable
 from injector import Injector, Module
 
 from engine.community.di.modules.config_module import ConfigModule
+from engine.community.di.modules.chat_file_share_module import ChatFileShareModule
 from engine.community.di.modules.manager_module import ManagerModule
 from engine.community.di.modules.process_module import ProcessModule
 from engine.community.di.modules.resource_materialization_module import (
@@ -40,6 +41,7 @@ def build_injector(
     """
     modules: list[Module] = [
         ConfigModule(),
+        ChatFileShareModule(),
         ProcessModule(),
         ManagerModule(),
         ResourceMaterializationModule(),

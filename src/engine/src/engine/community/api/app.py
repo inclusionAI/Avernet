@@ -91,6 +91,11 @@ from engine.community.api.resource_materialization import (  # noqa: E402
 from engine.community.core.resource_materialization.service import (  # noqa: E402
     ResourceMaterializationService,
 )
+from engine.community.config import load_chat_file_share_settings  # noqa: E402
+from engine.community.core.chat_file_share.service import (  # noqa: E402
+    ChatFileShareService,
+)
+from engine.community.local_file_share.server import LocalFileShareServer  # noqa: E402
 from engine.community.api.session_files import router as session_files_router  # noqa: E402
 from engine.community.api.node import router as node  # noqa: E402
 from engine.community.api.skills import router as skills_router  # noqa: E402
@@ -226,14 +231,25 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    yield
-
-    # ── shutdown ──
-    manager = EngineManager.get_instance()
-    await manager.shutdown()
-    # Unbind the injector so the binding never leaks past this app's lifespan
-    # (keeps `with TestClient(app)` blocks from polluting later tests).
-    EngineManager.bind_injector(None)
+    local_file_share_server: LocalFileShareServer | None = None
+    try:
+        file_share_settings = load_chat_file_share_settings()
+        if file_share_settings is not None:
+            local_file_share_server = LocalFileShareServer(
+                socket_path=file_share_settings.socket_path,
+                service=_INJECTOR.get(ChatFileShareService),
+            )
+            await local_file_share_server.start()
+        yield
+    finally:
+        if local_file_share_server is not None:
+            await local_file_share_server.close()
+        # ── shutdown ──
+        manager = EngineManager.get_instance()
+        await manager.shutdown()
+        # Unbind the injector so the binding never leaks past this app's lifespan
+        # (keeps `with TestClient(app)` blocks from polluting later tests).
+        EngineManager.bind_injector(None)
 
 
 app = FastAPI(

@@ -66,6 +66,16 @@ class TemporaryUrlSettings:
     timeout_seconds: float
 
 
+@dataclass(frozen=True)
+class ChatFileShareSettings:
+    """Profile-owned configuration for the local Chat file-share adapter."""
+
+    socket_path: Path
+    baas_base_url: str
+    tenant: str
+    allowed_share_hosts: frozenset[str]
+
+
 def load_temporary_url_settings() -> TemporaryUrlSettings:
     max_bytes = int(
         os.getenv("ENGINE_TEMPORARY_URL_MAX_BYTES", str(100 * 1024 * 1024))
@@ -80,6 +90,51 @@ def load_temporary_url_settings() -> TemporaryUrlSettings:
         max_bytes=max_bytes,
         image_max_bytes=image_max_bytes,
         timeout_seconds=timeout_seconds,
+    )
+
+
+def load_chat_file_share_settings() -> ChatFileShareSettings | None:
+    """Load the opt-in, Engine-owned local BaaS share profile.
+
+    The socket is the feature switch.  Once it is configured, every other
+    setting must be present so the local adapter fails closed instead of
+    falling back to caller-supplied BaaS identity or credentials.
+    """
+
+    socket_value = os.getenv("ENGINE_CHAT_FILE_SHARE_SOCKET", "").strip()
+    if not socket_value:
+        return None
+    required = {
+        "ENGINE_CHAT_FILE_SHARE_BAAS_BASE_URL": os.getenv(
+            "ENGINE_CHAT_FILE_SHARE_BAAS_BASE_URL", ""
+        ).strip(),
+        "ENGINE_CHAT_FILE_SHARE_TENANT": os.getenv(
+            "ENGINE_CHAT_FILE_SHARE_TENANT", ""
+        ).strip(),
+        "ENGINE_CHAT_FILE_SHARE_ALLOWED_OSS_HOSTS": os.getenv(
+            "ENGINE_CHAT_FILE_SHARE_ALLOWED_OSS_HOSTS", ""
+        ).strip(),
+    }
+    for name, value in required.items():
+        if not value:
+            raise ValueError(f"{name} is required when file sharing is enabled")
+    socket_path = Path(socket_value).expanduser()
+    if not socket_path.is_absolute():
+        raise ValueError("ENGINE_CHAT_FILE_SHARE_SOCKET must be absolute")
+    allowed_share_hosts = frozenset(
+        host.strip().lower()
+        for host in required["ENGINE_CHAT_FILE_SHARE_ALLOWED_OSS_HOSTS"].split(",")
+        if host.strip()
+    )
+    if not allowed_share_hosts:
+        raise ValueError(
+            "ENGINE_CHAT_FILE_SHARE_ALLOWED_OSS_HOSTS is required when file sharing is enabled"
+        )
+    return ChatFileShareSettings(
+        socket_path=socket_path,
+        baas_base_url=required["ENGINE_CHAT_FILE_SHARE_BAAS_BASE_URL"],
+        tenant=required["ENGINE_CHAT_FILE_SHARE_TENANT"],
+        allowed_share_hosts=allowed_share_hosts,
     )
 
 
