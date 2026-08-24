@@ -3,13 +3,18 @@
 config-renderer: Render Envoy config from header-rules.yaml.
 
 Reads header-rules.yaml (domain-matched set/remove rules) and produces
-a complete envoy.yaml from the template, with VirtualHosts and MITM SNI
-matching auto-generated from the rules.
+a complete envoy.yaml from the template, with VirtualHosts, MITM SNI
+matching, and Lua-based placeholder substitution auto-generated.
 
-Reference: ocb/dockers/poolab-sidecar/render.py (crypto logic removed)
+Rules with a "placeholder" field use a Lua filter for substring
+replacement within the existing header value (e.g. replace only
+${API-KEY} inside "Bearer ${API-KEY}"). Rules without placeholder
+use request_headers_to_add for whole-value overwrite.
 """
 
 import argparse
+import json
+import re
 import sys
 from typing import Any
 
@@ -19,9 +24,10 @@ import yaml
 # ---- Data structures ----
 
 class SetRule:
-    def __init__(self, header: str, value: str):
+    def __init__(self, header: str, value: str, placeholder: str | None = None):
         self.header = header
         self.value = value
+        self.placeholder = placeholder
 
 
 class OutboundRule:
@@ -43,7 +49,14 @@ def parse_config(data: dict[str, Any]) -> HeaderRulesConfig:
     """Parse header-rules.yaml into HeaderRulesConfig."""
     rules = []
     for r in data.get("rules", []):
-        set_rules = [SetRule(s["header"], s["value"]) for s in r.get("set", [])]
+        set_rules = [
+            SetRule(
+                s["header"],
+                s["value"],
+                s.get("placeholder"),
+            )
+            for s in r.get("set", [])
+        ]
         rules.append(OutboundRule(
             name=r.get("name", ""),
             domains=r.get("domains", []),
@@ -60,18 +73,12 @@ def escape_yaml_string(s: str) -> str:
 
 
 def render_headers_to_add(rules: list[SetRule], indent: str) -> str:
-    """Render request_headers_to_add (set = OVERWRITE_IF_EXISTS_OR_ADD).
-
-    indent is the list-item dash level:
-      {indent}- header:
-      {indent}    key: "..."
-      {indent}    value: "..."
-      {indent}  append_action: OVERWRITE_IF_EXISTS_OR_ADD
-    """
-    if not rules:
+    """Render request_headers_to_add for non-placeholder rules only."""
+    non_ph = [r for r in rules if not r.placeholder]
+    if not non_ph:
         return "[]"
     items = []
-    for r in rules:
+    for r in non_ph:
         items.append(
             f'{indent}- header:\n'
             f'{indent}    key: "{escape_yaml_string(r.header)}"\n'
@@ -89,13 +96,90 @@ def render_headers_to_remove(rules: list[str], indent: str) -> str:
     return "\n" + "\n".join(items)
 
 
-def render_virtual_host(rule: OutboundRule, idx: int, cluster: str = "outbound_original_dst") -> str:
-    """Render a single VirtualHost.
+# ---- Lua code generation for placeholder rules ----
 
-    cluster: the upstream cluster to route to. HTTP catch-all uses
-    outbound_original_dst_http (no TLS) while MITM uses
-    outbound_original_dst (with TLS re-encryption).
+def escape_lua_string(s: str) -> str:
+    """Escape a string for safe embedding in Lua double-quoted strings."""
+    return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+def escape_lua_pattern(s: str) -> str:
+    """Escape Lua pattern special chars (^$()%.[]*+-?) with % prefix."""
+    return re.sub(r'([%^%$%(%)%%%.%[%]%*%+%-%?])', r'%\1', s)
+
+
+def render_lua_code(rules: list[OutboundRule]) -> str:
+    """Generate Lua inline code for placeholder-based header replacement.
+
+    Only rules with set_rules that have a placeholder field are handled.
+    The Lua filter does string.gsub on the existing header value to
+    replace only the placeholder substring with the configured value.
     """
+    ph_entries = []  # (header, placeholder_pattern, value)
+    for rule in rules:
+        for s in rule.set_rules:
+            if s.placeholder:
+                ph_entries.append((
+                    s.header,
+                    escape_lua_pattern(s.placeholder),
+                    escape_lua_string(s.value),
+                ))
+
+    if not ph_entries:
+        return ""
+
+    lines = [
+        "function envoy_on_request(handle)",
+    ]
+    for header, ph_pat, val in ph_entries:
+        escaped_header = escape_lua_string(header)
+        lines.extend([
+            f'  local h = handle:headers():get("{escaped_header}")',
+            f'  if h then',
+            f'    h = string.gsub(h, "{ph_pat}", "{val}")',
+            f'    handle:headers():replace("{escaped_header}", h)',
+            f'  end',
+        ])
+    lines.append("end")
+    return "\n".join(lines)
+
+
+def has_placeholder_rules(rules: list[OutboundRule]) -> bool:
+    """Check if any rule has placeholder-based set rules."""
+    return any(
+        s.placeholder
+        for r in rules
+        for s in r.set_rules
+    )
+
+
+def render_lua_filter_config(lua_code: str) -> str:
+    """Render the Lua filter YAML block, or empty string if no code.
+
+    In the template, {{LUA_FILTER}} is placed before the router filter
+    at 18-space indent. When non-empty, we output the Lua filter entry
+    followed by a newline + 18 spaces so the router filter line stays
+    aligned. When empty, the template's trailing spaces produce the
+    router line correctly.
+    """
+    if not lua_code:
+        return ""
+    code_json = json.dumps(lua_code)
+    # 18 spaces = indent of http_filters items in both MITM and HTTP chains
+    indent = "                  "
+    return (
+        f'- name: envoy.filters.http.lua\n'
+        f'{indent}  typed_config:\n'
+        f'{indent}    "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua\n'
+        f'{indent}    inline_code: {code_json}\n'
+        f'{indent}'
+    )
+
+
+# ---- VirtualHost rendering ----
+
+def render_virtual_host(rule: OutboundRule, idx: int, cluster: str = "outbound_original_dst") -> str:
+    """Render a single VirtualHost."""
     item = "                    "   # 20 spaces: list-item dash indent
     prop = item + "  "             # 22 spaces: property indent
     child = prop + "  "            # 24 spaces: sub-list indent
@@ -136,16 +220,10 @@ def render_virtual_host(rule: OutboundRule, idx: int, cluster: str = "outbound_o
 
 
 def render_virtual_hosts(rules: list[OutboundRule], cluster: str = "outbound_original_dst") -> str:
-    """Render all VirtualHosts, merging rules with identical domain sets.
-
-    Envoy only permits a single wildcard domain per route, so multiple
-    '*' rules must be merged into one VirtualHost. Same-domain rules are
-    also merged to avoid duplicate matchers.
-    """
+    """Render all VirtualHosts, merging rules with identical domain sets."""
     if not rules:
         return "[]"
 
-    # Group rules by their domain tuple (sorted for stable key).
     groups: dict[tuple[str, ...], OutboundRule] = {}
     order: list[tuple[str, ...]] = []
     for r in rules:
@@ -198,23 +276,26 @@ def cmd_render(args):
 
     config = parse_config(rules_data)
 
-    # Split rules: specific-domain rules go to MITM (HTTPS), wildcard '*'
-    # rules go to the HTTP catch-all only.
+    # Split rules by domain type
     mitm_rules = [r for r in config.rules if any(d != "*" for d in r.domains)]
     http_rules = [r for r in config.rules if any(d == "*" for d in r.domains)]
 
-    # Render VirtualHosts separately for MITM (HTTPS) and HTTP chains
+    # Render VirtualHosts
     mitm_vhs = render_virtual_hosts(mitm_rules)
     http_vhs = render_virtual_hosts(http_rules, cluster="outbound_original_dst_http")
 
-    # MITM SNI domains: auto-derived from rules (exclude catch-all '*')
+    # Generate Lua code for placeholder rules (combined from all rules)
+    all_rules_for_lua = mitm_rules + http_rules
+    lua_code = render_lua_code(all_rules_for_lua)
+    lua_filter = render_lua_filter_config(lua_code)
+
+    # MITM SNI domains
     sni_domains = extract_sni_domains(config.rules)
     mitm_cert_dir = "/etc/sidecar/certs/mitm-ca"
 
     result = template
 
     if sni_domains:
-        # Has MITM domains: render the MITM filter chain with SNI matching
         mitm_sni_match = "[" + ", ".join(f'"{d}"' for d in sni_domains) + "]"
         replacements = {
             "{{SIDECAR_ADMIN_PORT}}": str(args.admin_port),
@@ -226,14 +307,9 @@ def cmd_render(args):
         }
         for placeholder, value in replacements.items():
             result = result.replace(placeholder, value)
-        # Remove marker comments
         result = result.replace("{{#MITM_CHAIN_START}}", "")
         result = result.replace("{{#MITM_CHAIN_END}}", "")
     else:
-        # No MITM domains: remove the entire MITM filter chain block
-        # to avoid duplicate TLS filter chain match.
-        import re
-        # Remove the MITM chain block between markers (inclusive of markers)
         result = re.sub(
             r"\{\{#MITM_CHAIN_START\}\}.*?\{\{#MITM_CHAIN_END\}\}\n?",
             "",
@@ -249,15 +325,20 @@ def cmd_render(args):
         for placeholder, value in replacements.items():
             result = result.replace(placeholder, value)
 
+    # Insert Lua filter into http_filters (both MITM and HTTP chains)
+    result = result.replace("{{LUA_FILTER}}", lua_filter)
+
     # Write output
     with open(args.output, "w") as f:
         f.write(result)
 
     # Stats
     total_set = sum(len(r.set_rules) for r in config.rules)
+    total_ph = sum(1 for r in config.rules for s in r.set_rules if s.placeholder)
     total_rm = sum(len(r.remove) for r in config.rules)
     print(f"[config-renderer] Rendered Envoy config to {args.output}")
     print(f"[config-renderer]   {len(config.rules)} rules (set={total_set}, remove={total_rm})")
+    print(f"[config-renderer]   placeholder rules: {total_ph}")
     print(f"[config-renderer]   MITM SNI domains: {sni_domains}")
 
 

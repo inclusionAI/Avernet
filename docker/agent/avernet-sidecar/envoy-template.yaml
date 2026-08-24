@@ -48,7 +48,7 @@ static_resources:
                   name: outbound_https_mitm_route
                   virtual_hosts: {{OUTBOUND_HTTPS_VIRTUAL_HOSTS}}
                 http_filters:
-                  - name: envoy.filters.http.router
+{{LUA_FILTER}}                  - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
                 stream_idle_timeout: 300s
@@ -89,7 +89,7 @@ static_resources:
                   name: outbound_route
                   virtual_hosts: {{OUTBOUND_VIRTUAL_HOSTS}}
                 http_filters:
-                  - name: envoy.filters.http.router
+{{LUA_FILTER}}                  - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
                 stream_idle_timeout: 300s

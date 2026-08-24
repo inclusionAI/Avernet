@@ -86,9 +86,9 @@ def _build_template_vars(
     """Build runtime variables for template rendering.
 
     ``images`` is a mapping of container name → image address (e.g.
-    ``{"openclaw": "...", "api-key-proxy": "...", "init": "..."}``).
-    Each is exposed as ``${OPENCLAW_IMAGE}``, ``${API_KEY_PROXY_IMAGE}``,
-    ``${INIT_IMAGE}`` respectively.
+    ``{"avernet-agent": "...", "avernet-sidecar": "...", "init": "...",
+    "nas-server": "..."}``). Each is exposed as ``${AGENT_IMAGE}``,
+    ``${SIDECAR_IMAGE}``, ``${INIT_IMAGE}``, ``${NAS_SERVER}`` respectively.
     """
     images = images or {}
     storage_id = (
@@ -98,24 +98,20 @@ def _build_template_vars(
     )
     mount_path = storage.path if storage and storage.path else "/home/admin"
     storage_size = storage.quota if storage and storage.quota else "1Gi"
-    cpu = str(resource_spec.cpu) if resource_spec else "1"
-    memory = f"{resource_spec.memory}Gi" if resource_spec else "1Gi"
+    cpu = str(resource_spec.cpu) if resource_spec else "2"
+    memory = f"{resource_spec.memory}Gi" if resource_spec else "4Gi"
     return {
         "UID": uid,
         "NAMESPACE": namespace,
-        "OPENCLAW_IMAGE": images.get("openclaw", "openclaw:latest"),
-        "ENVOY_SIDECAR_IMAGE": images.get(
-            "avernet-sidecar", "envoyproxy/envoy:v1.30-latest"
-        ),
-        "INIT_IMAGE": images.get("init", "busybox:latest"),
+        "AGENT_IMAGE": images.get("avernet-agent", ""),
+        "SIDECAR_IMAGE": images.get("avernet-sidecar", ""),
+        "INIT_IMAGE": images.get("init", ""),
         "NAS_SERVER": images.get("nas-server", ""),
         "STORAGE_ID": storage_id,
         "STORAGE_SIZE": storage_size,
         "MOUNT_PATH": mount_path,
-        "CPU_REQUEST": cpu,
-        "CPU_LIMIT": cpu,
-        "MEMORY_REQUEST": memory,
-        "MEMORY_LIMIT": memory,
+        "CPU": cpu,
+        "MEMORY": memory,
     }
 
 
@@ -128,7 +124,7 @@ def _convert_outbound_rules(rule: OutBoundOperationRule | None) -> str:
     block, i.e. 2-space indented).
     """
     if not rule or not rule.header_operation_rules:
-        return "  rules: []"
+        return "    rules: []"
 
     # Group rules by domain tuple so rules sharing the same domains
     # merge into one outbound rule entry.
@@ -144,16 +140,18 @@ def _convert_outbound_rules(rule: OutBoundOperationRule | None) -> str:
             }
         action = (h.action or "").lower()
         if action in ("replace", "set"):
-            domain_groups[key]["set"].append(
-                {"header": h.header_name, "value": h.value}
-            )
+            set_entry: dict[str, Any] = {"header": h.header_name, "value": h.value}
+            if h.placeholder:
+                set_entry["placeholder"] = h.placeholder
+            domain_groups[key]["set"].append(set_entry)
         elif action == "remove":
             domain_groups[key]["remove"].append(h.header_name)
 
     rules_data = {"rules": list(domain_groups.values())}
     header_yaml = yaml.safe_dump(rules_data, default_flow_style=False, sort_keys=False)
-    # Indent each line by 2 spaces for ConfigMap data block embedding.
-    return "\n".join(f"  {line}" for line in header_yaml.strip().splitlines())
+    # Indent each line by 4 spaces for ConfigMap data block embedding
+    # (2 levels: data key indent + block scalar content indent).
+    return "\n".join(f"    {line}" for line in header_yaml.strip().splitlines())
 
 
 class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
