@@ -4092,8 +4092,8 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
         });
       }
     }, {
-      name: "clawmind-command-stop",
-      description: "Abort active clawmind runs when /stop is issued",
+      name: "taskguard-command-stop",
+      description: "Abort active taskguard runs when /stop is issued",
     });
 
     // Tool path: OpenClaw slash skill forwards raw text here, then dispatchWorkflowCommand owns facade normalization.
