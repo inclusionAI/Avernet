@@ -5,9 +5,9 @@
 > 文档版本：v1.0；状态：**contract-only**。本手册为能力工坊页面的前端开发、Mock 与测试提供参考；
 > 最终机器可读权威始终是 Gateway 生成的 `configs/schemas/bots.openapi.json`。
 >
-> 当前后端对本手册中的新增接口统一返回 HTTP `501`、标准 Envelope，且响应头带
-> `x-contract-status: contract-only`。前端应据本手册 Mock 目标成功/错误态，**不能把
-> 当前 501 当成业务失败状态设计的唯一来源**。
+> 除下文明确标为“已实现”的列表接口外，当前后端对本手册中的新增接口统一返回 HTTP
+> `501`、标准 Envelope，且响应头带 `x-contract-status: contract-only`。前端应据本手册
+> Mock 目标成功/错误态，**不能把当前 501 当成业务失败状态设计的唯一来源**。
 
 ## 1. 使用范围与通用约定
 
@@ -82,10 +82,65 @@ contract-only 后端实际响应为：
 
 | PRD 功能点 | 方法与路径 | 入参 | 目标响应 data | Mock 页面状态 |
 | --- | --- | --- | --- | --- |
-| Space Skill 列表（已实现） | `GET /spaces/{space_id}/skills` | `user_id`，可选 `keyword`、`page_no`、`page_size` | `Page<SpaceSkillItem>` | loading、空态、卡片列表、无权限 |
-| ZIP 创建 | `POST /spaces/{space_id}/skills` | raw ZIP；`Idempotency-Key`；`user_id` | `SpaceSkillDetail`（201） | 上传中、校验失败、创建后打开详情 |
-| Git 导入 | `POST /spaces/{space_id}/skills/import-from-git` | `GitImportRequest`；`Idempotency-Key`；`user_id` | `SpaceSkillDetail`（201） | 导入中、内容错误、创建后打开详情 |
-| 创作详情 | `GET /spaces/{space_id}/skills/{skill_id}` | `user_id` | `SpaceSkillDetail` | Draft/Published 双状态、权限按钮 |
+| Space Skill 列表（已实现） | `GET /openapi/v1/bots/spaces/{space_id}/skills` | `user_id`，可选 `keyword`、`page_no`、`page_size` | `Page<SpaceSkillItem>` | loading、空态、卡片列表、无权限 |
+| ZIP 创建 | `POST /openapi/v1/bots/spaces/{space_id}/skills` | raw ZIP；`Idempotency-Key`；`user_id` | `SpaceSkillDetail`（201） | 上传中、校验失败、创建后打开详情 |
+| Git 导入 | `POST /openapi/v1/bots/spaces/{space_id}/skills/import-from-git` | `GitImportRequest`；`Idempotency-Key`；`user_id` | `SpaceSkillDetail`（201） | 导入中、内容错误、创建后打开详情 |
+| 创作详情 | `GET /openapi/v1/bots/spaces/{space_id}/skills/{skill_id}` | `user_id` | `SpaceSkillDetail` | Draft/Published 双状态、权限按钮 |
+
+#### 2.1.1 获取 Space Skills 列表（已实现，可直接联调）
+
+- **URL**：`GET /openapi/v1/bots/spaces/{space_id}/skills`
+- **状态**：已实现，实际成功响应为 HTTP `200`；**不带** `x-contract-status: contract-only`。
+- **说明**：能力工坊首页/Space 下的 Skills Tab 使用此接口。它只返回当前调用用户在该
+  Space 可见的 Skill 卡片；前端不应以 Bot 的 `/openapi/v1/bots/{bot_id}/skills` 列表替代。
+
+| 字段名 | 位置 | 类型 | 必填 | 默认值 | 描述 |
+| --- | --- | --- | --- | --- | --- |
+| `space_id` | path | integer | 是 | - | Space 主键，最小值 1 |
+| `user_id` | query | string | 是 | - | 当前调用用户；必须与已认证身份一致 |
+| `keyword` | query | string | 否 | - | 按 Skill 名称或描述搜索，最长 128 字符 |
+| `page_no` | query | integer | 否 | `1` | 从 1 开始的页码，最小值 1 |
+| `page_size` | query | integer | 否 | `20` | 每页最多 100 条，范围 1～100 |
+
+**请求示例**：
+
+```http
+GET /openapi/v1/bots/spaces/42/skills?user_id=u-owner&keyword=release&page_no=1&page_size=20
+```
+
+**成功响应**：`Envelope<Page<SpaceSkillItem>>`
+
+```json
+{
+  "code": 200000,
+  "message": "OK",
+  "request_id": "mock-list-1",
+  "data": {
+    "total": 1,
+    "items": [
+      {
+        "skill_id": "1001",
+        "skill_uuid": "9d41d2fa-7ef8-4b87-9f56-123456789abc",
+        "name": "release-note",
+        "description": "生成版本发布说明",
+        "status": "DRAFT",
+        "draft_status": "EDITING",
+        "space_type": "TEAM",
+        "current_user_skill_role": "OWNER",
+        "can_edit": true,
+        "can_grant": true,
+        "can_apply_edit": false,
+        "gmt_created": "2026-08-22T10:00:00Z",
+        "gmt_modified": "2026-08-22T10:30:00Z"
+      }
+    ]
+  }
+}
+```
+
+`items` 即使没有结果也始终为数组（`[]`），`total` 为 `0`；列表页应将其渲染为“空工坊”
+而不是错误页。无当前 Space 访问权限时后端返回 `403`；Space 不存在或对调用者不可见时
+返回 `404`。完整卡片字段释义见 [5.3 列表与详情响应字段](#53-列表与详情响应字段)。
 
 `SpaceSkillItem` 是列表卡片，至少使用：
 
