@@ -94,8 +94,8 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
     recover_legacy_skill_set_scope,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
+from agentclaw.community.api.skill_set_management_service import (
+    SkillSetManagementServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import (
@@ -396,7 +396,7 @@ def _get_skill_set_path_params(
     bot_id: str | None,
     engine_type: str | None,
     bot_repo: BotRepository,
-    control_plane: SkillSetControlPlaneServiceProtocol,
+    control_plane: SkillSetManagementServiceProtocol,
 ) -> tuple:
     """Recover the deprecated SkillSet Bot address before path normalization."""
     entity_id, bot_id = recover_legacy_skill_set_scope(
@@ -1123,8 +1123,8 @@ async def sync_skill_set(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> SwitchSkillSetResponse:
     """Sync a skill set to active skills without deactivating others."""
@@ -1181,8 +1181,8 @@ async def activate_skill_set(
     activator_factory: SkillSetActivatorFactoryProtocol = Injected(
         SkillSetActivatorFactoryProtocol
     ),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> ActivateSkillSetResponse:
     """激活单个能力集（增量激活，不清除其他已激活的能力集）
@@ -1240,8 +1240,8 @@ async def deactivate_skill_set(
     activator_factory: SkillSetActivatorFactoryProtocol = Injected(
         SkillSetActivatorFactoryProtocol
     ),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> DeactivateSkillSetResponse:
     """取消激活单个能力集
@@ -1304,8 +1304,8 @@ async def get_active_skill_sets(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> ActiveSkillSetsResponse:
     """获取当前 bot 的所有激活能力集列表

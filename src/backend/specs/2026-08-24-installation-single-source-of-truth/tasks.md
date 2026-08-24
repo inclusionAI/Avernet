@@ -5,7 +5,7 @@ lands in the same group as the migration of its last caller.
 
 ## Group 1 — Renames (zero behavior change)
 
-- [ ] 1.1 `SkillSetControlPlaneService` → `SkillSetManagementService`:
+- [x] 1.1 `SkillSetControlPlaneService` → `SkillSetManagementService`:
       `core/skill_center/services/skill_set_control_plane.py` →
       `skill_set_management_service.py`; `api/skill_set_control_plane.py` →
       `api/skill_set_management_service.py` (protocol renamed); DI bindings,

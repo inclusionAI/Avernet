@@ -21,8 +21,8 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetRuntimeReconcileError,
     McpPermissionDeniedError,
 )
-from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
-    SkillSetControlPlaneService,
+from agentclaw.community.core.skill_center.services.skill_set_management_service import (
+    SkillSetManagementService,
 )
 from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
     BotRuntimeProjectionReconciler,
@@ -282,7 +282,7 @@ class _Authorization:
 
     It stays after the seam migration because ``/api/skillsets`` reaches this
     service with four routes that carry no gate of their own — see the comment
-    at ``SkillSetControlPlaneService._bot``. Defaults to allow, so these tests
+    at ``SkillSetManagementService._bot``. Defaults to allow, so these tests
     stay about what the service does once admitted.
     """
 
@@ -668,7 +668,7 @@ class _FailingRuntimePassport(_RuntimePassport):
 async def test_collaborator_command_restores_desired_state_and_uses_true_owner():
     repository = _Repository()
     runtime = _Runtime()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_Bots(),
         runtime=runtime,
@@ -721,7 +721,7 @@ async def test_collaborator_command_restores_desired_state_and_uses_true_owner()
 async def test_deactivate_retires_mappings_removed_from_the_runtime_projection():
     repository = _Repository()
     runtime = _Runtime(snapshots=[_Runtime._skill_mappings(), ()], fail_first=False)
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_Bots(),
         runtime=runtime,
@@ -750,7 +750,7 @@ async def test_deactivate_retires_mappings_removed_from_the_runtime_projection()
 
 
 def test_create_rejects_missing_bot_instead_of_creating_orphan_set():
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=_Repository(),
         bot_repo=_MissingBots(),
         runtime=_SuccessfulRuntime(),
@@ -777,7 +777,7 @@ def test_create_rejects_missing_bot_instead_of_creating_orphan_set():
 
 def test_default_create_rejects_missing_bot_instead_of_creating_orphan_set():
     repository = _CreateRepository()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_MissingBots(),
         runtime=_SuccessfulRuntime(),
@@ -805,7 +805,7 @@ def test_default_create_uses_owner_qualified_bot_lookup():
     owner_id = "owner-a"
     bots = _SharedDefaultBots(owner_id)
     repository = _CreateRepository()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=bots,
         runtime=_SuccessfulRuntime(),
@@ -836,7 +836,7 @@ def test_legacy_set_scope_recovers_persisted_bot_then_applies_actor_acl() -> Non
         LegacySkillSetScope(owner_id="true-owner", bot_id="bot-1")
     )
     authorization = _Authorization()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_Bots(),
         runtime=_SuccessfulRuntime(),
@@ -869,7 +869,7 @@ def test_legacy_set_scope_rejects_conflicting_owner_hint() -> None:
     repository = _LegacyScopeRepository(
         LegacySkillSetScope(owner_id="true-owner", bot_id="bot-1")
     )
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_Bots(),
         runtime=_SuccessfulRuntime(),
@@ -891,7 +891,7 @@ def test_legacy_set_scope_rejects_conflicting_owner_hint() -> None:
 
 def test_addressed_create_persists_metadata_without_runtime_reconcile() -> None:
     repository = _CreateRepository()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_Bots(),
         runtime=_SuccessfulRuntime(),
@@ -925,7 +925,7 @@ def test_addressed_create_persists_metadata_without_runtime_reconcile() -> None:
 
 def test_create_inactive_set_does_not_require_runtime_readiness() -> None:
     repository = _CreateRepository()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_NotReadyApplicationCodingBots(),
         runtime=_SuccessfulRuntime(),
@@ -951,7 +951,7 @@ def test_create_inactive_set_does_not_require_runtime_readiness() -> None:
 
 def test_inactive_set_metadata_updates_do_not_require_runtime_readiness() -> None:
     repository = _Repository()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_NotReadyApplicationCodingBots(),
         runtime=_SuccessfulRuntime(),
@@ -997,7 +997,7 @@ async def test_inactive_set_membership_does_not_require_runtime_readiness(
 ) -> None:
     repository = _InactiveMembershipRepository()
     runtime = _Runtime(fail_first=False)
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_NotReadyApplicationCodingBots(),
         runtime=runtime,
@@ -1026,7 +1026,7 @@ async def test_inactive_set_membership_does_not_require_runtime_readiness(
 @pytest.mark.asyncio
 async def test_active_set_membership_still_requires_runtime_readiness() -> None:
     repository = _ActiveMembershipRepository()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_NotReadyApplicationCodingBots(),
         runtime=_Runtime(fail_first=False),
@@ -1051,7 +1051,7 @@ async def test_active_set_membership_still_requires_runtime_readiness() -> None:
 
 
 def test_default_read_rejects_missing_bot():
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=_Repository(),
         bot_repo=_MissingBots(),
         runtime=_SuccessfulRuntime(),
@@ -1072,7 +1072,7 @@ def test_default_read_rejects_missing_bot():
 @pytest.mark.asyncio
 async def test_legacy_sync_activates_additively_without_replacing_other_sets():
     repository = _Repository()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_Bots(),
         runtime=_SuccessfulRuntime(),
@@ -1108,7 +1108,7 @@ async def test_legacy_default_sync_uses_owner_qualified_bot_lookup():
     owner_id = "owner-a"
     bots = _SharedDefaultBots(owner_id)
     repository = _Repository()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=bots,
         runtime=_SuccessfulRuntime(),
@@ -1188,7 +1188,7 @@ def test_the_control_plane_check_the_legacy_surface_relies_on_still_exists():
     still ungated (if someone gives them an interceptor, this test should be
     revisited — not deleted quietly).
     """
-    source = inspect.getsource(SkillSetControlPlaneService._bot)
+    source = inspect.getsource(SkillSetManagementService._bot)
     assert "can_manage_bot" in source, (
         "_bot no longer adjudicates the caller. The /openapi/v1 rows are fine — "
         "the seam adjudicates them — but /api/skillsets reaches this service "
@@ -1272,7 +1272,7 @@ def test_the_service_keeps_writing_its_own_audit_row_after_the_seam_took_over():
         def insert(self, data) -> None:
             rows.append(data)
 
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=_CreateRepository(),
         bot_repo=_Bots(),
         runtime=_SuccessfulRuntime(),
@@ -1305,7 +1305,7 @@ def test_the_service_keeps_writing_its_own_audit_row_after_the_seam_took_over():
 
 def test_resources_forwards_resolved_bot_owner_to_owner_scoped_set_listing():
     repository = _ResourceRepository()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_Bots(),
         runtime=_SuccessfulRuntime(),
@@ -1332,7 +1332,7 @@ def test_resources_forwards_resolved_bot_owner_to_owner_scoped_set_listing():
 
 def test_list_sets_uses_aicoding_default_then_claude_code_fallback_for_coding_image():
     repository = _ResourceRepository()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_AicodingImageBots(),
         runtime=_SuccessfulRuntime(),
@@ -1357,7 +1357,7 @@ def test_list_sets_uses_aicoding_default_then_claude_code_fallback_for_coding_im
 
 def test_update_set_uses_runtime_default_candidates_for_coding_image():
     repository = _Repository()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_AicodingImageBots(),
         runtime=_SuccessfulRuntime(),
@@ -1392,7 +1392,7 @@ def test_update_set_uses_runtime_default_candidates_for_coding_image():
 def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_scope():
     repository = _DefaultResourceRepository()
     legacy = _ResourceLegacyFactory()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_Bots(),
         runtime=_SuccessfulRuntime(),
@@ -1423,7 +1423,7 @@ def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_sc
 def test_resources_keeps_ordinary_mcp_membership_on_canonical_repository_path():
     repository = _MixedResourceRepository()
     legacy = _ResourceLegacyFactory()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_Bots(),
         runtime=_SuccessfulRuntime(),
@@ -1455,7 +1455,7 @@ def test_resources_keeps_ordinary_mcp_membership_on_canonical_repository_path():
 async def test_existing_coding_bot_can_activate_skill_set(bots) -> None:
     repository = _Repository()
     runtime = _SuccessfulRuntime()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=bots,
         runtime=runtime,
@@ -1485,7 +1485,7 @@ async def test_existing_claude_code_skill_set_deactivate_uses_full_projection():
         snapshots=[_Runtime._skill_mappings(), ()],
         fail_first=False,
     )
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_PlainClaudeCodeBots(),
         runtime=runtime,
@@ -1528,7 +1528,7 @@ def test_existing_coding_bot_metadata_mutations_ignore_product_creation_matrix(
     bots,
 ) -> None:
     repository = _CreateRepository()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=bots,
         runtime=_SuccessfulRuntime(),
@@ -1561,7 +1561,7 @@ def test_existing_coding_bot_metadata_mutations_ignore_product_creation_matrix(
 
 
 def test_historical_bot_may_delete_an_inactive_skill_set_without_new_runtime_write():
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=_Repository(),
         bot_repo=_UnsupportedBots(),
         runtime=_SuccessfulRuntime(),
@@ -1585,7 +1585,7 @@ def test_legacy_name_or_git_path_materializes_market_repo_skill_before_membershi
     """The legacy batch adapter keeps its historical implicit Repo creation."""
     repository = _LegacyResolutionRepository()
     factory = _LegacyFactory()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_Bots(),
         runtime=_SuccessfulRuntime(),
@@ -1622,7 +1622,7 @@ async def test_mcp_direct_activation_checks_permission_before_writing_desired_st
     repository = _McpRepository()
     auth = _McpAuth(allowed=True)
     mcp_center = _McpCenter(allowed=True)
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_Bots(),
         runtime=_SuccessfulRuntime(),
@@ -1655,7 +1655,7 @@ async def test_mcp_direct_activation_checks_permission_before_writing_desired_st
 @pytest.mark.asyncio
 async def test_mcp_direct_activation_denies_before_writing_desired_state():
     repository = _McpRepository()
-    service = SkillSetControlPlaneService(
+    service = SkillSetManagementService(
         repository=repository,
         bot_repo=_Bots(),
         runtime=_SuccessfulRuntime(),

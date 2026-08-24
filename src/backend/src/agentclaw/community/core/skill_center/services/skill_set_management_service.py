@@ -46,7 +46,7 @@ from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
-class SkillSetControlPlaneService:
+class SkillSetManagementService:
     @inject
     def __init__(
         self,

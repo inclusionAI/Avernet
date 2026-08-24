@@ -69,7 +69,7 @@ def _build_app() -> FastAPI:
 
     @app.get("/api/skillsets/raise-lock-chained")
     async def raise_lock_chained():
-        # The shape SkillSetControlPlaneService produces: the guard's error
+        # The shape SkillSetManagementService produces: the guard's error
         # wraps the cache failure, and the control plane wraps the guard's.
         try:
             try:

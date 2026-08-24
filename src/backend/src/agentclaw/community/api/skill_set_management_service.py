@@ -10,7 +10,7 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
 
 
 @runtime_checkable
-class SkillSetControlPlaneServiceProtocol(Protocol):
+class SkillSetManagementServiceProtocol(Protocol):
     """Operate one exact Bot identified by its durable owner and identifier."""
 
     def list_sets(

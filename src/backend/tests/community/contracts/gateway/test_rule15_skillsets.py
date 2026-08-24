@@ -11,8 +11,8 @@ from unittest.mock import MagicMock, AsyncMock
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.plugin_api.passport import PassportPlugin
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
+from agentclaw.community.api.skill_set_management_service import (
+    SkillSetManagementServiceProtocol,
 )
 
 from tests.community.contracts.gateway.conftest import (
@@ -114,7 +114,7 @@ def _bind_skillset_deps(app):
     control.delete_set.return_value = None
     control.create_set.return_value = {**MOCK_SKILLSET_ROW, "name": "NewSet"}
     control.update_set.return_value = {**MOCK_SKILLSET_ROW, "name": "Updated"}
-    bind_mock_service(SkillSetControlPlaneServiceProtocol, control, app)
+    bind_mock_service(SkillSetManagementServiceProtocol, control, app)
     return mock_factory, mock_passport
 
 

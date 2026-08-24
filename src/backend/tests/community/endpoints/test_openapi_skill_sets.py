@@ -12,8 +12,8 @@ import time
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
+from agentclaw.community.api.skill_set_management_service import (
+    SkillSetManagementServiceProtocol,
 )
 from agentclaw.community.core.skill_center.authorization_hook import (
     BotCapabilityAuthorizationHookProtocol,
@@ -27,8 +27,8 @@ from agentclaw.community.core.repository.protocols.skill_set_control_plane impor
     SkillSetControlPlaneRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
-    SkillSetControlPlaneService,
+from agentclaw.community.core.skill_center.services.skill_set_management_service import (
+    SkillSetManagementService,
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
@@ -153,7 +153,7 @@ def _seed(world, *, member: bool = False) -> None:
                 engine_type="openclaw",
             )
     runtime = _Runtime()
-    control_plane = SkillSetControlPlaneService(
+    control_plane = SkillSetManagementService(
         repository=world.get(SkillSetControlPlaneRepositoryProtocol),
         bot_repo=world.get(BotRepository),
         runtime=runtime,
@@ -165,7 +165,7 @@ def _seed(world, *, member: bool = False) -> None:
         mcp_auth=world.get(MCPAuthPlugin),
     )
     world.injector.binder.bind(
-        SkillSetControlPlaneServiceProtocol, to=control_plane, scope=None
+        SkillSetManagementServiceProtocol, to=control_plane, scope=None
     )
 
 
@@ -186,7 +186,7 @@ def _seed_active(world) -> None:
 
 
 def _assert_reconciled(_response, world) -> None:
-    assert world.get(SkillSetControlPlaneServiceProtocol)._runtime.calls == [
+    assert world.get(SkillSetManagementServiceProtocol)._runtime.calls == [
         (_BOT_ID, _OWNER)
     ]
 

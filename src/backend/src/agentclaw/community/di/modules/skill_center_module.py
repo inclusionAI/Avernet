@@ -36,8 +36,8 @@ from agentclaw.community.api.skill_market_service import SkillMarketServiceProto
 from agentclaw.community.api.skill_parameter_service_factory import (
     SkillParameterServiceFactoryProtocol,
 )
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
+from agentclaw.community.api.skill_set_management_service import (
+    SkillSetManagementServiceProtocol,
 )
 from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
 from agentclaw.community.core.bot_collaborator.protocols import (
@@ -171,8 +171,8 @@ from agentclaw.community.core.skill_center.services.skill_publish_service import
     SkillPublishService,
 )
 from agentclaw.community.core.skill_center.services.skill_scan import SkillScanService
-from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
-    SkillSetControlPlaneService,
+from agentclaw.community.core.skill_center.services.skill_set_management_service import (
+    SkillSetManagementService,
 )
 from agentclaw.community.core.skill_center.services.skill_set_service import (
     SkillSetActivatorFactory,
@@ -330,8 +330,8 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             scope=singleton,
         )
         binder.bind(
-            SkillSetControlPlaneServiceProtocol,
-            to=SkillSetControlPlaneService,
+            SkillSetManagementServiceProtocol,
+            to=SkillSetManagementService,
             scope=singleton,
         )
         binder.bind(

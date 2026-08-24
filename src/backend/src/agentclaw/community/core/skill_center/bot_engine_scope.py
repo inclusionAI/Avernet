@@ -1,6 +1,6 @@
 """How a Bot's engine scopes the SkillSets a *read* should consider.
 
-Not shared with ``SkillSetControlPlaneService``, whose identically-shaped
+Not shared with ``SkillSetManagementService``, whose identically-shaped
 helpers feed writes: there a missing engine must narrow the scope to nothing
 rather than widen it.
 """

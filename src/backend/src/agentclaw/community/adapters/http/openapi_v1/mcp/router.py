@@ -51,8 +51,8 @@ from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
+from agentclaw.community.api.skill_set_management_service import (
+    SkillSetManagementServiceProtocol,
 )
 from agentclaw.community.core.mcp.config_flow import (
     list_marketplace_servers,
@@ -123,8 +123,8 @@ async def list_bot_mcps(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[list[BotMcpItem]]:
     return envelope(
@@ -150,8 +150,8 @@ async def activate_bot_mcp(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[BotMcpItem]:
     await service.activate_mcp_direct(
@@ -171,8 +171,8 @@ async def deactivate_bot_mcp(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[BotMcpItem]:
     await service.deactivate_mcp_direct(
