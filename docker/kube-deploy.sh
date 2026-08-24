@@ -41,6 +41,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE="${SCRIPT_DIR}/service-deployment.yaml"
 
+
 # --- Default values ---
 
 SERVICE=""
