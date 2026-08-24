@@ -7,14 +7,12 @@ internal names belong in ``#`` comments.
 
 from __future__ import annotations
 
-from copy import deepcopy
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
-from agentclaw.community.adapters.http.openapi_v1.errors import BotTemplateInvalidError
 
 # Request bodies reject unknown keys. Pydantic's default is to *ignore* them,
 # which on a public API means a typo'd or immutable field (``engine`` on update)
@@ -150,21 +148,16 @@ class BotMetadata(BaseModel):
     status: str = Field(description="Current lifecycle status.")
 
 
-class BotCreateTemplate(BaseModel):
-    """Optional business template applied while creating a bot."""
+class BotCreateEngineProperties(BaseModel):
+    """Engine-specific properties used while creating a bot."""
 
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["applicationCoding"] = Field(
+    template: dict[str, Any] = Field(
         description=(
-            "Template type. The creation API currently accepts 'applicationCoding'."
-        ),
-    )
-    properties: dict[str, Any] = Field(
-        description=(
-            "Template-specific JSON properties. Passed through unchanged to the "
-            "template validator; platform-managed identity and lifecycle fields "
-            "are not accepted."
+            "Application-coding template properties. Passed through unchanged to "
+            "the template validator; platform-managed identity and lifecycle "
+            "fields are not accepted."
         ),
     )
 
@@ -198,12 +191,11 @@ class BotCreate(BaseModel):
         default=None,
         description="Business space to associate with the bot, when applicable.",
     )
-    template: BotCreateTemplate | None = Field(
+    engine_properties: BotCreateEngineProperties | None = Field(
         default=None,
         description=(
-            "Optional business template. Omit for a plain bot; use type "
-            "'applicationCoding' with its template-specific properties for an "
-            "application-coding bot."
+            "Optional engine-specific properties. Omit for a plain bot; provide "
+            "template for an application-coding bot."
         ),
     )
     # ``engine_options`` is deliberately absent. Nothing downstream consumes
@@ -371,9 +363,11 @@ class BotAuthStatusPoll(BaseModel):
         description="Echo of the business space the bot was requested with; "
         "omitted resolves the caller's current space, exactly as on create.",
     )
-    template: BotCreateTemplate | None = Field(
+    engine_properties: BotCreateEngineProperties | None = Field(
         default=None,
-        description="Echo of the business template the bot was requested with.",
+        description=(
+            "Echo of the engine-specific properties the bot was requested with."
+        ),
     )
 
 

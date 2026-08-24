@@ -586,7 +586,7 @@ def test_create_bot_202_pending(client, passport):
     assert body["data"]["iframe_url"] == "http://auth"
 
 
-def test_create_application_coding_requires_template_properties(client, svc, passport):
+def test_create_application_coding_requires_engine_properties_template(client, svc, passport):
     response = client.post(
         "/openapi/v1/bots",
         json={
@@ -594,7 +594,7 @@ def test_create_application_coding_requires_template_properties(client, svc, pas
             "engine": "claude_code",
             "cluster_name": "ACRA",
             "bot_type": "personal",
-            "template": {"type": "applicationCoding"},
+            "engine_properties": {},
         },
     )
     assert response.status_code == 422, response.json()
@@ -625,10 +625,7 @@ def test_create_application_coding_maps_template_to_internal_spec(
             json={
                 **_CREATE_BODY,
                 "engine": "claude_code",
-                "template": {
-                    "type": "applicationCoding",
-                    "properties": properties,
-                },
+                "engine_properties": {"template": properties},
             },
         )
 
@@ -638,12 +635,12 @@ def test_create_application_coding_maps_template_to_internal_spec(
     assert kwargs["template_config"] == properties
 
 
-def test_create_rejects_unsupported_template_type(client, svc):
+def test_create_rejects_legacy_template_envelope(client, svc):
     response = client.post(
         "/openapi/v1/bots",
         json={
             **_CREATE_BODY,
-            "template": {"type": "personalCoding", "properties": {}},
+            "template": {"type": "applicationCoding", "properties": {}},
         },
     )
 
@@ -665,14 +662,13 @@ def test_create_rejects_legacy_top_level_template_fields(client, svc):
     svc.create_bot.assert_not_called()
 
 
-def test_create_rejects_unknown_template_envelope_fields(client, svc):
+def test_create_rejects_unknown_engine_properties_fields(client, svc):
     response = client.post(
         "/openapi/v1/bots",
         json={
             **_CREATE_BODY,
-            "template": {
-                "type": "applicationCoding",
-                "properties": {},
+            "engine_properties": {
+                "template": {},
                 "template_uid": "caller-controlled",
             },
         },
@@ -829,7 +825,7 @@ def test_post_auth_status_preserves_create_attributes(client, svc, passport):
     assert kw["bot_type"] == "service"
 
 
-def test_post_auth_status_application_coding_requires_template_properties(
+def test_post_auth_status_application_coding_requires_engine_properties_template(
     client, svc, passport
 ):
     response = client.post(
@@ -837,7 +833,7 @@ def test_post_auth_status_application_coding_requires_template_properties(
         json={
             "engine": "claude_code",
             "cluster_name": "ACRA",
-            "template": {"type": "applicationCoding"},
+            "engine_properties": {},
         },
     )
     assert response.status_code == 422, response.json()
@@ -858,10 +854,7 @@ def test_post_auth_status_maps_template_to_internal_spec(client, svc, passport):
         json={
             "engine": "claude_code",
             "cluster_name": "ACRA",
-            "template": {
-                "type": "applicationCoding",
-                "properties": properties,
-            },
+            "engine_properties": {"template": properties},
         },
     )
 
@@ -1275,19 +1268,21 @@ def test_create_schema_does_not_advertise_engine_options(client):
     assert "engine_options" not in schema["properties"]
 
 
-def test_create_schema_nests_template_specific_fields(client):
+def test_create_schema_nests_template_under_engine_properties(client):
     schemas = client.app.openapi()["components"]["schemas"]
     create_properties = schemas["BotCreate"]["properties"]
     poll_properties = schemas["BotAuthStatusPoll"]["properties"]
-    template_properties = schemas["BotCreateTemplate"]["properties"]
+    engine_properties = schemas["BotCreateEngineProperties"]["properties"]
 
-    assert "template" in create_properties
-    assert "template" in poll_properties
+    assert "engine_properties" in create_properties
+    assert "engine_properties" in poll_properties
+    assert "template" not in create_properties
+    assert "template" not in poll_properties
     assert "template_type" not in create_properties
     assert "template_config" not in create_properties
     assert "template_type" not in poll_properties
     assert "template_config" not in poll_properties
-    assert set(template_properties) == {"type", "properties"}
+    assert set(engine_properties) == {"template"}
 
 
 def test_auth_status_validates_cluster_against_default_engine(client, svc, passport):

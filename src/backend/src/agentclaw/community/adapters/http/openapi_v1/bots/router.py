@@ -412,9 +412,10 @@ async def create_bot(
         owner_id=owner_id,
         header_space_id=body.space_id,
     )
-    template_type = body.template.type if body.template is not None else None
     template_properties = (
-        body.template.properties if body.template is not None else None
+        body.engine_properties.template
+        if body.engine_properties is not None
+        else None
     )
     bot_id = generate_bot_id(owner_id, bot_repo)
     outcome = create_bot_with_authorization(
@@ -428,7 +429,9 @@ async def create_bot(
             bot_name=body.bot_name,
             bot_desc=body.bot_desc,
             space_id=current_space.numeric_id,
-            template_type=template_type,
+            template_type=(
+                "applicationCoding" if template_properties is not None else None
+            ),
             template_config=template_properties,
         ),
         context=BotCreateContext(
@@ -1108,9 +1111,13 @@ async def poll_bot_auth_status(
         bot_desc=body.bot_desc,
         bot_type=body.bot_type,
         space_id=body.space_id,
-        template_type=body.template.type if body.template is not None else None,
+        template_type=(
+            "applicationCoding" if body.engine_properties is not None else None
+        ),
         template_config=(
-            body.template.properties if body.template is not None else None
+            body.engine_properties.template
+            if body.engine_properties is not None
+            else None
         ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,

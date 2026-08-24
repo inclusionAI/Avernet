@@ -798,7 +798,7 @@ Bot 核心路由已接到内部服务上。这里保留下来，是作为其余�
 
 #### 创建 Application Coding Bot
 
-Application Coding 使用 `engine=claude_code`，模板专属参数统一收在 `template` 下，不平铺到 Bot 创建请求顶层：
+Application Coding 使用 `engine=claude_code`，模板专属参数统一收在 `engine_properties.template` 下，不平铺到 Bot 创建请求顶层：
 
 ```json
 {
@@ -807,9 +807,8 @@ Application Coding 使用 `engine=claude_code`，模板专属参数统一收在 
   "engine": "claude_code",
   "cluster_name": "ACRA",
   "bot_type": "personal",
-  "template": {
-    "type": "applicationCoding",
-    "properties": {
+  "engine_properties": {
+    "template": {
       "devflow_workflow": "app-flow",
       "yuque_kb_repos": [],
       "code_repos": [],
@@ -822,7 +821,7 @@ Application Coding 使用 `engine=claude_code`，模板专属参数统一收在 
 }
 ```
 
-若创建返回 202，POST `/{bot_id}/auth-status` 时必须原样回传同一个 `template` 对象。旧的顶层 `template_type` / `template_config` 不属于公共契约，会返回 422。HTTP adapter 会把嵌套对象转换为内部创建契约；它不会与服务端派生的运行时 `extra_properties` 混用。
+若创建返回 202，POST `/{bot_id}/auth-status` 时必须原样回传同一个 `engine_properties` 对象。旧的顶层 `template_type` / `template_config` 不属于公共契约，会返回 422。HTTP adapter 会把 `engine_properties.template` 转换为内部创建契约；它不会与服务端派生的运行时 `extra_properties` 混用。
 
 #### 变更归属业务空间
 

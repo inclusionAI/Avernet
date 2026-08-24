@@ -1,4 +1,4 @@
-"""Unit tests for the ``template.properties`` passthrough contract.
+"""Unit tests for the ``engine_properties.template`` passthrough contract.
 
 The public property bag is a thin passthrough into the owning template adapter's
 own structure (legacy flat applicationCoding vs nested template factory) — there
