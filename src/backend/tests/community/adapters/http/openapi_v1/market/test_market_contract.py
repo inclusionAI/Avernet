@@ -210,6 +210,29 @@ def test_skill_center_market_rejects_caller_supplied_team_id():
     assert sc.request is None
 
 
+def test_skill_center_tags_normalizes_null_children_to_empty_lists():
+    tag = {
+        "id": 1,
+        "name": "研发效能",
+        "description": None,
+        "iconUrl": None,
+        "parentId": None,
+        "tagLevel": 1,
+        "children": None,
+    }
+
+    client, _, _, sc = _client()
+    sc.get_market_tags = lambda: [tag]
+
+    response = client.get(
+        "/openapi/v1/bots/market/skill-center/tags",
+        params={"user_id": "user-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"][0]["children"] == []
+
+
 def test_skill_center_tags_returns_nested_tag_tree_without_changing_search_contract():
     client, _, _, _ = _client()
 
