@@ -32,7 +32,6 @@ from secbaas.community.plugins.database.mariadb.mariadb_orm import MariaDbOrmPlu
 from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 from secbaas.community.plugins.file_transfer import NoopFileTransferBackend
 from secbaas.community.plugins.sandbox.arca import (
-    AliyunAckSandboxPlugin,
     StubArcaSandboxPlugin,
 )
 from secbaas.community.plugins.sandbox.arca.aliyun_ack import (

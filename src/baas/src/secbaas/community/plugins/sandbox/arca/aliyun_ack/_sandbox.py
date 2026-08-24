@@ -51,6 +51,7 @@ class AliyunAckSandbox(ArcaSandbox):
         deployment_name: str | None = None,
         container_name: str | None = None,
         image: str | None = None,
+        ttl_in_minutes: float | int | None = None,
     ) -> None:
         self._sandbox_id = sandbox_id
         self._namespace = namespace
@@ -60,6 +61,7 @@ class AliyunAckSandbox(ArcaSandbox):
         self._deployment_name = deployment_name or ""
         self._container_name = container_name
         self._image = image
+        self._ttl_in_minutes = ttl_in_minutes
 
     @property
     def is_ready(self) -> bool:
@@ -75,17 +77,29 @@ class AliyunAckSandbox(ArcaSandbox):
         return self._sandbox_id
 
     def get_info(self) -> ArcaSandboxInfo:
-        """Extract Pod status into the unified ArcaSandboxInfo."""
+        """Extract Pod status into the unified ArcaSandboxInfo.
+
+        Also derives ``ttl_timestamp`` (ms epoch) from the Pod's
+        ``metadata.creation_timestamp`` plus the
+        ``avernet.arcasandbox/ttl-minutes`` annotation. This lets the renew path
+        treat an ACK Pod like any other Arca sandbox and extend its TTL.
+        """
         try:
             core_api = CoreV1Api(self._client)
             pod = core_api.read_namespaced_pod(
                 name=self._pod_name, namespace=self._namespace
             )
             status = getattr(pod, "status", None)
+
+            ttl_in_minutes = self._ttl_in_minutes
+            ttl_timestamp = self._derive_ttl_timestamp(pod, ttl_in_minutes)
+
             return ArcaSandboxInfo(
                 sandbox_id=self._sandbox_id,
                 status=getattr(status, "phase", None) or "UNKNOWN",
                 template_id=self._template_id,
+                ttl_in_minutes=ttl_in_minutes,
+                ttl_timestamp=ttl_timestamp,
                 metadata={
                     "pod_name": self._pod_name,
                     "namespace": self._namespace,
@@ -95,6 +109,40 @@ class AliyunAckSandbox(ArcaSandbox):
             raise RuntimeError(
                 f"get_info failed for sandbox {self._sandbox_id} ({e.status})"
             ) from e
+
+    def _derive_ttl_timestamp(
+        self, pod: Any, ttl_in_minutes: float | int | None
+    ) -> int | None:
+        """Compute the Pod expiry as a ms epoch timestamp.
+
+        Expiry = pod ``metadata.creation_timestamp`` + ``ttl-minutes`` annotation
+        (falling back to ``self._ttl_in_minutes``). Returns ``None`` when either
+        the creation time or the TTL cannot be resolved, so callers can fall back
+        to their own defaults rather than assuming a value.
+        """
+        from datetime import datetime as _datetime
+
+        metadata = getattr(pod, "metadata", None)
+        creation = getattr(metadata, "creation_timestamp", None) if metadata else None
+        if not isinstance(creation, _datetime):
+            return None
+
+        ttl = ttl_in_minutes
+        if ttl is None and metadata is not None:
+            annotations = getattr(metadata, "annotations", None) or {}
+            raw_ttl = annotations.get("avernet.arcasandbox/ttl-minutes")
+            if raw_ttl is not None:
+                try:
+                    ttl = float(raw_ttl)
+                except (TypeError, ValueError):
+                    ttl = None
+        if ttl is None:
+            return None
+
+        import calendar
+
+        created_epoch_s = calendar.timegm(creation.utctimetuple())
+        return int((created_epoch_s + ttl * 60) * 1000)
 
     def destroy(self) -> bool:
         """Delete the backing Deployment. Idempotent on 404.

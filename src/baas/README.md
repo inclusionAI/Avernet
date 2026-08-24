@@ -89,6 +89,7 @@ Key configuration sections:
 | `user_config.bot_service` | Bot runtime proxy settings |
 | `user_config.bot_run_queue` | Task queue worker config |
 | `user_config.device_ttl_timer` | Device TTL renewal schedule |
+| `user_config.expire_sandbox_timer` | Aliyun ACK pod expiry sweep (destroy Pod + stop bot) schedule |
 | `user_config.bot_runner` | Concurrency limits per bot |
 
 ## Development

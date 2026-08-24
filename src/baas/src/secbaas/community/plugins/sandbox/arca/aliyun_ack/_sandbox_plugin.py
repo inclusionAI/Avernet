@@ -269,7 +269,11 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         sandbox_id = f"{template_id}-{uuid.uuid4().hex[:12]}"
         uid = _sanitize_pod_name(sandbox_id)
         deployment_name, container_name = self._create_deployment(
-            uid, template_id, namespace, storage, resource_spec,
+            uid,
+            template_id,
+            namespace,
+            storage,
+            resource_spec,
             outbound_operation_rule=outbound_operation_rule,
         )
         try:
@@ -296,6 +300,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             deployment_name=deployment_name,
             container_name=container_name,
             image=image or "",
+            ttl_in_minutes=ttl_in_minutes,
         )
         logger.info(
             "[aliyun_ack] sandbox created template=%s sandbox_id=%s pod=%s",
@@ -340,6 +345,15 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         if pod.spec and pod.spec.containers:
             container_name = pod.spec.containers[0].name
 
+        ttl_in_minutes: float | int | None = None
+        if pod.metadata and pod.metadata.annotations:
+            raw_ttl = pod.metadata.annotations.get("avernet.arcasandbox/ttl-minutes")
+            if raw_ttl is not None:
+                try:
+                    ttl_in_minutes = float(raw_ttl)
+                except (TypeError, ValueError):
+                    ttl_in_minutes = None
+
         logger.info("[aliyun_ack] sandbox connected sandbox_id=%s", sandbox_id)
         return AliyunAckSandbox(
             sandbox_id=sandbox_id,
@@ -350,6 +364,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             deployment_name=deployment_name,
             container_name=container_name,
             image="",
+            ttl_in_minutes=ttl_in_minutes,
         )
 
     def resolve_ws_conn_info(

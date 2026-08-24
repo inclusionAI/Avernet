@@ -1,7 +1,7 @@
 """ORM-based device repository for baas_device table."""
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from secbaas.community.core.repository import OrmConnectionMixin, with_orm_session
@@ -461,16 +461,29 @@ class OrmDeviceRepository(OrmConnectionMixin, DeviceRepository):
 
     @with_orm_session
     def update_status_by_device_uuid(
-        self, device_uuid: str, tenant: str, env: str, status: str
+        self,
+        device_uuid: str,
+        tenant: str,
+        env: str,
+        status: str,
+        modifier: str | None = None,
     ) -> int:
         log.info(
-            "update_status_by_device_uuid: device_uuid=%s, tenant=%s, env=%s, status=%s",
+            "update_status_by_device_uuid: device_uuid=%s, tenant=%s, env=%s, status=%s, modifier=%s",
             device_uuid,
             tenant,
             env,
             status,
+            modifier,
         )
         from sqlalchemy import func as sa_func
+
+        values: dict[str, Any] = {
+            "status": status,
+            "gmt_modified": sa_func.now(),
+        }
+        if modifier is not None:
+            values["modifier"] = modifier
 
         result = (
             self._session.query(DeviceModel)
@@ -481,10 +494,7 @@ class OrmDeviceRepository(OrmConnectionMixin, DeviceRepository):
                 DeviceModel.is_deleted == 0,
             )
             .update(
-                {
-                    "status": status,
-                    "gmt_modified": sa_func.now(),
-                },
+                values,
                 synchronize_session=False,
             )
         )
@@ -527,6 +537,106 @@ class OrmDeviceRepository(OrmConnectionMixin, DeviceRepository):
         items = [r.to_record() for r in rows]
         log.info("[device:list_devices] result: %s rows", len(items))
         return total, items
+
+    @with_orm_session
+    def list_expired_paginated(
+        self,
+        *,
+        last_id: int = 0,
+        limit: int = 100,
+        grace_seconds: int = 0,
+        default_ttl_minutes: int = 10080,
+    ) -> list[dict[str, Any]]:
+        """查询 baas_device 中已到期的 ACK pod 设备，按 id ASC keyset 分页。
+
+        仅捞 ``provider_type = 'ARCA'``、``status = 'ACTIVE'``、``provider_device_props``
+        含非空 ``sandbox_id`` 的记录。到期判定以续期路径维护的
+        ``provider_device_props.ttl_expiration_timestamp``（毫秒 epoch）为准，
+        当其缺失时回退到派生 deadline = ``gmt_create`` + effective lifetime（分钟），
+        其中 effective lifetime 优先取每 bot 的
+        ``extra_config.deploy_config.ttl_in_minutes``（JSON 路径），缺失/零值时
+        回退到 ``default_ttl_minutes``。到期判定加入 ``grace_seconds`` 余量。
+        """
+        from sqlalchemy import Integer, case, func, text
+
+        # 续期路径写下的到期时间戳（毫秒 epoch），JSON 取值。
+        ttl_ts_expr = func.json_extract(
+            DeviceModel.provider_device_props, text("'$.ttl_expiration_timestamp'")
+        )
+        ttl_ts = func.cast(ttl_ts_expr, Integer)
+
+        # 派生 deadline 的 effective lifetime（分钟）。
+        json_lifetime = func.json_extract(
+            DeviceModel.extra_config, text("'$.deploy_config.ttl_in_minutes'")
+        )
+        parsed_lifetime = func.cast(json_lifetime, Integer)
+        effective_lifetime = case(
+            (
+                func.coalesce(func.nullif(parsed_lifetime, 0), 0) > 0,
+                func.coalesce(func.nullif(parsed_lifetime, 0), 0),
+            ),
+            else_=default_ttl_minutes,
+        )
+
+        sandbox_id_expr = DeviceModel.provider_device_props.op("->>")("$.sandbox_id")
+
+        is_sqlite = self._session.bind.dialect.name == "sqlite"
+        now = datetime.now()
+        now_ms = int(now.timestamp() * 1000)
+
+        if is_sqlite:
+            # deadline = gmt_create + effective_lifetime 分钟，用 julianday 比较。
+            deadline_days = func.julianday(DeviceModel.gmt_create) + (
+                effective_lifetime / 1440.0
+            )
+            cutoff_days = func.julianday(now) - (grace_seconds / 86400.0)
+            fallback_expired = deadline_days <= cutoff_days
+        else:
+            deadline_expr = func.timestampadd(
+                text("MINUTE"), effective_lifetime, DeviceModel.gmt_create
+            )
+            cutoff = now - timedelta(seconds=grace_seconds)
+            fallback_expired = deadline_expr <= cutoff
+
+        # 有 ttl_expiration_timestamp 用其判定到期；否则用派生 deadline。
+        # 到期判定：ttl_expiration_timestamp（毫秒）早于 now - grace（即到期已过
+        # grace 秒），与 fallback 的 deadline <= now - grace 语义保持一致。
+        has_ts = ttl_ts.isnot(None)
+        ts_expired = ttl_ts <= (now_ms - grace_seconds * 1000)
+        expired_filter = case((has_ts, ts_expired), else_=fallback_expired)
+
+        rows = (
+            self._session.query(DeviceModel)
+            .filter(
+                DeviceModel.status == "ACTIVE",
+                DeviceModel.provider_type == "ARCA",
+                sandbox_id_expr.isnot(None),
+                DeviceModel.id > last_id,
+                expired_filter,
+            )
+            .order_by(DeviceModel.id.asc())
+            .limit(limit)
+            .all()
+        )
+        result = []
+        for r in rows:
+            record = r.to_record()
+            result.append(
+                {
+                    "id": record.id,
+                    "tenant": record.tenant,
+                    "env": record.env,
+                    "status": record.status,
+                    "provider_type": record.provider_type,
+                    "device_uuid": record.device_uuid,
+                    "provider_device_id": record.provider_device_id,
+                    "provider_device_props": record.provider_device_props,
+                    "extra_config": record.extra_config,
+                    "is_deleted": record.is_deleted,
+                }
+            )
+        log.info("[device:list_expired_paginated] result: %s rows", len(result))
+        return result
 
     @with_orm_session
     def list_by_bot_id(
