@@ -119,7 +119,7 @@ async def get_bot_auth_status(
 
     This retired GET spelling is plain-bot only: it carries no template
     parameters, so an application-coding creation must be completed through the
-    POST at the same path, which accepts ``template_type`` / ``template_config``.
+    POST at the same path, which accepts 'template_type' / 'template_config'.
     Polling an application-coding creation here would complete it as a plain bot,
     which is not supported.
 
