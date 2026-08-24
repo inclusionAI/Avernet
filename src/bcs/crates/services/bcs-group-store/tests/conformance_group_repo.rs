@@ -288,6 +288,69 @@ async fn sqlite_delivery_patches_persist_canonical_routing_policy_json() {
 }
 
 #[tokio::test]
+async fn sqlite_transactional_delivery_patch_rejects_stringified_routing_policy_json() {
+    let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    bootstrap_migrations::run_sqlite_migrations(db.as_ref())
+        .await
+        .expect("migrate sqlite");
+    let repo = MySqlGroupStore::sqlite(db.clone(), PROVISIONING_ENV.to_string());
+    let group = GroupBuilder::new("driver")
+        .id("invalid-routing-policy-group")
+        .build();
+    let expected_version = group.version;
+    repo.upsert(group).await.expect("persist group");
+
+    let embedded_policy = serde_json::json!({
+        "mode": "mention",
+        "default_bot_final_delivery": "send_to_driver",
+        "sender_routes": {"driver": ["observer"]}
+    })
+    .to_string();
+    let stringified_policy =
+        serde_json::to_string(&embedded_policy).expect("stringify routing policy object");
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_groups SET routing_policy_json = ? WHERE env = ? AND group_id = ?",
+        vec![
+            DbValue::from(stringified_policy.as_str()),
+            DbValue::from(PROVISIONING_ENV),
+            DbValue::from("invalid-routing-policy-group"),
+        ],
+    ))
+    .await
+    .expect("persist historical stringified routing policy");
+
+    let uncached_repo = MySqlGroupStore::sqlite(db.clone(), PROVISIONING_ENV.to_string());
+    let error = uncached_repo
+        .commit_eventful_mutation(CommitGroupEventfulMutation {
+            group_id: "invalid-routing-policy-group".to_string(),
+            expected_version,
+            mutated_at_ms: 1_787_028_300_000,
+            mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch {
+                default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+                ..Default::default()
+            }),
+            event: None,
+        })
+        .await
+        .expect_err("stringified routing policy must not be overwritten");
+    assert!(error.to_string().contains("before patch"));
+
+    let rows = db
+        .query(DbStatement::with_params(
+            "SELECT routing_policy_json FROM bcs_groups WHERE env = ? AND group_id = ?",
+            vec![
+                DbValue::from(PROVISIONING_ENV),
+                DbValue::from("invalid-routing-policy-group"),
+            ],
+        ))
+        .await
+        .expect("reload stringified routing policy");
+    let stored_json =
+        db_get_column::<String>(&rows[0], "routing_policy_json").expect("routing_policy_json");
+    assert_eq!(stored_json, stringified_policy);
+}
+
+#[tokio::test]
 async fn sqlite_group_opening_message_rejects_invalid_persisted_json() {
     let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
     bootstrap_migrations::run_sqlite_migrations(db.as_ref())

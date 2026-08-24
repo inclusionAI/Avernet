@@ -102,12 +102,11 @@ fn routing_policy_json(policy: Option<&RoutingPolicy>, delivery: DefaultDelivery
     serde_json::to_string(&policy).expect("RoutingPolicy contains only JSON-compatible values")
 }
 
-fn patch_stored_routing_policy_json(
+fn parse_stored_routing_policy_json(
     stored_json: Option<&str>,
-    delivery: DefaultDelivery,
-) -> ServiceResult<String> {
-    let policy = match stored_json {
-        Some(json) if !json.is_empty() => Some(
+) -> ServiceResult<Option<RoutingPolicy>> {
+    Ok(match stored_json {
+        Some(json) => Some(
             serde_json::from_str::<RoutingPolicy>(json).map_err(|error| {
                 ServiceError::InternalError(format!(
                     "deserialize routing_policy_json before patch: {error}"
@@ -115,7 +114,14 @@ fn patch_stored_routing_policy_json(
             })?,
         ),
         _ => None,
-    };
+    })
+}
+
+fn patch_stored_routing_policy_json(
+    stored_json: Option<&str>,
+    delivery: DefaultDelivery,
+) -> ServiceResult<String> {
+    let policy = parse_stored_routing_policy_json(stored_json)?;
     Ok(routing_policy_json(policy.as_ref(), delivery))
 }
 
@@ -1304,6 +1310,22 @@ impl GroupRepoPort for MySqlGroupStore {
                 request_id: None,
             });
         }
+        let routing_policy_snapshot = match &command.mutation {
+            GroupEventfulMutation::PatchMutableFields(patch)
+                if patch.default_bot_final_delivery.is_some() =>
+            {
+                Some(
+                    self.load_raw_routing_policy_json(&command.group_id)
+                        .await?
+                        .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?,
+                )
+            }
+            _ => None,
+        };
+        let authoritative_routing_policy = routing_policy_snapshot
+            .as_ref()
+            .map(|stored_json| parse_stored_routing_policy_json(stored_json.as_deref()))
+            .transpose()?;
         let current = self
             .try_get(&command.group_id)
             .await?
@@ -1322,25 +1344,41 @@ impl GroupRepoPort for MySqlGroupStore {
             });
         }
         let mut terminal = current;
+        if let Some(policy) = authoritative_routing_policy {
+            terminal.routing_policy = policy;
+        }
         apply_db_group_mutation_candidate(&mut terminal, &command.mutation, command.mutated_at_ms)?;
         let mutated_at = db_timestamp_from_millis(command.mutated_at_ms)?;
-        let lock_sql = match self.flavor {
-            DbSqlFlavor::Mysql => {
-                "SELECT group_id FROM bcs_groups WHERE env = ? AND group_id = ? \
-                 AND version = ? AND record_status = 'active' FOR UPDATE"
+        let routing_policy_guard = match self.flavor {
+            DbSqlFlavor::Mysql if routing_policy_snapshot.is_some() => {
+                " AND routing_policy_json <=> ?"
             }
-            DbSqlFlavor::Sqlite => {
-                "SELECT group_id FROM bcs_groups WHERE env = ? AND group_id = ? \
-                 AND version = ? AND record_status = 'active'"
+            DbSqlFlavor::Sqlite if routing_policy_snapshot.is_some() => {
+                " AND routing_policy_json IS ?"
             }
+            _ => "",
         };
+        let lock_sql = match self.flavor {
+            DbSqlFlavor::Mysql => format!(
+                "SELECT group_id FROM bcs_groups WHERE env = ? AND group_id = ? \
+                 AND version = ? AND record_status = 'active'{routing_policy_guard} FOR UPDATE"
+            ),
+            DbSqlFlavor::Sqlite => format!(
+                "SELECT group_id FROM bcs_groups WHERE env = ? AND group_id = ? \
+                 AND version = ? AND record_status = 'active'{routing_policy_guard}"
+            ),
+        };
+        let mut lock_params = vec![
+            Value::from(self.env.as_str()),
+            Value::from(command.group_id.as_str()),
+            Value::from(command.expected_version),
+        ];
+        if let Some(stored_json) = &routing_policy_snapshot {
+            lock_params.push(Value::from(stored_json.as_deref()));
+        }
         let mut steps = vec![DbTransactionStep::Query(DbStatement::with_params(
             lock_sql,
-            vec![
-                Value::from(self.env.as_str()),
-                Value::from(command.group_id.as_str()),
-                Value::from(command.expected_version),
-            ],
+            lock_params,
         ))];
         let group_id = DbTransactionParam::query_result(0, 0, "group_id");
 
@@ -3848,12 +3886,14 @@ mod tests {
             DefaultDelivery::InjectObservers
         );
 
-        let error = patch_stored_routing_policy_json(
-            Some("{invalid-json"),
-            DefaultDelivery::InjectObservers,
-        )
-        .expect_err("invalid stored routing policy must not be overwritten");
-        assert!(error.to_string().contains("before patch"));
+        for invalid_json in ["", "{invalid-json"] {
+            let error = patch_stored_routing_policy_json(
+                Some(invalid_json),
+                DefaultDelivery::InjectObservers,
+            )
+            .expect_err("invalid stored routing policy must not be overwritten");
+            assert!(error.to_string().contains("before patch"));
+        }
     }
 
     #[tokio::test]
@@ -3969,7 +4009,9 @@ mod tests {
             .await
             .expect_err("concurrent routing change must fail the guarded write");
 
-        assert!(matches!(error, ServiceError::Conflict(message) if message.contains("concurrently")));
+        assert!(
+            matches!(error, ServiceError::Conflict(message) if message.contains("concurrently"))
+        );
     }
 
     #[tokio::test]
