@@ -23,7 +23,7 @@ from agentclaw.community.core.repository.protocols.task import (
 )
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult, NodeOpResult, Status, TaskCallbackData, TaskExecutionGraph, TaskNode, TaskNodePatch,
-    TaskOpResult, TaskSpec, TaskSummary, TaskType,
+    TaskOpResult, TaskSpec, TaskType,
 )
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 from agentclaw.community.core.task.repository.types import (
@@ -214,6 +214,12 @@ class TaskService:
 
     def _persist_node_run(self, task_id, task_info, *, run_mode, assignee, session_id,
                           extend_props=None):
+        # The aggregate graph repository already persists the node and runtime
+        # snapshot from the preceding graph mutation. Avoid duplicate inserts
+        # when the shared persistence path is enabled; retain the legacy direct
+        # repositories for lightweight/in-memory fixtures.
+        if self._graph.has_repository:
+            return
         if self._task_node_repo is not None:
             self._task_node_repo.insert(TaskNodeRecord(
                 id=0, task_id=task_id, node_id=task_id,
@@ -310,6 +316,16 @@ class TaskService:
         if exc is not None:
             logger.error("[execute] 后台 on_execute 异常: %s", exc, exc_info=exc)
 
+    async def redrive_task(self, task_id: str) -> None:
+        """Recovery resume:重投一个已 hydrate 的非终态任务(实例重启 / 滚动发布后)。
+
+        走 ``ExecutionEngine.redrive`` 重派 PENDING 叶节点;终态图冻结。幂等:派发飞行态/
+        状态机卫重复。recovery worker 在取得租约后调此方法。"""
+        bg = asyncio.create_task(self._engine.redrive(task_id))
+        self._bg_tasks.add(bg)
+        bg.add_done_callback(self._on_bg_done)
+        logger.info("[redrive] task=%s 后台 redrive 已调度", task_id)
+
     async def drain_background(self) -> None:
         """await 所有在途后台 on_execute 推进完成。
 
@@ -320,7 +336,11 @@ class TaskService:
         await asyncio.gather(*self._bg_tasks, return_exceptions=True)
 
     def get_task_dashboard(
-        self, task_id: str, node_id: str | None = None
+        self,
+        task_id: str,
+        node_id: str | None = None,
+        *,
+        include_action_log: bool = False,
     ) -> TaskExecutionGraph:
         """任务执行详情可视化(整图或按 node_id 子树投影),只读。
 
@@ -328,6 +348,8 @@ class TaskService:
         把回调审计的 ``execution_graph``(BCN/ClawMind DAG 快照)挂在图级,便于 dashboard 可见;无 session_id /
         无 callback / 未配 ``callback_repo`` → 留 ``None``。子树投影(node_id 入参)不挂(root 不在投影内)。"""
         graph = self._graph.query_task_dashboard(task_id, node_id)
+        if include_action_log:
+            self._graph.load_action_logs(graph)
         root = next((n for n in graph.tasks if n.node_id == task_id), None)
         sid = (root.run_info.extend_props.get("session_id") if root else None)
         if sid and self._callback_repo is not None:

@@ -63,7 +63,6 @@ from agentclaw.community.adapters.http.task.translator import (
     is_bcn_event_payload, is_claw_mind_payload, parse_manager_worker_bcn,
     translate, translate_bcn, translate_claw_mind,
 )
-from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.errors import InternalError
 from agentclaw.community.core.task.domain.errors import TaskStateError
@@ -120,7 +119,10 @@ async def get_task_dashboard_internal(
     """任务执行详情可视化(内部副本,只读;整图或按 node_id 子树投影)。
 
     任务/节点不存在 → TaskNotFoundError/NodeNotFoundError → ``@envelope_errors`` 映射 404。"""
-    graph = service.get_task_dashboard(task_id, node_id)
+    if include_action_log:
+        graph = service.get_task_dashboard(task_id, node_id, include_action_log=True)
+    else:
+        graph = service.get_task_dashboard(task_id, node_id)
     return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
 
 
