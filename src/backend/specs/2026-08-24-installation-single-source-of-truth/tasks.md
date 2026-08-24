@@ -14,7 +14,15 @@ lands in the same group as the migration of its last caller.
       implementation file, `core/repository/protocols/skill_set_control_plane.py`
       → `capability_desired_state.py`, `skill_set_control_plane_types.py` →
       `capability_desired_state_types.py`; all importers.
-- [ ] 1.3 Full suite green (`uv run pytest tests/community`) before any
+- [ ] 1.3 `BotRuntimeProjectionReconciler` → `BotRuntimeProjector`:
+      `bot_runtime_projection_reconciler.py` → `bot_runtime_projector.py`;
+      methods `reconcile` → `project`, `reconcile_non_skill_projection` →
+      `project_non_skill`, `reconcile_cleanup` → `project_cleanup`; both
+      protocols (`api/` + `runtime_projection_contract.py`); delete the
+      `SkillSetRuntimeReconciler` alias; DI, callers, tests
+      (`tests/community/contracts/test_bot_runtime_projection_reconciler.py`
+      → `test_bot_runtime_projector.py`).
+- [ ] 1.4 Full suite green (`uv run pytest tests/community`) before any
       behavior change.
 
 ## Group 2 — One flush: MCPs + new exclusion semantics, retire the materializer
@@ -35,7 +43,7 @@ lands in the same group as the migration of its last caller.
       Update the 2026-08-23 pinning test that asserted excluded rows are
       "left alone" (superseded — cite the spec).
 - [ ] 2.5 Swap the two materializer call sites to the repair
-      (`bot_runtime_projection_reconciler._resolve_plan`, Service-Bot
+      (`bot_runtime_projector._resolve_plan`, Service-Bot
       `build_stage.py`); delete the materializer +
       `ensure_active_skillset_installations` (impl, protocol, DI, tests);
       update `core/service_bot/README.md`.
@@ -54,16 +62,16 @@ lands in the same group as the migration of its last caller.
       Installation join renamed `list_bot_installed_assets` (drop merge and
       the `engine` read parameter; dedup by id); update
       `core/repository/protocols/skills_pool.py`.
-- [ ] 3.4 Migrate merge-readers to `reader.active_skill_assets`: reconciler
-      (snapshot + plan; drop the Group-2 direct repair call), the
+- [ ] 3.4 Migrate merge-readers to `reader.active_skill_assets`: the
+      projector (snapshot + plan; drop the Group-2 direct repair call), the
       name-conflict guard in the state service,
       `skills_pool/mapping_convergence.py`, `recovery_service.py`,
       `reconcile_service.py`, `active_aicoding_bridge_repair.py`, Service-Bot
       `build_stage.py` (flush via reader); wiring updates.
 - [ ] 3.5 Guard: no caller of `list_bot_installed_assets` outside the
       reader; no reference to `list_bot_active_assets` remains.
-- [ ] 3.6 Reconciler test pinning `bot_default_engine_types` Default-Set
-      precedence; run reconciler contract + skills_pool tests.
+- [ ] 3.6 Projector test pinning `bot_default_engine_types` Default-Set
+      precedence; run the projector contract + skills_pool tests.
 
 ## Group 4 — Symlink/compose projection converges
 
@@ -82,7 +90,7 @@ lands in the same group as the migration of its last caller.
 - [ ] 5.2 Union tests: ordinary-set MCP appears via Installation; excluded
       default MCP absent; direct-installed MCP appears with minimal
       metadata.
-- [ ] 5.3 Reconciler contract test: `installed ∪ effective_default` inputs
+- [ ] 5.3 Projector contract test: `installed ∪ effective_default` inputs
       consistent.
 
 ## Group 6 — CapabilityOwnershipPolicy

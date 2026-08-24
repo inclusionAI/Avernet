@@ -65,11 +65,12 @@ active Set accounts for rather than uninstalling something live.
 DB-side only: it reconciles the Installation tables with SkillSet
 configuration and never touches a device. The *runtime projection* is
 DB→engine: pushing Installation-backed desired state to the Bot's running
-engine (symlinks / Pool mappings, MCP details, Passport scope) through
-`BotRuntimeProjectionReconciler`. Every command ends with a synchronous
+engine (symlinks / Pool mappings, MCP details, Passport scope) through the
+runtime projector (`BotRuntimeProjector`, renamed from
+`BotRuntimeProjectionReconciler` — criterion F.15a). Every command ends with a synchronous
 runtime projection, compensated on failure — that responsibility stays with
 the two command services. The reader's flush never triggers one; read paths
-that need the runtime updated go through the reconciler, which reads via the
+that need the runtime updated go through the projector, which reads via the
 reader.
 
 ## Motivation — the inconsistencies as they exist today
@@ -257,6 +258,14 @@ reader.
     only door to "what is active"), consistent with the `Capability*` naming
     axis. Error class names are left as-is to bound the diff (recorded as
     accepted naming debt).
+15a. The DB→engine component is renamed **`BotRuntimeProjector`** (from
+    `BotRuntimeProjectionReconciler`; `reconcile()` → `project()`).
+    "Reconcile" collided with the flush — the codebase has two
+    reconciliations at different boundaries, and the established vocabulary
+    is *flush* (DB↔DB) vs *runtime projection* (DB→engine) — so the
+    component is named after its verb, pairing with the pure
+    `RuntimeProjectionResolver`: the resolver resolves the snapshot, the
+    projector applies it to the engine.
 
 ### G. Cohesion and dead code
 

@@ -28,9 +28,8 @@ Principles applied:
 - **Flush ≠ runtime projection.** The flush is DB-side only (Set config →
   Installation; the reader's job, never touches a device). The runtime
   projection is DB→engine (Installation-backed state → symlinks / MCP /
-  Passport via `BotRuntimeProjectionReconciler`) and ends every command,
-  synchronously, compensated on failure — that stays with the two command
-  services.
+  Passport via `BotRuntimeProjector`) and ends every command, synchronously,
+  compensated on failure — that trigger stays with the two command services.
 - **Fewer layers.** `BotSkillAssetService` (dispatch layer) and
   `LocalSkillStateService` (misnamed, parallel write path) dissolve into
   `DirectActivationService` + `SkillQueryService`.
@@ -44,6 +43,7 @@ Principles applied:
 | `SkillSetControlPlaneRepository` (+ protocol, types module) | `CapabilityDesiredStateRepository` | named by aggregate, since both services write through it |
 | `BotInstallationReader` (prev. draft) | `BotCapabilityStateReader` | consistent `Capability*` axis |
 | `BotSkillAssetService` + `LocalSkillQueryService` | `SkillQueryService` | one query component, one fewer layer |
+| `BotRuntimeProjectionReconciler` (+ protocol; `reconcile()` → `project()`) | `BotRuntimeProjector` | "reconcile" collided with the flush — two reconciliations at different boundaries; named after its verb, pairing with `RuntimeProjectionResolver` |
 
 Error classes (`SkillSetControlPlane*Error`, `LocalSkill*Error`) keep their
 names — accepted naming debt to bound the diff (spec F.15).
@@ -168,7 +168,7 @@ Backing read: `SkillRepository.list_bot_active_assets` loses its merge and
 becomes a pure Installation→`ac_skill` join, renamed
 `list_bot_installed_assets`; after migration its only caller is the reader.
 
-Migrated consumers (all previous merge-readers): the reconciler (snapshot +
+Migrated consumers (all previous merge-readers): the projector (snapshot +
 plan), the direct-activation name-conflict guard,
 `skills_pool/{mapping_convergence,recovery_service,reconcile_service,
 active_aicoding_bridge_repair}.py`, Service-Bot `publish_flow/build_stage.py`,
@@ -228,8 +228,8 @@ Enforcement sites:
 
 Everything done *to a SkillSet*. Existing shape is kept — ACL via `_bot`,
 one UoW mutation, then one synchronous **runtime projection** via
-`BotRuntimeProjectionReconciler` with compensating restore (this is the
-DB→engine sync, not the flush); additions:
+`BotRuntimeProjector` with compensating restore (this is the DB→engine sync,
+not the flush); additions:
 
 ```python
 class SkillSetManagementService:
@@ -267,7 +267,7 @@ class DirectActivationService:
         """Resolve the asset (local rows carry their own Bot/owner; shared
         repo assets take the addressed Bot/owner), authorize (owner or MEMBER
         collaborator), enforce R1 and the runtime-name-conflict guard, then
-        UoW activate/deactivate_skill_direct + reconcile."""
+        UoW activate/deactivate_skill_direct + runtime projection."""
 
     async def set_mcp_active(
         self, *, server_code: str, bot_id: str, owner_id: str,
@@ -321,7 +321,15 @@ def collect_bot_active_mcps(self, entity_id, bot_id, user_id,
     Stops iterating active ordinary Sets."""
 ```
 
-### 9. Runtime projection — `BotRuntimeProjectionReconciler` (existing)
+### 9. Runtime projection — `BotRuntimeProjector` (renamed)
+
+`BotRuntimeProjectionReconciler` → `BotRuntimeProjector`, methods
+`reconcile()` → `project()`, `reconcile_non_skill_projection()` →
+`project_non_skill()`, `reconcile_cleanup()` → `project_cleanup()`; the
+legacy `SkillSetRuntimeReconciler` alias is deleted. Rationale: "reconcile"
+collided with the flush — two reconciliations at different boundaries — and
+the settled vocabulary is *flush* (DB↔DB) vs *runtime projection*
+(DB→engine); the projector pairs with the pure `RuntimeProjectionResolver`.
 
 Inputs come from the reader (assets, installed MCP codes) and the converged
 `collect_bot_active_mcps`; structure and `RuntimeProjectionResolver` are
@@ -334,15 +342,15 @@ The projection's *content* is indeed just what the reader answers — the
 command services never compute it. What they own is the *trigger* and the
 *failure handling*: the reader is passive and the engine never polls the
 database, so after a command commits new desired state, nothing would move
-the running Bot until some unrelated flow happened to reconcile. The
-published contract of every activation command is synchronous — success
-means the runtime converged, failure means desired state was compensated —
-and that contract can only be kept by the component that ran the command.
-The dependency chain is:
+the running Bot until some unrelated flow happened to project. The published
+contract of every activation command is synchronous — success means the
+runtime converged, failure means desired state was compensated — and that
+contract can only be kept by the component that ran the command. The
+dependency chain is:
 
 ```
 command service ──1──▶ UoW write (desired state)
-                ──2──▶ BotRuntimeProjectionReconciler.reconcile()
+                ──2──▶ BotRuntimeProjector.project()
                               └──▶ reader (flush + read Installation)
                               └──▶ engine adapters (symlinks · MCP · Passport)
 ```
@@ -352,7 +360,7 @@ no-op — the UoW already wrote Installation eagerly; the flush earns its keep
 on reads that arrive over unflushed legacy data. And when the durable
 task-queue design lands (out of scope; the `skill_activation_sync_task`
 skeleton is its seam), it is exactly this synchronous trigger that moves onto
-the queue — the reconciler and the reader are unchanged by that move.
+the queue — the projector and the reader are unchanged by that move.
 
 ## Migration scope — which surfaces land on the new components
 
@@ -372,7 +380,7 @@ content/admin tooling, explicitly listed.
 | Internal `/api/skills/skillset/{activate,deactivate,sync,active}` | already canonical |
 | Internal `/api/skills/{id}/activate\|deactivate` (legacy wire) | `DirectActivationService` via the legacy-reference resolution in `SkillQueryService` |
 | `/api/skills/deactivate-all`, deprecated `/skillset/current` | migrated in Group 9 |
-| Background: runtime reconciler, skills_pool convergence/recovery/reconcile/bridge-repair, Service-Bot build, symlink listener / propagation / provisioning, teclaw config-compose, MCP sync | reader (directly, or via the `get_active_skills` / `collect_bot_active_mcps` delegations) |
+| Background: runtime projector, skills_pool convergence/recovery/reconcile/bridge-repair, Service-Bot build, symlink listener / propagation / provisioning, teclaw config-compose, MCP sync | reader (directly, or via the `get_active_skills` / `collect_bot_active_mcps` delegations) |
 
 **Deliberately not migrated (follow-up; they edit shared Set *content*
 upstream of the flush, not per-Bot activation):** the admin content tooling
@@ -424,7 +432,7 @@ activation step (deleted).
 - **Rename fallout**: Group 1 is pure renames validated by the full suite
   before any behavior change lands.
 - **Default-Set engine precedence** (layout-engine-first) pinned by a
-  reconciler test.
+  projector test.
 - **Error-precedence compatibility** (R2 before R3) encoded in
   `membership_conflict` and pinned by tests.
 - **Deletion fallout**: every deletion lands with the migration of its last
