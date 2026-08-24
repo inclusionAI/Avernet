@@ -179,6 +179,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         CoreTaskContainer,
         config=config,
         distributed_lock_service=services.distributed_lock_service,
+        device_repo=repository.device_repository,
         device_binding_repo=repository.device_binding_repository,
         sandbox_device_router=services.sandbox_device_router,
         bot_run_queue_repository=repository.bot_run_queue_repository,
@@ -186,6 +187,10 @@ class ApplicationContainer(containers.DeclarativeContainer):
         paas_service_facade=services.paas_facade,
         file_transfer_backend=services.file_transfer_backend,
         ttl_renewal_schedule_repository=ttl_renewal_schedule_repo,
+        device_service=services.device_service,
+        bot_manage_service=services.bot_management_service,
+        bot_repo=repository.bot_repository,
+        bot_device_rel_repo=repository.bot_device_rel_repository,
     )
 
     cron_lifecycle = providers.Singleton(
@@ -200,6 +205,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
             ),
             tasks.bot_run_recovery_task,
             tasks.file_transfer_poller_task,
+            tasks.expire_sandbox_timer_task,
         ),
     )
 
