@@ -7,13 +7,8 @@ from datetime import datetime, timezone
 
 import jwt
 
-from agentclaw.community.core.bot_chat.models import (
-    BcsGroupParticipant,
-    BcsGroupSession,
-)
-from agentclaw.community.core.repository.implementations.chat.db import (
-    BotChatDbRepository,
-)
+from agentclaw.community.core.bot_chat.models import BcsGroupSession
+from agentclaw.community.core.repository.implementations.chat.db import BotChatDbRepository
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.gateway_principal_config import (
@@ -36,10 +31,6 @@ _TRACE_ID = "trace_open_endpoint_fixture"
 _SESSION_ID = "session_open_endpoint_fixture"
 _BCS_SESSION_ID = "group_open_endpoint_fixture:abcdef12"
 _SESSION_KEY = f"agent:main:bcs:group:{_BCS_SESSION_ID}"
-_GROUP_ID = "group_open_endpoint_fixture"
-_VIEWER_BOT_ID = "bot_open_endpoint_fixture"
-_VIEWER_OWNER_ID = "owner_open_endpoint_fixture"
-_VIEWER_BOT_UUID = f"{_VIEWER_BOT_ID}:{_VIEWER_OWNER_ID}"
 _SIGNING_KEY = "endpoint-test-shared-secret-at-least-32-bytes"
 
 
@@ -132,20 +123,13 @@ def _seed_trace(world) -> None:
 def _seed_group_trace(world) -> None:
     _seed_trace(world)
     with world.get(DatabasePlugin).orm_session() as session:
-        session.add_all(
-            [
-                BcsGroupSession(
-                    session_id=_BCS_SESSION_ID,
-                    group_id=_GROUP_ID,
-                    session_kind="chat",
-                    env=get_current_env(),
-                ),
-                BcsGroupParticipant(
-                    group_id=_GROUP_ID,
-                    bot_uuid=_VIEWER_BOT_UUID,
-                    env=get_current_env(),
-                ),
-            ]
+        session.add(
+            BcsGroupSession(
+                session_id=_BCS_SESSION_ID,
+                group_id="group_open_endpoint_fixture",
+                session_kind="chat",
+                env=get_current_env(),
+            )
         )
 
 
@@ -291,52 +275,6 @@ def open_bot_chat_group_list_happy():
 @endpoint_test(
     method="GET",
     path=_GROUP_PATH,
-    scenario="member_bot_happy",
-    seed=_seed_group_trace,
-    input=CaseInput(
-        path_params={"group_id": _GROUP_ID},
-        query_params={
-            "bot_id": _VIEWER_BOT_ID,
-            "user_id": "collaborator_open_endpoint_fixture",
-            "owner_id": _VIEWER_OWNER_ID,
-        },
-        headers=_principal_headers(),
-    ),
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={
-            "code": 200000,
-            "data": {"total": 1, "sessions": [{"id": _TRACE_ID}]},
-        },
-    ),
-)
-def open_bot_chat_group_list_member_bot_happy():
-    """The framework owns invocation."""
-
-
-@endpoint_test(
-    method="GET",
-    path=_GROUP_PATH,
-    scenario="non_member_bot_hidden",
-    seed=_seed_group_trace,
-    input=CaseInput(
-        path_params={"group_id": _GROUP_ID},
-        query_params={
-            "bot_id": _VIEWER_BOT_ID,
-            "user_id": _VIEWER_OWNER_ID,
-            "owner_id": "other_owner",
-        },
-        headers=_principal_headers(),
-    ),
-    expect=ExpectError(status=404),
-)
-def open_bot_chat_group_list_non_member_bot_hidden():
-    """The framework owns invocation."""
-
-
-@endpoint_test(
-    method="GET",
-    path=_GROUP_PATH,
     scenario="invalid_limit",
     seed=_enable_public_auth,
     input=CaseInput(
@@ -413,46 +351,6 @@ def open_bot_chat_user_bot_list_missing_bot_id():
     ),
 )
 def open_bot_chat_detail_happy():
-    """The framework owns invocation."""
-
-
-@endpoint_test(
-    method="GET",
-    path=_DETAIL_PATH,
-    scenario="group_member_happy",
-    seed=_seed_group_trace,
-    input=CaseInput(
-        path_params={"trace_id": _TRACE_ID},
-        query_params={
-            "bot_id": _VIEWER_BOT_ID,
-            "group_id": _GROUP_ID,
-            "user_id": "collaborator_open_endpoint_fixture",
-            "owner_id": _VIEWER_OWNER_ID,
-        },
-        headers=_principal_headers(),
-    ),
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={"code": 200000, "data": {"id": _TRACE_ID}},
-    ),
-)
-def open_bot_chat_detail_group_member_happy():
-    """The framework owns invocation."""
-
-
-@endpoint_test(
-    method="GET",
-    path=_DETAIL_PATH,
-    scenario="partial_group_context",
-    seed=_seed_group_trace,
-    input=CaseInput(
-        path_params={"trace_id": _TRACE_ID},
-        query_params={"bot_id": _VIEWER_BOT_ID, "group_id": _GROUP_ID},
-        headers=_principal_headers(),
-    ),
-    expect=ExpectError(status=400),
-)
-def open_bot_chat_detail_partial_group_context():
     """The framework owns invocation."""
 
 

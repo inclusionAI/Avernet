@@ -183,18 +183,3 @@ class BcsGroupSession(Base):
     env = Column(String(32), nullable=False, default="prod")
     status = Column(String(16), nullable=False, default="running")
     session_kind = Column(String(32), nullable=False, default="chat")
-
-
-class BcsGroupParticipant(Base):
-    """Read model for checking whether a Bot belongs to a BCS group."""
-
-    __tablename__ = "bcs_group_participants"
-    __table_args__ = {"extend_existing": True}
-
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
-    group_id = Column(String(64), nullable=False)
-    bot_uuid = Column(String(256), nullable=False)
-    role = Column(String(256), nullable=False, default="consultant")
-    env = Column(String(64), nullable=False)
-    actor_kind = Column(String(16), nullable=False, default="bot")
-    mode = Column(String(16), nullable=False, default="auto")

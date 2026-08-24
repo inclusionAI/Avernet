@@ -57,21 +57,11 @@ class OpenBotChatServiceProtocol(Protocol):
         biz_scene: str | None = None,
         biz_task_id: str | None = None,
         group_id: str | None = None,
-        bot_id: str | None = None,
-        user_id: str | None = None,
-        owner_id: str | None = None,
         page: int = 1,
         limit: int = 100,
     ) -> SessionListResponse: ...
 
-    async def get_open_session(
-        self,
-        trace_id: str,
-        bot_id: str | None = None,
-        group_id: str | None = None,
-        user_id: str | None = None,
-        owner_id: str | None = None,
-    ) -> ConversationDetail: ...
+    async def get_open_session(self, trace_id: str) -> ConversationDetail: ...
 
     async def list_open_user_bot_traces(
         self,

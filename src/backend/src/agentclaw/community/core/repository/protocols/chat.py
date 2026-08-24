@@ -296,11 +296,6 @@ class OpenBotChatRepositoryProtocol(Protocol):
     """Reads owned exclusively by the Bot Chat OpenAPI surface."""
 
     @abstractmethod
-    def is_bot_in_group(self, group_id: str, bot_uuid: str) -> bool:
-        """Return whether the Bot is a participant of the group."""
-        ...
-
-    @abstractmethod
     def list_scope_traces(
         self,
         *,
