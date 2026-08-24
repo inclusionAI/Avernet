@@ -95,7 +95,7 @@ async fn accept_friend_connection_request(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
-    path: Result<Path<String>, PathRejection>,
+    path: Result<Path<u64>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
     let Path(request_id_path) =
         path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
@@ -117,7 +117,7 @@ async fn reject_friend_connection_request(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
-    path: Result<Path<String>, PathRejection>,
+    path: Result<Path<u64>, PathRejection>,
     body: Option<Json<RejectFriendConnectionRequestBody>>,
 ) -> Result<Response, ErrorResponse> {
     let Path(request_id_path) =
@@ -140,7 +140,7 @@ async fn cancel_friend_connection_request(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
-    path: Result<Path<String>, PathRejection>,
+    path: Result<Path<u64>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
     let Path(request_id_path) =
         path.map_err(|error| invalid_request(&request_id, error.body_text()))?;

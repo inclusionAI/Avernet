@@ -50,17 +50,17 @@ pub enum FriendConnectionCreateStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FriendConnectionCreateResult {
-    pub request_ids: Vec<String>,
-    pub edge_ids: Vec<String>,
+    pub request_ids: Vec<u64>,
+    pub edge_ids: Vec<u64>,
     pub status: FriendConnectionCreateStatus,
     pub auto_accepted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FriendConnectionRequestView {
-    pub request_id: String,
+    pub request_id: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub edge_id: Option<String>,
+    pub edge_id: Option<u64>,
     pub from_actor: FriendConnectionActor,
     pub to_actor: FriendConnectionActor,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -120,20 +120,20 @@ pub struct ListFriendConnectionRequests {
 #[derive(Debug, Clone)]
 pub struct AcceptFriendConnectionRequest {
     pub caller: AuthenticatedCaller,
-    pub request_id: String,
+    pub request_id: u64,
 }
 
 #[derive(Debug, Clone)]
 pub struct RejectFriendConnectionRequest {
     pub caller: AuthenticatedCaller,
-    pub request_id: String,
+    pub request_id: u64,
     pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct CancelFriendConnectionRequest {
     pub caller: AuthenticatedCaller,
-    pub request_id: String,
+    pub request_id: u64,
 }
 
 #[derive(Debug, Clone)]

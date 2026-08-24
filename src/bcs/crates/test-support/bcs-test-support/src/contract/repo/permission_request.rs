@@ -18,7 +18,7 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
     env: &str,
 ) {
     let req = PermissionRequest {
-        request_id: "req_c1".into(),
+        request_id: 0,
         edge_id: None,
         env: env.into(),
         from_id: "human_1".into(),
@@ -33,10 +33,11 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
         decided_by: None,
         decided_at: None,
     };
-    repo.insert(req).await.expect("insert request");
+    let request_id = repo.insert(req).await.expect("insert request");
 
     // get — pending request round-trips, edge_id unset.
-    let got = repo.get("req_c1", env).await.expect("found");
+    let got = repo.get(request_id, env).await.expect("found");
+    assert_eq!(got.request_id, request_id);
     assert_eq!(got.status, RequestStatus::Pending);
     assert!(got.edge_id.is_none(), "pending → no edge_id");
     assert_eq!(got.request_kind, RequestKind::Connect);
@@ -72,7 +73,7 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
 
     // decide — status, decided_by, decided_at mutate.
     repo.decide(
-        "req_c1",
+        request_id,
         env,
         RequestStatus::Approved,
         "owner",
@@ -80,7 +81,7 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
     )
     .await
     .expect("decide");
-    let got2 = repo.get("req_c1", env).await.expect("found after decide");
+    let got2 = repo.get(request_id, env).await.expect("found after decide");
     assert_eq!(got2.status, RequestStatus::Approved, "status → approved");
     assert_eq!(got2.decided_by.as_deref(), Some("owner"), "decided_by set");
     // decided_at is a DB-managed timestamp set at decision time.
@@ -88,19 +89,19 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
     assert_eq!(got2.decision_reason.as_deref(), Some("ok"), "decision_reason set");
 
     // backfill_edge_id — annotate the approved request with its new edge.
-    repo.backfill_edge_id("req_c1", env, "eg_c1")
+    repo.backfill_edge_id(request_id, env, 3001)
         .await
         .expect("backfill_edge_id");
-    let got3 = repo.get("req_c1", env).await.expect("found after backfill");
+    let got3 = repo.get(request_id, env).await.expect("found after backfill");
     assert_eq!(
-        got3.edge_id.as_deref(),
-        Some("eg_c1"),
+        got3.edge_id,
+        Some(3001),
         "edge_id back-filled after approval"
     );
 
     // Missing request → None (non-fallible).
     assert!(
-        repo.get("req_missing", env).await.is_none(),
+        repo.get(9999, env).await.is_none(),
         "missing request → None"
     );
 }
