@@ -8,7 +8,7 @@
  */
 import type { IDatabase, Row } from "../types.js";
 import { nowForDb } from "../types.js";
-import type { IFlowRunRepository } from "./types.js";
+import type { IFlowRunRepository, FlowRunReapFields } from "./types.js";
 
 // ── Types ──
 
@@ -396,6 +396,54 @@ export class FlowRunRepository implements IFlowRunRepository {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[db] FlowRunRepository.findRunningByOrigin failed: ${msg}`);
       return [];
+    }
+  }
+
+  /**
+   * CAS-claim a timeout reap: the server transitions the row to failed only
+   * when it is not already terminal. Exactly one engine process sharing the
+   * DB wins — losers get claimed=false and skip logging/notifications.
+   */
+  async markFailedIfRunning(flowId: string, fields: FlowRunReapFields): Promise<boolean> {
+    try {
+      const now = nowForDb(this.db.dbType);
+      const result = await this.db.query<{ affected_rows: number }>(
+        `UPDATE flow_runs SET status = 'failed', result_json = ?, current_phase = ?, total_duration_ms = ?, completed_at = ?, gmt_modified = ?
+         WHERE flow_id = ? AND status NOT IN ('succeeded', 'failed', 'cancelled', 'completed')`,
+        [
+          fields.reason,
+          fields.currentPhase,
+          fields.totalDurationMs ?? null,
+          fields.completedAt,
+          now,
+          flowId,
+        ],
+      );
+      // SQLite returns the number of rows affected. claimed when exactly 1.
+      return result.length > 0 && (result[0]?.affected_rows ?? 0) > 0;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn(`[db] FlowRunRepository.markFailedIfRunning failed: ${msg}`);
+      return false;
+    }
+  }
+
+  /**
+   * Reset started_at when a flow is resumed/retried from a non-running state,
+   * so the timeout watchdog computes ranFrom from the retry time.
+   */
+  async resetStartedAt(flowId: string, startedAt: number): Promise<boolean> {
+    try {
+      const now = nowForDb(this.db.dbType);
+      await this.db.exec(
+        `UPDATE flow_runs SET started_at = ?, gmt_modified = ? WHERE flow_id = ?`,
+        [startedAt, now, flowId],
+      );
+      return true;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn(`[db] FlowRunRepository.resetStartedAt failed: ${msg}`);
+      return false;
     }
   }
 }

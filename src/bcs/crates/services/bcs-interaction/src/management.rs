@@ -535,7 +535,9 @@ fn validate_requested_payload(
 ) -> Result<(), String> {
     match kind {
         bcs_service_api::InteractionKind::Exec => {
-            require_non_empty_string(payload, "command")?;
+            if payload.get("command").is_some() {
+                require_non_empty_string(payload, "command")?;
+            }
             validate_decision_options(payload.get("options"), true)
         }
         bcs_service_api::InteractionKind::ModeSwitch => {
@@ -1094,6 +1096,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn exec_requested_without_command_is_stored_published_and_replayable() {
+        let (service, store, _provider, frontend) = service(true);
+        let mut request = requested("interaction-without-command");
+        request.payload.as_object_mut().unwrap().remove("command");
+
+        service.on_provider_requested(request).await.unwrap();
+
+        let stored = store
+            .get(&InteractionKey {
+                bcs_run_id: "bcs-run-1".to_string(),
+                interaction_id: "interaction-without-command".to_string(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(stored.requested_payload.get("command").is_none());
+
+        let calls = frontend.calls.lock().await;
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].payload.get("command").is_none());
+        drop(calls);
+
+        let replay = service.list_pending("session-1").await.unwrap();
+        assert_eq!(replay.len(), 1);
+        assert!(replay[0].payload.get("command").is_none());
+    }
+
+    #[tokio::test]
     async fn resolve_rechecks_authorization_and_never_calls_provider_when_denied() {
         let (service, _store, provider, _frontend) = service(false);
         service
@@ -1522,6 +1552,20 @@ mod tests {
     #[tokio::test]
     async fn rejects_invalid_requested_shape_and_unoffered_exec_decision() {
         let (service, _store, provider, _frontend) = service(true);
+        for (index, command) in [json!(null), json!(""), json!("   "), json!(42)]
+            .into_iter()
+            .enumerate()
+        {
+            let mut invalid_command = requested(&format!("invalid-command-{index}"));
+            invalid_command.payload["command"] = command;
+            assert!(
+                service
+                    .on_provider_requested(invalid_command)
+                    .await
+                    .is_err()
+            );
+        }
+
         let mut invalid = requested("invalid");
         invalid.payload = json!({
             "phase":"requested",

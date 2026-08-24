@@ -33,6 +33,40 @@ async fn sqlite_session_repo_passes_session_repo_contract() {
     bcs_test_support::contract::repo::session_repo_port_contract_tests(&repo).await;
 }
 
+#[tokio::test]
+async fn memory_session_repo_persists_channel_source_in_session_id() {
+    let repo = MemorySessionRepo::new();
+    assert_channel_session_id(&repo).await;
+}
+
+#[tokio::test]
+async fn sqlite_session_repo_persists_channel_source_in_session_id() {
+    let db = sqlite_db().await;
+    let repo = MySqlSessionStore::sqlite(db, "dev".to_string());
+    assert_channel_session_id(&repo).await;
+}
+
+async fn assert_channel_session_id(repo: &dyn SessionRepoPort) {
+    let session = repo
+        .create_channel(
+            "bcs_grp_dingtalk_dm_1234567890abcdef",
+            "dingtalk",
+            NewSessionParams::default(),
+        )
+        .await
+        .expect("create channel session");
+
+    assert!(
+        session
+            .id
+            .starts_with("bcs_grp_dingtalk_dm_1234567890abcdef:channel_dingtalk_")
+    );
+    assert_eq!(session.id.matches(':').count(), 1);
+    let stored = repo.get(&session.id).await.expect("stored channel session");
+    assert_eq!(stored.id, session.id);
+    assert_eq!(stored.group_id, session.group_id);
+}
+
 async fn sqlite_db() -> Arc<dyn DbPlugin> {
     let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
     bootstrap_migrations::run_sqlite_migrations(db.as_ref())

@@ -108,6 +108,34 @@ class UnsupportedEngineError(Exception):
     """
 
 
+class BotTemplateInvalidError(Exception):
+    """A ``template_type``/``template_config`` pairing is invalid (→ 422).
+
+    Covers a ``template_config`` without a ``template_type``, an unsupported
+    template type, and a template payload that fails the application-coding
+    validation. Deliberately a 422, not 400: the request is well-formed but the
+    template contract is wrong.
+    """
+
+
+class BotCombinationUnsupportedError(Exception):
+    """An application-coding combination is recognized but not creatable (→ 409).
+
+    The engine / deployment / space / service combination is valid in the
+    abstract but not supported in this deployment — distinct from a malformed
+    template (422) and from a deployment that cannot host workspaces at all
+    (503).
+    """
+
+
+class ApplicationCodingUnavailableError(Exception):
+    """The deployment has no Workspace Hosting bound (→ 503).
+
+    Checked before any side effect. A 503 rather than 409: the caller's
+    combination may be valid, but this deployment cannot honor it right now.
+    """
+
+
 class StartupScriptUnsupportedError(Exception):
     """A bot whose container cannot run a startup script was sent one.
 

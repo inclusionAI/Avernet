@@ -1064,6 +1064,7 @@ async fn bot_final_event_in_human_bot_dm_does_not_self_relay_to_sender_bot() {
             role: ParticipantRole::Observer,
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::Present),
+            tags: Vec::new(),
         },
         Participant {
             bot_uuid: "bot-observer".to_string(),
@@ -1072,6 +1073,7 @@ async fn bot_final_event_in_human_bot_dm_does_not_self_relay_to_sender_bot() {
             role: ParticipantRole::Driver,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
+            tags: Vec::new(),
         },
     ];
     support.group.upsert(group).await.unwrap();

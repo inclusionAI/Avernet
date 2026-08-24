@@ -234,8 +234,7 @@ async def test_handle_ask_user_resolve_normalizes_all_values_as_ordinary(
 
     assert result.ok is True
     mock_interaction_service.resolve.assert_called_once_with(
-        session_key="session-1",
-        interaction_id="interaction-ask-1",
+        baas_interaction_id="interaction-ask-1",
         resolution=InteractionResolution(
             kind="ask_user",
             decision="submit",
@@ -267,6 +266,45 @@ async def test_handle_ask_user_resolve_normalizes_all_values_as_ordinary(
         },
         idempotency_key="idem-ask-1",
     )
+
+
+@pytest.mark.asyncio
+async def test_handle_ask_user_resolve_preserves_skipped_values(
+    service, mock_interaction_service
+) -> None:
+    result = await service.handle_interaction_resolve(
+        _make_interaction_resolve_input(
+            answers={
+                "empty_array": BcnInteractionAnswer(
+                    values=(),
+                    question="Skip with an empty array?",
+                    header="Array",
+                ),
+                "empty_string": BcnInteractionAnswer(
+                    values=("",),
+                    question="Skip with an empty string?",
+                    header="Empty",
+                ),
+                "whitespace": BcnInteractionAnswer(
+                    values=("   ",),
+                    question="Skip with whitespace?",
+                    header="Blank",
+                ),
+            }
+        )
+    )
+
+    assert result.ok is True
+    resolution = mock_interaction_service.resolve.call_args.kwargs["resolution"]
+    assert resolution.answer == "；".join(["Array: ", "Empty: ", "Blank:    "])
+    assert resolution.message == resolution.answer
+    assert resolution.values == {"Array": "", "Empty": "", "Blank": "   "}
+    assert resolution.answers == {
+        "Skip with an empty array?": "",
+        "Skip with an empty string?": "",
+        "Skip with whitespace?": "   ",
+    }
+    assert resolution.selected_options == ((), ("",), ("   ",))
 
 
 @pytest.mark.asyncio

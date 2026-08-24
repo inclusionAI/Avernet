@@ -1345,6 +1345,11 @@ async fn create_uses_the_authenticated_human_as_originator() {
                 participants: vec![CreateParticipant {
                     actor_id: "helper".into(),
                     role: ParticipantRole::Consultant,
+                    tags: vec![
+                        " tenant-a ".to_string(),
+                        "".to_string(),
+                        "scene-review".to_string(),
+                    ],
                 }],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
                     delivery_policy: GroupDeliveryPolicy {
@@ -1361,6 +1366,15 @@ async fn create_uses_the_authenticated_human_as_originator() {
     };
     assert_eq!(detail.driver_bot_uuid, "driver");
     assert_eq!(detail.originator_actor_id, "human_requester");
+    assert_eq!(
+        detail
+            .participants
+            .iter()
+            .find(|participant| participant.actor_id == "helper")
+            .expect("helper participant")
+            .tags,
+        vec!["tenant-a".to_string(), "scene-review".to_string()]
+    );
     assert!(
         detail
             .participants
@@ -1842,10 +1856,12 @@ async fn human_participant_can_create_with_driver_reachable_protected_participan
                     CreateParticipant {
                         actor_id: "human_staff-1".into(),
                         role: ParticipantRole::Observer,
+                        tags: Vec::new(),
                     },
                     CreateParticipant {
                         actor_id: "helper".into(),
                         role: ParticipantRole::Consultant,
+                        tags: Vec::new(),
                     },
                 ],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
@@ -2040,6 +2056,7 @@ async fn create_group_propagates_non_driver_registry_database_failure() {
                 participants: vec![CreateParticipant {
                     actor_id: "helper".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
                     delivery_policy: GroupDeliveryPolicy {
@@ -2190,6 +2207,7 @@ async fn state_machine_create_without_runtime_fails_before_persisting_group() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2237,6 +2255,7 @@ async fn state_machine_create_rejects_duplicate_participant_binding_names() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2295,6 +2314,7 @@ async fn state_machine_runtime_failure_rolls_back_created_group() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2340,6 +2360,7 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2440,6 +2461,7 @@ async fn state_machine_create_with_inline_yaml_returns_persisted_definition_ref(
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2502,6 +2524,7 @@ async fn state_machine_create_defers_initial_run_until_required_channel_is_bound
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2550,6 +2573,7 @@ async fn state_machine_create_rejects_human_actors_in_bot_bindings() {
                 participants: vec![CreateParticipant {
                     actor_id: "human_staff-1".into(),
                     role: ParticipantRole::Observer,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2602,6 +2626,7 @@ async fn state_machine_create_preserves_authenticated_human_in_audit_and_start()
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2672,6 +2697,7 @@ async fn state_machine_create_does_not_reread_runtime_for_its_response() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2714,6 +2740,7 @@ async fn state_machine_start_failure_removes_runtime_session_and_group() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2783,6 +2810,7 @@ async fn deleting_state_machine_group_cancels_runs_and_removes_runtime_state() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -3013,6 +3041,7 @@ async fn tenant_metadata_does_not_restrict_bot_collaboration() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
                     delivery_policy: GroupDeliveryPolicy {
@@ -3131,6 +3160,7 @@ async fn state_machine_patch_failure_does_not_commit_requested_changes() {
                 participants: vec![CreateParticipant {
                     actor_id: "helper".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -3244,6 +3274,7 @@ async fn create_propagates_protected_participant_friendship_lookup_failure() {
                 participants: vec![CreateParticipant {
                     actor_id: "helper".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
                     delivery_policy: GroupDeliveryPolicy {
@@ -3323,6 +3354,7 @@ async fn update_opening_message_preserves_patch_states_and_strategy_guard() {
                 participants: vec![CreateParticipant {
                     actor_id: "helper".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -3465,10 +3497,12 @@ async fn create_rejects_duplicate_participant_actor_ids() {
                     CreateParticipant {
                         actor_id: "helper".into(),
                         role: ParticipantRole::Consultant,
+                        tags: Vec::new(),
                     },
                     CreateParticipant {
                         actor_id: "helper".into(),
                         role: ParticipantRole::Observer,
+                        tags: Vec::new(),
                     },
                 ],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
@@ -3507,6 +3541,7 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
                 participants: vec![CreateParticipant {
                     actor_id: "manager".into(),
                     role: ParticipantRole::Manager,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
                     delivery_policy: GroupDeliveryPolicy {
@@ -3536,10 +3571,12 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
                     CreateParticipant {
                         actor_id: "manager".into(),
                         role: ParticipantRole::Manager,
+                        tags: Vec::new(),
                     },
                     CreateParticipant {
                         actor_id: "worker".into(),
                         role: ParticipantRole::Worker,
+                        tags: Vec::new(),
                     },
                 ],
                 collaboration: CollaborationConfiguration::ManagerWorker(Default::default()),
@@ -3704,6 +3741,7 @@ async fn client_caused_group_errors_map_to_documented_4xx_classes() {
                 participants: vec![CreateParticipant {
                     actor_id: "protected".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
                     delivery_policy: GroupDeliveryPolicy {

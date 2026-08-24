@@ -8,9 +8,9 @@ use crate::GroupKind;
 
 pub const GROUP_ID_PREFIX: &str = "bcs_grp_";
 pub const GENERATED_SESSION_ID_SUFFIX_CHARS: usize = 9;
-pub const MAX_SESSION_ID_CHARS: usize = 64;
-pub const MAX_GENERATED_GROUP_ID_CHARS: usize =
-    MAX_SESSION_ID_CHARS - GENERATED_SESSION_ID_SUFFIX_CHARS;
+pub const MAX_SESSION_ID_CHARS: usize = 128;
+pub const MAX_GENERATED_GROUP_ID_CHARS: usize = 55;
+pub const MAX_CHANNEL_TYPE_CHARS: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum GroupIdBuildError {
@@ -19,7 +19,7 @@ pub enum GroupIdBuildError {
     #[error("group id source must not be empty")]
     EmptySourceId,
     #[error(
-        "generated group id cannot produce a session id within {MAX_SESSION_ID_CHARS} characters"
+        "generated group id exceeds the {MAX_GENERATED_GROUP_ID_CHARS}-character compatibility limit"
     )]
     SessionIdTooLong,
 }
@@ -37,7 +37,7 @@ pub fn channel_group_id(
     source_id: &str,
 ) -> Result<String, GroupIdBuildError> {
     let channel_type = channel_type.trim();
-    if !valid_channel_type(channel_type) {
+    if !is_valid_channel_type(channel_type) {
         return Err(GroupIdBuildError::InvalidChannelType);
     }
     let source_id = source_id.trim();
@@ -62,10 +62,11 @@ fn compose_group_id(channel_type: Option<&str>, group_kind: GroupKind, token: &s
     }
 }
 
-fn valid_channel_type(channel_type: &str) -> bool {
+pub fn is_valid_channel_type(channel_type: &str) -> bool {
     // COSEC: Keep ':' and other delimiters out of generated IDs so a plugin
-    // identifier cannot change the `{group_id}:{8_hex}` session boundary.
+    // identifier cannot change the `{group_id}:<suffix>` session boundary.
     !channel_type.is_empty()
+        && channel_type.chars().count() <= MAX_CHANNEL_TYPE_CHARS
         && channel_type
             .bytes()
             .all(|byte| {
@@ -132,12 +133,13 @@ mod tests {
     }
 
     #[test]
-    fn max_channel_namespace_fits_session_id_limit() -> Result<(), GroupIdBuildError> {
+    fn max_channel_namespace_preserves_legacy_group_bound() -> Result<(), GroupIdBuildError> {
         let group_id = channel_group_id("wechat_work", GroupKind::Dm, UUID)?;
         let session_id = format!("{group_id}:abcdef12");
 
         assert_eq!(group_id.chars().count(), MAX_GENERATED_GROUP_ID_CHARS);
-        assert_eq!(session_id.chars().count(), MAX_SESSION_ID_CHARS);
+        assert_eq!(session_id.chars().count(), 64);
+        assert!(session_id.chars().count() <= MAX_SESSION_ID_CHARS);
         Ok(())
     }
 

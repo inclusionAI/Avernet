@@ -18,6 +18,7 @@ class BotRunInteractionRepository(Protocol):
     def create_requested(
         self,
         *,
+        baas_interaction_id: str,
         session_key: str,
         interaction_id: str,
         payload: BotRunInteractionPayload,
@@ -27,11 +28,24 @@ class BotRunInteractionRepository(Protocol):
         self, *, session_key: str, interaction_id: str
     ) -> BotRunInteractionRecord | None: ...
 
+    def get_by_baas_interaction_id(
+        self, *, baas_interaction_id: str
+    ) -> BotRunInteractionRecord | None: ...
+
     def transition(
         self,
         *,
         session_key: str,
         interaction_id: str,
+        from_states: frozenset[InteractionState],
+        to_state: InteractionState,
+        patch: BotRunInteractionPayloadPatch,
+    ) -> BotRunInteractionRecord | None: ...
+
+    def transition_by_baas_interaction_id(
+        self,
+        *,
+        baas_interaction_id: str,
         from_states: frozenset[InteractionState],
         to_state: InteractionState,
         patch: BotRunInteractionPayloadPatch,

@@ -11,7 +11,9 @@ use tokio::sync::RwLock;
 use tracing::debug;
 
 use bcs_event_store::MemoryEventStore;
-use bcs_service_api::core::session::{can_reactivate, new_session_id, validate_session_id};
+use bcs_service_api::core::session::{
+    can_reactivate, new_channel_session_id, new_session_id, validate_session_id,
+};
 use bcs_service_api::port::repo::{
     AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent,
     NewSessionParams, RemoveSessionParticipantWithEvent, SessionRepoPort,
@@ -233,6 +235,28 @@ impl SessionRepoPort for MemorySessionRepo {
             .await
             .map_err(|error| ServiceError::InternalError(error.to_string()))?;
         Ok(candidate)
+    }
+
+    async fn create_channel(
+        &self,
+        group_id: &str,
+        channel_type: &str,
+        params: NewSessionParams,
+    ) -> ServiceResult<Session> {
+        for _ in 0..3 {
+            let id = new_channel_session_id(group_id, channel_type)
+                .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
+            let mut state = self.state.write().await;
+            if state.sessions.contains_key(&id) {
+                continue;
+            }
+            let session = session_from_params(id.clone(), group_id, &params, now_ms());
+            state.sessions.insert(id, session.clone());
+            return Ok(session);
+        }
+        Err(ServiceError::SessionInvalidParams(
+            "session_id collision retry exhausted (3 attempts)".to_string(),
+        ))
     }
 
     async fn get(&self, session_id: &str) -> Option<Session> {

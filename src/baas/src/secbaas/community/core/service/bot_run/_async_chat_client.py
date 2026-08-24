@@ -39,6 +39,26 @@ from ._session_state import SessionState
 logger = get_logger("core-bot-run")
 
 
+def _public_interaction_envelope(
+    envelope: JsonObject,
+    *,
+    baas_interaction_id: str,
+) -> JsonObject:
+    """Copy an Engine envelope and replace only its externally visible ID."""
+    public_envelope = dict(envelope)
+    engine_payload = envelope.get("payload")
+    if not isinstance(engine_payload, dict):
+        raise ValueError("interaction event envelope payload must be an object")
+    public_payload = dict(engine_payload)
+    public_payload["interactionId"] = baas_interaction_id
+    if "id" in public_payload:
+        public_payload["id"] = baas_interaction_id
+    if "transitionId" in public_payload:
+        public_payload["transitionId"] = baas_interaction_id
+    public_envelope["payload"] = public_payload
+    return public_envelope
+
+
 def _capture_trace_context() -> Any:
     """捕获当前 trace context，供后续回调中恢复。
 
@@ -883,14 +903,14 @@ class AsyncChatClient:
             session_key=session_key,
             payload=payload,
         )
-        created = self._interaction_service.record_requested(
+        result = self._interaction_service.record_requested(
             session_key=event.session_key,
             interaction_id=event.interaction_id,
             envelope=event.envelope,
             allowed_decisions=event.allowed_decisions,
             expires_at_ms=event.expires_at_ms,
         )
-        if created and state is not None:
+        if result.created and state is not None:
             self._emit_stream_chunk(
                 state,
                 StreamChunk(
@@ -898,7 +918,10 @@ class AsyncChatClient:
                     content="",
                     metadata={
                         "event": "interaction.requested",
-                        "payload": event.envelope,
+                        "payload": _public_interaction_envelope(
+                            event.envelope,
+                            baas_interaction_id=result.baas_interaction_id,
+                        ),
                     },
                 ),
             )
@@ -944,12 +967,12 @@ class AsyncChatClient:
             session_key=session_key,
             payload=payload,
         )
-        applied = self._interaction_service.mark_resolved(
+        result = self._interaction_service.mark_resolved(
             session_key=event.session_key,
             interaction_id=event.interaction_id,
             envelope=event.envelope,
         )
-        if not applied:
+        if result is None or not result.applied:
             return
 
         if state is not None:
@@ -960,7 +983,10 @@ class AsyncChatClient:
                     content="",
                     metadata={
                         "event": "interaction.resolved",
-                        "payload": event.envelope,
+                        "payload": _public_interaction_envelope(
+                            event.envelope,
+                            baas_interaction_id=result.baas_interaction_id,
+                        ),
                     },
                 ),
             )
@@ -984,13 +1010,14 @@ class AsyncChatClient:
             session_key=session_key,
             payload=payload,
         )
-        self._interaction_service.mark_resolved(
+        result = self._interaction_service.mark_resolved(
             session_key=event.session_key,
             interaction_id=event.interaction_id,
             envelope=event.envelope,
         )
         if (
-            state is None
+            result is None
+            or state is None
             or event.interaction_id not in state.pending_mode_transition_ids
         ):
             return
@@ -1003,7 +1030,10 @@ class AsyncChatClient:
                 content="",
                 metadata={
                     "event": "mode_transition.resolved",
-                    "payload": event.envelope,
+                    "payload": _public_interaction_envelope(
+                        event.envelope,
+                        baas_interaction_id=result.baas_interaction_id,
+                    ),
                 },
             ),
         )

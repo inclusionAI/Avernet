@@ -828,6 +828,29 @@ impl CollaborationRuntime {
             delivery_request_id = %delivery_request_id,
             "state_machine: node dispatch started"
         );
+        let target = if let Some(registry) = self.bot_registry.as_ref() {
+            registry.resolve_delivery_target(&assignee_bot_id).await?
+        } else {
+            BotDeliveryTarget::WebSocket {
+                bot_id: assignee_bot_id.clone(),
+            }
+        };
+        let provider_tags = if target.is_http_provider() {
+            self.sessions
+                .get(&run.session_id)
+                .await
+                .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
+                .and_then(|session| {
+                    session
+                        .participants
+                        .into_iter()
+                        .find(|participant| participant.bot_uuid == assignee_bot_id)
+                })
+                .map(|participant| participant.tags)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let mut frame = build_chat_send_frame(
             &delivery_request_id,
             &group.id,
@@ -837,6 +860,7 @@ impl CollaborationRuntime {
             BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
             &[],
             &assignee_bot_id,
+            &provider_tags,
             &None,
             &None,
             false,
@@ -852,13 +876,6 @@ impl CollaborationRuntime {
                 }
             }
         }
-        let target = if let Some(registry) = self.bot_registry.as_ref() {
-            registry.resolve_delivery_target(&assignee_bot_id).await?
-        } else {
-            BotDeliveryTarget::WebSocket {
-                bot_id: assignee_bot_id.clone(),
-            }
-        };
         let delivery_result = match self
             .bot_delivery
             .deliver(BotDeliveryCommand {

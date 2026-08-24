@@ -2213,6 +2213,7 @@ async fn get_group_preserves_legacy_detail_payload_from_query_service() {
             role: ParticipantRole::Driver,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+            tags: Vec::new(),
         }],
     );
     group.messages = vec![GroupMessage {
@@ -2662,6 +2663,7 @@ async fn test_app_with_service_spec_and_store(
             role: ParticipantRole::Driver,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+            tags: Vec::new(),
         }],
     );
     g.service_spec = initial_spec;
@@ -2707,6 +2709,7 @@ async fn test_app() -> (axum::Router, Arc<RecordingGroupManagement>, TempDir) {
                     role: ParticipantRole::Driver,
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+                    tags: Vec::new(),
                 },
                 Participant {
                     bot_uuid: "target-bot".to_string(),
@@ -2715,6 +2718,7 @@ async fn test_app() -> (axum::Router, Arc<RecordingGroupManagement>, TempDir) {
                     role: ParticipantRole::Consultant,
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+                    tags: Vec::new(),
                 },
             ],
         ))
@@ -2850,6 +2854,7 @@ fn participant_view(bot_id: &str, role: &str) -> GroupParticipantView {
         role: role.to_string(),
         actor_kind: ActorKind::Bot,
         mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+        tags: Vec::new(),
     }
 }
 

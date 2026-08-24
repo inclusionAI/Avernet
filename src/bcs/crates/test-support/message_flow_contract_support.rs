@@ -52,6 +52,7 @@ impl FlowTestSupport {
                     role: ParticipantRole::Observer,
                     actor_kind: ActorKind::Human,
                     mode: None,
+                    tags: Vec::new(),
                 },
             ],
         );

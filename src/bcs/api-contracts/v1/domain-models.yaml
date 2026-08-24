@@ -472,6 +472,10 @@ Participant:
         - manager
         - worker
         - observer
+    tags:
+      type: array
+      items:
+        type: string
     mode:
       type: string
       enum:
@@ -479,6 +483,11 @@ Participant:
         - muted
         - present
         - absent
+    tags:
+      type: array
+      items:
+        type: string
+      description: Provider routing tags scoped to this Group or Session membership.
 
 DeliveryPolicy:
   type: object

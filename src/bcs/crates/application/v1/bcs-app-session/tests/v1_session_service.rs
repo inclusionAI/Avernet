@@ -3152,6 +3152,12 @@ async fn create_session_inherits_parent_group_participants_without_request_roste
         )
         .await;
     let mut group = fixture.groups.get("g1").await.expect("group exists");
+    group
+        .participants
+        .iter_mut()
+        .find(|participant| participant.bot_uuid == "expert")
+        .expect("expert Group participant")
+        .tags = vec!["tenant-a".to_string(), "scene-review".to_string()];
     group.participants.push(Participant::human(
         "human_driver",
         ParticipantRole::Observer,
@@ -3198,6 +3204,16 @@ async fn create_session_inherits_parent_group_participants_without_request_roste
             .participants
             .iter()
             .any(|p| p.actor_id == "driver" && p.role == ParticipantRole::Driver)
+    );
+    let inherited_expert = outcome
+        .session
+        .participants
+        .iter()
+        .find(|participant| participant.actor_id == "expert")
+        .expect("expert Group participant should be inherited into Session");
+    assert_eq!(
+        inherited_expert.tags,
+        vec!["tenant-a".to_string(), "scene-review".to_string()]
     );
 }
 
@@ -3525,6 +3541,7 @@ async fn get_preserves_human_participant_from_legacy_invitation_join() {
                         role: ParticipantRole::Consultant,
                         actor_kind: ActorKind::Human,
                         mode: Some(ParticipantMode::Present),
+                        tags: Vec::new(),
                     },
                 ],
                 group_version: Some(group.version),

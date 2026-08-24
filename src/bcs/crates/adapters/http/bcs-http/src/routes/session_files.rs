@@ -922,6 +922,7 @@ mod tests {
             role: ParticipantRole::default(),
             actor_kind: DomainActorKind::Bot,
             mode: None,
+            tags: Vec::new(),
         }
     }
 

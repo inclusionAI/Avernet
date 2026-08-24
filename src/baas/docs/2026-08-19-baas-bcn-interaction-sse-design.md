@@ -27,6 +27,7 @@ Engine envelope 嵌套在 `data.payload` 中。即使只修改事件名，BCN �
 - 对实际 Engine 消息和旧格式做有限兼容，避免单条异常 interaction 终止
   整条聊天流。
 - 更新 BCN SSE 协议，允许 mode switch 的目标模式和推荐选项。
+- 对 BCN/前端只暴露 BaaS 生成的 public interaction ID，不暴露 Engine ID。
 
 ## 非目标
 
@@ -46,9 +47,11 @@ _transform_interaction
 └── _transform_mode_switch_requested
 ```
 
-converter 从已保存的 Engine envelope 中读取 `payload`，创建新的 BCN 数据
-对象，不修改原对象。输出采用字段白名单，防止 Engine 新增内部字段后被自动
-泄露。Engine 回调仍保存完整 envelope，供 interaction resolve 使用。
+converter 从交付副本的 envelope 中读取 `payload`，创建新的 BCN 数据对象，不
+修改原始 Engine 对象。interaction service 先按 Engine `sessionKey` 和
+`interactionId` 生成、持久化 BaaS public ID；交付副本中的 `interactionId` 被替换
+为该 public ID。输出采用字段白名单，防止 Engine 新增内部字段后被自动泄露。
+Engine 回调仍保存完整原始 envelope，内部派发仍使用 Engine ID。
 
 不在 Engine 回调处直接归一化，因为该层同时承担 Engine 原始事件持久化；过早
 转换会混淆 Engine 合约和 BCN 合约。也不采用通用字段表驱动的深层映射，因为
@@ -79,7 +82,7 @@ data: {"runId":"<BCN chat.send request id>","seq":<BaaS stream sequence>,"ts":..
 
 | Engine 来源 | BCN `data` 字段 | 规则 |
 | --- | --- | --- |
-| `payload.interactionId`，fallback `payload.id` | `interactionId` | 必需 |
+| BaaS 持久化的 `baas_interaction_id` | `interactionId` | 必需；格式为 `BAAS-INTERACTION-` + SHA-256 前 32 位 hex |
 | `payload.kind` | `kind` | 必需 |
 | `payload.phase` | `phase` | 缺失时根据源事件名推导；与源事件名冲突时以源事件名为准并记录 warning |
 | `payload.title` | `title` | 缺失时不输出 |
@@ -157,7 +160,7 @@ data: {
 | Engine 来源 | BCN `data` 字段 | 规则 |
 | --- | --- | --- |
 | `payload.cwd` | `cwd` | 可选 |
-| `payload.command` | `command` | 必需，必须为非空字符串 |
+| `payload.command` | `command` | 可选；仅非空字符串会被复制 |
 | `payload.options[].label` | `options[].label` | 必需 |
 | `payload.options[].decision`，fallback `.value` | `options[].decision` | 两者都缺失时跳过该选项并 warning |
 
@@ -165,6 +168,8 @@ data: {
 BCN 可执行的 `allow-once`、`allow-always`、`deny` 三个标准选项。显式提供
 `options` 时必须是非空数组；非法子项被过滤，重复 decision 由后一项覆盖前一项，
 过滤后没有有效选项则跳过当前 interaction。显式 `null` 不触发默认选项合成。
+`command` 缺失、为 `null`、非字符串、空字符串或仅含空白时不阻断 interaction，
+BaaS 省略该可选字段且不记录 warning；非空字符串保持原值透传。
 
 ```text
 event: interaction
@@ -244,8 +249,9 @@ Engine 的 `interaction.resolved` 和 `mode_transition.resolved` 都转换为
 `event: interaction.resolved` 或 `event: mode_transition.resolved` 的不兼容 SSE
 形式。
 
-mode-switch requested chunk 在活跃 stream 上暴露后，其 interactionId 会进入该
-stream 的有界 pending 集合。对应 `mode_transition.resolved` 到达时只投递一次
+mode-switch requested chunk 在活跃 stream 上暴露后，其 Engine interactionId 会
+进入该 stream 的内部有界 pending 集合。对应 `mode_transition.resolved` 到达时，
+BaaS 通过 Engine 身份找到持久化 public ID，并只投递一次
 resolved SSE，即使更早的成功 RPC response 已将 DB record 兜底标记为 resolved。
 未暴露 requested chunk、非法 kind 或重复 terminal event 不进入这一兼容投递
 路径。
@@ -287,8 +293,8 @@ warning 使用结构化上下文，仅记录 BCN runId、interactionId、kind、
   1..4/唯一性限制、bool-only `multiSelect`/`allowOther`、自由文本约束，以及 option
   decision/value/legacy-label fallback；用真实 Engine label+description-only shape
   验证输出仍满足 BCN 合约且 warning 不泄露业务文本。
-- exec 的必需 command、无 options 默认选项、显式非法 options 拒绝、option
-  fallback 与重复 decision 后写覆盖。
+- exec 的可选 command 省略规则、有效 command 透传、无 options 默认选项、显式
+  非法 options 拒绝、option fallback 与重复 decision 后写覆盖。
 - 使用实际抓包形状作为 mode_switch fixture，验证顶层 toMode 到 targetMode、
   subject fallback、decision/value fallback、recommended 和 option targetMode。
 - 验证 Engine 私有字段不会进入 BCN 数据。
@@ -313,7 +319,9 @@ warning 使用结构化上下文，仅记录 BCN runId、interactionId、kind、
 
 主要风险是 Engine 实际消息随版本变化。字段白名单、顶层优先加旧结构 fallback、
 子项级容错和结构化 warning 用于限制风险。回滚可恢复旧 converter 输出；完整
-Engine envelope 的持久化格式不变。
+Engine envelope 的 payload 快照保持原样；interaction 表新增独立的
+`baas_interaction_id` 列。升级前已持久化的行以此前已经暴露的 Engine
+`interaction_id` 回填 public ID，避免部署期间的 pending interaction 失效。
 
 interaction 状态 payload 对允许决策采用显式三态兼容历史 pending 数据：旧记录
 缺少 `allowedDecisions` 时解码为 `None`，仅这种状态按 legacy unrestricted 处理；

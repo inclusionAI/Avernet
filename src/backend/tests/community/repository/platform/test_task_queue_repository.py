@@ -18,7 +18,9 @@ from sqlalchemy.pool import StaticPool
 # create_all() builds the ac_task_queue table.
 from agentclaw.community.core.task_queue.repository.models import TaskQueueModel  # noqa: F401
 from agentclaw.community.core.task_queue.types import TaskStatus
+from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
 from agentclaw.community.core.repository.implementations.platform.task_queue import _ACTIVE_IDEM_INDEX, _KEYED_INSERT_ATTEMPTS, _MAX_IDEMPOTENCY_KEY_LEN, _MAX_TASK_TYPE_LEN
 from agentclaw.community.core.repository.implementations.platform.task_queue import TaskQueueRepository, _is_active_idem_conflict
 
@@ -624,7 +626,7 @@ def test_key_is_stored_verbatim_without_stripping(repo):
 def test_validation_also_applies_through_the_service_facade(repo):
     """Adopters call TaskQueueService, so the guard must hold on that path too;
     it delegates to the repository, which is where the check lives."""
-    service = TaskQueueService(repo)
+    service = TaskQueueService(repo, HandlerRegistry(), WorkerWakeup())
     with pytest.raises(ValueError, match="exceeds"):
         service.enqueue(
             "demo", {}, 3600, idempotency_key="k" * (_MAX_IDEMPOTENCY_KEY_LEN + 1)
@@ -795,7 +797,7 @@ def test_unkeyed_enqueue_still_accepts_any_task_type(repo, task_type):
 
 def test_padded_task_type_is_rejected_through_the_service_facade(repo):
     """Adopters call the service, so the guard has to hold on that path too."""
-    service = TaskQueueService(repo)
+    service = TaskQueueService(repo, HandlerRegistry(), WorkerWakeup())
     with pytest.raises(ValueError, match="leading or trailing whitespace"):
         service.enqueue("job ", {}, 3600, idempotency_key="k1")
     assert _all_rows(repo) == []
