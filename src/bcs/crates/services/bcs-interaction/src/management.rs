@@ -695,52 +695,84 @@ fn validate_ask_user_resolution(
             .get("values")
             .and_then(Value::as_array)
             .ok_or_else(|| format!("ask_user answer {question_id} requires values"))?;
-        if values.is_empty()
-            || values
-                .iter()
-                .any(|value| value.as_str().is_none_or(str::is_empty))
+        if values
+            .iter()
+            .any(|value| value.as_str().is_none_or(str::is_empty))
         {
             return Err(format!(
                 "ask_user answer {question_id} values must be non-empty strings"
+            ));
+        }
+        let custom_values: &[Value] = match answer.get("customValues") {
+            Some(custom_values) => custom_values
+                .as_array()
+                .ok_or_else(|| {
+                    format!("ask_user answer {question_id} customValues must be an array")
+                })?
+                .as_slice(),
+            None => &[],
+        };
+        if custom_values
+            .iter()
+            .any(|value| value.as_str().is_none_or(|value| value.trim().is_empty()))
+        {
+            return Err(format!(
+                "ask_user answer {question_id} customValues must be non-empty strings"
+            ));
+        }
+        if values.is_empty() && custom_values.is_empty() {
+            return Err(format!(
+                "ask_user answer {question_id} requires values or customValues"
             ));
         }
         let multi_select = question
             .get("multiSelect")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        if !multi_select && values.len() != 1 {
+        if !multi_select && values.len() + custom_values.len() != 1 {
             return Err(format!("ask_user answer {question_id} accepts one value"));
         }
         if let Some(options) = question.get("options").and_then(Value::as_array) {
+            let offered = options
+                .iter()
+                .filter_map(|option| option.get("value").and_then(Value::as_str))
+                .collect::<HashSet<_>>();
+            if values
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|value| !offered.contains(value))
+            {
+                return Err(format!(
+                    "ask_user answer {question_id} contains a value not offered by Provider"
+                ));
+            }
             let allow_other = question
                 .get("allowOther")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
-            if !allow_other {
-                let offered = options
-                    .iter()
-                    .filter_map(|option| option.get("value").and_then(Value::as_str))
-                    .collect::<HashSet<_>>();
-                if values
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .any(|value| !offered.contains(value))
-                {
-                    return Err(format!(
-                        "ask_user answer {question_id} contains a value not offered by Provider"
-                    ));
-                }
+            if !custom_values.is_empty() && !allow_other {
+                return Err(format!(
+                    "ask_user answer {question_id} customValues require allowOther"
+                ));
             }
-        } else if values.len() != 1 {
-            return Err(format!("free-text answer {question_id} accepts one value"));
+        } else {
+            if !custom_values.is_empty() {
+                return Err(format!(
+                    "free-text answer {question_id} does not accept customValues"
+                ));
+            }
+            if values.len() != 1 {
+                return Err(format!("free-text answer {question_id} accepts one value"));
+            }
         }
     }
     Ok(())
 }
 
 /// AskUser submit 时，按 questionId（answers 对象的键）把 requested 阶段存储的
-/// 原始 question 和可选 header 补进每个 answer 对象，与 `values` 平级。
-/// 前端 resolve 只发 `values`；question/header 始终由 BCS 用权威存储值覆盖，存储
+/// 原始 question 和可选 header 补进每个 answer 对象，与 `values/customValues` 平级。
+/// 前端 resolve 发 `values` 和可选 `customValues`；question/header 始终由 BCS
+/// 用权威存储值覆盖，存储
 /// header 缺失时保持缺失，不从 questionId 或前端输入合成。canonical resolution
 /// 同时用于 fingerprint 与 Provider 转发。cancel / exec / mode_switch 原样返回。
 fn augment_ask_user_resolution(record: &InteractionRecord, mut resolution: Value) -> Value {
@@ -1685,6 +1717,129 @@ mod tests {
             "Which components?"
         );
         assert_eq!(resolution["answers"]["components"]["header"], "Components");
+    }
+
+    #[tokio::test]
+    async fn ask_user_submit_accepts_explicit_custom_and_declared_values() {
+        let (service, _store, provider, _frontend) = service(true);
+        let mut ask = requested("ask-custom");
+        ask.kind = InteractionKind::AskUser;
+        ask.payload = json!({
+            "runId":"provider-run-1",
+            "phase":"requested",
+            "interactionId":"ask-custom",
+            "kind":"ask_user",
+            "questions":[
+                {
+                    "questionId":"target",
+                    "header":"Deployment environment",
+                    "question":"Where should this be deployed?",
+                    "allowOther":true,
+                    "options":[{"value":"staging","label":"Staging"}]
+                },
+                {
+                    "questionId":"components",
+                    "header":"Components",
+                    "question":"Which components?",
+                    "multiSelect":true,
+                    "allowOther":true,
+                    "options":[
+                        {"value":"web","label":"Web"},
+                        {"value":"worker","label":"Worker"}
+                    ]
+                }
+            ]
+        });
+        service.on_provider_requested(ask).await.unwrap();
+
+        let mut command = resolve("ask-custom", "idem-custom");
+        command.resolution = json!({
+            "action":"submit",
+            "answers":{
+                "target":{
+                    "values":[],
+                    "customValues":["private cloud"]
+                },
+                "components":{
+                    "values":["web"],
+                    "customValues":["scheduler"]
+                }
+            }
+        });
+
+        let result = service.resolve(command).await.unwrap();
+
+        assert!(result.accepted);
+        let calls = provider.calls.lock().await;
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].resolution["answers"]["target"],
+            json!({
+                "values":[],
+                "customValues":["private cloud"],
+                "question":"Where should this be deployed?",
+                "header":"Deployment environment"
+            })
+        );
+        assert_eq!(
+            calls[0].resolution["answers"]["components"],
+            json!({
+                "values":["web"],
+                "customValues":["scheduler"],
+                "question":"Which components?",
+                "header":"Components"
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn ask_user_submit_rejects_unmarked_or_disallowed_custom_values() {
+        for (interaction_id, allow_other, answer) in [
+            (
+                "ask-unmarked",
+                true,
+                json!({"values":["custom raw value"], "customValues":[]}),
+            ),
+            (
+                "ask-disallowed",
+                false,
+                json!({"values":["staging"], "customValues":["private cloud"]}),
+            ),
+            (
+                "ask-blank-custom",
+                true,
+                json!({"values":[], "customValues":["   "]}),
+            ),
+        ] {
+            let (service, _store, provider, _frontend) = service(true);
+            let mut ask = requested(interaction_id);
+            ask.kind = InteractionKind::AskUser;
+            ask.payload = json!({
+                "runId":"provider-run-1",
+                "phase":"requested",
+                "interactionId":interaction_id,
+                "kind":"ask_user",
+                "questions":[{
+                    "questionId":"target",
+                    "question":"Where?",
+                    "allowOther":allow_other,
+                    "options":[{"value":"staging","label":"Staging"}]
+                }]
+            });
+            service.on_provider_requested(ask).await.unwrap();
+
+            let mut command = resolve(interaction_id, "idem-invalid-custom");
+            command.resolution = json!({
+                "action":"submit",
+                "answers":{"target":answer}
+            });
+
+            assert!(matches!(
+                service.resolve(command).await,
+                Err(InteractionServiceError::InvalidRequest(_))
+            ));
+            assert!(provider.calls.lock().await.is_empty());
+        }
     }
 
     #[tokio::test]

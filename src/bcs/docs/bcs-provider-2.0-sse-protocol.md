@@ -433,7 +433,7 @@ Submit（前端回传，只发 `values`）：
   "action": "submit",
   "answers": {
     "deploy_target": {"values": ["canary"]},
-    "components": {"values": ["web", "worker"]},
+    "components": {"values": ["web"], "customValues": ["scheduler"]},
     "release_notes": {"values": ["Deploy after 22:00"]}
   }
 }
@@ -449,7 +449,7 @@ BCS 转发给 Provider 时，按 `questionId` 把 requested 存储的原始 `que
   "action": "submit",
   "answers": {
     "deploy_target": {"values": ["canary"], "question": "Where should this be deployed?", "header": "Environment"},
-    "components": {"values": ["web", "worker"], "question": "Which components?"},
+    "components": {"values": ["web"], "customValues": ["scheduler"], "question": "Which components?"},
     "release_notes": {"values": ["Deploy after 22:00"], "question": "Additional deployment instructions?"}
   }
 }
@@ -470,11 +470,13 @@ Cancel：
   `description` 可选，不定义 `optionId`。
 - 省略 options 表示自由文本题，同时应省略 `allowOther`，答案仍放单元素
   `values[]`。
-- `allowOther=true` 时自定义输入直接合并进 `values[]`；Provider 根据是否命中原
-  option value 区分预定义值和自由文本，不引入第二套 custom 字段。
+- `values[]` 只承载原 options 中声明的 value；`allowOther=true` 时，自定义输入放入
+  可选的 `customValues[]`。BCS 和 Provider 不根据字符串是否命中 option value 推断
+  自定义输入。
 - resolve 的 `action` 必须是 `submit/cancel`。submit 必须提供 answers，且
   questionId 集合与 requested 完全一致；本期所有问题都必须回答。
-- answers 的键是 `questionId`；每个 Frontend answer 只需 `values`。BCS 按
+- answers 的键是 `questionId`；每个 Frontend answer 提供 `values`，存在自定义输入时
+  另外提供 `customValues`。两个数组可以在多选题中同时非空。BCS 按
   `questionId` 从 requested 存储数据补齐 `question` 和存在时的 `header` 后转发给
   Provider，并覆盖前端可能回传的同名字段。header 缺失时不 fallback。
 - `header` 在 BCN 通用协议中仍然可选；具体 Provider 可以声明更严格的输入约束。
@@ -482,8 +484,10 @@ Cancel：
   answer 都包含非空 header。
 - cancel 的语义由 action 决定。BCS 不额外禁止携带 answers，但 Provider/Frontend
   应发送最小的 `{action:"cancel"}`，避免产生歧义。
-- 单选和纯文本恰好一个 value；多选一个或多个；每项都是非空字符串。
-- `allowOther=false` 的选择题只接受原 options value；true 时也接受原样自由文本。
+- 单选题的 `values` 与 `customValues` 合计恰好一项；多选题合计至少一项；每项都是
+  非空字符串。纯文本题仍使用单元素 `values`，不使用 `customValues`。
+- 选择题的 `values` 始终只能包含原 options value；只有 `allowOther=true` 时才允许
+  非空 `customValues`。
 - 本期不支持 `secret/isSecret`。Provider 遇到原生 secret question 必须拒绝转换，
   不能降级为普通明文问题。
 
@@ -496,7 +500,7 @@ Cancel：
 完整回显：
 
 ```json
-{"runId":"provider-run-1","seq":11,"phase":"resolved","interactionId":"interaction-2","kind":"ask_user","action":"submit","answers":{"deploy_target":{"values":["staging"]},"components":{"values":["web","worker"]},"release_notes":{"values":["Deploy after 22:00"]}}}
+{"runId":"provider-run-1","seq":11,"phase":"resolved","interactionId":"interaction-2","kind":"ask_user","action":"submit","answers":{"deploy_target":{"values":["staging"]},"components":{"values":["web"],"customValues":["scheduler"]},"release_notes":{"values":["Deploy after 22:00"]}}}
 ```
 
 ### 6.3 mode_switch
