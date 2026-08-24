@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM model for baas_arca_ttl_renewal_schedule table."""
+"""SQLAlchemy ORM model for baas_bot_ttl_renewal_schedule table."""
 
 from sqlalchemy import (
     BigInteger,
@@ -17,7 +17,7 @@ from ._record import TtlRenewalScheduleRecord
 
 
 class TtlRenewalScheduleModel(Base):
-    __tablename__ = "baas_arca_ttl_renewal_schedule"
+    __tablename__ = "baas_bot_ttl_renewal_schedule"
     __table_args__ = (
         UniqueConstraint("env", "source_table", "source_id", name="uk_source"),
         Index("idx_schedule", "env", "status", "next_renew_at"),
