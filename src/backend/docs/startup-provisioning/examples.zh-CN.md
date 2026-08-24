@@ -8,27 +8,27 @@
 ## 0. 贯穿场景：一个客服 bot 的完整置备文档
 
 某业务团队运营一批「商家客服」bot（openclaw 引擎为主，部分租户在
-teclaw）。他们的内容资产维护在自己的 CMS（Content Management System，
-内容管理系统）服务上：人设 md、话术规范、质检 skill、常见问题数据。
-CMS 在本文中泛指**业务方自建的内容服务**（虚构示例域名
-`cms.example.com`）——静态文件服务、Git raw 接口、自研运营后台均可，
-方案对它的全部要求只有：平台侧网络可达、支持 HTTPS GET（私有源配合
-凭证引用）。今天每新开一个 bot 或每次内容更新，他们要按顺序
-手工调 4~5 个 open API；容器重建后 bot 立即可用但内容可能滞后。
+teclaw）。他们的内容资产——人设 md、话术规范、质检 skill、知识库、常见
+问题数据——**统一维护在公司 git 服务的一个内容仓库里**，以 tag 发版
+（这是最常见的形态：这些东西本质都是文本表达，本来就该被版本管理和
+评审；唯一的例外是二进制 CLI 工具，见 §7）。今天每新开一个 bot 或每次
+内容更新，他们要按顺序手工调 4~5 个 open API；容器重建后 bot 立即可用
+但内容可能滞后。
 
-CMS 是私有源，**业务方先调用平台的 TC Open API**，做一次性的租户级凭证注册
-（方向与上传 skill、写 identity 相同：业务方 → 平台）。此后每个 apply 点由
-**平台的 fetcher 携带此凭证访问业务方的 CMS**（平台 → 业务方源站）——这是
-平台对业务方唯一的出向调用。fetch 时凭证注入为 `Authorization` 头，且只会
-发给 `cms.example.com`；secret 写后不可读回（`manifest-schema.zh-CN.md`
-§2.1）：
+仓库是私有的，**业务方先调用平台的 TC Open API**，做一次性的租户级凭证
+注册（方向与上传 skill、写 identity 相同：业务方 → 平台）。此后每个
+apply 点由**平台携带此凭证访问该 git 服务**（平台 → 业务方源站）——这是
+平台对业务方唯一的出向调用。git 型凭证**强制**声明仓库白名单，凭证只对
+名单内的仓库出示；secret 写后不可读回（`manifest-schema.zh-CN.md` §2.1）：
 
 ```text
-PUT /openapi/v1/provisioning/credentials/cms-token
+PUT /openapi/v1/provisioning/credentials/corp-git-content
 {
-  "header_name": "Authorization",
-  "secret": "Bearer eyJhbGciOi…",
-  "allowed_origins": ["https://cms.example.com"]
+  "type": "git",
+  "header_name": "PRIVATE-TOKEN",
+  "secret": "…",                                        # 仓库级只读 token 或机器人账号 token
+  "allowed_origins": ["https://code.example-corp.com"],
+  "allowed_repos": ["team/content"]                     # 越出此名单的仓库不出示凭证
 }
 ```
 
@@ -36,6 +36,12 @@ PUT /openapi/v1/provisioning/credentials/cms-token
 
 ```yaml
 schema_version: 1
+
+sources:
+  content:                                   # 命名源：一处声明、多处引用
+    git: https://code.example-corp.com/team/content.git
+    ref: v1.2.0                              # ← 整套配置升版本只改这一行
+    auth: corp-git-content
 
 manifest:
   engine_config:
@@ -45,33 +51,30 @@ manifest:
 
   identity:
     - type: SOUL.md
-      source: https://cms.example.com/bots/${OCB_BOT_ID}/soul.md
-      auth: cms-token
+      from: content
+      subpath: bots/${OCB_BOT_ID}/soul.md    # 每个 bot 一份人设
     - type: RULES.md
-      source: https://cms.example.com/kb/service-rules.md
-      auth: cms-token
+      from: content
+      subpath: kb/service-rules.md           # 全体共享的话术规范
     - type: SAFETY.md
-      content: |
+      content: |                             # 三行红线，直接内联
         # 安全边界
         不承诺退款金额；涉及资损问题一律转人工。
 
   resources:
-    - path: data/faq.csv
-      source: https://cms.example.com/kb/faq.csv
-      auth: cms-token
+    - path: data/faq.csv                     # 文件条目
+      from: content
+      subpath: kb/faq.csv
       on_fetch_failure: keep_last
-    - path: data/kb/                         # 目录条目：整个知识库
-      source: https://cms.example.com/kb/knowledge-base.zip
-      unpack: zip
-      strip_components: 1                    # 消掉 `zip -r kb.zip kb/` 的壳目录
-      auth: cms-token
+    - path: data/kb/                         # 目录条目：整个知识库，git 形态免打包
+      from: content
+      subpath: kb/
       on_fetch_failure: keep_last
 
   skills:
-    - name: quality-check
-      source: https://cms.example.com/skills/quality-check.zip
-      auth: cms-token
-      digest: "sha256:9f2c…"          # 质检逻辑要求可复现，钉住版本
+    - name: quality-check                    # skill 目录直接取自仓库
+      from: content
+      subpath: skills/quality-check/
 
   mcp:
     - server_code: mcp.ant.homistudio.meetmcp   # 会议信息服务（注册表真实条目）
@@ -90,18 +93,25 @@ apply 报告（`GET …/provisioning/last-apply`）：
 ```json
 {
   "trigger": "republish", "result": "SUCCEEDED",
+  "sources": [
+    {"name": "content", "ref": "v1.2.0", "resolved_sha": "9c1f4ae…"}
+  ],
   "entries": [
     {"category": "engine_config", "name": "language,reply_style", "action": "updated"},
-    {"category": "identity", "name": "SOUL.md", "action": "updated", "source_digest": "sha256:1a…"},
-    {"category": "identity", "name": "RULES.md", "action": "unchanged"},
+    {"category": "identity", "name": "SOUL.md", "action": "updated", "from": "content"},
+    {"category": "identity", "name": "RULES.md", "action": "unchanged", "from": "content"},
     {"category": "identity", "name": "SAFETY.md", "action": "unchanged"},
-    {"category": "resources", "name": "data/faq.csv", "action": "updated"},
-    {"category": "resources", "name": "data/kb/", "action": "unchanged", "source_digest": "sha256:7b…"},
-    {"category": "skills", "name": "quality-check", "action": "unchanged", "source_digest": "sha256:9f2c…"},
+    {"category": "resources", "name": "data/faq.csv", "action": "updated", "from": "content"},
+    {"category": "resources", "name": "data/kb/", "action": "updated", "from": "content"},
+    {"category": "skills", "name": "quality-check", "action": "unchanged", "from": "content"},
     {"category": "mcp", "name": "mcp.ant.homistudio.meetmcp", "action": "unchanged"}
   ]
 }
 ```
+
+命名源的 `ref` 与解析出的 `resolved_sha` 记在报告顶层——「线上这批 bot
+到底跑的是哪一版内容」一眼可查；条目层只记它来自哪个源。URL 源的条目
+则照旧记 `source_digest`。
 
 以下逐类展开。每类的「apply 做什么」都是对**现有服务**的调用编排——这正是
 路线 B 的可信度来源：apply 没有任何私有旁路，每一步都等价于一次今天已经
@@ -198,16 +208,26 @@ rename 整树替换——归档里删掉的文件随之消失，手工塞进该�
 （schema §2.2）：
 
 ```yaml
+# 内联写法（单条目/一次性来源）
 resources:
-  - path: data/kb/
+  - path: data/kb/               # 落点：workspace 相对
     source:
       git: https://code.example-corp.com/team/content.git
       ref: v1.2.0                # 发新版内容 = 打新 tag、改这里
-      path: kb/
+      subpath: kb/               # 源内路径：仓库里取哪
     auth: corp-git-content       # git 型凭证：含 allowed_repos 仓库白名单
                                  # （单 origin 托管全司仓库，防凭证被改
                                  #  source 套取，schema §2.1）
+
+# 命名源写法（多类目共用同一仓库同一版本时的推荐形态，见 §0）
+resources:
+  - path: data/kb/
+    from: content
+    subpath: kb/
 ```
+
+注意一个条目里有两个「路径」，故异名：`path` 是**落点**（写到 workspace
+哪里），`subpath` 是**源内路径**（从源的哪里取）。
 
 落地后的语义（目录级 managed、原子替换等）与 zip 形态完全一致，git 只是
 传输形态。

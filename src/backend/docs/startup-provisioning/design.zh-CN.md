@@ -302,13 +302,20 @@ apply 在平台侧执行，天然产出结构化记录（#935 的 `last-start` �
 {
   "apply_id": "…", "bot_id": "…", "trigger": "create|republish|restart|explicit",
   "started_at": "…", "finished_at": "…", "result": "SUCCEEDED|PARTIAL|FAILED",
+  "sources": [
+    {"name": "content", "ref": "v1.2.0", "resolved_sha": "9c1f4ae…"}
+  ],
   "entries": [
     {"category": "skills", "name": "reviewer",
      "action": "created|updated|unchanged|skipped|failed",
-     "source_digest": "sha256:…", "error": null}
+     "from": "content", "source_digest": "sha256:…", "error": null}
   ]
 }
 ```
+
+命名源的解析结果记在顶层 `sources`（声明的 `ref` + 解析出的
+`resolved_sha`）——「这批 bot 线上跑的是哪一版内容」由此可查；条目层记
+`from`（来自哪个源）或 `source_digest`（URL 源）。
 
 经 `GET …/provisioning/last-apply` 暴露。script 的输出维持现状：容器内
 `/home/admin/logs/startup_script.log`。
@@ -325,9 +332,29 @@ planning 决定；模块边界按 `context-boundary-format.md` 出 README。
 
 | 期 | 内容 |
 | --- | --- |
-| **v1** | manifest 五类（mcp / resources / skills / engine_config / identity；resources 含**目录条目**——归档 + `strip_components` 展开，schema §3.2）+ script 归编到置备文档；source 支持 URL 与 **git 引用**两种形态（tag/branch/SHA 版本化，schema §2.2；git 型凭证强制 `allowed_repos`）；平台侧 apply + guarded fetcher；租户级凭证引用（§4.5，仅请求头注入）；能力表；apply report；teclaw 经 artifact 组装生效 |
+| **v1** | manifest 五类（mcp / resources / skills / engine_config / identity；resources 含**目录条目**——归档 + `strip_components` 展开，schema §3.2）+ script 归编到置备文档；source 支持 URL 与 **git 引用**两种形态（tag/branch/SHA 版本化，schema §2.2；git 型凭证强制 `allowed_repos`），**命名源 `sources`/`from`** 让一次 `ref` 变更原子地升级整套配置（schema §2.3）；平台侧 apply + guarded fetcher；租户级凭证引用（§4.5，仅请求头注入）；能力表；apply report；teclaw 经 artifact 组装生效 |
 | **cli_tools（schema 已定稿，排期后置）** | 给模型调用的命令行工具（schema §3.7）：静态二进制/压缩包、digest 强制、平台工具目录 + PATH 注入；ARCA 系先行（A2），teclaw 待确认（T4）。按业务优先级排期 |
-| **v2 候选** | 条目级结果上报（teclaw 唯一可能的契约增量）；strict 就绪门控；`apply_once`；skill-center 引用源（`center://uuid@version`）；目录源的更多传输形态（索引文件 / 对象存储前缀——「文件夹语义」需要带目录枚举能力的协议；git 与归档已进 v1）；engine plugin 类目（**注册表引用**模式，照 MCP 模子而非任意 URL——插件在引擎进程内自动执行，供应链敏感度最高；前置确认见 O10）；容器内 op CLI（服务 script 用户体验：`install-skill` 等意图层命令，ARCA 系实现）；凭证注入的扩展形态（query 参数 / mTLS，O8）；模板级 manifest（一份声明应用于多个 bot） |
+| **v2 候选** | 条目级结果上报（teclaw 唯一可能的契约增量）；strict 就绪门控；`apply_once`；skill-center 引用源（`center://uuid@version`）；目录源的更多传输形态（索引文件 / 对象存储前缀——「文件夹语义」需要带目录枚举能力的协议；git 与归档已进 v1）；engine plugin 类目（**注册表引用**模式，照 MCP 模子而非任意 URL——插件在引擎进程内自动执行，供应链敏感度最高；前置确认见 O10）；容器内 op CLI（服务 script 用户体验：`install-skill` 等意图层命令，ARCA 系实现）；凭证注入的扩展形态（query 参数 / mTLS，O8）；模板级 manifest（一份声明应用于多个 bot）；**manifest 自身托管于 git**（§9.1） |
+
+### 9.1 v2 方向：manifest 自身托管于 git
+
+顺着「置备内容都是文本表达」推到底，**置备声明本身也是文本**，也可以活在
+业务的内容仓库里。平台侧 bot 上存的退化为一个**指针**——
+`{git, ref, credential}`，`manifest.yaml` 从仓库根读取。这是 Flux/ArgoCD
+的模式，收益有三：
+
+- **声明与内容在同一个 tag 下原子一致**——不会出现「manifest 升了 ref、
+  内容没跟上」的错位（v1 的命名源已在单份文档内解决了这个问题，git 托管
+  把它扩展到「文档自己也跟着走」）；
+- **配置变更走 PR 评审**，审计天然；
+- **顺手解掉 O6**：一个仓库 + 一个 tag 指给整个 bot 舰队，就是模板级
+  manifest。
+
+代价必须一并记下：写入路径要重做（open API 从「PUT 整份文档」变为
+「PUT 指针」）；**能力校验从 PUT 时挪到 apply 时**——「teclaw 写 script
+当场拒绝」这类 fail-fast 会弱化为 apply report 里的错误，与 §5.1 的
+fail-closed 口径需要重新对齐。因此 v1 不做，待业务用起来、验证「整仓库
+一个 tag」确实是主流形态后再评估。
 
 ## 10. 实现注意（backend 内部，不涉及引擎侧改动）
 

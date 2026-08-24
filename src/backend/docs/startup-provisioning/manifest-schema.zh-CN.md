@@ -11,6 +11,12 @@
 ```yaml
 schema_version: 1
 
+sources:                       # 命名源（可选，§2.3）：一处声明、多处引用
+  content:
+    git: https://code.example-corp.com/team/content.git
+    ref: v1.2.0
+    auth: corp-git-content
+
 manifest:                      # 声明式部分，所有引擎
   mcp: [ … ]                   # §3.1
   resources: [ … ]             # §3.2（含文件与目录两种条目形态）
@@ -25,29 +31,67 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
     …
 ```
 
-两部分均可缺省。`manifest` 六个类别均可缺省，缺省的类别不参与 apply
+三段均可缺省。`manifest` 六个类别均可缺省，缺省的类别不参与 apply
 （不碰任何实体）。**类别存在但为空列表（`skills: []`）含义不同**：声明
 「该类别下不应有 managed 实体」，会把此前 apply 落成的 managed 实体摘除
 标记（不删资产，语义同 DELETE，见 design §6）。
 
+### 1.1 内容归属：文本进 git，制品进制品库
+
+六个类别按内容本性分成两组，这条线决定了各自的来源形态：
+
+| 类别 | 内容本性 | 典型来源 |
+| --- | --- | --- |
+| identity / skills / resources | **文本表达**（md、SKILL.md、csv/json…） | git（§2.2/§2.3）；也可 URL |
+| engine_config / mcp | 文本，但**内联在 manifest 内**（键值 / 注册表引用） | 无 source——它们的「文本」就是置备文档自身 |
+| cli_tools | **二进制制品** | URL + 强制 `digest`（§3.7） |
+
+`cli_tools` 是唯一的例外，且是原则性的：**git 管表达，制品库管产物**。
+二进制进 git 是反模式（仓库膨胀、LFS 运维），而可执行物需要的是 digest
+钉死的供应链通道。其余五类没有这个张力——它们本来就该被版本管理、被
+评审，git 是它们的自然栖息地。
+
 ## 2. 条目通用字段
 
-内容型条目（resources / skills / identity / cli_tools）的来源三选一：
+内容型条目（resources / skills / identity / cli_tools）的来源四选一，互斥：
 
 | 字段 | 说明 |
 | --- | --- |
-| `source` | 两种形态：**HTTPS URL**（字符串），或**git 引用**（结构化对象，§2.2）。均由平台在 apply 点经 guarded fetcher 拉取（design §4），均支持变量替换（§4） |
-| `content` | 内联 UTF-8 文本，适合小的 md/配置。与 `source` 互斥 |
+| `from` + `subpath` | 引用一个**命名源**（§2.3）并取其中某个子路径。多类目共用同一仓库同一版本时的推荐写法 |
+| `source` | 内联来源。两种形态：**HTTPS URL**（字符串），或**git 引用**（结构化对象，§2.2）。由平台在 apply 点经 guarded fetcher 拉取（design §4），支持变量替换（§4） |
+| `content` | 内联 UTF-8 文本，适合小的 md/配置 |
 | （注册项引用） | 仅特定类别：MCP 的 `server_code`；v2 的 `center://` skill 引用 |
 
 通用可选字段：
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
+| `subpath` | 无 | **源内路径**：命名源/git 仓库内、或归档内的子目录或文件。缺省 = 源的根 |
 | `digest` | 无 | `sha256:…`。校验 fetch 内容，不匹配按 fetch 失败处理（钉扎可复现）。**仅适用于 URL 源**——git 源以 commit SHA 为天然 digest，写了报错 |
-| `auth` | 无 | 租户级命名凭证的引用（§2.1）；仅对 `source` 条目有效。fetch 时注入为请求头 |
+| `auth` | 无 | 租户级命名凭证的引用（§2.1）；仅对内联 `source` 有效（命名源的凭证声明在源上）。fetch 时注入为请求头 |
 | `on_fetch_failure` | `keep_last` | `keep_last` / `skip` / `fail`（design §4.3） |
 | `apply_once` | —— | **v1 保留字，拒绝写入**；v2 语义见 design §3.2 |
+
+### 2.0 字段命名规范
+
+条目字段分两组，**一组必须横向一致，一组刻意各不相同**：
+
+- **来源侧字段横向强一致**：`from` / `subpath` / `source` / `content` /
+  `auth` / `digest` / `on_fetch_failure` 在所有类目里拼写、语义、默认值
+  一字不差——它们是同一套取数机器，不一致即缺陷。
+- **实体键字段按实体本性各归各名**，字段名本身承载契约信息：
+  - `identity.type`（`SOUL.md`）——值域是白名单枚举，**选而非造**；
+  - `skills.name` / `cli_tools.name`——**标识符**，不含位置信息，装到
+    哪里由引擎决定；
+  - `resources.path`——**工作区位置**，且只有 resources 有权指定位置。
+
+  强行统一成一个词会抹掉这条线：skills 若叫 `path`，用户会以为自己在
+  选安装路径——路径感知就从字段名这个后门漏回去了。**这里的不一致是
+  文档的一部分。**
+
+注意区分两个「路径」：`resources.path` 是**落点**（写到 workspace 哪里），
+`subpath` 是**源内路径**（从源的哪里取）。二者可同时出现在一个 resources
+条目里，故必须异名。
 
 ### 2.1 凭证引用 `auth`
 
@@ -121,21 +165,24 @@ token 选型（防越权的另外两层，与 `allowed_repos` 叠加）：**首�
 
 ```yaml
 resources:
-  - path: data/kb/                     # 目录条目：git 侧枚举，免打包
+  - path: data/kb/                        # 落点：workspace 相对
     source:
       git: https://code.example-corp.com/team/content.git
-      ref: v1.2.0                      # tag / branch / commit SHA
-      path: kb/                        # 仓库内子目录或文件，缺省 = 仓库根
-    auth: corp-git-content             # git 型凭证（§2.1）
+      ref: v1.2.0                         # tag / branch / commit SHA
+      subpath: kb/                        # 源内路径：仓库内子目录或文件，缺省 = 仓库根
+    auth: corp-git-content                # git 型凭证（§2.1）
 
 identity:
   - type: SOUL.md
     source:
       git: https://code.example-corp.com/team/content.git
       ref: v1.2.0
-      path: bots/${OCB_BOT_ID}/soul.md # 变量替换照常可用
+      subpath: bots/${OCB_BOT_ID}/soul.md # 变量替换照常可用
     auth: corp-git-content
 ```
+
+（多个条目引用同一仓库同一 `ref` 时，改用命名源写法更短且升版本只改一处，
+见 §2.3。）
 
 语义：
 
@@ -156,6 +203,49 @@ identity:
 （ref 解析 + 按 ref/子目录取归档），把 git 源编译为「一次 HTTPS 归档
 拉取 + 解包」，复用 guarded fetcher 与归档管线；不在后端进程里跑
 `git clone`。API 能力确认见 O11。
+
+### 2.3 命名源 `sources` 与 `from`
+
+多个类目的内容通常来自**同一个仓库的同一个版本**（identity、skills、
+resources 都在业务的内容仓库里）。逐条目重复写 `{git, ref, auth}` 会让
+「升一版」变成改 N 处、且可能改漏——半新半旧。顶层 `sources` 段把来源
+提取为命名对象，条目用 `from` 引用：
+
+```yaml
+sources:
+  content:                                  # 源名：自由标识符
+    git: https://code.example-corp.com/team/content.git
+    ref: v1.2.0                             # ← 整套配置升版本只改这一行
+    auth: corp-git-content
+  public-assets:                            # URL 源同样可命名
+    url: https://cdn.example.com/assets/
+    auth: cdn-token
+
+manifest:
+  identity:
+    - type: SOUL.md
+      from: content
+      subpath: bots/${OCB_BOT_ID}/soul.md
+  skills:
+    - name: quality-check
+      from: content
+      subpath: skills/quality-check/
+  resources:
+    - path: data/kb/                        # 落点
+      from: content
+      subpath: kb/                          # 源内路径
+```
+
+规则：
+
+- **原子升版**：一次 `ref` 变更，所有引用该源的条目在同一个 apply 点一起
+  收敛到同一个 commit——不存在「identity 升了、skills 没跟上」的错位。
+- `from` 与内联 `source` 互斥；引用不存在的源名 → PUT 时拒绝。
+- 凭证声明在**源**上（`sources.<name>.auth`），条目不再写 `auth`。
+- 命名源被引用零次不报错（允许先声明后使用），但会在 PUT 响应里提示。
+- URL 源的 `url` 作为前缀，条目的 `subpath` 拼在其后；git 源的 `subpath`
+  为仓库内路径。拼接前后均施加路径穿越校验。
+- 内联 `source` 写法**保留**：单条目、跨仓库、一次性来源仍可直接写。
 
 ## 3. 类别定义
 
@@ -193,13 +283,18 @@ resources:
   - path: data/sales.csv         # workspace 相对路径（必填）
     source: https://my-svc.example.com/data/sales.csv
 
-  # 目录条目：source 为归档，内容按相对层次展开到 path 之下
+  # 目录条目（归档形态）：source 为归档，内容按相对层次展开到 path 之下
   - path: data/kb/
     source: https://my-svc.example.com/kb/knowledge-base.zip
-    unpack: zip                  # zip | tar.gz（目录条目必填）
+    unpack: zip                  # zip | tar.gz（归档形态必填）
     strip_components: 1          # 可选，默认 0：剥掉归档内的前 N 层目录
                                  # （语义同 tar --strip-components；业务用
                                  #  `zip -r kb.zip kb/` 打包出的壳目录用它消掉）
+
+  # 目录条目（git 形态）：免打包，无需 unpack/strip_components
+  - path: data/kb/
+    from: content                # 命名源（§2.3）
+    subpath: kb/                 # 源内路径
 ```
 
 **共同规则**：
@@ -232,10 +327,14 @@ resources:
 skills:
   - name: reviewer               # skill 名（必填，唯一）
     source: https://my-svc.example.com/skills/reviewer.zip   # zip，形状同现有 upload API
+  - name: quality-check          # git 形态：skill 目录直接取自仓库，免打包
+    from: content
+    subpath: skills/quality-check/
 ```
 
 - 语义等价于现有 `POST /openapi/v1/bots/skills/upload`（zip 校验、大小限制
-  复用现状）+ activate。
+  复用现状）+ activate。git/命名源形态取到的是 skill **目录**，平台在
+  物化后按同一路径入库，与 zip 上传殊途同归。
 - teclaw：物化进 bot-data store 后以 `SkillRef(scope="user")` 进 artifact，
   与今天手工 upload 的 skill 走完全相同的路。
 - v2 预留来源：`source: center://<skill_uuid>@<version>`（skill center 引用，

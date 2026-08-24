@@ -145,4 +145,14 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
    （zip/tar.gz，schema §3.2；打包习惯决定 `strip_components` 用不用）。
 8. **CLI 工具的形态**：想装的工具具体是什么——静态二进制/压缩包（v1 范围
    内），还是 npm/pip 包（属命令式，走 script，且 teclaw 不可用）？目标
-   容器架构是否单一（对应 O9）？
+   容器架构是否单一（对应 O9）？注意 `cli_tools` 是唯一**不建议进 git**
+   的类目（二进制制品走制品库 + digest，schema §1.1）——工具的分发地址
+   请单独提供。
+9. **仓库拓扑与发版流程**：identity / skills / resources 是同一个仓库
+   （命名源一处声明即可，一个 tag 原子升级整套——schema §2.3），还是
+   分散在多个仓库（则需多个命名源、多个凭证或一个覆盖多仓的
+   `allowed_repos`）？tag 命名与发布节奏是什么（是否会重打同名 tag——
+   重打即声明含义变化，下次 apply 收敛到新内容）？
+10. **配置本身是否也想进 git**：v2 方向是置备文档自身托管于仓库、平台只
+   存指针（design §9.1，可顺带解掉模板级 manifest）。若这是你们期望的
+   终态，请提出——它会影响 v1 的 API 设计取舍。
