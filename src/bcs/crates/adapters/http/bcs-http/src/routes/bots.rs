@@ -11,11 +11,14 @@ use bcs_protocol::{
 use bcs_service_api::{
     ActorKind, ActorStatus, BotConnectCommand, BotDetailCommand, BotDetailResult, BotLeaveCommand,
     BotListCommand, BotListEntry, BotPagedListCommand, BotQueryByIdsCommand, BotQueryEntry,
+    application::v1::{
+        ApplicationError, BotInternalAttributes, FriendCheckInStrategy, UserVisibility,
+    },
     BotStatusUpdateCommand, BotUseCaseError, BotVisibilityCommand, BotVisibilityQueryCommand,
     BotVisibilityQueryResult, ConnectError, MyBotsCommand, SearchBotsCommand, ServiceError,
 };
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::error::HttpAdapterError;
 use crate::mapping::capabilities::{
@@ -449,7 +452,21 @@ fn bot_visibility_to_json(result: BotVisibilityQueryResult) -> Value {
     })
 }
 
-/// `GET /bots/search` — bot search with name fuzzy + keyword filtering + is_friend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FriendshipFilter {
+    All,
+    Friends,
+    NonFriends,
+}
+
+#[derive(Debug, Clone)]
+struct BotSearchPolicy {
+    user_visibility: String,
+    friend_ext: Map<String, Value>,
+    friend_check_in_strategy: String,
+}
+
+/// `GET /bots/search` — bot search with name fuzzy + keyword filtering + friendship filters.
 /// Spec: docs/superpowers/specs/2026-08-20-bot-search-endpoint-design.md
 pub async fn search_bots(
     State(state): State<HttpAppState>,
@@ -467,15 +484,16 @@ pub async fn search_bots(
             )))
         }
     };
-    let visibility = match q.visibility.as_deref() {
-        Some(v) if matches!(v, "public" | "protected" | "private") => Some(v.to_string()),
-        Some(v) => {
-            return Err(HttpAdapterError::BadRequest(format!(
-                "visibility must be public|protected|private, got '{v}'"
-            )))
-        }
-        None => None,
-    };
+    let visibility = parse_csv_filter(
+        q.visibility.as_deref(),
+        "visibility",
+        &["public", "protected", "private"],
+    )?;
+    let user_visibility = parse_csv_filter(
+        q.user_visibility.as_deref(),
+        "user_visibility",
+        &["public", "protected", "private"],
+    )?;
     let status = match q.status.as_deref() {
         Some("online") => Some(ActorStatus::Online),
         Some("hidden") => Some(ActorStatus::Hidden),
@@ -486,6 +504,7 @@ pub async fn search_bots(
         }
         None => None,
     };
+    let friendship = parse_friendship_filter(q.friendship.as_deref(), q.is_friend)?;
 
     // ── Resolve caller (optional Bearer) ───────────────────────────────────────
     let caller_id = caller_actor_id_from_headers(&state, &headers, &uri).await;
@@ -514,20 +533,25 @@ pub async fn search_bots(
             ));
         }
     };
-    if q.is_friend.is_some() && viewer_actor_id.is_none() {
+    if matches!(friendship, FriendshipFilter::Friends | FriendshipFilter::NonFriends)
+        && viewer_actor_id.is_none()
+    {
         return Err(HttpAdapterError::BadRequest(
-            "is_friend requires viewer_actor_type and viewer_actor_id".to_string(),
+            "friendship filter requires viewer_actor_type and viewer_actor_id".to_string(),
         ));
     }
 
     // ── Effective visibility scope (spec §3.6.2) ───────────────────────────────
-    // No Bearer → force public (ignore any client-provided visibility). Bearer +
-    // explicit visibility → respect it. Bearer + no visibility → None (service
-    // yields the default public+protected scope).
-    let effective_visibility = match (&caller_id, &visibility) {
-        (None, _) => Some("public".to_string()),
-        (Some(_), v) => v.clone(),
+    // No Bearer → only public can be returned. If the caller provided a visibility
+    // filter, intersect it with public so unsupported combinations produce an
+    // empty result instead of widening scope. Bearer + explicit visibility →
+    // respect it. Bearer + no visibility → None (service yields public+protected).
+    let effective_visibility = match (&caller_id, visibility) {
+        (None, None) => Some(vec!["public".to_string()]),
+        (None, Some(values)) => Some(values.into_iter().filter(|v| v == "public").collect()),
+        (Some(_), values) => values,
     };
+    let effective_visibility_filter = effective_visibility.clone();
 
     // ── Query the registry via the application service (carries status/online) ─
     let result = state
@@ -544,8 +568,9 @@ pub async fn search_bots(
         .map_err(bot_use_case_error_to_http)?;
 
     // ── Friend set from the explicit viewer's edge_grants ──────────────────────
-    let friend_ids: std::collections::HashSet<String> = match &viewer_actor_id {
-        Some(viewer) => state
+    let needs_friend_set = viewer_actor_id.is_some();
+    let friend_ids: std::collections::HashSet<String> = match (&viewer_actor_id, needs_friend_set) {
+        (Some(viewer), true) => state
             .connect
             .list_friends(viewer)
             .await
@@ -553,21 +578,36 @@ pub async fn search_bots(
             .into_iter()
             .map(|e| e.actor_id)
             .collect(),
-        None => std::collections::HashSet::new(),
+        _ => std::collections::HashSet::new(),
     };
 
-    // ── is_friend post-filter (viewer-dependent) + pagination ──────────────────
-    let filtered: Vec<BotQueryEntry> = result
-        .items
-        .into_iter()
-        .filter(|bot| match q.is_friend {
-            Some(want_friend) => friend_ids.contains(&bot.bot_uuid) == want_friend,
-            None => true,
-        })
-        .collect();
+    // ── Enrich policy, post-filter viewer-dependent fields, then paginate ──────
+    let mut filtered: Vec<(BotQueryEntry, BotSearchPolicy)> = Vec::new();
+    for bot in result.items {
+        if let Some(wants) = effective_visibility_filter.as_ref() {
+            if !wants.iter().any(|want| bot.visibility == *want) {
+                continue;
+            }
+        }
+        let policy = load_bot_search_policy(&state, &bot.bot_uuid).await?;
+        if let Some(wants) = user_visibility.as_ref() {
+            if !wants.iter().any(|want| policy.user_visibility == *want) {
+                continue;
+            }
+        }
+        let is_friend = friend_ids.contains(&bot.bot_uuid);
+        let friendship_matches = match friendship {
+            FriendshipFilter::All => true,
+            FriendshipFilter::Friends => is_friend,
+            FriendshipFilter::NonFriends => !is_friend,
+        };
+        if friendship_matches {
+            filtered.push((bot, policy));
+        }
+    }
 
     let total = filtered.len() as u64;
-    let page_items: Vec<BotQueryEntry> = filtered
+    let page_items: Vec<(BotQueryEntry, BotSearchPolicy)> = filtered
         .into_iter()
         .skip(offset as usize)
         .take(limit as usize)
@@ -576,11 +616,14 @@ pub async fn search_bots(
     // ── Build response (is_friend field only for an explicit viewer) ───────────
     let items: Vec<BotSearchEntry> = page_items
         .into_iter()
-        .map(|bot| BotSearchEntry {
+        .map(|(bot, policy)| BotSearchEntry {
             bot_uuid: bot.bot_uuid.clone(),
             name: bot.capabilities.name.clone(),
             summary: bot.capabilities.summary.clone(),
             visibility: bot.visibility,
+            user_visibility: policy.user_visibility,
+            friend_ext: policy.friend_ext,
+            friend_check_in_strategy: policy.friend_check_in_strategy,
             status: actor_status_to_wire(bot.status).to_string(),
             actor_kind: actor_kind_to_wire(bot.actor_kind).to_string(),
             is_online: bot.dynamic_status.status == "active",
@@ -594,6 +637,123 @@ pub async fn search_bots(
         "offset": offset,
         "limit": limit,
     })))
+}
+
+fn parse_csv_filter(
+    raw: Option<&str>,
+    name: &str,
+    allowed: &[&str],
+) -> Result<Option<Vec<String>>, HttpAdapterError> {
+    let Some(raw) = raw else { return Ok(None) };
+    let mut values = Vec::new();
+    for part in raw.split(',') {
+        let value = part.trim();
+        if value.is_empty() || !allowed.contains(&value) {
+            return Err(HttpAdapterError::BadRequest(format!(
+                "{name} must be {}, got '{raw}'",
+                allowed.join("|")
+            )));
+        }
+        if !values.iter().any(|existing| existing == value) {
+            values.push(value.to_string());
+        }
+    }
+    Ok(Some(values))
+}
+
+fn parse_friendship_filter(
+    friendship: Option<&str>,
+    is_friend: Option<bool>,
+) -> Result<FriendshipFilter, HttpAdapterError> {
+    if friendship.is_some() && is_friend.is_some() {
+        return Err(HttpAdapterError::BadRequest(
+            "friendship and deprecated is_friend must not be provided together".to_string(),
+        ));
+    }
+    if let Some(is_friend) = is_friend {
+        return Ok(if is_friend {
+            FriendshipFilter::Friends
+        } else {
+            FriendshipFilter::NonFriends
+        });
+    }
+    match friendship.unwrap_or("all") {
+        "all" => Ok(FriendshipFilter::All),
+        "friends" => Ok(FriendshipFilter::Friends),
+        "non_friends" => Ok(FriendshipFilter::NonFriends),
+        value => Err(HttpAdapterError::BadRequest(format!(
+            "friendship must be all|friends|non_friends, got '{value}'"
+        ))),
+    }
+}
+
+async fn load_bot_search_policy(
+    state: &HttpAppState,
+    bot_id: &str,
+) -> Result<BotSearchPolicy, HttpAdapterError> {
+    let Some(service) = state.internal_bot_attributes_service.as_ref() else {
+        return Ok(default_bot_search_policy());
+    };
+    match service.get(bot_id.to_string()).await {
+        Ok(attributes) => Ok(bot_search_policy_from_attributes(attributes)),
+        Err(ApplicationError::NotFound { .. }) => Ok(default_bot_search_policy()),
+        Err(ApplicationError::InvalidInput { message, .. }) => {
+            Err(HttpAdapterError::BadRequest(message))
+        }
+        Err(ApplicationError::Unauthenticated) => Err(HttpAdapterError::Unauthorized(
+            "authentication is required".to_string(),
+        )),
+        Err(ApplicationError::Forbidden(message) | ApplicationError::ForbiddenCode { message, .. }) => {
+            Err(HttpAdapterError::Forbidden(message))
+        }
+        Err(ApplicationError::Conflict { message, .. }) => Err(HttpAdapterError::Conflict(message)),
+        Err(ApplicationError::Gone { message, .. }) => Err(HttpAdapterError::Gone(message)),
+        Err(ApplicationError::QuotaExceeded { message, .. })
+        | Err(ApplicationError::PayloadTooLarge { message, .. })
+        | Err(ApplicationError::Unprocessable { message, .. })
+        | Err(ApplicationError::BadGateway { message, .. })
+        | Err(ApplicationError::Internal(message)) => Err(HttpAdapterError::Service(
+            ServiceError::InternalError(message),
+        )),
+    }
+}
+
+fn bot_search_policy_from_attributes(attributes: BotInternalAttributes) -> BotSearchPolicy {
+    BotSearchPolicy {
+        user_visibility: user_visibility_to_wire(attributes.user_visibility).to_string(),
+        friend_ext: attributes.friend_ext,
+        friend_check_in_strategy: friend_check_in_strategy_to_wire(
+            attributes.friend_check_in_strategy,
+        )
+        .to_string(),
+    }
+}
+
+fn default_bot_search_policy() -> BotSearchPolicy {
+    BotSearchPolicy {
+        user_visibility: user_visibility_to_wire(UserVisibility::Protected).to_string(),
+        friend_ext: Map::new(),
+        friend_check_in_strategy: friend_check_in_strategy_to_wire(
+            FriendCheckInStrategy::Approval,
+        )
+        .to_string(),
+    }
+}
+
+fn user_visibility_to_wire(value: UserVisibility) -> &'static str {
+    match value {
+        UserVisibility::Public => "public",
+        UserVisibility::Protected => "protected",
+        UserVisibility::Private => "private",
+    }
+}
+
+fn friend_check_in_strategy_to_wire(value: FriendCheckInStrategy) -> &'static str {
+    match value {
+        FriendCheckInStrategy::Open => "OPEN",
+        FriendCheckInStrategy::Approval => "APPROVAL",
+        FriendCheckInStrategy::DeptFree => "DEPT_FREE",
+    }
 }
 
 async fn resolve_bot_caller(
