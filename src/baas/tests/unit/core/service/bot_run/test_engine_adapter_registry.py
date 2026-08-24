@@ -71,7 +71,7 @@ def test_build_claude_code_ws_path() -> None:
     assert registry.get("claude_code").ws_path() == "/api/claude_code/ws"
 
 
-# ── Registry.register_eval_support / get_eval_adapter ────────────────────
+# ── Registry.register_eval_support ────────────────────────────────────────
 
 
 def test_register_eval_support_registers_new_engine() -> None:
@@ -89,14 +89,3 @@ def test_register_eval_support_does_not_overwrite_existing() -> None:
     registry.register_eval_support("aicoding", new_adapter)
     # 已存在的 adapter 不被覆盖
     assert registry.get("aicoding") is original
-
-
-def test_get_eval_adapter_returns_registered() -> None:
-    adapter = MockAICodingAdapter()
-    registry = BotEngineAdapterRegistry({"eval_engine": adapter})
-    assert registry.get_eval_adapter("eval_engine") is adapter
-
-
-def test_get_eval_adapter_returns_none_for_unregistered() -> None:
-    registry = BotEngineAdapterRegistry({})
-    assert registry.get_eval_adapter("unknown_engine") is None

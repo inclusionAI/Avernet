@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from secbaas.community.api.eval_env import EvalBindingResolverProtocol
+from secbaas.community.spi.eval_env import EvalBindingResolverProtocol
 
 
 class NoopEvalBindingResolver(EvalBindingResolverProtocol):

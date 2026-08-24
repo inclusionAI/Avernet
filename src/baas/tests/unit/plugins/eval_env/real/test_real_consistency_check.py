@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock
 
+from secbaas.community.api.eval_env import DYNAMIC_ENV_TAG_KEY
 from secbaas.community.plugins.eval_env.real._real_consistency_check import (
     RealEvalConsistencyCheck,
 )
@@ -22,7 +23,7 @@ class TestRealEvalConsistencyCheck:
     def test_consistent_tags_returns_true(self):
         checker = RealEvalConsistencyCheck()
         binding_info = _make_binding_info(
-            device_props={"AGENTCLAW_DEFAULT_TAG": "staging"}
+            device_props={DYNAMIC_ENV_TAG_KEY: "staging"}
         )
         result = checker.check_default_tag_consistency(
             binding_info=binding_info,
@@ -33,7 +34,7 @@ class TestRealEvalConsistencyCheck:
     def test_inconsistent_tags_returns_false(self):
         checker = RealEvalConsistencyCheck()
         binding_info = _make_binding_info(
-            device_props={"AGENTCLAW_DEFAULT_TAG": "production"}
+            device_props={DYNAMIC_ENV_TAG_KEY: "production"}
         )
         result = checker.check_default_tag_consistency(
             binding_info=binding_info,
@@ -44,7 +45,7 @@ class TestRealEvalConsistencyCheck:
     def test_no_metadata_tag_returns_true(self):
         checker = RealEvalConsistencyCheck()
         binding_info = _make_binding_info(
-            device_props={"AGENTCLAW_DEFAULT_TAG": "staging"}
+            device_props={DYNAMIC_ENV_TAG_KEY: "staging"}
         )
         result = checker.check_default_tag_consistency(
             binding_info=binding_info,

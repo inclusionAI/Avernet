@@ -60,20 +60,3 @@ class BotEngineAdapterRegistry:
             logger.info(
                 f"[BotEngineAdapterRegistry] Registered eval adapter for engine_type={engine_type!r}"
             )
-
-    def get_eval_adapter(
-        self,
-        engine_type: str,
-    ) -> BotEngineAdapter | None:
-        """返回 eval 专用的 adapter；若无专用则复用标准 adapter。
-
-        当 eval binding 的 device_props 包含 engine_type 但该 engine_type
-        没有正式注册时，返回 None（调用方应 fallback 到标准 adapter 或基础路径）。
-
-        Args:
-            engine_type: 引擎类型
-
-        Returns:
-            已注册的 adapter 或 None
-        """
-        return self._adapters.get(engine_type)

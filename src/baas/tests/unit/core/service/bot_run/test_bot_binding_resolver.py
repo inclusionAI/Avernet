@@ -16,6 +16,7 @@ from secbaas.community.core.repository.ac_bot import AcBotRecord
 from secbaas.community.core.repository.device_binding import (
     DeviceBindingRecord,
 )
+from secbaas.community.api.eval_env import DYNAMIC_ENV_TAG_KEY
 from secbaas.community.core.service.bot_run import BotBindingResolver
 
 # ==================== Fixtures ====================
@@ -805,7 +806,7 @@ class TestServiceBotEvalStage:
             device_provider="baas",
             device_id="eval-uuid-001",
             binding_id=self.BINDING_ID_EVAL,
-            props={"AGENTCLAW_DEFAULT_TAG": "eval", "bot_id": BOT_ID},
+            props={DYNAMIC_ENV_TAG_KEY: "eval", "bot_id": BOT_ID},
         )
         mock_binding_repo.get_by_id.return_value = eval_binding
 
@@ -891,7 +892,7 @@ class TestEvalSwitchControl:
             device_provider="baas",
             device_id="eval-uuid-001",
             binding_id=self.BINDING_ID_EVAL,
-            props={"AGENTCLAW_DEFAULT_TAG": "eval", "bot_id": BOT_ID},
+            props={DYNAMIC_ENV_TAG_KEY: "eval", "bot_id": BOT_ID},
         )
         mock_binding_repo.get_by_id.return_value = eval_binding
 
