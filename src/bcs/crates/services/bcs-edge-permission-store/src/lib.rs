@@ -1286,7 +1286,7 @@ mod tests {
     async fn sqlite_store() -> DbEdgeGrantStore {
         let db = LocalSqliteDbPlugin::new().expect("local sqlite");
         // edge_grants + permission_profiles schema (mirrors
-        // migrations/mysql/011_edge_permission.sql for SQLite).
+        // migrations/mysql/012_edge_permission.sql for SQLite).
         db.execute(DbStatement::new(
             "CREATE TABLE edge_grants (\
                 edge_id VARCHAR(128) NOT NULL, \
@@ -1444,7 +1444,7 @@ mod tests {
     // ---- DbPermissionProfileStore (T8) ----
 
     /// Profile store backed by a fresh LocalSqliteDbPlugin with the full
-    /// `permission_profiles` schema (mirrors 011_edge_permission.sql).
+    /// `permission_profiles` schema (mirrors 012_edge_permission.sql).
     async fn profile_store() -> DbPermissionProfileStore {
         let db = LocalSqliteDbPlugin::new().expect("local sqlite");
         db.execute(DbStatement::new(
@@ -1569,7 +1569,7 @@ mod tests {
     // ---- DbPermissionRequestStore (T9) ----
 
     /// Request store backed by a fresh LocalSqliteDbPlugin with the full
-    /// `permission_requests` schema (mirrors 011_edge_permission.sql).
+    /// `permission_requests` schema (mirrors 012_edge_permission.sql).
     async fn request_store() -> DbPermissionRequestStore {
         let db = LocalSqliteDbPlugin::new().expect("local sqlite");
         db.execute(DbStatement::new(

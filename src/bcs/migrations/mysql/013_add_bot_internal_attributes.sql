@@ -1,4 +1,4 @@
--- 012_add_bot_internal_attributes.sql — persistent Provider Bot attributes.
+-- 013_add_bot_internal_attributes.sql — persistent Provider Bot attributes.
 -- Keep these fields outside bot_info so reads and partial updates share one schema.
 ALTER TABLE bcs_bots
     ADD COLUMN IF NOT EXISTS user_visibility varchar(32) NOT NULL DEFAULT 'protected' COMMENT '用户可见性(public/protected/private)',
