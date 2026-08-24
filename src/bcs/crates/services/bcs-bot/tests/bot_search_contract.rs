@@ -4,8 +4,12 @@
 use std::sync::Arc;
 
 use bcs_bot::{Bot, BotCore};
+use bcs_bot_store::PersistentBotRepo;
+use bcs_cache_local::InMemoryCachePlugin;
+use bcs_db_api::{DbPlugin, DbStatement};
+use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{
-    BotCapabilities, BotQueryService, BotRegistryCoreService, SearchBotsCommand,
+    BotCapabilities, BotQueryService, BotRegistryCoreService, BotRepoPort, SearchBotsCommand,
 };
 use tempfile::TempDir;
 
@@ -16,6 +20,31 @@ fn capabilities(name: &str, visibility: &str) -> BotCapabilities {
         visibility: visibility.to_string(),
         ..Default::default()
     }
+}
+
+async fn sqlite_db() -> Arc<dyn DbPlugin> {
+    let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    db.execute(DbStatement::new(
+        "CREATE TABLE bcs_bots (
+            bot_uuid TEXT NOT NULL,
+            name TEXT,
+            bot_info TEXT,
+            session_token TEXT,
+            created_by TEXT,
+            visibility TEXT,
+            status TEXT NOT NULL DEFAULT 'online',
+            actor_kind TEXT NOT NULL DEFAULT 'bot',
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            agent_code TEXT DEFAULT NULL,
+            env TEXT NOT NULL,
+            registered_at TEXT,
+            updated_at TEXT,
+            PRIMARY KEY (bot_uuid, env)
+        )",
+    ))
+    .await
+    .expect("create bcs_bots table");
+    db
 }
 
 async fn build_bot() -> (Bot, Arc<BotCore>, TempDir) {
@@ -79,4 +108,42 @@ async fn search_bots_tc_bot_filter_keeps_only_owner_suffixed_bots() {
         .map(|b| b.bot_uuid.as_str())
         .collect();
     assert_eq!(native_uuids, vec!["ws-native-bot"]);
+}
+
+#[tokio::test]
+async fn search_bots_excludes_soft_deleted_persistent_rows_even_if_memory_has_bot() {
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    let db = sqlite_db().await;
+    let repo = Arc::new(PersistentBotRepo::with_plugins(cache, db));
+    let core = Arc::new(BotCore::with_repo(repo.clone()));
+    let bot = Bot::new(core.clone() as Arc<dyn BotRegistryCoreService>);
+
+    repo.register_with_owner_and_token(
+        "soft-delete-bot".to_string(),
+        capabilities("Soft Delete Bot", "public"),
+        "11111111",
+        "soft-delete-token",
+    )
+    .await
+    .expect("register bot");
+    assert!(repo.soft_delete("soft-delete-bot").await);
+
+    // Re-registering a retained soft-deleted row intentionally does not clear
+    // `is_deleted`; `/bots/search` must still not leak the in-memory bot.
+    repo.register_with_owner_and_token(
+        "soft-delete-bot".to_string(),
+        capabilities("Soft Delete Bot", "public"),
+        "11111111",
+        "new-soft-delete-token",
+    )
+    .await
+    .expect("re-register soft-deleted bot");
+
+    let result = bot
+        .search_bots(SearchBotsCommand::default())
+        .await
+        .expect("search bots");
+
+    assert!(result.items.is_empty());
+    assert_eq!(result.total, 0);
 }

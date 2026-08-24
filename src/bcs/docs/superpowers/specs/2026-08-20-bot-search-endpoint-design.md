@@ -38,7 +38,9 @@ GET /bots/search
 | `q` | string | — | 名称/简介模糊搜索（contains，大小写不敏感） |
 | `visibility` | string | — | 可见性过滤：`public` / `protected` / `private`；非法值 → 400 |
 | `status` | string | — | 状态过滤：`online` / `hidden`；非法值 → 400 |
-| `is_friend` | bool | — | friend 状态过滤：`true` / `false`（需 Bearer 认证） |
+| `viewer_actor_type` | string | — | 好友关系视角 actor 类型：`human` / `bot`；必须和 `viewer_actor_id` 同传 |
+| `viewer_actor_id` | string | — | 好友关系视角 actor id；必须和 `viewer_actor_type` 同传 |
+| `is_friend` | bool | — | 相对显式 viewer 的 friend 状态过滤：`true` / `false`；传该参数必须同时传 viewer |
 | `tc_bot` | bool | — | TC（TeamClaw backend）bot 过滤：`true` 仅返回 backend 过来的 bot，`false` 仅返回 native bot，缺省不过滤（见 §3.6.6） |
 | `offset` | int | 0 | 分页起始 |
 | `limit` | int | 20 | 每页数，取值范围 `1..=100`，越界 → 400 |
@@ -46,8 +48,9 @@ GET /bots/search
 ### 3.3 认证
 
 - **Bearer（可选）** — 任何 actor（人或 bot）
-- 无 Bearer → 仅返回 `visibility=public` 的 bot，`is_friend` 字段不返回
-- 有 Bearer → 返回可见 bot 列表 + 附带 `is_friend` 状态（从 `edge_grants` 读取）
+- 无 Bearer → 仅返回 `visibility=public` 的 bot
+- 有 Bearer → 返回可见 bot 列表；Bearer 只影响可见性范围和排除调用者自身
+- `is_friend` 不从 Bearer/请求身份隐式计算；仅当显式传 `viewer_actor_type + viewer_actor_id` 时返回/过滤
 
 ### 3.4 响应
 
@@ -71,14 +74,14 @@ GET /bots/search
 }
 ```
 
-> `is_friend` 字段仅在有 Bearer 时返回；匿名调用该字段缺省（`skip_serializing_if`）。
+> `is_friend` 字段仅在显式传 `viewer_actor_type + viewer_actor_id` 时返回；未传 viewer 时该字段缺省（`skip_serializing_if`）。
 > `status` 来自 `ActorStatus`（`online`/`hidden`），`is_online` 来自 `effective_dynamic_status`（`active`/`offline`）。
 
 ### 3.5 错误码
 
 | HTTP | code | 说明 |
 |---|---|---|
-| 400 | BadRequest | 参数非法：`limit` 越界、`visibility`/`status` 取值非法 |
+| 400 | BadRequest | 参数非法：`limit` 越界、`visibility`/`status`/`viewer_actor_type` 取值非法、viewer 参数未成对传入、`is_friend` 缺少 viewer |
 | 401 | Unauthorized | Bearer 提供但解析失败 |
 | 500 | Internal | 服务内部错误 |
 
@@ -88,10 +91,10 @@ GET /bots/search
 2. **可见性过滤**：
    - 无 Bearer → 强制 `visibility=public`（忽略用户传入的 visibility 参数）。
    - 有 Bearer → 默认返回 `public` + `protected`（服务侧 `visibility=None`）；若传 `visibility` 参数则按参数过滤（含 `private`）。
-3. **friend 过滤**：`is_friend=true` → 仅返回已是好友的 bot；`is_friend=false` → 仅返回非好友的 bot。无此参数 → 不过滤。
-4. **排序**：按 `name` 升序（无 name 的排最后；可扩展为多字段排序参数）。
-5. **is_friend** 判定：handler 调 `ConnectService::list_friends(caller)` 取好友 actor_id 集合，按 `bot_uuid` 是否在集合内判定。
-6. **匿名 is_friend 过滤**：无 Bearer 时好友集合为空，`is_friend=true` → 返回空，`is_friend=false` → 返回全部 public bot（逻辑自洽：匿名者与任何 bot 都不是好友）。
+3. **viewer 校验**：`viewer_actor_type` 和 `viewer_actor_id` 必须同时传或同时不传；`viewer_actor_type` 仅允许 `human` / `bot`；`viewer_actor_id` trim 后不能为空。
+4. **friend 过滤**：`is_friend=true` → 仅返回与 viewer 已是好友的 bot；`is_friend=false` → 仅返回与 viewer 非好友的 bot。传 `is_friend` 必须同时传 viewer；无此参数 → 不过滤。
+5. **排序**：按 `name` 升序（无 name 的排最后；可扩展为多字段排序参数）。
+6. **is_friend** 判定：handler 调 `ConnectService::list_friends(viewer_actor_id)` 取好友 actor_id 集合，按 `bot_uuid` 是否在集合内判定。
 
 ### 3.6.6 TC bot 过滤（`tc_bot`）
 
@@ -131,11 +134,11 @@ GET /bots/search
 
 | 层 | 改动 | 文件 |
 |---|---|---|
-| **wire** | `BotSearchQuery`（含 `tc_bot`）+ `BotSearchEntry` response struct；crate root re-export | `bcs-protocol/src/http/bots.rs`、`http/mod.rs`、`lib.rs` |
-| **handler** | `search_bots` handler：参数校验（limit/visibility/status → 400）、caller 解析、可见性规则、is_friend 后过滤 + 分页、`BotSearchEntry` 组装 | `bcs-http/src/routes/bots.rs` |
+| **wire** | `BotSearchQuery`（含 `viewer_actor_type`、`viewer_actor_id`、`is_friend`、`tc_bot`）+ `BotSearchEntry` response struct；crate root re-export | `bcs-protocol/src/http/bots.rs`、`http/mod.rs`、`lib.rs` |
+| **handler** | `search_bots` handler：参数校验（limit/visibility/status/viewer → 400）、caller 解析、可见性规则、显式 viewer 的 is_friend 后过滤 + 分页、`BotSearchEntry` 组装 | `bcs-http/src/routes/bots.rs` |
 | **router** | 注册 `.route("/bots/search", get(routes::bots::search_bots))` | `bcs-http/src/router.rs` |
 | **service** | 新增 `BotQueryService::search_bots(SearchBotsCommand) -> BotSearchResult`（默认 impl 兜底），基于 `list_active()` 过滤 `q`/`visibility`/`status`/`tc_bot` + name 排序，经 `bot_to_query_entry` 带 status/online；`is_tc_bot` helper | `bcs-service-api/.../bot_query.rs`（trait）、`bcs-bot/src/application/bot.rs`（impl） |
-| **friend** | `is_friend` 在 handler 调 `ConnectService::list_friends` 取集合判定 | 复用现有，无新增 |
+| **friend** | `is_friend` 在 handler 按显式 `viewer_actor_id` 调 `ConnectService::list_friends` 取集合判定 | 复用现有，无新增 |
 | **store** | 无改动（复用 `bcs-bot-store` 现有 query 能力） | — |
 | **测试** | handler 契约测试 + `search_bots` 服务级测试 | `bcs-http/tests/bots_contract.rs`、`bcs-bot/tests/bot_search_contract.rs` |
 
@@ -157,8 +160,8 @@ GET /bots/search?q=研
 # 搜索所有 public bot，第二页
 GET /bots/search?visibility=public&offset=20&limit=20
 
-# 搜索非好友的 protected bot
-GET /bots/search?visibility=protected&is_friend=false
+# 以 bot-viewer 视角搜索非好友的 protected bot
+GET /bots/search?visibility=protected&viewer_actor_type=bot&viewer_actor_id=bot-viewer&is_friend=false
   Authorization: Bearer <bot_token>
 
 # 仅返回 TeamClaw backend 过来的 bot
