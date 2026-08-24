@@ -7,7 +7,7 @@ class TtlRenewalScheduleRepository(Protocol):
     """Protocol for the ARCA TTL renewal schedule repository.
 
     Method set mirrors the operations the renewal engine requires against
-    the baas_arca_ttl_renewal_schedule table (design doc §7.4). Every
+    the baas_bot_ttl_renewal_schedule table (design doc §7.4). Every
     method takes an ``env`` parameter — pre/prod share one MySQL instance,
     so all statements must be env-scoped.
     """
