@@ -87,7 +87,10 @@ async def get_task_dashboard(
     TRANSITION 全量 payload),默认关(诊断页开)。任务/节点不存在 → TaskNotFoundError/NodeNotFoundError
     → @envelope_errors 映射 404。"""
     del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
-    graph = service.get_task_dashboard(task_id, node_id)
+    if include_action_log:
+        graph = service.get_task_dashboard(task_id, node_id, include_action_log=True)
+    else:
+        graph = service.get_task_dashboard(task_id, node_id)
     return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
 
 

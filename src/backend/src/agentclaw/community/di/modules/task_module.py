@@ -22,11 +22,15 @@ from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProt
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.repository.protocols.task import (
     TaskCallbackRepositoryProtocol,
+    TaskGraphRepositoryProtocol,
     TaskInfoRepositoryProtocol,
     TaskNodeRepositoryProtocol,
     TaskNodeRunInfoRepositoryProtocol,
 )
 from agentclaw.community.core.task.task_center.task_service import TaskService
+from agentclaw.community.core.task.task_center.recovery_lifecycle import (
+    TaskRecoveryLifecycle,
+)
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_runner.callback_correlation import (
@@ -39,7 +43,9 @@ class TaskModule(Module):
     """Production bindings for the task module(社区核心,所有 profile 装配)。"""
 
     def configure(self, binder: Binder) -> None:
-        # TaskGraphService 是 in-mem 单例(无外部依赖),直接 self-bind。
+        # TaskGraphService remains directly constructible for lightweight test
+        # injectors. The full composition root attaches the graph repository in
+        # the task_service provider below.
         binder.bind(TaskGraphService, to=TaskGraphService, scope=singleton)
         # task_loop inbound callback 服务的进程内可信默认绑定(社区分布)。
         # CORP/prod 的 HmacCallbackAuthenticator + 真实密钥由 corp adapter 覆写(经模块替换/子类)。
@@ -66,6 +72,10 @@ class TaskModule(Module):
         - discover(``BotDiscoverServiceProtocol``,来自 BotPublicModule)始终传入:
           singlebox profile 换 ``SingleboxKeywordBotDiscover``(本地关键字搜索),其余用注入的 BCSFuse。
         """
+        try:
+            graph.bind_repository(injector.get(TaskGraphRepositoryProtocol))
+        except Exception:  # noqa: BLE101 standalone/lightweight test injector
+            pass
         bot, bcs = self._resolve_ports()
         discover_port = self._resolve_discover(default=discover, bot_public=bot_public)
         bcs_identity = None
@@ -138,6 +148,17 @@ class TaskModule(Module):
     ) -> CallbackCorrelationRegistry:
         """task 级回调→节点寻址 registry(社区 in-mem;进程内可信)。"""
         return reg
+
+    @singleton
+    @provider
+    @inject
+    def task_recovery_lifecycle(self, injector: Injector) -> TaskRecoveryLifecycle:
+        """Recovery lifecycle participant — picked up by discover_lifecycle_participants.
+
+        Construction is cheap (holds the injector only); the worker's graph
+        repository + task service are resolved lazily on first scan. The
+        participant's ``startup()`` no-ops unless ``TASK_RECOVERY_ENABLED=1``."""
+        return TaskRecoveryLifecycle(injector)
 
     @singleton
     @provider

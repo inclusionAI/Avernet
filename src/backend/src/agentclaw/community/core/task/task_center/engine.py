@@ -321,6 +321,27 @@ class ExecutionEngine:
                 self._hung_and_escalate(task_id, root.node_id, 'root_gap_no_decompose')  # 有 gap 拆不出 → HUNG 升 BBS
         await self._drain(task_id, side)
 
+    async def redrive(self, task_id: str) -> None:
+        """Recovery resume entrypoint: re-dispatch pending leaf nodes of a
+        hydrated non-terminal task after an instance restart / rolling deploy.
+
+        Mirrors the dispatch tail of ``on_execute`` but starts from the
+        already-hydrated graph (``query_task_dashboard`` hydrates from the shared
+        store on cache miss): collect未派发 PENDING 叶 → dispatch → start_run.
+        Only non-terminal runtime statuses are recoverable (the worker filters),
+        and terminal graphs freeze immediately. Idempotent: ``_prepare_into``
+        skips nodes already ``dispatching`` and the status machine guards repeats.
+        """
+        if self._is_graph_terminal(task_id):
+            logger.info("[redrive] task=%s 图已终态,冻结重投", task_id)
+            return
+        side: list[tuple] = []
+        with self._lock_for(task_id):
+            graph = self._graph.query_task_dashboard(task_id)
+            logger.info("[redrive] task=%s status=%s resume dispatch", task_id, graph.status.value)
+            await self._prepare_into(task_id, side)
+        await self._drain(task_id, side)
+
     # ===== on_start =====
     async def on_start(self, patch: TaskNodePatch) -> NodeOpResult:
         """入站 start 回调:PENDING→RUNNING(幂等)。纯节点态翻转,不触发传播/side-effect。"""

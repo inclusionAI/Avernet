@@ -11,6 +11,7 @@ import time
 import uuid
 from typing import Any
 
+from agentclaw.community.core.repository.protocols.task import TaskGraphRepositoryProtocol
 from agentclaw.community.core.task.domain.errors import (
     GraphAlreadyInitializedError,
     GraphIntegrityError,
@@ -64,6 +65,27 @@ _DEFAULT_MAX_LOOP = 10  # 图级总轮次(根 gap 不闭 + 反复升 BBS)
 _DEFAULT_MAX_PLAN_ROUND = 10  # 节点级重规划次数(父节点子全 DONE→gap 未闭→重 plan 产新子)
 _DEFAULT_BBS_MAX_DEPTH = 3
 
+def _consume_pending_callback_audit(task_id: str):
+    """Return and clear the pending callback audit if it targets ``task_id``.
+
+    The callback boundary (``callback_adapter``) stages a ``TaskCallbackRecord``
+    in a contextvar before driving a graph mutation; the graph service consumes
+    it on the first persist so the audit commits in the same transaction. Only
+    the audit matching this task is consumed; others stay for their own task's
+    persist.
+    """
+    from agentclaw.community.core.task.task_runner.callback_adapter import (
+        _PENDING_CALLBACK_AUDIT,
+    )
+    record = _PENDING_CALLBACK_AUDIT.get()
+    if record is None:
+        return None
+    if getattr(record, "run_id", None) != task_id:
+        # Different task's audit; leave it for that task's persist.
+        return None
+    _PENDING_CALLBACK_AUDIT.set(None)
+    return record
+
 
 class TaskGraphService:
     """任务图谱 SSOT + 原子变更唯一网关。
@@ -72,13 +94,23 @@ class TaskGraphService:
     结构归属由 relations 分解树(单入)表达;depth/结构子/结构父均从 relations 派生。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, graph_repo: TaskGraphRepositoryProtocol | None = None) -> None:
         self._graphs: dict[str, TaskExecutionGraph] = {}
+        self._graph_versions: dict[str, int] = {}
+        self._graph_repo = graph_repo
         self._locks: dict[str, threading.RLock] = {}
         self._registry_lock = threading.RLock()
         self._run_id_counter = 0
 
     # ===== internal helpers =====
+    def bind_repository(self, graph_repo: TaskGraphRepositoryProtocol) -> None:
+        """Attach the shared repository at the composition root."""
+        self._graph_repo = graph_repo
+
+    @property
+    def has_repository(self) -> bool:
+        return self._graph_repo is not None
+
     def _lock_for(self, task_id: str) -> threading.RLock:
         with self._registry_lock:
             lk = self._locks.get(task_id)
@@ -94,8 +126,50 @@ class TaskGraphService:
 
     def _require_graph(self, task_id: str) -> TaskExecutionGraph:
         graph = self._graphs.get(task_id)
+        if graph is None and self._graph_repo is not None:
+            # Cross-instance correctness: a callback/mutation reaching an instance
+            # that has never served this task must hydrate from the shared store
+            # before mutating (spec §9/§12). Memory is a cache only.
+            graph = self._hydrate_locked(task_id)
         if graph is None:
             raise TaskNotFoundError(f"task_id={task_id} 图不存在")
+        return graph
+
+    def _persist_locked(self, graph: TaskExecutionGraph, *, action_events=None) -> None:
+        """Persist after a successful in-memory mutation, then advance cache version."""
+        if self._graph_repo is None:
+            return
+        events = action_events or []
+        expected = self._graph_versions.get(graph.task_id, 0)
+        root = next((node for node in graph.tasks if node.node_id == graph.task_id), None)
+        runtime_status = root.status if root is not None else graph.status
+        # Attach the inbound callback audit to this mutation's transaction (spec §12).
+        callback_audit = _consume_pending_callback_audit(graph.task_id)
+        try:
+            version = self._graph_repo.save_graph(
+                graph,
+                expected_version=expected,
+                runtime_status=runtime_status,
+                action_events=events,
+                callback_audit=callback_audit,
+            )
+        except Exception:
+            # Never leave a dirty cache after a failed shared-store write.
+            restored = self._graph_repo.load_graph(graph.task_id)
+            if restored is not None:
+                self._graphs[graph.task_id] = restored
+                self._graph_versions[graph.task_id] = self._graph_repo.get_version(graph.task_id) or 0
+            raise
+        self._graph_versions[graph.task_id] = version
+
+    def _hydrate_locked(self, task_id: str) -> TaskExecutionGraph | None:
+        if self._graph_repo is None:
+            return None
+        graph = self._graph_repo.load_graph(task_id)
+        if graph is None:
+            return None
+        self._graphs[task_id] = graph
+        self._graph_versions[task_id] = self._graph_repo.get_version(task_id) or 0
         return graph
 
     def _get_node(self, graph: TaskExecutionGraph, node_id: str) -> TaskNode | None:
@@ -154,6 +228,10 @@ class TaskGraphService:
             graph.extend_props["source_type"] = task_info.source_type
             graph.extend_props["owner_bot_id"] = task_info.owner_bot_id
             self._graphs[task_id] = graph
+            if self._graph_repo is not None:
+                self._graph_versions[task_id] = self._graph_repo.create_graph(
+                    graph, runtime_status=Status.PENDING
+                )
             return graph
 
     def add_task_nodes(self, tasks: list[TaskNode], parent_node_id: str) -> TaskExecutionGraph:
@@ -196,6 +274,7 @@ class TaskGraphService:
             # RUNNING 只给真正派发执行的叶子。
             if parent.status != Status.PLANNING:
                 parent.status = Status.PLANNING
+            self._persist_locked(graph)
             return graph
 
     def _assert_add_trigger(self, graph: TaskExecutionGraph) -> None:
@@ -253,6 +332,7 @@ class TaskGraphService:
                 # 翻态/复位由编排核 on_harness 直驱 patch.status 处理。
                 if patch.extend_props_patch is not None:
                     node.run_info.extend_props.update(patch.extend_props_patch)
+                self._persist_locked(graph)
                 return NodeOpResult(
                     task_id=patch.task_id, node_id=patch.node_id, success=True,
                     prev_status=prev_status, new_status=node.status,
@@ -291,6 +371,7 @@ class TaskGraphService:
             # 应用翻态
             if new_status is not None:
                 node.status = new_status
+            self._persist_locked(graph)
             return NodeOpResult(
                 task_id=patch.task_id,
                 node_id=patch.node_id,
@@ -320,18 +401,23 @@ class TaskGraphService:
         with self._lock_for(task_id):
             graph = self._require_graph(task_id)
             node = self._require_node(graph, node_id)
-            node.run_info.action_log.append(
-                NodeActionEvent(
-                    seq=len(node.run_info.action_log) + 1,
-                    ts=int(time.time() * 1000),
-                    action=action,
-                    loop_round=graph.loop_round,
-                    attempt=attempt,
-                    status_from=status_from,
-                    status_to=status_to,
-                    payload=dict(payload),
-                )
+            event_payload = dict(payload)
+            event_payload.setdefault("__node_id", node_id)
+            next_seq = len(node.run_info.action_log) + 1
+            if self._graph_repo is not None:
+                next_seq = max(next_seq, self._graph_repo.next_action_seq(task_id, node_id))
+            event = NodeActionEvent(
+                seq=next_seq,
+                ts=int(time.time() * 1000),
+                action=action,
+                loop_round=graph.loop_round,
+                attempt=attempt,
+                status_from=status_from,
+                status_to=status_to,
+                payload=event_payload,
             )
+            node.run_info.action_log.append(event)
+            self._persist_locked(graph, action_events=[event])
 
     def update_task_graph_info(self, task_id: str, patch: TaskGraphPatch) -> TaskExecutionGraph:
         """图级原子写口:收口图级终态(``status``=DONE/HUNG、``loop_round`` 原子加、``output`` 浅合并、
@@ -347,6 +433,7 @@ class TaskGraphService:
                 graph.output.update(patch.output_patch)
             if patch.extend_props_patch is not None:
                 graph.extend_props.update(patch.extend_props_patch)
+            self._persist_locked(graph)
             return graph
 
     def claim_bbs_owner(self, task_id: str, bot_id: str) -> NodeOpResult:
@@ -354,15 +441,22 @@ class TaskGraphService:
 
         恰一赢:首个 bot 写入成功;后续不同 bot 重 claim 抛 ``TaskStateError``(CAS 输者)。
         同 bot 重 claim 幂等(成功)。非 ``bbs_mode`` 任务拒绝(``TaskStateError``)。
-        实现:取 ``_lock_for(task_id)``(RLock 可重入)后调 ``update_task_node_info`` 折叠
-        ``extend_props_patch={'bbs_owner','bbs_claim_at'}`` —— 不翻态,PLANNING/HUNG 根均可写。
+
+        跨实例:图仓储绑定(``has_repository``)时,占有权以仓储
+        ``claim_bbs_owner`` 的数据库行锁 CAS 为准(``SELECT ... FOR UPDATE`` on 根 run_info):
+        先 hydrate 最新图(他实例可能已 claim),再做 DB CAS;赢者更新本地缓存,输者抛 ``TaskStateError``。
+        无仓储(lightweight/单测)走原 in-mem CAS(仅 ``_lock_for`` 进程内串行)。
 
         **recover 清理**:CAS 占根成功后,先把图中所有 ``HUNG`` 子树(每个 HUNG 节点及其 DEPENDENCY 后代)
         删除——这些是 planner 规划不合理 / 派发全 MISS 造的死分支,BBS 接力视为推倒重做,清掉让根回到
         干净委托点(根 ``task_id`` 永不清)。不区分 ``hung_reason``/checkpoint(按 recover 语义)。
         """
         with self._lock_for(task_id):
-            graph = self._require_graph(task_id)
+            graph = self._graphs.get(task_id)
+            if graph is None and self._graph_repo is not None:
+                graph = self._hydrate_locked(task_id)
+            if graph is None:
+                raise TaskNotFoundError(f"claim_bbs_owner: task={task_id} 图不存在")
             if not graph.extend_props.get("bbs_mode"):
                 raise TaskStateError(f"claim_bbs_owner: task={task_id} 非 bbs_mode 任务")
             root = next((n for n in graph.tasks if n.node_id == task_id), None)
@@ -371,6 +465,23 @@ class TaskGraphService:
             owner = root.run_info.extend_props.get("bbs_owner")
             if owner is not None and owner != bot_id:
                 raise TaskStateError(f"claim_bbs_owner: task={task_id} 已被 {owner} 占有")
+            if self._graph_repo is not None:
+                # 数据库行锁 CAS 是跨实例权威;in-mem 仅做缓存先行校验。
+                if not self._graph_repo.claim_bbs_owner(task_id, bot_id):
+                    _LOG.info("[bbs-claim] task=%s DB CAS 输者 bot=%s", task_id, bot_id)
+                    raise TaskStateError(f"claim_bbs_owner: task={task_id} DB CAS 失败")
+                now = int(time.time() * 1000)
+                root.run_info.extend_props["bbs_owner"] = bot_id
+                root.run_info.extend_props["bbs_claim_at"] = now
+                self._graph_versions[task_id] = self._graph_repo.get_version(task_id) or 0
+                pruned = self._prune_hung_subtrees(graph, task_id)
+                if pruned:
+                    _LOG.info("[bbs-claim] task=%s recover 清理 HUNG 死子树 %d 个", task_id, pruned)
+                    self._persist_locked(graph)
+                return NodeOpResult(
+                    task_id=task_id, node_id=task_id, success=True,
+                    prev_status=root.status, new_status=root.status,
+                )
             pruned = self._prune_hung_subtrees(graph, task_id)
             if pruned:
                 _LOG.info("[bbs-claim] task=%s recover 清理 HUNG 死子树 %d 个", task_id, pruned)
@@ -444,6 +555,7 @@ class TaskGraphService:
                 r for r in graph.relations
                 if r.src_id not in prune and r.dst_id not in prune
             ]
+            self._persist_locked(graph)
 
     def attach_bbs_node(
         self, task_id: str, parent_node_id: str, task_spec: TaskSpec, bot_id: str
@@ -491,10 +603,30 @@ class TaskGraphService:
             )
             return node
 
+    def load_action_logs(self, graph: TaskExecutionGraph, *, limit: int = 200) -> None:
+        """Attach bounded persisted action history for diagnostic Dashboard reads."""
+        if self._graph_repo is None:
+            return
+        grouped = self._graph_repo.load_action_logs(graph.task_id, limit=limit)
+        for node in graph.tasks:
+            node.run_info.action_log = list(grouped.get(node.node_id, []))
+
     def query_task_dashboard(self, task_id: str, node_id: str | None = None) -> TaskExecutionGraph:
-        """只读看板快照。node_id=None 返回整图引用;指定 node_id 返回该节点子树投影(新构造对象)。"""
+        """只读看板快照。node_id=None 返回整图引用;指定 node_id 返回该节点子树投影(新构造对象)。
+
+        跨实例版本感知缓存(spec §11):缓存命中时比对 ``task_info.graph_version`` 与本地图版本,
+        不一致(他实例已推进图)→ 从共享存储重新 hydrate,保证看板总能反映最新已提交图态。
+        """
         with self._lock_for(task_id):
-            graph = self._require_graph(task_id)
+            graph = self._graphs.get(task_id)
+            if graph is None:
+                graph = self._hydrate_locked(task_id)
+            elif self._graph_repo is not None:
+                db_version = self._graph_repo.get_version(task_id)
+                if db_version is not None and db_version != self._graph_versions.get(task_id):
+                    graph = self._hydrate_locked(task_id)  # 缓存过期 → 重新 hydrate
+            if graph is None:
+                raise TaskNotFoundError(f"task_id={task_id} 图不存在")
             if node_id is None:
                 return graph
             self._require_node(graph, node_id)  # 校验存在

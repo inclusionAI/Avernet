@@ -71,6 +71,14 @@ class TaskInfoModel(Base):
     execution_config = Column(Text, nullable=True)
     task_spec = Column(Text, nullable=False)
     status = Column(String(64), nullable=False)
+    graph_run_id = Column(_RUN_ID, nullable=True)
+    graph_loop_round = Column(Integer, nullable=False, default=0)
+    graph_output = Column(Text, nullable=True)
+    graph_extend_props = Column(Text, nullable=True)
+    graph_version = Column(BigInteger, nullable=False, default=0)
+    lease_owner = Column(String(256), nullable=True)
+    lease_until = Column(BigInteger, nullable=True)
+    heartbeat_at = Column(BigInteger, nullable=True)
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
     gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -89,6 +97,14 @@ class TaskInfoModel(Base):
             execution_config=_loads(self.execution_config),
             task_spec=_loads(self.task_spec),
             status=Status(self.status),
+            graph_run_id=self.graph_run_id,
+            graph_loop_round=self.graph_loop_round,
+            graph_output=_loads(self.graph_output),
+            graph_extend_props=_loads(self.graph_extend_props),
+            graph_version=self.graph_version,
+            lease_owner=self.lease_owner,
+            lease_until=self.lease_until,
+            heartbeat_at=self.heartbeat_at,
             gmt_create=self.gmt_create,
             gmt_modified=self.gmt_modified,
         )
@@ -106,6 +122,7 @@ class TaskNodeModel(Base):
     gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
+        Index("uk_task_node_identity", "task_id", "node_id", unique=True),
         Index("idx_task_status", "task_id", "status"),
     )
 
@@ -182,7 +199,7 @@ class TaskNodeRelationModel(Base):
     gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
-        Index("uk_src_dst", "src_node_id", "dst_node_id", unique=True),
+        Index("uk_src_dst", "task_id", "src_node_id", "dst_node_id", unique=True),
         Index("idx_src", "task_id", "src_node_id"),
     )
 
@@ -214,6 +231,9 @@ class TaskCallbackModel(Base):
     result_success = Column(Boolean, nullable=True)
     exec_error = Column(Text, nullable=True)
     extend_props = Column(Text, nullable=True)
+    event_id = Column(String(256), nullable=True)
+    process_status = Column(String(64), nullable=True)
+    processed_at = Column(DateTime, nullable=True)
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
     gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -236,6 +256,36 @@ class TaskCallbackModel(Base):
             result_success=self.result_success,
             exec_error=self.exec_error,
             extend_props=_loads(self.extend_props),
+            event_id=self.event_id,
+            process_status=self.process_status,
+            processed_at=self.processed_at,
             gmt_create=self.gmt_create,
             gmt_modified=self.gmt_modified,
         )
+
+class TaskActionLogModel(Base):
+    """Append-only high-volume node action history."""
+
+    __tablename__ = "task_action_log"
+
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
+    event_id = Column(String(256), nullable=False)
+    task_id = Column(_TASK_ID, nullable=False)
+    node_id = Column(_NODE_ID, nullable=False)
+    seq = Column(Integer, nullable=False)
+    action = Column(String(64), nullable=False)
+    loop_round = Column(Integer, nullable=True)
+    attempt = Column(Integer, nullable=False, default=0)
+    status_from = Column(String(64), nullable=True)
+    status_to = Column(String(64), nullable=True)
+    payload = Column(Text, nullable=False)
+    instance_id = Column(String(256), nullable=True)
+    gmt_create = Column(DateTime, default=func.now(), nullable=False)
+    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("uk_task_action_event", "event_id", unique=True),
+        Index("uk_task_node_action_seq", "task_id", "node_id", "seq", unique=True),
+        Index("idx_task_action_task_node", "task_id", "node_id", "seq"),
+        Index("idx_task_action_created", "gmt_create"),
+    )
