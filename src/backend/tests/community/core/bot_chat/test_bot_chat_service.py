@@ -13,6 +13,7 @@ from agentclaw.community.core.bot_chat.service import (
     _apply_client_side_filters,
     _matches_session_key,
 )
+from agentclaw.community.core.bot_chat.query_support import QueryScope
 from agentclaw.community.core.bot_chat.schemas import ConversationDetail, ConversationObservation, ConversationSession, SessionMetadata
 from agentclaw.community.core.bot_chat.errors import SessionNotFoundError, LangfuseAPIError
 from agentclaw.community.di.config import BotChatConfig
@@ -530,6 +531,42 @@ class TestBotChatServiceListSessions:
         service._db_repo.has_bot_access.assert_called_once_with("collaborator-1", "bot-a")
         _, kwargs = service._db_repo.list_traces.call_args
         assert kwargs["bot_id"] == "bot-a"
+
+    @pytest.mark.asyncio
+    async def test_group_query_uses_group_as_scope_and_reads_all_history(self, service):
+        """Legacy Group mode must not be narrowed by the selected Bot or owner."""
+        sessions = [
+            ConversationSession(
+                id="trace-bot-a",
+                name="Bot A",
+                timestamp="2020-01-01T00:00:00Z",
+            ),
+            ConversationSession(
+                id="trace-bot-b",
+                name="Bot B",
+                timestamp="2020-01-01T00:00:01Z",
+            ),
+        ]
+        service._db_repo = MagicMock()
+        service._db_repo.list_ocb_traces.return_value = (sessions, 2)
+
+        result = await service.list_sessions(
+            owner_id="viewer-user",
+            bot_id="bot-a",
+            group_id="group-fixture",
+            from_date=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            to_date=datetime(2026, 8, 21, tzinfo=timezone.utc),
+        )
+
+        assert result.sessions == sessions
+        service._db_repo.has_bot_access.assert_not_called()
+        kwargs = service._db_repo.list_ocb_traces.call_args.kwargs
+        assert kwargs["owner_id"] is None
+        assert kwargs["bot_id"] is None
+        assert kwargs["group_id"] == "group-fixture"
+        assert kwargs["query_scope"] == QueryScope.OPEN
+        assert kwargs["from_ms"] == 0
+        assert kwargs["to_ms"] >= 1_787_500_800_000
 
     @pytest.mark.asyncio
     async def test_list_sessions_explicit_db_uses_db_source(self, service):

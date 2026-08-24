@@ -134,33 +134,12 @@ async def list_group_traces(
     limit: int = Query(
         default=100, ge=1, le=100, description="Traces per page (max 100)."
     ),
-    bot_id: str | None = Query(
-        default=None,
-        min_length=1,
-        max_length=256,
-        description="Optional viewing Bot. When supplied, it must belong to the group.",
-    ),
-    user_id: str | None = Query(
-        default=None,
-        min_length=1,
-        max_length=256,
-        description="Acting user for the optional viewing Bot context.",
-    ),
-    owner_id: str | None = Query(
-        default=None,
-        min_length=1,
-        max_length=256,
-        description="Owner of the viewing Bot; defaults to user_id.",
-    ),
     service: OpenBotChatServiceProtocol = Injected(OpenBotChatServiceProtocol),
 ) -> Envelope[SessionListResponse]:
     """List the traces of every session in one collaboration group, newest first."""
     del principal
     result = await service.list_open_sessions(
         group_id=group_id,
-        bot_id=bot_id,
-        user_id=user_id,
-        owner_id=owner_id,
         page=page,
         limit=limit,
     )
@@ -214,30 +193,6 @@ async def get_trace(
         max_length=256,
         description="The trace's id, as returned in a listing entry's id.",
     ),
-    bot_id: str | None = Query(
-        default=None,
-        min_length=1,
-        max_length=256,
-        description="Optional viewing Bot for a group-scoped detail request.",
-    ),
-    group_id: str | None = Query(
-        default=None,
-        min_length=1,
-        max_length=256,
-        description="Optional group context; must be supplied together with bot_id.",
-    ),
-    user_id: str | None = Query(
-        default=None,
-        min_length=1,
-        max_length=256,
-        description="Acting user for the optional viewing Bot context.",
-    ),
-    owner_id: str | None = Query(
-        default=None,
-        min_length=1,
-        max_length=256,
-        description="Owner of the viewing Bot; defaults to user_id.",
-    ),
     service: OpenBotChatServiceProtocol = Injected(OpenBotChatServiceProtocol),
 ) -> Envelope[ConversationDetail]:
     """Return one recorded chat turn (trace) in full.
@@ -246,11 +201,5 @@ async def get_trace(
     model generations and tool calls that made up the turn.
     """
     del principal
-    result = await service.get_open_session(
-        trace_id,
-        bot_id=bot_id,
-        group_id=group_id,
-        user_id=user_id,
-        owner_id=owner_id,
-    )
+    result = await service.get_open_session(trace_id)
     return envelope(result, request)

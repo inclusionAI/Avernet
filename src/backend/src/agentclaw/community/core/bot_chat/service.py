@@ -412,12 +412,19 @@ class BotChatService:
                 "time_scope=all requires match_mode=exact and an exact identifier"
             )
 
+        group_mode = group_id is not None
         now = datetime.now(timezone.utc)
         if from_date is not None:
             from_date = _as_utc(from_date)
         if to_date is not None:
             to_date = _as_utc(to_date)
-        if time_scope == "all":
+        if group_mode:
+            # A group is the aggregation boundary for the legacy logs UI.  The
+            # old frontend passes the currently selected bot_id and omits
+            # time_scope=all, but neither should narrow the group's history.
+            from_date = datetime(1970, 1, 1, tzinfo=timezone.utc)
+            to_date = now
+        elif time_scope == "all":
             from_date = from_date or datetime(1970, 1, 1, tzinfo=timezone.utc)
             to_date = to_date or now
         else:
@@ -457,7 +464,11 @@ class BotChatService:
         # Default DB mode: for non-(legacy-default) bot, check access (owner or collaborator).
         # Legacy default aliases short-circuit (see _is_legacy_default_bot_id): the
         # subsequent DB list is already scoped by owner_id, so access is implicit.
-        if bot_id and not self._is_legacy_default_bot_id(bot_id, owner_id):
+        if (
+            not group_mode
+            and bot_id
+            and not self._is_legacy_default_bot_id(bot_id, owner_id)
+        ):
             has_access = self._check_bot_access(owner_id, bot_id)
             if not has_access:
                 return SessionListResponse(
@@ -470,12 +481,12 @@ class BotChatService:
 
         # Default: DB mode (no fallback to Langfuse)
         return await self._list_sessions_db(
-            owner_id=owner_id,
+            owner_id=None if group_mode else owner_id,
             from_date=from_date,
             to_date=to_date,
             page=page,
             limit=limit,
-            bot_id=bot_id,
+            bot_id=None if group_mode else bot_id,
             trace_id=trace_id,
             session_id=session_id,
             session_key=session_key,
@@ -485,6 +496,7 @@ class BotChatService:
             group_id=group_id,
             match_mode=match_mode,
             include_output_match=include_output_match,
+            query_scope=QueryScope.OPEN if group_mode else QueryScope.OWNER,
         )
 
     async def _list_sessions_db(
