@@ -113,6 +113,40 @@ def test_list_inventory_combines_personal_cloud_and_local(client):
     assert ids == {"c1", "l1"}
 
 
+def test_list_inventory_filters_non_service_bots(client):
+    data = _ok(
+        client.get("/openapi/v1/bots/all", params={"is_service": "false"})
+    )
+
+    assert data["total"] == 2
+    assert {item["bot_id"] for item in data["items"]} == {"c1", "l1"}
+
+
+def test_list_inventory_filters_service_bots_without_leaking_local_bots(client):
+    data = _ok(
+        client.get("/openapi/v1/bots/all", params={"is_service": "true"})
+    )
+
+    assert data["total"] == 0
+    assert data["items"] == []
+
+
+def test_list_inventory_combines_engine_deploy_and_service_filters(client):
+    data = _ok(
+        client.get(
+            "/openapi/v1/bots/all",
+            params={
+                "engine": "openclaw",
+                "deploy_mode": "local",
+                "is_service": "false",
+            },
+        )
+    )
+
+    assert data["total"] == 1
+    assert [item["bot_id"] for item in data["items"]] == ["l1"]
+
+
 def test_inventory_consumes_space_header_fail_closed(client):
     resp = client.get("/openapi/v1/bots/all", headers={"X-Space-Id": "team:1"})
 
