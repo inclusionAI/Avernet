@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use bcs_db_api::{DbPlugin, DbStatement, DbValue, db_get_column};
@@ -18,8 +18,8 @@ use bcs_service_api::types::{
     EventSubject, EventSubscriptionScope, EventSubscriptionScopeType, EventSubscriptionStatus,
 };
 use bcs_service_api::{
-    GroupKind, GroupMutableFieldsPatch, GroupStatus, GroupStrategy, Participant, ParticipantRole,
-    ServiceError,
+    DefaultDelivery, GroupKind, GroupMutableFieldsPatch, GroupStatus, GroupStrategy, Participant,
+    ParticipantRole, RoutingMode, RoutingPolicy, ServiceError,
 };
 
 #[path = "../../../bootstrap/bcs/src/migrations.rs"]
@@ -157,6 +157,114 @@ async fn sqlite_group_opening_message_round_trips_and_can_be_cleared() {
             .expect("group")
             .opening_message,
         None
+    );
+}
+
+#[tokio::test]
+async fn sqlite_delivery_patches_persist_canonical_routing_policy_json() {
+    let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    bootstrap_migrations::run_sqlite_migrations(db.as_ref())
+        .await
+        .expect("migrate sqlite");
+    let repo = MySqlGroupStore::sqlite(db.clone(), PROVISIONING_ENV.to_string());
+    let mut group = GroupBuilder::new("driver").id("routing-policy-group").build();
+    group.routing_policy = Some(RoutingPolicy {
+        mode: RoutingMode::Mention,
+        default_bot_final_delivery: DefaultDelivery::SendToDriver,
+        sender_routes: HashMap::from([(
+            "driver".to_string(),
+            vec!["observer".to_string()],
+        )]),
+    });
+    repo.upsert(group).await.expect("persist group");
+
+    repo.patch_mutable_fields(
+        "routing-policy-group",
+        GroupMutableFieldsPatch {
+            default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("apply direct delivery patch");
+    let directly_updated = repo
+        .try_get("routing-policy-group")
+        .await
+        .expect("load directly updated group")
+        .expect("group");
+    let direct_policy = directly_updated.routing_policy.expect("routing policy");
+    assert_eq!(direct_policy.mode, RoutingMode::Mention);
+    assert_eq!(
+        direct_policy.default_bot_final_delivery,
+        DefaultDelivery::InjectObservers
+    );
+    assert_eq!(
+        direct_policy.sender_routes.get("driver"),
+        Some(&vec!["observer".to_string()])
+    );
+
+    let transactionally_updated = repo
+        .commit_eventful_mutation(CommitGroupEventfulMutation {
+            group_id: "routing-policy-group".to_string(),
+            expected_version: directly_updated.version,
+            mutated_at_ms: 1_787_028_100_000,
+            mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch {
+                default_bot_final_delivery: Some(DefaultDelivery::SendToDriver),
+                ..Default::default()
+            }),
+            event: None,
+        })
+        .await
+        .expect("apply transactional delivery patch");
+    let repeatedly_updated = repo
+        .commit_eventful_mutation(CommitGroupEventfulMutation {
+            group_id: "routing-policy-group".to_string(),
+            expected_version: transactionally_updated.version,
+            mutated_at_ms: 1_787_028_200_000,
+            mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch {
+                default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+                ..Default::default()
+            }),
+            event: None,
+        })
+        .await
+        .expect("apply repeated transactional delivery patch");
+    let repeated_policy = repeatedly_updated.routing_policy.expect("routing policy");
+    assert_eq!(repeated_policy.mode, RoutingMode::Mention);
+    assert_eq!(
+        repeated_policy.default_bot_final_delivery,
+        DefaultDelivery::InjectObservers
+    );
+    assert_eq!(
+        repeated_policy.sender_routes.get("driver"),
+        Some(&vec!["observer".to_string()])
+    );
+
+    let rows = db
+        .query(DbStatement::with_params(
+            "SELECT routing_policy_json FROM bcs_groups WHERE env = ? AND group_id = ?",
+            vec![
+                DbValue::from(PROVISIONING_ENV),
+                DbValue::from("routing-policy-group"),
+            ],
+        ))
+        .await
+        .expect("query stored routing policy");
+    let stored_json = db_get_column::<String>(&rows[0], "routing_policy_json")
+        .expect("routing_policy_json");
+    assert!(serde_json::from_str::<serde_json::Value>(&stored_json)
+        .expect("valid JSON")
+        .is_object());
+    let stored_policy =
+        serde_json::from_str::<RoutingPolicy>(&stored_json).expect("routing policy object");
+    assert_eq!(stored_policy.mode, RoutingMode::Mention);
+    assert_eq!(
+        stored_policy.default_bot_final_delivery,
+        DefaultDelivery::InjectObservers
+    );
+    assert_eq!(
+        stored_policy.sender_routes.get("driver"),
+        Some(&vec!["observer".to_string()])
     );
 }
 

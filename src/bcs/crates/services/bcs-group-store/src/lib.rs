@@ -96,6 +96,12 @@ fn db_timestamp_from_millis(timestamp_ms: u64) -> ServiceResult<String> {
         .ok_or_else(|| ServiceError::InternalError("Group timestamp is invalid".to_string()))
 }
 
+fn routing_policy_json(policy: Option<&RoutingPolicy>, delivery: DefaultDelivery) -> String {
+    let mut policy = policy.cloned().unwrap_or_default();
+    policy.default_bot_final_delivery = delivery;
+    serde_json::to_string(&policy).expect("RoutingPolicy contains only JSON-compatible values")
+}
+
 fn group_version_update_step(
     env: &str,
     group_id: DbTransactionParam,
@@ -1323,14 +1329,10 @@ impl GroupRepoPort for MySqlGroupStore {
                     params.push(DbTransactionParam::value(visibility.as_str()));
                 }
                 if let Some(delivery) = patch.default_bot_final_delivery {
-                    assignments.push(match self.flavor {
-                        DbSqlFlavor::Mysql => "routing_policy_json = JSON_SET(COALESCE(routing_policy_json, JSON_OBJECT()), '$.default_bot_final_delivery', ?)".to_string(),
-                        DbSqlFlavor::Sqlite => "routing_policy_json = json_set(COALESCE(routing_policy_json, '{}'), '$.default_bot_final_delivery', ?)".to_string(),
-                    });
-                    params.push(DbTransactionParam::value(match delivery {
-                        DefaultDelivery::SendToDriver => "send_to_driver",
-                        DefaultDelivery::InjectObservers => "inject_observers",
-                    }));
+                    let policy_json =
+                        routing_policy_json(terminal.routing_policy.as_ref(), delivery);
+                    assignments.push("routing_policy_json = ?".to_string());
+                    params.push(DbTransactionParam::value(policy_json));
                 }
                 if assignments.is_empty() {
                     return Err(ServiceError::Conflict(
@@ -1566,9 +1568,10 @@ impl GroupRepoPort for MySqlGroupStore {
         id: &str,
         patch: GroupMutableFieldsPatch,
     ) -> ServiceResult<()> {
-        if self.try_get(id).await?.is_none() {
-            return Err(ServiceError::GroupNotFound(id.to_string()));
-        }
+        let group = self
+            .try_get(id)
+            .await?
+            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
 
         let mut assignments = Vec::new();
         let mut params = Vec::new();
@@ -1596,19 +1599,9 @@ impl GroupRepoPort for MySqlGroupStore {
             params.push(Value::from(visibility.as_str()));
         }
         if let Some(delivery) = patch.default_bot_final_delivery {
-            let expression = match self.flavor {
-                DbSqlFlavor::Mysql => {
-                    "routing_policy_json = JSON_SET(COALESCE(routing_policy_json, JSON_OBJECT()), '$.default_bot_final_delivery', ?)"
-                }
-                DbSqlFlavor::Sqlite => {
-                    "routing_policy_json = json_set(COALESCE(routing_policy_json, '{}'), '$.default_bot_final_delivery', ?)"
-                }
-            };
-            assignments.push(expression.to_string());
-            params.push(Value::from(match delivery {
-                DefaultDelivery::SendToDriver => "send_to_driver",
-                DefaultDelivery::InjectObservers => "inject_observers",
-            }));
+            let policy_json = routing_policy_json(group.routing_policy.as_ref(), delivery);
+            assignments.push("routing_policy_json = ?".to_string());
+            params.push(Value::from(policy_json));
         }
         if assignments.is_empty() {
             return Ok(());
@@ -3793,6 +3786,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mutable_patch_reports_a_missing_group() {
+        let repo = MySqlGroupStore::new(Arc::new(RecordingDbPlugin::default()), "local".into());
+
+        let error = repo
+            .patch_mutable_fields(
+                "missing-group",
+                GroupMutableFieldsPatch {
+                    default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("missing group must fail");
+
+        assert!(matches!(error, ServiceError::GroupNotFound(id) if id == "missing-group"));
+    }
+
+    #[tokio::test]
     async fn delete_aborts_before_persistence_when_snapshot_read_fails() {
         let db = Arc::new(RecordingDbPlugin::failing_queries());
         let repo = MySqlGroupStore::new(db.clone(), "local".to_string());
@@ -3950,10 +3961,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mutable_patch_uses_field_scoped_sql() {
+    async fn mutable_patch_serializes_routing_policy_before_sql() {
         let db = Arc::new(RecordingDbPlugin::with_first_execute_affected_rows(1));
         let repo = MySqlGroupStore::new(db.clone(), "local".to_string());
-        let group = Group::new("group-1", "driver", Vec::new());
+        let mut group = Group::new("group-1", "driver", Vec::new());
+        let mut policy = RoutingPolicy {
+            mode: bcs_service_api::RoutingMode::Mention,
+            default_bot_final_delivery: DefaultDelivery::SendToDriver,
+            sender_routes: HashMap::from([(
+                "driver".to_string(),
+                vec!["observer".to_string()],
+            )]),
+        };
+        group.routing_policy = Some(policy.clone());
         repo.cache.write().await.insert(group.id.clone(), group);
 
         repo.patch_mutable_fields(
@@ -3971,15 +3991,17 @@ mod tests {
         assert_eq!(statements.len(), 1);
         let sql = statements[0].sql();
         assert!(sql.contains("label = ?"));
-        assert!(sql.contains("JSON_SET"));
-        assert!(sql.contains("$.default_bot_final_delivery"));
-        assert!(!sql.contains("sender_routes"));
+        assert!(sql.contains("routing_policy_json = ?"));
+        assert!(!sql.contains("JSON_SET"));
+        assert!(!sql.contains("json_set"));
         assert!(!sql.contains("participants"));
+        policy.default_bot_final_delivery = DefaultDelivery::InjectObservers;
+        let policy_json = serde_json::to_string(&policy).expect("serialize routing policy");
         assert_eq!(
             statements[0].params(),
             &[
                 Value::from("Renamed"),
-                Value::from("inject_observers"),
+                Value::from(policy_json),
                 Value::from("group-1"),
                 Value::from("local"),
             ]
