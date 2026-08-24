@@ -750,7 +750,7 @@ _MISSING = object()
 
 def _make_eval_binding_resolver_plugin(enabled=True, resolved_id=_MISSING):
     """创建 mock EvalBindingResolverProtocol。"""
-    from secbaas.community.api.eval_env import EvalBindingResolverProtocol
+    from secbaas.community.spi.eval_env import EvalBindingResolverProtocol
 
     plugin = MagicMock(spec=EvalBindingResolverProtocol)
     plugin.is_eval_env_enabled.return_value = enabled

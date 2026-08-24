@@ -1,13 +1,5 @@
-"""评测环境 API Protocol — re-export SPI 层 Protocol 供 API 消费者使用。"""
+"""评测环境 API — 数据模型与能力契约。
 
-from secbaas.community.spi.eval_env import (
-    EvalBindingResolverProtocol,
-    EvalConsistencyCheckProtocol,
-    EvalSessionLogProtocol,
-)
-
-__all__ = [
-    "EvalBindingResolverProtocol",
-    "EvalConsistencyCheckProtocol",
-    "EvalSessionLogProtocol",
-]
+Protocol 定义在 spi/eval_env，service 直接依赖 spi，
+api 层不再重复定义或 re-export Protocol。
+"""

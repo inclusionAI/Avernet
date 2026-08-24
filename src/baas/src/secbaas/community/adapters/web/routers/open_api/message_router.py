@@ -46,7 +46,7 @@ from secbaas.community.api.bot_runtime import (
     BotServiceError,
     TooManyRequestsError,
 )
-from secbaas.community.api.eval_env import EvalSessionLogProtocol
+from secbaas.community.spi.eval_env import EvalSessionLogProtocol
 from secbaas.community.api.open_api import OpenAPICode, get_code_message
 from secbaas.community.api.sse import (
     SseConverterFactory,
