@@ -52,10 +52,7 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
         "post"
         in document["paths"]["/openapi/v1/collaboration/friend-connections/requests"]
     )
-    assert (
-        "delete"
-        in document["paths"]["/openapi/v1/collaboration/friend-connections"]
-    )
+    assert "delete" in document["paths"]["/openapi/v1/collaboration/friend-connections"]
     collection = document["paths"][
         "/openapi/v1/collaboration/sessions/{session_id}/collect"
     ]
@@ -76,9 +73,7 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
     assert (
         "post" in internal["paths"]["/api/v1/collaboration/sessions/{session_id}/files"]
     )
-    assert (
-        "post" in internal["paths"]["/api/v1/collaboration/definitions/validate"]
-    )
+    assert "post" in internal["paths"]["/api/v1/collaboration/definitions/validate"]
     assert [tag["name"] for tag in document["tags"]] == [
         "Collaboration / Bots",
         "Collaboration / Friendships",

@@ -115,9 +115,7 @@ def test_shipped_config_still_requires_a_user_where_a_human_is_required(
         ("POST", "/openapi/v1/bots/bot-123/iam-token"),
     ],
 )
-def test_iam_operations_do_not_resolve_an_app_identity(
-    method: str, path: str
-) -> None:
+def test_iam_operations_do_not_resolve_an_app_identity(method: str, path: str) -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     req = RouteSecurity.from_table(raw["user_config"]["route_security"]).resolve(
         method, path
