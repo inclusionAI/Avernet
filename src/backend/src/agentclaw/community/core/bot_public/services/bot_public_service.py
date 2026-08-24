@@ -27,6 +27,7 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogMetadata,
     BotCatalogMetadataServiceProtocol,
     BotCatalogMetadataUnavailableError,
+    BotCatalogSearchFilters,
     BotCatalogSearchUnavailableError,
 )
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
@@ -1444,15 +1445,21 @@ class BotPublicService:
         *,
         caller: BotCatalogCaller,
         request_id: str,
+        filters: BotCatalogSearchFilters | None = None,
     ) -> Dict[str, Any]:
         """Return the current BCS catalog page joined to public Backend Bots."""
         try:
+            metadata_kwargs: dict[str, Any] = {
+                "search": search,
+                "page": page,
+                "page_size": page_size,
+                "caller": caller,
+                "request_id": request_id,
+            }
+            if filters is not None:
+                metadata_kwargs["filters"] = filters
             metadata = self._catalog_metadata_service.search_public_bot_metadata(
-                search=search,
-                page=page,
-                page_size=page_size,
-                caller=caller,
-                request_id=request_id,
+                **metadata_kwargs
             )
             addresses = self._validated_catalog_addresses(metadata)
             metadata_by_address = {item.address: item for item in metadata}

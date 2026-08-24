@@ -14,6 +14,7 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogMetadata,
     BotCatalogMetadataServiceProtocol,
     BotCatalogMetadataUnavailableError,
+    BotCatalogSearchFilters,
 )
 from agentclaw.community.di.container import build_injector
 from agentclaw.community.di.profile import DeployProfile
@@ -177,6 +178,44 @@ def test_bcs_catalog_search_omits_blank_query_and_keeps_page_boundary() -> None:
         "limit": 10,
         "tc_bot": True,
     }
+
+
+def test_bcs_catalog_search_forwards_only_supplied_frontend_filters() -> None:
+    """The adapter must preserve the explicit BCS filter contract without headers."""
+    service, http = _make_service()
+    http.set_response("get", _response(200, {"total": 0, "items": []}))
+
+    result = service.search_public_bot_metadata(
+        search=None,
+        page=2,
+        page_size=10,
+        filters=BotCatalogSearchFilters(
+            visibility=("public", "protected"),
+            user_visibility=("private",),
+            status="online",
+            viewer_actor_type="bot",
+            viewer_actor_id="viewer:owner",
+            friendship="non_friends",
+        ),
+        caller=_caller(),
+        request_id="trace-filters",
+    )
+
+    assert result == []
+    call = http.calls_to("get")[0]
+    assert call.args[0] == "/bots/search"
+    assert call.kwargs["params"] == {
+        "offset": 10,
+        "limit": 10,
+        "tc_bot": True,
+        "visibility": "public,protected",
+        "user_visibility": "private",
+        "status": "online",
+        "viewer_actor_type": "bot",
+        "viewer_actor_id": "viewer:owner",
+        "friendship": "non_friends",
+    }
+    assert "headers" not in call.kwargs
 
 
 @pytest.mark.parametrize(
