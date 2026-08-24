@@ -299,6 +299,45 @@ _HAPPY_CASES = (
 )
 
 
+#: The projection each operation owes, keyed by address. A status on its own
+#: would still hold if a read answered a stale name, somebody else's owner, or
+#: an empty list where the seeded bot belongs — so each case pins the fields
+#: that would actually change under those regressions. ``create`` pins no
+#: ``bot_id``: the surface mints one, so the id is not knowable here.
+_HAPPY_BODIES = {
+    ("GET", _BASE_PATH): {
+        "data": {"total": 1, "items": [{"bot_id": _BOT_ID, "owner_entity_id": _OWNER}]}
+    },
+    ("POST", _BASE_PATH): {
+        "data": {"bot_name": "created-bot", "owner_entity_id": _OWNER}
+    },
+    ("GET", f"{_BASE_PATH}/all"): {
+        "data": {"total": 1, "items": [{"bot_id": _BOT_ID, "owner_entity_id": _OWNER}]}
+    },
+    ("GET", f"{_BASE_PATH}/ceiling"): {"data": {"ceiling": 5}},
+    ("GET", f"{_BASE_PATH}/{{bot_id}}"): {
+        "data": {"bot_id": _BOT_ID, "owner_entity_id": _OWNER, "bot_type": "personal"}
+    },
+    ("PUT", f"{_BASE_PATH}/{{bot_id}}"): {
+        "data": {"bot_id": _BOT_ID, "bot_name": "Renamed Bot", "bot_desc": "renamed"}
+    },
+    ("DELETE", f"{_BASE_PATH}/{{bot_id}}"): {"data": {"deleted": True}},
+    ("GET", f"{_BASE_PATH}/{{bot_id}}/status"): {"data": {"status": "REACTIVATING"}},
+    ("GET", f"{_BASE_PATH}/{{bot_id}}/passport"): {
+        "data": {"bot_id": _BOT_ID, "passport_id": f"mock_agent_code_{_BOT_ID}"}
+    },
+    ("GET", f"{_BASE_PATH}/{{bot_id}}/engine/config"): {"data": {"model": "default"}},
+    ("PUT", f"{_BASE_PATH}/{{bot_id}}/engine/config"): {"data": {"model": "default"}},
+    ("POST", f"{_BASE_PATH}/{{bot_id}}/activate"): {
+        "data": {"bot_id": _BOT_ID, "status": "REACTIVATING"}
+    },
+    ("POST", f"{_BASE_PATH}/{{bot_id}}/restart"): {"data": {"bot_id": _BOT_ID}},
+    ("POST", f"{_BASE_PATH}/{{bot_id}}/data-init"): {
+        "data": {"bot_id": _BOT_ID, "status": "in_progress"}
+    },
+}
+
+
 for _method, _path, _input, _status in _HAPPY_CASES:
     endpoint_test(
         method=_method,
@@ -306,7 +345,9 @@ for _method, _path, _input, _status in _HAPPY_CASES:
         scenario="happy",
         input=_input,
         seed=_seed_happy_services,
-        expect=ExpectSuccess(status=_status),
+        expect=ExpectSuccess(
+            status=_status, json_contains=_HAPPY_BODIES[(_method, _path)]
+        ),
     )(lambda: None)
 
 

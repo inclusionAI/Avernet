@@ -244,6 +244,24 @@ _CONFIG_BODY = {"api_key": _RAW_KEY, "endpoint_env": "PROD"}
 #: ``(method, path, input, status, body_subset)`` — see the local surface's
 #: note: a status-only assertion would still hold if the projection dropped
 #: every field, so each case pins what its own handler builds.
+_DETAIL_PATH = f"{_BASE_PATH}/servers/{{server_code}}"
+
+
+def _extinfo_never_reaches_the_client(response, _world) -> None:
+    """The detail projection strips ``extInfo``; this is what says so.
+
+    ``json_contains`` is a recursive *subset* match, so pinning the keys that
+    survive cannot express the absence of one that should not — a fragment of
+    ``{"properties": {"q": 2}}`` matches just as well when ``extInfo`` is still
+    sitting beside it. Reading the whole response for the key is the only
+    assertion that fails when the stripping regresses.
+    """
+    assert "extInfo" not in response.text, response.text
+
+
+_DETAIL_ASSERTIONS = (_extinfo_never_reaches_the_client,)
+
+
 _HAPPY_CASES = (
     (
         "GET",
@@ -272,7 +290,13 @@ _HAPPY_CASES = (
         f"{_BASE_PATH}/servers/{{server_code}}",
         CaseInput(path_params=_SERVER_PATH_PARAMS, headers=_HEADERS),
         200,
-        {"data": {"server_code": _SERVER_CODE, "transport_protocol": "SSE"}},
+        {
+            "data": {
+                "server_code": _SERVER_CODE,
+                "transport_protocol": "SSE",
+                "tools": [{"name": "get"}],
+            }
+        },
     ),
     (
         "GET",
@@ -319,7 +343,13 @@ for _method, _path, _input, _status, _contains in _HAPPY_CASES:
         input=_input,
         seed=_seed_happy_services,
         expect=ExpectSuccess(status=_status, json_contains=_contains),
-        extra_assertions=_CONFIG_ASSERTIONS if _path.endswith("/config") else (),
+        extra_assertions=(
+            _CONFIG_ASSERTIONS
+            if _path.endswith("/config")
+            else _DETAIL_ASSERTIONS
+            if _path == _DETAIL_PATH
+            else ()
+        ),
     )(lambda: None)
 
 

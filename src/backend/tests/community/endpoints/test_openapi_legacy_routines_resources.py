@@ -27,6 +27,9 @@ from tests.community.endpoints.test_openapi_resources import (
     _OCTET_HEADERS,
 )
 from tests.community.endpoints.test_openapi_resources import (
+    _HAPPY_CASES as _MODERN_RESOURCE_CASES,
+)
+from tests.community.endpoints.test_openapi_resources import (
     _HEADERS as _RESOURCE_HEADERS,
 )
 from tests.community.endpoints.test_openapi_resources import _OWNER as _RESOURCE_OWNER
@@ -41,6 +44,9 @@ from tests.community.endpoints.test_openapi_routines import (
     _CREATE_BODY,
     _ROUTINE_ID,
     _UPDATE_BODY,
+)
+from tests.community.endpoints.test_openapi_routines import (
+    _HAPPY_CASES as _MODERN_ROUTINE_CASES,
 )
 from tests.community.endpoints.test_openapi_routines import _HEADERS as _ROUTINE_HEADERS
 from tests.community.endpoints.test_openapi_routines import _OWNER as _ROUTINE_OWNER
@@ -214,14 +220,25 @@ _RESOURCE_CASES = (
 )
 
 
-for _method, _path, _input, _status in _ROUTINE_CASES:
+# The retiring address must answer exactly what its replacement answers, so each
+# case pins the *same* fragment the modern case pins. That is what distinguishes
+# a working shim from one whose signature surgery quietly dropped a field: both
+# would return 200, only one returns the right body. The zip is guarded, so a
+# reordering of either list fails loudly rather than silently pairing the wrong
+# expectation with the wrong address.
+for (_method, _path, _input, _status), _modern in zip(
+    _ROUTINE_CASES, _MODERN_ROUTINE_CASES, strict=True
+):
+    assert (_method, _status) == (_modern[0], _modern[3]), (
+        f"legacy/modern routine case lists drifted at {_method} {_path}"
+    )
     endpoint_test(
         method=_method,
         path=_path,
         scenario="happy",
         input=_input,
         seed=_seed_routines,
-        expect=ExpectSuccess(status=_status),
+        expect=ExpectSuccess(status=_status, json_contains=_modern[4] or {}),
     )(lambda: None)
 
     endpoint_test(
@@ -239,14 +256,19 @@ for _method, _path, _input, _status in _ROUTINE_CASES:
     )(lambda: None)
 
 
-for _method, _path, _input, _status in _RESOURCE_CASES:
+for (_method, _path, _input, _status), _modern in zip(
+    _RESOURCE_CASES, _MODERN_RESOURCE_CASES, strict=True
+):
+    assert (_method, _status) == (_modern[0], _modern[3]), (
+        f"legacy/modern resource case lists drifted at {_method} {_path}"
+    )
     endpoint_test(
         method=_method,
         path=_path,
         scenario="happy",
         input=_input,
         seed=_seed_resources,
-        expect=ExpectSuccess(status=_status),
+        expect=ExpectSuccess(status=_status, json_contains=_modern[4] or {}),
     )(lambda: None)
 
     endpoint_test(

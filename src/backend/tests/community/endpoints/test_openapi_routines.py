@@ -159,12 +159,22 @@ _CREATE_BODY = {
 }
 _UPDATE_BODY = {"name": "renamed"}
 
+#: The projection each operation owes, pinned alongside the status. A status on
+#: its own would still hold if the handler answered from the right address with
+#: the wrong payload — a dropped ``trigger``, somebody else's routine id — which
+#: is the regression these fixtures exist to describe.
 _HAPPY_CASES = (
     (
         "GET",
         _BASE_PATH,
         CaseInput(path_params=_PATH_PARAMS, query_params=_QUERY, headers=_HEADERS),
         200,
+        {
+            "data": {
+                "total": 1,
+                "items": [{"routine_id": _ROUTINE_ID, "name": "morning-brief"}],
+            }
+        },
     ),
     (
         "POST",
@@ -176,6 +186,14 @@ _HAPPY_CASES = (
             json_body=_CREATE_BODY,
         ),
         201,
+        {
+            "data": {
+                "routine_id": _ROUTINE_ID,
+                "name": "morning-brief",
+                "trigger": {"cron": "0 9 * * *"},
+                "command": "echo hi",
+            }
+        },
     ),
     (
         "GET",
@@ -184,6 +202,14 @@ _HAPPY_CASES = (
             path_params=_ROUTINE_PATH_PARAMS, query_params=_QUERY, headers=_HEADERS
         ),
         200,
+        {
+            "data": {
+                "routine_id": _ROUTINE_ID,
+                "bot_id": _BOT_ID,
+                "enabled": True,
+                "timezone": "Asia/Shanghai",
+            }
+        },
     ),
     (
         "PATCH",
@@ -195,6 +221,7 @@ _HAPPY_CASES = (
             json_body=_UPDATE_BODY,
         ),
         200,
+        {"data": {"routine_id": _ROUTINE_ID, "name": "morning-brief"}},
     ),
     (
         "DELETE",
@@ -203,6 +230,7 @@ _HAPPY_CASES = (
             path_params=_ROUTINE_PATH_PARAMS, query_params=_QUERY, headers=_HEADERS
         ),
         200,
+        {"data": {"deleted": True}},
     ),
     (
         "POST",
@@ -211,6 +239,9 @@ _HAPPY_CASES = (
             path_params=_ROUTINE_PATH_PARAMS, query_params=_QUERY, headers=_HEADERS
         ),
         200,
+        # ``dispatched`` upstream is ``completed`` on the wire — the mapping is
+        # the handler's, so pinning it here is what holds the projection.
+        {"data": {"run_id": "run-1", "routine_id": _ROUTINE_ID, "status": "completed"}},
     ),
     (
         "GET",
@@ -219,18 +250,24 @@ _HAPPY_CASES = (
             path_params=_ROUTINE_PATH_PARAMS, query_params=_QUERY, headers=_HEADERS
         ),
         200,
+        {
+            "data": {
+                "total": 1,
+                "items": [{"run_id": "run-1", "status": "succeeded"}],
+            }
+        },
     ),
 )
 
 
-for _method, _path, _input, _status in _HAPPY_CASES:
+for _method, _path, _input, _status, _body in _HAPPY_CASES:
     endpoint_test(
         method=_method,
         path=_path,
         scenario="happy",
         input=_input,
         seed=_seed_happy_services,
-        expect=ExpectSuccess(status=_status),
+        expect=ExpectSuccess(status=_status, json_contains=_body),
     )(lambda: None)
 
 
@@ -238,7 +275,7 @@ for _method, _path, _input, _status in _HAPPY_CASES:
 # names someone other than the caller the principal authenticated. It is
 # raised by ``require_user_id`` ahead of the handler, so no service is seeded —
 # reaching one would itself be the bug.
-for _method, _path, _input, _status in _HAPPY_CASES:
+for _method, _path, _input, _status, _body in _HAPPY_CASES:
     endpoint_test(
         method=_method,
         path=_path,

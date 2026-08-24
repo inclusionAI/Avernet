@@ -179,6 +179,9 @@ def _seed_happy_services(world) -> None:
     bind_overrides(world, ResourceServiceFactoryProtocol, {"create": create})
 
 
+#: The projection each operation owes, pinned alongside the status — otherwise
+#: an empty listing, or one path's metadata answered for another, would pass.
+#: ``download`` is the sole ``None``: its body is raw bytes, not an envelope.
 _HAPPY_CASES = (
     (
         "GET",
@@ -187,6 +190,12 @@ _HAPPY_CASES = (
             path_params=_PATH_PARAMS, query_params=_query(path="docs"), headers=_HEADERS
         ),
         200,
+        {
+            "data": {
+                "total": 1,
+                "items": [{"path": _EXISTING_PATH, "name": "a.txt", "type": "file"}],
+            }
+        },
     ),
     (
         "GET",
@@ -197,6 +206,7 @@ _HAPPY_CASES = (
             headers=_HEADERS,
         ),
         200,
+        {"data": {"path": _EXISTING_PATH, "name": "a.txt", "type": "file", "size": 11}},
     ),
     (
         "GET",
@@ -207,6 +217,7 @@ _HAPPY_CASES = (
             headers=_HEADERS,
         ),
         200,
+        None,
     ),
     (
         "GET",
@@ -217,6 +228,7 @@ _HAPPY_CASES = (
             headers=_HEADERS,
         ),
         200,
+        {"data": {"path": _EXISTING_PATH, "content": "hello world"}},
     ),
     (
         "POST",
@@ -228,6 +240,7 @@ _HAPPY_CASES = (
             raw_body=b"hello world",
         ),
         201,
+        {"data": {"path": _NEW_PATH, "name": "new.txt", "type": "file", "size": 11}},
     ),
     (
         "POST",
@@ -238,6 +251,7 @@ _HAPPY_CASES = (
             headers=_HEADERS,
         ),
         201,
+        {"data": {"path": _NEW_DIR, "name": "sub", "type": "folder"}},
     ),
     (
         "DELETE",
@@ -248,18 +262,19 @@ _HAPPY_CASES = (
             headers=_HEADERS,
         ),
         200,
+        {"data": {"deleted": True}},
     ),
 )
 
 
-for _method, _path, _input, _status in _HAPPY_CASES:
+for _method, _path, _input, _status, _body in _HAPPY_CASES:
     endpoint_test(
         method=_method,
         path=_path,
         scenario="happy",
         input=_input,
         seed=_seed_happy_services,
-        expect=ExpectSuccess(status=_status),
+        expect=ExpectSuccess(status=_status, json_contains=_body or {}),
     )(lambda: None)
 
 
@@ -267,7 +282,7 @@ for _method, _path, _input, _status in _HAPPY_CASES:
 # names someone other than the caller the principal authenticated.
 # ``require_user_id`` raises ahead of the handler, so no workspace is seeded —
 # reaching one would itself be the bug.
-for _method, _path, _input, _status in _HAPPY_CASES:
+for _method, _path, _input, _status, _body in _HAPPY_CASES:
     endpoint_test(
         method=_method,
         path=_path,
