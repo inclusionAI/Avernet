@@ -580,3 +580,11 @@ UpdateBotRequest:
       description: >-
         Task-dream opt-in toggle. Omit to leave the stored value unchanged;
         defaults to false when never set. Physical bots only.
+    user_visibility:
+      $ref: ../domain-models.yaml#/UserVisibility
+    friend_ext:
+      type: object
+      additionalProperties: true
+      description: Friend connection policy extension, including department scopes.
+    friend_check_in_strategy:
+      $ref: ../domain-models.yaml#/FriendCheckInStrategy
