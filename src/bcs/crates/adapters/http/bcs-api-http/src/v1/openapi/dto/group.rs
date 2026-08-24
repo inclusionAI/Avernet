@@ -274,6 +274,8 @@ impl CreateGroupRequest {
 pub struct UpdateGroupRequest {
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
+    pub context: Option<String>,
     #[serde(default, deserialize_with = "deserialize_present_nullable")]
     pub opening_message: Option<Option<OpeningMessage>>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
@@ -294,7 +296,7 @@ impl From<UpdateGroupRequest> for GroupPatch {
     fn from(value: UpdateGroupRequest) -> Self {
         Self {
             name: value.name,
-            context: None,
+            context: value.context,
             opening_message: value.opening_message,
             visibility: value.visibility,
             delivery_policy: value.delivery_policy.map(|policy| GroupDeliveryPolicy {
