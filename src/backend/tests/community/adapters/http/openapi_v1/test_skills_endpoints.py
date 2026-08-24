@@ -37,11 +37,19 @@ from agentclaw.community.api.local_skill_state_service import (
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
-from agentclaw.community.core.models.skill import BotSkillInstallation, Skill
+from agentclaw.community.core.models.skill import (
+    BotSkillInstallation,
+    Skill,
+    SkillSet,
+    SkillSetSkill,
+)
 from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
 from agentclaw.community.core.repository.implementations.skill_center.skill import (
     SkillRepository,
     SkillSetRepository,
+)
+from agentclaw.community.core.repository.implementations.skill_center.skill_set_control_plane import (
+    SkillSetControlPlaneRepository,
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillActiveError,
@@ -58,6 +66,7 @@ from agentclaw.community.core.skill_center.services.local_skill_state_service im
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
     reset_principal_verifier_config_cache,
@@ -73,7 +82,7 @@ class _Query:
     def __init__(self) -> None:
         self.list_args = None
 
-    def list_local_skills(self, **kwargs):
+    def list_bot_skills(self, **kwargs):
         self.list_args = kwargs
         return 1, [
             {
@@ -96,7 +105,7 @@ class _Query:
             raise LocalSkillNotFoundError()
         if kwargs["skill_id"] == "ambiguous":
             raise LocalSkillOwnerAmbiguousError()
-        return self.list_local_skills()[1][0]
+        return self.list_bot_skills()[1][0]
 
 
 class _Upload:
@@ -581,6 +590,11 @@ class _Database:
         self._session = sessionmaker(bind=engine)
 
     @contextmanager
+    def transactional_orm_session(self):
+        with self.orm_session() as session:
+            yield session
+
+    @contextmanager
     def orm_session(self):
         session = self._session()
         try:
@@ -591,6 +605,106 @@ class _Database:
             raise
         finally:
             session.close()
+
+
+def test_a_skillset_bridged_skill_is_listed_and_gains_its_installation(tmp_path):
+    """The whole point: a Skill only a SkillSet ties to the Bot, listed active.
+
+    The Skill row names another owner and another Bot, so nothing but the
+    SkillSet reaches it, and it holds no Installation row until this listing
+    writes one. Tenant scoping is deliberately left at the default here — the
+    guard is what the neighbouring tenant test exercises.
+    """
+    engine = create_engine(f"sqlite:///{tmp_path / 'bridged.db'}")
+    for model in (
+        BotModel,
+        Skill,
+        SkillSet,
+        SkillSetSkill,
+        BotSkillInstallation,
+        DefaultSkillsetSkillExclusion,
+    ):
+        model.__table__.create(engine)
+    db = _Database(engine)
+    bots, skills = BotRepository(db), SkillRepository(db)
+
+    bots.insert(
+        {
+            "bot_id": "bot",
+            "entity_id": "owner",
+            "entity_type": "staff",
+            "creator_id": "owner",
+            "owner_id": "owner",
+            "active_engine": "openclaw",
+        }
+    )
+    skills.create(
+        {
+            "name": "mine",
+            "git_path": "local://mine",
+            "user_id": "owner",
+            "bolt_id": "bot",
+        }
+    )
+    bridged = skills.create(
+        {
+            "name": "from-the-market",
+            "git_path": "git://market/from-the-market",
+            "user_id": "someone-else",
+            "bolt_id": "another-bot",
+        }
+    )
+    with db.orm_session() as session:
+        skill_set = SkillSet(
+            name="mine",
+            bolt_id="bot",
+            user_id="owner",
+            engine_type="openclaw",
+            is_active=True,
+            env=get_current_env(),
+        )
+        session.add(skill_set)
+        session.flush()
+        session.add(
+            SkillSetSkill(
+                skill_set_id=skill_set.id,
+                skill_id=int(bridged["id"]),
+                env=get_current_env(),
+            )
+        )
+
+    class Bindings(Module):
+        def configure(self, binder):
+            binder.bind(
+                LocalSkillQueryServiceProtocol,
+                to=LocalSkillQueryService(
+                    skills,
+                    bots,
+                    object(),
+                    SkillSetControlPlaneRepository(db),
+                ),
+            )
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "owner"}
+    attach_injector(app, Injector([Bindings()]))
+    client = user_scoped_client(app, "owner")
+    listed = client.get("/openapi/v1/bots/bot/skills?owner_id=owner")
+    active_only = client.get("/openapi/v1/bots/bot/skills?owner_id=owner&active=true")
+
+    assert listed.status_code == 200
+    body = listed.json()["data"]
+    assert body["total"] == 2
+    # The Set is active, so the repair installed its member and `active` says so.
+    assert {item["name"]: item["active"] for item in body["items"]} == {
+        "mine": False,
+        "from-the-market": True,
+    }
+    # And the filter agrees, because it reads the row the repair wrote.
+    filtered = active_only.json()["data"]
+    assert filtered["total"] == 1
+    assert [item["name"] for item in filtered["items"]] == ["from-the-market"]
 
 
 def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
@@ -609,7 +723,14 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
         _Resolver(), "gateway_principal_signing_key", strict=False
     )
     engine = create_engine(f"sqlite:///{tmp_path / 'skills-router.db'}")
-    for model in (BotModel, Skill, BotSkillInstallation, DefaultSkillsetSkillExclusion):
+    for model in (
+        BotModel,
+        Skill,
+        SkillSet,
+        SkillSetSkill,
+        BotSkillInstallation,
+        DefaultSkillsetSkillExclusion,
+    ):
         model.__table__.create(engine)
     db = _Database(engine)
     bots, skills = BotRepository(db), SkillRepository(db)
@@ -656,7 +777,12 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
 
         class Bindings(Module):
             def configure(self, binder):
-                local_query = LocalSkillQueryService(skills, bots, object())
+                local_query = LocalSkillQueryService(
+                    skills,
+                    bots,
+                    object(),
+                    SkillSetControlPlaneRepository(db),
+                )
                 binder.bind(
                     LocalSkillQueryServiceProtocol,
                     to=local_query,
@@ -738,7 +864,14 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
 def test_default_bot_scope_is_owner_distinguished(tmp_path):
     """Two valid legacy ``default`` Bots must not make either owner ambiguous."""
     engine = create_engine(f"sqlite:///{tmp_path / 'default-owner.db'}")
-    for model in (BotModel, Skill, BotSkillInstallation, DefaultSkillsetSkillExclusion):
+    for model in (
+        BotModel,
+        Skill,
+        SkillSet,
+        SkillSetSkill,
+        BotSkillInstallation,
+        DefaultSkillsetSkillExclusion,
+    ):
         model.__table__.create(engine)
     db = _Database(engine)
     bots, skills = BotRepository(db), SkillRepository(db)
@@ -761,8 +894,13 @@ def test_default_bot_scope_is_owner_distinguished(tmp_path):
                     "bolt_id": "default",
                 }
             )
-        service = LocalSkillQueryService(skills, bots, object())
-        _, a_skills = service.list_local_skills(
+        service = LocalSkillQueryService(
+            skills,
+            bots,
+            object(),
+            SkillSetControlPlaneRepository(db),
+        )
+        _, a_skills = service.list_bot_skills(
             bot_id="default",
             owner_id="owner-a",
             actor_id="owner-a",
@@ -771,7 +909,7 @@ def test_default_bot_scope_is_owner_distinguished(tmp_path):
             active=None,
             keyword=None,
         )
-        _, b_skills = service.list_local_skills(
+        _, b_skills = service.list_bot_skills(
             bot_id="default",
             owner_id="owner-b",
             actor_id="owner-b",

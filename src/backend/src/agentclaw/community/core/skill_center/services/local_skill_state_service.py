@@ -21,6 +21,10 @@ from agentclaw.community.core.skill_center.errors import (
     SkillRuntimeNameConflictError,
     SkillSetManagedResourceError,
 )
+from agentclaw.community.core.skill_center.bot_engine_scope import (
+    bot_default_engine_types,
+    bot_engine_type,
+)
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeDesiredState,
@@ -45,6 +49,46 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
 from agentclaw.community.core.skills_pool.models import (
     RegisteredSkillAsset,
 )
+
+
+def skill_set_reaches_bot(
+    skill_set: dict[str, Any],
+    *,
+    bot_id: str,
+    owner_id: str,
+    engine_type: str | None,
+    default_engine_types: tuple[str, ...],
+) -> bool:
+    """Whether a SkillSet governs this Bot's Skills, and so owns their state.
+
+    Shared by both activation guards so they cannot drift.
+
+    Ownerless platform Defaults are settled first, by ``user_id``: the
+    repository projects a null ``bolt_id`` to the string ``"default"``, which
+    is also a real legacy Bot id, so testing ``bolt_id`` first would confuse
+    the two. Such a Default reaches only Bots on its engine.
+
+    One accepted divergence from ``_bot_sets``: it takes the first candidate
+    engine with any Default rows, this accepts any candidate. They differ only
+    when both the layout and persisted engines have Defaults, where this errs
+    toward refusing direct control.
+    """
+    if bool(skill_set.get("is_default")) and not skill_set.get("user_id"):
+        # Decided before the Bot-owned comparison below, which cannot tell
+        # these apart: a Bot whose id really is ``default`` shares the string
+        # this projection puts on every platform Default.
+        return str(skill_set.get("engine_type") or "") in default_engine_types
+    if str(skill_set.get("bolt_id") or bot_id) != bot_id:
+        return False
+    # ``bot_id`` alone does not identify a Bot: the legacy ``default`` Bot
+    # exists once per owner, so a Set with this ``bolt_id`` may belong to
+    # someone else entirely. And a Set left behind on a previous engine no
+    # longer applies. Both are the rest of ``_owned_set_scope``, which is what
+    # the listing's bridge selects Sets with; matching less here refuses
+    # direct control over Sets the listing never bridges.
+    if str(skill_set.get("user_id") or "") != owner_id:
+        return False
+    return engine_type is None or str(skill_set.get("engine_type") or "") == engine_type
 
 
 class LocalSkillStateService:
@@ -75,7 +119,9 @@ class LocalSkillStateService:
         self, *, skill_id: str, actor_id: str, active: bool
     ) -> dict[str, Any]:
         skill, bot, owner_id, bot_id = self._authorize(skill_id, actor_id)
-        self._reject_ordinary_skill_set_member(skill_id=skill_id, bot_id=bot_id)
+        self._reject_skill_set_member(
+            skill_id=skill_id, bot_id=bot_id, bot=bot, owner_id=owner_id
+        )
         if not is_bot_ready(bot):
             raise LocalSkillNotReadyError()
         changed = self._write_desired_state(
@@ -269,7 +315,16 @@ class LocalSkillStateService:
         owner_id: str,
         bot_id: str,
     ) -> None:
-        """Direct and normal-SkillSet sources are mutually exclusive."""
+        """Direct state is forbidden once any SkillSet owns the Skill.
+
+        The Repo half of the rule :meth:`_reject_skill_set_member` states for
+        Local assets, and it must include Default Sets for the same reason —
+        more pressingly here, since a Default Set is exactly where shared
+        ``git://`` Repo Skills live. A Default Set is always active, so a
+        direct deactivate on one of its members deletes an Installation row
+        that the next reconciliation against membership puts straight back,
+        reporting success and not holding.
+        """
         references = self._skill_repo.list_skill_set_references(skill_id)
         if not references:
             return
@@ -285,10 +340,12 @@ class LocalSkillStateService:
             if not set_id:
                 continue
             skill_set = service.get_skill_set(set_id, user_id=owner_id)
-            if (
-                skill_set
-                and not skill_set.get("is_default")
-                and str(skill_set.get("bolt_id") or bot_id) == bot_id
+            if skill_set and self._set_governs(
+                skill_set,
+                skill_id=skill_id,
+                bot=bot,
+                bot_id=bot_id,
+                owner_id=owner_id,
             ):
                 raise SkillManagedBySkillSetError()
 
@@ -317,17 +374,65 @@ class LocalSkillStateService:
         except ValueError as exc:
             raise SkillRuntimeNameConflictError() from exc
 
-    def _reject_ordinary_skill_set_member(self, *, skill_id: str, bot_id: str) -> None:
-        """Direct state is forbidden once ordinary SkillSet owns the Skill."""
+    def _set_governs(
+        self,
+        skill_set: dict[str, Any],
+        *,
+        skill_id: str,
+        bot: dict[str, Any],
+        bot_id: str,
+        owner_id: str,
+    ) -> bool:
+        """Whether this Set owns this Skill's state for this Bot.
+
+        Reachability *and* not excluded. An exclusion hands the Skill back to
+        direct control, so a guard that still refused on this Set's account
+        would strand it — unbridged by the listing and un-activatable.
+        """
+        if not skill_set_reaches_bot(
+            skill_set,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            engine_type=bot_engine_type(bot),
+            default_engine_types=bot_default_engine_types(bot),
+        ):
+            return False
+        if not skill_set.get("is_default"):
+            return True
+        excluded = self._skill_set_repo.get_excluded_skills(
+            user_id=owner_id, bot_id=bot_id, skill_set_id=int(skill_set["id"])
+        )
+        return int(skill_id) not in {int(value) for value in excluded}
+
+    def _reject_skill_set_member(
+        self, *, skill_id: str, bot_id: str, bot: dict[str, Any], owner_id: str
+    ) -> None:
+        """Direct state is forbidden once any SkillSet owns the Skill.
+
+        A Set carries its membership atomically, so a Skill inside one is
+        active exactly when its Set is. Letting a direct command write the
+        Installation row for such a Skill puts two authorities on one fact,
+        and the one that loses is whichever ran first: any later read that
+        reconciles Installation against membership silently undoes it.
+
+        Default Sets are included. They are always active, so a Skill in one
+        is always active, and a direct deactivate on it could never have held.
+        """
         skill = self._skill_repo.get_by_id(skill_id)
         for reference in self._skill_repo.list_skill_set_references(
             skill_id, skill.get("skill_uuid") if skill else None
         ):
             skill_set = self._skill_set_repo.get_by_id(reference["skill_set_id"])
-            if (
-                skill_set is not None
-                and not skill_set.get("is_default")
-                and str(skill_set.get("bolt_id")) == bot_id
+            if skill_set is None:
+                continue
+            # The Bot's own Sets, plus the platform Default it inherits — the
+            # same reachability the listing's Installation repair walks.
+            if self._set_governs(
+                skill_set,
+                skill_id=skill_id,
+                bot=bot,
+                bot_id=bot_id,
+                owner_id=owner_id,
             ):
                 raise SkillSetManagedResourceError()
 

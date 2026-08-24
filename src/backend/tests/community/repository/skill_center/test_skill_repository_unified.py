@@ -653,9 +653,17 @@ def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets):
     }
 
 
-def test_skills_pool_active_assets_include_system_default_without_exclusion_state(
+def test_skills_pool_active_assets_drop_a_default_member_its_owner_excluded(
     skills, sets
 ):
+    """Removing a Skill from a shared Default Set has to reach the runtime.
+
+    A shared Default Set cannot be edited per Bot, so removal is recorded as an
+    exclusion. The Bot Skill listing and
+    ``SkillSetControlPlaneRepository.list_skills`` have always applied that;
+    this projection did not, so a Skill its owner removed kept running and a
+    direct deactivate on it reported success without holding.
+    """
     default_enabled = skills.create(
         {
             "name": "default-enabled",
@@ -692,12 +700,7 @@ def test_skills_pool_active_assets_include_system_default_without_exclusion_stat
         engine="openclaw",
     )
 
-    # System Default is an unconditional Resolver input.  Its historical
-    # exclusion table is migration-only compatibility data, not desired state.
-    assert [asset.git_path for asset in assets] == [
-        "git://defaults/enabled",
-        "git://defaults/excluded",
-    ]
+    assert [asset.git_path for asset in assets] == ["git://defaults/enabled"]
 
 
 # ── SkillSetRepository ──────────────────────────────────────────────
@@ -905,6 +908,89 @@ def test_add_default_skill_exclusion_upsert_idempotent(sets, db):
     assert sets.get_all_excluded_skills("u1", "bot1") == [42]
 
 
+def test_exclude_default_set_skill_retires_the_installation_with_the_exclusion(
+    sets, db
+):
+    """Both halves of a Default removal, in one transaction under the Set lock.
+
+    The exclusion stops the Set from providing the Skill; the Installation row
+    is a second, independent provider. Written apart, a listing repair can lock
+    the Set, read no exclusion, and insert the row this call has just looked
+    for and not found — leaving the Skill installed after a removal that
+    reported success.
+    """
+    with db.orm_session() as session:
+        session.add(SkillSet(id=7, name="d", is_default=True, env="dev"))
+        session.add(
+            BotSkillInstallation(
+                bot_id="bot1", owner_id="u1", skill_id=42, env="dev"
+            )
+        )
+
+    created, uninstalled = sets.exclude_default_set_skill(
+        owner_id="u1", bot_id="bot1", skill_set_id=7, skill_id=42, env="dev"
+    )
+
+    assert (created, uninstalled) == (True, True)
+    assert sets.get_excluded_skills("u1", "bot1", 7) == [42]
+    with db.orm_session() as session:
+        assert session.query(BotSkillInstallation).count() == 0
+
+
+def test_excluding_an_already_excluded_skill_leaves_a_direct_row_alone(sets, db):
+    """A retry owns neither half, so it must undo neither.
+
+    Once excluded, the Set no longer governs the Skill and the activation
+    guards let its owner install it directly. An idempotent retry of the same
+    removal must not delete that later, deliberate installation.
+    """
+    with db.orm_session() as session:
+        session.add(SkillSet(id=7, name="d", is_default=True, env="dev"))
+    sets.exclude_default_set_skill(
+        owner_id="u1", bot_id="bot1", skill_set_id=7, skill_id=42, env="dev"
+    )
+    with db.orm_session() as session:
+        session.add(
+            BotSkillInstallation(
+                bot_id="bot1", owner_id="u1", skill_id=42, env="dev"
+            )
+        )
+
+    created, uninstalled = sets.exclude_default_set_skill(
+        owner_id="u1", bot_id="bot1", skill_set_id=7, skill_id=42, env="dev"
+    )
+
+    assert (created, uninstalled) == (False, False)
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetSkillExclusion).count() == 1
+        assert session.query(BotSkillInstallation).count() == 1
+
+
+def test_exclude_default_set_skill_keeps_another_env_installation(sets, db):
+    """Installation is keyed on the Bot's env, so the removal must be too."""
+    with db.orm_session() as session:
+        session.add(SkillSet(id=7, name="d", is_default=True, env="dev"))
+        session.add_all(
+            [
+                BotSkillInstallation(
+                    bot_id="bot1", owner_id="u1", skill_id=42, env="dev"
+                ),
+                BotSkillInstallation(
+                    bot_id="bot1", owner_id="u1", skill_id=42, env="pre"
+                ),
+            ]
+        )
+
+    sets.exclude_default_set_skill(
+        owner_id="u1", bot_id="bot1", skill_set_id=7, skill_id=42, env="dev"
+    )
+
+    with db.orm_session() as session:
+        assert [
+            row.env for row in session.query(BotSkillInstallation).all()
+        ] == ["pre"]
+
+
 def test_remove_default_skill_exclusion(sets, db):
     sets.add_default_skill_exclusion("u1", "bot1", 7, 42)
     assert sets.get_excluded_skills("u1", "bot1", 7) == [42]
@@ -1106,3 +1192,41 @@ def test_list_all_can_use_runtime_default_engine_for_global_default(sets):
     )
 
     assert {row["id"] for row in rows} == {aicoding_global["id"], custom["id"]}
+
+
+def test_skills_pool_active_assets_apply_an_exclusion_only_to_its_own_bot(
+    skills, sets
+):
+    """An exclusion is recorded per (owner, bot, set, skill), and stays there."""
+    shared = skills.create(
+        {"name": "shared", "git_path": "git://defaults/shared"}
+    )
+    default_set = sets.create(
+        {
+            "name": "OpenClaw defaults",
+            "is_default": True,
+            "is_active": True,
+            "engine_type": "openclaw",
+        }
+    )
+    sets.add_skill_to_set(default_set["id"], shared["id"])
+    sets.add_default_skill_exclusion(
+        user_id="owner-x",
+        bot_id="bot-x",
+        skill_set_id=int(default_set["id"]),
+        skill_id=int(shared["id"]),
+    )
+
+    excluded_bot = skills.list_bot_active_assets(
+        env=shared["env"], bot_id="bot-x", owner_id="owner-x", engine="openclaw"
+    )
+    other_bot = skills.list_bot_active_assets(
+        env=shared["env"], bot_id="bot-y", owner_id="owner-x", engine="openclaw"
+    )
+    other_owner = skills.list_bot_active_assets(
+        env=shared["env"], bot_id="bot-x", owner_id="owner-y", engine="openclaw"
+    )
+
+    assert [asset.git_path for asset in excluded_bot] == []
+    assert [asset.git_path for asset in other_bot] == ["git://defaults/shared"]
+    assert [asset.git_path for asset in other_owner] == ["git://defaults/shared"]
