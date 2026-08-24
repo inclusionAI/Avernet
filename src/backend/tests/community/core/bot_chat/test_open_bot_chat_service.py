@@ -27,6 +27,7 @@ async def test_open_group_query_uses_independent_repository(service, repository)
     assert kwargs["group_id"] == "group_fixture"
     assert kwargs["session_key"] is None
     assert kwargs["from_ms"] == 0
+    repository.is_bot_in_group.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -99,6 +100,7 @@ async def test_open_detail_uses_independent_repository(service, repository):
 
     assert result is detail
     repository.get_trace_detail.assert_called_once_with("trace_fixture")
+    repository.is_bot_in_group.assert_not_called()
 
 
 @pytest.mark.asyncio
