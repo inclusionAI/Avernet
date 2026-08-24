@@ -24,6 +24,7 @@ import time
 import uuid
 from collections.abc import Generator
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from secbaas.community.core.repository.bot_run_queue import (
@@ -78,6 +79,7 @@ class BotRequestWorkerConfig:
     max_concurrent: int = 50  # 单 Worker 最大并发执行数
     heartbeat_interval_seconds: float = 30.0
     timeout_scan_interval_seconds: float = 5.0  # 超时扫描间隔
+    stale_heartbeat_seconds: float = 120.0  # 心跳过期阈值（判定对端 worker 已 down）
     bucket_sweep_interval_seconds: float = 300.0  # 空闲桶扫描间隔
     bucket_idle_ttl_seconds: float = 600.0  # 空闲桶淘汰 TTL
 
@@ -116,6 +118,8 @@ class BotRequestWorker:
         self._stop_event: asyncio.Event | None = None
         self._loop_task: asyncio.Task[None] | None = None
         self._timeout_task: asyncio.Task[None] | None = None
+        # run_id -> 正在执行的 _run_one task，用于超时扫描时 cancel 本机任务
+        self._running_tasks: dict[str, asyncio.Task[None]] = {}
 
     @property
     def worker_id(self) -> str:
@@ -191,21 +195,52 @@ class BotRequestWorker:
                 logger.exception("[BotRequestWorker] timeout scan error: %s", e)
             await asyncio.sleep(interval)
 
+    def _is_heartbeat_stale(self, record: BotRunQueueRecord) -> bool:
+        """判断 RUNNING 记录的心跳是否已过期（对端 worker 可能已 down）。"""
+        if record.last_heartbeat is None:
+            return True
+        elapsed = (datetime.now() - record.last_heartbeat).total_seconds()
+        return elapsed > self._config.stale_heartbeat_seconds
+
     async def _timeout_scan_once(self) -> None:
-        """扫描一轮超时工作项：委托 executor 写结果终态后强制终结队列项。"""
+        """扫描一轮超时工作项：区分 PENDING / 本机 RUNNING / 非本机 RUNNING。
+
+        - PENDING：委托 executor 写结果终态后强制终结队列项。
+        - RUNNING + 本机：cancel 本机 task，再由 executor 标 FAILED + force_done。
+        - RUNNING + 非本机：仅当心跳过期（对端 worker 已 down）才 force_done；
+          心跳正常则跳过（对端还在执行，由对端的超时检查兜底）。
+        """
         records = self._queue.scan_timeout()
         for record in records:
-            try:
-                await self._executor.execute(record)
-            except RequeuedToPendingError:
-                # ResultGuardExecutor 会在进入 session lock 前处理 timeout；如果这里仍
-                # 透出 requeue，说明 executor 链未包含 timeout guard，保持队列原状。
+            if record.status == "RUNNING" and record.assigned_worker != self._worker_id:
+                if not self._is_heartbeat_stale(record):
+                    # 对端 worker 还活着，由对端自己处理超时
+                    continue
+                # 对端 worker 已 down，直接 force_done
+                with contextlib.suppress(Exception):
+                    self._queue.force_done(record.run_id)
                 logger.warning(
-                    "[BotRequestWorker] timeout scan requeued run_id=%s status=%s",
+                    "[BotRequestWorker] timeout scan: run_id=%s status=%s "
+                    "stale heartbeat (worker=%s), force done",
                     record.run_id,
                     record.status,
+                    record.assigned_worker,
                 )
+                callback = self._resolve_callback(record)
+                if callback is not None:
+                    try:
+                        await callback(record.run_id)
+                    except Exception as e:
+                        logger.error(
+                            "[BotRequestWorker] timeout scan callback failed run_id=%s: %s",
+                            record.run_id,
+                            e,
+                            exc_info=True,
+                        )
                 continue
+
+            # PENDING 或本机 RUNNING：走 executor 标 FAILED + force_done
+            await self._executor.execute(record)
             with contextlib.suppress(Exception):
                 self._queue.force_done(record.run_id)
             logger.warning(
@@ -213,6 +248,15 @@ class BotRequestWorker:
                 record.run_id,
                 record.status,
             )
+            # cancel 本机正在执行的超时任务
+            if record.assigned_worker == self._worker_id:
+                running_task = self._running_tasks.get(record.run_id)
+                if running_task is not None and not running_task.done():
+                    running_task.cancel()
+                    logger.warning(
+                        "[BotRequestWorker] timeout scan: cancelled local task run_id=%s",
+                        record.run_id,
+                    )
             callback = self._resolve_callback(record)
             if callback is not None:
                 try:
@@ -263,7 +307,8 @@ class BotRequestWorker:
                 bucket.try_acquire()
                 self._active += 1
                 dispatched += 1
-                asyncio.create_task(self._run_one(record))
+                task = asyncio.create_task(self._run_one(record))
+                self._running_tasks[record.run_id] = task
 
         self._sweep_idle_buckets()
         return dispatched
@@ -297,6 +342,7 @@ class BotRequestWorker:
                 await self._post_run(record, post_run_callback)
                 self._mark_queue_done(record)
         finally:
+            self._running_tasks.pop(record.run_id, None)
             heartbeat.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat

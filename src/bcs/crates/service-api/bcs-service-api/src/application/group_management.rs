@@ -44,6 +44,7 @@ pub struct GroupCreateCommand {
 pub struct GroupCreateParticipantCommand {
     pub bot_id: String,
     pub role: Option<String>,
+    pub tags: Vec<String>,
 }
 
 /// Request for creating or reusing a 1:1 direct message group.
@@ -175,6 +176,8 @@ pub struct GroupParticipantView {
     pub actor_kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<ParticipantMode>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 /// Group detail shape returned by group management use cases.

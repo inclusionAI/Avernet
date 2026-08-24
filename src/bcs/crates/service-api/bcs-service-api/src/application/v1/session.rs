@@ -23,6 +23,8 @@ pub struct SessionParticipant {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub role: ParticipantRole,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
     pub mode: ParticipantMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub joined_at: Option<u64>,

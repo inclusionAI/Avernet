@@ -366,7 +366,7 @@ async fn handle_connect(
     };
 
     send_ok(tx, &req.id, serde_json::to_value(response)?).await?;
-    if let WorkbenchConnectionAuth::SessionBound { session_id, .. } = auth {
+    if let Some(session_id) = session_id.as_deref() {
         match state.interactions.list_pending(session_id).await {
             Ok(pending) => {
                 for event in pending {

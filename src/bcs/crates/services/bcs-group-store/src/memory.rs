@@ -843,6 +843,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 
@@ -893,6 +894,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 
@@ -942,6 +944,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 
@@ -955,6 +958,7 @@ mod tests {
             role: ParticipantRole::Consultant, // Different role
             actor_kind: bcs_service_api::ActorKind::default(),
             mode: None,
+            tags: Vec::new(),
         };
         store
             .add_participant("test-group", duplicate)
@@ -977,6 +981,7 @@ mod tests {
             role: ParticipantRole::Consultant,
             actor_kind: bcs_service_api::ActorKind::default(),
             mode: None,
+            tags: Vec::new(),
         };
 
         let result = store.add_participant("nonexistent", participant).await;
@@ -1155,6 +1160,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 
@@ -1175,6 +1181,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .participant(Participant {
                 bot_uuid: "initiator-bot".to_string(),
@@ -1183,6 +1190,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 
@@ -1204,6 +1212,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .participant(Participant {
                 bot_uuid: "dba".to_string(),
@@ -1212,6 +1221,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .participant(Participant {
                 bot_uuid: "security".to_string(),
@@ -1220,6 +1230,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 
@@ -1259,6 +1270,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .participant(Participant {
                 bot_uuid: "dba".to_string(),
@@ -1267,6 +1279,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 
@@ -1345,6 +1358,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
         store.upsert(session2).await.unwrap();
@@ -1405,6 +1419,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .participant(Participant {
                 bot_uuid: "dev-bot".to_string(),
@@ -1413,6 +1428,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .participant(Participant {
                 bot_uuid: "qa-bot".to_string(),
@@ -1421,6 +1437,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 

@@ -8,7 +8,10 @@ A ``Lifecycle`` singleton: ``startup()`` launches an asyncio loop,
 2. runs each claimed task's handler concurrently, bounded by a semaphore;
 3. maps the handler's :class:`TaskOutcome` back to a repository transition;
 4. **greedy re-poll** when the batch came back full (a backlog likely exists)
-   else sleeps a jittered idle interval.
+   else waits out a jittered idle interval — interruptibly. An enqueue of a task
+   type registered with ``wake_on_enqueue=True`` signals :class:`WorkerWakeup`
+   and the wait ends at once, so the interval is a latency *ceiling* rather than
+   a fixed cost. Types that did not opt in are unaffected.
 
 Give-up is a deadline from first enqueue, enforced entirely DB-side by the
 repository: a past-deadline task is retired ``TIMED_OUT`` at claim time (never
@@ -36,6 +39,7 @@ from injector import inject
 
 from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
+from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
 from agentclaw.community.core.task_queue.types import (
     Complete,
     Fail,
@@ -66,10 +70,12 @@ class TaskWorker(LifecycleBase):
         repo: TaskQueueRepositoryProtocol,
         registry: HandlerRegistry,
         config: TaskQueueWorkerConfig,
+        wakeup: WorkerWakeup,
     ) -> None:
         self._repo = repo
         self._registry = registry
         self._config = config
+        self._wakeup = wakeup
         self._worker_id = _make_worker_id()
         self._env = get_current_env()
         self._running = False
@@ -91,6 +97,10 @@ class TaskWorker(LifecycleBase):
             )
             return
         self._running = True
+        # Capture the loop for cross-thread wake-ups. ``startup()`` runs *on*
+        # the loop, which is the only place ``get_running_loop()`` works — a
+        # handler thread signalling later cannot look it up for itself.
+        self._wakeup.bind(asyncio.get_running_loop())
         self._task = asyncio.create_task(self._loop())
         logger.info(
             "[TaskWorker] started worker_id=%s env=%s batch=%d poll=%.1fs lease=%ds",
@@ -103,6 +113,10 @@ class TaskWorker(LifecycleBase):
 
     async def shutdown(self) -> None:
         self._running = False
+        # Unbind first: handler threads can outlive teardown, and a signal
+        # arriving after this point should be a no-op rather than a callback
+        # scheduled onto a loop that is going away.
+        self._wakeup.unbind()
         if self._task and not self._task.done():
             self._task.cancel()
             try:
@@ -124,7 +138,10 @@ class TaskWorker(LifecycleBase):
             # Greedy: a full batch implies more is waiting → re-poll now.
             if claimed >= self._config.batch_size:
                 continue
-            await asyncio.sleep(self._idle_delay())
+            # Otherwise idle — but interruptibly. An opted-in enqueue ends this
+            # wait immediately; nothing else changes, and a missed signal costs
+            # only the ordinary interval.
+            await self._wakeup.wait(self._idle_delay())
 
     def _idle_delay(self) -> float:
         jitter = self._config.poll_jitter_seconds

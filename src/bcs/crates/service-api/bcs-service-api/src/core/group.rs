@@ -259,6 +259,7 @@ pub trait GroupCoreService: Send + Sync {
             role: ParticipantRole::Observer,
             actor_kind: ActorKind::Human,
             mode: Some(mode),
+            tags: Vec::new(),
         };
         self.add_participant(group_id, participant).await
     }

@@ -1173,6 +1173,23 @@ export function resolveChatRunId(requestId: unknown, idempotencyKey: unknown): s
   return frameRunId || randomUUID();
 }
 
+/**
+ * Select the BCS identity OpenClaw should wrap in its own agent/channel route.
+ * Protocol v3 supplies both fields with the same canonical session id. Older
+ * frames keep their existing group-based histories.
+ */
+export function resolveEngineSessionPeerId(
+  params: Pick<ChatSendParams, 'session_key' | 'bcs_group_id' | 'bcs_session_id'>,
+  onboardingPeerId: string,
+): string {
+  const canonicalSessionId = params.bcs_session_id?.trim();
+  if (canonicalSessionId) {
+    const requestedSessionKey = params.session_key?.trim();
+    return requestedSessionKey === canonicalSessionId ? requestedSessionKey : canonicalSessionId;
+  }
+  return params.bcs_group_id || onboardingPeerId;
+}
+
 /** Handle chat.send request from BCS. */
 export async function handleChatSend(
   request: RequestFrame,
@@ -1252,7 +1269,7 @@ export async function handleChatSend(
       accountId: account.accountId,
       peer: {
         kind: 'group',
-        id: bcsGroupId || `onboarding-${account.botId}`,
+        id: resolveEngineSessionPeerId(params, `onboarding-${account.botId}`),
       },
     });
 
@@ -1660,7 +1677,7 @@ export async function handleChatInject(
       accountId: account.accountId,
       peer: {
         kind: 'group',
-        id: bcsGroupId || `onboarding-${account.botId}`,
+        id: resolveEngineSessionPeerId(params, `onboarding-${account.botId}`),
       },
     });
 
