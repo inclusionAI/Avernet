@@ -247,29 +247,26 @@ domains:
 - **禁止开放代理写法**：`match` 靠前的字面量段必须钉住 `base_path` 再加至少一个具体段；`{param}` 只能出现在这些字面量段**之后**。也就是说 `match: /**` 或 `match: /openapi/v1/{anything}/**` 这种"一上来就是通配符"的写法**在启动时直接被拒绝**——这就是让"配出一个开放代理"在配置语法层面就不可能表达的机制。
 - **禁止 `rewrite` 永远打不中的规则**：`rewrite.from` 必须是这个 domain 自己 `match` 前缀的**前缀**，否则这条改写规则永远不可能命中，启动时直接报错拒绝，而不是留到线上才发现改写从没生效过。
 
-### 6.4 多个 domain 都能命中同一路径时：具体度（specificity）怎么判
+### 6.4 一个例子：两个 domain 都能接住同一条请求，网关选谁？
 
-`match` 允许多个 domain 的声明范围产生重叠（比如 `bots` 和 `repository-skills` 都能"够到"`/openapi/v1/bots/skills/list`），这时候网关按下面两步决定由谁来处理这条请求：
+`match` 允许多个 domain 的声明范围产生重叠。仓库里正好有一对真实的 domain 可以拿来走一遍这个过程：
 
-**第一步 —— 先筛"平面"（候选集过滤，不是兜底重试）**
+- `bots`：没写 `match`，隐式覆盖 `/openapi/v1/bots/**`
+- `repository-skills`：`match: /openapi/v1/bots/skills/**`
 
-对每条请求，先算出它的"平面"是 HTTP 还是 WebSocket（不是 URL scheme——`http`/`https` 算一类，`ws`/`wss` 算另一类；scheme 只说明是否走 TLS，不参与这层判断）。**只有 `protocols` 里声明了这个平面的 domain 才进入候选集**；不声明 `protocols` 默认只服务 `[http]`。
+来一条请求 `GET /openapi/v1/bots/skills/list`，看网关怎么选：
 
-> **重要：这是一次性过滤，不是"选中的 domain 如果不支持这个平面就退回去试下一个"的重试机制。** 一个 domain 只要不服务某个平面，它在这个平面上就**根本不是候选**，等价于它在这个维度上不存在——这样"最具体的候选获胜"这句话在过滤完之后依然成立，而不会出现"最具体的赢了，但它答不了这个平面，于是退而求其次转发到另一个 domain"这种会让权限/路由行为变得不确定的情况。
+**第一步：谁"够得着"这条路径？** 两个都够得着——`skills/list` 落在 `bots` 的 `**` 里，`list` 落在 `repository-skills` 的 `**` 里。两个 domain 也都服务 HTTP（都没有把自己限定成 `websocket` 专用），所以两个都进候选名单。
 
-**第二步 —— 候选集里比"具体度"，最具体者胜**
+**第二步：比谁"钉住"的字面量段更多。** 把请求路径拆成一节一节，看每个 domain 的 `match` 能把哪几节钉死成字面量、从哪一节开始就撒手交给 `**`：
 
-具体度按下面的优先级比较：
+![请求 /openapi/v1/bots/skills/list 同时落在 bots 和 repository-skills 的范围内；repository-skills 多钉住了 skills 这一段，字面量段数 4 比 bots 的 3 更多，因此更具体并胜出](images/gateway-specificity-example.svg)
 
-1. **字面量段数量更多者更具体。**（`repository-skills` 的 `/openapi/v1/bots/skills/**` 有 3 段字面量 `openapi/v1/bots/skills`，`bots` 的 `/openapi/v1/bots/**` 只有 2 段——严格来说是 base_path 之后各自多钉了几段，这里按"域名下自己声明的字面量段"直观理解即可。）
-2. **字面量段数量相同时，用参数段（`{param}`）数量打破平局**——参数段越多，说明这条规则往更深的路径层级"钉"得越准，视为更具体。
+`repository-skills` 多钉死了 `skills` 这一段（4 段 vs 3 段），**更具体，赢得这条请求**。结果是：这条请求的转发目标、路径改写规则、对外文档，**完全由 `repository-skills` 的配置决定**，`bots` 的配置对这条请求不起任何作用——即便 `bots` 的 `**` 本来也"接得住"。
 
-**举例直觉：**
+**两边钉住的字面量段数一样呢？** 那就看谁多带了 `{参数}` 段——多带的那个更具体（等于把路径钉得更深一层）。如果连这个也一样，说明这两个 domain 的声明范围产生了网关判不出优先级的重叠，**这种配置在启动时就会被直接拒绝**并点名冲突的 domain，不会留到线上才发现"结果取决于谁先注册"这种不确定行为。
 
-- `/openapi/v1/bots/skills/list` 命中 `bots`（隐式 `/openapi/v1/bots/**`）和 `repository-skills`（`/openapi/v1/bots/skills/**`）两个 domain；`repository-skills` 字面量段更多 → 胜出，请求由它的配置（server/rewrite/schema）决定，`bots` 的配置在这条请求上完全不生效。
-- 假设（仓库当前配置里没有这种真实场景，纯粹用来讲清楚参数打平的规则）同时存在 `match: /openapi/v1/bots/**` 与 `match: /openapi/v1/bots/{bot_id}/**` 两个 domain：字面量段数量一样（都只钉了 `bots` 这一段），但后者多了一个 `{bot_id}` 参数段——按规则 2，后者更具体，会赢得所有 `/openapi/v1/bots/<任意bot_id>/...` 形状的请求。
-
-**启动期还会拒绝"平局无法判定"的配置**：如果两个 domain 在同一路径、同一平面上具体度**完全打平**（字面量段数和参数段数都相等），谁赢是未定义的——这种配置在启动时就会被拒绝并点名冲突的 domain，而不是留给运行时的一个隐藏的、不可预测的顺序去决定。
+> **一个常见误解要澄清：** "候选名单"是按平面（HTTP / WebSocket）**先筛一遍、筛完就定了**，不是"最具体的赢了、但它答不了这个平面，于是退而求其次转发到另一个 domain"。一个 domain 只要不服务某个平面，它在这个平面上就**根本不算候选**，不存在"重试到下一个"这回事——这样路由结果才是确定的，不会因为平面不同而悄悄改判给别的上游。
 
 ### 6.5 大请求体转发（Forwarder 契约 v2）
 
