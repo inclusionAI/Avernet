@@ -1,6 +1,6 @@
 """Endpoint-framework coverage for the BCS publish-to-users operation.
 
-``POST /openapi/v1/bots/{bot_id}/public-bcs`` opens a botpublish approval
+``POST /openapi/v1/collaboration/bots/{bot_uuid}/public`` opens a botpublish approval
 ticket — it talks to an external approval system, a step no test host can run.
 So both cases stand the service in through the sanctioned DI seam (``bind``
 helpers), not a class-level mock that would outlive the case or lie about
@@ -27,6 +27,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.core.bot_public.services.bot_public_service import (
     BotNotFoundError,
+    BotPublicServiceError,
 )
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -39,7 +40,7 @@ from tests.community.framework import (
 )
 from tests.community.framework.di_seams import bind_failing_method, bind_method
 
-_PATH = "/openapi/v1/bots/{bot_id}/public-bcs"
+_PATH = "/openapi/v1/collaboration/bots/{bot_uuid}/public"
 _CALLER = "bcs-publisher"
 _KEY = "public-bcs-framework-signing-key-32b"
 
@@ -104,7 +105,7 @@ def _happy(_self, *_args, **_kwargs) -> BcsPublishResult:
     path=_PATH,
     scenario="starts_the_publish_approval_ticket",
     input=CaseInput(
-        path_params={"bot_id": "bcs-target-bot"},
+        path_params={"bot_uuid": "bcs-target-bot"},
         headers={PRINCIPAL_HEADER: _principal()},
         query_params={"user_id": _CALLER},
         json_body={"public_scope": "user"},
@@ -131,7 +132,7 @@ def public_bcs_opens_approval():
     path=_PATH,
     scenario="unknown_bot_surfaces_not_found",
     input=CaseInput(
-        path_params={"bot_id": "no-such-bot"},
+        path_params={"bot_uuid": "no-such-bot"},
         headers={PRINCIPAL_HEADER: _principal()},
         query_params={"user_id": _CALLER},
         json_body={"public_scope": "user"},
@@ -156,4 +157,39 @@ def public_bcs_unknown_bot_is_not_found():
     ``bind_failing_method`` raises the production ``BotNotFoundError`` on the
     per-test injector so the case documents the mapping it pins rather than name
     a different error the route never raises.
+    """
+
+
+@endpoint_test(
+    method="POST",
+    path=_PATH,
+    scenario="publish_service_failure_surfaces_500",
+    input=CaseInput(
+        path_params={"bot_uuid": "bcs-target-bot"},
+        headers={PRINCIPAL_HEADER: _principal()},
+        query_params={"user_id": _CALLER},
+        json_body={"public_scope": "user"},
+    ),
+    seed=lambda world: (
+        _boot_verifier(world),
+        bind_failing_method(
+            world,
+            BotPublicServiceProtocol,
+            "public_bcs_bot",
+            BotPublicServiceError("创建审批失败: puid PARAM_CHECKED_ERROR"),
+        ),
+    ),
+    expect=ExpectError(
+        status=500,
+        json_contains={"code": 500000, "message": "Publish failed", "data": None},
+    ),
+)
+def public_bcs_service_failure_is_500():
+    """The server-side failure branch maps through ``@envelope_errors`` → 500.
+
+    ``BotPublicServiceError`` is the service's invariant guard (approval-ticket
+    submit rejected, etc.). Without the ``@envelope_errors`` mapping it escaped
+    as a bare 500; the mapping pins it as a business-coded 5xx so the caller
+    gets ``code: 500000 "Publish failed"`` rather than a generic Internal Server
+    Error, with the cause logged at the raise site.
     """

@@ -126,6 +126,36 @@ class TestPublicBcsBot:
         assert "同学正在开放" in ctx["publishHint"]
         assert "bot到加好友场景，" in ctx["publishHint"]
 
+    def test_context_carries_bot_id_and_owner_id_for_callback_echo(self):
+        # antprocess echoes the ticket context back on the /callback POST
+        # (snake→camel: bot_id→botId, owner_id→ownerId). The new-version
+        # callback path uses bot_id verbatim as the BCS bot_uuid
+        # (_apply_callback_decision → get_attributes(bot_uuid=bot_id)) and
+        # owner_id for the legacy branch; without them in the context the
+        # callback arrives with botId/ownerId=None and the AGREE visibility
+        # flip is a no-op.
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True, "puid": "p1", "state": "PROCESSING",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+        svc = _make_service(process_service=process, bot_repository=bot_repo)
+
+        # bot_uid is the full BCS identity "{backend_bot_id}:{entity_id}"; it
+        # must echo back unchanged so the callback addresses the right bot —
+        # backend_bot_id alone would not resolve via BCS get_attributes.
+        svc.public_bcs_bot(
+            bot_uid="b1:entity1",
+            owner_id="u1",
+            public_scope="user",
+            operator=_make_operator(staff_id="op_user"),
+        )
+
+        ctx = process.start_approval.call_args.kwargs["context"]
+        assert ctx["bot_id"] == "b1:entity1"
+        assert ctx["owner_id"] == "u1"
+
     def test_completed_runs_callback_inline_with_public_scope(self):
         process = MagicMock()
         process.start_approval.return_value = {
@@ -1329,6 +1359,75 @@ class TestSearchPublicBotsByKeyword:
             page=1,
             page_size=2,
         )
+
+    def test_catalog_search_preserves_bcs_is_friend_on_its_exact_address(self):
+        metadata = MagicMock()
+        bcs_item = BotCatalogMetadata(
+            BotCatalogAddress("shared", "entity-a"), "bot", is_friend=False
+        )
+        metadata.search_public_bot_metadata.return_value = [bcs_item]
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (
+            1,
+            [_make_catalog_bot("shared", "entity-a")],
+        )
+        svc = _make_service(
+            bot_repository=repository, catalog_metadata_service=metadata
+        )
+
+        result = svc.search_catalog_public_bots_by_keyword(
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace-friend",
+        )
+
+        assert result["items"] == [
+            {**_make_catalog_bot("shared", "entity-a"), "is_friend": False}
+        ]
+
+    def test_catalog_search_preserves_requested_bcs_metadata_on_its_exact_address(self):
+        metadata = MagicMock()
+        friend_ext = {"public_user_approval": {"status": "PROCESSING"}}
+        bcs_item = BotCatalogMetadata(
+            BotCatalogAddress("shared", "entity-a"),
+            "bot",
+            is_friend=False,
+            visibility="protected",
+            is_online=False,
+            actor_kind="bot",
+            friend_ext=friend_ext,
+            friend_check_in_strategy={},
+            user_visibility="private",
+        )
+        metadata.search_public_bot_metadata.return_value = [bcs_item]
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (
+            2,
+            [
+                _make_catalog_bot("shared", "entity-a"),
+                _make_catalog_bot("shared", "entity-b"),
+            ],
+        )
+        svc = _make_service(
+            bot_repository=repository, catalog_metadata_service=metadata
+        )
+
+        result = svc.search_catalog_public_bots_by_keyword(
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace-metadata",
+        )
+
+        assert result["items"] == [
+            {
+                **_make_catalog_bot("shared", "entity-a"),
+                "is_friend": False,
+                "visibility": "protected",
+                "is_online": False,
+                "actor_kind": "bot",
+                "friend_ext": friend_ext,
+                "friend_check_in_strategy": {},
+                "user_visibility": "private",
+            }
+        ]
 
     def test_catalog_search_restores_bcs_order_and_isolates_same_bot_id_by_entity(self):
         metadata = MagicMock()

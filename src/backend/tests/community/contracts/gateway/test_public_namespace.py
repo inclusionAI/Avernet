@@ -28,6 +28,16 @@ _DECLARED_PREFIXES = (
     # Department directory search — a tenant-wide catalogue read, declared with
     # its own gateway domain + route_security entry.
     "/openapi/v1/org/dept",
+    # BCS publish-to-users — the external contract path the gateway's
+    # `collaboration-publish` domain routes to the backend (pulled out of the
+    # broad collaboration→bcs namespace). Declared with its gateway domain +
+    # route_security entry.
+    "/openapi/v1/collaboration/bots",
+    # Task public surface (execute/dashboard/list) — the external contract path
+    # the gateway's `collaboration-tasks` domain routes to the backend (pulled
+    # out of the broad collaboration→bcs namespace). Declared with its gateway
+    # domain + route_security entry.
+    "/openapi/v1/collaboration/tasks",
 )
 
 

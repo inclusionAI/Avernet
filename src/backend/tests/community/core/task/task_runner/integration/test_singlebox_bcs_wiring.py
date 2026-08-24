@@ -56,11 +56,12 @@ def test_resolve_ports_singlebox_uses_singlebox_bcs_adapter(monkeypatch):
     monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
     monkeypatch.setenv("SINGLEBOX_BCS_URL", "http://localhost:21000")
     monkeypatch.setenv("SINGLEBOX_USER_ID", "35983")
-    bot, bcs, task_provider_id = TaskModule._resolve_ports()
+    bot, bcs = TaskModule._resolve_ports()  # provider_id 由 BCS token 自带，task_provider_id 不再单独透传
     try:
         assert isinstance(bot, SingleboxEngineAdapter)
         assert isinstance(bcs, SingleboxBcsAdapter), "singlebox bcs 端口应为 SingleboxBcsAdapter"
         assert isinstance(bcs, BcsHttpAdapter)  # 继承 BcsHttpAdapter
+        assert bcs.provider_id == ""  # 测试未设 SINGLEBOX_BCS_PROVIDER_ID → 圈定关闭;provider_id 由端口自带
         client = bcs._client  # type: ignore[attr-defined]
         assert client.base_url.host == "localhost"
         assert client.base_url.port == 21000

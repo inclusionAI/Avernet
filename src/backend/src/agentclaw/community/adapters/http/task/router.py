@@ -9,7 +9,7 @@
 端点(同一任务模块,不同阶段):
   POST /api/v1/collaboration/tasks/execute          — 提交任务(公开面镜像;delegate TaskServiceProtocol.execute)
   GET  /api/v1/collaboration/tasks/dashboard         — 查任务图(公开面镜像;delegate get_task_dashboard)
-  GET  /api/v1/collaboration/tasks/list              — 列任务摘要(公开面镜像;delegate list_tasks)
+  GET  /api/v1/collaboration/tasks/list              — 列持久化任务记录(公开面镜像;delegate list_tasks)
   POST /api/v1/collaboration/tasks/callback/report  — 执行实体回投(delegate TaskLoopCallbackProtocol.report_result)
   POST /api/v1/collaboration/tasks/bbs/claim        — BBS 接力步②:CAS 占根(恰一赢,输者 409)
   POST /api/v1/collaboration/tasks/bbs/attach        — BBS 接力步④:挂 run_mode=bbs scoped 子节点 + start
@@ -28,7 +28,10 @@ task_loop inbound PUSH callback(前缀 ``/api/v1/collaboration/tasks/callback``)
 """
 from __future__ import annotations
 
+import json
 import os
+
+import httpx
 from pathlib import Path
 from typing import Any
 
@@ -44,19 +47,22 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackDataDTO,
     TaskCallbackRequest,
     TaskExecutionGraphDTO,
-    TaskInfoDTO,
+    TaskInfoRecordDTO,
+    TaskInfoRequestDTO,
     TaskNodeCallbackRequest,
     TaskOpResultDTO,
-    TaskSummaryDTO,
     acceptance_result_from_dto,
     callback_from_dto,
     graph_to_dto,
     op_result_to_dto,
-    summary_to_dto,
-    task_info_from_dto,
+    task_info_record_to_dto,
+    task_info_request_from_dto,
     task_spec_from_dto,
 )
-from agentclaw.community.adapters.http.task.translator import translate
+from agentclaw.community.adapters.http.task.translator import (
+    is_bcn_event_payload, is_claw_mind_payload, parse_manager_worker_bcn,
+    translate, translate_bcn, translate_claw_mind,
+)
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.errors import InternalError
@@ -90,15 +96,15 @@ router = APIRouter(prefix="/api/v1/collaboration/tasks", tags=["task"])
 @router.post("/execute", response_model=Envelope[TaskOpResultDTO])
 @envelope_errors
 async def execute_task_internal(
-    body: TaskInfoDTO,
+    body: TaskInfoRequestDTO,
     request: Request,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskOpResultDTO]:
-    """提交执行任务(内部副本)。initialize_graph(根 PENDING)→ 编排核 on_execute 首帧推进。
+    """提交执行任务(内部副本)。task_id 服务端生成;持久化 task_info(PENDING)→ initialize_graph → on_execute。
 
     幂等:同 task_id 已建图(GraphAlreadyInitializedError)→ ``@envelope_errors`` 映射 409。"""
-    task_info = task_info_from_dto(body)
-    result = await service.execute(task_info)
+    task_request = task_info_request_from_dto(body)
+    result = await service.execute(task_request)
     return envelope(op_result_to_dto(result), request)
 
 
@@ -118,20 +124,20 @@ async def get_task_dashboard_internal(
     return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
 
 
-@router.get("/list", response_model=Envelope[list[TaskSummaryDTO]])
+@router.get("/list", response_model=Envelope[list[TaskInfoRecordDTO]])
 @envelope_errors
 async def list_tasks_internal(
     request: Request,
     status: str | None = None,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[list[TaskSummaryDTO]]:
-    """列任务摘要(内部副本,按 run_id 降序;可选 ``status`` 过滤图级状态)。
+) -> Envelope[list[TaskInfoRecordDTO]]:
+    """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选状态过滤)。
 
     非法 ``status`` 过滤值 → 400(经 ``HTTPException`` → 中央 handler → ``ErrorEnvelope``)。"""
     if status is not None and status not in {s.value for s in Status}:
         raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
     items = service.list_tasks(status)
-    return envelope([summary_to_dto(s) for s in items], request)
+    return envelope([task_info_record_to_dto(item) for item in items], request)
 
 
 # ===== 回投 / BBS 接力 =====
@@ -140,16 +146,26 @@ async def list_tasks_internal(
 @router.post("/callback/report", response_model=Envelope[dict[str, Any]])
 @envelope_errors
 async def report_callback(
-    body: TaskCallbackDataDTO,
     request: Request,
-    callback: TaskLoopCallbackProtocol = Injected(TaskLoopCallbackProtocol),  # noqa: B008
+    svc: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+    auth: CallbackAuthenticator = Injected(CallbackAuthenticator),  # noqa: B008
+    registry: CallbackCorrelationRegistry = Injected(CallbackCorrelationRegistry),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
-    """执行实体(bot workflow / bcn 协作群)PUSH 回投 → 适配层 → 编排核 on_report → 翻态推进。
+    """统一回投入口:仅接 ``request``,交 ``_dispatch`` 按 body 形态区分 ClawMind/BCN/羽雀 → 转换 → 入库/推进。
 
-    领域异常(TaskStateError/TaskNotFoundError…)上抛 → ``@envelope_errors`` 映射。"""
-    data = callback_from_dto(body)
-    await callback.report_result(data)
-    return envelope({"ok": True}, request)
+    ClawMind(HttpCallbackPayload)/BCN(CloudEvent)→ 转换 + ``ingest`` 只落 ``task_callback`` 审计;
+    羽雀(TaskCallbackRequest,框架节点级)→ ``translate`` + ``report_result`` 落库并推进编排核。
+    disposition 固定 ``result``(回投即终态/进度落库);羽雀节点级 start 仍由 task_callback_router 的
+    workflow_start/node_start 端点各自走(disposition=start)。领域异常上抛 → ``@envelope_errors`` 映射。"""
+    # 入口日志:打出回调原始 body(CloudEvent / HttpCallbackPayload / 羽雀 schema 都能见),便于排查。
+    # Starlette request.body() 首次读后缓存,_dispatch 再读仍得同一份,不冲突。
+    _body = await request.body()
+    _preview = _body[:4000].decode("utf-8", "replace")
+    if len(_body) > 4000:
+        _preview += f"...(truncated, total {len(_body)} bytes)"
+    logger.info("[report_callback] entry method=%s path=%s body=%s",
+                request.method, request.url.path, _preview)
+    return await _dispatch(request, "result", TaskCallbackRequest, svc, auth, registry)
 
 
 @router.post("/bbs/claim", response_model=Envelope[dict[str, Any]])
@@ -410,31 +426,166 @@ def _find_node_status(svc: TaskServiceProtocol, loop_task_id: str) -> Status | N
     return node.status if node is not None else None
 
 
+def _build_task_status_graph(run_detail: dict | None, graph_detail: dict | None) -> dict | None:
+    """结合 BCS DAG(graph nodes+edges)与实际执行结果(run nodes)→ 任务状态图谱。
+
+    - run_detail: ``GET /state-machine-runs/{run_id}`` 响应(run 级 status/output + nodes 执行记录)。
+    - graph_detail: ``GET /state-machine-runs/{run_id}/graph`` 响应(definition + nodes DAG + edges 流转)。
+    合并后每个 node 同时含 DAG 定义(display_name/kind/assignee/final_output)+ 执行结果(status/attempt/outcome/artifact_text)。
+    """
+    if not run_detail and not graph_detail:
+        return None
+    # 执行结果按 node_id 索引(来自 run_detail.nodes)
+    _exec_by_node: dict[str, dict] = {}
+    if run_detail:
+        for _n in run_detail.get("nodes") or []:
+            _nid = _n.get("node_id")
+            if _nid:
+                _exec_by_node[_nid] = _n
+    # DAG nodes + edges(来自 graph_detail)
+    _dag_nodes = (graph_detail or {}).get("nodes") or []
+    _dag_edges = (graph_detail or {}).get("edges") or []
+    # 合并:DAG node 定义 + 该 node 的执行结果
+    _merged_nodes = []
+    for _dn in _dag_nodes:
+        _nid = _dn.get("node_id")
+        _exec = _exec_by_node.get(_nid, {})
+        _merged_nodes.append({
+            "node_id": _nid,
+            "display_name": _dn.get("display_name"),
+            "kind": _dn.get("kind"),
+            "assignee": _dn.get("assignee"),
+            "final_output": _dn.get("final_output"),
+            "execution": {
+                "status": _exec.get("status") or _dn.get("status"),
+                "attempt": _exec.get("attempt") or _dn.get("attempt"),
+                "outcome": _exec.get("outcome"),
+                "artifact_text": _exec.get("artifact_text"),
+                "assignee_bot_id": _exec.get("assignee_bot_id"),
+                "error": _exec.get("error"),
+            },
+        })
+    # fallback:graph 无 nodes 但 run_detail 有 → 直接用 run_detail 的 nodes
+    if not _merged_nodes and run_detail:
+        _merged_nodes = [
+            {"node_id": _n.get("node_id"), "execution": _n}
+            for _n in run_detail.get("nodes") or []
+        ]
+    return {
+        "run_status": ((run_detail or {}).get("run") or {}).get("status"),
+        "run_output": ((run_detail or {}).get("run") or {}).get("output"),
+        "definition": (graph_detail or {}).get("definition"),
+        "nodes": _merged_nodes,
+        "edges": _dag_edges,
+    }
+
+
 async def _dispatch(
     request: Request, disposition: str, schema_cls: type[TaskCallbackRequest],
     svc: TaskServiceProtocol, auth: CallbackAuthenticator, registry: CallbackCorrelationRegistry,
 ) -> Envelope[dict[str, Any]]:
     raw = await request.body()
+    # 回调 body 按调用者分流:ClawMind(HttpCallbackPayload 四字段)/ BCN(CloudEvent 信封)/ 羽雀(默认 schema)。
+    try:
+        _raw_obj = json.loads(raw)
+    except Exception:
+        _raw_obj = None
+    # ClawMind / BCN 是事件/工作流级回投(run_id/workflow_id 不对应框架节点):只落 task_callback 审计,
+    # 不推进编排核(start_run/report_result 会 NodeNotFoundError),直接 ack。
+    if is_claw_mind_payload(_raw_obj):
+        auth.verify(source="claw_mind", headers=request.headers, raw_body=raw,
+                    method=request.method, path=request.url.path)
+        await svc.callback.ingest(translate_claw_mind(_raw_obj, disposition).data)
+        return envelope({"ok": True}, request)
+    if is_bcn_event_payload(_raw_obj):
+        auth.verify(source="bcn", headers=request.headers, raw_body=raw,
+                    method=request.method, path=request.url.path)
+        # manager_worker(任务协作群)事件:走 manager_worker 分流(parse+merge 进单 session 行 +
+        # session.completed 收敛),不进 state_machine 的 translate_bcn/run_detail 路径。
+        if parse_manager_worker_bcn(_raw_obj) is not None:
+            await svc.apply_manager_worker_event(_raw_obj)
+            return envelope({"ok": True}, request)
+        _tc = translate_bcn(_raw_obj)
+        if _tc is None:
+            return envelope({"ok": True}, request, message="bcn event not handled")
+        # 从 CloudEvent 取 scope.run_id → 经 BCS GET /state-machine-runs/{run_id} 查 run 明细
+        # → 把明细覆盖 _raw_callback_body,落 task_callback.orig_callback_data(而非原始 CloudEvent)。
+        _run_detail: dict | None = None
+        _run_id = ((_raw_obj.get("scope") or {}).get("run_id")) if isinstance(_raw_obj, dict) else None
+        if _run_id:
+            try:
+                _bcs_base = os.environ.get("BCS_API_BASE_URL", "http://127.0.0.1:21000").rstrip("/")
+                async with httpx.AsyncClient(timeout=10.0) as _cli:
+                    _run_resp = await _cli.get(f"{_bcs_base}/state-machine-runs/{_run_id}")
+                    _graph_resp = await _cli.get(f"{_bcs_base}/state-machine-runs/{_run_id}/graph")
+                _run_detail = _run_resp.json() if _run_resp.status_code == 200 else None
+                _graph_detail = _graph_resp.json() if _graph_resp.status_code == 200 else None
+                if _run_detail:
+                    _tc.data.data["_raw_callback_body"] = _run_detail
+                    logger.info("[callback] BCN run 明细已取回 run_id=%s → orig_callback_data", _run_id)
+                else:
+                    logger.warning("[callback] BCS run 明细非 200 run_id=%s status=%s",
+                                   _run_id, _run_resp.status_code)
+                # 结合 DAG(graph nodes+edges)与执行结果(run nodes)→ 任务状态图谱 → execution_graph
+                _task_graph = _build_task_status_graph(_run_detail, _graph_detail)
+                if _task_graph:
+                    _tc.data.data["execution_graph"] = _task_graph
+                    logger.info("[callback] 任务状态图谱已构建 run_id=%s nodes=%d edges=%d → execution_graph",
+                                _run_id, len(_task_graph.get("nodes") or []), len(_task_graph.get("edges") or []))
+            except Exception as exc:  # noqa: BLE001 查 BCS 明细/DAG 失败不阻断落库(fallback 存原始 CloudEvent)
+                logger.warning("[callback] 查 BCS run 明细/DAG 失败 run_id=%s: %s", _run_id, exc)
+        await svc.callback.ingest(_tc.data)
+        # 终态收敛:run.status in (completed/failed/aborted) → 按 session_id 查 task_node_run_info
+        # → 框架 (task_id, node_id) → svc.converge_by_session → on_report → 翻态(引擎验收+传播+根 DONE)。
+        if _run_detail:
+            _run_status = ((_run_detail.get("run") or {}).get("status"))
+            if _run_status in ("completed", "failed", "aborted"):
+                _session_id = ((_raw_obj.get("scope") or {}).get("session_id")) if isinstance(_raw_obj, dict) else None
+                if _session_id:
+                    _success = _run_status == "completed"
+                    _run_output = ((_run_detail.get("run") or {}).get("output"))
+                    try:
+                        await svc.converge_by_session(_session_id, success=_success, output=_run_output)
+                        logger.info("[callback] 终态收敛已触发 session_id=%s success=%s", _session_id, _success)
+                    except Exception as exc:  # noqa: BLE001 收敛失败不阻断(回调查询/落库已完成)
+                        logger.warning("[callback] 终态收敛失败 session_id=%s: %s", _session_id, exc)
+        return envelope({"ok": True}, request)
+    # 羽雀/框架节点级回投:先按 schema_cls(TaskCallbackRequest 富 schema)校验 → translate → report_result/start_run;
+    # 不符合则兜底 TaskCallbackDataDTO(loop_task_id+result,report_callback 旧契约)→ callback_from_dto → report_result。
     try:
         req = schema_cls.model_validate_json(raw)
     except Exception:
-        raise HTTPException(status_code=422, detail="invalid callback body")
-    # source 来自已解析 body;HMAC 用原始字节。CallbackAuthError/CallbackCorrelationError 上抛 → @envelope_errors
-    auth.verify(source=req.workflow_source, headers=request.headers, raw_body=raw,
-                method=request.method, path=request.url.path)
-    tc = translate(req, disposition, registry)
+        req = None
+    if req is not None:
+        # source 来自已解析 body;HMAC 用原始字节。CallbackAuthError/CallbackCorrelationError 上抛 → @envelope_errors
+        auth.verify(source=req.workflow_source, headers=request.headers, raw_body=raw,
+                    method=request.method, path=request.url.path)
+        tc = translate(req, disposition, registry)
+        try:
+            if tc.disposition == "start":
+                await svc.callback.start_run(tc.data)
+            else:
+                await svc.callback.report_result(tc.data)
+        except TaskStateError:
+            # 幂等:result 重投到已终态节点 → 200 ack;否则 TaskStateError 上抛 → @envelope_errors 409
+            if tc.disposition == "result":
+                _payload = tc.data.data
+                _loop_task_id = _payload.get("loop_task_id") if isinstance(_payload, dict) else ""
+                cur = _find_node_status(svc, _loop_task_id)
+                if cur in _TERMINAL:
+                    return envelope({"ok": True}, request, message="idempotent")
+            raise
+        return envelope({"ok": True}, request)
+    # 兜底:TaskCallbackDataDTO(loop_task_id+result)→ callback_from_dto → report_result(落库 + 推进编排核)。
     try:
-        if disposition == "start":
-            await svc.callback.start_run(tc.data)
-        else:
-            await svc.callback.report_result(tc.data)
-    except TaskStateError:
-        # 幂等:result 重投到已终态节点 → 200 ack;否则 TaskStateError 上抛 → @envelope_errors 409
-        if disposition == "result":
-            cur = _find_node_status(svc, tc.data.loop_task_id)
-            if cur in _TERMINAL:
-                return envelope({"ok": True}, request, message="idempotent")
-        raise
+        dto = TaskCallbackDataDTO.model_validate(_raw_obj if isinstance(_raw_obj, dict) else {})
+    except Exception:
+        raise HTTPException(status_code=422, detail="invalid callback body")
+    # TaskCallbackDataDTO 无 workflow_source;按 workflow_type 取 source(单测/内部可信 Noop/singlebox 直通;
+    # 生产侧该 source 应已登记密钥,否则 HMAC 校验会拒)。
+    auth.verify(source=(dto.workflow_type or "single_bot"), headers=request.headers, raw_body=raw,
+                method=request.method, path=request.url.path)
+    await svc.callback.report_result(callback_from_dto(dto))
     return envelope({"ok": True}, request)
 
 

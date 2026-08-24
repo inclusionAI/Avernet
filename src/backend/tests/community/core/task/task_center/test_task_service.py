@@ -36,8 +36,28 @@ def _task_info(task_id: str = "t1", max_depth: int = 3) -> TaskInfo:
             context=Context(background="bg"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
-        source_channel_type="bot",
-        source_channel_id="b1",
+        source_type="bot",
+        owner_bot_id="b1",
+        execution_config={"MAX_DEPTH": max_depth, "BBS_MAX_DEPTH": 3},
+    )
+
+
+def _task_info_request(task_id: str = "t1", max_depth: int = 3):
+    """TaskInfoRequest for execute (task_id is supplied by the provider, not the request)."""
+    from agentclaw.community.core.task.domain.models import TaskSourceType
+    from agentclaw.community.core.task.domain.requests import (
+        RequestAcceptance, RequestContext, RequestGoal, RequestMetadata,
+        RequestTaskSpec, TaskInfoRequest,
+    )
+    return TaskInfoRequest(
+        task_spec=RequestTaskSpec(
+            metadata=RequestMetadata(title="T", instruction="do"),
+            context=RequestContext(background="bg"),
+            goal=RequestGoal(objective="o", acceptances=[RequestAcceptance(id="ac1", acceptance="d")]),
+        ),
+        source_type=TaskSourceType.BOT,
+        owner_user_id="u1",
+        owner_bot_id="b1",
         execution_config={"MAX_DEPTH": max_depth, "BBS_MAX_DEPTH": 3},
     )
 
@@ -134,11 +154,12 @@ class _CaseEngine(ExecutionEngine):
 
 class _CaseTaskService(TaskService):
     """测试用 facade:覆写 _build_engine 返回 _CaseEngine(注入 stub 策略/投递;模拟 corp)。"""
-    def __init__(self, graph, planner_factory=None, discover_bot="bot1", runner=None, harness=None):
+    def __init__(self, graph, planner_factory=None, discover_bot="bot1", runner=None, harness=None,
+                 task_id_provider=None):
         self._case_planner_factory = planner_factory or (lambda g: [])
         self._case_discover_bot = discover_bot
         self._case_runner = runner
-        super().__init__(graph, harness=harness)
+        super().__init__(graph, harness=harness, task_id_provider=task_id_provider)
 
     def _build_engine(self, *, bot=None, bcs=None, discover=None) -> ExecutionEngine:
         # case 测试覆写:注入 stub 策略/投递的 _CaseEngine(忽略传入端口)
@@ -151,7 +172,7 @@ class _CaseTaskService(TaskService):
 
 
 def _build_facade(svc=None, *, decomposer=None, discover=None, runner=None,
-                  harness=None, verify=None, bbs=None) -> tuple:
+                  harness=None, verify=None, bbs=None, task_id_provider=None) -> tuple:
     """兼容旧调用签名(verify/bbs 参数已废弃,忽略);返回 (facade, svc, planner, dispatcher, discover, runner)。"""
     from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
     svc = svc or TaskGraphService()
@@ -166,6 +187,7 @@ def _build_facade(svc=None, *, decomposer=None, discover=None, runner=None,
         svc, planner_factory=factory,
         discover_bot=getattr(discover, "bot_id", "bot1") if discover else "bot1",
         runner=runner, harness=harness,
+        task_id_provider=task_id_provider or (lambda: "t1"),
     )
     return facade, svc, None, None, discover, facade._engine._runner
 
@@ -173,10 +195,10 @@ def _build_facade(svc=None, *, decomposer=None, discover=None, runner=None,
 def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
-def _exec(facade, ti):
+def _exec(facade, request):
     """execute(fire-and-forget)→drain_background 等首帧落定(测试确定性 seam)。"""
     async def _go():
-        r = await facade.execute(ti)
+        r = await facade.execute(request)
         await facade.drain_background()
         return r
     return _run(_go())
@@ -192,7 +214,7 @@ class TestProtocolConformance:
 class TestExecute:
     def test_execute_first_frame(self):
         facade, svc, *__, runner = _build_facade(decomposer=lambda g: [_child("c1"), _child("c2")])
-        result = _exec(facade, _task_info())
+        result = _exec(facade, _task_info_request())
         assert result.task_id == "t1"
         assert result.success is True
         assert result.run_id is not None
@@ -206,7 +228,7 @@ class TestExecute:
     def test_execute_no_plan_gap_closed_finishes(self):
         # Step2:plan[]+has_gap=F = 根 gap 闭(终验通过)→ 翻根 DONE + 图 DONE
         facade, svc, *_ = _build_facade(decomposer=lambda g: [])
-        result = _exec(facade, _task_info())
+        result = _exec(facade, _task_info_request())
         assert result.success is True
         graph = svc.query_task_dashboard("t1")
         assert svc._get_node(graph, "t1").status == Status.DONE
@@ -217,13 +239,13 @@ class TestExecute:
 class TestGetDashboard:
     def test_returns_full_graph(self):
         facade, svc, *_ = _build_facade()
-        _exec(facade, _task_info())
+        _exec(facade, _task_info_request())
         g = facade.get_task_dashboard("t1")
         assert g.tasks[0].node_id == "t1"
 
     def test_subtree_projection(self):
         facade, svc, *_ = _build_facade(decomposer=lambda g: [_child("c1")])
-        _exec(facade, _task_info())
+        _exec(facade, _task_info_request())
         sub = facade.get_task_dashboard("t1", "c1")
         assert {n.node_id for n in sub.tasks} == {"c1"}
 
@@ -237,11 +259,11 @@ class TestCallback:
 
     def test_report_result_flips_node_via_callback(self):
         facade, svc, *_ = _build_facade(decomposer=lambda g: [_child("c1")])
-        _exec(facade, _task_info())
-        _run(facade.callback.report_result(TaskCallbackData(
-            loop_task_id="t1::c1", workflow_type="single_bot", workflow_id=1, instance_id=9,
-            result={"success": True, "data": "done"},
-        )))
+        _exec(facade, _task_info_request())
+        _run(facade.callback.report_result(TaskCallbackData(data={
+            "loop_task_id": "t1::c1", "workflow_type": "single_bot", "workflow_id": 1, "instance_id": 9,
+            "result": {"success": True, "data": "done"},
+        })))
         graph = svc.query_task_dashboard("t1")
         assert svc._get_node(graph, "c1").status == Status.DONE
 
@@ -253,8 +275,9 @@ class TestHarnessWiring:
         from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
         svc = TaskGraphService()
         harness = TaskHarness(svc)
-        facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1")], harness=harness)
-        _exec(facade, _task_info())
+        facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1")], harness=harness,
+                              task_id_provider=lambda: "t1")
+        _exec(facade, _task_info_request())
         assert "t1" in harness._registered
         assert harness._on_harness_fn == facade._engine.on_harness
 
@@ -266,12 +289,13 @@ class TestAcceptanceViaReport:
         from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
         svc = TaskGraphService()
         # decomposer 首批产 c1,c1 DONE 后 plan[]→ gap 闭=终验通过 → 翻根 DONE
-        facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1")])
-        _exec(facade, _task_info())
-        _run(facade.callback.report_result(TaskCallbackData(
-            loop_task_id="t1::c1", workflow_type="single_bot", workflow_id=1, instance_id=1,
-            result={"success": True, "data": "x"},
-        )))
+        facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1")],
+                              task_id_provider=lambda: "t1")
+        _exec(facade, _task_info_request())
+        _run(facade.callback.report_result(TaskCallbackData(data={
+            "loop_task_id": "t1::c1", "workflow_type": "single_bot", "workflow_id": 1, "instance_id": 1,
+            "result": {"success": True, "data": "x"},
+        })))
         # c1 DONE → 根 plan[](无新子,去重空)→ gap 闭=终验通过 → 翻根 DONE + graph DONE
         graph = svc.query_task_dashboard("t1")
         assert svc._get_node(graph, "t1").status == Status.DONE
@@ -283,14 +307,13 @@ class TestBbsEscalationNoMarket:
         # V2:升 BBS 只标 bbs_mode,无 bbs market publish
         from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
         svc = TaskGraphService()
-        ti = _task_info("t3")
-        ti.execution_config["MAX_DEPTH"] = 1
-        facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1", "t3")])
-        _exec(facade, ti)
-        _run(facade.callback.report_result(TaskCallbackData(
-            loop_task_id="t3::c1", workflow_type="single_bot", workflow_id=1, instance_id=1,
-            result={"success": False, "fail_detail": "缺x"},
-        )))
+        facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1", "t3")],
+                                  task_id_provider=lambda: "t3")
+        _exec(facade, _task_info_request("t3", max_depth=1))
+        _run(facade.callback.report_result(TaskCallbackData(data={
+            "loop_task_id": "t3::c1", "workflow_type": "single_bot", "workflow_id": 1, "instance_id": 1,
+            "result": {"success": False, "fail_detail": "缺x"},
+        })))
         graph = svc.query_task_dashboard("t3")
         # v4:验收 FAIL→FAILED(补救治移 harness 重新派发;无 harness → 停 FAILED,不立即升 BBS)
         assert svc._get_node(graph, "c1").status == Status.FAILED

@@ -8,7 +8,7 @@ tags: [task, planning, decompose]
 
 # task-planning
 
-任务目标驱动的**任务规划** skill,运行在 **owner bot**(source_channel_id)。框架投递 planning prompt(prompt 含 `{goal, context, target_node, graph_snapshot, gaps}` + 返回格式约定;详见框架 `GapBasedPlanningStrategy._compose_planning_prompt`),本 skill 读 prompt 中的目标节点 `node_id`,按案例剧本确定式产出下一批子任务。
+任务目标驱动的**任务规划** skill,运行在 **owner bot**(owner_bot_id)。框架投递 planning prompt(prompt 含 `{goal, context, target_node, graph_snapshot, gaps}` + 返回格式约定;详见框架 `GapBasedPlanningStrategy._compose_planning_prompt`),本 skill 读 prompt 中的目标节点 `node_id`,按案例剧本确定式产出下一批子任务。
 
 ## 环境约束(必须遵守)
 

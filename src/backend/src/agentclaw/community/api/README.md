@@ -18,14 +18,43 @@ api/
 └── …
 ```
 
-Conformance is **structural**: concrete services under
-`core/<module>/services/` do *not* inherit from the Protocol (that
-would force a `core → api` import, which the layering rule forbids).
-Instead `tests/architecture/test_service_api_conformance.py` parametrizes
-over every `(Protocol, ConcreteService)` pair and asserts
+Conformance is checked **structurally**, and a concrete service *may*
+also inherit its Protocol. `core → api` is forbidden by default —
+`tests/architecture/test_architecture_compliance.py::test_core_layer_does_not_import_api`
+enforces it — but that gate carries a documented per-file allowlist for
+service implementations that bridge to their own Protocol, so a service
+under `core/<module>/services/` may declare
+`class XService(XServiceProtocol)` by adding itself there. Prefer that
+over structural-only: it makes the contract navigable in an IDE (jump
+from Protocol to implementation and back) and, when every Protocol member
+is `@abstractmethod`, turns a missing member into a construction-time
+`TypeError` naming it instead of a silently inherited `...` body that
+returns `None`.
+
+Two edits come with it: the allowlist entry in
+`test_architecture_compliance.py`, and the import declared in the
+module's `## Context Boundary`. `arch.rules.md` Rule 6 is an
+**Invariant**, so a cross-layer exception is a deliberate cost — keep
+them rare, and justify each one in the allowlist comment.
+
+The cleaner long-term shape is to define the Protocol in `core/` and
+re-export it from `api/` — then `core` imports its own abstraction and
+there is no exception at all. `governance_service.py` documents that
+pattern. It needs `test_api_layer_is_protocols_only.py` taught about
+re-export-only modules first, which is why it is not used here.
+
+Services that predate this — and those whose Protocol still declares
+`*args: Any, **kwargs: Any`, against which inheritance would assert
+nothing — remain structural-only. Both forms are supported.
+
+Either way `tests/architecture/test_service_api_conformance.py`
+parametrizes over every `(Protocol, ConcreteService)` pair and asserts
 `issubclass(ConcreteService, Protocol)` against the `@runtime_checkable`
 Protocol — so a missing or renamed method on the concrete class fails
-CI rather than only showing up as a router-time `AttributeError`.
+CI rather than only showing up as a router-time `AttributeError`. That
+gate stays the backstop for the structural-only services, and its
+signature check still catches drift (a renamed keyword, `async`→`def`)
+that inheritance alone does not.
 
 Two enforcement gates live under `tests/architecture/`:
 
@@ -84,6 +113,8 @@ internal_dependencies:
   - agentclaw.community.core.skill_center            # Local Skill desired-state lifecycle contract
   - agentclaw.community.core.skill_center            # Local Skill recoverable deletion lifecycle contract
   - agentclaw.community.core.task.domain.models      # TaskInfo, TaskExecutionGraph, TaskOpResult, TaskCallbackData — typed in task_service.py and task_loop_callback.py
+  - agentclaw.community.core.task.domain.requests    # TaskInfoRequest — typed in task_service.py Protocol execute signature
+  - agentclaw.community.core.task.repository.types   # TaskInfoRecord — typed in task_service.py Protocol list_tasks signature
   - agentclaw.community.kernel.device_dto            # OutBoundOperationRule — typed in baas_service.py Protocol (B6)
   - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py

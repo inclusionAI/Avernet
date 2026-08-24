@@ -153,6 +153,25 @@ _IMPORT_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset({
         "core/bot_startup_script/services/startup_script_service.py",
         "agentclaw.community.api.bot_startup_script_service",
     ),
+    # LocalSkillQueryService implements the Service API Protocol defined in
+    # api/local_skill_query_service.py — the same shape as BotStartupScriptService
+    # above, and for the same reason: every member of that Protocol is
+    # @abstractmethod, so omitting one fails at construction naming the member.
+    # Inheriting it also makes the contract navigable from Protocol to
+    # implementation in an IDE.
+    (
+        "core/skill_center/services/local_skill_query_service.py",
+        "agentclaw.community.api.local_skill_query_service",
+    ),
+    # BotSkillAssetService implements the Service API Protocol defined in
+    # api/bot_skill_asset_service.py — same shape and same reason as the entry
+    # above: every member of that Protocol is @abstractmethod, so omitting one
+    # fails at construction naming the member, and inheriting it makes the
+    # contract navigable from Protocol to implementation in an IDE.
+    (
+        "core/skill_center/services/bot_skill_asset_service.py",
+        "agentclaw.community.api.bot_skill_asset_service",
+    ),
 })
 
 

@@ -13,7 +13,7 @@ gated by ``SINGLEBOX_TASK_E2E=1``。**协作群需 BCS double**,本地起后端 
   ② 业务架构与数据架构双视角深度分析 → 命中协作群走 **coop_group**(2 bot);
   ③ 基础架构方向 3 位架构师名册 → 无现成 bot → MISS → HUNG → 升 **BBS** 中继。
 - **owner bot 装 ``planning-arch`` + ``search``**(同 integration e2e 的 storage search):
-  - 规划走 ``planning-arch``(确定式按 ``t_3mode_`` 前缀查表)→ 拆出固定 3 子:`N_tech_stack`/`N_dual_view`/`N_architects`;
+  - 规划走 ``planning-arch``(确定式按根验收交付物集合查表)→ 拆出固定 3 子:`N_tech_stack`/`N_dual_view`/`N_architects`;
   - 派发走 ``search`` skill(**按 `demand.node_id` 查表**,同 storage 方式):表里 ``N_tech_stack``→HIT_SINGLE
     `技术栈概览Bot`、``N_dual_view``→HIT_MULTI_BOTS 两视角 bot、``N_architects``→MISS。HIT/MISS 由表定(不靠 catalog 判),
     `bot_id` 在 catalog 里按 `bot_name` 解析。
@@ -51,7 +51,6 @@ import asyncio
 import os
 import time
 import unittest
-import uuid
 from pathlib import Path
 
 import httpx
@@ -63,7 +62,7 @@ from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adap
 
 _LIVE = os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"}
 _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-_USER_ID = os.environ.get("SINGLEBOX_USER_ID", "146836")
+_USER_ID = os.environ.get("SINGLEBOX_USER_ID", "35983")
 _TIMEOUT = float(os.environ.get("SINGLEBOX_TASK_E2E_TIMEOUT", "2000"))
 # 独立 owner 名:避免与其它 e2e 的 task-owner-* 共用 bot 造成 skill 串扰
 _OWNER_BOT_NAME = "task-owner-3mode-bot"
@@ -87,7 +86,6 @@ _BBS_SKILL = str(
 )
 
 # 主任务:三份交付物(技术栈概览 + 业务/数据双视角分析 + 架构师名册);planning-arch LLM 自拆 ~3 子。
-TASK_ID = f"t_3mode_{uuid.uuid4().hex[:6]}"
 _BBS_MAX_DEPTH = 3  # 架构师名册一段中继收口;金庸自判 full 一次唤醒即可
 
 _HDRS = {"x-user-id": _USER_ID, "accept": "application/json"}
@@ -98,10 +96,10 @@ _DASH_TIMEOUT = 60.0
 
 
 async def _get_dashboard(cli: httpx.AsyncClient, task_id: str) -> dict | None:
-    """读 ``/openapi/v1/collaboration/tasks/dashboard``;一次性排队/断网时返 ``None`` 供外层轮询重试(不直接 fail 用例)。"""
+    """读 ``/api/v1/collaboration/tasks/dashboard``;一次性排队/断网时返 ``None`` 供外层轮询重试(不直接 fail 用例)。"""
     try:
         r = await cli.get(
-            f"{_BACKEND}/openapi/v1/collaboration/tasks/dashboard",
+            f"{_BACKEND}/api/v1/collaboration/tasks/dashboard",
             params={"task_id": task_id},
             timeout=_DASH_TIMEOUT,
         )
@@ -114,8 +112,50 @@ async def _get_dashboard(cli: httpx.AsyncClient, task_id: str) -> dict | None:
     return r.json().get("data") or {}
 
 
+def _print_task_details(g: dict | None, task_id: str) -> None:
+    """经 dashboard 接口取到任务详情后,打印图状态 + 每节点完整 run_info(extend_props/output/verdict/exec_error)
+    便于 e2e 排查三模态落地与收口情况。"""
+    if not g:
+        print(f"[task-details] task={task_id} (empty dashboard)")
+        return
+    ep = g.get("extend_props") or {}
+    print(f"[task-details] task={task_id} graph.status={g.get('status')} "
+          f"loop_round={g.get('loop_round')} bbs_mode={ep.get('bbs_mode')} "
+          f"bbs_owner={str(ep.get('bbs_owner') or '-')[:24]} "
+          f"bbs_relay_count={ep.get('bbs_relay_count')} node_count={len(g.get('tasks') or [])}")
+    for t in g.get("tasks") or []:
+        ri = t.get("run_info") or {}
+        print(f"  - node={t.get('node_id')} status={t.get('status')} "
+              f"run_mode={ri.get('run_mode') or '-'} assignee={str(ri.get('assignee') or '-')[:40]}")
+        if ri.get("extend_props"):
+            print(f"      extend_props={ri.get('extend_props')}")
+        if ri.get("exec_error"):
+            print(f"      exec_error={ri.get('exec_error')}")
+        ar = ri.get("acceptance_result") or {}
+        if ar:
+            print(f"      acceptance={ar}")
+        out = ri.get("output")
+        if out:
+            print(f"      output={str(out)[:300]!r}")
+
+
+def _signature(g: dict | None) -> tuple:
+    """图态签名(graph.status + bbs_mode/bbs_owner + 各节点 status/run_mode/assignee),用于检测轮询间状态变化,
+    变化时触发 ``_print_task_details`` 打印(提升 task-details 打印频率,不只在最后打一次)。"""
+    if not g:
+        return ()
+    ep = g.get("extend_props") or {}
+    nodes = tuple(
+        (t.get("node_id"), t.get("status"),
+         (t.get("run_info") or {}).get("run_mode"),
+         str((t.get("run_info") or {}).get("assignee") or "")[:24])
+        for t in g.get("tasks") or []
+    )
+    return (g.get("status"), ep.get("bbs_mode"), str(ep.get("bbs_owner") or "")[:24], nodes)
+
+
 def _execute_body(owner_id: str) -> dict:
-    """``POST /openapi/v1/collaboration/tasks/execute`` 请求体(TaskInfoDTO):基础架构方向三份交付物。
+    """``POST /api/v1/collaboration/tasks/execute`` 请求体(TaskInfoDTO):基础架构方向三份交付物。
 
     planning-arch(通用 LLM)读根 goal 自拆 ~3 子:技术栈概览(命中 技术栈概览Bot → single_bot HIT)、
     业务+数据双视角分析(命中 业务架构视角Bot+数据架构视角Bot → coop_group HIT_MULTI_BOTS)、
@@ -124,7 +164,6 @@ def _execute_body(owner_id: str) -> dict:
     return {
         "task_spec": {
             "metadata": {
-                "task_id": TASK_ID,
                 "title": "整理某某某公司基础架构方向:技术栈概览 + 业务/数据双视角分析 + 架构师名册",
                 "instruction": (
                     "本任务有**三份交付物**,请拆成三个子任务分别完成:"
@@ -141,21 +180,26 @@ def _execute_body(owner_id: str) -> dict:
                     "产出某某某公司基础架构方向:技术栈概览 + 业务/数据双视角架构分析 + 3 位核心架构师名册"
                 ),
                 "acceptances": [
-                    {"id": "ac1", "description": "给出基础架构方向技术栈概览(计算/存储/网络等层与核心组件)"},
-                    {"id": "ac2", "description": "从业务架构与数据架构双视角深度分析基础架构现状与演进"},
-                    {"id": "ac3", "description": "给出基础架构方向 3 位架构师的姓名/角色 + 职责"},
+                    {"id": "ac1", "acceptance": "给出基础架构方向技术栈概览(计算/存储/网络等层与核心组件)"},
+                    {"id": "ac2", "acceptance": "从业务架构与数据架构双视角深度分析基础架构现状与演进"},
+                    {"id": "ac3", "acceptance": "给出基础架构方向 3 位架构师的姓名/角色 + 职责"},
                 ],
             },
         },
-        "source_channel_type": "bot",
-        "source_channel_id": owner_id,
+        "source_type": "bot",
+        "owner_user_id": _USER_ID,
+        "owner_bot_id": owner_id,
         # MAX_DEPTH=1:架构师名册子任务在 depth-1 MISS 直走 miss_depth_exhausted 升 BBS(不 re-plan 嵌套);
         # single_bot / coop_group 子任务同为 depth-1,命中执行不受影响。BBS拉群需 SINGLEBOX_BCS_DOUBLE=1。
-        "execution_config": {"MAX_DEPTH": 1, "BBS_MAX_DEPTH": _BBS_MAX_DEPTH},
+        "execution_config": {
+            "task_type": "dynamic",
+            "MAX_DEPTH": 1,
+            "BBS_MAX_DEPTH": _BBS_MAX_DEPTH,
+        },
     }
 
 
-def _wake_prompt(jy_bot_id: str) -> str:
+def _wake_prompt(task_id: str, jy_bot_id: str) -> str:
     """唤醒金庸自驱 bbs-relay-pickup 收口"架构师名册"侧(MISS→HUNG→升 BBS 的那段)。
 
     只交代用哪个 skill 接单 + 必要定位信息(task_id / backend url / 自身 bot_id),
@@ -167,7 +211,7 @@ def _wake_prompt(jy_bot_id: str) -> str:
     """
     return (
         "请用 bbs-relay-pickup skill 接力执行已自然升 BBS 的单子。\n"
-        f"task_id={TASK_ID};task API backend base url={_BACKEND};"
+        f"task_id={task_id};task API backend base url={_BACKEND};"
         f"你(金庸)自身 bot_id={jy_bot_id}(claim/attach/result 的 bot_id 字段填它)。\n"
         "交付物编码:本次中继段做的是「架构师名册」,step⑤ bbs/result 的 output_patch 必须含 architects 键"
         "(数组,装整理出的架构师名册,每项至少含姓名/角色/职责);这是本段交付物的固定写入口。"
@@ -214,20 +258,23 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
         adapter = SingleboxEngineAdapter(backend_base_url=_BACKEND, user_id=_USER_ID)
 
         async with httpx.AsyncClient(timeout=300.0, headers=_HDRS) as cli:
-            # 3) POST /openapi/v1/collaboration/tasks/execute → backend 进程内真实 engine 推进:
+            # 3) POST /api/v1/collaboration/tasks/execute → backend 进程内真实 engine 推进:
             #    planning-arch LLM 自拆 ~3 子 → owner 通用 LLM 派发判:
             #      技术栈概览 → HIT_SINGLE 技术栈概览Bot(single_bot);
             #      业务+数据双视角 → HIT_MULTI_BOTS [业务架构视角Bot,数据架构视角Bot](coop_group,BCS 拉群);
             #      架构师名册 → MISS → @MAX_DEPTH=1 升 BBS(bbs_mode=True / 根 PLANNING / 图空闲;前两子在跑保根可恢复)。
-            r = await cli.post(f"{_BACKEND}/openapi/v1/collaboration/tasks/execute", json=_execute_body(owner_id))
+            r = await cli.post(f"{_BACKEND}/api/v1/collaboration/tasks/execute", json=_execute_body(owner_id))
             r.raise_for_status()
-            print(f"[execute] {r.json().get('message')} data={r.json().get('data')}")
+            execute_data = r.json().get("data") or {}
+            task_id = execute_data["task_id"]
+            print(f"[execute] {r.json().get('message')} data={execute_data}")
 
             # 等自然升 BBS:Poll 直到 bbs_mode 置 true(架构师名册 MISS→HUNG→升 BBS)或全图 DONE / 超时
             g: dict = {}
+            last_sig: tuple | None = None
             deadline = time.monotonic() + _TIMEOUT
             while time.monotonic() < deadline:
-                g = await _get_dashboard(cli, TASK_ID)
+                g = await _get_dashboard(cli, task_id)
                 if g is None:
                     await asyncio.sleep(5.0)
                     continue
@@ -239,12 +286,15 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
                 ]
                 print(f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} "
                       f"bbs_mode={(g.get('extend_props') or {}).get('bbs_mode')} nodes={snap}")
+                if _signature(g) != last_sig:
+                    last_sig = _signature(g)
+                    _print_task_details(g, task_id)
                 if (g.get("extend_props") or {}).get("bbs_mode"):
                     _ep = g.get("extend_props") or {}
                     _nodes = {t["node_id"]: t for t in g.get("tasks") or []}
-                    _root = _nodes.get(TASK_ID)
+                    _root = _nodes.get(task_id)
                     print(
-                        f"[escalated] ⭐ 架构师名册 MISS→已自然升 BBS! task={TASK_ID} "
+                        f"[escalated] ⭐ 架构师名册 MISS→已自然升 BBS! task={task_id} "
                         f"graph={g.get('status')} loop_round={g.get('loop_round')} "
                         f"bbs_relay_count={_ep.get('bbs_relay_count')} "
                         f"root.status={(_root or {}).get('status')} "
@@ -268,10 +318,10 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
             )
 
             # 5) 唤醒金庸自驱 bbs-relay-pickup 收口"架构师名册"侧:
-            #    一次唤醒 = 一段接力;未收口且图空闲则再唤醒,上限 BBS_MAX_DEPTH 次。
-            wake_prompt = _wake_prompt(jy_id)
+            #    BBS 一次唤醒即收口(自判"架构师名册"段 full → 挂 bbs scoped 节点 → 写回),不多次唤醒。
+            wake_prompt = _wake_prompt(task_id, jy_id)
             wakes = 0
-            while g.get("status") not in ("DONE", "HUNG") and wakes < _BBS_MAX_DEPTH:
+            while g.get("status") not in ("DONE", "HUNG") and wakes < 1:
                 wakes += 1
                 print(f"[wake#{wakes}] 唤醒金庸自驱 bbs-relay-pickup ...")
                 try:
@@ -286,7 +336,7 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
                 # 唤醒后轮询,等接力写回落地 / 图收口 / 图空闲可再唤醒
                 sub_deadline = time.monotonic() + 300.0
                 while time.monotonic() < sub_deadline:
-                    g = await _get_dashboard(cli, TASK_ID)
+                    g = await _get_dashboard(cli, task_id)
                     if g is None:
                         await asyncio.sleep(5.0)
                         continue
@@ -298,6 +348,9 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
                     ]
                     print(f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} "
                           f"bbs_owner={nodes_first_ext(g,'bbs_owner')} nodes={snap}")
+                    if _signature(g) != last_sig:
+                        last_sig = _signature(g)
+                        _print_task_details(g, task_id)
                     if g.get("status") in ("DONE", "HUNG"):
                         break
                     busy = any((t.get("status") == "RUNNING") for t in g.get("tasks") or [])
@@ -305,6 +358,12 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
                     if not busy and not held:
                         break
                     await asyncio.sleep(5.0)
+
+            # 任务详情:经 dashboard 接口取全量并打印(便于 e2e 排查三模态落地)
+            detail_g = await _get_dashboard(cli, task_id)
+            if detail_g is not None:
+                g = detail_g
+            _print_task_details(g, task_id)
 
         # 6) 断言:3-mode natural 三种执行模态共存 + 图收口 DONE。
         #    断言取宽容(≥1 每模态):LLM 自分解/自判非确定,只要三模态共存即达到 3-mode 意图。
@@ -315,13 +374,13 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
 
         self.assertEqual(g.get("status"), "DONE", f"全图未闭环 DONE:status={g.get('status')}")
         nodes = {t["node_id"]: t for t in g.get("tasks") or []}
-        self.assertEqual(nodes[TASK_ID]["status"], "DONE", "根未 DONE")
+        self.assertEqual(nodes[task_id]["status"], "DONE", "根未 DONE")
         self.assertTrue((g.get("extend_props") or {}).get("bbs_mode"), "图未置 bbs_mode(架构师名册未升 BBS)")
 
         # 6a) single_bot:技术栈概览子任务真匹配到现成 bot(DONE,assignee=技术栈概览Bot)
         single_nodes = [
             t for t in g.get("tasks") or []
-            if (t.get("run_info") or {}).get("run_mode") == "single_bot" and t["node_id"] != TASK_ID
+            if (t.get("run_info") or {}).get("run_mode") == "single_bot" and t["node_id"] != task_id
         ]
         self.assertGreaterEqual(
             len(single_nodes), 1,
@@ -339,7 +398,7 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
         # 6b) coop_group:业务+数据双视角子任务命中协作群(DONE,assignee=grp_ 群 id)
         coop_nodes = [
             t for t in g.get("tasks") or []
-            if (t.get("run_info") or {}).get("run_mode") == "coop_group" and t["node_id"] != TASK_ID
+            if (t.get("run_info") or {}).get("run_mode") == "coop_group" and t["node_id"] != task_id
         ]
         self.assertGreaterEqual(
             len(coop_nodes), 1,
@@ -349,14 +408,15 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
         for n in coop_nodes:
             self.assertEqual(n.get("status"), "DONE", f"coop_group 子任务未 DONE:{n.get('node_id')}")
             self.assertTrue(
-                str((n.get("run_info") or {}).get("assignee") or "").startswith("grp_"),
+                # 群 id 前缀容忍两种后端:本地 stub/double 产 ``grp_<8hex>``;真 BCS(:21000)产 ``bcs_grp_<uuid>``。
+                str((n.get("run_info") or {}).get("assignee") or "").startswith(("grp_", "bcs_grp_")),
                 f"coop_group assignee 非群 id:{n.get('node_id')} assignee={(n.get('run_info') or {}).get('assignee')}",
             )
 
         # 6c) bbs:架构师名册 MISS→BBS,金庸自驱 bbs scoped 节点(DONE,assignee=金庸,output.architects)
         bbs_nodes = [
             t for t in g.get("tasks") or []
-            if (t.get("run_info") or {}).get("run_mode") == "bbs" and t["node_id"] != TASK_ID
+            if (t.get("run_info") or {}).get("run_mode") == "bbs" and t["node_id"] != task_id
         ]
         self.assertGreaterEqual(
             len(bbs_nodes), 1,

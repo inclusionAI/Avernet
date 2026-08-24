@@ -526,6 +526,11 @@ class SkillSetService:
         set: it is the device-level reconciliation command that clears stale
         allow-list entries.  Per-server detail delivery precedes that full
         declaration so all newly allowed MCPs have their configured payload.
+
+        Detail delivery is handed to ``sync_mcp_details_for_bot`` rather than
+        looped one ``sync_mcp_detail`` at a time: every entry here targets the
+        same bot, and that entrypoint resolves the device once for the whole
+        batch instead of paying a blocking ws-info round trip per MCP.
         """
         try:
             entries: list[dict[str, Any]] = []
@@ -534,20 +539,27 @@ class SkillSetService:
                 if not detail:
                     return False
                 entries.append(detail)
-                result = await self._mcp_sync_service.sync_mcp_detail(
-                    user_id=self.user_id or self.entity_id or "",
-                    mcp_data=detail,
-                    bot_id=self.bot_id,
-                    entity_id=self.entity_id,
-                    engine_type=self.engine_type,
-                )
-                if not result.get("success"):
-                    return False
-            ctx = self._resolver.resolve_for_bot(
-                self.bot_id, self.entity_id or self.user_id or ""
+            delivery = await self._mcp_sync_service.sync_mcp_details_for_bot(
+                user_id=self.user_id or self.entity_id or "",
+                mcp_entries=entries,
+                bot_id=self.bot_id,
+                entity_id=self.entity_id,
+                engine_type=self.engine_type,
+            )
+            if not delivery.get("success"):
+                return False
+            # resolve_for_bot 与 sync_all_mcp_servers 都是同步阻塞调用(前者含
+            # ws-info HTTP,后者是设备侧 HTTP),留在协程里会占住 event loop。
+            ctx = await asyncio.to_thread(
+                self._resolver.resolve_for_bot,
+                self.bot_id,
+                self.entity_id or self.user_id or "",
             )
             return bool(
-                self._device_sync_dispatcher.dispatch(ctx).sync_all_mcp_servers(entries)
+                await asyncio.to_thread(
+                    self._device_sync_dispatcher.dispatch(ctx).sync_all_mcp_servers,
+                    entries,
+                )
             )
         except Exception:
             logger.warning(

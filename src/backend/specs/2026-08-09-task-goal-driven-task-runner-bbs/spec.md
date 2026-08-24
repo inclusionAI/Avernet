@@ -4,6 +4,10 @@
 > 落点域:ocb backend(task 域)+ bot/agent 自有的内容 skill;具体代码落点(新路由挂载、守卫实现、skill 目录)属 HOW,见 `plan.md`。
 > 上游基线:`src/backend/specs/2026-08-09-task-goal-driven-execution-framework/spec.md`(权威,目标驱动 6 态执行框架)、`2026-08-09-task-goal-driven-task-runner/`(runner 适配)、`2026-08-09-task-goal-driven-task-runner-callback/`(回投回调面)。本 spec 为其 delta,**声明不破坏上游契约**。
 > 日期:2026-08-15(2026-08-04 初版按旧 9 态/`BbsExecutor`/`on_event` 基线;本版按最新 6 态 `ExecutionEngine` 全量重落地)。
+>
+> **2026-08-22 读契约修订:** `/collaboration/tasks/list` 返回持久化 `TaskInfoRecord`,不再返回
+> `TaskSummary.bbs_mode`;BBS 发现先从 list 枚举 `task_id`,再逐个调用 `/dashboard` 读取
+> `TaskExecutionGraph.extend_props.bbs_mode`。下文涉及“list 直出 bbs_mode”的旧描述均由本修订覆盖。
 
 ---
 

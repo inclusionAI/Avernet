@@ -3,6 +3,7 @@
 纯业务逻辑层，不包含任何 HTTP 关注点。
 """
 import json
+import re
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -487,7 +488,7 @@ class BotPublicService:
             raise BotNotFoundError(f"Bot not found: {bot_uid}")
         operator_id = operator.staff_id if operator else owner_id
         # Context mirrors the normal-bot publish (publishHint/botSkills/botMcps
-        # via _build_public_approval_context) plus the two new-version fields.
+        # via _build_public_approval_context) plus the new-version fields.
         # All values are str -> stays dict[str, str] for the antprocess echo.
         context: Dict[str, str] = self._build_public_approval_context(bot, operator)
         # BCS publish uses its own approval prompt (发布→开放, scene resolved
@@ -495,9 +496,24 @@ class BotPublicService:
         context["publishHint"] = self._build_bcs_publish_hint(bot, operator, public_scope)
         context["public_scope"] = public_scope
         context["viewFriendDeps"] = self._build_view_friend_deps(view_depts)
+        # bot_id (the full BCS identity "{backend_bot_id}:{entity_id}", used
+        # verbatim as bot_uuid by the callback's _apply_callback_decision) and
+        # owner_id ride the context so antprocess echoes them back (snake→camel:
+        # bot_id→botId, owner_id→ownerId) on the /callback POST — without
+        # bot_id the callback can't resolve the bot and the AGREE visibility
+        # flip is a no-op.
+        context["bot_id"] = bot_uid
+        context["owner_id"] = owner_id
         approval_result = self._process_service.start_approval(
             applicant=operator_id,
-            biz_id=f"{bot_uid}{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            # biz_id flows into the approval service's puid, which only accepts
+            # alphanumeric + hyphen. bot_uid is the BCS identity
+            # "{backend_bot_id}:{entity_id}" and may carry ":" and "_" (the
+            # backend bot id has its own underscores) — both rejected by the
+            # approval service's PARAM_CHECKED. Sanitize every non-alphanumeric
+            # char to "-" so the puid carries the identity without the colon/_
+            # that would break its "-" / "_" field delimiters.
+            biz_id=f"{re.sub(r'[^a-zA-Z0-9-]', '-', bot_uid)}{datetime.now().strftime('%Y%m%d%H%M%S')}",
             biz_type="botpublic",
             context=context,
         )
@@ -1439,6 +1455,7 @@ class BotPublicService:
                 request_id=request_id,
             )
             addresses = self._validated_catalog_addresses(metadata)
+            metadata_by_address = {item.address: item for item in metadata}
         except BotCatalogMetadataUnavailableError as exc:
             logger.warning(
                 "[BotPublicService.catalog_search] request_id=%s "
@@ -1462,7 +1479,25 @@ class BotPublicService:
             for bot in backend_bots
             if (address := self._catalog_address(bot)) in addresses
         }
-        items = [bots_by_address[address] for address in addresses if address in bots_by_address]
+        items = []
+        for address in addresses:
+            bot = bots_by_address.get(address)
+            if bot is None:
+                continue
+            metadata_item = metadata_by_address[address]
+            for field_name in (
+                "is_friend",
+                "visibility",
+                "is_online",
+                "actor_kind",
+                "friend_ext",
+                "friend_check_in_strategy",
+                "user_visibility",
+            ):
+                value = getattr(metadata_item, field_name)
+                if value is not None:
+                    bot[field_name] = value
+            items.append(bot)
         # Sanitize sensitive fields before pagination and public projection.
         EXT_SENSITIVE_KEYS = {"iam_token"}
         for bot in items:

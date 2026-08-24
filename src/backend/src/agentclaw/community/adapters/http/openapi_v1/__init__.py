@@ -176,7 +176,8 @@ from fastapi import APIRouter, Depends
 from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
-from .collaboration_bots import router as collaboration_bots_router
+from .collaboration_bots import public_router as collaboration_public_router
+from .task import task_router
 from .bots.engine_config import router as engine_config_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
@@ -235,7 +236,12 @@ from .token import token_router
 # Every public route lives under this prefix. Exported so app-level handlers can
 # tell a public request from an internal one (e.g. to envelope validation errors
 # only on this surface).
-PUBLIC_API_PREFIX = "/openapi/v1"
+#: Re-exported so existing callers keep importing it from here; the
+#: definition lives in ``contracts`` so ``access_log`` can read it at module
+#: scope without closing an import loop back through this package.
+from agentclaw.community.adapters.http.openapi_v1.contracts import (  # noqa: E402
+    PUBLIC_API_PREFIX,
+)
 
 # The groups that answer no 403, because no route in them is scoped by the
 # *caller's* user: Bot Logs never derived a user from the credential at all, and
@@ -520,13 +526,27 @@ def build_public_router() -> APIRouter:
     public.include_router(
         bots_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
     )
-    # New-version bcs publish-to-users (backend route: /openapi/v1/bots/{bot_id}/public-bcs;
-    # the gateway rewrites the external /openapi/v1/collaboration/bots/{bot_uuid}/public onto
-    # it). Declares user-scoped responses for the openapi_v1 admission contract; authz
-    # is deferred per design (caller identity via _PUBLIC_AUTH/UserIdDep, no grant check yet).
+    # New-version bcs publish-to-users: served at the external contract path
+    # POST /openapi/v1/collaboration/bots/{bot_uuid}/public. The gateway's
+    # collaboration-publish domain verbatim-forwards it here (no rewrite), so the
+    # backend serves the public address directly. user-scoped responses for the
+    # openapi_v1 admission contract; authz deferred per design (caller identity
+    # via _PUBLIC_AUTH/UserIdDep, no grant check yet).
     public.include_router(
-        collaboration_bots_router,
+        collaboration_public_router,
         responses=USER_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Task public surface (execute/dashboard/list) — served at the external
+    # contract path the gateway's `collaboration-tasks` domain routes to the
+    # backend (pulled out of the broad collaboration→bcs namespace). Not
+    # bot-scoped, no grant gate; caller identity via _PUBLIC_AUTH/UserIdDep,
+    # authz via the table. Mixed group: execute/dashboard have no user dimension
+    # (no 403), only `list` is user-scoped and declares its 403 per-route — so
+    # the mount uses the base ERROR_RESPONSES, not USER_SCOPED_ERROR_RESPONSES.
+    public.include_router(
+        task_router,
+        responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
     # The two failures `PublicAPIRoute` cannot see itself: a router built

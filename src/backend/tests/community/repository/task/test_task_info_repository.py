@@ -59,3 +59,36 @@ def test_list_by_status(db):
     pending = repo.list_by_status(Status.PENDING)
     assert {r.task_id for r in pending} == {"T-1", "T-3"}
     assert repo.list_by_status(Status.DONE) == []
+
+
+def test_list_records_returns_full_records_and_filters(db):
+    repo = TaskInfoRepository(db)
+    repo.insert(_record("T-1", Status.PENDING))
+    repo.insert(_record("T-2", Status.RUNNING))
+
+    all_records = repo.list_records()
+    assert [record.task_id for record in all_records] == ["T-2", "T-1"]
+    assert all_records[0].task_spec["metadata"]["instruction"] == "do"
+
+    running = repo.list_records(Status.RUNNING)
+    assert [record.task_id for record in running] == ["T-2"]
+
+
+def test_list_records_filters_owner(db):
+    repo = TaskInfoRepository(db)
+    repo.insert(_record("T-1"))
+    other = _record("T-2")
+    repo.insert(TaskInfoRecord(
+        id=other.id,
+        task_id=other.task_id,
+        source_type=other.source_type,
+        owner_user_id="U-2",
+        owner_bot_id=other.owner_bot_id,
+        execution_config=other.execution_config,
+        task_spec=other.task_spec,
+        status=other.status,
+    ))
+
+    records = repo.list_records(owner_user_id="U-1")
+
+    assert [record.task_id for record in records] == ["T-1"]

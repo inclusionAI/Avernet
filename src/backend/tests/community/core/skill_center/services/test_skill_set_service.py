@@ -1493,3 +1493,134 @@ class TestSyncSkillSetToActiveOwnerIdResolution:
         skill_service.activate_skill.assert_called_once_with(
             "git://biz/skill-a", user_id="user1", bolt_id="bot-1"
         )
+
+
+# ── TestSyncMcpDesiredState ──────────────────────────────────────────
+
+
+class TestSyncMcpDesiredState:
+    """sync_mcp_desired_state: projection contract + delegation to the batch entrypoint.
+
+    The fan-out itself lives in ``MCPSyncService.sync_mcp_details_for_bot`` (which
+    resolves the device once for the whole batch); what matters here is that the
+    desired state is handed over in one call and that a failed delivery still
+    withholds the allow-list declaration.
+    """
+
+    def _make_svc(self, *, delivery=None):
+        from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
+
+        with patch("agentclaw.community.core.skill_center.services.skill_set_service.WorkspacePathFactory"):
+            svc = SkillSetService(
+                skill_repo=MagicMock(),
+                skill_set_repo=MagicMock(),
+                mcp_center=MagicMock(),
+                mcp_config_service=MagicMock(),
+                skill_service=MagicMock(),
+                bot_repo=MagicMock(),
+                path_factory=MagicMock(),
+            )
+        svc.bot_id = "bot1"
+        svc.user_id = "user1"
+        svc.entity_id = "staff_user1"
+        svc.engine_type = "moltis"
+        svc.mcp_center = MagicMock()
+        svc.mcp_center.get_mcp_detail.side_effect = lambda code: {"server_code": code}
+        svc._mcp_sync_service = MagicMock()
+        svc._mcp_sync_service.sync_mcp_details_for_bot = AsyncMock(
+            return_value=delivery if delivery is not None else {"success": True}
+        )
+
+        plugin = MagicMock()
+        plugin.sync_all_mcp_servers = MagicMock(return_value=True)
+        svc._resolver = MagicMock()
+        svc._device_sync_dispatcher = MagicMock()
+        svc._device_sync_dispatcher.dispatch.return_value = plugin
+        return svc, plugin
+
+    @pytest.mark.asyncio
+    async def test_whole_desired_state_is_delivered_in_one_call(self):
+        """One batch call, not one per MCP — that is what lets the device be
+        resolved once instead of once per entry."""
+        svc, plugin = self._make_svc()
+        codes = {"mcp.s2", "mcp.s0", "mcp.s1"}
+
+        assert await svc.sync_mcp_desired_state(server_codes=codes) is True
+
+        svc._mcp_sync_service.sync_mcp_details_for_bot.assert_awaited_once_with(
+            user_id="user1",
+            mcp_entries=[{"server_code": code} for code in sorted(codes)],
+            bot_id="bot1",
+            entity_id="staff_user1",
+            engine_type="moltis",
+        )
+        # The allow-list declaration still carries every entry, in sorted order.
+        plugin.sync_all_mcp_servers.assert_called_once_with(
+            [{"server_code": code} for code in sorted(codes)]
+        )
+
+    @pytest.mark.asyncio
+    async def test_failed_delivery_withholds_the_allow_list_declaration(self):
+        svc, plugin = self._make_svc(
+            delivery={"success": False, "error": "bot=bot1 推送失败: mcp.s1"}
+        )
+
+        result = await svc.sync_mcp_desired_state(server_codes={"mcp.s0", "mcp.s1"})
+
+        assert result is False
+        plugin.sync_all_mcp_servers.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_raising_delivery_fails_the_projection_without_escaping(self):
+        svc, plugin = self._make_svc()
+        svc._mcp_sync_service.sync_mcp_details_for_bot = AsyncMock(
+            side_effect=RuntimeError("device refused the payload")
+        )
+
+        result = await svc.sync_mcp_desired_state(server_codes={"mcp.s0"})
+
+        assert result is False
+        plugin.sync_all_mcp_servers.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_missing_mcp_center_detail_skips_delivery_entirely(self):
+        svc, plugin = self._make_svc()
+        svc.mcp_center.get_mcp_detail.side_effect = (
+            lambda code: None if code == "mcp.s1" else {"server_code": code}
+        )
+
+        result = await svc.sync_mcp_desired_state(server_codes={"mcp.s0", "mcp.s1"})
+
+        assert result is False
+        svc._mcp_sync_service.sync_mcp_details_for_bot.assert_not_awaited()
+        plugin.sync_all_mcp_servers.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_empty_desired_state_still_declares_the_empty_allow_list(self):
+        svc, plugin = self._make_svc()
+
+        assert await svc.sync_mcp_desired_state(server_codes=set()) is True
+
+        plugin.sync_all_mcp_servers.assert_called_once_with([])
+
+    @pytest.mark.asyncio
+    async def test_blocking_device_calls_do_not_run_on_the_event_loop(self):
+        """resolve_for_bot and sync_all_mcp_servers are blocking HTTP; running
+        them inline would stall every other task on this worker."""
+        import threading
+
+        loop_thread = threading.get_ident()
+        seen: dict[str, int] = {}
+
+        svc, plugin = self._make_svc()
+        svc._resolver.resolve_for_bot.side_effect = (
+            lambda *a, **k: seen.setdefault("resolve", threading.get_ident())
+        )
+        plugin.sync_all_mcp_servers.side_effect = (
+            lambda *a, **k: seen.setdefault("declare", threading.get_ident()) and True
+        )
+
+        await svc.sync_mcp_desired_state(server_codes={"mcp.s0"})
+
+        assert seen["resolve"] != loop_thread
+        assert seen["declare"] != loop_thread

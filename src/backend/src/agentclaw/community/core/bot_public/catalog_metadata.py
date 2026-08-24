@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, Sequence, runtime_checkable
+from typing import Any, Protocol, Sequence, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -25,10 +25,17 @@ class BotCatalogCaller:
 
 @dataclass(frozen=True)
 class BotCatalogMetadata:
-    """Membership-only metadata returned by the catalog metadata port."""
+    """BCS metadata retained for one catalog Bot after transport validation."""
 
     address: BotCatalogAddress
     kind: str
+    is_friend: bool | None = None
+    visibility: Any = None
+    is_online: Any = None
+    actor_kind: str | None = None
+    friend_ext: Any = None
+    friend_check_in_strategy: Any = None
+    user_visibility: Any = None
 
 
 class BotCatalogMetadataUnavailableError(Exception):

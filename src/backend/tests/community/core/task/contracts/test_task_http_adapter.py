@@ -3,12 +3,16 @@
 独立 TestClient + 小型 test injector(仅 TaskModule + BotDiscoverServiceProtocol stub),
 不拉起 singlebox 全栈。验证:
 - POST /openapi/v1/collaboration/tasks/execute 返 TaskOpResultDTO(success/run_id)
+- GET  /openapi/v1/collaboration/tasks/list 返持久化 TaskInfoRecord(含 task_spec/owner/config)
 - GET  /openapi/v1/collaboration/tasks/dashboard 返 TaskExecutionGraphDTO(含节点/状态)
 - POST /api/v1/collaboration/tasks/callback/report 返 {ok:true} 且翻态(N_overview PASS → DONE)
 
 不验真实 plan/dispatch body(已在 test_executor_e2e 覆盖);此测聚焦 HTTP 边界协议正确。
 """
 from __future__ import annotations
+
+from dataclasses import replace
+from datetime import datetime
 
 import pytest
 from fastapi import FastAPI
@@ -18,12 +22,57 @@ from injector import Injector, Module, provider, singleton
 
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.core.repository.protocols.task import TaskInfoRepositoryProtocol
+from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.principal import require_user_id
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
 from agentclaw.community.adapters.http.task.router import router as task_internal_router
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, Status, TaskInfo, TaskSpec,
 )
+from agentclaw.community.core.task.repository.types import TaskInfoRecord
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+
+
+class _MemoryTaskInfoRepository:
+    def __init__(self) -> None:
+        self._records: dict[str, TaskInfoRecord] = {}
+
+    def insert(self, record: TaskInfoRecord) -> TaskInfoRecord:
+        now = datetime(2026, 8, 22, 10, 0, 0)
+        stored = replace(record, id=len(self._records) + 1,
+                         gmt_create=now, gmt_modified=now)
+        self._records[record.task_id] = stored
+        return stored
+
+    def get(self, task_id: str) -> TaskInfoRecord | None:
+        return self._records.get(task_id)
+
+    def update_status(self, task_id: str, status: Status) -> bool:
+        record = self._records.get(task_id)
+        if record is None:
+            return False
+        self._records[task_id] = replace(record, status=status)
+        return True
+
+    def list_records(
+        self,
+        status: Status | None = None,
+        *,
+        owner_user_id: str | None = None,
+    ) -> list[TaskInfoRecord]:
+        records = list(self._records.values())
+        if status is not None:
+            records = [record for record in records if record.status is status]
+        if owner_user_id is not None:
+            records = [
+                record for record in records
+                if record.owner_user_id == owner_user_id
+            ]
+        return sorted(records, key=lambda record: record.id, reverse=True)
+
+    def list_by_status(self, status: Status, **_kwargs) -> list[TaskInfoRecord]:
+        return self.list_records(status)
 
 
 class _StubDiscoverModule(Module):
@@ -48,6 +97,11 @@ class _StubDiscoverModule(Module):
                 return {"total": 0, "items": []}
         return _B()  # type: ignore[return-value]
 
+    @singleton
+    @provider
+    def task_info_repo(self) -> TaskInfoRepositoryProtocol:
+        return _MemoryTaskInfoRepository()  # type: ignore[return-value]
+
 
 @pytest.fixture
 def client():
@@ -57,22 +111,33 @@ def client():
     app = FastAPI()
     app.include_router(task_router)
     app.include_router(task_internal_router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "owner_user"}
+    app.dependency_overrides[require_user_id] = lambda: "owner_user"
     attach_injector(app, injector)
     return TestClient(app), injector
 
 
-def _task_info_dict(task_id="t_http") -> dict:
+def _task_info_dict() -> dict:
+    """新扁平契约(TaskInfoRequestDTO):task_id 服务端生成,不在请求体。"""
     return {
         "task_spec": {
-            "metadata": {"task_id": task_id, "title": "存储尽调", "instruction": "produce DD"},
+            "metadata": {"title": "存储尽调", "instruction": "produce DD"},
             "context": {"background": "存储行业", "extend_props": {}},
             "goal": {"objective": "产出尽调报告",
-                     "acceptances": [{"id": "ac1", "description": "d1"}]},
+                     "acceptances": [{"id": "ac1", "acceptance": "d1"}]},
         },
-        "source_channel_type": "bot",
-        "source_channel_id": "owner_bot",
-        "execution_config": {"MAX_DEPTH": 3, "BBS_MAX_DEPTH": 3},
+        "source_type": "bot",
+        "owner_user_id": "owner_user",
+        "owner_bot_id": "owner_bot",
+        "execution_config": {"task_type": "dynamic", "MAX_DEPTH": 3, "BBS_MAX_DEPTH": 3},
     }
+
+
+def _execute_and_get_id(c) -> str:
+    """POST execute → 返回服务端生成的 task_id(契约:task_id 不在请求体,服务端 uuid4)。"""
+    r = c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
+    assert r.status_code == 200, r.text
+    return r.json()["data"]["task_id"]
 
 
 class TestTaskExecute:
@@ -82,36 +147,95 @@ class TestTaskExecute:
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["code"] == 200000
-        assert body["data"]["task_id"] == "t_http"
+        assert isinstance(body["data"]["task_id"], str) and body["data"]["task_id"]
         assert body["data"]["success"] is True
         assert body["data"]["run_id"] > 0
+
+
+class TestTaskList:
+    def test_list_returns_persisted_task_info_record(self, client):
+        c, _ = client
+        task_id = _execute_and_get_id(c)
+
+        r = c.get("/openapi/v1/collaboration/tasks/list")
+
+        assert r.status_code == 200, r.text
+        records = r.json()["data"]
+        record = next(item for item in records if item["task_id"] == task_id)
+        assert record["source_type"] == "bot"
+        assert record["owner_user_id"] == "owner_user"
+        assert record["owner_bot_id"] == "owner_bot"
+        assert record["task_spec"]["metadata"]["task_id"] == task_id
+        assert record["task_spec"]["goal"]["objective"] == "产出尽调报告"
+        assert record["execution_config"]["task_type"] == "dynamic"
+        assert record["status"] == "DEFINED"
+        assert record["gmt_create"] is not None
+
+    def test_public_list_is_scoped_to_authenticated_user(self, client):
+        c, inj = client
+        repo = inj.get(TaskInfoRepositoryProtocol)
+        repo.insert(TaskInfoRecord(
+            id=0,
+            task_id="other-user-task",
+            source_type="bot",
+            owner_user_id="other-user",
+            owner_bot_id="other-bot",
+            execution_config={"task_type": "dynamic"},
+            task_spec={"metadata": {"task_id": "other-user-task"}},
+            status=Status.PENDING,
+        ))
+
+        r = c.get("/openapi/v1/collaboration/tasks/list")
+
+        assert r.status_code == 200, r.text
+        assert all(
+            record["owner_user_id"] == "owner_user"
+            for record in r.json()["data"]
+        )
+
+    def test_list_filters_persisted_status(self, client):
+        c, _ = client
+        task_id = _execute_and_get_id(c)
+
+        pending = c.get(
+            "/openapi/v1/collaboration/tasks/list",
+            params={"status": Status.PENDING.value},
+        )
+        done = c.get(
+            "/openapi/v1/collaboration/tasks/list",
+            params={"status": Status.DONE.value},
+        )
+
+        assert any(item["task_id"] == task_id for item in pending.json()["data"])
+        assert all(item["task_id"] != task_id for item in done.json()["data"])
 
 
 class TestTaskDashboard:
     def test_dashboard_returns_graph_structure(self, client):
         c, _ = client
-        c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
-        r = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": "t_http"})
+        task_id = _execute_and_get_id(c)
+        r = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": task_id})
         assert r.status_code == 200, r.text
         body = r.json()["data"]
         # stub 路径无 owner bot → 无法规划 → 根 gap 拆不出 → 图 HUNG(语义正确:无规划端口不假 done)
-        assert body["status"] == Status.HUNG.value
-        assert any(n["node_id"] == "t_http" for n in body["tasks"])
-        # 根节点 task_spec 字段透传
-        root = next(n for n in body["tasks"] if n["node_id"] == "t_http")
-        assert root["task_spec"]["metadata"]["task_id"] == "t_http"
+        assert body["status"] == "REVIEWING"
+        assert any(n["node_id"] == task_id for n in body["tasks"])
+        # 根节点 task_spec 字段透传(task_id 服务端回填进 metadata)
+        root = next(n for n in body["tasks"] if n["node_id"] == task_id)
+        assert root["status"] == "REVIEWING"
+        assert root["task_spec"]["metadata"]["task_id"] == task_id
         assert root["task_spec"]["goal"]["objective"] == "产出尽调报告"
         # include_action_log 默认关:action_log 不返回(空),避免常规查询 payload 膨胀
         assert root["run_info"]["action_log"] == []
 
     def test_dashboard_include_action_log_populates(self, client):
         c, _ = client
-        c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
+        task_id = _execute_and_get_id(c)
         r = c.get("/openapi/v1/collaboration/tasks/dashboard",
-                  params={"task_id": "t_http", "include_action_log": "true"})
+                  params={"task_id": task_id, "include_action_log": "true"})
         assert r.status_code == 200, r.text
         body = r.json()["data"]
-        root = next(n for n in body["tasks"] if n["node_id"] == "t_http")
+        root = next(n for n in body["tasks"] if n["node_id"] == task_id)
         # 根经历 plan(无规划端口 has_gap=T,children=[])→ HUNG:至少 1 条 plan + 1 条 transition
         actions = [e["action"] for e in root["run_info"]["action_log"]]
         assert "plan" in actions
@@ -133,7 +257,7 @@ class TestTaskCallbackReport:
         graph_svc.initialize_graph(TaskInfo(
             task_spec=TaskSpec(Metadata("t_http", "T", "i"), Context("bg"),
                                Goal("o", [AcceptanceCriteria("a1", "d1")])),
-            source_channel_type="bot", source_channel_id="owner_bot", execution_config={}))
+            source_type="bot", owner_bot_id="owner_bot", execution_config={}))
         # 手动建一个 RUNNING 子节点(backdoor:直接调 graph_svc),模拟引擎已派发
         from agentclaw.community.core.task.domain.models import TaskNode, RuntimeInfo
         child = TaskNode(
@@ -156,6 +280,14 @@ class TestTaskCallbackReport:
         g = graph_svc.query_task_dashboard("t_http")
         n = next(n for n in g.tasks if n.node_id == "N_http")
         assert n.status == Status.DONE, f"回投未翻 DONE: {n.status}"
+        # dashboard DTO 透传 relations 分解树:http 边界 graph_to_dto 不再丢 relations(回归 guard)
+        d = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": "t_http"})
+        assert d.status_code == 200, d.text
+        rels = d.json()["data"]["relations"]
+        assert rels, "dashboard 未返回 relations"
+        assert rels[0]["src_id"] == "t_http"
+        assert rels[0]["dst_id"] == "N_http"
+        assert rels[0]["type"] == "DEPENDENCY"
 
 
 class TestProtocolConformance:

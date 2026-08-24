@@ -135,8 +135,8 @@ def _execute_body(owner_id: str) -> dict:
                 ],
             },
         },
-        "source_channel_type": "bot",
-        "source_channel_id": owner_id,
+        "source_type": "bot",
+        "owner_bot_id": owner_id,
         # MAX_DEPTH=1:只展一层,depth-1 miss 直走 miss_depth_exhausted 可恢复(不 re-plan 嵌套);
         # 规划出 1~3 个扁平子任务即停,避免拆成太多。
         "execution_config": {"MAX_DEPTH": 1, "BBS_MAX_DEPTH": _BBS_MAX_DEPTH},

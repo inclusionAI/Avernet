@@ -1,7 +1,7 @@
 """TaskSummary.bbs_mode 直出测试(Task 1)。
 
-校验 BBS-relay 升级后,``TaskSummary`` 透出 ``bbs_mode`` 标志(``extend_props["bbs_mode"]``
-投影),供 BBS-relay bot 经 ``GET /openapi/v1/collaboration/tasks/list`` 发现被升级的任务。纯加字段,不动状态机。
+校验 BBS-relay 升级后,图服务内部 ``TaskSummary`` 投影仍能透出 ``bbs_mode`` 标志。
+HTTP ``/list`` 已改为返回持久化 ``TaskInfoRecord``;BBS 调用方经 ``/dashboard`` 读取图级标志。
 """
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
@@ -22,8 +22,8 @@ def _task_info(task_id: str = "t1") -> TaskInfo:
             context=Context(background="", extend_props={}),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
-        source_channel_type="bot",
-        source_channel_id="b1",
+        source_type="bot",
+        owner_bot_id="b1",
         execution_config={},
     )
 

@@ -32,6 +32,9 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
 )
+from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
+    LegacySkillSetScope,
+)
 
 
 class _Database:
@@ -65,6 +68,39 @@ class _InstallationRecorder:
     def install(self, **kwargs) -> bool:
         self.calls.append(kwargs)
         return True
+
+
+def test_legacy_scope_resolution_returns_only_ordinary_set_address() -> None:
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        ordinary = SkillSet(
+            name="ordinary",
+            user_id="owner",
+            bolt_id="persisted-bot",
+            engine_type="claude_code",
+            env="dev",
+        )
+        default = SkillSet(
+            name="default",
+            user_id="",
+            bolt_id="",
+            engine_type="openclaw",
+            is_default=True,
+            env="dev",
+        )
+        session.add_all([ordinary, default])
+        session.flush()
+        ordinary_id = str(ordinary.id)
+        default_id = str(default.id)
+
+    repository = SkillSetControlPlaneRepository(db)
+
+    assert repository.resolve_legacy_set_scope(
+        set_id=ordinary_id
+    ) == LegacySkillSetScope(owner_id="owner", bot_id="persisted-bot")
+    assert repository.resolve_legacy_set_scope(set_id=default_id) is None
+    with pytest.raises(SkillSetControlPlaneNotFoundError):
+        repository.resolve_legacy_set_scope(set_id="999999")
 
 
 def test_list_sets_is_scoped_to_exact_owner_for_shared_default_bot_id():

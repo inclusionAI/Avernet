@@ -31,7 +31,7 @@ from typing import Any
 import httpx
 import websockets
 
-from agentclaw.community.core.task.task_runner.integration.ports import OpenApiBotPort
+from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult, OpenApiBotPort
 from agentclaw.community.core.task.task_runner.integration.protocols import BotPublicServiceProtocol
 
 _WS_PATH = "/api/openclaw/ws"
@@ -92,17 +92,18 @@ class SingleboxEngineAdapter(OpenApiBotPort):  # pragma: no cover — live singl
         """singlebox 无 api-key grant:仅预解析并缓存 bot → 引擎 target(等同"确保可达")。"""
         await self._resolve_target(bot_id)
 
-    async def send_message(self, *, bot_id: str, message: str, metadata: dict[str, Any]) -> str:
-        """fire ``chat.send``:解析 target+建 session → 后台 WS 收帧存 ``_runs`` → 立即返 run_id。
+    async def send_message(self, *, bot_id: str, message: str, metadata: dict[str, Any]) -> BotSendResult:
+        """fire ``chat.send``:解析 target+建 session → 后台 WS 收帧存 ``_runs`` → 立即返 BotSendResult。
 
         解析/建会话失败不抛(避免打断 executor gather):落 FAILED 进 ``_runs``,poller 收口。
+        run_id 为 poller 关联句柄,session_id 透传 WS session_key(workflow task_type 路径用)。
         """
         run_id = f"ws_{uuid.uuid4().hex[:8]}"
         resolved = await self._resolve_roundtrip_inputs(bot_id)
         if isinstance(resolved, str):  # 错误信息
             with self._lock:
                 self._runs[run_id] = {"status": "FAILED", "error": resolved}
-            return run_id
+            return BotSendResult(run_id=run_id, session_id=None)
         target, session_key = resolved
         with self._lock:
             self._runs[run_id] = {"status": "RUNNING"}
@@ -112,7 +113,7 @@ class SingleboxEngineAdapter(OpenApiBotPort):  # pragma: no cover — live singl
         with self._lock:
             self._collectors[run_id] = future
         future.add_done_callback(lambda done: self._collector_done(run_id, done))
-        return run_id
+        return BotSendResult(run_id=run_id, session_id=session_key)
 
     async def get_run(self, run_id: str) -> dict[str, Any]:
         """轮询 run 状态:未终态返 RUNNING;终态返 {status, result{content}, error}(对齐 BaaS)。"""
@@ -458,6 +459,64 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
             raise RuntimeError(
                 f"set_bcs_visibility failed (PUT {bcs_url}/bots/{bot_uuid}/visibility "
                 f"visibility={visibility}): {r.status_code} {r.text[:200]}"
+            )
+        return r.json() if r.text else {}
+
+    async def set_bbs_task_dream_mode(self, bot_id: str, enabled: bool = True) -> dict[str, Any]:
+        """开启单个 bot 的 BCS ``task_dream_mode``(BBS 主动 bid roster 入选开关)。
+
+        唯一 setter 是 principal-gated 的 BCS openapi ``PATCH /openapi/v1/collaboration/bots/{bot_id}``
+        (``bcs-api-http`` openapi v1,经 ``GatewayPrincipalTokenVerifier`` 校验)。``task_dream_mode`` 的
+        读写与 ``set_bcs_visibility`` 不同:visibility 走 bcs-http mock-auth 面,无 token;dream-mode 只在
+        openapi v1 面,必须带 gateway principal token。
+
+        singlebox launcher 已设 ``AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE``(默认
+        ``avernet-dev-signing-key-NOT-FOR-PROD``,见 ``scripts/modules/bcs.sh:884`` /
+        ``scripts/modules/backend.sh:86``)。本方法自铸一个 gateway principal token:
+        HS256 / iss=gateway / aud=bcs / kid=bare / principals=[user(subject.id=user_id)]。
+        token claim shape 对齐 BCS ``wire.rs:GatewayUserPrincipal``(与 Avernet gateway_principal 共享
+        gateway 签发契约)。user_id 即 bot 的 owner staff_no(创建时 ``entity_id=user_id``),经 BCS
+        ``authorize_bot_management`` 的 owner 匹配(``caller_actor_id == created_by``)放行。
+
+        bot_uuid=``{bot_id}:{user_id}``(同 ``set_bcs_visibility``)。PATCH 只传 task_dream_mode
+        (BCS ``UpdateBotRequest`` 各字段 Option,仅更新传入项)。非 2xx 抛错带 status/body,
+        便于定位 principal 形状 / owner 匹配问题(若 403 可调 principal subject.id)。
+        """
+        import time as _t
+
+        import jwt  # PyJWT(Avernet gateway_principal verifier 同库;HS256)
+
+        bcs_url = os.environ.get("BCS_API_BASE_URL", "http://127.0.0.1:21000").rstrip("/")
+        key = os.environ.get(
+            "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE", "avernet-dev-signing-key-NOT-FOR-PROD")
+        bot_uuid = f"{bot_id}:{self._user_id}"
+        now = int(_t.time())
+        claims: dict[str, Any] = {
+            "iss": "gateway", "aud": "bcs", "iat": now, "exp": now + 300,
+            "principals": [{
+                "type": "user",
+                "subject": {
+                    "id": self._user_id, "username": self._user_id,
+                    "display_name": "singlebox-e2e", "full_name": None,
+                    "tenant_id": "default",
+                },
+            }],
+        }
+        token = jwt.encode(claims, key, algorithm="HS256", headers={"kid": "bare"})
+        r = await self._http.patch(
+            f"{bcs_url}/openapi/v1/collaboration/bots/{bot_uuid}",
+            headers={
+                "accept": "application/json",
+                "content-type": "application/json",
+                "Authorization": f"Bearer {token}",
+            },
+            json={"task_dream_mode": enabled},
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(
+                f"set_bbs_task_dream_mode failed (PATCH "
+                f"{bcs_url}/openapi/v1/collaboration/bots/{bot_uuid} "
+                f"task_dream_mode={enabled}): {r.status_code} {r.text[:300]}"
             )
         return r.json() if r.text else {}
 

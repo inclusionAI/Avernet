@@ -16,10 +16,12 @@ from fastapi_injector import attach_injector
 from fastapi.testclient import TestClient
 from injector import Injector, Module, provider, singleton
 
+from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.task.router import router as task_internal_router
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.core.repository.protocols.task import TaskInfoRepositoryProtocol
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
@@ -55,6 +57,11 @@ class _StubDiscoverModule(Module):
 
         return _B()  # type: ignore[return-value]
 
+    @provider
+    def task_info_repo(self) -> TaskInfoRepositoryProtocol:
+        # 路由契约测不验持久化(execute 未走);facade 构造需 protocol 绑定 → None 跳过 persist。
+        return None  # type: ignore[return-value]
+
 
 @pytest.fixture
 def client():
@@ -65,6 +72,7 @@ def client():
     app = FastAPI()
     app.include_router(task_router)
     app.include_router(task_internal_router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "bbs-test-user"}
     attach_injector(app, injector)
     return TestClient(app), injector
 
@@ -83,8 +91,8 @@ def _bbs_task_planning(injector: Injector, task_id: str) -> None:
             context=Context(background="", extend_props={}),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
-        source_channel_type="bot",
-        source_channel_id="b1",
+        source_type="bot",
+        owner_bot_id="b1",
         execution_config={},
     ))
     graph_svc.update_task_graph_info(task_id, TaskGraphPatch(extend_props_patch={"bbs_mode": True}))

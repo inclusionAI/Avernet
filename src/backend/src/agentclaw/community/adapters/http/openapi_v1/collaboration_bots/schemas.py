@@ -14,7 +14,7 @@ class ViewDept(BaseModel):
 
 
 class BcsPublicRequest(BaseModel):
-    """New-version publish body (backend route POST /openapi/v1/bots/{bot_uuid}/public-bcs)."""
+    """New-version publish body (POST /openapi/v1/collaboration/bots/{bot_uuid}/public)."""
 
     public_scope: Literal["user", "agent"] = Field(
         description=(

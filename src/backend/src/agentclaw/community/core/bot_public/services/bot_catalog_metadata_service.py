@@ -47,7 +47,7 @@ class BcsBotCatalogMetadataService:
             # COSEC: The injected BCS client supplies the configured upstream host and
             # this constant relative path prevents request data from selecting a target.
             response = self._http.get(
-                "/v2/bots/search", params=params, timeout=self._timeout
+                "/bots/search", params=params, timeout=self._timeout
             )
             response.raise_for_status()
             payload = response.json()
@@ -64,8 +64,27 @@ class BcsBotCatalogMetadataService:
                 address = self._address_from_bot_uuid(item.get("bot_uuid"))
                 if address is None or address in seen:
                     raise BotCatalogMetadataUnavailableError()
+                is_friend = item.get("is_friend")
+                # COSEC: Do not coerce an invalid upstream relationship state into
+                # a caller-visible boolean value.
+                if "is_friend" in item and not isinstance(is_friend, bool):
+                    raise BotCatalogMetadataUnavailableError()
                 seen.add(address)
-                metadata.append(BotCatalogMetadata(address=address, kind="bot"))
+                metadata.append(
+                    BotCatalogMetadata(
+                        address=address,
+                        kind="bot",
+                        is_friend=is_friend,
+                        visibility=item.get("visibility"),
+                        is_online=item.get("is_online"),
+                        actor_kind=item.get("actor_kind"),
+                        friend_ext=item.get("friend_ext"),
+                        friend_check_in_strategy=item.get(
+                            "friend_check_in_strategy"
+                        ),
+                        user_visibility=item.get("user_visibility"),
+                    )
+                )
         except BotCatalogMetadataUnavailableError:
             logger.warning(
                 "[BcsBotCatalogMetadataService.search] request_id=%s "

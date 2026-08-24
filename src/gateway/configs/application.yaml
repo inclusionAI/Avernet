@@ -514,18 +514,6 @@ user_config:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
-      caller:
-        server: backend
-        schema:
-          source: file
-          path: schemas/bots.openapi.json
-          refresh_seconds: 300
-      dept:
-        server: backend
-        schema:
-          source: file
-          path: schemas/bots.openapi.json
-          refresh_seconds: 300
       repository-skills:
         match: /openapi/v1/bots/skills/**
         server: backend

@@ -26,6 +26,7 @@ from agentclaw.community.core.runtime_binding.service import RuntimeBindingResol
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
+from tests.community.factories.bot_collaborator import make_bot
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -127,6 +128,11 @@ def _seed_verifier(_world) -> None:
 
 def _seed_happy_services(world) -> None:
     _seed_verifier(world)
+    # The six session-file operations declare ``Check(MEMBER)``, so
+    # ``bot_access`` resolves ``(bot_id, owner_id)`` against the real
+    # ``BotRepository`` before the handler runs. The relay override below
+    # answers without a Bot row; the gate does not, and refuses.
+    make_bot(world, bot_id=_BOT_ID, owner_id=_OWNER)
     record = _record()
     async def resolve_bot(_self, *_args, **_kwargs):
         return BotFacts(

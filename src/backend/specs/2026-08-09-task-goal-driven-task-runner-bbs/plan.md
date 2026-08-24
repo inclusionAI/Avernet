@@ -10,6 +10,10 @@
 
 **Spec:** `src/backend/specs/2026-08-09-task-goal-driven-task-runner-bbs/spec.md`(权威 WHAT/WHY;本计划为其 HOW delta,声明不破坏上游 `2026-08-09-task-goal-driven-execution-framework` 契约)
 
+> **2026-08-22 读契约修订:** `/list` 改为返回持久化 `TaskInfoRecord`;BBS skill 从 list
+> 枚举 `task_id`,再经 `/dashboard` 的 `extend_props.bbs_mode` 过滤。下文旧的
+> `TaskSummary.bbs_mode` 直出步骤由此修订覆盖。
+
 ## Global Constraints
 
 (逐字引自 spec §2.3 / §7.3 / §13.3,每个 task 隐含遵守)
@@ -72,7 +76,7 @@ def _task_info(task_id="t1"):
     return TaskInfo(task_spec=TaskSpec(metadata=Metadata(task_id=task_id, title="t", instruction="i"),
                     context=Context(background="", extend_props={}),
                     goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")])),
-                    source_channel_type="bot", source_channel_id="b1", execution_config={})
+                    source_type="bot", owner_bot_id="b1", execution_config={})
 
 def test_summary_exposes_bbs_mode_flag():
     svc = TaskGraphService()
@@ -154,7 +158,7 @@ def _ti(tid="c1"):
     return TaskInfo(task_spec=TaskSpec(metadata=Metadata(task_id=tid, title="t", instruction="i"),
                     context=Context(background="", extend_props={}),
                     goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")])),
-                    source_channel_type="bot", source_channel_id="b1", execution_config={})
+                    source_type="bot", owner_bot_id="b1", execution_config={})
 
 def test_bbs_max_depth_default():
     svc = TaskGraphService()
@@ -226,7 +230,7 @@ def _ti(tid="p1"):
     return TaskInfo(task_spec=TaskSpec(metadata=Metadata(task_id=tid, title="t", instruction="i"),
                     context=Context(background="", extend_props={}),
                     goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")])),
-                    source_channel_type="bot", source_channel_id="b1", execution_config={})
+                    source_type="bot", owner_bot_id="b1", execution_config={})
 
 def _bbs_task(svc, tid):
     svc.initialize_graph(_ti(tid))
@@ -342,7 +346,7 @@ def _bbs_task(task_graph_service, task_service_protocol):
     ti = TaskInfo(task_spec=TaskSpec(metadata=Metadata(task_id="r1", title="t", instruction="i"),
                   context=Context(background="", extend_props={}),
                   goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")])),
-                  source_channel_type="bot", source_channel_id="b1", execution_config={})
+                  source_type="bot", owner_bot_id="b1", execution_config={})
     task_graph_service.initialize_graph(ti)
     task_graph_service.update_task_graph_info("r1", TaskGraphPatch(extend_props_patch={"bbs_mode": True}))
 
@@ -426,7 +430,7 @@ def _ti(tid):
     return TaskInfo(task_spec=TaskSpec(metadata=Metadata(task_id=tid, title="t", instruction="i"),
                     context=Context(background="", extend_props={}),
                     goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")])),
-                    source_channel_type="bot", source_channel_id="b1", execution_config={})
+                    source_type="bot", owner_bot_id="b1", execution_config={})
 
 def _scoped_spec():
     return TaskSpec(metadata=Metadata(task_id=f"bbs-{uuid.uuid4().hex[:6]}", title="bbs-scoped", instruction="do part"),

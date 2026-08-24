@@ -6,6 +6,6 @@ out of the collaboration→bcs namespace onto the backend. Auth (grant /
 admission) is deferred for now: the handler identifies the caller but applies
 no bot-grant check.
 """
-from .router import router
+from .router import public_router
 
-__all__ = ["router"]
+__all__ = ["public_router"]

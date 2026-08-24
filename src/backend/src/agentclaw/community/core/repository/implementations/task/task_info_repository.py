@@ -60,6 +60,24 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             )
         return count > 0
 
+    def list_records(
+        self,
+        status: Optional[Status] = None,
+        *,
+        owner_user_id: Optional[str] = None,
+    ) -> list[TaskInfoRecord]:
+        with self._db.orm_session() as db:
+            q = db.query(self._model)
+            if status is not None:
+                q = q.filter(self._model.status == status.value)
+            if owner_user_id is not None:
+                q = q.filter(self._model.owner_user_id == owner_user_id)
+            rows = q.order_by(
+                self._model.gmt_modified.desc(),
+                self._model.id.desc(),
+            ).all()
+            return [row.to_record() for row in rows]
+
     def list_by_status(
         self,
         status: Status,

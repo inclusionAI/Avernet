@@ -4,6 +4,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
+
 
 class _DoubleOpenApiBot:
     """进程内模拟 grant/send/poll(不经网络)。
@@ -28,13 +30,13 @@ class _DoubleOpenApiBot:
     async def ensure_grant(self, bot_id: str) -> None:
         return None
 
-    async def send_message(self, *, bot_id: str, message: str, metadata: dict) -> str:
+    async def send_message(self, *, bot_id: str, message: str, metadata: dict) -> BotSendResult:
         rid = f"mid_{uuid.uuid4().hex[:8]}"
         init_status = "RUNNING" if self._poll_mode else self._final
         self._runs[rid] = {"status": init_status, "result": {"content": self._content}, "error": self._error}
         if self._poll_mode:
             self._poll_counts[rid] = 0
-        return rid
+        return BotSendResult(run_id=rid, session_id=None)
 
     async def get_run(self, run_id: str) -> dict[str, Any]:
         run = self._runs.get(run_id, {"status": "RUNNING"})

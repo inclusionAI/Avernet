@@ -34,6 +34,7 @@ class SingleBotHandle:
     bot_id: str
     registered_at: float
     fails: int = 0
+    session_id: str | None = None
 
 
 @dataclass
@@ -107,9 +108,10 @@ class TaskExecutorResultPoller:
             return
         if data is not None:
             handle.fails = 0
+            _result = (data.data.get("result") if isinstance(data.data, dict) else None) or {}
             logger.info("[poller] %s 收终态 success=%s data=%s",
-                        handle.loop_task_id, data.result.get("success"),
-                        str(data.result.get("data"))[:80])
+                        handle.loop_task_id, _result.get("success"),
+                        str(_result.get("data"))[:80])
             await self._report(data, handle)
 
     async def _poll_terminal(self, handle) -> TaskCallbackData | None:
@@ -145,11 +147,13 @@ class TaskExecutorResultPoller:
             logger.warning("[poller] %s cancel_run failed: %s", handle.loop_task_id, exc)
 
     def _exec_error(self, handle, reason: str) -> TaskCallbackData:
-        return TaskCallbackData(
-            loop_task_id=handle.loop_task_id,
-            workflow_type="single_bot" if isinstance(handle, SingleBotHandle) else "bcn_coop_group",
-            workflow_id=0, instance_id=0, result={"success": False, "exec_error": reason},
-        )
+        return TaskCallbackData(data={
+            "loop_task_id": handle.loop_task_id,
+            "workflow_type": "single_bot" if isinstance(handle, SingleBotHandle) else "bcn_coop_group",
+            "workflow_id": 0,
+            "instance_id": 0,
+            "result": {"success": False, "exec_error": reason},
+        })
 
     async def _poll_once(self) -> list[TaskCallbackData]:
         await self._poll_all_once()

@@ -2,7 +2,7 @@
 
 POST /openapi/v1/collaboration/tasks/execute   — 提交任务(delegate TaskServiceProtocol.execute)
 GET  /openapi/v1/collaboration/tasks/dashboard  — 查任务图(delegate TaskServiceProtocol.get_task_dashboard)
-GET  /openapi/v1/collaboration/tasks/list       — 列任务摘要(delegate TaskServiceProtocol.list_tasks)
+GET  /openapi/v1/collaboration/tasks/list       — 列持久化任务记录(delegate TaskServiceProtocol.list_tasks)
 
 前端公开面经 gateway spanner 鉴权(``/openapi/v1/collaboration/**`` → user+app required)。内部接口
 (回投 / bbs 接力 / 任务发现阶段)见 ``adapters/http/task/``(前缀 ``/api/v1/collaboration/tasks``,不经 spanner)。
@@ -14,19 +14,26 @@ GET  /openapi/v1/collaboration/tasks/list       — 列任务摘要(delegate Tas
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from typing import Annotated
 
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, USER_SCOPED_403
+from agentclaw.community.adapters.http.openapi_v1.dependencies import (
+    Principal,
+    require_principal,
+)
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
 from agentclaw.community.adapters.http.task.schemas import (
     TaskExecutionGraphDTO,
-    TaskInfoDTO,
+    TaskInfoRecordDTO,
+    TaskInfoRequestDTO,
     TaskOpResultDTO,
-    TaskSummaryDTO,
     graph_to_dto,
     op_result_to_dto,
-    summary_to_dto,
-    task_info_from_dto,
+    task_info_record_to_dto,
+    task_info_request_from_dto,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.models import Status
@@ -35,53 +42,71 @@ from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPI
 
 router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"], route_class=PublicAPIRoute)
 
+# Handler-level principal dependency: ``test_public_routes_require_principal`` walks each
+# route's dependant tree, and the ``@envelope_errors`` wrapper keeps handler-level
+# `Depends(...)` params reachable while the router-level ``_PUBLIC_AUTH`` stays on the
+# mount. Operations with no bot to gate (execute/dashboard) declare this so the route
+# is visibly gated, then ``del principal`` since the identity is not used.
+PrincipalDep = Annotated[Principal, Depends(require_principal)]
+
 
 @router.post("/execute", response_model=Envelope[TaskOpResultDTO])
 @envelope_errors
 async def execute_task(
-    body: TaskInfoDTO,
+    body: TaskInfoRequestDTO,
     request: Request,
+    principal: PrincipalDep,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskOpResultDTO]:
-    """提交执行任务。initialize_graph(根 PENDING) → 编排核 on_execute 首帧推进。
+    """提交执行任务。task_id 服务端生成;持久化 task_info(PENDING)→ initialize_graph → on_execute 首帧。
 
-    幂等:同 task_id 已建图(GraphAlreadyInitializedError)→ ``@envelope_errors`` 映射 409。"""
-    task_info = task_info_from_dto(body)
-    result = await service.execute(task_info)
+    幂等:同 task_id 已建图(GraphAlreadyInitializedError)→ @envelope_errors 映射 409。"""
+    del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
+    task_request = task_info_request_from_dto(body)
+    result = await service.execute(task_request)
     return envelope(op_result_to_dto(result), request)
 
 
 @router.get("/dashboard", response_model=Envelope[TaskExecutionGraphDTO])
 @envelope_errors
 async def get_task_dashboard(
-    task_id: str,
+    task_id: Annotated[str, Query(description="任务ID(创建时签发,bots 列表返回的 task_id)")],
     request: Request,
-    node_id: str | None = None,
-    include_action_log: bool = False,
+    principal: PrincipalDep,
+    node_id: Annotated[
+        str | None, Query(description="子节点ID;指定则只返回该节点的子树投影,缺省返回整图")
+    ] = None,
+    include_action_log: Annotated[
+        bool, Query(description="是否返回各节点动作级历史快照(诊断用,默认关)")
+    ] = False,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskExecutionGraphDTO]:
     """任务执行详情可视化(整图或按 node_id 子树投影),只读。
 
-    ``include_action_log=true`` 时返回各节点动作级历史快照(PLAN/DISPATCH/EXECUTE/VERIFY/RESET/
+    include_action_log=true 时返回各节点动作级历史快照(PLAN/DISPATCH/EXECUTE/VERIFY/RESET/
     TRANSITION 全量 payload),默认关(诊断页开)。任务/节点不存在 → TaskNotFoundError/NodeNotFoundError
-    → ``@envelope_errors`` 映射 404。"""
+    → @envelope_errors 映射 404。"""
+    del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
     graph = service.get_task_dashboard(task_id, node_id)
     return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
 
 
-@router.get("/list", response_model=Envelope[list[TaskSummaryDTO]])
+@router.get("/list", response_model=Envelope[list[TaskInfoRecordDTO]], responses=USER_SCOPED_403)
 @envelope_errors
 async def list_tasks(
     request: Request,
-    status: str | None = None,
+    user_id: UserIdDep,
+    status: Annotated[
+        str | None, Query(description="可选 status 过滤记录状态;非法值 → 400")
+    ] = None,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[list[TaskSummaryDTO]]:
-    """列任务摘要(轻量投影),按 run_id 降序(最新在前)。可选 ``status`` 过滤图级状态。
+) -> Envelope[list[TaskInfoRecordDTO]]:
+    """列持久化 task_info 记录,按更新时间降序。可选 status 过滤记录状态。
 
-    visualization/看板列表视图用;不返回完整图对象。非法 ``status`` 过滤值 → 400
-    (``Status(invalid)`` 会抛 ``ValueError``,router 层先校验;经 ``HTTPException`` → 中央 handler
-    → ``ErrorEnvelope``,非 500)。"""
+    返回完整 TaskInfoRecord 字段(含 task_spec/execution_config/owner)。非法 status → 400
+    (Status(invalid) 会抛 ValueError,router 层先校验;经 HTTPException → 中央 handler
+    → ErrorEnvelope,非 500)。"""
     if status is not None and status not in {s.value for s in Status}:
         raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
-    items = service.list_tasks(status)
-    return envelope([summary_to_dto(s) for s in items], request)
+    items = service.list_tasks(status, owner_user_id=user_id)
+    return envelope([task_info_record_to_dto(item) for item in items], request)

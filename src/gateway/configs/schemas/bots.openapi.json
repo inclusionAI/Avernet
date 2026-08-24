@@ -3617,6 +3617,18 @@
             "description": "Published kind of Bot.",
             "title": "Bot Type"
           },
+          "actor_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "BCS actor kind returned by Catalog Search when available.",
+            "title": "Actor Kind"
+          },
           "description": {
             "description": "Public Bot description.",
             "title": "Description",
@@ -3631,6 +3643,30 @@
             "description": "Public entity identifier for the Bot owner.",
             "title": "Entity Id",
             "type": "string"
+          },
+          "friend_check_in_strategy": {
+            "description": "BCS friend check-in strategy returned by Catalog Search when available.",
+            "title": "Friend Check In Strategy"
+          },
+          "friend_ext": {
+            "description": "BCS friend extension returned by Catalog Search when available.",
+            "title": "Friend Ext"
+          },
+          "is_friend": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Caller-relative friendship state returned by BCS when available.",
+            "title": "Is Friend"
+          },
+          "is_online": {
+            "description": "BCS online state returned by Catalog Search when available.",
+            "title": "Is Online"
           },
           "name": {
             "description": "Public Bot display name.",
@@ -3649,6 +3685,14 @@
             "description": "Public Bot lifecycle status.",
             "title": "Status",
             "type": "string"
+          },
+          "user_visibility": {
+            "description": "BCS user visibility returned by Catalog Search when available.",
+            "title": "User Visibility"
+          },
+          "visibility": {
+            "description": "BCS visibility returned by Catalog Search when available.",
+            "title": "Visibility"
           }
         },
         "required": [
@@ -12992,6 +13036,18 @@
             "description": "Published kind of Bot.",
             "title": "Bot Type"
           },
+          "actor_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "BCS actor kind returned by Catalog Search when available.",
+            "title": "Actor Kind"
+          },
           "description": {
             "description": "Public Bot description.",
             "title": "Description",
@@ -13007,6 +13063,30 @@
             "title": "Entity Id",
             "type": "string"
           },
+          "friend_check_in_strategy": {
+            "description": "BCS friend check-in strategy returned by Catalog Search when available.",
+            "title": "Friend Check In Strategy"
+          },
+          "friend_ext": {
+            "description": "BCS friend extension returned by Catalog Search when available.",
+            "title": "Friend Ext"
+          },
+          "is_friend": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Caller-relative friendship state returned by BCS when available.",
+            "title": "Is Friend"
+          },
+          "is_online": {
+            "description": "BCS online state returned by Catalog Search when available.",
+            "title": "Is Online"
+          },
           "name": {
             "description": "Public Bot display name.",
             "title": "Name",
@@ -13020,6 +13100,14 @@
             "description": "Public Bot lifecycle status.",
             "title": "Status",
             "type": "string"
+          },
+          "user_visibility": {
+            "description": "BCS user visibility returned by Catalog Search when available.",
+            "title": "User Visibility"
+          },
+          "visibility": {
+            "description": "BCS visibility returned by Catalog Search when available.",
+            "title": "Visibility"
           }
         },
         "required": [

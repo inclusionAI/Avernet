@@ -1,4 +1,22 @@
-"""Bot-scoped public Channel CRUD backed by the existing Channel service."""
+"""Bot-scoped public Channel CRUD backed by the existing Channel service.
+
+**Where the two bars live.** A read needs member level on the addressed Bot; a
+write needs admin. Both used to be enforced here — the member half by the bot
+resolve inside ``_authorize``, the admin half by a ``_require_admin`` helper
+each of the four writes called first. The admin half is now declared on the
+route (``Check(PermissionLevel.ADMIN)`` in ``openapi_v1/authorization.py``) and
+enforced by ``bot_access`` before the handler runs, so the helper and its four
+call sites are gone, along with the ``CollaboratorServiceProtocol`` parameter
+they were the only reason for.
+
+``_authorize`` stays, because the handlers do not call it for the check: they
+call it for the **resolved owner**, which every subsequent write is scoped by,
+and for the bot-type refusal the shared engine-runtime gate performs.
+
+``_require_edit_lock`` stays untouched, and its 423 with it. It is not a
+collaborator bar — it asks who currently holds the Bot's draft, which is a
+question about concurrent editing, not about permission.
+"""
 
 from __future__ import annotations
 
@@ -33,12 +51,9 @@ from agentclaw.community.api.channel_service import ChannelServiceProtocol
 from agentclaw.community.api.collaborator_lock_service import (
     CollaboratorLockServiceProtocol,
 )
-from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
-from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
-    BotPermissionError,
 )
 from agentclaw.community.core.channel.errors import (
     ChannelEditLockedError,
@@ -149,25 +164,6 @@ async def _authorize(
         surface="channels",
     )
     return facts.owner_id
-
-
-def _require_admin(
-    collaborators: CollaboratorServiceProtocol,
-    *,
-    bot_id: str,
-    owner_id: str,
-    user_id: str,
-) -> None:
-    result = collaborators.check_collaborator_permission(
-        bot_id=bot_id,
-        owner_id=owner_id,
-        user_id=user_id,
-        required_level=PermissionLevel.ADMIN,
-    )
-    if not bool(result.get("has_permission")):
-        # Public Bot authorization failures are masked as not-found, like the
-        # Bot resolve itself, so the endpoint is not an ownership oracle.
-        raise BotPermissionError("channel write requires Bot admin permission")
 
 
 def _require_edit_lock(
@@ -286,7 +282,6 @@ async def create_channel(
     owner_id: OwnerIdDep,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
-    collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
     aix_config: cfg.AixConfig = Injected(cfg.AixConfig),
 ) -> Envelope[Channel]:
@@ -296,12 +291,6 @@ async def create_channel(
         bot_id=bot_id,
         user_id=user_id,
         owner_id=owner_id,
-    )
-    _require_admin(
-        collaborators,
-        bot_id=bot_id,
-        owner_id=resolved_owner,
-        user_id=user_id,
     )
     _require_edit_lock(
         locks,
@@ -380,7 +369,6 @@ async def update_channel(
     owner_id: OwnerIdDep,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
-    collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
     aix_config: cfg.AixConfig = Injected(cfg.AixConfig),
 ) -> Envelope[Channel]:
@@ -390,12 +378,6 @@ async def update_channel(
         bot_id=bot_id,
         user_id=user_id,
         owner_id=owner_id,
-    )
-    _require_admin(
-        collaborators,
-        bot_id=bot_id,
-        owner_id=resolved_owner,
-        user_id=user_id,
     )
     _require_edit_lock(
         locks,
@@ -458,7 +440,6 @@ async def update_channel_status(
     owner_id: OwnerIdDep,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
-    collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
 ) -> Envelope[Channel]:
     """Activate or deactivate a draft Channel and synchronize its runtime."""
@@ -467,12 +448,6 @@ async def update_channel_status(
         bot_id=bot_id,
         user_id=user_id,
         owner_id=owner_id,
-    )
-    _require_admin(
-        collaborators,
-        bot_id=bot_id,
-        owner_id=resolved_owner,
-        user_id=user_id,
     )
     _require_edit_lock(
         locks,
@@ -511,7 +486,6 @@ async def delete_channel(
     owner_id: OwnerIdDep,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
-    collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
 ) -> Envelope[Deleted]:
     """Deactivate and remove a draft Channel."""
@@ -520,12 +494,6 @@ async def delete_channel(
         bot_id=bot_id,
         user_id=user_id,
         owner_id=owner_id,
-    )
-    _require_admin(
-        collaborators,
-        bot_id=bot_id,
-        owner_id=resolved_owner,
-        user_id=user_id,
     )
     _require_edit_lock(
         locks,

@@ -649,6 +649,7 @@ async fn persistent_control_plane_internal_attributes_round_trip_and_clear_frien
             "attributes",
             "dev",
             BotControlPlanePatch {
+                visibility: Some("private".to_string()),
                 user_visibility: Some(UserVisibility::Private),
                 friend_ext: Some(serde_json::Map::from_iter([(
                     "scope".to_string(),
@@ -661,6 +662,7 @@ async fn persistent_control_plane_internal_attributes_round_trip_and_clear_frien
         .await
         .expect("patch internal attributes")
         .expect("patched row exists");
+    assert_eq!(updated.visibility, "private");
     assert_eq!(updated.user_visibility, UserVisibility::Private);
     assert_eq!(updated.friend_ext["scope"], "engineering");
     assert_eq!(
@@ -669,7 +671,7 @@ async fn persistent_control_plane_internal_attributes_round_trip_and_clear_frien
     );
     let rows = db
         .query(DbStatement::with_params(
-            "SELECT user_visibility, friend_ext, friend_check_in_strategy, \
+            "SELECT visibility, user_visibility, friend_ext, friend_check_in_strategy, \
                     json_extract(bot_info, '$.user_visibility') AS bot_info_user_visibility, \
                     json_extract(bot_info, '$.friend_ext') AS bot_info_friend_ext, \
                     json_extract(bot_info, '$.friend_check_in_strategy') AS bot_info_friend_check_in_strategy \
@@ -679,6 +681,10 @@ async fn persistent_control_plane_internal_attributes_round_trip_and_clear_frien
         .await
         .expect("read physical attributes");
     let row = rows.first().expect("physical attributes row");
+    assert_eq!(
+        db_get_column::<String>(row, "visibility").expect("visibility"),
+        "private"
+    );
     assert_eq!(
         db_get_column::<String>(row, "user_visibility").expect("user visibility"),
         "private"

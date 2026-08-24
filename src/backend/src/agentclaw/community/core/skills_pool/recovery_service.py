@@ -27,19 +27,26 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
 )
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
-from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolSkillRepositoryProtocol,
+)
 from agentclaw.community.core.skills_pool.reconcile_task import (
     SKILLS_POOL_RECONCILE_DEADLINE_SECONDS,
     SKILLS_POOL_RECONCILE_TASK,
     build_skills_pool_reconcile_payload,
 )
-from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolLayoutRepositoryProtocol,
+)
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     SkillLayoutPhase,
 )
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
+)
+from agentclaw.community.core.workspace.skill_layout import (
+    runtime_layout_engine_for_bot,
 )
 from agentclaw.community.log import get_logger
 
@@ -328,15 +335,16 @@ class SkillsPoolRollbackService:
                 evidence={"reason": f"engine Pool layout not implemented: {engine}"},
             )
         user_id = str(owner_id)
+        layout_engine = runtime_layout_engine_for_bot(bot)
 
         probe = await self._runtime.probe(
             bot_id=scope.bot_id,
-            owner_id=user_id,
-            engine=engine,
+            user_id=user_id,
+            engine=layout_engine,
         )
         restoration_resume = is_trusted_aicoding_repo_restoration_resume(
             state=state,
-            engine=engine,
+            engine=layout_engine,
             probe=probe,
         )
         if (

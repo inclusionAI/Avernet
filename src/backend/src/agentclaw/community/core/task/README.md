@@ -23,7 +23,7 @@ core/task/
 │   ├── models.py                  #   领域 dataclass/enum + 中间类型(patch/criteria/op_result/callback_data)
 │   └── errors.py                  #   统一错误(全框架唯一 errors 收口)
 ├── task_center/                   # TaskService facade + ExecutionEngine 编排核(非独立模块)
-│   ├── task_service.py            #   facade 2 API(execute / get_task_dashboard)
+│   ├── task_service.py            #   facade API(execute / get_task_dashboard / list_tasks)
 │   └── engine.py                  #   ExecutionEngine:on_* 事件驱动 + 状态条件(a/b/c)推进
 ├── task_graph/                    # TaskGraphService 图谱 SSOT(7+2 API,独立模块)
 │   └── task_graph_service.py      #   原子变更唯一网关 + relations 分解树派生查询

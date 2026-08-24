@@ -38,6 +38,7 @@ from agentclaw.community.core.repository.implementations.skill_center.installati
 from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_set_control_plane import (
     McpSkillSetControlPlaneCommands,
 )
+from agentclaw.community.core.repository.implementations.skill_center.legacy_skill_set_scope import LegacySkillSetScopeQueries
 from agentclaw.community.core.repository.skill_set_control_plane_types import (
     SkillSetDesiredState,
     SkillSetMutation,
@@ -45,7 +46,6 @@ from agentclaw.community.core.repository.skill_set_control_plane_types import (
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
-
 
 from agentclaw.community.core.skill_center.errors import (
     SkillRuntimeNameConflictError,
@@ -55,7 +55,8 @@ from agentclaw.community.core.skill_center.errors import (
 
 
 class SkillSetControlPlaneRepository(
-    McpSkillSetControlPlaneCommands, SkillSetControlPlaneRepositoryProtocol
+    LegacySkillSetScopeQueries, McpSkillSetControlPlaneCommands,
+    SkillSetControlPlaneRepositoryProtocol,
 ):
     """Desired-state UoW for SkillSet Membership and Installations."""
 
