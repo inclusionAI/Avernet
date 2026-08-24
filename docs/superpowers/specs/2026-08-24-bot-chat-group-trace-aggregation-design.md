@@ -140,11 +140,19 @@ WHERE trace.session_key IN (:group_sessions)
 
 `bot_id` 仍可作为页面上下文存在，但不属于 Group Trace 聚合条件。
 
-### 4.3 全历史兼容
+### 4.3 Group 聚合页显式开启全历史
 
-老前端 Group 请求没有传 `time_scope=all`，而老接口默认只查询最近 72 小时。为了兼容老前端并满足“查看全部历史”，Backend 在 `group_id` 模式内部强制使用全历史时间范围。
+Group 查询虽然以 `group_id` 作为聚合边界并开放 Bot/Owner 范围，但不应让所有带 `group_id` 的请求都自动取消时间限制。日志详情页的关联 Trace 查询仍需遵守默认时间窗口或调用方传入的时间范围。
 
-该规则只作用于 Group 模式；其他模式继续保留：
+Group 视角聚合页必须显式传入：
+
+```http
+GET /api/v1/bot-chats?group_id={groupId}&match_mode=exact&time_scope=all
+```
+
+只有 `time_scope=all` 才查询完整 Group 历史；未传时继续使用老接口默认的最近 72 小时，或遵守调用方传入的 `from_date` / `to_date`。
+
+该规则只作用于显式开启 `time_scope=all` 的 Group 聚合请求；其他模式继续保留：
 
 - 默认最近 72 小时；
 - 显式 `time_scope=all` 的既有校验；
@@ -169,7 +177,7 @@ WHERE trace.session_key IN (:group_sessions)
 新前端“按群ID”应直接调用：
 
 ```http
-GET /api/v1/bot-chats?bot_id={currentBotId}&group_id={groupId}&match_mode=exact&page={page}&limit=100
+GET /api/v1/bot-chats?bot_id={currentBotId}&group_id={groupId}&match_mode=exact&time_scope=all&page={page}&limit=100
 ```
 
 前端职责：
@@ -197,7 +205,7 @@ GET /api/v1/bot-chats?bot_id={currentBotId}&group_id={groupId}&match_mode=exact&
 调用：
 
 ```http
-GET /api/v1/bot-chats?bot_id=bot-a&group_id=group-fixture&match_mode=exact&page=1&limit=100
+GET /api/v1/bot-chats?bot_id=bot-a&group_id=group-fixture&match_mode=exact&time_scope=all&page=1&limit=100
 ```
 
 期望：
