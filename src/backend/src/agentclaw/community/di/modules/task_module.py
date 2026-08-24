@@ -38,6 +38,9 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
+from agentclaw.community.core.task.task_runner.integration.ports import (
+    BcsClientPort, OpenApiBotPort,
+)
 from agentclaw.community.di.config import EconomyGovernanceConfig
 from agentclaw.community.di.profile import DeployProfile
 
@@ -71,7 +74,9 @@ class TaskModule(Module):
         端口接线策略(组合根按 ``DEPLOY_PROFILE`` 选实现,不在 adapter 内 if):
         - ``DEPLOY_PROFILE=singlebox`` → singlebox 真实链路(``SingleboxEngineAdapter`` 直连 per-bot 引擎 +
           ``BcsHttpAdapter`` 复用 BCS REST 直连本地 BCS :21000);本地集成即真实执行。
-        - 其它(corp/prod 由 overlay 覆写)→ community 不内联 BaaS/BCS 密钥,留 None,真实端口由 corp adapter 覆写。
+        - 其它(corp/prod)→ 不内联 BaaS/BCS 密钥;``_resolve_ports`` 返 ``(None,None)`` 后由
+          ``injector.get(OpenApiBotPort)``/``injector.get(BcsClientPort)`` 取 corp overlay 经 DI 绑定的
+          真实端口实现(community 未绑 → None,纯内核/HTTP-contract 路径退化为 stub)。
         - discover(``BotDiscoverServiceProtocol``,来自 BotPublicModule)始终传入:
           singlebox profile 换 ``SingleboxKeywordBotDiscover``(本地关键字搜索),其余用注入的 BCSFuse。
         """
@@ -80,6 +85,19 @@ class TaskModule(Module):
         except Exception:  # noqa: BLE101 standalone/lightweight test injector
             pass
         bot, bcs = self._resolve_ports()
+        # 非 singlebox(corp/prod):corp overlay 经 DI 绑定 OpenApiBotPort/BcsClientPort(真实 BaaS/BCS
+        # 凭据),构造期取用。community 未绑 → None(与 BcnService 同款 try/except 降级),
+        # 纯内核/HTTP-contract 测试不阻断。singlebox 已由 _resolve_ports 给出真实端口,跳过。
+        if bot is None:
+            try:
+                bot = injector.get(OpenApiBotPort)
+            except Exception:  # noqa: BLE001 未绑定 → 单 bot 派发端口缺省
+                bot = None
+        if bcs is None:
+            try:
+                bcs = injector.get(BcsClientPort)
+            except Exception:  # noqa: BLE001 未绑定 → 协作群协调端口缺省
+                bcs = None
         discover_port = self._resolve_discover(default=discover, bot_public=bot_public)
         # BBS 候选查询复用 BcnService 的统一 provider 身份(BcnConfig prod/pre,与 register/switch
         # provider-bot 同源)。任务模块作为普通消费方经 DI 注入 BcnService;纯内核/未装 BotManagement 的
