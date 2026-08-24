@@ -50,7 +50,7 @@ RUN curl -fsSL docker/agent/avernet-sidecar/internal-gateway-ca.crt \
     && update-ca-certificates
 
 # Config renderer (Python, no compilation needed).
-COPY render.py /usr/local/bin/config-renderer
+COPY docker/agent/envoy-sidecar/render.py /usr/local/bin/config-renderer
 RUN chmod +x /usr/local/bin/config-renderer && \
     sed -i '1s|^#!/usr/bin/env python3|#!/usr/bin/python3|' /usr/local/bin/config-renderer
 
@@ -62,10 +62,10 @@ RUN mkdir -p /etc/sidecar/certs/mitm-ca && \
          -o /etc/sidecar/certs/mitm-ca/ca.key
 
 # Scripts and configs.
-COPY iptables-setup.sh    /usr/local/bin/iptables-setup.sh
-COPY entrypoint.sh        /usr/local/bin/entrypoint.sh
-COPY envoy-template.yaml  /etc/envoy/envoy-template.yaml
-COPY header-rules.yaml    /etc/sidecar/header-rules.yaml
+COPY docker/agent/envoy-sidecar/iptables-setup.sh    /usr/local/bin/iptables-setup.sh
+COPY docker/agent/envoy-sidecar/entrypoint.sh        /usr/local/bin/entrypoint.sh
+COPY docker/agent/envoy-sidecar/envoy-template.yaml  /etc/envoy/envoy-template.yaml
+COPY docker/agent/envoy-sidecar/header-rules.yaml    /etc/sidecar/header-rules.yaml
 
 RUN chmod +x /usr/local/bin/iptables-setup.sh \
              /usr/local/bin/entrypoint.sh \
