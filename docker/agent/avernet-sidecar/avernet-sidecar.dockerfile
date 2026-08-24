@@ -1,5 +1,5 @@
 # ============================================================
-# envoy-sidecar: Outbound traffic header manipulation sidecar
+# avernet-sidecar: Outbound traffic header manipulation sidecar
 # Based on Envoy + iptables, hijacks main container's outbound
 # traffic to the sidecar for HTTP/HTTPS header set/remove operations.
 #
@@ -50,7 +50,7 @@ RUN curl -fsSL docker/agent/avernet-sidecar/internal-gateway-ca.crt \
     && update-ca-certificates
 
 # Config renderer (Python, no compilation needed).
-COPY docker/agent/envoy-sidecar/render.py /usr/local/bin/config-renderer
+COPY docker/agent/avernet-sidecar/render.py /usr/local/bin/config-renderer
 RUN chmod +x /usr/local/bin/config-renderer && \
     sed -i '1s|^#!/usr/bin/env python3|#!/usr/bin/python3|' /usr/local/bin/config-renderer
 
@@ -62,10 +62,10 @@ RUN mkdir -p /etc/sidecar/certs/mitm-ca && \
          -o /etc/sidecar/certs/mitm-ca/ca.key
 
 # Scripts and configs.
-COPY docker/agent/envoy-sidecar/iptables-setup.sh    /usr/local/bin/iptables-setup.sh
-COPY docker/agent/envoy-sidecar/entrypoint.sh        /usr/local/bin/entrypoint.sh
-COPY docker/agent/envoy-sidecar/envoy-template.yaml  /etc/envoy/envoy-template.yaml
-COPY docker/agent/envoy-sidecar/header-rules.yaml    /etc/sidecar/header-rules.yaml
+COPY docker/agent/avernet-sidecar/iptables-setup.sh    /usr/local/bin/iptables-setup.sh
+COPY docker/agent/avernet-sidecar/entrypoint.sh        /usr/local/bin/entrypoint.sh
+COPY docker/agent/avernet-sidecar/envoy-template.yaml  /etc/envoy/envoy-template.yaml
+COPY docker/agent/avernet-sidecar/header-rules.yaml    /etc/sidecar/header-rules.yaml
 
 RUN chmod +x /usr/local/bin/iptables-setup.sh \
              /usr/local/bin/entrypoint.sh \
