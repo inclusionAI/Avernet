@@ -99,6 +99,20 @@
 # the test tree, so these operations are driven on the wire instead of asserting
 # a 401. Their cases live in tests/community/endpoints/test_openapi_*.py. Hand
 # edited rather than regenerated, to keep these notes.
+#
+# Correcting the 2026-08-10 note above while the lines it describes come off:
+# an App identity CAN be minted here, so "which the harness cannot mint at all"
+# no longer holds. The token's `principals` claim is a list of the gateway's
+# discriminated union (core/gateway_principal/models.py), so an
+# {"type": "app", ...} entry beside the user entry projects onto AppPrincipal
+# exactly as the user entry projects onto UserPrincipal, and
+# require_user_and_app_principal is satisfied. The App's tenant must be
+# DEFAULT_AVERNET_TENANT, because a user principal asserts none and the request
+# is isolated by the App's. A user+app set is still a human request --
+# require_acting_caller keys the grant path off a caller naming no user -- so
+# no grant adjudication intervenes. test_openapi_authorized_apps.py does this,
+# and confirms the App half is load-bearing: drop the app entry and the two
+# operations that need it answer 401 instead of 201/200.
 DELETE /api/bot-render-screens/{record_id}: missing [happy, error]
 DELETE /api/bots/{bot_id}: missing [happy, error]
 DELETE /api/desktop/bots/{bot_id}: missing [happy, error]
