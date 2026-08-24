@@ -69,7 +69,7 @@ artifact。本文先冻结待实现合同；实现完成后生成的 OpenAPI JSO
 23. 作为 Bot 用户，我希望 Bot 重启时根据数据库 Desired State 重建全部 Skill/MCP 投影。
 24. 作为 Bot 用户，我希望一次 Runtime 明确失败不会留下新的半套 Desired State。
 25. 作为运维人员，我希望再次 activate/deactivate 或修改 active SkillSet 能全量修复上次崩溃窗口。
-26. 作为 Space 用户，我希望从 ZIP 或 Git 创建全新的 Space Skill Identity，而不转换 Legacy Repo。
+26. 作为 Space 用户，我希望从本地文件夹或 Git 创建全新的 Space Skill Identity，而不转换 Legacy Repo。
 27. 作为 Space Skill Owner，我希望升级只创建新 Draft/Version，skill_id 和 skill_uuid 永远不变。
 28. 作为 Space Skill Owner，我希望名称和描述只来自 SKILL.md，避免页面和发布内容不一致。
 29. 作为 Team Skill Owner/Manager，我希望编辑前取得可抢占的数据库 Lease，旧页面在抢占后不能保存。
@@ -430,12 +430,12 @@ POST   /openapi/v1/spaces/{space_id}/market-favorites/search
 | Method | Path | 语义 |
 | --- | --- | --- |
 | GET | `/openapi/v1/spaces/{space_id}/skills` | 能力工坊 Skill 列表 |
-| POST | `/openapi/v1/spaces/{space_id}/skills` | raw ZIP + 幂等键创建 Identity、V1 Draft、Binding、Owner |
+| POST | `/openapi/v1/spaces/{space_id}/skills` | multipart 本地文件夹 + 幂等键创建 Identity、V1 Draft、Binding、Owner |
 | POST | `/openapi/v1/spaces/{space_id}/skills/import-from-git` | JSON Git source + 幂等键，映射同一创建命令 |
 | GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}` | 创作详情：Draft、Version、Attempt、权限 |
 | GET | `/openapi/v1/bots/skills/repository/{skill_id}` | 消费详情：只返回 latest Published |
 
-创建事务包含 `ac_skill Identity + V1 Draft facts + ac_skill_space_binding + 唯一 Skill Owner`；SC RPC 不进入事务。Git 导入后与 ZIP 创建同模型，不转换 Legacy Repo Skill。
+创建事务包含 `ac_skill Identity + V1 Draft facts + ac_skill_space_binding + 唯一 Skill Owner`；SC RPC 不进入事务。本地文件夹上传使用重复 `files` 与可选 JSON `file_paths` 字段保存相对目录结构，不要求前端生成 ZIP。Git 导入后与本地文件夹创建同模型，不转换 Legacy Repo Skill。
 
 详情分别返回：
 
@@ -456,7 +456,7 @@ SKILL.md 是名称和描述的唯一事实来源。
 | GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft` | Draft 状态和 Git metadata |
 | GET/PUT | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft/files/{path}` | 读取/保存单文件 |
 | GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft/files` | Draft 文件树 |
-| POST | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft/replace` | ZIP 原子替换 |
+| POST | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft/replace` | multipart 本地文件夹原子替换 |
 | POST | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft/refresh-from-git` | 从原 Git 来源手动刷新 |
 | GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/versions` | Published Version 列表 |
 | GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/versions/{version}` | 精确业务版本详情 |
@@ -604,7 +604,7 @@ PREPARING → SC_SUBMITTING → WAITING_SC → MATERIALIZING
 | 403 | ACL、Owner/Manager、MCP 权限失败 |
 | 404 | Skill/Space/Version/Attempt 不存在 |
 | 409 | 状态机、Membership、Bot ready、runtime name 冲突 |
-| 422 | SKILL.md、ZIP、Git 内容或参数校验失败 |
+| 422 | SKILL.md、本地文件夹、Git 内容或参数校验失败 |
 | 502/503 | Skill Center 或 Runtime 不可用 |
 
 继续使用已发布 Gateway Envelope，并提供稳定 `error_code`。
@@ -677,7 +677,7 @@ Legacy 全矩阵无回归。产品前端是否已经完成调用切换和页面 
 
 Phase 1 对新产品 PRD 的可测边界：Local 上传、Repo Catalog、MCP Catalog/权限、
 添加到 SkillSet、SkillSet 整体激活/停用、System Default 和 Runtime 恢复可做完整
-Backend 验收。真实 Space Skill 的 ZIP/Git 创建、Draft 编辑、Owner/Manager/Edit
+Backend 验收。真实 Space Skill 的本地文件夹/Git 创建、Draft 编辑、Owner/Manager/Edit
 Lease、发布、版本升级、Skill Center 物化、Track Latest、Service Artifact 精确版本
 和退役属于 Phase 2；Phase 1 只能通过兼容 Fixture 验证已有 Space wire 和消费边界，
 不能把它计为新产品主流程 E2E。

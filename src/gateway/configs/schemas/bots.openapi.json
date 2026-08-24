@@ -17234,6 +17234,37 @@
         "title": "SpaceSkillDetail",
         "type": "object"
       },
+      "SpaceSkillFolderUpload": {
+        "description": "Browser-selected files and relative paths for one Space Skill directory.",
+        "properties": {
+          "file_paths": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional JSON array of relative paths aligned one-to-one with files; file names are used when omitted.",
+            "title": "File Paths"
+          },
+          "files": {
+            "description": "All files selected from the local Skill directory.",
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "SpaceSkillFolderUpload",
+        "type": "object"
+      },
       "SpaceSkillItem": {
         "description": "Skill card data owned by one Space.",
         "properties": {
@@ -34981,7 +35012,7 @@
         ]
       },
       "post": {
-        "description": "Create identity, initial Draft, binding, and Owner from raw ZIP bytes.",
+        "description": "Create identity, initial Draft, binding, and Owner from a local folder.",
         "operationId": "create_space_skill_openapi_v1_bots_spaces__space_id__skills_post",
         "parameters": [
           {
@@ -35024,11 +35055,9 @@
         ],
         "requestBody": {
           "content": {
-            "application/zip": {
+            "multipart/form-data": {
               "schema": {
-                "contentMediaType": "application/octet-stream",
-                "title": "Package",
-                "type": "string"
+                "$ref": "#/components/schemas/SpaceSkillFolderUpload"
               }
             }
           },
@@ -35187,7 +35216,7 @@
             "description": "Upstream service error"
           }
         },
-        "summary": "Create a Space Skill from a raw ZIP package",
+        "summary": "Create a Space Skill from a local folder",
         "tags": [
           "phase2-space-skills"
         ],
@@ -37667,8 +37696,8 @@
     },
     "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/replace": {
       "post": {
-        "description": "Atomically replace the Draft package; ZIP bodies are never base64 JSON.",
-        "operationId": "replace_draft_package_openapi_v1_bots_spaces__space_id__skills__skill_id__draft_replace_post",
+        "description": "Atomically replace all Draft files from one browser-selected folder.",
+        "operationId": "replace_draft_folder_openapi_v1_bots_spaces__space_id__skills__skill_id__draft_replace_post",
         "parameters": [
           {
             "description": "Space primary identifier.",
@@ -37709,11 +37738,9 @@
         ],
         "requestBody": {
           "content": {
-            "application/zip": {
+            "multipart/form-data": {
               "schema": {
-                "contentMediaType": "application/octet-stream",
-                "title": "Package",
-                "type": "string"
+                "$ref": "#/components/schemas/SpaceSkillFolderUpload"
               }
             }
           },
@@ -37872,7 +37899,7 @@
             "description": "Upstream service error"
           }
         },
-        "summary": "Atomically replace current Draft files from raw ZIP",
+        "summary": "Atomically replace current Draft files from a local folder",
         "tags": [
           "phase2-space-skills"
         ],

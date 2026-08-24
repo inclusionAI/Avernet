@@ -78,16 +78,36 @@ def test_every_placeholder_is_declared_as_a_path_parameter():
             assert placeholders <= path_parameters
 
 
-def test_zip_commands_use_raw_zip_schema_and_contract_only_response():
+def test_folder_upload_commands_use_multipart_schema_and_contract_only_response():
     app = _app()
-    paths = app.openapi()["paths"]
+    schema = app.openapi()
+    paths = schema["paths"]
     for path in (
         "/openapi/v1/bots/spaces/{space_id}/skills",
         "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/replace",
     ):
         operation = paths[path]["post"]
-        assert set(operation["requestBody"]["content"]) == {"application/zip"}
+        assert set(operation["requestBody"]["content"]) == {"multipart/form-data"}
         assert operation["responses"]["501"]["headers"]["x-contract-status"]
+        payload_schema = operation["requestBody"]["content"]["multipart/form-data"][
+            "schema"
+        ]
+        payload_component = schema["components"]["schemas"][
+            payload_schema["$ref"].rsplit("/", maxsplit=1)[-1]
+        ]
+        assert set(payload_component["properties"]) == {"files", "file_paths"}
+
+    git_import_schema = paths[
+        "/openapi/v1/bots/spaces/{space_id}/skills/import-from-git"
+    ]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    git_import_component = schema["components"]["schemas"][
+        git_import_schema["$ref"].rsplit("/", maxsplit=1)[-1]
+    ]
+    assert set(git_import_component["properties"]) == {
+        "repository_url",
+        "branch",
+        "subdir",
+    }
 
     client = TestClient(app)
     response = client.get(
@@ -118,8 +138,12 @@ _CONTRACT_REQUESTS = (
     pytest.param(
         "post",
         "/openapi/v1/bots/spaces/1/skills",
-        {"content": b"zip", "headers": {"Idempotency-Key": "create", "content-type": "application/zip"}},
-        id="create-from-zip",
+        {
+            "data": {"file_paths": '["SKILL.md"]'},
+            "files": [("files", ("SKILL.md", b"---\nname: demo\n---", "text/markdown"))],
+            "headers": {"Idempotency-Key": "create"},
+        },
+        id="create-from-folder",
     ),
     pytest.param(
         "post",
@@ -147,8 +171,11 @@ _CONTRACT_REQUESTS = (
     pytest.param(
         "post",
         "/openapi/v1/bots/spaces/1/skills/skill-1/draft/replace",
-        {"content": b"zip", "headers": {"content-type": "application/zip"}},
-        id="replace-draft",
+        {
+            "data": {"file_paths": '["SKILL.md"]'},
+            "files": [("files", ("SKILL.md", b"---\nname: demo\n---", "text/markdown"))],
+        },
+        id="replace-draft-from-folder",
     ),
     pytest.param(
         "post",

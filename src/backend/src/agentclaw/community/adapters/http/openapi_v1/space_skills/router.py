@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Header, Path, Request
+from fastapi import APIRouter, Depends, Form, Header, Path, Request
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
@@ -36,6 +36,7 @@ from .schemas import (
     RefreshDraftFromGitRequest,
     RetirementImpact,
     RetireSkillRequest,
+    SpaceSkillFolderUpload,
     SkillGrant,
     SkillGrants,
     SpaceSkillDetail,
@@ -116,17 +117,17 @@ def _operation_extra(summary: str) -> dict[str, str]:
     status_code=201,
     response_model=Envelope[SpaceSkillDetail],
     responses=_CONTRACT_ONLY_RESPONSE,
-    openapi_extra=_operation_extra("Create a Space Skill from a raw ZIP package"),
+    openapi_extra=_operation_extra("Create a Space Skill from a local folder"),
 )
 async def create_space_skill(
     space_id: SpaceIdPath,
     request: Request,
     user_id: UserIdDep,
     idempotency_key: IdempotencyKey,
-    package: bytes = Body(..., media_type="application/zip"),
+    payload: Annotated[SpaceSkillFolderUpload, Form(media_type="multipart/form-data")],
 ) -> JSONResponse:
-    """Create identity, initial Draft, binding, and Owner from raw ZIP bytes."""
-    del space_id, package, idempotency_key, user_id
+    """Create identity, initial Draft, binding, and Owner from a local folder."""
+    del space_id, payload, idempotency_key, user_id
     return _contract_only(request)
 
 
@@ -268,17 +269,17 @@ async def put_draft_file(
     "/{skill_id}/draft/replace",
     response_model=Envelope[DraftDetail],
     responses=_CONTRACT_ONLY_RESPONSE,
-    openapi_extra=_operation_extra("Atomically replace current Draft files from raw ZIP"),
+    openapi_extra=_operation_extra("Atomically replace current Draft files from a local folder"),
 )
-async def replace_draft_package(
+async def replace_draft_folder(
     space_id: SpaceIdPath,
     skill_id: SkillIdPath,
     request: Request,
     user_id: UserIdDep,
-    package: bytes = Body(..., media_type="application/zip"),
+    payload: Annotated[SpaceSkillFolderUpload, Form(media_type="multipart/form-data")],
 ) -> JSONResponse:
-    """Atomically replace the Draft package; ZIP bodies are never base64 JSON."""
-    del space_id, skill_id, package, user_id
+    """Atomically replace all Draft files from one browser-selected folder."""
+    del space_id, skill_id, payload, user_id
     return _contract_only(request)
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from fastapi import UploadFile
 from pydantic import BaseModel, Field
 
 
@@ -71,6 +72,21 @@ class GitImportRequest(BaseModel):
     )
     subdir: str | None = Field(
         default=None, max_length=1024, description="Optional repository subdirectory."
+    )
+
+
+class SpaceSkillFolderUpload(BaseModel):
+    """Browser-selected files and relative paths for one Space Skill directory."""
+
+    files: list[UploadFile] = Field(
+        description="All files selected from the local Skill directory."
+    )
+    file_paths: str | None = Field(
+        default=None,
+        description=(
+            "Optional JSON array of relative paths aligned one-to-one with files; "
+            "file names are used when omitted."
+        ),
     )
 
 

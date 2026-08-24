@@ -64,14 +64,15 @@ contract-only 后端实际响应为：
 | 403 | 非 Owner/Manager 或 Space Member | 展示权限页/禁用命令 |
 | 404 | Space、Skill、Version 或 Attempt 不可见 | 返回列表或空态 |
 | 409 | Draft/Lease/状态机冲突 | 刷新详情后提示冲突 |
-| 422 | ZIP、SKILL.md、Git、路径或字段校验失败 | 定位到上传/表单字段 |
+| 422 | 本地文件夹、SKILL.md、Git、路径或字段校验失败 | 定位到上传/表单字段 |
 | 502/503 | Skill Center 或运行时依赖不可用 | 可重试的外部失败态 |
 
 ### 1.3 特殊请求约束
 
-- 创建 ZIP 和 Draft ZIP replace 必须发送原始字节：`Content-Type: application/zip`；
-  不使用 base64 JSON 或 multipart。
-- 下列命令必须带非空 `Idempotency-Key` header：创建 ZIP、Git 导入、创建升级 Draft、
+- 本地文件夹创建和 Draft 文件夹替换使用 `multipart/form-data`：每个文件使用重复的
+  `files` 字段；`file_paths` 是可选 JSON 字符串数组，与每个文件一一对应，用来保留相对
+  目录结构。前端不需要、也不应自行压缩为 ZIP。
+- 下列命令必须带非空 `Idempotency-Key` header：本地文件夹创建、Git 导入、创建升级 Draft、
   创建发布、物化重试。
 - `PUT/DELETE manager` 是幂等命令；不要以“已经存在/不存在”作为错误提示。
 - `{version}` 是业务版本序号（`1`、`2`……），不是数据库主键。
@@ -83,7 +84,7 @@ contract-only 后端实际响应为：
 | PRD 功能点 | 方法与路径 | 入参 | 目标响应 data | Mock 页面状态 |
 | --- | --- | --- | --- | --- |
 | Space Skill 列表（已实现） | `GET /openapi/v1/bots/spaces/{space_id}/skills` | `user_id`，可选 `keyword`、`page_no`、`page_size` | `Page<SpaceSkillItem>` | loading、空态、卡片列表、无权限 |
-| ZIP 创建 | `POST /openapi/v1/bots/spaces/{space_id}/skills` | raw ZIP；`Idempotency-Key`；`user_id` | `SpaceSkillDetail`（201） | 上传中、校验失败、创建后打开详情 |
+| 本地文件夹创建 | `POST /openapi/v1/bots/spaces/{space_id}/skills` | `files` + `file_paths` multipart；`Idempotency-Key`；`user_id` | `SpaceSkillDetail`（201） | 上传中、校验失败、创建后打开详情 |
 | Git 导入 | `POST /openapi/v1/bots/spaces/{space_id}/skills/import-from-git` | `GitImportRequest`；`Idempotency-Key`；`user_id` | `SpaceSkillDetail`（201） | 导入中、内容错误、创建后打开详情 |
 | 创作详情 | `GET /openapi/v1/bots/spaces/{space_id}/skills/{skill_id}` | `user_id` | `SpaceSkillDetail` | Draft/Published 双状态、权限按钮 |
 
@@ -158,7 +159,26 @@ latest_published_version, draft_target_version, draft_status,
 publication_status, current_user_skill_role
 ```
 
-#### 创建与 Git 导入 request
+#### 本地文件夹创建与 Git 导入 request
+
+本地文件夹创建不使用 JSON body 或 ZIP。浏览器选择文件夹后，提交以下 multipart 表单：
+
+| 字段名 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `files` | `File[]` | 是 | 重复字段；包含所选文件夹内的所有文件 |
+| `file_paths` | string | 否 | JSON 字符串数组，和 `files` 一一对应，例如 `["SKILL.md","scripts/check.py"]`；不传时使用文件名 |
+
+```javascript
+const form = new FormData();
+for (const file of selectedFiles) form.append('files', file);
+form.append('file_paths', JSON.stringify(selectedFiles.map((file) => file.webkitRelativePath)));
+
+await fetch('/openapi/v1/bots/spaces/42/skills?user_id=u-owner', {
+  method: 'POST',
+  headers: { 'Idempotency-Key': crypto.randomUUID() },
+  body: form,
+});
+```
 
 ```json
 // POST .../import-from-git
@@ -169,8 +189,8 @@ publication_status, current_user_skill_role
 }
 ```
 
-`branch` 与 `subdir` 可省略。ZIP 创建没有 JSON body；原始 ZIP 内的 `SKILL.md` 是名称
-和描述的事实来源。
+`branch` 与 `subdir` 可省略。文件夹中必须有且仅有一个 `SKILL.md`，它是名称和描述的
+事实来源。
 
 ### 2.2 Draft 编辑抽屉
 
@@ -182,7 +202,7 @@ publication_status, current_user_skill_role
 | Draft 文件树 | `GET /{skill_id}/draft/files` | `user_id` | `FileTreeItem[]` |
 | 读取文件 | `GET /{skill_id}/draft/files/{path}` | `user_id` | `FileContent` |
 | 保存文件 | `PUT /{skill_id}/draft/files/{path}` | `WriteDraftFileRequest`、`user_id` | `FileContent` |
-| ZIP 原子替换 | `POST /{skill_id}/draft/replace` | raw ZIP、`user_id` | `DraftDetail` |
+| 本地文件夹原子替换 | `POST /{skill_id}/draft/replace` | `files` + `file_paths` multipart、`user_id` | `DraftDetail` |
 | 从 Git 刷新 | `POST /{skill_id}/draft/refresh-from-git` | `RefreshDraftFromGitRequest`、`user_id` | `DraftDetail` |
 
 `DraftDetail`：
@@ -202,7 +222,9 @@ target_version, status, source_type, repository_url, branch, subdir, gmt_modifie
 }
 ```
 
-`fencing_token` 仅 Team Space 在持有 Lease 时使用；Personal Space 可不传。Git 刷新：
+`fencing_token` 仅 Team Space 在持有 Lease 时使用；Personal Space 可不传。Draft 文件夹
+替换沿用上节同一个 `files + file_paths` multipart wire，成功时必须原子替换全量文件，不能
+部分更新。Git 刷新：
 
 ```json
 { "confirm_overwrite": true }
@@ -333,7 +355,7 @@ Mock 仅在 `can_retire=true` 时允许受理；有 binding、Service Artifact�
 
 建议至少维护以下 fixture 组合，以覆盖 PRD 页面能力：
 
-1. **空工坊**：列表为空，可上传 ZIP / Git 导入。
+1. **空工坊**：列表为空，可选择本地文件夹 / Git 导入。
 2. **首次 Draft**：没有 Published Version，Draft=`EDITING`，Owner 可编辑。
 3. **双轨详情**：Published V1 + Draft V2；页头同时展示 `latest_published_version=1` 与
    `draft_target_version=2`。
@@ -453,7 +475,7 @@ Mock 仅在 `can_retire=true` 时允许受理；有 binding、Service Artifact�
 | --- | --- | --- | --- |
 | `DraftDetail` | `target_version` | integer | 正在编辑的业务版本 |
 |  | `status` | string | Draft 状态 |
-|  | `source_type` | string/null | `ZIP` 或 `GIT` 等来源投影 |
+|  | `source_type` | string/null | `FOLDER` 或 `GIT` 等来源投影 |
 |  | `repository_url` / `branch` / `subdir` | string/null | Git-backed Draft 原始来源 |
 |  | `gmt_modified` | datetime/null | 最近修改时间 |
 | `FileTreeItem` | `path` | string | 相对 Skill 根目录路径 |
