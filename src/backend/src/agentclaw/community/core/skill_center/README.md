@@ -24,9 +24,8 @@ provides:
   - "SkillInstallationRepositoryProtocol"
   - "BotSkillAssetService"
   - "RuntimeProjectionResolver"
-  - "BotRuntimeProjectionReconciler"
-  - "BotRuntimeProjectionReconcilerProtocol"
-  - "ActiveSkillSetInstallationMaterializer"
+  - "BotRuntimeProjector"
+  - "BotRuntimeProjectorProtocol"
   - "LocalSkillCleanupWorkModel"
   - "SkillActivationSyncAction"
   - "SkillActivationSyncScope"
@@ -109,22 +108,18 @@ internal_dependencies:
 Skill-set switching is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols.
 
 `ac_bot_skill_installation` materializes the current active Desired State with
-identity `(tenant, env, owner_id, bot_id, skill_id)`. During Phase 1 cutover,
-`ActiveSkillSetInstallationMaterializer` lazily
-inserts missing rows for a Bot's ordinary active SkillSet members. It is
-invoked only before a complete runtime reconcile and before a new Service Bot
-Artifact build; it never
-deletes rows, reads historical Default exclusions, or runs in HTTP GET/list,
-Pool convergence, or file-snapshot paths.
-
-`GET /openapi/v1/bots/{bot_id}/skills` is the one deliberate exception, through
-`repair_bot_skillset_installations` rather than the materializer. It lists every
-Skill a Bot reaches — the rows it owns plus the ones a SkillSet bridges — and
-`active` is a *filter*, deciding `total` and the page boundary, so the listing
-repairs before it filters. Unlike the materializer this repair also deletes rows
-and reads Default exclusions. It writes only the difference, in one transaction,
-after the caller's Bot access has been checked, and never reconciles runtime.
-See `specs/2026-08-23-openapi-v1-bot-skill-listing/`.
+identity `(tenant, env, owner_id, bot_id, skill_id)`. Installation tables were
+never globally backfilled, so every read-side consumer runs the lazy flush
+first: `CapabilityDesiredStateRepository.flush_installations` atomically makes
+Installation agree with Set configuration for one exact Bot — inserting active
+(and non-excluded Default) members' rows, Skills and MCPs alike, and deleting
+rows only inactive claims account for. It runs before a complete runtime
+projection, before a new Service Bot Artifact build, and before flush-fronted
+reads such as `GET /openapi/v1/bots/{bot_id}/skills` (see
+`specs/2026-08-23-openapi-v1-bot-skill-listing/` and
+`specs/2026-08-24-installation-single-source-of-truth/`). It writes only the
+difference, in one transaction, after the caller's Bot access has been checked,
+and never touches runtime.
 
 MCP Direct activation and ordinary SkillSet MCP membership share the same
 active-only desired-state and compensation boundary as Skills.  The MCP
@@ -160,12 +155,10 @@ the registry key and the payload validation, and its `_run` seam reports
 `Fail` until the body lands. It is not registered, and no call site enqueues,
 so the control plane's inline mutate-then-reconcile path is unchanged.
 
-Phase 1 does not run a global Local Installation backfill and does not treat
-historical Default exclusions as an active-state source. The small number of
-such historical residues is corrected through DB operations. Normal
+Phase 1 does not run a global Local Installation backfill. Normal
 SkillSet/Direct commands continue to maintain Installation synchronously; the
-lazy materializer only fills the missing active ordinary SkillSet rows that
-pre-date the new command path.
+lazy flush reconciles the rows that pre-date the new command path, treating a
+Default-Set exclusion as that Set's per-Bot deactivation of the member.
 
 Local Skill replacement is defined only for an existing complete package at the
 stable layout-owned `skills-local/<skill-name>` locator. It stages and verifies

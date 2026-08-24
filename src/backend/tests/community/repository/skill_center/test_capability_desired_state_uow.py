@@ -62,15 +62,6 @@ class _Database:
             session.close()
 
 
-class _InstallationRecorder:
-    def __init__(self) -> None:
-        self.calls: list[dict] = []
-
-    def install(self, **kwargs) -> bool:
-        self.calls.append(kwargs)
-        return True
-
-
 def test_legacy_scope_resolution_returns_only_ordinary_set_address() -> None:
     db = _Database()
     with db.transactional_orm_session() as session:
@@ -150,91 +141,6 @@ def test_list_sets_is_scoped_to_exact_owner_for_shared_default_bot_id():
     assert [item["name"] for item in items] == ["system-default", "mine"]
 
 
-def test_ensure_active_skillset_installations_only_materializes_active_ordinary_members():
-    """Legacy active ordinary Sets gain missing active-only Installations once."""
-    db = _Database()
-    with db.transactional_orm_session() as session:
-        active = SkillSet(
-            name="active",
-            bolt_id="bot",
-            user_id="owner",
-            is_active=True,
-            engine_type="openclaw",
-            env="dev",
-        )
-        inactive = SkillSet(
-            name="inactive", bolt_id="bot", user_id="owner", is_active=False, env="dev"
-        )
-        other_engine = SkillSet(
-            name="other-engine",
-            bolt_id="bot",
-            user_id="owner",
-            is_active=True,
-            engine_type="aicoding",
-            env="dev",
-        )
-        default = SkillSet(
-            name="default",
-            bolt_id="bot",
-            user_id="owner",
-            is_default=True,
-            is_active=True,
-            env="dev",
-        )
-        active_skill = Skill(name="active", git_path="git://active", env="dev")
-        inactive_skill = Skill(name="inactive", git_path="git://inactive", env="dev")
-        other_engine_skill = Skill(
-            name="other-engine", git_path="git://other-engine", env="dev"
-        )
-        default_skill = Skill(name="default", git_path="git://default", env="dev")
-        session.add_all(
-            [
-                active,
-                inactive,
-                other_engine,
-                default,
-                active_skill,
-                inactive_skill,
-                other_engine_skill,
-                default_skill,
-            ]
-        )
-        session.flush()
-        session.add_all(
-            [
-                SkillSetSkill(skill_set_id=active.id, skill_id=active_skill.id, env="dev"),
-                SkillSetSkill(
-                    skill_set_id=inactive.id, skill_id=inactive_skill.id, env="dev"
-                ),
-                SkillSetSkill(
-                    skill_set_id=other_engine.id,
-                    skill_id=other_engine_skill.id,
-                    env="dev",
-                ),
-                SkillSetSkill(
-                    skill_set_id=default.id, skill_id=default_skill.id, env="dev"
-                ),
-            ]
-        )
-
-    repository = CapabilityDesiredStateRepository(db)
-
-    assert (
-        repository.ensure_active_skillset_installations(
-            bot_id="bot", owner_id="owner", engine_type="openclaw"
-        )
-        == 1
-    )
-    assert (
-        repository.ensure_active_skillset_installations(
-            bot_id="bot", owner_id="owner", engine_type="openclaw"
-        )
-        == 0
-    )
-    with db.orm_session() as session:
-        assert {row.skill_id for row in session.query(BotSkillInstallation).all()} == {1}
-
-
 def test_global_default_reads_apply_owner_bot_exclusions_without_hiding_membership():
     """Global Default is visible to every Bot, but its content is per Bot."""
     db = _Database()
@@ -302,39 +208,8 @@ def test_global_default_reads_apply_owner_bot_exclusions_without_hiding_membersh
         bot_id="default", owner_id="owner-b", set_id=str(default.id), engine_type="openclaw"
     )] == ["included", "excluded"]
 
-def test_ensure_active_skillset_installations_uses_install_repository_upsert_seam():
-    db = _Database()
-    with db.transactional_orm_session() as session:
-        skill_set = SkillSet(
-            name="active",
-            bolt_id="bot",
-            user_id="owner",
-            engine_type="openclaw",
-            is_active=True,
-            env="dev",
-        )
-        skill = Skill(name="member", git_path="git://member", env="dev")
-        session.add_all([skill_set, skill])
-        session.flush()
-        session.add(
-            SkillSetSkill(skill_set_id=skill_set.id, skill_id=skill.id, env="dev")
-        )
-
-    installs = _InstallationRecorder()
-    result = CapabilityDesiredStateRepository(
-        db, installation_repository=installs
-    ).ensure_active_skillset_installations(
-        bot_id="bot", owner_id="owner", engine_type="openclaw"
-    )
-
-    assert result == 1
-    assert installs.calls == [
-        {"env": "dev", "owner_id": "owner", "bot_id": "bot", "skill_id": 1}
-    ]
-
-
-def test_ensure_active_skillset_installations_does_not_resurrect_deactivated_set_member():
-    """A later projection cannot re-add a member after its Set is deactivated."""
+def test_flush_does_not_resurrect_a_deactivated_sets_member():
+    """A later flush cannot re-add a member after its Set is deactivated."""
     db = _Database()
     with db.transactional_orm_session() as session:
         skill_set = SkillSet(
@@ -355,10 +230,9 @@ def test_ensure_active_skillset_installations_does_not_resurrect_deactivated_set
     repository = CapabilityDesiredStateRepository(db)
     repository.set_skill_set_active(bot_id="bot", owner_id="owner", set_id="1", active=False)
 
-    assert (
-        repository.ensure_active_skillset_installations(bot_id="bot", owner_id="owner")
-        == 0
-    )
+    plan = repository.flush_installations(bot_id="bot", owner_id="owner", env="dev")
+
+    assert plan.skills_to_install == frozenset()
     with db.orm_session() as session:
         assert session.query(BotSkillInstallation).count() == 0
 

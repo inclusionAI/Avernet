@@ -91,8 +91,8 @@ def set_member_mcp_codes(scope, session, *, skill_set_id: int) -> set[str]:
 
 
 class BotSkillSetInstallations:
-    """Mixed into the control-plane repository; uses its ``_db``, ``_scope``,
-    ``_owned_set_scope`` and ``_installation_repository``."""
+    """Mixed into the control-plane repository; uses its ``_db``, ``_scope``
+    and ``_owned_set_scope``."""
 
     def flush_installations(
         self,
@@ -353,50 +353,6 @@ class BotSkillSetInstallations:
             skills_to_uninstall=frozenset(inactive_skills - active_skills),
             mcps_to_install=frozenset(active_mcps),
             mcps_to_uninstall=frozenset(inactive_mcps - active_mcps),
-        )
-
-    def ensure_active_skillset_installations(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        engine_type: str | None = None,
-    ) -> int:
-        """Insert missing rows for active ordinary SkillSet members.
-
-        A narrow cutover repair: never reads the Default Set, never removes
-        rows, never changes existing Direct desired state.
-        """
-        with self._db.orm_session() as session:
-            sets = self._scope(session.query(SkillSet), SkillSet).filter(
-                SkillSet.bolt_id == bot_id,
-                SkillSet.user_id == owner_id,
-                SkillSet.is_default.is_(False),
-                SkillSet.is_active.is_(True),
-            )
-            if engine_type is not None:
-                sets = sets.filter(SkillSet.engine_type == engine_type)
-            active_set_ids = {int(row.id) for row in sets.all()}
-            if not active_set_ids:
-                return 0
-
-            member_ids = {
-                int(row.skill_id)
-                for row in self._scope(session.query(SkillSetSkill), SkillSetSkill)
-                .filter(SkillSetSkill.skill_set_id.in_(active_set_ids))
-                .all()
-            }
-            if not member_ids:
-                return 0
-
-        return sum(
-            self._installation_repository.install(
-                env=get_current_env(),
-                owner_id=owner_id,
-                bot_id=bot_id,
-                skill_id=skill_id,
-            )
-            for skill_id in member_ids
         )
 
     def _bot_sets(

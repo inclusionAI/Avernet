@@ -29,12 +29,6 @@ from agentclaw.community.core.repository.implementations.skill_center.skill_set_
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
 )
-from agentclaw.community.core.repository.protocols.skill_installation import (
-    SkillInstallationRepositoryProtocol,
-)
-from agentclaw.community.core.repository.implementations.skill_center.installation import (
-    SkillInstallationRepository,
-)
 from agentclaw.community.core.repository.implementations.skill_center.bot_skillset_installations import (
     BotSkillSetInstallations,
     set_member_skill_ids,
@@ -67,17 +61,8 @@ class CapabilityDesiredStateRepository(
     """Desired-state UoW for SkillSet Membership and Installations."""
 
     @inject
-    def __init__(
-        self,
-        db: DatabasePlugin,
-        installation_repository: SkillInstallationRepositoryProtocol | None = None,
-    ) -> None:
+    def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
-        # Direct construction remains a supported test seam; the fallback
-        # preserves the same Install-or-already-present repository semantics.
-        self._installation_repository = (
-            installation_repository or SkillInstallationRepository(db)
-        )
 
     @staticmethod
     def _as_item(row: SkillSet) -> dict:

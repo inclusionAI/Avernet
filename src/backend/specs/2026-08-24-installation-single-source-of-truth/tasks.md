@@ -54,7 +54,7 @@ lands in the same group as the migration of its last caller.
       active Set accounts for is kept); direct rows untouched; idempotent.
       Update the 2026-08-23 pinning test that asserted excluded rows are
       "left alone" (superseded — cite the spec).
-- [ ] 2.5 Swap the two materializer call sites to `flush_installations`
+- [x] 2.5 Swap the two materializer call sites to `flush_installations`
       (`bot_runtime_projector._resolve_plan`, Service-Bot
       `build_stage.py`); delete the materializer +
       `ensure_active_skillset_installations` (impl, protocol, DI, tests);

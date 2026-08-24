@@ -17,6 +17,10 @@ from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
     SkillsPoolSkillRepositoryProtocol,
 )
+from agentclaw.community.core.skill_center.bot_engine_scope import (
+    bot_default_engine_types,
+    bot_engine_type,
+)
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     SkillSetRuntimeReconcileError,
@@ -110,7 +114,7 @@ class BotRuntimeProjector:
         service, bot, engine, projection, effective_cli_items = self._resolve_plan(
             bot_id=bot_id,
             owner_id=owner_id,
-            materialize_active_skillset_installations=True,
+            flush_before_read=True,
             retired_mappings=retired_mappings,
         )
         await self._apply_skill_projection(
@@ -186,17 +190,19 @@ class BotRuntimeProjector:
         *,
         bot_id: str,
         owner_id: str,
-        materialize_active_skillset_installations: bool = False,
+        flush_before_read: bool = False,
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ):
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()
-        if materialize_active_skillset_installations:
-            self._repository.ensure_active_skillset_installations(
+        if flush_before_read:
+            self._repository.flush_installations(
                 bot_id=bot_id,
                 owner_id=owner_id,
-                engine_type=str(bot.get("active_engine") or "openclaw"),
+                env=str(bot["env"]),
+                engine_type=bot_engine_type(bot),
+                default_engine_types=bot_default_engine_types(bot),
             )
 
         return self._build_plan(

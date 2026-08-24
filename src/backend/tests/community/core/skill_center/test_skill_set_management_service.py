@@ -15,6 +15,9 @@ from agentclaw.community.core.repository.implementations.skill_center.capability
     CapabilityDesiredState,
     DesiredStateMutation,
 )
+from agentclaw.community.core.repository.capability_desired_state_types import (
+    InstallationFlushPlan,
+)
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     SkillSetControlPlaneNotFoundError,
@@ -522,11 +525,11 @@ class _TeclawRuntimeBots(_RuntimeBots):
 
 class _McpInstallations:
     def __init__(self) -> None:
-        self.materialize_calls: list[dict] = []
+        self.flush_calls: list[dict] = []
 
-    def ensure_active_skillset_installations(self, **kwargs) -> int:
-        self.materialize_calls.append(kwargs)
-        return 0
+    def flush_installations(self, **kwargs) -> InstallationFlushPlan:
+        self.flush_calls.append(kwargs)
+        return InstallationFlushPlan(frozenset(), frozenset(), frozenset())
 
     def list_installed_mcps(self, *, bot_id: str, owner_id: str) -> set[str]:
         assert bot_id == "bot-1"
@@ -534,8 +537,8 @@ class _McpInstallations:
         return {"mcp.weather"}
 
 
-class _FailingMaterializationRepository(_McpInstallations):
-    def ensure_active_skillset_installations(self, **_kwargs) -> int:
+class _FailingFlushRepository(_McpInstallations):
+    def flush_installations(self, **_kwargs) -> InstallationFlushPlan:
         raise RuntimeError("installation persistence unavailable")
 
 
@@ -1714,13 +1717,13 @@ async def test_runtime_mapping_snapshot_has_no_runtime_side_effects():
             corpus="repo", relative_path="business/eva", link_name="eva"
         ),
     )
-    assert repository.materialize_calls == []
+    assert repository.flush_calls == []
     assert pool.publish_calls == []
     assert pool.verify_calls == []
 
 
 @pytest.mark.asyncio
-async def test_runtime_reconcile_materializes_active_ordinary_skillset_members_first():
+async def test_runtime_projection_flushes_installations_first():
     repository = _McpInstallations()
     runtime = BotRuntimeProjector(
         factory=_RuntimeFactory(),
@@ -1734,21 +1737,23 @@ async def test_runtime_reconcile_materializes_active_ordinary_skillset_members_f
 
     await runtime.project(bot_id="bot-1", owner_id="true-owner")
 
-    assert repository.materialize_calls == [
+    assert repository.flush_calls == [
         {
             "bot_id": "bot-1",
             "owner_id": "true-owner",
+            "env": "pre",
             "engine_type": "openclaw",
+            "default_engine_types": ("openclaw",),
         }
     ]
 
 
 @pytest.mark.asyncio
-async def test_runtime_reconcile_fails_before_runtime_projection_when_materialization_fails():
+async def test_runtime_projection_fails_before_engine_writes_when_flush_fails():
     runtime = BotRuntimeProjector(
         factory=_RuntimeFactory(),
         bot_repo=_RuntimeBots(),
-        repository=_FailingMaterializationRepository(),
+        repository=_FailingFlushRepository(),
         pool_skills=_RuntimeSkills(),
         pool_runtime=_RuntimePool(),
         pool_layouts=_RuntimeLayouts(),

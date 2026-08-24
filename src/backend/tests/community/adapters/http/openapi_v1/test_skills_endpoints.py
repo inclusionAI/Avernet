@@ -37,6 +37,10 @@ from agentclaw.community.api.local_skill_state_service import (
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
+from agentclaw.community.core.models.mcp import (
+    BotMCPInstallation,
+    SkillSetMCPServer,
+)
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
     Skill,
@@ -621,7 +625,9 @@ def test_a_skillset_bridged_skill_is_listed_and_gains_its_installation(tmp_path)
         Skill,
         SkillSet,
         SkillSetSkill,
+        SkillSetMCPServer,
         BotSkillInstallation,
+        BotMCPInstallation,
         DefaultSkillsetSkillExclusion,
     ):
         model.__table__.create(engine)
@@ -728,7 +734,9 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
         Skill,
         SkillSet,
         SkillSetSkill,
+        SkillSetMCPServer,
         BotSkillInstallation,
+        BotMCPInstallation,
         DefaultSkillsetSkillExclusion,
     ):
         model.__table__.create(engine)
@@ -869,7 +877,9 @@ def test_default_bot_scope_is_owner_distinguished(tmp_path):
         Skill,
         SkillSet,
         SkillSetSkill,
+        SkillSetMCPServer,
         BotSkillInstallation,
+        BotMCPInstallation,
         DefaultSkillsetSkillExclusion,
     ):
         model.__table__.create(engine)

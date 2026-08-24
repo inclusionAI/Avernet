@@ -119,9 +119,6 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
 )
-from agentclaw.community.core.skill_center.services.active_skillset_installation_materializer import (
-    ActiveSkillSetInstallationMaterializer,
-)
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
 )
@@ -312,11 +309,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         binder.bind(
             CapabilityDesiredStateRepositoryProtocol,
             to=CapabilityDesiredStateRepository,
-            scope=singleton,
-        )
-        binder.bind(
-            ActiveSkillSetInstallationMaterializer,
-            to=ActiveSkillSetInstallationMaterializer,
             scope=singleton,
         )
         binder.bind(
