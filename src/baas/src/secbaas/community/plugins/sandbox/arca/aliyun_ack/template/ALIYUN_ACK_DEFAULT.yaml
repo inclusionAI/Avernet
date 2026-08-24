@@ -79,7 +79,7 @@ spec:
       volumes:
       - name: data
         nfs:
-          server: 011yhkvtf9l5avlm4ty-gks56.cn-beijing.nas.aliyuncs.com
+          server: ${NAS_SERVER}
           path: /
       - name: proxy-config
         configMap:
