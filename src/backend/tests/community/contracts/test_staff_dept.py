@@ -29,7 +29,6 @@ from injector import Injector, Module, singleton
 
 from agentclaw.community.adapters.http.app import _unhandled_exception_handler
 from agentclaw.community.adapters.http.middleware import AvernetTenantMiddleware
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.adapters.http.openapi_v1.errors import DeptLookupError
 from agentclaw.community.plugin_api.staff_dept import (
@@ -42,6 +41,7 @@ from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
     reset_principal_verifier_config_cache,
 )
+from tests.community.adapters.http.openapi_v1.conftest import public_router
 
 _KEY = "staff-dept-contract-signing-key-at-least-32-bytes"
 _USER = {"id": "u-staff-1", "username": "bob@example.com"}
@@ -87,7 +87,7 @@ def _app_bound_to(staff_dept: StaffDeptPlugin) -> FastAPI:
 
     app = FastAPI()
     app.add_middleware(AvernetTenantMiddleware)
-    app.include_router(build_public_router())
+    app.include_router(public_router())
     app.add_exception_handler(Exception, _unhandled_exception_handler)
     attach_injector(app, Injector([_M()]))
     return app

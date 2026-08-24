@@ -26,7 +26,6 @@ from fastapi import FastAPI
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.api.local_skill_delete_service import (
@@ -56,6 +55,7 @@ from .conftest import (
     SeamCollaborators,
     bind_bot_access_seam,
     mount_public_error_handlers,
+    public_router,
     user_scoped_client,
 )
 
@@ -201,7 +201,7 @@ def client():
     # The assembled router, not a hand-mounted subset: what is under test is
     # partly *how* the group is mounted, so a fixture that mounted it its own
     # way could not see the defect this file was written for.
-    app.include_router(build_public_router())
+    app.include_router(public_router())
     app.dependency_overrides[require_principal] = _app_caller
     attach_injector(app, Injector([_M()]))
     mount_public_error_handlers(app)

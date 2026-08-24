@@ -19,9 +19,7 @@ from email.utils import parsedate_to_datetime
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
-
-from .conftest import mount_public_error_handlers
+from .conftest import mount_public_error_handlers, public_document, public_router
 from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTES
 from agentclaw.community.adapters.http.openapi_v1.middleware import (
     DEPRECATION,
@@ -32,9 +30,7 @@ from agentclaw.community.adapters.http.openapi_v1.middleware import (
 
 
 def _document() -> dict:
-    app = FastAPI()
-    app.include_router(build_public_router())
-    return app.openapi()
+    return public_document()
 
 
 #: ``LEGACY_ROUTES`` holds route paths, which keep Starlette's ``:path``
@@ -83,7 +79,7 @@ def test_every_legacy_address_answers_with_both_headers() -> None:
     thing a test of the registration alone would miss.
     """
     app = FastAPI()
-    app.include_router(build_public_router())
+    app.include_router(public_router())
     app.add_middleware(DeprecationHeaderMiddleware)
     mount_public_error_handlers(app)
     client = TestClient(app)
@@ -111,7 +107,7 @@ def test_the_two_headers_use_their_own_spellings() -> None:
     so neither can drift into the other's format.
     """
     app = FastAPI()
-    app.include_router(build_public_router())
+    app.include_router(public_router())
     app.add_middleware(DeprecationHeaderMiddleware)
     mount_public_error_handlers(app)
     method, path = sorted(LEGACY_ROUTES)[0]
@@ -221,7 +217,7 @@ def test_a_browser_can_actually_read_the_headers_cross_origin() -> None:
             return None
 
     app = FastAPI()
-    app.include_router(build_public_router())
+    app.include_router(public_router())
     mount_public_error_handlers(app)
     # The real installer, with the two plugins stubbed: what is under test is
     # the CORS registration it performs, and re-creating that here would be the

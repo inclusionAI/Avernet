@@ -28,8 +28,8 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.dependencies.utils import get_flat_params
+from .conftest import public_document, public_router
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 
 #: Every place a request field can be declared. ``path`` is read off the address
 #: template rather than the parameter list, so a path parameter counts even for a
@@ -39,12 +39,12 @@ _LOCATIONS = ("path", "query", "header", "cookie", "body")
 
 def _app() -> FastAPI:
     app = FastAPI()
-    app.include_router(build_public_router())
+    app.include_router(public_router())
     return app
 
 
 def _document() -> dict[str, Any]:
-    return _app().openapi()
+    return public_document()
 
 
 def _body_fields(

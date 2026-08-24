@@ -80,6 +80,12 @@ fi
 # in-memory SQLite engine, the DI singletons and the FastAPI ``app`` object are
 # isolated per worker for free; ``--dist loadfile`` additionally keeps every test
 # in a file on one worker so file-local ordering is preserved.
+#
+# ``auto`` is also the measured optimum, not just the obvious default: every
+# worker collects the whole suite for itself (~80s of the run), so a worker
+# past the core count adds more collection than it removes test time. On the
+# 4-core runner this targets — full suite, sysmon coverage — auto/4 took 276s,
+# -n 6 took 306s, and -n 8 took 367s. Raise it only along with the cores.
 pytest_workers="${BACKEND_CI_PYTEST_WORKERS:-auto}"
 xdist_args=()
 if [[ "$pytest_workers" != "0" ]]; then

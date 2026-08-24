@@ -1,11 +1,14 @@
 """Shared assembled-application fixtures for OpenAPI v1 adapter tests."""
 
+from copy import deepcopy
+from functools import lru_cache
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 
+from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     BotAccessRefusedError,
     GrantNotResolvableError,
@@ -15,6 +18,65 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 from agentclaw.community.adapters.http.openapi_v1.principal import USER_ID_QUERY
 from tests.community.framework.fixtures import app_with_testing_modules  # noqa: F401
 from tests.community.framework.fixtures import world  # noqa: F401
+
+
+@lru_cache(maxsize=1)
+def _assembled_public_router() -> APIRouter:
+    """``build_public_router()``, run once per process.
+
+    Assembling the surface is not cheap — every group's routes are cloned into
+    the public router, and each clone re-derives its dependency tree — so it
+    costs ~1.4s. This package builds the surface in ~40 places, most of them
+    per test rather than per module, which made assembly alone the largest
+    single cost in the whole backend suite.
+
+    Sharing one is safe for *mounting*, which is what almost every caller
+    does: assembly reads the group routers and writes a new one, and
+    ``include_router`` copies each route onto its target, so the result can be
+    mounted on any number of applications without any of them observing
+    another's mounting.
+
+    It is not safe for a caller that mounts something onto the router itself —
+    see :func:`public_router`.
+    """
+    return build_public_router()
+
+
+def public_router() -> APIRouter:
+    """The assembled public surface, for mounting on a test's own app.
+
+    Mounting is the cheap half (~1ms), so callers keep building their own
+    ``FastAPI()`` and stay isolated in the things that live on an application
+    rather than a router — ``dependency_overrides``, exception handlers, the
+    attached injector.
+
+    **The router itself is shared, so treat it as read-only.** A test that
+    mounts anything onto what it gets back — the assembly-refusal rows in
+    ``test_authorization_inventory.py`` are the ones that do — leaves that
+    route on the surface every later reader sees, and the failure surfaces in
+    an unrelated file. Those tests call ``build_public_router()`` directly and
+    pay the assembly cost, which is the right trade for the few that need it.
+    """
+    return _assembled_public_router()
+
+
+@lru_cache(maxsize=1)
+def _generated_public_document() -> dict:
+    """The published document, generated once per process (~2.4s a call)."""
+    app = FastAPI()
+    app.include_router(public_router())
+    return app.openapi()
+
+
+def public_document() -> dict:
+    """The document the public surface publishes — a fresh copy per call.
+
+    ``app.openapi()`` memoises on the application, so building one app per test
+    meant regenerating the whole document — 187 paths, 377 schemas — every
+    time. Generating it once and copying (~30ms) keeps each caller the owner of
+    what it gets, which is what a freshly built app used to give them.
+    """
+    return deepcopy(_generated_public_document())
 
 
 def user_scoped_client(app: FastAPI, user_id: str, **kwargs) -> TestClient:

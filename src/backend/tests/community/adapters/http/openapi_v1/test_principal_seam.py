@@ -26,7 +26,6 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.middleware import AvernetTenantMiddleware
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     PRINCIPAL_HEADER,
     Principal,
@@ -47,6 +46,7 @@ from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
     reset_principal_verifier_config_cache,
 )
+from .conftest import public_router
 
 KEY = "seam-test-shared-secret-at-least-32-bytes"
 TENANT = "acme-tenant"
@@ -367,7 +367,7 @@ def test_public_routes_require_principal():
     internal tenant's data for an unauthenticated caller, so this is checked
     rather than remembered.
     """
-    api_routes = _api_routes(build_public_router())
+    api_routes = _api_routes(public_router())
     assert api_routes, "no public routes found — the guard would pass vacuously"
 
     missing = [
@@ -382,7 +382,7 @@ def test_public_routes_require_principal():
 def test_bot_logs_routes_require_user_and_app_principal():
     bot_logs_routes = [
         route
-        for route in _api_routes(build_public_router())
+        for route in _api_routes(public_router())
         if route.path.startswith("/openapi/v1/bots/logs")
     ]
     assert bot_logs_routes, "no Bot Logs routes found"
@@ -410,7 +410,7 @@ def test_granting_a_bot_authorization_requires_user_and_app_principal():
     """
     routes = [
         route
-        for route in _api_routes(build_public_router())
+        for route in _api_routes(public_router())
         if route.path == _AUTHORIZED_APPS_PREFIX and "POST" in route.methods
     ]
     assert routes, "no grant route found"
@@ -433,7 +433,7 @@ def test_application_view_requires_user_and_app_principal():
     """
     routes = [
         route
-        for route in _api_routes(build_public_router())
+        for route in _api_routes(public_router())
         if route.path == _AUTHORIZED_BOTS_PATH
     ]
     assert routes, "no application-view route found"
@@ -456,7 +456,7 @@ def test_listing_and_withdrawing_authorizations_need_only_the_owner():
     """
     owner_only = [
         route
-        for route in _api_routes(build_public_router())
+        for route in _api_routes(public_router())
         if route.path.startswith(_AUTHORIZED_APPS_PREFIX)
         and ("GET" in route.methods or "DELETE" in route.methods)
     ]

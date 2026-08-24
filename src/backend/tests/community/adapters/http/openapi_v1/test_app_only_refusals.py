@@ -24,7 +24,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.middleware import AvernetTenantMiddleware
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.admission import (
     ADMISSION,
     AdmissionMode,
@@ -35,6 +34,7 @@ from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
     reset_principal_verifier_config_cache,
 )
+from .conftest import public_router
 
 KEY = "refusal-test-shared-secret-at-least-32-bytes"
 TENANT = "acme-tenant"
@@ -106,7 +106,7 @@ def client():
 
     app = FastAPI()
     app.add_middleware(AvernetTenantMiddleware)
-    app.include_router(build_public_router())
+    app.include_router(public_router())
     app.add_exception_handler(Exception, _unhandled_exception_handler)
     return TestClient(app, raise_server_exceptions=False)
 

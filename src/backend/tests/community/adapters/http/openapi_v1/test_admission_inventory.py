@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.deprecated import (
     LEGACY_ROUTES,
     SELF_CHECKED_ROUTES,
@@ -44,6 +43,7 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
     require_granted_addressed_bot,
     require_granted_own_bot,
 )
+from .conftest import public_router
 
 #: The modes whose contract is "a grant is checked for the addressed bot",
 #: each mapped to the one dependency that spells it. The declaration *is* the
@@ -68,7 +68,7 @@ def _effective_routes():
     the test would pass while the wiring was absent. Reading the effective
     contexts is what makes this check about the assembled surface.
     """
-    router = build_public_router()
+    router = public_router()
     found = []
     for route in getattr(router, "routes", []):
         if hasattr(route, "effective_route_contexts"):

@@ -53,6 +53,7 @@ from tests.community.adapters.http.openapi_v1._route_walk import (
     original_route_of,
     path_of,
 )
+from .conftest import public_router
 
 
 _RAN: list[str | None] = []
@@ -143,8 +144,20 @@ def test_attached_dependency_publishes_its_parameters(probe_surface):
 # ── the inventory ────────────────────────────────────────────────────────────
 
 
+def _own_surface() -> APIRouter:
+    """A surface belonging to this test alone.
+
+    The rows below assert on *assembly*: each mounts a deliberately wrong route
+    and expects the check to refuse it. They must therefore build their own
+    surface rather than take the shared ``public_router()`` — the bad route
+    they add would otherwise stay on it and reach every later reader, which is
+    a failure a long way from its cause.
+    """
+    return build_public_router()
+
+
 def _live_operations():
-    return {key for key, _ in operations(build_public_router())}
+    return {key for key, _ in operations(public_router())}
 
 
 def test_the_surface_and_the_table_agree_exactly():
@@ -199,7 +212,7 @@ def test_every_route_is_a_public_api_route():
     """
     offenders = [
         f"{sorted(getattr(ctx, 'methods', None) or {'WEBSOCKET'})} {path_of(ctx)}"
-        for ctx in effective_routes(build_public_router())
+        for ctx in effective_routes(public_router())
         if not isinstance(original_route_of(ctx), PublicAPIRoute)
         and hasattr(original_route_of(ctx), "methods")
     ]
@@ -233,7 +246,7 @@ def test_assembly_refuses_a_row_that_matches_no_operation():
     and a table that no longer describes the surface cannot be trusted to say
     an operation is covered.
     """
-    router = build_public_router()
+    router = public_router()
     AUTHORIZATION[("GET", "/openapi/v1/bots/{bot_id}/renamed-away")] = OWNER_SCOPED
     try:
         with pytest.raises(PublicRouteNotAuthorized) as refusal:
@@ -496,7 +509,7 @@ def test_a_router_cannot_opt_out_of_the_route_class():
     ``test_every_route_is_a_public_api_route``, which asserts today's surface is
     clean: this asserts the mechanism would notice if it stopped being.
     """
-    public = build_public_router()
+    public = _own_surface()
     opted_out = APIRouter()  # no route_class
 
     @opted_out.get("/openapi/v1/bots/{bot_id}/built-its-own-way")
@@ -523,7 +536,7 @@ def test_a_websocket_route_without_a_row_fails_assembly():
     with no declared authorization at all — the orphan check looks the other
     way and finds nothing to complain about.
     """
-    public = build_public_router()
+    public = _own_surface()
     sockets = APIRouter()
 
     @sockets.websocket("/openapi/v1/bots/undeclared/ws")
@@ -561,7 +574,7 @@ def test_a_websocket_check_row_fails_assembly():
     covered — and the inventory would agree — while the socket was served
     unguarded.
     """
-    public = build_public_router()
+    public = _own_surface()
     sockets = APIRouter()
 
     @sockets.websocket("/openapi/v1/bots/declared/ws")
@@ -593,7 +606,7 @@ def test_a_check_handler_must_consume_the_owner_the_gate_checks():
     So the migration cannot be half-done: the row and the handler move
     together, or assembly refuses.
     """
-    public = build_public_router()
+    public = _own_surface()
     diverging = APIRouter(route_class=PublicAPIRoute)
     key = ("GET", "/openapi/v1/bots/{bot_id}/diverging")
     AUTHORIZATION[key] = Check(PermissionLevel.MEMBER)
@@ -618,7 +631,7 @@ def test_a_check_handler_taking_owner_id_dep_is_accepted():
     Also exercises ``@envelope_errors``, since every real handler wears it and
     the check has to see through ``__wrapped__`` to the true signature.
     """
-    public = build_public_router()
+    public = _own_surface()
     correct = APIRouter(route_class=PublicAPIRoute)
     key = ("GET", "/openapi/v1/bots/{bot_id}/correct")
     AUTHORIZATION[key] = Check(PermissionLevel.MEMBER)
@@ -656,7 +669,7 @@ def test_a_check_row_without_bot_id_on_the_path_fails_assembly():
     under ``/openapi/v1/bots/{bot_id}/harness`` and pass this refusal. See
     ``_assert_check_rows_are_enforceable`` for what actually stops them.
     """
-    public = build_public_router()
+    public = _own_surface()
     pathless = APIRouter(route_class=PublicAPIRoute)
     key = ("GET", "/openapi/v1/bots/pathless-thing")
     AUTHORIZATION[key] = Check(PermissionLevel.MEMBER)
@@ -689,7 +702,7 @@ def test_bot_id_anywhere_on_the_path_is_accepted():
     today, so they do not reach this refusal yet; the moment Task 11 flips them
     to ``Check`` they do, and a refusal keyed on position would reject every one.
     """
-    public = build_public_router()
+    public = _own_surface()
     relocated = APIRouter(route_class=PublicAPIRoute)
     key = ("GET", "/openapi/v1/bots/relocated/{bot_id}/thing")
     AUTHORIZATION[key] = Check(PermissionLevel.MEMBER)

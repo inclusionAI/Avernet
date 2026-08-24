@@ -29,7 +29,7 @@ routine creation. Those are separated below, so this file asserts the strongest
 thing that is actually true rather than a stricter one that would have to be
 weakened the first time it ran.
 
-Driven through ``build_public_router()`` rather than a hand-mounted subset,
+Driven through ``public_router()`` rather than a hand-mounted subset,
 because *how* these routes are mounted is half of what is under test.
 """
 
@@ -42,7 +42,6 @@ from fastapi import FastAPI
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.admission import (
     SKILL_SCOPED_OPERATIONS,
 )
@@ -69,7 +68,7 @@ from agentclaw.community.core.gateway_principal import (
     VerifiedCaller,
 )
 
-from .conftest import mount_public_error_handlers, user_scoped_client
+from .conftest import mount_public_error_handlers, public_router, user_scoped_client
 
 APP_ID = 99
 USER = "u-1"
@@ -188,7 +187,7 @@ def client(services):
                 binder.bind(protocol, to=services)
 
     app = FastAPI()
-    app.include_router(build_public_router())
+    app.include_router(public_router())
     app.dependency_overrides[require_principal] = _app_caller
     attach_injector(app, Injector([_M()]))
     mount_public_error_handlers(app)
