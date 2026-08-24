@@ -53,11 +53,11 @@ USER admin
 
 EXPOSE 8888
 
-# AGENTCLAWPROXY_PORT only steers the healthcheck; the real listen port comes
+# SANDBOXPROXY_PORT only steers the healthcheck; the real listen port comes
 # from module_config.web.port in the mounted config. Keep them in sync.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=6 \
-    CMD curl -fsS "http://127.0.0.1:${AGENTCLAWPROXY_PORT:-8888}/health" >/dev/null || exit 1
+    CMD curl -fsS "http://127.0.0.1:${SANDBOXPROXY_PORT:-8888}/health" >/dev/null || exit 1
 
 # Entry point selects the runner via installed entry points (bare = community).
-ENTRYPOINT ["python", "/app/src/agentclawproxy/community/main.py"]
+ENTRYPOINT ["python", "/app/src/sandboxproxy/community/main.py"]
 CMD ["--config", "/app/configs", "--mode", "bare"]

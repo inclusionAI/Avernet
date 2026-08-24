@@ -20,6 +20,7 @@ def config() -> UserConfig:
                 "api_server": "https://ack.internal.example",
                 "token": "tok",
                 "namespace": "default",
+                "api_keys": {"0": "key-zero", "1": "key-one"},
             },
             "teclaw": {"host": "http://teclaw.internal.example"},
             "baas": {"host": "http://baas.internal.example"},
@@ -49,9 +50,24 @@ class TestArcaResolution:
         with pytest.raises(ValueError):
             resolver.resolve("ARCA_")
 
-    def test_no_api_key_injected(self, resolver: PrefixTargetResolver) -> None:
+    def test_default_tenant_headers(self, resolver: PrefixTargetResolver) -> None:
         result = resolver.resolve("ARCA_12345")
-        assert "x-agent-sandbox-api-key" not in result
+        assert result["x-agent-sandbox-id"] == "12345"
+        assert result["x-agent-sandbox-port"] == "8080"
+        assert result["x-agent-sandbox-api-key"] == "key-zero"
+
+    def test_tenant_selects_api_key(self, resolver: PrefixTargetResolver) -> None:
+        result = resolver.resolve("ARCA_12345@1:9090")
+        assert result["sandbox_id"] == "12345"
+        assert result["sandbox_port"] == "9090"
+        assert result["x-agent-sandbox-api-key"] == "key-one"
+
+    def test_no_api_key_when_unconfigured(self) -> None:
+        cfg = UserConfig.model_validate(
+            {"aliyun_ack_cluster": {"api_server": "https://ack"}}
+        )
+        result = PrefixTargetResolver(cfg).resolve("ARCA_12345")
+        assert result["x-agent-sandbox-api-key"] == ""
 
     def test_missing_host(self) -> None:
         cfg = UserConfig.model_validate({"aliyun_ack_cluster": {}})

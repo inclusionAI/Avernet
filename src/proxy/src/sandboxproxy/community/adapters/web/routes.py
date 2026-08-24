@@ -19,6 +19,7 @@ logger = get_logger("routes")
 def build_router(container: ApplicationContainer, loaded: Config) -> APIRouter:
     router = APIRouter()
     jwt_verifier = container.jwt_verifier()
+    relay_secret = loaded.user_config.jwt.secret
 
     def _auth(request: Request) -> dict[str, Any] | None:
         auth = request.headers.get("authorization", "")
@@ -95,9 +96,25 @@ def build_router(container: ApplicationContainer, loaded: Config) -> APIRouter:
 
     @router.websocket("/wsrelay/{session_id}")
     async def wsrelay(websocket: WebSocket, session_id: str) -> None:
-        """Client side: pair with a waiting mng connection."""
+        """Client side: authenticate, query BaaS route, then pair with mng."""
+        from sandboxproxy.community.core.authn import authenticate_relay
+
         await websocket.accept()
+        auth = authenticate_relay(
+            websocket.headers, websocket.url.path, "wsrelay", relay_secret
+        )
+        if not auth.ok:
+            await websocket.close(code=4401)
+            return
+
         relay_server = container.relay_server()
+        relay_client = container.relay_client()
+
+        route_info = await relay_client.get_route_info(session_id)
+        if route_info is None or route_info.get("status") != "active":
+            await websocket.close(code=4503)
+            return
+
         fut = await relay_server.connect_client(session_id)
         if fut is None:
             await websocket.close(code=1008)
@@ -110,11 +127,20 @@ def build_router(container: ApplicationContainer, loaded: Config) -> APIRouter:
 
     @router.websocket("/wsrevrelay/{session_id}")
     async def wsrevrelay(websocket: WebSocket, session_id: str) -> None:
-        """Mng (reverse) side: register, wait for client, then bridge."""
+        """Mng (reverse) side: authenticate, write active route, wait for client."""
+        from sandboxproxy.community.core.authn import authenticate_relay
+
         await websocket.accept()
+        auth = authenticate_relay(
+            websocket.headers, websocket.url.path, "wsrevrelay", relay_secret
+        )
+        if not auth.ok:
+            await websocket.close(code=4401)
+            return
+
         relay_server = container.relay_server()
         if not await relay_server.register_mng(session_id):
-            await websocket.close(code=1011)
+            await websocket.close(code=4502)
             return
         relay_server.signal_mng_ready(session_id, websocket)
         fut = await relay_server.wait_for_client(session_id)
@@ -153,8 +179,16 @@ def _to_ws_url(upstream: str, target_path: str) -> str:
 
 def _extra_headers(resolved: dict[str, str]) -> dict[str, str]:
     headers: dict[str, str] = {}
-    if "x-target-bot-id" in resolved:
-        headers["x-target-bot-id"] = resolved["x-target-bot-id"]
+    for key in (
+        "x-target-bot-id",
+        "x-andc-target-service",
+        "x-env-id",
+        "x-agent-sandbox-id",
+        "x-agent-sandbox-port",
+        "x-agent-sandbox-api-key",
+    ):
+        if key in resolved:
+            headers[key] = resolved[key]
     if "local_path_prefix" in resolved:
         headers["x-local-path-prefix"] = resolved["local_path_prefix"]
     return headers

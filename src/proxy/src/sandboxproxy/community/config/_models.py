@@ -50,6 +50,11 @@ class AliyunAckClusterConfig(BaseModel):
     api_server: str = ""
     token: str = ""
     namespace: str = "default"
+    api_keys: dict[str, str] = Field(default_factory=dict)
+
+    def api_key_for(self, tenant: str) -> str:
+        """Return the sandbox API key for ``tenant`` (default ``"0"``)."""
+        return self.api_keys.get(tenant) or self.api_keys.get("0", "")
 
     @property
     def cluster_host(self) -> str:
