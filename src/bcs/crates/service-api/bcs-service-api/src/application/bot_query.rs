@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::core::{ActorKind, ActorStatus, BotCapabilities, DynamicStatusResponse, ServiceError};
+use crate::types::BotTaskModesQuery;
 
 use super::bot_management::BotUseCaseError;
 
@@ -36,6 +37,15 @@ pub struct BotListResult {
     pub offset: u64,
     pub limit: u64,
     pub total: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BotTaskModeListEntry {
+    pub bot_id: String,
+    pub name: String,
+    pub env: String,
+    pub task_claim_mode: bool,
+    pub task_dream_mode: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -243,6 +253,13 @@ pub trait BotQueryService: Send + Sync {
         &self,
         _command: SearchBotsCommand,
     ) -> Result<BotSearchResult, BotUseCaseError> {
+        Err(bot_query_not_configured().into())
+    }
+
+    async fn list_bots_by_task_modes(
+        &self,
+        _query: BotTaskModesQuery,
+    ) -> Result<Vec<BotTaskModeListEntry>, BotUseCaseError> {
         Err(bot_query_not_configured().into())
     }
 }

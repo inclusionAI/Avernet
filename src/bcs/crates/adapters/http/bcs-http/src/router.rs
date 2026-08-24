@@ -60,6 +60,10 @@ fn build_api_routes() -> Router<HttpAppState> {
         .route("/bots/query", post(routes::bots::query_bots))
         .route("/bots/status", post(routes::bots::update_bot_status))
         .route(
+            "/bots/by-task-modes",
+            get(routes::bots::list_bots_by_task_modes),
+        )
+        .route(
             "/bots/{id}",
             get(routes::bots::get_bot).delete(routes::bots::leave_bot),
         )
