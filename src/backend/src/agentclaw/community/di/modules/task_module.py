@@ -38,7 +38,6 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.di.profile import DeployProfile
-from agentclaw.community.utils.env_utils import get_current_env
 
 
 class TaskModule(Module):
@@ -127,8 +126,8 @@ class TaskModule(Module):
             bot_service = injector.get(BotServiceProtocol)
         except Exception:  # noqa: BLE101 未绑定 → dashboard 不附加 assignee 的 bot 归属/名
             bot_service = None
-        # 回投地址 = backend 访问 URL(SINGLEBOX_BACKEND_URL / TASK_API_BASE_URL[_PRE]),
-        # 由各环境部署注入;agent 回投结果往此 origin POST(自行拼 /api/v1/... 路径)。
+        # 回投地址 = 本 backend 自身访问 URL(singlebox→SINGLEBOX_BACKEND_URL / 其余→BACKEND_URL,
+        # 单值、各环境部署 overlay 注入当前环境 backend 地址),agent 回投结果往此 origin POST(自行拼 /api/v1/...)。
         return TaskService(
             graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
             bcn=bcn, bcs_identity=bcs_identity, task_info_repo=task_info_repo,
@@ -182,16 +181,16 @@ class TaskModule(Module):
 
     @staticmethod
     def _resolve_api_base_url() -> str:
-        """返回本 backend 的访问 URL(agent 回投结果往此 origin POST,自行拼 /api/v1/... 路径)。
+        """返回本 backend 自身访问 URL(agent 回投结果往此 origin POST,自行拼 /api/v1/... 路径)。
 
-        复用旧的裸 env 机制,不引入新 config:singlebox → 本地直连(``SINGLEBOX_BACKEND_URL``/8888);
-        其余按 get_current_env() 选 ``TASK_API_BASE_URL_PRE``(pre)/``TASK_API_BASE_URL``(其余),由各环境
-        部署注入;空 → 回退 localhost:8888(未配置 / 尚未申请)。"""
+        复用 task_discovery 既有约定,不引入新 env:单值 ``BACKEND_URL``(非 singlebox,各环境部署
+        overlay 注入当前环境 backend 地址,如预发注入预发后端;空 → localhost:8888 表示未配置/本地默认),
+        ``SINGLEBOX_BACKEND_URL``(singlebox 直连,与 _resolve_ports 同源)。代码不按 env 分支:环境差异
+        由 overlay 注入的单值决定,符合组合根裸 env 读取约束。"""
 
         if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == DeployProfile.SINGLEBOX.value:
             return os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-        key = "TASK_API_BASE_URL_PRE" if get_current_env() == "pre" else "TASK_API_BASE_URL"
-        return os.environ.get(key) or "http://localhost:8888"
+        return os.environ.get("BACKEND_URL", "http://localhost:8888")
 
     @staticmethod
     def _resolve_ports():

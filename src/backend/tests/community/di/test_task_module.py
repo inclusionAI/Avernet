@@ -52,17 +52,16 @@ def test_resolve_ports_outside_singlebox_returns_the_two_port_contract(monkeypat
     assert TaskModule._resolve_ports() == (None, None)
 
 
-def test_resolve_api_base_url_uses_neutral_config_default(monkeypatch):
+def test_resolve_api_base_url_single_value_backend_url(monkeypatch):
+    # 非 singlebox:单值 BACKEND_URL,按环境由部署 overlay 注入,代码不按 env 分支。
     monkeypatch.setenv("DEPLOY_PROFILE", "community")
-    monkeypatch.delenv("TASK_API_BASE_URL", raising=False)
-    monkeypatch.delenv("TASK_API_BASE_URL_PRE", raising=False)
-    assert TaskModule._resolve_api_base_url() == "http://localhost:8888"
-    # prod env -> TASK_API_BASE_URL
-    monkeypatch.setenv("SERVER_ENV", "prod")
-    monkeypatch.setenv("TASK_API_BASE_URL", "https://example-backend.alipay.com")
-    assert TaskModule._resolve_api_base_url() == "https://example-backend.alipay.com"
-    # pre env -> TASK_API_BASE_URL_PRE override
-    monkeypatch.setenv("SERVER_ENV", "pre")
-    monkeypatch.delenv("TASK_API_BASE_URL", raising=False)
-    monkeypatch.setenv("TASK_API_BASE_URL_PRE", "https://example-backend-pre.alipay.com")
-    assert TaskModule._resolve_api_base_url() == "https://example-backend-pre.alipay.com"
+    monkeypatch.delenv("BACKEND_URL", raising=False)
+    assert TaskModule._resolve_api_base_url() == "http://localhost:8888"  # 未配置 → 中立兜底
+    monkeypatch.setenv("BACKEND_URL", "https://backend.example.test")
+    assert TaskModule._resolve_api_base_url() == "https://backend.example.test"  # 用 overlay 注入值
+
+    # singlebox:走 SINGLEBOX_BACKEND_URL(与 _resolve_ports 同源),与 BACKEND_URL 无关。
+    monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
+    monkeypatch.setenv("SINGLEBOX_BACKEND_URL", "http://singlebox.local:8888")
+    monkeypatch.setenv("BACKEND_URL", "https://backend.example.test")  # singlebox 不读这个
+    assert TaskModule._resolve_api_base_url() == "http://singlebox.local:8888"
