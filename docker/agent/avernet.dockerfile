@@ -159,11 +159,12 @@ COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 COPY --from=builder /opt/openclawExt/openclaw-channel-bcn /opt/openclawExt/openclaw-channel-bcn
 
 # CA bundle symlink for run.sh's hardcoded NODE_EXTRA_CA_CERTS path.
-# Also trust the MITM CA used by avernet-sidecar for HTTPS traffic interception,
-# so the agent container doesn't reject the sidecar's re-encrypted TLS connections.
-RUN curl -fsSL docker/agent/avernet-sidecar/mitm-ca.crt \
-         -o /usr/local/share/ca-certificates/avernet-sidecar-mitm-ca.crt \
-    && update-ca-certificates \
+# Optionally trust the avernet-sidecar MITM CA: place the CA cert at
+# docker/agent/avernet-sidecar/mitm-ca.crt in the build context, and it
+# will be added to the system trust store so the agent container doesn't
+# reject the sidecar's re-encrypted TLS connections.
+COPY docker/agent/avernet-sidecar/mitm-ca.crt /usr/local/share/ca-certificates/avernet-sidecar-mitm-ca.crt
+RUN update-ca-certificates \
     && ln -sf /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-bundle.crt
 
 # Recreate admin user at runtime stage (uid/gid 10001).

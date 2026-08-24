@@ -5,18 +5,13 @@
 #
 # Reference: ocb/dockers/poolab-sidecar/Dockerfile
 #
-# CA certs are downloaded from OSS at build time:
-#   MITM CA (for HTTPS man-in-the-middle decryption):
-#     docker/agent/avernet-sidecar/mitm-ca.crt
-#     docker/agent/avernet-sidecar/mitm-ca.key
-#   Internal gateway CA (Nautilus SWG CA):
-#     docker/agent/avernet-sidecar/internal-gateway-ca.crt
-#   Main container image must trust the same MITM ca.crt:
-#     ADD ca.crt /usr/local/share/ca-certificates/envoy-sidecar-ca.crt
-#     RUN update-ca-certificates
-#
-# Encrypted values: header-rules.yaml values prefixed with "enc:" are
-# auto-decrypted at render time (XOR + base64).
+# CA certificates: place the following files in docker/agent/avernet-sidecar/
+# before building (they are .gitignore'd, NOT committed):
+#   mitm-ca.crt  — MITM CA certificate (for HTTPS interception)
+#   mitm-ca.key  — MITM CA private key (sidecar signs dynamic server certs)
+#   internal-gateway-ca.crt — (optional) internal gateway CA
+#   The agent image must trust the same mitm-ca.crt:
+#     docker/agent/avernet-sidecar/mitm-ca.crt is COPY'd into both images.
 # ============================================================
 
 FROM envoyproxy/envoy:v1.30-latest
@@ -44,17 +39,22 @@ RUN apt-get update && \
     && groupadd -g 1337 sidecar \
     && useradd -u 1337 -g sidecar -s /sbin/nologin -M sidecar
 
-# Trust internal gateway CA (Nautilus SWG CA), downloaded from OSS.
-RUN curl -fsSL docker/agent/avernet-sidecar/internal-gateway-ca.crt \
-         -o /usr/local/share/ca-certificates/ant-internal-gateway-ca.crt \
-    && update-ca-certificates
+# Optionally trust an internal gateway CA. Place the cert at
+# docker/agent/avernet-sidecar/internal-gateway-ca.crt in the build
+# context. Not committed to the repository.
+COPY docker/agent/avernet-sidecar/internal-gateway-ca.crt /usr/local/share/ca-certificates/ant-internal-gateway-ca.crt
+RUN update-ca-certificates
 
 # Config renderer (Python, no compilation needed).
 COPY docker/agent/avernet-sidecar/render.py /usr/local/bin/config-renderer
 RUN chmod +x /usr/local/bin/config-renderer && \
     sed -i '1s|^#!/usr/bin/env python3|#!/usr/bin/python3|' /usr/local/bin/config-renderer
 
-# MITM CA certificates (downloaded from OSS at build time).
+# MITM CA certificate and key. COPY from build context — the caller
+# must place ca.crt and ca.key in docker/agent/avernet-sidecar/ before
+# building. These are NOT committed to the repository (.gitignore'd).
+COPY docker/agent/avernet-sidecar/mitm-ca.crt /etc/sidecar/certs/mitm-ca/ca.crt
+COPY docker/agent/avernet-sidecar/mitm-ca.key /etc/sidecar/certs/mitm-ca/ca.key
 RUN mkdir -p /etc/sidecar/certs/mitm-ca && \
     curl -fsSL docker/agent/avernet-sidecar/mitm-ca.crt \
          -o /etc/sidecar/certs/mitm-ca/ca.crt && \
