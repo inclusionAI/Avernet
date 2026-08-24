@@ -16,13 +16,13 @@ class _FakeInjector:
 
     def get(self, interface):
         self.calls.append(interface)
-        from agentclaw.community.api.task.task_service import TaskServiceProtocol
         from agentclaw.community.core.repository.protocols.task import (
             TaskGraphRepositoryProtocol,
         )
+        from agentclaw.community.core.task.task_center.task_service import TaskService
         if interface is TaskGraphRepositoryProtocol:
             return self._graph_repo
-        if interface is TaskServiceProtocol:
+        if interface is TaskService:
             return self._task_service
         raise KeyError(interface)
 
@@ -87,9 +87,9 @@ def test_recovery_worker_resolves_and_runs_once():
     assert recovered == ["t-recover"]
     assert svc.redriven == ["t-recover"]
     # graph repo + task service resolved lazily exactly once each
-    from agentclaw.community.api.task.task_service import TaskServiceProtocol
     from agentclaw.community.core.repository.protocols.task import (
         TaskGraphRepositoryProtocol,
     )
+    from agentclaw.community.core.task.task_center.task_service import TaskService
     assert inj.calls.count(TaskGraphRepositoryProtocol) == 1
-    assert inj.calls.count(TaskServiceProtocol) == 1
+    assert inj.calls.count(TaskService) == 1

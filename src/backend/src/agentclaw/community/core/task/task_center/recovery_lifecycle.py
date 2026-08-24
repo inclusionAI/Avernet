@@ -23,7 +23,7 @@ from typing import Optional
 
 from injector import Injector, inject
 
-from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.repository.protocols.task import (
     TaskGraphRepositoryProtocol,
 )
@@ -71,7 +71,7 @@ class TaskRecoveryLifecycle(LifecycleBase):
             logger.info("[task-recovery] graph repository not bound, recovery disabled")
             return None
         try:
-            task_service = self._injector.get(TaskServiceProtocol)
+            task_service = self._injector.get(TaskService)
         except Exception as exc:  # noqa: BLE101 任务服务装配失败 → 本周期跳过
             logger.warning("[task-recovery] task service not resolvable: %s", exc)
             return None
