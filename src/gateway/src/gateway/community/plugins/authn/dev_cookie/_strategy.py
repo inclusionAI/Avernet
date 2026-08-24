@@ -11,7 +11,12 @@ import os
 from urllib.parse import unquote
 
 from gateway.community.spi.auth import AuthenticatedUser
-from gateway.community.spi.authn import CredentialBundle, Principal, PrincipalType, UserPrincipal
+from gateway.community.spi.authn import (
+    CredentialBundle,
+    Principal,
+    PrincipalType,
+    UserPrincipal,
+)
 
 
 class DevCookieUserStrategy:
@@ -45,7 +50,9 @@ class DevCookieUserStrategy:
         if not staff_id:
             return None
 
-        display_name = unquote(creds.cookies.get(self._nick_name_cookie, "")).strip() or staff_id
+        display_name = (
+            unquote(creds.cookies.get(self._nick_name_cookie, "")).strip() or staff_id
+        )
         subject = AuthenticatedUser(
             id=staff_id,
             username=staff_id,

@@ -20,7 +20,9 @@ logger = get_logger("plugin-sandbox")
 class AliyunAckClusterConfig:
     """Cluster connection config for building an ACK ApiClient."""
 
-    def __init__(self, api_server: str = "", token: str = "", namespace: str = "default") -> None:
+    def __init__(
+        self, api_server: str = "", token: str = "", namespace: str = "default"
+    ) -> None:
         self.api_server = api_server
         self.token = token
         self.namespace = namespace

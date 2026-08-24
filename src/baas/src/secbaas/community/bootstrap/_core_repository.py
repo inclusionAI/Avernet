@@ -106,9 +106,10 @@ class CoreRepositoryContainer(containers.DeclarativeContainer):
         mariadb=_orm_repo(OrmBotRunQueueRepository),
     )
     bot_run_interaction_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmBotRunInteractionRepository),
-        SQLITE_ORM=_orm_repo(OrmBotRunInteractionRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmBotRunInteractionRepository),
+        sqlite=_orm_repo(OrmBotRunInteractionRepository),
+        mariadb=_orm_repo(OrmBotRunInteractionRepository),
     )
     bot_run_queue_chunk_repository = providers.Selector(
         config.plugins.database,

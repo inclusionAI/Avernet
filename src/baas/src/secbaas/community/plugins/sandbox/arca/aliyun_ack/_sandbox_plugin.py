@@ -269,7 +269,11 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         sandbox_id = f"{template_id}-{uuid.uuid4().hex[:12]}"
         uid = _sanitize_pod_name(sandbox_id)
         deployment_name, container_name = self._create_deployment(
-            uid, template_id, namespace, storage, resource_spec,
+            uid,
+            template_id,
+            namespace,
+            storage,
+            resource_spec,
             outbound_operation_rule=outbound_operation_rule,
         )
         try:

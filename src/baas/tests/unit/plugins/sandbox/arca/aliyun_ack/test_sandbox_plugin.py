@@ -245,7 +245,9 @@ class TestClientManager:
             AliyunAckClusterConfig,
         )
 
-        cfg = AliyunAckClusterConfig("https://ack.example.com", "dummy-token", "default")
+        cfg = AliyunAckClusterConfig(
+            "https://ack.example.com", "dummy-token", "default"
+        )
         mgr = AliyunAckClientManager(cfg)
         fake = MagicMock()
         mgr.build_client = MagicMock(return_value=fake)
@@ -257,7 +259,9 @@ class TestClientManager:
             AliyunAckClusterConfig,
         )
 
-        cfg = AliyunAckClusterConfig("https://ack.example.com", "dummy-token", "default")
+        cfg = AliyunAckClusterConfig(
+            "https://ack.example.com", "dummy-token", "default"
+        )
         AliyunAckClientManager(cfg).close()
 
 
