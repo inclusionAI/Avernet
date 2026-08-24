@@ -47,8 +47,8 @@ if [ ! -x "/usr/local/bin/supervisord" ]; then
     exit 1
 fi
 
-if command -v openclaw &>/dev/null; then
-    echo "===> OpenClaw: $(openclaw --version 2>&1 | head -1 || echo 'unknown')"
+if [ -x /usr/local/bin/openclaw ]; then
+    echo "===> OpenClaw: $(su admin -s /bin/bash -c 'openclaw --version' 2>&1 | head -1 || echo 'unknown')"
 else
     echo "WARNING: OpenClaw not found in PATH" >&2
 fi
