@@ -107,7 +107,7 @@ class TaskModule(Module):
             bcs_identity=bcs_identity, task_info_repo=task_info_repo,
             callback_repo=callback_repo, task_node_repo=task_node_repo,
             task_node_run_info_repo=task_node_run_info_repo,
-            bot_service=bot_service, bot_public=bot_public,
+            bot_service=bot_service,
             api_base_url=self._resolve_api_base_url(),
         )
 
@@ -165,7 +165,7 @@ class TaskModule(Module):
           + ``SingleboxBcsAdapter``(继承 ``BcsHttpAdapter`` 复用 BCS REST 直连本地 BCS :21000;本地
           ``require_authentication=false``,HMAC 头被忽略;仅覆写本地响应形状与生产不一致处 → coop_group 真驱动本地 BCS)。
         - 其它(corp/prod 由 overlay 覆写)→ 不内联 BaaS/BCS(社区不发 corp 密钥),真实端口由 corp adapter
-          覆写本 provider。
+          完成装配。
         """
         if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
             return None, None
@@ -196,11 +196,10 @@ class TaskModule(Module):
                 sm_status="completed", sm_output=_coop_pass_output,
                 poll_once_then_terminal=True, terminal_after=1,
             )
-            # double 端口不参与 roster 圈定,沿用全部候选。
+            # double 不连接真实 BCS，任务模式候选固定返回空列表。
         else:
             token = LocalBcsTokenProvider.from_env()
             bcs = SingleboxBcsAdapter(token)
-            # provider_id 由 bcs 端口自带(token.provider_id=SINGLEBOX_BCS_PROVIDER_ID);空→roster 圈定关闭(旧行为)。
         return bot, bcs
 
     @staticmethod

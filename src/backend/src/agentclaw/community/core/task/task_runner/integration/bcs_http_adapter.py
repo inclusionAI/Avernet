@@ -76,10 +76,7 @@ class BcsCreateGroupResult:
 
 @dataclass
 class BotTaskModeRoster:
-    """任务模式 roster 本地 DTO(不复用 backend 已有领域对象)。
-
-    来自 BCS 内部 provider 路由 ``GET /providers/{provider_id}/bots/by-task-modes``。
-    """
+    """Backend task-mode query DTO projected directly from ``bcs_bots``."""
 
     bot_id: str
     name: str
@@ -139,12 +136,6 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
             yield client
         finally:
             await client.aclose()
-
-    @property
-    def provider_id(self) -> str:
-        # 复用点:provider_id 取自构造期注入的 token(singlebox=SINGLEBOX_BCS_PROVIDER_ID;corp overlay=
-        # BcnConfig)。空=该 BCS client 未配任务模式 roster 圈定 → 调用方按"圈定关闭"处理(沿用全部候选)。
-        return self._t.provider_id
 
     def _sign(self, method: str, path: str, ts: str) -> dict[str, str]:
         sig = hmac.new(self._t.secret.encode(), f"{ts}{method}{path}".encode(), hashlib.sha256).hexdigest()
@@ -259,35 +250,33 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
     async def validate_definition(self, definition_yaml: str) -> None:
         await self._req("POST", "/collaboration/definitions/validate", json={"yaml": definition_yaml})
 
-    async def list_bots_by_task_modes(self, *, claim: bool | None = None,
-                                      dream: bool | None = None, match: str = "any") -> list[BotTaskModeRoster]:
-        """查询满足任务模式开关的 provider bot roster(BCS 内部 provider 路由,Bearer provider_admin_token)。
-
-        ``provider_id`` 复用本 client 构造期注入的 token(``self.provider_id``),不作为入参暴露。
-        ``claim``/``dream`` 为 ``None`` 表示该开关不过滤(有意哨兵);``match`` 为 any|all。路径照搬
-        ``get_session_messages``:HMAC 签 path 不含 query,query 走 httpx ``params``(provider 路由只读
-        Bearer,忽略 X-ECB,故 HMAC 签串约定无关)。
-        """
-        provider_id = self.provider_id
-        if not provider_id:
-            raise BcsClientError("task-mode roster provider_id not configured on this BCS client")
-        path = f"/providers/{provider_id}/bots/by-task-modes"
-        ts = str(int(time.time()))
-        headers = self._sign("GET", path, ts)
-        headers["Authorization"] = f"Bearer {self._t.provider_admin_token}"
+    async def list_bots_by_task_modes(
+        self,
+        *,
+        claim: bool | None = None,
+        dream: bool | None = None,
+        match: str = "any",
+    ) -> list[BotTaskModeRoster]:
+        """Query the environment-isolated global physical-Bot roster from BCS."""
+        path = "/bots/by-task-modes"
         params: dict[str, str] = {"match": match}
         if claim is not None:
             params["task_claim_mode"] = "true" if claim else "false"
         if dream is not None:
             params["task_dream_mode"] = "true" if dream else "false"
+        ts = str(int(time.time()))
+        headers = self._sign("GET", path, ts)
         async with self._client_for_current_loop() as client:
-            r = await client.request("GET", path, params=params, headers=headers)
-        _map_status(r)
-        items = r.json().get("items", [])
-        return [BotTaskModeRoster(
-            bot_id=str(it.get("bot_id", "")),
-            name=str(it.get("name", "")),
-            env=str(it.get("env", "")),
-            task_claim_mode=bool(it.get("task_claim_mode", False)),
-            task_dream_mode=bool(it.get("task_dream_mode", False)),
-        ) for it in items]
+            response = await client.request("GET", path, params=params, headers=headers)
+        _map_status(response)
+        items = response.json().get("items", [])
+        return [
+            BotTaskModeRoster(
+                bot_id=str(item.get("bot_id", "")),
+                name=str(item.get("name", "")),
+                env=str(item.get("env", "")),
+                task_claim_mode=bool(item.get("task_claim_mode", False)),
+                task_dream_mode=bool(item.get("task_dream_mode", False)),
+            )
+            for item in items
+        ]

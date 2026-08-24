@@ -47,7 +47,7 @@ class TaskService:
     验收 100% 走回调回投;engine 不主动验,无 verify/bbs port。engine 对调用方不可见(无 property)。
     """
 
-    def __init__(self, graph, harness=None, *, bot=None, bcs=None, discover=None, bot_public=None,
+    def __init__(self, graph, harness=None, *, bot=None, bcs=None, discover=None,
                  bcs_identity=None, task_info_repo: TaskInfoRepositoryProtocol | None = None,
                  callback_repo: TaskCallbackRepositoryProtocol | None = None,
                  task_id_provider: Callable[[], str] | None = None,
@@ -57,8 +57,7 @@ class TaskService:
                  api_base_url: str | None = None) -> None:
         """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
         bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。
-        bot_public: BotPublicServiceProtocol|None(TEMP e2e)供 bbs_runner 按关键字取 dream bot roster。
-        任务模式 roster 圈定的 provider 取自 bcs.provider_id(端口自带凭据),不再单独透传。
+        BBS 候选通过 bcs.list_bots_by_task_modes 查询 BCS 当前环境的全局物理 Bot。
 
         ``task_info_repo``(可选):task_info 持久化协议(DI 在 prod 注入真实实现;``None``
         时 execute 跳过持久化,纯内核/单测路径用)。``callback_repo``(可选):回投落库协议(同上,
@@ -76,7 +75,7 @@ class TaskService:
         self._callback_repo = callback_repo
         self._bot_service = bot_service
         self._api_base_url = api_base_url
-        self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover, bot_public=bot_public)
+        self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
         # fire-and-forget 后台推进任务跟踪(防 GC + 异常可见 + drain seam)
         self._bg_tasks: set[asyncio.Task] = set()
         # 回投适配层:执行实体 PUSH → 适配 → 编排核 on_report
@@ -88,11 +87,11 @@ class TaskService:
             _t.Thread(target=self._harness.run_poll_loop, daemon=True, name="task-harness").start()
             logger.info("[task-service] harness 旁路巡检线程已启动(SLA 超时/FAILED 重派/PENDING 派发超时重搜推)")
 
-    def _build_engine(self, *, bot=None, bcs=None, discover=None, bot_public=None) -> ExecutionEngine:
-        """构造编排核:ExecutionEngine(graph, bot=, bcs=, discover=, bot_public=)。引擎内部 ``_build_*`` new 自带策略 +
+    def _build_engine(self, *, bot=None, bcs=None, discover=None) -> ExecutionEngine:
+        """构造编排核:ExecutionEngine(graph, bot=, bcs=, discover=)。引擎内部 ``_build_*`` new 自带策略 +
         接线 TaskExecutor。测试可经 facade/engine 子类覆写本方法注入 stub 策略/投递的引擎(测试 seam)。"""
         return ExecutionEngine(
-            self._graph, bot=bot, bcs=bcs, discover=discover, bot_public=bot_public,
+            self._graph, bot=bot, bcs=bcs, discover=discover,
             bcs_identity=self._bcs_identity,
             api_base_url=self._api_base_url,
         )

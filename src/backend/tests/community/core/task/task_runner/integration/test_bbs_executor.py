@@ -20,3 +20,4 @@ def test_task_executor_run_bbs_delegates_to_bbs_runner():
         call_kwargs = mock_notify.call_args
         assert call_kwargs.kwargs["backend_url"] == "http://test:8888"
         assert call_kwargs.kwargs["execution_graph"] is g
+        assert call_kwargs.kwargs["bcs"] is exe._bcs

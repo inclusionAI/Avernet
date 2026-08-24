@@ -9,6 +9,7 @@ use bcs_service_api::{
     BotDiscoveryService, BotLeaveCommand, BotLeaveResult, BotListCommand, BotListEntry,
     BotListResult, BotManagementService, BotPagedListCommand, BotPagedListResult,
     BotQueryByIdsCommand, BotQueryByIdsResult, BotQueryEntry, BotQueryService,
+    BotTaskModeListEntry, BotTaskModesQuery, BotControlPlaneCoreService,
     BotRegistryCoreService, OrganizationCoreService, OrganizationMemberSummary,
     BotRuntimeConnectCommand, BotRuntimeConnectOutcome, BotRuntimeConnectionService,
     BotRuntimeDisconnectCommand, BotRuntimeStatusCommand, BotRuntimeStatusOutcome,
@@ -32,6 +33,7 @@ pub struct Bot {
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     connection_control: Option<Arc<dyn BotConnectionControlPort>>,
     organization: Option<Arc<dyn OrganizationCoreService>>,
+    control_plane: Option<Arc<dyn BotControlPlaneCoreService>>,
 }
 
 impl Bot {
@@ -51,6 +53,7 @@ impl Bot {
             user_directory: None,
             connection_control: None,
             organization: None,
+            control_plane: None,
         }
     }
 
@@ -87,6 +90,14 @@ impl Bot {
         organization: Arc<dyn OrganizationCoreService>,
     ) -> Self {
         self.organization = Some(organization);
+        self
+    }
+
+    pub fn with_control_plane(
+        mut self,
+        control_plane: Arc<dyn BotControlPlaneCoreService>,
+    ) -> Self {
+        self.control_plane = Some(control_plane);
         self
     }
 
@@ -342,6 +353,29 @@ impl BotQueryService for Bot {
             entries.push(self.bot_to_query_entry(bot).await);
         }
         Ok(BotQueryByIdsResult { bots: entries })
+    }
+
+    async fn list_bots_by_task_modes(
+        &self,
+        query: BotTaskModesQuery,
+    ) -> Result<Vec<BotTaskModeListEntry>, BotUseCaseError> {
+        let control_plane = self.control_plane.as_ref().ok_or_else(|| {
+            ServiceError::InvalidOperation {
+                message: "bot control-plane query is not configured".to_string(),
+                request_id: None,
+            }
+        })?;
+        let views = control_plane.list_by_task_modes(query).await?;
+        Ok(views
+            .into_iter()
+            .map(|view| BotTaskModeListEntry {
+                bot_id: view.record.bot_id,
+                name: view.record.name,
+                env: view.record.env,
+                task_claim_mode: view.record.task_claim_mode,
+                task_dream_mode: view.record.task_dream_mode,
+            })
+            .collect())
     }
 }
 

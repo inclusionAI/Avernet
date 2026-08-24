@@ -2875,7 +2875,8 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
                     created_by, agent_code, task_claim_mode, task_dream_mode, \
                     ({}) * 1000 AS gmt_create_ms, ({}) * 1000 AS gmt_modified_ms \
              FROM bcs_bots \
-             WHERE env = ? AND COALESCE(is_deleted, 0) = 0 \
+             WHERE env = ? \
+             AND is_deleted = 0 \
              AND COALESCE(actor_kind, 'bot') = 'bot'",
             self.flavor.unix_ts("gmt_create"),
             self.flavor.unix_ts("gmt_modified")

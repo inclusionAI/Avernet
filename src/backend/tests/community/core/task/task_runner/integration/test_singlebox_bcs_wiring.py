@@ -1,9 +1,8 @@
 """singlebox 环境 BCS 端口接线测试:复用 BcsHttpAdapter + 本地 LocalBcsTokenProvider。
 
 本地 BCS(Rust :21000)与生产 BCS 同 REST、`require_authentication=false`,
-HMAC `X-ECB-*` 头被本地忽略 → singlebox 直接用 BcsHttpAdapter(本地 token provider)即可,
-无需新建 adapter 类。本测覆盖:本地 provider 取值、_resolve_ports 单 box 装配出真 BcsHttpAdapter、
-BcsHttpAdapter+本地 provider 的 create_group 契约。
+HMAC `X-ECB-*` 头被本地忽略 → singlebox 直接使用本地 BCS 凭据。
+本测覆盖:本地凭据取值、_resolve_ports 装配真实 BcsHttpAdapter、create_group 契约。
 """
 from __future__ import annotations
 
@@ -56,12 +55,11 @@ def test_resolve_ports_singlebox_uses_singlebox_bcs_adapter(monkeypatch):
     monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
     monkeypatch.setenv("SINGLEBOX_BCS_URL", "http://localhost:21000")
     monkeypatch.setenv("SINGLEBOX_USER_ID", "35983")
-    bot, bcs = TaskModule._resolve_ports()  # provider_id 由 BCS token 自带，task_provider_id 不再单独透传
+    bot, bcs = TaskModule._resolve_ports()
     try:
         assert isinstance(bot, SingleboxEngineAdapter)
         assert isinstance(bcs, SingleboxBcsAdapter), "singlebox bcs 端口应为 SingleboxBcsAdapter"
         assert isinstance(bcs, BcsHttpAdapter)  # 继承 BcsHttpAdapter
-        assert bcs.provider_id == ""  # 测试未设 SINGLEBOX_BCS_PROVIDER_ID → 圈定关闭;provider_id 由端口自带
         client = bcs._client  # type: ignore[attr-defined]
         assert client.base_url.host == "localhost"
         assert client.base_url.port == 21000
@@ -108,80 +106,3 @@ def test_create_group_state_machine_body_sets_start_initial_run_false():
     assert seen["body"]["group_strategy"] == "state_machine"
     assert seen["body"]["start_initial_run"] is False
     assert seen["body"]["collaboration_definition_yaml"] == "states: [s1, s2]"
-
-def test_singlebox_task_mode_query_initializes_provider_once():
-    calls: list[tuple[str, str]] = []
-
-    def h(req: httpx.Request) -> httpx.Response:
-        calls.append((req.method, req.url.path))
-        if req.method == "POST" and req.url.path == "/providers":
-            assert req.headers["X-Mock-User-Id"] == "146836"
-            assert req.headers["X-Mock-Staff-No"] == "146836"
-            return httpx.Response(
-                200,
-                json={
-                    "provider_id": "provider-singlebox",
-                    "provider_admin_token": "provider-admin-token",
-                },
-            )
-        assert req.method == "GET"
-        assert req.url.path == "/providers/provider-singlebox/bots/by-task-modes"
-        assert req.headers["Authorization"] == "Bearer provider-admin-token"
-        return httpx.Response(
-            200,
-            json={
-                "items": [
-                    {
-                        "bot_id": "provider-bot-1",
-                        "name": "task-bot",
-                        "env": "local",
-                        "task_claim_mode": True,
-                        "task_dream_mode": True,
-                    }
-                ]
-            },
-        )
-
-    adapter = _adapter(httpx.MockTransport(h))
-    try:
-        first = _run(adapter.list_bots_by_task_modes(claim=True, dream=True, match="all"))
-        second = _run(adapter.list_bots_by_task_modes(claim=True, dream=True, match="all"))
-    finally:
-        _run(adapter._client.aclose())  # type: ignore[attr-defined]
-
-    assert first == second
-    assert calls == [
-        ("POST", "/providers"),
-        ("GET", "/providers/provider-singlebox/bots/by-task-modes"),
-        ("GET", "/providers/provider-singlebox/bots/by-task-modes"),
-    ]
-
-
-def test_singlebox_task_mode_query_reuses_explicit_provider_credentials():
-    calls: list[tuple[str, str]] = []
-
-    def h(req: httpx.Request) -> httpx.Response:
-        calls.append((req.method, req.url.path))
-        assert req.method == "GET"
-        assert req.url.path == "/providers/provider-configured/bots/by-task-modes"
-        assert req.headers["Authorization"] == "Bearer configured-token"
-        return httpx.Response(200, json={"items": []})
-
-    adapter = SingleboxBcsAdapter(
-        LocalBcsTokenProvider(
-            base_url="http://b:21000",
-            provider_id="provider-configured",
-            provider_admin_token="configured-token",
-        ),
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(h),
-            base_url="http://b:21000",
-        ),
-    )
-    try:
-        roster = _run(adapter.list_bots_by_task_modes(claim=True))
-    finally:
-        _run(adapter._client.aclose())  # type: ignore[attr-defined]
-
-    assert roster == []
-    assert calls == [("GET", "/providers/provider-configured/bots/by-task-modes")]

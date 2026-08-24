@@ -114,7 +114,8 @@ pub use bot_use_cases::{
     OrganizationMemberSummary,
     BotLeaveResult, BotListCommand, BotListEntry, BotListResult, BotManagementService,
     BotPagedListCommand, BotPagedListResult, BotQueryByIdsCommand, BotQueryByIdsResult,
-    BotQueryEntry, BotQueryService, BotStatusUpdateCommand, BotStatusUpdateResult, BotUseCaseError,
+    BotQueryEntry, BotQueryService, BotStatusUpdateCommand, BotStatusUpdateResult,
+    BotTaskModeListEntry, BotUseCaseError,
     BotVisibilityCommand, BotVisibilityQueryCommand, BotVisibilityQueryResult, BotVisibilityResult,
     MyBotsCommand, SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult,
 };

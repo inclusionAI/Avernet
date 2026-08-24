@@ -8,8 +8,9 @@ use bcs_protocol::{BotConnectParams, QueryBotsRequest, SetVisibilityRequest, Upd
 use bcs_service_api::{
     ActorStatus, BotConnectCommand, BotDetailCommand, BotDetailResult, BotLeaveCommand,
     BotListCommand, BotListEntry, BotPagedListCommand, BotQueryByIdsCommand, BotQueryEntry,
-    BotStatusUpdateCommand, BotUseCaseError, BotVisibilityCommand, BotVisibilityQueryCommand,
-    BotVisibilityQueryResult, ConnectError, MyBotsCommand, ServiceError,
+    BotStatusUpdateCommand, BotTaskModesQuery, BotUseCaseError, BotVisibilityCommand,
+    BotVisibilityQueryCommand, BotVisibilityQueryResult, ConnectError, MyBotsCommand, ServiceError,
+    TaskModeMatch,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -55,6 +56,55 @@ pub struct MyBotsQuery {
     pub limit: Option<u64>,
     #[serde(default)]
     pub active_only: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct TaskModesQueryParams {
+    pub task_claim_mode: Option<String>,
+    pub task_dream_mode: Option<String>,
+    #[serde(rename = "match")]
+    pub match_mode: Option<String>,
+}
+
+pub async fn list_bots_by_task_modes(
+    State(state): State<HttpAppState>,
+    Query(params): Query<TaskModesQueryParams>,
+) -> Result<Json<Value>, HttpAdapterError> {
+    let items = state
+        .services
+        .bot_query
+        .list_bots_by_task_modes(BotTaskModesQuery {
+            env: state.manifest_env.clone(),
+            task_claim_mode: parse_task_mode_toggle("task_claim_mode", &params.task_claim_mode)?,
+            task_dream_mode: parse_task_mode_toggle("task_dream_mode", &params.task_dream_mode)?,
+            match_mode: match params.match_mode.as_deref().map(str::trim) {
+                Some(value) if value.eq_ignore_ascii_case("all") => TaskModeMatch::All,
+                Some("") | None => TaskModeMatch::Any,
+                Some(value) if value.eq_ignore_ascii_case("any") => TaskModeMatch::Any,
+                Some(value) => {
+                    return Err(HttpAdapterError::BadRequest(format!(
+                        "invalid match value '{value}'; expected any|all"
+                    )))
+                }
+            },
+        })
+        .await
+        .map_err(bot_use_case_error_to_http)?;
+    Ok(Json(serde_json::json!({ "items": items })))
+}
+
+fn parse_task_mode_toggle(
+    name: &str,
+    value: &Option<String>,
+) -> Result<Option<bool>, HttpAdapterError> {
+    match value.as_deref().map(str::trim) {
+        None | Some("") => Ok(None),
+        Some("true") | Some("1") => Ok(Some(true)),
+        Some("false") | Some("0") => Ok(Some(false)),
+        Some(other) => Err(HttpAdapterError::BadRequest(format!(
+            "invalid {name} value '{other}'; expected true|false"
+        ))),
+    }
 }
 
 pub async fn list_bots(

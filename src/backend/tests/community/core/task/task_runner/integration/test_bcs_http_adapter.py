@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
-    BcsClientError, BcsClientRequestError, BcsCreateGroupRequest, BcsHttpAdapter, BcsServerError,
+    BcsClientRequestError, BcsCreateGroupRequest, BcsHttpAdapter, BcsServerError,
     BotTaskModeRoster,
 )
 
@@ -13,8 +13,6 @@ class _Tok:
     token = "drv"
     secret = "s3c"
     base_url = "http://bcs"
-    provider_id = "prov-1"
-    provider_admin_token = "adm-tok"
 
 
 def _adapter(handler):
@@ -110,29 +108,46 @@ def test_client_4xx_raises():
         _run(_adapter(h).get_group("g1"))
 
 
-def test_list_bots_by_task_modes_sends_bearer_and_maps_items():
+def test_list_bots_by_task_modes_calls_global_bcs_route_and_maps_items():
     seen = {}
 
     def h(req):
         seen["path"] = req.url.path
-        seen["auth"] = req.headers.get("authorization")
         seen["claim"] = req.url.params.get("task_claim_mode")
         seen["dream"] = req.url.params.get("task_dream_mode")
         seen["match"] = req.url.params.get("match")
         return httpx.Response(200, json={"items": [
-            {"bot_id": "b1", "name": "n1", "env": "dev", "task_claim_mode": True, "task_dream_mode": False},
-            {"bot_id": "b2", "name": "n2", "env": "dev", "task_claim_mode": True, "task_dream_mode": True},
+            {
+                "bot_id": "b1",
+                "name": "Bot One",
+                "env": "local",
+                "task_claim_mode": True,
+                "task_dream_mode": True,
+            },
         ]})
 
-    roster = _run(_adapter(h).list_bots_by_task_modes(claim=True, dream=True, match="all"))
-    assert seen["path"] == "/providers/prov-1/bots/by-task-modes"
-    assert seen["auth"] == "Bearer adm-tok"
-    assert seen["claim"] == "true"
-    assert seen["dream"] == "true"
-    assert seen["match"] == "all"
+    roster = _run(
+        _adapter(h).list_bots_by_task_modes(
+            claim=True,
+            dream=True,
+            match="all",
+        )
+    )
+
+    assert seen == {
+        "path": "/bots/by-task-modes",
+        "claim": "true",
+        "dream": "true",
+        "match": "all",
+    }
     assert roster == [
-        BotTaskModeRoster(bot_id="b1", name="n1", env="dev", task_claim_mode=True, task_dream_mode=False),
-        BotTaskModeRoster(bot_id="b2", name="n2", env="dev", task_claim_mode=True, task_dream_mode=True),
+        BotTaskModeRoster(
+            bot_id="b1",
+            name="Bot One",
+            env="local",
+            task_claim_mode=True,
+            task_dream_mode=True,
+        )
     ]
 
 
@@ -145,20 +160,16 @@ def test_list_bots_by_task_modes_omits_unset_toggles():
         seen["match"] = req.url.params.get("match")
         return httpx.Response(200, json={"items": []})
 
-    roster = _run(_adapter(h).list_bots_by_task_modes())
-    assert seen["claim"] is None          # claim=None → 该开关不过滤,不发 query 参数
-    assert seen["dream"] is None
-    assert seen["match"] == "any"         # 默认 any
-    assert roster == []
+    assert _run(_adapter(h).list_bots_by_task_modes()) == []
+    assert seen == {"claim": None, "dream": None, "match": "any"}
 
 
-def test_list_bots_by_task_modes_401_raises():
+def test_list_bots_by_task_modes_4xx_raises():
     def h(req):
-        assert req.headers.get("authorization") == "Bearer adm-tok"
-        return httpx.Response(401, json={"error": "unauthorized", "status": 401})
+        return httpx.Response(400, json={"error": "invalid match"})
 
     with pytest.raises(BcsClientRequestError):
-        _run(_adapter(h).list_bots_by_task_modes(claim=True))
+        _run(_adapter(h).list_bots_by_task_modes(match="invalid"))
 
 
 def test_owned_client_isolated_when_event_loop_changes(monkeypatch):
@@ -186,12 +197,3 @@ def test_owned_client_isolated_when_event_loop_changes(monkeypatch):
 
     assert len(_FakeClient.instances) == 2
     assert _FakeClient.instances[1].closed is True
-
-
-def test_list_bots_by_task_modes_unconfigured_raises():
-    # provider_id 由 token 自带(复用点);未配置(空)时不应发请求——直接报错,而非空 roster 误清候选。
-    class _NoProvTok(_Tok):
-        provider_id = ""
-
-    with pytest.raises(BcsClientError):
-        _run(BcsHttpAdapter(_NoProvTok()).list_bots_by_task_modes(claim=True))

@@ -46,8 +46,9 @@ pub trait BotControlPlaneRepoPort: Send + Sync {
         query: BotControlPlaneOwnedQuery,
     ) -> ServiceResult<Vec<BotControlPlaneRecord>>;
 
-    /// Read physical bots by the task-mode toggles. Internal capability consumed by the
-    /// provider roster route; not exposed over OpenAPI.
+    /// Read non-deleted physical bots in one environment by the task-mode toggles.
+    /// Internal capability consumed by the global task-mode query route; not exposed over
+    /// OpenAPI.
     async fn list_control_plane_by_task_modes(
         &self,
         query: BotTaskModesQuery,
