@@ -11,9 +11,11 @@ logger = get_logger()
 def has_member_management_enabled(template_ext: object) -> bool:
     """Whether AICoding template ext explicitly enables member management.
 
-    Expected shape on the AICoding template record::
+    Supported shapes include both the legacy ext form and the newer capability
+    form:
 
         ac_templates.ext.bot_template_config.advanced_config.member_management == true
+        ac_templates.ext.capabilities.member_management == true
 
     Only the boolean value ``True`` enables the capability; missing/malformed
     ext or truthy strings such as ``"true"`` stay disabled to avoid
@@ -21,6 +23,15 @@ def has_member_management_enabled(template_ext: object) -> bool:
     """
     if not isinstance(template_ext, Mapping):
         return False
+
+    capabilities = template_ext.get("capabilities")
+    if isinstance(capabilities, Mapping):
+        member_management = capabilities.get("member_management")
+        if member_management is True:
+            return True
+        if isinstance(member_management, Mapping):
+            return member_management.get("enabled") is True
+
     bot_template_config = template_ext.get("bot_template_config")
     if not isinstance(bot_template_config, Mapping):
         return False
@@ -76,8 +87,9 @@ class AICodingMemberManagementCapability:
 
         应用 Coding Bot（``applicationCoding``）与个人 Coding Bot
         （``personalCoding``）都运行在 ``claude_code`` 引擎上，并复用协作者表
-        做应用成员管理。其它 Bot 必须通过模板 ``advanced_config.member_management
-        == true`` 显式开启才会放行。
+        做应用成员管理。其它 Bot 必须通过模板 ``member_management`` 显式开关
+        放行；模板开关是引擎无关的显式契约，一旦开启即代表该 Bot 支持成员
+        协作语义。
         """
         if self._has_template_switch_enabled(bot, bot_id):
             return True
@@ -94,6 +106,13 @@ class AICodingMemberManagementCapability:
         template_config = bot.get("template_config")
         if isinstance(template_config, Mapping):
             return has_member_management_enabled(template_config)
+
+        ext = bot.get("ext")
+        if isinstance(ext, Mapping):
+            nested_template_config = ext.get("template_config")
+            if isinstance(nested_template_config, Mapping):
+                return has_member_management_enabled(nested_template_config)
+
         if bot_id:
             return has_member_management_enabled(
                 get_template_ext(self._template_service, bot_id)
