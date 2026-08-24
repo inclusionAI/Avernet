@@ -183,42 +183,7 @@ upstreams:
 
 **整体拓扑**（客户端 → 网关内部各阶段 → 上游服务；边上标注的是 `application.yaml` 里真实存在的代表性 domain）：
 
-```mermaid
-flowchart LR
-    subgraph Clients["调用方"]
-        FE["第一方前端<br/>（浏览器，会话 Cookie）"]
-        TP["第三方 App<br/>（Bearer API Key + 租户令牌）"]
-        BOT["Bot / Agent<br/>（Bot 凭证）"]
-    end
-
-    subgraph GW["Avernet Gateway（同一个应用进程）"]
-        direction TB
-        CORS["① CORS 边缘中间件"]
-        ROUTE["② Domain 路由解析<br/>match + 具体度判定"]
-        AUTHN["③ 身份提取<br/>user / app / bot / access_key"]
-        SIGN["④ Principal 签名"]
-        FWD["⑤ 转发 Forwarder<br/>（流式，路径默认原样透传）"]
-        CORS --> ROUTE --> AUTHN --> SIGN --> FWD
-    end
-
-    BACKEND[("backend")]
-    BCS[("bcs")]
-    BAAS[("baas")]
-    BCSFUSE[("bcsfuse")]
-    ENGINE[("engine proxy")]
-    CLAWWEB[("clawweb")]
-
-    FE --> CORS
-    TP --> CORS
-    BOT --> CORS
-
-    FWD -->|"/openapi/v1/bots/**<br/>/openapi/v1/org/**"| BACKEND
-    FWD -->|"/openapi/v1/collaboration/**"| BCS
-    FWD -->|"/openapi/v1/chat/**"| BAAS
-    FWD -->|"/openapi/v1/bcsfuse/**"| BCSFUSE
-    FWD -->|"WS /openapi/v1/bots/messages/ws/**"| ENGINE
-    FWD -->|"/openapi/v1/harnessflow/**"| CLAWWEB
-```
+![调用方（第一方前端 / 第三方 App / Bot）只连接网关；网关内部依次经过 CORS、Domain 路由、身份提取、Principal 签名、转发五个阶段，再分发到 backend / bcs / baas / bcsfuse / engine proxy / clawweb 六个上游服务](images/gateway-topology.svg)
 
 **读图要点：**
 
