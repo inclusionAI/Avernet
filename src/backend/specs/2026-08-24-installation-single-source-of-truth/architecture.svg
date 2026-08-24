@@ -13,46 +13,40 @@
 
   <!-- policy consultation bus -->
   <path d="M 195 58 L 195 48 L 830 48 L 830 58 M 520 58 L 520 48" fill="none" stroke="#d97706" stroke-width="1.3" stroke-dasharray="5 4"/>
-  <text x="700" y="43" text-anchor="middle" font-size="10.5" fill="#b45309">writers consult the ownership rules (R1–R3)</text>
+  <text x="700" y="43" text-anchor="middle" font-size="10.5" fill="#b45309">both command services consult the ownership rules (R1–R3)</text>
 
-  <!-- Band 1: writers + policy -->
+  <!-- Band 1: command services + policy -->
   <rect x="40" y="58" width="310" height="96" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.3"/>
-  <text x="195" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">SkillSetControlPlaneService</text>
-  <text x="195" y="99" text-anchor="middle" font-size="11" fill="#475569">SkillSet lifecycle &amp; membership commands</text>
-  <text x="195" y="114" text-anchor="middle" font-size="11" fill="#475569">MCP direct activate / deactivate</text>
+  <text x="195" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">SkillSetManagementService</text>
+  <text x="195" y="99" text-anchor="middle" font-size="11" fill="#475569">Set CRUD · activate / deactivate / sync / all</text>
+  <text x="195" y="114" text-anchor="middle" font-size="11" fill="#475569">skill &amp; MCP membership · Default exclusions</text>
   <text x="195" y="129" text-anchor="middle" font-size="11" fill="#475569">ACL · audit · runtime-reconcile orchestration</text>
 
   <rect x="380" y="58" width="280" height="96" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.3"/>
-  <text x="520" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">LocalSkillStateService</text>
-  <text x="520" y="99" text-anchor="middle" font-size="11" fill="#475569">(behind BotSkillAssetService.set_active)</text>
-  <text x="520" y="114" text-anchor="middle" font-size="11" fill="#475569">direct skill activate / deactivate</text>
-  <text x="520" y="129" text-anchor="middle" font-size="11" fill="#475569">writes Installation rows directly</text>
+  <text x="520" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">DirectActivationService</text>
+  <text x="520" y="99" text-anchor="middle" font-size="11" fill="#475569">activate / deactivate ONE capability</text>
+  <text x="520" y="114" text-anchor="middle" font-size="11" fill="#475569">skill or MCP — same semantics</text>
+  <text x="520" y="129" text-anchor="middle" font-size="11" fill="#475569">legal only when no Set governs it (R1)</text>
 
   <rect x="700" y="58" width="260" height="96" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.3"/>
   <text x="830" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#b45309">CapabilityOwnershipPolicy · new</text>
-  <text x="830" y="99" text-anchor="middle" font-size="11" fill="#78350f">R1  Set-managed ⇒ no direct control</text>
+  <text x="830" y="99" text-anchor="middle" font-size="11" fill="#78350f">R1  in any reaching Set ⇒ no direct control</text>
   <text x="830" y="114" text-anchor="middle" font-size="11" fill="#78350f">R2  direct-active ⇒ cannot join a Set</text>
   <text x="830" y="129" text-anchor="middle" font-size="11" fill="#78350f">R3  one ordinary Set per capability</text>
 
-  <!-- writers -> repositories -->
-  <line x1="195" y1="154" x2="195" y2="186" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
-  <line x1="520" y1="154" x2="640" y2="186" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <!-- services -> UoW -->
+  <line x1="195" y1="154" x2="270" y2="186" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="520" y1="154" x2="450" y2="186" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
 
-  <!-- Band 2: repositories -->
-  <rect x="40" y="190" width="460" height="76" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.3"/>
-  <text x="270" y="212" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">SkillSetControlPlaneRepository — unit of work</text>
-  <text x="270" y="231" text-anchor="middle" font-size="11" fill="#475569">Set state + membership + Installation in one transaction</text>
-  <text x="270" y="246" text-anchor="middle" font-size="11" fill="#475569">repair_bot_skillset_installations(bot) = the lazy flush (skills + MCPs)</text>
+  <!-- Band 2: the one UoW repository -->
+  <rect x="40" y="190" width="640" height="76" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.3"/>
+  <text x="360" y="212" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">CapabilityDesiredStateRepository — the one unit of work (the one writer)</text>
+  <text x="360" y="231" text-anchor="middle" font-size="11" fill="#475569">composes per-table command modules (one owner per table's SQL) in one transaction</text>
+  <text x="360" y="246" text-anchor="middle" font-size="11" fill="#475569">Set state · membership · exclusions · installations — plus repair_bot_skillset_installations = the lazy flush</text>
 
-  <rect x="540" y="190" width="250" height="76" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.3"/>
-  <text x="665" y="212" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">SkillInstallationRepository</text>
-  <text x="665" y="231" text-anchor="middle" font-size="11" fill="#475569">direct Installation rows</text>
-  <text x="665" y="246" text-anchor="middle" font-size="11" fill="#475569">install · uninstall · list</text>
-
-  <!-- repositories -> tables -->
-  <line x1="160" y1="266" x2="160" y2="302" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
-  <line x1="440" y1="266" x2="600" y2="302" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
-  <line x1="665" y1="266" x2="665" y2="302" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <!-- UoW -> tables -->
+  <line x1="200" y1="266" x2="200" y2="302" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="560" y1="266" x2="680" y2="302" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
 
   <!-- Band 3: tables -->
   <rect x="40" y="306" width="340" height="84" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.3"/>
@@ -78,7 +72,7 @@
 
   <!-- Band 4: reader -->
   <rect x="560" y="430" width="340" height="76" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
-  <text x="730" y="452" text-anchor="middle" font-size="13" font-weight="700" fill="#1d4ed8">BotInstallationReader · new</text>
+  <text x="730" y="452" text-anchor="middle" font-size="13" font-weight="700" fill="#1d4ed8">BotCapabilityStateReader · new</text>
   <text x="730" y="471" text-anchor="middle" font-size="11" fill="#1e40af">flush(bot) first → then read Installation only</text>
   <text x="730" y="486" text-anchor="middle" font-size="11" fill="#1e40af">active_skill_assets · active_mcp_server_codes</text>
 
@@ -89,6 +83,6 @@
   <rect x="40" y="546" width="920" height="86" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.3"/>
   <text x="500" y="568" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">One projection everywhere — every consumer goes through the reader</text>
   <text x="60" y="589" font-size="11" fill="#475569">· BotRuntimeProjectionReconciler → engine runtime   · skills_pool convergence / recovery / reconcile   · Service-Bot build stage</text>
-  <text x="60" y="605" font-size="11" fill="#475569">· OpenAPI skills listing &amp; detail   · SkillSetService.get_active_skills → symlink mappings, teclaw config-compose</text>
+  <text x="60" y="605" font-size="11" fill="#475569">· SkillQueryService (OpenAPI listing &amp; detail)   · SkillSetService.get_active_skills → symlink mappings, teclaw config-compose</text>
   <text x="60" y="621" font-size="11" fill="#475569">· collect_bot_active_mcps = default MCP policy (engine/template − exclusions) ∪ installed MCPs</text>
 </svg>
