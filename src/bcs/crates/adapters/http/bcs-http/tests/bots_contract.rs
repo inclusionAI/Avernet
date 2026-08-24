@@ -4,6 +4,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
+use async_trait::async_trait;
 use bcs_auth_api::{AuthPluginChain, AuthPrincipal};
 use bcs_auth_local::StaticAuthPlugin;
 use bcs_bot::{Bot, BotCore};
@@ -11,13 +12,17 @@ use bcs_http::{
     router::build_router,
     state::{ChainUserIdentityPort, HttpAppState},
 };
+use bcs_domain::edge_permission::{FriendListEntry, PermissionRequest, RequestStatus};
 use bcs_service_api::{
+    application::connect::{
+        ConnectResult, ConnectService, ConnectStatus, RequestDirection, RequestsPage,
+    },
     ActorKind, ActorStatus, BotConnectCommand, BotConnectResult, BotDetailCommand, BotDetailResult,
     BotDynamicStatus, BotLeaveResult, BotListCommand, BotListEntry, BotListResult,
     BotManagementService, BotPagedListResult, BotQueryByIdsResult, BotQueryEntry, BotQueryService,
     BotRegistryCoreService, BotSearchResult, BotStatusUpdateCommand, BotStatusUpdateResult,
     BotUseCaseError, BotVisibilityCommand, BotVisibilityQueryResult, BotVisibilityResult,
-    ConnectError, DynamicStatusResponse, ServiceError, Skill,
+    ConnectError, DynamicStatusResponse, ServiceError, ServiceResult, Skill,
 };
 use bcs_services_container::Services;
 use serde_json::Value;
@@ -25,6 +30,73 @@ use std::sync::Arc;
 use support::bot_use_cases::{RecordingBotManagementService, RecordingBotQueryService};
 use tempfile::TempDir;
 use tower::ServiceExt;
+
+struct RecordingSearchConnectService {
+    list_friends_commands: tokio::sync::Mutex<Vec<String>>,
+    friends: Vec<FriendListEntry>,
+}
+
+impl RecordingSearchConnectService {
+    fn with_friends(friends: Vec<FriendListEntry>) -> Self {
+        Self {
+            list_friends_commands: tokio::sync::Mutex::new(Vec::new()),
+            friends,
+        }
+    }
+}
+
+#[async_trait]
+impl ConnectService for RecordingSearchConnectService {
+    async fn create_connect(
+        &self,
+        _: &str,
+        _: &str,
+        _: Option<String>,
+    ) -> ServiceResult<ConnectResult> {
+        Ok(ConnectResult {
+            request_ids: vec![],
+            edge_ids: vec![],
+            status: ConnectStatus::Pending,
+            auto_accepted: false,
+        })
+    }
+
+    async fn approve(&self, _: u64, _: &str) -> ServiceResult<Vec<u64>> {
+        Ok(vec![])
+    }
+
+    async fn reject(&self, _: u64, _: &str, _: Option<String>) -> ServiceResult<()> {
+        Ok(())
+    }
+
+    async fn cancel(&self, _: u64) -> ServiceResult<()> {
+        Ok(())
+    }
+
+    async fn get_request(&self, _: u64) -> ServiceResult<PermissionRequest> {
+        Err(ServiceError::FriendRequestNotFound("not configured".to_string()))
+    }
+
+    async fn revoke_friend(&self, _: &str, _: &str) -> ServiceResult<Vec<u64>> {
+        Ok(vec![])
+    }
+
+    async fn list_friends(&self, actor: &str) -> ServiceResult<Vec<FriendListEntry>> {
+        self.list_friends_commands.lock().await.push(actor.to_string());
+        Ok(self.friends.clone())
+    }
+
+    async fn list_requests(
+        &self,
+        _: &str,
+        _: RequestDirection,
+        _: Option<RequestStatus>,
+        page: u32,
+        page_size: u32,
+    ) -> ServiceResult<RequestsPage> {
+        Ok(RequestsPage { items: vec![], total: 0, page, page_size })
+    }
+}
 
 fn static_auth_chain(staff_no: &str, nick_name: &str) -> Arc<AuthPluginChain> {
     let principal = AuthPrincipal {
@@ -1221,7 +1293,7 @@ async fn search_bots_route_forces_public_scope_without_bearer() {
 }
 
 #[tokio::test]
-async fn search_bots_route_includes_is_friend_field_with_bearer() {
+async fn search_bots_route_omits_is_friend_without_explicit_viewer() {
     let query = Arc::new(RecordingBotQueryService {
         search_result: Ok(BotSearchResult {
             items: vec![query_entry("bot-alpha")],
@@ -1235,9 +1307,8 @@ async fn search_bots_route_includes_is_friend_field_with_bearer() {
         ChainUserIdentityPort::new(chain),
     )));
 
-    // No visibility param ⇒ default public+protected scope (None), and the
-    // is_friend field is included (false, since the noop connect service knows
-    // no friends).
+    // No visibility param with authenticated caller still controls visibility,
+    // but friendship is only calculated when explicit viewer params are present.
     let response = app
         .oneshot(
             Request::builder()
@@ -1253,12 +1324,78 @@ async fn search_bots_route_includes_is_friend_field_with_bearer() {
     let json: Value = serde_json::from_slice(&body).unwrap();
     let items = json["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0]["is_friend"], false);
+    assert!(items[0].get("is_friend").is_none());
 
     let commands = query.search_commands.lock().await;
     assert_eq!(commands.len(), 1);
     assert!(commands[0].visibility.is_none());
     assert_eq!(commands[0].requester_actor_id.as_deref(), Some("human_alice"));
+}
+
+#[tokio::test]
+async fn search_bots_route_uses_explicit_viewer_for_is_friend_filter() {
+    let query = Arc::new(RecordingBotQueryService {
+        search_result: Ok(BotSearchResult {
+            items: vec![query_entry("bot-alpha"), query_entry("bot-beta")],
+            total: 2,
+        }),
+        ..Default::default()
+    });
+    let connect = Arc::new(RecordingSearchConnectService::with_friends(vec![FriendListEntry {
+        actor_id: "bot-alpha".to_string(),
+        name: Some("Alpha".to_string()),
+        summary: Some("friend".to_string()),
+        is_online: true,
+        kind: ActorKind::Bot,
+    }]));
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    let app = build_router(HttpAppState::new(services).with_connect(connect.clone()));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/search?viewer_actor_type=bot&viewer_actor_id=viewer-bot&is_friend=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["total"], 1);
+    let items = json["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["bot_uuid"], "bot-alpha");
+    assert_eq!(items[0]["is_friend"], true);
+    assert_eq!(
+        connect.list_friends_commands.lock().await.as_slice(),
+        ["viewer-bot"]
+    );
+}
+
+#[tokio::test]
+async fn search_bots_route_rejects_is_friend_without_explicit_viewer() {
+    let query = Arc::new(RecordingBotQueryService {
+        search_result: Ok(BotSearchResult { items: vec![], total: 0 }),
+        ..Default::default()
+    });
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    let app = build_router(HttpAppState::new(services));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/search?is_friend=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(query.search_commands.lock().await.is_empty());
 }
 
 #[tokio::test]

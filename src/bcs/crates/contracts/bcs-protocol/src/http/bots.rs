@@ -16,7 +16,13 @@ pub struct BotSearchQuery {
     /// Status filter: online | hidden.
     #[serde(default)]
     pub status: Option<String>,
-    /// Friend status filter (requires Bearer): true | false.
+    /// Viewer actor kind used to calculate friendship: human | bot.
+    #[serde(default)]
+    pub viewer_actor_type: Option<String>,
+    /// Viewer actor id used to calculate friendship.
+    #[serde(default)]
+    pub viewer_actor_id: Option<String>,
+    /// Friend status filter relative to the explicit viewer: true | false.
     #[serde(default)]
     pub is_friend: Option<bool>,
     /// TC (TeamClaw backend) bot filter. `true` → only bots onboarded from the

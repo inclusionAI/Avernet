@@ -490,6 +490,36 @@ pub async fn search_bots(
     // ── Resolve caller (optional Bearer) ───────────────────────────────────────
     let caller_id = caller_actor_id_from_headers(&state, &headers, &uri).await;
 
+    // ── Resolve explicit friendship viewer ─────────────────────────────────────
+    let viewer_actor_id = match (&q.viewer_actor_type, &q.viewer_actor_id) {
+        (None, None) => None,
+        (Some(actor_type), Some(actor_id)) => {
+            let actor_type = actor_type.trim();
+            if !matches!(actor_type, "human" | "bot") {
+                return Err(HttpAdapterError::BadRequest(format!(
+                    "viewer_actor_type must be human|bot, got '{actor_type}'"
+                )));
+            }
+            let actor_id = actor_id.trim();
+            if actor_id.is_empty() {
+                return Err(HttpAdapterError::BadRequest(
+                    "viewer_actor_id must not be empty".to_string(),
+                ));
+            }
+            Some(actor_id.to_string())
+        }
+        _ => {
+            return Err(HttpAdapterError::BadRequest(
+                "viewer_actor_type and viewer_actor_id must be provided together".to_string(),
+            ));
+        }
+    };
+    if q.is_friend.is_some() && viewer_actor_id.is_none() {
+        return Err(HttpAdapterError::BadRequest(
+            "is_friend requires viewer_actor_type and viewer_actor_id".to_string(),
+        ));
+    }
+
     // ── Effective visibility scope (spec §3.6.2) ───────────────────────────────
     // No Bearer → force public (ignore any client-provided visibility). Bearer +
     // explicit visibility → respect it. Bearer + no visibility → None (service
@@ -513,18 +543,20 @@ pub async fn search_bots(
         .await
         .map_err(bot_use_case_error_to_http)?;
 
-    // ── Friend set from the caller's edge_grants (spec §3.7) ───────────────────
-    // Anonymous callers are friends with nobody (empty set), so the is_friend
-    // filter naturally resolves is_friend=true → none, is_friend=false → all.
-    let friend_ids: std::collections::HashSet<String> = match &caller_id {
-        Some(caller) => match state.connect.list_friends(caller).await {
-            Ok(entries) => entries.into_iter().map(|e| e.actor_id).collect(),
-            Err(_) => std::collections::HashSet::new(),
-        },
+    // ── Friend set from the explicit viewer's edge_grants ──────────────────────
+    let friend_ids: std::collections::HashSet<String> = match &viewer_actor_id {
+        Some(viewer) => state
+            .connect
+            .list_friends(viewer)
+            .await
+            .map_err(HttpAdapterError::Service)?
+            .into_iter()
+            .map(|e| e.actor_id)
+            .collect(),
         None => std::collections::HashSet::new(),
     };
 
-    // ── is_friend post-filter (caller-dependent) + pagination ──────────────────
+    // ── is_friend post-filter (viewer-dependent) + pagination ──────────────────
     let filtered: Vec<BotQueryEntry> = result
         .items
         .into_iter()
@@ -541,7 +573,7 @@ pub async fn search_bots(
         .take(limit as usize)
         .collect();
 
-    // ── Build response (is_friend field only for authenticated callers) ────────
+    // ── Build response (is_friend field only for an explicit viewer) ───────────
     let items: Vec<BotSearchEntry> = page_items
         .into_iter()
         .map(|bot| BotSearchEntry {
@@ -552,7 +584,7 @@ pub async fn search_bots(
             status: actor_status_to_wire(bot.status).to_string(),
             actor_kind: actor_kind_to_wire(bot.actor_kind).to_string(),
             is_online: bot.dynamic_status.status == "active",
-            is_friend: caller_id.as_ref().map(|_| friend_ids.contains(&bot.bot_uuid)),
+            is_friend: viewer_actor_id.as_ref().map(|_| friend_ids.contains(&bot.bot_uuid)),
         })
         .collect();
 
