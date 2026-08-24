@@ -540,7 +540,9 @@ class TestCollectBotActiveMcps:
 class TestRemoveSkillFromDefaultSet:
     """remove_skill_from_set for default skill sets writes exclusion."""
 
-    def _make_svc(self, mock_repo, skill_repo=None, skill_service=None):
+    def _make_svc(
+        self, mock_repo, skill_repo=None, skill_service=None, installations=None
+    ):
         from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
         with patch("agentclaw.community.core.skill_center.services.skill_set_service.WorkspacePathFactory"):
             svc = SkillSetService(
@@ -551,6 +553,7 @@ class TestRemoveSkillFromDefaultSet:
                 skill_service=skill_service or MagicMock(),
                 bot_repo=MagicMock(),
                 path_factory=MagicMock(),
+                installations=installations,
             )
         svc.entity_id = "staff_user1"
         svc.bot_id = "default"
@@ -562,10 +565,14 @@ class TestRemoveSkillFromDefaultSet:
         """Default set: writes exclusion record, deactivates skill, syncs."""
         mock_repo = MagicMock()
         mock_repo.get_by_id.return_value = {"id": "1", "is_default": True, "bolt_id": "default"}
-        mock_repo.add_default_skill_exclusion.return_value = True
+        mock_repo.exclude_default_set_skill.return_value = (True, False)
 
         mock_skill_repo = MagicMock()
-        mock_skill_repo.get_by_id.return_value = {"id": "42", "git_path": "git://biz/my-skill"}
+        mock_skill_repo.get_by_id.return_value = {
+            "id": "42",
+            "git_path": "git://biz/my-skill",
+            "env": "dev",
+        }
 
         mock_skill_svc = MagicMock()
         mock_skill_svc.get_link_name.return_value = "biz_my-skill"
@@ -576,8 +583,12 @@ class TestRemoveSkillFromDefaultSet:
             result = await svc.remove_skill_from_set("1", "42", user_id="user1")
 
         assert result is True
-        mock_repo.add_default_skill_exclusion.assert_called_once_with(
-            user_id="user1", bot_id="default", skill_set_id=1, skill_id=42
+        mock_repo.exclude_default_set_skill.assert_called_once_with(
+            owner_id="staff_user1",
+            bot_id="default",
+            skill_set_id=1,
+            skill_id=42,
+            env="dev",
         )
         mock_skill_svc.deactivate_skill.assert_called_once_with(
             "biz_my-skill", bolt_id="default", user_id="user1"
@@ -598,7 +609,9 @@ class TestRemoveSkillFromDefaultSet:
                 "local:///home/admin/.openclaw/workspace/"
                 "skills-pool/skills-local/my-skill"
             ),
+            "env": "dev",
         }
+        mock_repo.exclude_default_set_skill.return_value = (True, False)
         mock_skill_svc = MagicMock()
         mock_skill_svc.deactivate_skill = AsyncMock(return_value=True)
         svc = self._make_svc(
@@ -619,10 +632,14 @@ class TestRemoveSkillFromDefaultSet:
         """Default set: deactivate_skill failure rolls back exclusion."""
         mock_repo = MagicMock()
         mock_repo.get_by_id.return_value = {"id": "1", "is_default": True, "bolt_id": "default"}
-        mock_repo.add_default_skill_exclusion.return_value = True
+        mock_repo.exclude_default_set_skill.return_value = (True, False)
 
         mock_skill_repo = MagicMock()
-        mock_skill_repo.get_by_id.return_value = {"id": "42", "git_path": "git://biz/my-skill"}
+        mock_skill_repo.get_by_id.return_value = {
+            "id": "42",
+            "git_path": "git://biz/my-skill",
+            "env": "dev",
+        }
 
         mock_skill_svc = MagicMock()
         mock_skill_svc.get_link_name.return_value = "biz_my-skill"
@@ -633,7 +650,7 @@ class TestRemoveSkillFromDefaultSet:
 
         assert result is False
         mock_repo.remove_default_skill_exclusion.assert_called_once_with(
-            user_id="user1", bot_id="default", skill_set_id=1, skill_id=42
+            user_id="staff_user1", bot_id="default", skill_set_id=1, skill_id=42
         )
 
     @pytest.mark.asyncio
@@ -641,10 +658,14 @@ class TestRemoveSkillFromDefaultSet:
         """Default set: skill without git_path still writes exclusion (no deactivate)."""
         mock_repo = MagicMock()
         mock_repo.get_by_id.return_value = {"id": "1", "is_default": True, "bolt_id": "default"}
-        mock_repo.add_default_skill_exclusion.return_value = True
+        mock_repo.exclude_default_set_skill.return_value = (True, False)
 
         mock_skill_repo = MagicMock()
-        mock_skill_repo.get_by_id.return_value = {"id": "42", "git_path": None}
+        mock_skill_repo.get_by_id.return_value = {
+            "id": "42",
+            "git_path": None,
+            "env": "dev",
+        }
 
         mock_skill_svc = MagicMock()
 
@@ -653,7 +674,7 @@ class TestRemoveSkillFromDefaultSet:
             result = await svc.remove_skill_from_set("1", "42", user_id="user1")
 
         assert result is True
-        mock_repo.add_default_skill_exclusion.assert_called_once()
+        mock_repo.exclude_default_set_skill.assert_called_once()
         mock_skill_svc.deactivate_skill.assert_not_called()
 
     @pytest.mark.asyncio
@@ -661,18 +682,26 @@ class TestRemoveSkillFromDefaultSet:
         """Default set: falls back to entity_id when user_id is None."""
         mock_repo = MagicMock()
         mock_repo.get_by_id.return_value = {"id": "1", "is_default": True, "bolt_id": "default"}
-        mock_repo.add_default_skill_exclusion.return_value = True
+        mock_repo.exclude_default_set_skill.return_value = (True, False)
 
         mock_skill_repo = MagicMock()
-        mock_skill_repo.get_by_id.return_value = {"id": "42", "git_path": None}
+        mock_skill_repo.get_by_id.return_value = {
+            "id": "42",
+            "git_path": None,
+            "env": "dev",
+        }
 
         svc = self._make_svc(mock_repo, skill_repo=mock_skill_repo)
         with patch.object(svc, "_sync_symlinks_to_device_if_needed"):
             result = await svc.remove_skill_from_set("1", "42", user_id=None)
 
         assert result is True
-        mock_repo.add_default_skill_exclusion.assert_called_once_with(
-            user_id="staff_user1", bot_id="default", skill_set_id=1, skill_id=42
+        mock_repo.exclude_default_set_skill.assert_called_once_with(
+            owner_id="staff_user1",
+            bot_id="default",
+            skill_set_id=1,
+            skill_id=42,
+            env="dev",
         )
 
 
@@ -729,6 +758,27 @@ class TestGetSetSkillsExclusion:
         result = svc.get_set_skills("1", user_id="user1")
 
         assert len(result) == 2
+
+    def test_default_set_exclusions_are_read_for_the_bot_owner(self):
+        """A collaborator sees the owner's removals, not their own.
+
+        The exclusion is the Bot's state: it is written under the owner and
+        read under the owner by the listing repair and the runtime projection.
+        Reading it here under the caller would give a collaborator a different
+        Default membership than the Bot actually has.
+        """
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {"id": "1", "is_default": True}
+        mock_repo.get_skills_in_set.return_value = [{"id": "10", "name": "a"}]
+        mock_repo.get_excluded_skills.return_value = []
+
+        svc = self._make_svc(mock_repo)
+        svc.entity_id = "staff_owner"
+        svc.get_set_skills("1", user_id="collaborator")
+
+        mock_repo.get_excluded_skills.assert_called_once_with(
+            user_id="staff_owner", bot_id="default", skill_set_id=1
+        )
 
     def test_default_set_no_user_id_no_filtering(self):
         """Without user_id, no exclusion lookup happens."""
@@ -1494,6 +1544,112 @@ class TestSyncSkillSetToActiveOwnerIdResolution:
             "git://biz/skill-a", user_id="user1", bolt_id="bot-1"
         )
 
+
+class TestRemoveRepoSkillFromDefaultSetUninstalls:
+    """Excluding a Repo Skill must also stop Installation from providing it."""
+
+    def _svc(self, *, deactivate_ok: bool = True, exclusion=(True, True)):
+        from agentclaw.community.core.skill_center.services.skill_set_service import (
+            SkillSetService,
+        )
+
+        skill_sets = MagicMock()
+        skill_sets.get_by_id.return_value = {
+            "id": "1",
+            "is_default": True,
+            "bolt_id": "default",
+        }
+        skill_sets.exclude_default_set_skill.return_value = exclusion
+        skills = MagicMock()
+        skills.get_by_id.return_value = {
+            "id": "42",
+            "git_path": "git://biz/my-skill",
+            "env": "dev",
+        }
+        skill_service = MagicMock()
+        skill_service.get_link_name.return_value = "biz_my-skill"
+        skill_service.deactivate_skill = AsyncMock(
+            return_value=True, side_effect=None if deactivate_ok else RuntimeError("no")
+        )
+        installations = MagicMock()
+        installations.uninstall.return_value = True
+        with patch(
+            "agentclaw.community.core.skill_center.services.skill_set_service.WorkspacePathFactory"
+        ):
+            svc = SkillSetService(
+                skill_repo=skills,
+                skill_set_repo=skill_sets,
+                mcp_center=MagicMock(),
+                mcp_config_service=MagicMock(),
+                skill_service=skill_service,
+                bot_repo=MagicMock(),
+                path_factory=MagicMock(),
+                installations=installations,
+            )
+        svc.entity_id = "staff_user1"
+        svc.bot_id = "default"
+        svc.entity_type = "staff"
+        return svc, skill_sets, installations
+
+    @pytest.mark.asyncio
+    async def test_exclusion_also_removes_the_installation_row(self):
+        """Otherwise the Skill stays active through the direct-install path.
+
+        The exclusion stops the Set from providing the Skill. Installation is a
+        second, independent provider — read by the runtime projection and by
+        the public Bot Skill listing — so a removal that writes only the
+        exclusion leaves the Skill running and listed after its owner removed
+        it. Both halves are one repository call, holding the Set row, so a
+        concurrent listing repair cannot slip between them.
+        """
+        svc, skill_sets, _installations = self._svc()
+
+        with patch.object(svc, "_sync_symlinks_to_device_if_needed"):
+            result = await svc.remove_skill_from_set("1", "42", user_id="user1")
+
+        assert result is True
+        skill_sets.exclude_default_set_skill.assert_called_once_with(
+            owner_id="staff_user1",
+            bot_id="default",
+            skill_set_id=1,
+            skill_id=42,
+            env="dev",
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_failed_deactivation_restores_both_halves(self):
+        """A removal that reports failure must not have half-removed the Skill."""
+        svc, skill_sets, installations = self._svc(deactivate_ok=False)
+
+        with patch.object(svc, "_sync_symlinks_to_device_if_needed"):
+            result = await svc.remove_skill_from_set("1", "42", user_id="user1")
+
+        assert result is False
+        skill_sets.remove_default_skill_exclusion.assert_called_once()
+        installations.install.assert_called_once_with(
+            env="dev", owner_id="staff_user1", bot_id="default", skill_id="42"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_retry_that_wrote_nothing_rolls_nothing_back(self):
+        """The second removal of an already-excluded Skill owns neither half.
+
+        Once excluded, the Set no longer governs the Skill, so the guards let
+        its owner activate it directly. A retried removal finds the exclusion
+        already recorded and touches no Installation row; rolling back on a
+        failed deactivation would then revoke the earlier, successful removal
+        and delete a direct activation this call never made.
+        """
+        svc, skill_sets, installations = self._svc(
+            deactivate_ok=False, exclusion=(False, False)
+        )
+
+        with patch.object(svc, "_sync_symlinks_to_device_if_needed"):
+            result = await svc.remove_skill_from_set("1", "42", user_id="user1")
+
+        assert result is False
+        skill_sets.remove_default_skill_exclusion.assert_not_called()
+        installations.install.assert_not_called()
 
 # ── TestSyncMcpDesiredState ──────────────────────────────────────────
 

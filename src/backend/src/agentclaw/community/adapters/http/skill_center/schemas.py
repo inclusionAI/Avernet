@@ -80,12 +80,6 @@ class SyncSkillsRequest(BaseModel):
     user_id: Optional[str] = Field(None, description="User ID (optional in Phase 1)")
 
 
-class SwitchSkillSetRequest(BaseModel):
-    skill_set_id: str = Field(..., description="Target skill set ID")
-    user_id: Optional[str] = Field(None, description="User ID (optional in Phase 1)")
-    proxy_token: Optional[str] = Field(None, description="agentclawproxy token for remote sync")
-
-
 class SyncSkillSetRequest(BaseModel):
     skill_set_id: str = Field(..., description="Skill set ID to sync")
     user_id: Optional[str] = Field(None, description="User ID (optional in Phase 1)")

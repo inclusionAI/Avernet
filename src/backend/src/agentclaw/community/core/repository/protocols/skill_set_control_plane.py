@@ -10,6 +10,7 @@ if TYPE_CHECKING:
         LegacySkillSetScope,
     )
     from agentclaw.community.core.repository.skill_set_control_plane_types import (
+        BotSkillSetBridge,
         SkillSetDesiredState,
         SkillSetMutation,
     )
@@ -27,6 +28,25 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> list[dict]: ...
+    @abstractmethod
+    def repair_bot_skillset_installations(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        env: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> BotSkillSetBridge:
+        """Atomically make Installation agree with SkillSet membership.
+
+        ``default_engine_types`` scopes both halves: which platform Default the
+        Bot inherits, and which Defaults are retired — the ones in this tuple
+        that are not the inherited one. It is the same tuple the activation
+        guards gate on, so the retirement can only reach Sets whose members
+        those guards refuse direct control of.
+        """
+        ...
     @abstractmethod
     def resolve_legacy_set_scope(
         self, *, set_id: str
@@ -152,11 +172,6 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
         set_id: str,
         active: bool,
         engine_type: str | None = None,
-        default_engine_types: tuple[str, ...] | None = None,
-    ) -> SkillSetMutation: ...
-    @abstractmethod
-    def replace_active_set(
-        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> SkillSetMutation: ...
     @abstractmethod
