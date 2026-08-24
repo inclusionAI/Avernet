@@ -9,10 +9,15 @@ from agentclaw.community.core.bot_chat.models import (
     AcOtelLogObservation,
     AwLangfuseObservation,
     AwLangfuseTrace,
+    BcsGroupParticipant,
     BcsGroupSession,
 )
-from agentclaw.community.core.repository.implementations.chat.db import BotChatDbRepository
-from agentclaw.community.core.repository.implementations.chat.open import OpenBotChatRepository
+from agentclaw.community.core.repository.implementations.chat.db import (
+    BotChatDbRepository,
+)
+from agentclaw.community.core.repository.implementations.chat.open import (
+    OpenBotChatRepository,
+)
 from agentclaw.community.plugin_api.models import Base
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -64,6 +69,30 @@ def _write_ocb_trace(
             "status": "SUCCESS",
             "usage": {},
         }
+    )
+
+
+def test_group_membership_is_scoped_by_group_bot_and_environment() -> None:
+    db = _LocalDb()
+    with db.orm_session() as session:
+        session.add(
+            BcsGroupParticipant(
+                group_id="group-fixture",
+                bot_uuid="bot-fixture:owner-fixture",
+                env=get_current_env(),
+            )
+        )
+
+    repository = OpenBotChatRepository(db)
+
+    assert (
+        repository.is_bot_in_group("group-fixture", "bot-fixture:owner-fixture") is True
+    )
+    assert (
+        repository.is_bot_in_group("group-fixture", "bot-fixture:other-owner") is False
+    )
+    assert (
+        repository.is_bot_in_group("other-group", "bot-fixture:owner-fixture") is False
     )
 
 
@@ -330,9 +359,7 @@ def test_task_scope_merges_direct_and_owned_relation_matches() -> None:
             "biz_task_id": "task-fixture",
             "user_id": "relation-user",
             "bot_id": "relation-bot",
-            "refs": [
-                {"ref_type": "trace_id", "ref_value": "relation-task-trace"}
-            ],
+            "refs": [{"ref_type": "trace_id", "ref_value": "relation-task-trace"}],
         }
     )
 
@@ -372,9 +399,7 @@ def test_task_scope_falls_back_to_legacy_relation() -> None:
             "biz_task_id": "legacy-task",
             "user_id": "legacy-user",
             "bot_id": "legacy-bot",
-            "refs": [
-                {"ref_type": "session_key", "ref_value": "legacy-task-key"}
-            ],
+            "refs": [{"ref_type": "session_key", "ref_value": "legacy-task-key"}],
         }
     )
 
