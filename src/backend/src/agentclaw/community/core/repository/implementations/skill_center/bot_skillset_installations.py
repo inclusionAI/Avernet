@@ -1,6 +1,6 @@
 """Bot-wide resolution from SkillSet membership to Installation rows.
 
-Separate from ``skill_set_control_plane``, which mutates one named Set: these
+Separate from ``capability_desired_state``, which mutates one named Set: these
 range over every Set a Bot has and answer what its Installation table should say.
 """
 
@@ -19,7 +19,7 @@ from agentclaw.community.core.repository.implementations.skill_center.default_sk
     excluded_skill_ids,
     global_default_scope,
 )
-from agentclaw.community.core.repository.skill_set_control_plane_types import (
+from agentclaw.community.core.repository.capability_desired_state_types import (
     BotSkillSetBridge,
 )
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant

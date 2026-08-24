@@ -10,8 +10,8 @@ from agentclaw.community.core.mcp.services.passport_scope import (
     filter_passport_mcp_codes,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
-    SkillSetControlPlaneRepositoryProtocol,
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
@@ -57,7 +57,7 @@ class BotRuntimeProjectionReconciler:
         self,
         factory: SkillSetServiceFactory,
         bot_repo: BotRepository,
-        repository: SkillSetControlPlaneRepositoryProtocol,
+        repository: CapabilityDesiredStateRepositoryProtocol,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
         pool_runtime: SkillsPoolRuntimeProtocol,
         pool_layouts: SkillsPoolLayoutRepositoryProtocol,

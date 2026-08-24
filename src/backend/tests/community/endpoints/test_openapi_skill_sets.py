@@ -23,8 +23,8 @@ from agentclaw.community.core.repository.protocols.bot import (
     BotRepository,
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
-    SkillSetControlPlaneRepositoryProtocol,
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.skill_center.services.skill_set_management_service import (
@@ -123,7 +123,7 @@ def _seed(world, *, member: bool = False) -> None:
                 "active_engine": "openclaw",
             }
         )
-        repository = world.get(SkillSetControlPlaneRepositoryProtocol)
+        repository = world.get(CapabilityDesiredStateRepositoryProtocol)
         skill_set = repository.create_set(
             bot_id=_BOT_ID,
             owner_id=_OWNER,
@@ -154,7 +154,7 @@ def _seed(world, *, member: bool = False) -> None:
             )
     runtime = _Runtime()
     control_plane = SkillSetManagementService(
-        repository=world.get(SkillSetControlPlaneRepositoryProtocol),
+        repository=world.get(CapabilityDesiredStateRepositoryProtocol),
         bot_repo=world.get(BotRepository),
         runtime=runtime,
         legacy_factory=world.get(SkillSetServiceFactory),
@@ -176,7 +176,7 @@ def _seed_member(world) -> None:
 def _seed_active(world) -> None:
     _seed_member(world)
     with avernet_tenant_scope(_TENANT):
-        world.get(SkillSetControlPlaneRepositoryProtocol).set_active(
+        world.get(CapabilityDesiredStateRepositoryProtocol).set_active(
             bot_id=_BOT_ID,
             owner_id=_OWNER,
             set_id="1",
@@ -474,7 +474,7 @@ def deactivate_error():
 def _seed_mcp_member(world) -> None:
     _seed(world)
     with avernet_tenant_scope(_TENANT):
-        world.get(SkillSetControlPlaneRepositoryProtocol).add_mcp(
+        world.get(CapabilityDesiredStateRepositoryProtocol).add_mcp(
             bot_id=_BOT_ID,
             owner_id=_OWNER,
             set_id="1",

@@ -48,8 +48,8 @@ from agentclaw.community.core.repository.implementations.skill_center.skill impo
     SkillRepository,
     SkillSetRepository,
 )
-from agentclaw.community.core.repository.implementations.skill_center.skill_set_control_plane import (
-    SkillSetControlPlaneRepository,
+from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
+    CapabilityDesiredStateRepository,
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillActiveError,
@@ -681,7 +681,7 @@ def test_a_skillset_bridged_skill_is_listed_and_gains_its_installation(tmp_path)
                     skills,
                     bots,
                     object(),
-                    SkillSetControlPlaneRepository(db),
+                    CapabilityDesiredStateRepository(db),
                 ),
             )
 
@@ -781,7 +781,7 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
                     skills,
                     bots,
                     object(),
-                    SkillSetControlPlaneRepository(db),
+                    CapabilityDesiredStateRepository(db),
                 )
                 binder.bind(
                     LocalSkillQueryServiceProtocol,
@@ -898,7 +898,7 @@ def test_default_bot_scope_is_owner_distinguished(tmp_path):
             skills,
             bots,
             object(),
-            SkillSetControlPlaneRepository(db),
+            CapabilityDesiredStateRepository(db),
         )
         _, a_skills = service.list_bot_skills(
             bot_id="default",

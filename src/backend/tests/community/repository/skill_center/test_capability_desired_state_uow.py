@@ -25,8 +25,8 @@ from agentclaw.community.core.skill_center.orm import (
     DefaultSkillsetMcpExclusion,
     DefaultSkillsetSkillExclusion,
 )
-from agentclaw.community.core.repository.implementations.skill_center.skill_set_control_plane import (
-    SkillSetControlPlaneRepository,
+from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
+    CapabilityDesiredStateRepository,
 )
 from agentclaw.community.core.skill_center.errors import (
     SkillRuntimeNameConflictError,
@@ -94,7 +94,7 @@ def test_legacy_scope_resolution_returns_only_ordinary_set_address() -> None:
         ordinary_id = str(ordinary.id)
         default_id = str(default.id)
 
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
 
     assert repository.resolve_legacy_set_scope(
         set_id=ordinary_id
@@ -143,7 +143,7 @@ def test_list_sets_is_scoped_to_exact_owner_for_shared_default_bot_id():
             ]
         )
 
-    items = SkillSetControlPlaneRepository(db).list_sets(
+    items = CapabilityDesiredStateRepository(db).list_sets(
         bot_id="default", owner_id="owner-a", engine_type="openclaw"
     )
 
@@ -217,7 +217,7 @@ def test_ensure_active_skillset_installations_only_materializes_active_ordinary_
             ]
         )
 
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
 
     assert (
         repository.ensure_active_skillset_installations(
@@ -286,7 +286,7 @@ def test_global_default_reads_apply_owner_bot_exclusions_without_hiding_membersh
             ]
         )
 
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
 
     assert repository.get_set(
         bot_id="default", owner_id="owner-a", set_id=str(default.id), engine_type="openclaw"
@@ -321,7 +321,7 @@ def test_ensure_active_skillset_installations_uses_install_repository_upsert_sea
         )
 
     installs = _InstallationRecorder()
-    result = SkillSetControlPlaneRepository(
+    result = CapabilityDesiredStateRepository(
         db, installation_repository=installs
     ).ensure_active_skillset_installations(
         bot_id="bot", owner_id="owner", engine_type="openclaw"
@@ -352,7 +352,7 @@ def test_ensure_active_skillset_installations_does_not_resurrect_deactivated_set
             ]
         )
 
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
     repository.set_active(bot_id="bot", owner_id="owner", set_id="1", active=False)
 
     assert (
@@ -370,7 +370,7 @@ def test_cross_owner_set_id_is_not_readable_or_mutable_for_shared_default_bot_id
             SkillSet(name="owner-b-set", user_id="owner-b", bolt_id="default", env="dev")
         )
 
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
     with pytest.raises(SkillSetControlPlaneNotFoundError):
         repository.get_set(bot_id="default", owner_id="owner-a", set_id="1")
     with pytest.raises(SkillSetControlPlaneNotFoundError):
@@ -398,7 +398,7 @@ def test_global_default_is_immutable_even_for_description_only_update():
             )
         )
 
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
     with pytest.raises(
         SkillSetControlPlaneConflictError, match="SYSTEM_DEFAULT_IMMUTABLE"
     ):
@@ -438,7 +438,7 @@ def test_routed_claude_code_prefers_aicoding_global_default_before_fallback():
             ]
         )
 
-    items = SkillSetControlPlaneRepository(db).list_sets(
+    items = CapabilityDesiredStateRepository(db).list_sets(
         bot_id="bot",
         owner_id="owner",
         engine_type="claude_code",
@@ -465,7 +465,7 @@ def test_mcp_membership_is_independent_for_two_owners_sharing_default_bot_id():
             )
         )
 
-    result = SkillSetControlPlaneRepository(db).add_mcp(
+    result = CapabilityDesiredStateRepository(db).add_mcp(
         bot_id="default",
         owner_id="owner-a",
         set_id=str(owner_a.id),
@@ -502,7 +502,7 @@ def test_activation_rolls_back_all_membership_installations_when_nth_insert_fail
     event.listen(BotSkillInstallation, "before_insert", fail_second_install)
     try:
         with pytest.raises(RuntimeError, match="second installation"):
-            SkillSetControlPlaneRepository(db).set_active(
+            CapabilityDesiredStateRepository(db).set_active(
                 bot_id="bot", owner_id="owner", set_id="1", active=True
             )
     finally:
@@ -536,7 +536,7 @@ def test_activation_rejects_runtime_name_conflict_before_installation_write():
         )
 
     with pytest.raises(SkillRuntimeNameConflictError):
-        SkillSetControlPlaneRepository(db).set_active(
+        CapabilityDesiredStateRepository(db).set_active(
             bot_id="bot", owner_id="owner", set_id="1", active=True
         )
 
@@ -548,7 +548,7 @@ def test_activation_rejects_runtime_name_conflict_before_installation_write():
 
 def test_create_rejects_a_duplicate_name_without_a_durable_replay_record():
     db = _Database()
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
 
     first = repository.create_set(
         bot_id="bot",
@@ -580,7 +580,7 @@ def test_default_projection_is_always_active_even_for_historical_false_row():
             )
         )
 
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
     assert repository.list_sets(
         bot_id="bot", owner_id="owner", engine_type="openclaw"
     )[0]["is_active"] is True
@@ -641,7 +641,7 @@ def test_database_allows_system_default_and_one_ordinary_membership():
 
 def test_active_skill_set_mutates_mcp_membership_and_installation_atomically():
     db = _Database()
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
     with db.transactional_orm_session() as session:
         skill_set = SkillSet(name="set", user_id="owner", bolt_id="bot", is_active=True, env="dev")
         session.add(skill_set)
@@ -668,7 +668,7 @@ def test_active_skill_set_mutates_mcp_membership_and_installation_atomically():
 
 def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
     db = _Database()
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
     with db.transactional_orm_session() as session:
         skill_set = SkillSet(name="set", user_id="owner", bolt_id="bot", is_active=False, env="dev")
         session.add(skill_set)
@@ -699,7 +699,7 @@ def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
 
 def test_direct_mcp_installation_isolated_by_owner_for_shared_bot_id():
     db = _Database()
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
 
     assert repository.activate_mcp_direct(
         bot_id="default", owner_id="owner-a", server_code="mcp.weather"
@@ -741,7 +741,7 @@ def test_skill_set_control_plane_sql_only_adds_owner_scoped_mcp_installation():
 
 def test_skill_set_name_is_unique_for_bot_across_engines():
     db = _Database()
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
     repository.create_set(
         bot_id="bot",
         owner_id="owner",
@@ -764,7 +764,7 @@ def test_skill_set_name_is_unique_for_bot_across_engines():
 
 def test_skill_set_rename_is_unique_for_bot_across_engines():
     db = _Database()
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
     repository.create_set(
         bot_id="bot",
         owner_id="owner",
@@ -812,7 +812,7 @@ def test_legacy_resolver_keeps_bot_scope_and_suffix_matching_for_existing_repo_s
         session.add_all([target, other])
         session.flush()
 
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
 
     assert repository.resolve_legacy_skill_id(
         bot_id="bot-a", identifier="same-name"
@@ -896,7 +896,7 @@ def _bridge_fixture(db) -> None:
 
 def _bridge(db, **overrides):
     """Drive the repair, which is what the listing calls, and read its answer."""
-    return SkillSetControlPlaneRepository(db).repair_bot_skillset_installations(
+    return CapabilityDesiredStateRepository(db).repair_bot_skillset_installations(
         **{
             "bot_id": "bot",
             "owner_id": "owner",
@@ -1205,7 +1205,7 @@ def test_repair_writes_exactly_the_difference_membership_implies():
             ]
         )
 
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
     bridge = repository.repair_bot_skillset_installations(
         bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
     )
@@ -1244,7 +1244,7 @@ def test_repair_is_convergent_and_leaves_another_bots_rows_alone():
             ]
         )
 
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
     repository.repair_bot_skillset_installations(
         bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
     )
@@ -1299,7 +1299,7 @@ def test_repair_takes_no_lock_and_opens_no_transaction_when_converged():
         )
 
     writes: list[str] = []
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
     original = db.transactional_orm_session
 
     @contextmanager
@@ -1352,7 +1352,7 @@ def test_repair_resolves_again_under_lock_before_it_writes():
         session.flush()
         session.add(SkillSetSkill(skill_set_id=skill_set.id, skill_id=1, env="dev"))
 
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
     original = db.transactional_orm_session
 
     @contextmanager
@@ -1417,7 +1417,7 @@ def test_repair_survives_a_concurrent_listing_winning_the_same_insert():
             ]
         )
 
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
     original = db.transactional_orm_session
 
     @contextmanager
@@ -1665,7 +1665,7 @@ def test_repair_re_raises_an_integrity_error_that_is_not_a_lost_race():
         session.flush()
         session.add(SkillSetSkill(skill_set_id=skill_set.id, skill_id=1, env="dev"))
 
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
     original = db.transactional_orm_session
 
     @contextmanager
@@ -1770,7 +1770,7 @@ def test_deactivating_a_set_removes_the_center_version_the_repair_installed():
     """
     db = _Database()
     _stale_center_membership(db)
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
     repository.repair_bot_skillset_installations(
         bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
     )
@@ -1793,7 +1793,7 @@ def test_activating_a_set_installs_the_center_version_the_repair_would():
     _stale_center_membership(db)
     with db.transactional_orm_session() as session:
         session.query(SkillSet).filter(SkillSet.id == 1).one().is_active = False
-    repository = SkillSetControlPlaneRepository(db)
+    repository = CapabilityDesiredStateRepository(db)
 
     repository.set_active(
         bot_id="bot", owner_id="owner", set_id=1, active=True, engine_type="openclaw"
@@ -1854,7 +1854,7 @@ def test_deactivating_a_set_retires_a_member_that_no_longer_resolves():
     db = _Database()
     _offlined_center_member(db)
 
-    SkillSetControlPlaneRepository(db).set_active(
+    CapabilityDesiredStateRepository(db).set_active(
         bot_id="bot",
         owner_id="owner",
         set_id="1",
@@ -1874,7 +1874,7 @@ def test_activating_a_set_still_installs_only_what_resolves():
         session.query(SkillSet).filter(SkillSet.id == 1).one().is_active = False
         session.query(BotSkillInstallation).delete()
 
-    SkillSetControlPlaneRepository(db).set_active(
+    CapabilityDesiredStateRepository(db).set_active(
         bot_id="bot",
         owner_id="owner",
         set_id="1",
@@ -1891,7 +1891,7 @@ def test_removing_a_member_that_no_longer_resolves_retires_its_row():
     db = _Database()
     _offlined_center_member(db)
 
-    SkillSetControlPlaneRepository(db).remove_skill(
+    CapabilityDesiredStateRepository(db).remove_skill(
         bot_id="bot",
         owner_id="owner",
         set_id="1",

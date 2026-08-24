@@ -10,7 +10,7 @@ from agentclaw.community.core.models.skill import SkillSet
 from agentclaw.community.core.repository.implementations.skill_center.default_skillset_projection import (
     excluded_mcp_codes,
 )
-from agentclaw.community.core.repository.skill_set_control_plane_types import (
+from agentclaw.community.core.repository.capability_desired_state_types import (
     SkillSetMutation,
 )
 from agentclaw.community.core.skill_center.errors import (

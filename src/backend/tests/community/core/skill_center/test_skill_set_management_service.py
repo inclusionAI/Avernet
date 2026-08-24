@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentclaw.community.core.repository.implementations.skill_center.skill_set_control_plane import (
+from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
     SkillSetDesiredState,
     SkillSetMutation,
 )

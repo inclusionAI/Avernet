@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.repository.skill_set_control_plane_types import (
+from agentclaw.community.core.repository.capability_desired_state_types import (
     BotSkillSetBridge,
 )
 from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError

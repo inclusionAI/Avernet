@@ -18,8 +18,8 @@ from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
-    SkillSetControlPlaneRepositoryProtocol,
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
@@ -41,7 +41,7 @@ class LocalSkillQueryService(LocalSkillQueryServiceProtocol):
         skill_repo: SkillRepository,
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
-        skill_sets: SkillSetControlPlaneRepositoryProtocol,
+        skill_sets: CapabilityDesiredStateRepositoryProtocol,
     ) -> None:
         self._skill_repo = skill_repo
         self._bot_repo = bot_repo

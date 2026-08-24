@@ -61,8 +61,8 @@ from agentclaw.community.core.repository.implementations.skill_center.installati
 )
 from agentclaw.community.core.repository.implementations.skill_center.propagation_log import \
     SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository
-from agentclaw.community.core.repository.implementations.skill_center.skill_set_control_plane import (
-    SkillSetControlPlaneRepository,
+from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
+    CapabilityDesiredStateRepository,
 )
 from agentclaw.community.core.repository.implementations.skill_center.space_skill import (
     SpaceSkillRepository as UnifiedSpaceSkillRepository,
@@ -95,8 +95,8 @@ from agentclaw.community.core.repository.protocols.skill_center import (
 from agentclaw.community.core.repository.protocols.skill_installation import (
     SkillInstallationRepositoryProtocol,
 )
-from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
-    SkillSetControlPlaneRepositoryProtocol,
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
@@ -305,13 +305,13 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             scope=singleton,
         )
         binder.bind(
-            SkillSetControlPlaneRepository,
-            to=SkillSetControlPlaneRepository,
+            CapabilityDesiredStateRepository,
+            to=CapabilityDesiredStateRepository,
             scope=singleton,
         )
         binder.bind(
-            SkillSetControlPlaneRepositoryProtocol,
-            to=SkillSetControlPlaneRepository,
+            CapabilityDesiredStateRepositoryProtocol,
+            to=CapabilityDesiredStateRepository,
             scope=singleton,
         )
         binder.bind(
@@ -404,7 +404,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         skill_repo: SkillRepository,
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
-        skill_sets: SkillSetControlPlaneRepositoryProtocol,
+        skill_sets: CapabilityDesiredStateRepositoryProtocol,
     ) -> LocalSkillQueryServiceProtocol:
         """Bind the public Bot-Skill desired-state query service."""
         return LocalSkillQueryService(

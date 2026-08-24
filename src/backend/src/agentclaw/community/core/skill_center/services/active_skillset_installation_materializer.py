@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from injector import inject
 
-from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
-    SkillSetControlPlaneRepositoryProtocol,
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
 )
 
 
@@ -13,7 +13,7 @@ class ActiveSkillSetInstallationMaterializer:
     """Materialize missing active-only Installations for one exact Bot."""
 
     @inject
-    def __init__(self, repository: SkillSetControlPlaneRepositoryProtocol) -> None:
+    def __init__(self, repository: CapabilityDesiredStateRepositoryProtocol) -> None:
         self._repository = repository
 
     def materialize(

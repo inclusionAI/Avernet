@@ -629,7 +629,7 @@ class SkillRepository(
                 # is shared and no one Bot may edit it — so a projection that
                 # ignored exclusions would keep running a Skill its owner
                 # removed, and would contradict both the Bot Skill listing and
-                # ``SkillSetControlPlaneRepository.list_skills``, which have
+                # ``CapabilityDesiredStateRepository.list_skills``, which have
                 # always applied them.
                 excluded = {
                     int(value)

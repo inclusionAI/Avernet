@@ -26,8 +26,8 @@ from agentclaw.community.core.repository.implementations.skill_center.default_sk
 from agentclaw.community.core.repository.implementations.skill_center.skill_set_projection import (
     skill_set_item as _item,
 )
-from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
-    SkillSetControlPlaneRepositoryProtocol,
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.skill_installation import (
     SkillInstallationRepositoryProtocol,
@@ -43,7 +43,7 @@ from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_
     McpSkillSetControlPlaneCommands,
 )
 from agentclaw.community.core.repository.implementations.skill_center.legacy_skill_set_scope import LegacySkillSetScopeQueries
-from agentclaw.community.core.repository.skill_set_control_plane_types import (
+from agentclaw.community.core.repository.capability_desired_state_types import (
     SkillSetDesiredState,
     SkillSetMutation,
 )
@@ -58,11 +58,11 @@ from agentclaw.community.core.skill_center.errors import (
 )
 
 
-class SkillSetControlPlaneRepository(
+class CapabilityDesiredStateRepository(
     BotSkillSetInstallations,
     LegacySkillSetScopeQueries,
     McpSkillSetControlPlaneCommands,
-    SkillSetControlPlaneRepositoryProtocol,
+    CapabilityDesiredStateRepositoryProtocol,
 ):
     """Desired-state UoW for SkillSet Membership and Installations."""
 

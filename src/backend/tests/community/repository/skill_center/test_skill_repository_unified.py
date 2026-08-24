@@ -690,7 +690,7 @@ def test_skills_pool_active_assets_drop_a_default_member_its_owner_excluded(
 
     A shared Default Set cannot be edited per Bot, so removal is recorded as an
     exclusion. The Bot Skill listing and
-    ``SkillSetControlPlaneRepository.list_skills`` have always applied that;
+    ``CapabilityDesiredStateRepository.list_skills`` have always applied that;
     this projection did not, so a Skill its owner removed kept running and a
     direct deactivate on it reported success without holding.
     """

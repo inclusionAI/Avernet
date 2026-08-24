@@ -9,14 +9,14 @@ if TYPE_CHECKING:
     from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
         LegacySkillSetScope,
     )
-    from agentclaw.community.core.repository.skill_set_control_plane_types import (
+    from agentclaw.community.core.repository.capability_desired_state_types import (
         BotSkillSetBridge,
         SkillSetDesiredState,
         SkillSetMutation,
     )
 
 
-class SkillSetControlPlaneRepositoryProtocol(Protocol):
+class CapabilityDesiredStateRepositoryProtocol(Protocol):
     """Tenant/env-scoped atomic SkillSet desired-state operations."""
 
     @abstractmethod

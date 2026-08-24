@@ -13,10 +13,10 @@ from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
     BotRepository,
 )
-from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
-    SkillSetControlPlaneRepositoryProtocol,
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
 )
-from agentclaw.community.core.repository.skill_set_control_plane_types import (
+from agentclaw.community.core.repository.capability_desired_state_types import (
     SkillSetMutation,
 )
 from agentclaw.community.core.skill_center.errors import (
@@ -50,7 +50,7 @@ class SkillSetManagementService:
     @inject
     def __init__(
         self,
-        repository: SkillSetControlPlaneRepositoryProtocol,
+        repository: CapabilityDesiredStateRepositoryProtocol,
         bot_repo: BotRepository,
         runtime: BotRuntimeProjectionReconcilerProtocol,
         legacy_factory: LegacySkillSetCompatibilityFactoryProtocol,
