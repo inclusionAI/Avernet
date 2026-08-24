@@ -61,7 +61,9 @@ class SpaceRepository(SpaceRepositoryProtocol):
         if existing is not None:
             return existing, False
         try:
-            with self.create_personal_transaction(user_id=user_id, env=env) as record:
+            with self.create_personal_transaction(
+                user_id=user_id, creator_user_name=None, env=env
+            ) as record:
                 return record, True
         except SpaceAlreadyExistsError:
             # Concurrent initialization: the unique personal-owner key decides
@@ -86,7 +88,9 @@ class SpaceRepository(SpaceRepositoryProtocol):
             return row.to_record() if row is not None else None
 
     @contextmanager
-    def create_personal_transaction(self, *, user_id: str, env: str):
+    def create_personal_transaction(
+        self, *, user_id: str, creator_user_name: str | None, env: str
+    ):
         try:
             with self._db.transactional_orm_session() as db:
                 space = self._Space(
@@ -104,6 +108,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     self._Member(
                         space_id=space.id,
                         user_id=user_id,
+                        user_name=creator_user_name,
                         role=self._stored_role(SpaceRole.ADMIN),
                         env=env,
                         created_by=user_id,
@@ -146,7 +151,14 @@ class SpaceRepository(SpaceRepositoryProtocol):
             db.flush()
 
     @contextmanager
-    def create_team_transaction(self, *, name: str, creator_id: str, env: str):
+    def create_team_transaction(
+        self,
+        *,
+        name: str,
+        creator_id: str,
+        creator_user_name: str | None,
+        env: str,
+    ):
         try:
             with self._db.transactional_orm_session() as db:
                 space = self._Space(
@@ -164,6 +176,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     self._Member(
                         space_id=space.id,
                         user_id=creator_id,
+                        user_name=creator_user_name,
                         role=self._stored_role(SpaceRole.ADMIN),
                         env=env,
                         created_by=creator_id,
@@ -291,6 +304,20 @@ class SpaceRepository(SpaceRepositoryProtocol):
                 .all()
             )
             page_space_ids = [row.id for row in rows]
+            creator_user_names = {
+                int(space_id): user_name
+                for space_id, user_name in (
+                    db.query(self._Member.space_id, self._Member.user_name)
+                    .join(self._Space, self._Member.space_id == self._Space.id)
+                    .filter(
+                        self._Member.space_id.in_(page_space_ids),
+                        self._Member.user_id == self._Space.created_by,
+                        self._Member.env == env,
+                        self._Member.status == "ACTIVE",
+                    )
+                    .all()
+                )
+            } if page_space_ids else {}
             applying_space_ids = (
                 {
                     int(biz_id)
@@ -358,6 +385,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                         ),
                         member_count=member_count,
                         owner_count=owner_count,
+                        creator_user_name=creator_user_names.get(row.id),
                     )
                 )
             return total, items

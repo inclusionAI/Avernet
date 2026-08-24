@@ -32,6 +32,22 @@ pub trait BotRepoPort: Send + Sync {
         self.save_token(&bot_id_for_followup, token).await
     }
 
+    /// Replace a bot's capabilities wholesale (including cleared/empty arrays).
+    ///
+    /// Unlike [`register`](Self::register), whose existing-bot merge skips
+    /// empty `domains`/`skills`/`scopes`, this writes the given capabilities
+    /// verbatim so a partial update that clears a field actually takes effect
+    /// in the live registry. The default delegates to `register` for backward
+    /// compatibility; stores that support wholesale replacement should
+    /// override this to avoid the empty-array skip.
+    async fn update_capabilities(
+        &self,
+        bot_id: &str,
+        capabilities: BotCapabilities,
+    ) -> ServiceResult<()> {
+        self.register(bot_id.to_string(), capabilities).await
+    }
+
     async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool;
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot>;
 

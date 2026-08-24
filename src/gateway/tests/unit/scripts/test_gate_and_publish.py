@@ -130,9 +130,7 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
     )
     assert (
         "delete"
-        in public_document["paths"][
-            "/openapi/v1/collaboration/friend-connections"
-        ]
+        in public_document["paths"]["/openapi/v1/collaboration/friend-connections"]
     )
     assert (
         "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"

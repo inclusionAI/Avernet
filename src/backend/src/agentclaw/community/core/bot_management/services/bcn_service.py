@@ -3,10 +3,10 @@
 负责与 BCN (Bot Coordination Network) 服务交互，包括：
 - Bot 入网注册 (onboard, 上行)
 - Bot 信息同步 (name, summary)
-- claude_code engine 启动时的 Provider Bot 注册 (下行, 见 register_provider_bot)
+- Bot create/start 时的 Provider Bot 注册 (下行, 见 register_provider_bot)
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Mapping, Optional
 
 import httpx
 
@@ -230,8 +230,9 @@ class BcnService:
         owner_workno: str,
         name: str,
         summary: str,
+        connection_mode: Literal["plugin"] | None = None,
     ) -> Dict[str, Any]:
-        """claude_code engine start 时把 bot 注册为 Provider 的 bot (下行链路)。
+        """将 bot 注册为 Provider bot (下行链路)。
 
         语雀: doc 548864073, POST /providers/{provider_id}/bots
 
@@ -240,6 +241,8 @@ class BcnService:
             owner_workno: bot 所有者工号 (例如 "100000")
             name: bot 显示名
             summary: bot 简介 (空字符串也可)
+            connection_mode: 仅 OpenClaw personal 使用 ``plugin``；未传时由 BCN
+                按既有 ``gateway`` 默认处理。
 
         Returns:
             BCN 返回的 dict, 关键字段:
@@ -262,7 +265,8 @@ class BcnService:
         if not provider_cfg:
             logger.info(
                 f"[BcnService.register_provider_bot] env={env} skipped "
-                f"(no provider credentials), provider_bot_ref={provider_bot_ref}"
+                f"(no provider credentials), provider_bot_ref={provider_bot_ref} "
+                f"connection_mode={connection_mode}"
             )
             return {
                 "bot_uuid": "",
@@ -282,6 +286,8 @@ class BcnService:
             "owners": owners,
             "provider_bot_ref": provider_bot_ref,
         }
+        if connection_mode is not None:
+            payload["connection_mode"] = connection_mode
         path = f"/providers/{provider_id}/bots"
         headers = {
             "Content-Type": "application/json",
@@ -289,8 +295,7 @@ class BcnService:
         }
         logger.info(
             f"[BcnService.register_provider_bot] POST {path} "
-            f"provider_bot_ref={provider_bot_ref} name={name} "
-            f"summary_len={len(summary or '')}"
+            f"provider_bot_ref={provider_bot_ref} connection_mode={connection_mode}"
         )
 
         try:
@@ -302,7 +307,8 @@ class BcnService:
             if response.status_code == 409:
                 logger.warning(
                     f"[BcnService.register_provider_bot] 409 idempotent: "
-                    f"provider_bot_ref={provider_bot_ref} already registered"
+                    f"provider_bot_ref={provider_bot_ref} connection_mode={connection_mode} "
+                    f"already registered"
                 )
                 body: Dict[str, Any] = {}
                 try:
@@ -319,7 +325,7 @@ class BcnService:
             logger.info(
                 f"[BcnService.register_provider_bot] OK "
                 f"bot_uuid={response_data.get('bot_uuid')} "
-                f"provider_bot_ref={provider_bot_ref}"
+                f"provider_bot_ref={provider_bot_ref} connection_mode={connection_mode}"
             )
             return response_data
 
@@ -328,22 +334,23 @@ class BcnService:
             status = e.response.status_code if e.response else "N/A"
             logger.error(
                 f"[BcnService.register_provider_bot] HTTP error: "
-                f"status={status} body={error_body} "
-                f"provider_bot_ref={provider_bot_ref}"
+                f"status={status} "
+                f"provider_bot_ref={provider_bot_ref} connection_mode={connection_mode}"
             )
             raise BcnServiceError(
                 f"BCN register_provider_bot HTTP error: {status} - {error_body}"
             )
         except httpx.TimeoutException as e:
             logger.error(
-                f"[BcnService.register_provider_bot] Timeout: {e} "
-                f"provider_bot_ref={provider_bot_ref}"
+                f"[BcnService.register_provider_bot] Timeout: "
+                f"provider_bot_ref={provider_bot_ref} connection_mode={connection_mode}"
             )
             raise BcnServiceError(f"BCN register_provider_bot timeout: {e}")
         except Exception as e:
             logger.error(
-                f"[BcnService.register_provider_bot] Unexpected error: {e} "
-                f"provider_bot_ref={provider_bot_ref}"
+                f"[BcnService.register_provider_bot] Unexpected error: "
+                f"error_type={type(e).__name__} provider_bot_ref={provider_bot_ref} "
+                f"connection_mode={connection_mode}"
             )
             raise BcnServiceError(f"BCN register_provider_bot error: {e}")
 

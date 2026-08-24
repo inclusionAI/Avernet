@@ -33,6 +33,9 @@ class EvalPublishMixin:
         publish_id: int,
         operator: str,
         biz_id: str = "",
+        default_tag: str = "",
+        template_uuid: str = "",
+        ttl_seconds: int | None = None,
     ) -> dict:
         """Publish to the eval environment.
 
@@ -42,6 +45,16 @@ class EvalPublishMixin:
         - it only reuses the publish record's build artifact + bot base info
 
         This path always targets the EVAL stage, so the stage is not a parameter.
+
+        Args:
+            publish_id: 发布记录 ID
+            operator: 操作者
+            biz_id: 业务标识
+            default_tag: 评测标签
+            template_uuid: 显式模板 UUID（可选）。非空时跳过
+                _resolve_baas_template_uuid 路由，用于评测沙箱强制注入评测模板。
+            ttl_seconds: TTL 安全网延迟秒数。未指定时使用默认值 86400（24h），
+                对应 Default 区常驻场景。Eval 区（即拉即销）应传 7200（120min）。
         """
         # This flow is EVAL-only; the stage is fixed here rather than taken as an arg.
         publish_stage = PublishStage.EVAL
@@ -78,6 +91,8 @@ class EvalPublishMixin:
         ext_info = {}
         if biz_id:
             ext_info["biz_id"] = biz_id
+        if default_tag:
+            ext_info["default_tag"] = default_tag
 
         # (#197) Crash-safe issuance via the operation runner. Eval is a CREATION
         # (no bot to adopt), so a crash after the BaaS create but before the id is
@@ -92,7 +107,7 @@ class EvalPublishMixin:
         )
 
         async def _issue():
-            return await self._build_service.release_async(
+            release_kwargs: dict[str, Any] = dict(
                 bot=bot,
                 user_id=owner_id,
                 migration_path=migration_path,
@@ -104,6 +119,9 @@ class EvalPublishMixin:
                 docker_image=image_pin.docker_image,
                 template_config=service_publish_template_config(bot),
             )
+            if template_uuid:
+                release_kwargs["template_uuid"] = template_uuid
+            return await self._build_service.release_async(**release_kwargs)
 
         op = await self._operation_runner.acquire_workflow(op, _issue)
         bot_uuid = op.bot_uuid
@@ -126,12 +144,13 @@ class EvalPublishMixin:
             _EVAL_TEARDOWN_TTL_SECONDS,
         )
 
+        effective_ttl = ttl_seconds if ttl_seconds is not None else _EVAL_TEARDOWN_TTL_SECONDS
         enqueue_eval_teardown(
             self._task_queue_service,
             publish_id=publish_id,
             bot_uuid=bot_uuid,
             operator=operator,
-            delay_seconds=_EVAL_TEARDOWN_TTL_SECONDS,
+            delay_seconds=effective_ttl,
         )
 
         # All-auto approval (#197): the eval CREATE workflow is auto-approved
@@ -155,6 +174,7 @@ class EvalPublishMixin:
         *,
         operator: str = "system",
         publish_id: int = 0,
+        default_tag: str = "",
     ) -> dict:
         """Tear down the eval environment (#197: enqueue the durable teardown).
 
@@ -181,10 +201,11 @@ class EvalPublishMixin:
         result = {
             "success": True,
             "bot_uuid": bot_uuid,
+            "default_tag": default_tag,
             "message": "Eval environment teardown enqueued",
         }
         logger.info(
-            f"[PublishFlowService.eval_teardown] Teardown enqueued: {result}"
+            f"[PublishFlowService.eval_teardown] Teardown enqueued: default_tag={default_tag}, {result}"
         )
         return result
 

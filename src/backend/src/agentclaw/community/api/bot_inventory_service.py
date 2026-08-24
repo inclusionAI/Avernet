@@ -23,6 +23,7 @@ class BotInventoryServiceProtocol(Protocol):
         keyword: str | None,
         engine: str | None,
         deploy_mode: DeployMode | None,
+        is_service: bool | None = None,
         bot_ids: list[str] | None = None,
         page: int,
         page_size: int,

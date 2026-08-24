@@ -35,6 +35,7 @@ def _make_service(
 
     Task 6 收口后 ``device_sync_supplier`` 入参已删除。
     """
+    resolved = resolver or MagicMock()
     return BotPublicService(
         bot_friend_repo=MagicMock(),
         bot_repository=MagicMock(),
@@ -45,7 +46,7 @@ def _make_service(
         auth_relationship_plugin=MagicMock(),
         publish_approval_plugin=MagicMock(),
         skill_set_service_factory=MagicMock(),
-        device_context_resolver=resolver or MagicMock(),
+        device_context_resolver_factory=lambda: resolved,
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
         catalog_metadata_service=MagicMock(),
     )

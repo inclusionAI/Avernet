@@ -291,3 +291,26 @@ def test_dept_search_directory_down_surfaces_5xx() -> None:
     finally:
         reset_principal_verifier_config_cache()
 
+
+
+def test_community_profile_lookup_returns_requested_work_no(community_world) -> None:
+    info = community_world.get(StaffDeptPlugin).get_profile_by_work_no(
+        work_no="work-42"
+    )
+    assert info.work_no == "work-42"
+    assert info.nick_name is None
+
+
+def test_local_profile_lookup_is_recorded_and_returns_null_name(
+    app_with_testing_modules,
+) -> None:
+    injector = getattr(app_with_testing_modules.state, "injector", None)
+    assert injector is not None
+    local = injector.get(StaffDeptPlugin)
+    info = local.get_profile_by_work_no(work_no="work-42")
+    assert info.work_no == "work-42"
+    assert info.nick_name is None
+    assert any(
+        getattr(call, "kwargs", {}).get("work_no") == "work-42"
+        for call in local.calls_to("get_profile_by_work_no")
+    )

@@ -46,6 +46,9 @@ def _common_test_doubles() -> list[Module]:
     from agentclaw.community.di.modules.infrastructure.test.bot_publish_approval import (
         TestBotPublishApprovalModule,
     )
+    from agentclaw.community.di.modules.infrastructure.test.eval_env import (
+        TestEvalEnvModule,
+    )
     from agentclaw.community.di.modules.testing_aicoding_module import TestingAicodingModule
     from agentclaw.community.di.modules.testing_database_module import TestingDatabaseModule
     from agentclaw.community.di.modules.testing_mcp_module import TestingMcpModule
@@ -74,6 +77,8 @@ def _common_test_doubles() -> list[Module]:
         TestDRMModule(),
         TestSandboxRuntimeModule(),
         TestSkillCenterClientModule(),
+        # 评测环境 Noop 绑定（评测功能关闭）。
+        TestEvalEnvModule(),
     ]
 
 
@@ -281,6 +286,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.notify import (
             CommunityNotifyModule,
         )
+        from agentclaw.community.di.modules.infrastructure.community.eval_env import (
+            CommunityEvalEnvModule,
+        )
 
         column: list[Module] = [
             # Decomposed per-concern community infrastructure modules.
@@ -311,6 +319,8 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             CommunityBotPublishApprovalModule(),
             # Notify sender — no-op (no DingTalk in community; B11 Phase A).
             CommunityNotifyModule(),
+            # 评测环境 Prod 绑定。
+            CommunityEvalEnvModule(),
         ]
         return column
 

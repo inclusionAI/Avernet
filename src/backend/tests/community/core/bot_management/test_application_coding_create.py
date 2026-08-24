@@ -1,9 +1,4 @@
-"""Coverage tests for the applicationCoding create failure paths.
-
-The CI changed-line gate flags the create preflight error branches and the
-create_bot workspace/template failure handling; these drive exactly those new
-lines.
-"""
+"""Application Coding creation policy and failure-path coverage."""
 
 from __future__ import annotations
 
@@ -11,114 +6,231 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentclaw.community.adapters.http.openapi_v1.bots.router import (
-    _application_coding_preflight,
-)
-from agentclaw.community.adapters.http.openapi_v1.errors import (
+from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.core.bot_management.errors import (
     ApplicationCodingUnavailableError,
     BotCombinationUnsupportedError,
     BotTemplateInvalidError,
+)
+from agentclaw.community.core.bot_management.create_flow import (
+    APPLICATION_CODING_ENGINES,
+    BotCreateContext,
+    BotCreateDeploymentMode,
+    BotCreateSpec,
+    complete_bot_authorization,
+    create_bot_with_authorization,
+    prepare_bot_create,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotService,
     BotServiceError,
 )
 
+pytestmark = pytest.mark.unit
 
-def _mock_bot_service(hosting_available: bool = True) -> MagicMock:
-    svc = MagicMock()
-    svc.is_workspace_hosting_available.return_value = hosting_available
-    return svc
-
-
-# ── create preflight error branches ──────────────────────────────────────
+_CLOUD_PERSONAL = BotCreateContext(
+    deployment_mode=BotCreateDeploymentMode.CLOUD,
+    space_kind="personal",
+)
 
 
-def test_preflight_plain_bot_returns_none() -> None:
-    assert (
-        _application_coding_preflight(
-            template_type=None,
-            template_config=None,
-            bot_type="personal",
-            engine="claude_code",
-            space_kind="personal",
-            bot_service=_mock_bot_service(),
-        )
-        is None
+def _prepare(**overrides):
+    params = dict(
+        template_type=None,
+        template_config=None,
+        bot_type="personal",
+        engine_type="claude_code",
+        context=_CLOUD_PERSONAL,
     )
+    params.update(overrides)
+    return prepare_bot_create(**params)
 
 
-def test_preflight_config_without_type_is_rejected() -> None:
-    with pytest.raises(BotTemplateInvalidError):
-        _application_coding_preflight(
-            template_type=None,
-            template_config={"devflow_workflow": "x"},
-            bot_type="personal",
-            engine="claude_code",
-            space_kind="personal",
-            bot_service=_mock_bot_service(),
-        )
+def _application_coding_spec(**overrides) -> BotCreateSpec:
+    params = dict(
+        entity_id="u1",
+        engine_type="claude_code",
+        bot_type="personal",
+        bot_name="Coding Bot",
+        template_type="applicationCoding",
+        template_config={"devflow_workflow": "x"},
+    )
+    params.update(overrides)
+    return BotCreateSpec(**params)
 
 
-def test_preflight_unsupported_type_is_rejected() -> None:
-    with pytest.raises(BotTemplateInvalidError):
-        _application_coding_preflight(
-            template_type="personalCoding",
-            template_config={"devflow_workflow": "x"},
-            bot_type="personal",
-            engine="claude_code",
-            space_kind="personal",
-            bot_service=_mock_bot_service(),
-        )
+def test_application_coding_engine_matrix() -> None:
+    assert APPLICATION_CODING_ENGINES == frozenset({"claude_code"})
 
 
-def test_preflight_application_coding_without_config_is_rejected() -> None:
-    with pytest.raises(BotTemplateInvalidError):
-        _application_coding_preflight(
+def test_prepare_plain_bot_has_no_hosting_requirement() -> None:
+    prepared = _prepare()
+    assert prepared.template_config is None
+    assert prepared.requires_workspace_hosting is False
+
+
+def test_prepare_preserves_existing_non_application_template() -> None:
+    payload = {"legacy": {"enabled": True}}
+    prepared = _prepare(
+        template_type="personalCoding",
+        template_config=payload,
+    )
+    assert prepared.template_config == payload
+    assert prepared.template_config is not payload
+    assert prepared.requires_workspace_hosting is False
+
+
+@pytest.mark.parametrize(
+    ("overrides", "error"),
+    [
+        ({"template_config": {}}, BotTemplateInvalidError),
+        (
+            {
+                "template_type": "applicationCoding",
+                "template_config": {},
+                "engine_type": "aicoding",
+            },
+            BotCombinationUnsupportedError,
+        ),
+        (
+            {
+                "template_type": "applicationCoding",
+                "template_config": {},
+                "bot_type": "service",
+            },
+            BotCombinationUnsupportedError,
+        ),
+        (
+            {
+                "template_type": "applicationCoding",
+                "template_config": {},
+                "context": BotCreateContext(
+                    deployment_mode=BotCreateDeploymentMode.CLOUD,
+                    space_kind="team",
+                ),
+            },
+            BotCombinationUnsupportedError,
+        ),
+        (
+            {
+                "template_type": "applicationCoding",
+                "template_config": {},
+                "context": BotCreateContext(
+                    deployment_mode=BotCreateDeploymentMode.LOCAL,
+                    space_kind="personal",
+                ),
+            },
+            BotCombinationUnsupportedError,
+        ),
+    ],
+)
+def test_prepare_rejects_invalid_application_coding_combinations(
+    overrides, error
+) -> None:
+    with pytest.raises(error):
+        _prepare(**overrides)
+
+
+def test_prepare_application_coding_without_config_preserves_legacy_default() -> None:
+    prepared = _prepare(template_type="applicationCoding")
+    assert prepared.template_config is None
+    assert prepared.requires_workspace_hosting is True
+
+
+def test_prepare_application_coding_rejects_supplied_empty_config() -> None:
+    with pytest.raises(BotTemplateInvalidError, match="must not be empty"):
+        _prepare(template_type="applicationCoding", template_config={})
+
+
+def test_prepare_application_coding_rejects_known_field_with_wrong_type() -> None:
+    with pytest.raises(BotTemplateInvalidError, match="code_repos"):
+        _prepare(
             template_type="applicationCoding",
-            template_config=None,
-            bot_type="personal",
-            engine="claude_code",
-            space_kind="personal",
-            bot_service=_mock_bot_service(),
+            template_config={"code_repos": "not-a-list"},
         )
 
 
-def test_preflight_wrong_engine_is_rejected() -> None:
-    with pytest.raises(BotCombinationUnsupportedError):
-        _application_coding_preflight(
-            template_type="applicationCoding",
-            template_config={"devflow_workflow": "x"},
-            bot_type="personal",
-            engine="aicoding",  # internal adapter, not an external engine
-            space_kind="personal",
-            bot_service=_mock_bot_service(),
-        )
-
-
-def test_preflight_missing_hosting_is_rejected() -> None:
-    with pytest.raises(ApplicationCodingUnavailableError):
-        _application_coding_preflight(
-            template_type="applicationCoding",
-            template_config={"devflow_workflow": "x"},
-            bot_type="personal",
-            engine="claude_code",
-            space_kind="personal",
-            bot_service=_mock_bot_service(hosting_available=False),
-        )
-
-
-def test_preflight_valid_application_coding_passes_through() -> None:
-    payload = {"devflow_workflow": "app-flow"}
-    result = _application_coding_preflight(
+def test_prepare_valid_application_coding_returns_detached_config() -> None:
+    payload = {"devflow_workflow": "x"}
+    prepared = _prepare(
         template_type="applicationCoding",
         template_config=payload,
-        bot_type="personal",
-        engine="claude_code",
-        space_kind="personal",
-        bot_service=_mock_bot_service(),
     )
-    assert result == payload
+    assert prepared.template_config == payload
+    assert prepared.template_config is not payload
+    assert prepared.requires_workspace_hosting is True
+
+
+def test_shared_create_rejects_missing_hosting_before_passport() -> None:
+    bot_service = MagicMock(spec=BotServiceProtocol)
+    bot_service.is_workspace_hosting_available.return_value = False
+    passport = MagicMock()
+
+    with pytest.raises(ApplicationCodingUnavailableError):
+        create_bot_with_authorization(
+            user_id="u1",
+            nick_name="u1",
+            bot_id="b1",
+            spec=_application_coding_spec(),
+            context=_CLOUD_PERSONAL,
+            bot_service=bot_service,
+            passport_plugin=passport,
+            auth_rel_plugin=MagicMock(),
+            skill_set_factory=MagicMock(),
+        )
+
+    passport.apply_first_agent_passport.assert_not_called()
+    passport.apply_agent_passport.assert_not_called()
+    bot_service.check_create_bot_preflight.assert_not_called()
+
+
+def test_plain_bot_does_not_query_workspace_hosting() -> None:
+    bot_service = MagicMock(spec=BotServiceProtocol)
+    bot_service.is_first_bot.return_value = True
+    passport = MagicMock()
+    passport.apply_first_agent_passport.return_value = {
+        "iframe_url": "https://passport/authorize"
+    }
+    skill_set_factory = MagicMock()
+    skill_set_factory.create.return_value.get_bot_mcp_codes.return_value = []
+
+    create_bot_with_authorization(
+        user_id="u1",
+        nick_name="u1",
+        bot_id="b1",
+        spec=BotCreateSpec(
+            entity_id="u1",
+            engine_type="openclaw",
+            bot_type="personal",
+            bot_name="Plain Bot",
+        ),
+        context=_CLOUD_PERSONAL,
+        bot_service=bot_service,
+        passport_plugin=passport,
+        auth_rel_plugin=MagicMock(),
+        skill_set_factory=skill_set_factory,
+    )
+
+    bot_service.is_workspace_hosting_available.assert_not_called()
+
+
+def test_auth_completion_rejects_invalid_combo_before_passport_query() -> None:
+    bot_service = MagicMock(spec=BotServiceProtocol)
+    passport = MagicMock()
+
+    with pytest.raises(BotCombinationUnsupportedError):
+        complete_bot_authorization(
+            user_id="u1",
+            nick_name="u1",
+            bot_id="b1",
+            spec=_application_coding_spec(bot_type="service"),
+            context=_CLOUD_PERSONAL,
+            bot_service=bot_service,
+            passport_plugin=passport,
+            auth_rel_plugin=MagicMock(),
+        )
+
+    passport.query_auth_status.assert_not_called()
 
 
 # ── create_bot workspace/template failure ────────────────────────────────

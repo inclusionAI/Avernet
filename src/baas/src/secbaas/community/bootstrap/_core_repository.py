@@ -4,6 +4,9 @@ from secbaas.community.core.database import db_manager as _db_manager
 from secbaas.community.core.repository.ac_bot import OrmAcBotRepository
 from secbaas.community.core.repository.ac_bot_publish import OrmAcBotPublishRepository
 from secbaas.community.core.repository.api_gateway import OrmAPIKeyRepository
+from secbaas.community.core.repository.arca_ttl import (
+    OrmTtlRenewalScheduleRepository,
+)
 from secbaas.community.core.repository.bot import OrmBotRepository
 from secbaas.community.core.repository.bot_device_rel import OrmBotDeviceRelRepository
 from secbaas.community.core.repository.bot_qpm import OrmBotQpmRepository
@@ -75,6 +78,12 @@ class CoreRepositoryContainer(containers.DeclarativeContainer):
         SQLITE_ORM=_orm_repo(OrmAPIKeyRepository),
         MARIADB_ORM=_orm_repo(OrmAPIKeyRepository),
     )
+    arca_ttl_schedule_repository = providers.Selector(
+        config.plugins.database.plugin_database,
+        ZDAS_ORM=_orm_repo(OrmTtlRenewalScheduleRepository),
+        SQLITE_ORM=_orm_repo(OrmTtlRenewalScheduleRepository),
+        MARIADB_ORM=_orm_repo(OrmTtlRenewalScheduleRepository),
+    )
     bot_device_rel_repository = providers.Selector(
         config.plugins.database.plugin_database,
         ZDAS_ORM=_orm_repo(OrmBotDeviceRelRepository),
@@ -109,6 +118,7 @@ class CoreRepositoryContainer(containers.DeclarativeContainer):
         config.plugins.database.plugin_database,
         ZDAS_ORM=_orm_repo(OrmBotRunInteractionRepository),
         SQLITE_ORM=_orm_repo(OrmBotRunInteractionRepository),
+        MARIADB_ORM=_orm_repo(OrmBotRunInteractionRepository),
     )
     bot_run_queue_chunk_repository = providers.Selector(
         config.plugins.database.plugin_database,

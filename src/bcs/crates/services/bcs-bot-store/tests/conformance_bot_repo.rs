@@ -6,7 +6,7 @@ use bcs_db_api::{DbPlugin, DbStatement, DbValue as Value};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCapabilities, BotMetricsSnapshotPort, BotRepoPort,
-    ConnectStreamError, mock_token,
+    ConnectStreamError, ServiceError, Skill, mock_token,
 };
 use bcs_test_support::contract::port::bot_metrics_snapshot_port_contract_tests;
 use bcs_test_support::contract::repo::bot_repo_port_contract_tests;
@@ -369,6 +369,80 @@ async fn connect_or_promote_streaming_refuses_real_token_connected_with_already_
         .expect_err("live bot already connected");
     assert!(matches!(err, ConnectStreamError::AlreadyConnected(id) if id == "live-bot:alice"));
     assert_eq!(repo.load_token("live-bot:alice").await.as_deref(), Some(first.as_str()));
+}
+
+#[tokio::test]
+async fn persistent_repo_update_capabilities_replaces_in_memory_and_db() {
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    let db = sqlite_db().await;
+    let repo = PersistentBotRepo::with_plugins(cache, db);
+
+    repo.register(
+        "update-cap-bot".to_string(),
+        BotCapabilities {
+            name: Some("Update Cap Bot".to_string()),
+            domains: vec!["before".to_string()],
+            skills: vec![Skill::new("before_skill")],
+            scopes: vec!["before_scope".to_string()],
+            visibility: "public".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("register bot");
+
+    // update_capabilities replaces capabilities wholesale (no empty-array skip,
+    // unlike register). Clear fields and assert it takes effect in the live
+    // in-memory registry, not only in the DB column.
+    repo.update_capabilities(
+        "update-cap-bot",
+        BotCapabilities {
+            name: Some("Update Cap Bot".to_string()),
+            domains: vec![],
+            skills: vec![Skill::new("after_skill")],
+            scopes: vec![],
+            visibility: "protected".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("update_capabilities");
+
+    let stored = repo.get("update-cap-bot").await.expect("bot present");
+    assert!(
+        stored.capabilities.domains.is_empty(),
+        "domains must be cleared in memory (register would skip empty arrays)"
+    );
+    assert!(stored.capabilities.scopes.is_empty());
+    assert_eq!(
+        stored
+            .capabilities
+            .skills
+            .iter()
+            .map(|s| s.name.clone())
+            .collect::<Vec<_>>(),
+        vec!["after_skill".to_string()]
+    );
+    assert_eq!(stored.capabilities.visibility, "protected");
+}
+
+#[tokio::test]
+async fn persistent_repo_update_capabilities_returns_not_found_for_unknown_bot() {
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    let db = sqlite_db().await;
+    let repo = PersistentBotRepo::with_plugins(cache, db);
+
+    let err = repo
+        .update_capabilities(
+            "never-registered",
+            BotCapabilities {
+                name: Some("Ghost".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect_err("unknown bot must error");
+    assert!(matches!(err, ServiceError::BotNotFound(id) if id == "never-registered"));
 }
 
 async fn sqlite_db() -> Arc<dyn DbPlugin> {

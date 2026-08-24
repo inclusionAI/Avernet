@@ -206,8 +206,13 @@ pub struct PatchProviderBotRequest {
     pub summary: Option<String>,
     #[serde(default)]
     pub domains: Option<Vec<String>>,
+    /// Skills as structured `{ name, description }` objects only. Unlike
+    /// provider-bot registration, the legacy bare-string form is deliberately
+    /// not accepted, so the PATCH request shape matches the structured skills
+    /// emitted in the response (round-trip fidelity) and lets clients update
+    /// skill descriptions. Absent/`null` leaves skills unchanged.
     #[serde(default)]
-    pub skills: Option<Vec<String>>,
+    pub skills: Option<Vec<Skill>>,
     #[serde(default)]
     pub scopes: Option<Vec<String>>,
     #[serde(default)]

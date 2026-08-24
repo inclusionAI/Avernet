@@ -40,6 +40,7 @@ def _make_service(
     device_sync_dispatcher=None,
     catalog_metadata_service=None,
 ):
+    resolver = device_context_resolver or MagicMock()
     return BotPublicService(
         bot_friend_repo=bot_friend_repo or MagicMock(),
         bot_repository=bot_repository or MagicMock(),
@@ -50,7 +51,7 @@ def _make_service(
         auth_relationship_plugin=auth_relationship_plugin or MagicMock(),
         publish_approval_plugin=publish_approval_plugin or MagicMock(),
         skill_set_service_factory=skill_set_service_factory or MagicMock(),
-        device_context_resolver=device_context_resolver or MagicMock(),
+        device_context_resolver_factory=lambda: resolver,
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
         catalog_metadata_service=catalog_metadata_service or MagicMock(),
     )
@@ -412,7 +413,7 @@ class TestPublicBcsBot:
         # merge 仍保留已有 friend_ext 子键
         assert bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]["old"] == "x"
 
-    def test_agent_publish_stores_public_public_approval_block(self):
+    def test_agent_publish_stores_public_agent_approval_block(self):
         process = MagicMock()
         process.start_approval.return_value = {
             "success": True, "puid": "p1", "approval_url": "u1", "state": "PROCESSING",
@@ -429,9 +430,9 @@ class TestPublicBcsBot:
             visibility="public",
         )
         friend_ext = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]
-        # agent → public_public_approval subkey (NOT public_user_approval); same block shape
+        # agent → public_agent_approval subkey (NOT public_user_approval); same block shape
         assert "public_user_approval" not in friend_ext
-        block = friend_ext["public_public_approval"]
+        block = friend_ext["public_agent_approval"]
         assert block["puid"] == "p1"
         assert block["approval_url"] == "u1"
         assert block["view_friend_deps"] == [{"deptNo": "D1", "deptName": "Tech"}]
@@ -463,11 +464,11 @@ class TestPublicBcsBot:
         assert block["puid"] == "p1"
         assert block["visibility"] == "public"
 
-    def test_callback_cancel_updates_public_public_approval_for_agent(self):
+    def test_callback_cancel_updates_public_agent_approval_for_agent(self):
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
             "friend_ext": {
-                "public_public_approval": {"puid": "p1", "status": "PROCESSING"}
+                "public_agent_approval": {"puid": "p1", "status": "PROCESSING"}
             }
         }
         svc = _make_service(bcn_service=bcn)
@@ -475,7 +476,7 @@ class TestPublicBcsBot:
             bot_id="b", owner_id="u", puid="p1",
             last_operate="CANCEL", public_scope="agent",
         )
-        block = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]["public_public_approval"]
+        block = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]["public_agent_approval"]
         assert block["status"] == "CANCEL"
 
     def test_callback_agree_user_writes_block_visibility_to_user_visibility(self):
@@ -512,7 +513,7 @@ class TestPublicBcsBot:
     def test_callback_agree_agent_public_when_friend_check_open(self):
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
-            "friend_ext": {"public_public_approval": {"puid": "p1", "status": "PROCESSING"}},
+            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING"}},
             "friend_check_in_strategy": "OPEN",
         }
         svc = _make_service(bcn_service=bcn)
@@ -521,14 +522,14 @@ class TestPublicBcsBot:
             last_operate="AGREE", public_scope="agent",
         )
         body = bcn.patch_attributes.call_args.kwargs["body"]
-        assert body["friend_ext"]["public_public_approval"]["status"] == "AGREE"
+        assert body["friend_ext"]["public_agent_approval"]["status"] == "AGREE"
         # agent: visibility 由 friend_check_in_strategy=OPEN → public
         assert body["visibility"] == "public"
 
     def test_callback_agree_agent_protected_when_friend_check_not_open(self):
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
-            "friend_ext": {"public_public_approval": {"puid": "p1", "status": "PROCESSING"}},
+            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING"}},
             "friend_check_in_strategy": "APPROVAL",
         }
         svc = _make_service(bcn_service=bcn)
@@ -565,7 +566,7 @@ class TestPublicBcsBot:
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
             "friend_ext": {
-                "public_public_approval": {
+                "public_agent_approval": {
                     "puid": "p1", "status": "PROCESSING",
                     "view_friend_deps": [{"deptNo": "D2", "deptName": "Sales"}],
                 }
@@ -1347,6 +1348,7 @@ class TestSearchPublicBotsByKeyword:
 
         assert result["total"] == 1
         assert [bot["bot_id"] for bot in result["items"]] == ["bot-1"]
+        assert [bot["bot_uuid"] for bot in result["items"]] == ["bot-1:entity-1"]
         metadata.search_public_bot_metadata.assert_called_once_with(
             search="agent",
             page=3,
@@ -1359,6 +1361,31 @@ class TestSearchPublicBotsByKeyword:
             page=1,
             page_size=2,
         )
+
+    def test_catalog_search_prefers_validated_bcs_bot_uuid(self):
+        metadata = MagicMock()
+        metadata.search_public_bot_metadata.return_value = [
+            BotCatalogMetadata(
+                BotCatalogAddress("bot-1", "entity-1"),
+                "bot",
+                bot_uuid=" bot-1 : entity-1 ",
+            )
+        ]
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (
+            1,
+            [_make_catalog_bot("bot-1", "entity-1")],
+        )
+        svc = _make_service(
+            bot_repository=repository, catalog_metadata_service=metadata
+        )
+
+        result = svc.search_catalog_public_bots_by_keyword(
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace-bcs-bot-uuid",
+        )
+
+        assert result["items"][0]["bot_uuid"] == " bot-1 : entity-1 "
 
     def test_catalog_search_preserves_bcs_is_friend_on_its_exact_address(self):
         metadata = MagicMock()
@@ -1381,7 +1408,11 @@ class TestSearchPublicBotsByKeyword:
         )
 
         assert result["items"] == [
-            {**_make_catalog_bot("shared", "entity-a"), "is_friend": False}
+            {
+                **_make_catalog_bot("shared", "entity-a"),
+                "bot_uuid": "shared:entity-a",
+                "is_friend": False,
+            }
         ]
 
     def test_catalog_search_preserves_requested_bcs_metadata_on_its_exact_address(self):
@@ -1419,6 +1450,7 @@ class TestSearchPublicBotsByKeyword:
         assert result["items"] == [
             {
                 **_make_catalog_bot("shared", "entity-a"),
+                "bot_uuid": "shared:entity-a",
                 "is_friend": False,
                 "visibility": "protected",
                 "is_online": False,

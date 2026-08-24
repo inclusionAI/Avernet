@@ -165,6 +165,14 @@ impl BotRegistryCoreService for BotCore {
             .await
     }
 
+    async fn update_capabilities(
+        &self,
+        bot_id: &str,
+        capabilities: BotCapabilities,
+    ) -> ServiceResult<()> {
+        self.repo.update_capabilities(bot_id, capabilities).await
+    }
+
     async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool {
         self.repo.update_status(bot_id, status).await
     }

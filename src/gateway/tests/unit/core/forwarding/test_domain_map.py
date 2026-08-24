@@ -121,9 +121,12 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     assert friend_connections is not None
     assert friend_connections.server.name == "bcs"
     assert friend_connections.rewrite is None
-    assert friend_connections.upstream_path(
-        "/openapi/v1/collaboration/friend-connections/requests"
-    ) == "/openapi/v1/collaboration/friend-connections/requests"
+    assert (
+        friend_connections.upstream_path(
+            "/openapi/v1/collaboration/friend-connections/requests"
+        )
+        == "/openapi/v1/collaboration/friend-connections/requests"
+    )
 
     security = RouteSecurity.from_table(raw["user_config"]["route_security"])
     requirement = security.resolve("GET", "/openapi/v1/collaboration/groups/group-1")

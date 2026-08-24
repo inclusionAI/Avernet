@@ -140,6 +140,7 @@ def _public_bot(record: Mapping[str, Any]) -> PublicBot:
     # service records cannot expose bindings, device data, credentials, or environment data.
     return PublicBot(
         bot_id=str(record.get("bot_id") or ""),
+        bot_uuid=record.get("bot_uuid"),
         entity_id=str(record.get("entity_id") or record.get("owner_id") or ""),
         bot_type=record["bot_type"],
         name=str(record.get("bot_name") or ""),

@@ -11,11 +11,19 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot.engine_adapter import BotEngineAdapter
+
+logger = get_logger("core-bot-run")
 
 
 class BotEngineAdapterRegistry:
-    """按 engine_type 查 adapter 的注册表。"""
+    """按 engine_type 查 adapter 的注册表。
+
+    支持 eval 环境的 engine adapter：当 eval binding 的 device_props 中
+    包含 engine_type 但该 engine_type 没有正式注册时，允许 fallback 到
+    base adapter。
+    """
 
     def __init__(self, adapters: Mapping[str, BotEngineAdapter]) -> None:
         self._adapters: dict[str, BotEngineAdapter] = dict(adapters)
@@ -32,3 +40,23 @@ class BotEngineAdapterRegistry:
     def has(self, engine_type: str) -> bool:
         """engine_type 是否有已注册 adapter;不抛异常。"""
         return engine_type in self._adapters
+
+    def register_eval_support(
+        self,
+        engine_type: str,
+        adapter: BotEngineAdapter,
+    ) -> None:
+        """在 registry 中注册 eval 环境的 engine adapter schema。
+
+        当 eval binding 的 device_props 包含 engine_type 时，
+        允许 registry 查找到对应的 adapter。
+
+        Args:
+            engine_type: 引擎类型
+            adapter: 已初始化的 BotEngineAdapter 实例
+        """
+        if engine_type not in self._adapters:
+            self._adapters[engine_type] = adapter
+            logger.info(
+                f"[BotEngineAdapterRegistry] Registered eval adapter for engine_type={engine_type!r}"
+            )
