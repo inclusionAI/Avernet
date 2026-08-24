@@ -79,6 +79,17 @@
 # still cannot mint, so they join the existing /openapi/v1 debt tracked by #651.
 # Their handlers have focused adapter/service tests; remove these entries once
 # the shared runner can exercise authenticated success and error paths.
+#
+# 2026-08-24: the routines (7) and resources (7) operations come off this log.
+# Every entry above blames one thing -- "the harness has no minter", so a case
+# could assert nothing but a 401. That stopped being true when
+# test_openapi_session_files.py minted a principal in the test tree: point
+# init_principal_verifier_config at a local signing key and hand the runner a
+# token signed with it. tests/community/endpoints/test_openapi_routines.py and
+# test_openapi_resources.py do the same, so these fourteen are covered on the
+# wire and the gate holds them from here on. The debt the remaining lines
+# record is unchanged, and #651 still covers the minter and the backfill for
+# them. Hand edited rather than regenerated, to keep these notes.
 DELETE /api/bot-render-screens/{record_id}: missing [happy, error]
 DELETE /api/bots/{bot_id}: missing [happy, error]
 DELETE /api/desktop/bots/{bot_id}: missing [happy, error]
@@ -100,8 +111,6 @@ DELETE /openapi/v1/bots/{bot_id}/authorized-apps/{app_id}: missing [happy, error
 DELETE /openapi/v1/bots/{bot_id}/edit-lock: missing [happy, error]
 DELETE /openapi/v1/bots/{bot_id}/lifecycle: missing [happy, error]
 DELETE /openapi/v1/bots/{bot_id}/local: missing [happy, error]
-DELETE /openapi/v1/bots/{bot_id}/resources: missing [happy, error]
-DELETE /openapi/v1/bots/{bot_id}/routines/{routine_id}: missing [happy, error]
 DELETE /openapi/v1/bots/{bot_id}/sessions/{session_id}/messages: missing [happy, error]
 DELETE /openapi/v1/bots/{bot_id}/sessions/{session_id}: missing [happy, error]
 DELETE /openapi/v1/bots/{bot_id}: missing [happy, error]
@@ -275,13 +284,6 @@ GET /openapi/v1/bots/{bot_id}/identity: missing [happy, error]
 GET /openapi/v1/bots/{bot_id}/models/{model_id:path}: missing [happy, error]
 GET /openapi/v1/bots/{bot_id}/models: missing [happy, error]
 GET /openapi/v1/bots/{bot_id}/passport: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/resources/download: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/resources/preview: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/resources/stat: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/resources: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/routines/{routine_id}/runs: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/routines/{routine_id}: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/routines: missing [happy, error]
 GET /openapi/v1/bots/{bot_id}/sessions/{session_id}/messages: missing [happy, error]
 GET /openapi/v1/bots/{bot_id}/sessions/{session_id}: missing [happy, error]
 GET /openapi/v1/bots/{bot_id}/sessions: missing [happy, error]
@@ -299,7 +301,6 @@ OPTIONS /api/v1/token/iam: missing [happy, error]
 PATCH /api/bots/{bot_id}/ext: missing [happy, error]
 PATCH /openapi/v1/bots/routines/{routine_id}: missing [happy, error]
 PATCH /openapi/v1/bots/sessions/{bot_id}/{session_id}: missing [happy, error]
-PATCH /openapi/v1/bots/{bot_id}/routines/{routine_id}: missing [happy, error]
 PATCH /openapi/v1/bots/{bot_id}/sessions/{session_id}: missing [happy, error]
 POST /api/aicoding/workspace/initialize: missing [happy, error]
 POST /api/approvals/mode/get: missing [happy, error]
@@ -454,11 +455,7 @@ POST /openapi/v1/bots/{bot_id}/lifecycle/retry: missing [happy, error]
 POST /openapi/v1/bots/{bot_id}/lifecycle/upgrade: missing [happy, error]
 POST /openapi/v1/bots/{bot_id}/local/open-folder: missing [happy, error]
 POST /openapi/v1/bots/{bot_id}/local/restart: missing [happy, error]
-POST /openapi/v1/bots/{bot_id}/resources/mkdir: missing [happy, error]
-POST /openapi/v1/bots/{bot_id}/resources/upload: missing [happy, error]
 POST /openapi/v1/bots/{bot_id}/restart: missing [happy, error]
-POST /openapi/v1/bots/{bot_id}/routines/{routine_id}/run: missing [happy, error]
-POST /openapi/v1/bots/{bot_id}/routines: missing [happy, error]
 POST /openapi/v1/bots/{bot_id}/sessions: missing [happy, error]
 POST /openapi/v1/bots: missing [happy, error]
 POST /openapi/v1/bots/local: missing [happy, error]
