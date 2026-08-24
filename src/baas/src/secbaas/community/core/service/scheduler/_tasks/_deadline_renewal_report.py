@@ -35,6 +35,7 @@ class RenewalRunReport:
     duration_seconds: float = 0.0
     gap_detected: bool = False
     gap_records_registered: int = 0
+    anti_join_triggered: bool = False
     due_count: int = 0
     orphan_count: int = 0
     success: int = 0

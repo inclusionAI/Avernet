@@ -1053,6 +1053,18 @@ class TestStep5ReportAndMetrics:
         assert isinstance(report.to_log(), str)
         assert len(report.to_log()) > 0
 
+    def test_report_declares_anti_join_triggered_field(self):
+        """WR-01: anti_join_triggered is a declared dataclass field, so
+        structured consumers (asdict / serializers) preserve the flag
+        instead of silently dropping the dynamic attribute."""
+        from dataclasses import asdict
+
+        report = RenewalRunReport()
+        report.anti_join_triggered = True
+        assert asdict(report)["anti_join_triggered"] is True
+        # The field is declared: constructing with it is also legal.
+        assert RenewalRunReport(anti_join_triggered=True).anti_join_triggered is True
+
     @pytest.mark.asyncio
     async def test_metrics_logging_emits_structured_entries(self, caplog):
         """Test 27: after _run_once(), structured [arca_ttl_metrics] log emitted."""
