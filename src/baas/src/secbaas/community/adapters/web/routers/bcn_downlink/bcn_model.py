@@ -238,17 +238,6 @@ class InteractionResolveAnswer(BaseModel):
             raise ValueError("interaction answer text fields must be non-empty")
         return value
 
-    @field_validator("custom_values")
-    @classmethod
-    def _custom_values_must_be_non_empty(
-        cls, value: list[str] | None
-    ) -> list[str] | None:
-        if value is not None and any(not item.strip() for item in value):
-            raise ValueError(
-                "interaction answer customValues must be non-empty strings"
-            )
-        return value
-
 
 class InteractionResolveParams(BaseModel):
     """BCS Provider 2.0 kind-specific interaction resolution."""

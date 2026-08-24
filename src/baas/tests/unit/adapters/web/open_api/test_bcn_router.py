@@ -75,12 +75,17 @@ def test_interaction_resolve_request_accepts_bcs_ask_user_shape() -> None:
     assert request.params.answers["deploy_target"].header == ("Deployment environment")
 
 
-def test_interaction_resolve_request_rejects_blank_custom_values() -> None:
+@pytest.mark.parametrize("custom_values", [[""], ["   "], ["", "   "]])
+def test_interaction_resolve_request_preserves_blank_custom_values(
+    custom_values: list[str],
+) -> None:
     body = _interaction_resolve_body()
-    body["params"]["answers"]["components"]["customValues"] = ["   "]
+    body["params"]["answers"]["components"]["customValues"] = custom_values
 
-    with pytest.raises(ValidationError, match="customValues"):
-        InteractionResolveRequest.model_validate(body)
+    request = InteractionResolveRequest.model_validate(body)
+
+    assert request.params.answers is not None
+    assert request.params.answers["components"].custom_values == custom_values
 
 
 @pytest.mark.parametrize("values", [[], [""], ["   "], ["custom raw value"]])

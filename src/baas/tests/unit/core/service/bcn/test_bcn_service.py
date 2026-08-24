@@ -325,6 +325,45 @@ async def test_handle_ask_user_resolve_normalizes_explicit_custom_values(
 
 
 @pytest.mark.asyncio
+async def test_handle_ask_user_resolve_preserves_blank_custom_values(
+    service, mock_interaction_service
+) -> None:
+    result = await service.handle_interaction_resolve(
+        _make_interaction_resolve_input(
+            answers={
+                "blank": BcnInteractionAnswer(
+                    values=(),
+                    custom_values=("", "   "),
+                    question="Keep blank custom input?",
+                    header="Blank",
+                )
+            }
+        )
+    )
+
+    assert result.ok is True
+    rendered = "自定义输入: ，自定义输入:    "
+    mock_interaction_service.resolve.assert_called_once_with(
+        baas_interaction_id="interaction-ask-1",
+        resolution=InteractionResolution(
+            kind="ask_user",
+            decision="submit",
+            answer=f"Blank: {rendered}",
+            message=f"Blank: {rendered}",
+            values={"Blank": rendered},
+            answers={"Keep blank custom input?": rendered},
+            selected_options=(("other",),),
+        ),
+        request_envelope={
+            "type": "req",
+            "id": "bcn-resolve-1",
+            "method": "interaction.resolve",
+        },
+        idempotency_key="idem-ask-1",
+    )
+
+
+@pytest.mark.asyncio
 async def test_handle_ask_user_resolve_preserves_skipped_values(
     service, mock_interaction_service
 ) -> None:

@@ -52,6 +52,11 @@ BaaS requires non-empty `header` and `question` for every submitted answer. It
 does not infer custom input from an unknown `values` entry and does not derive
 `header` from `questionId`.
 
+BaaS treats `customValues` as Provider input and validates only its wire type
+(`list[str]`). It does not reject, trim, or drop empty and whitespace-only
+strings. BCS owns Frontend answer validation, while Engine remains the final
+authority for Engine-specific constraints.
+
 ## Engine Mapping
 
 BaaS renders each answer in requested question order:

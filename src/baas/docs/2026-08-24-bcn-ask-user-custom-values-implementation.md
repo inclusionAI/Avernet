@@ -46,8 +46,9 @@
    `customValues`.
 2. Run the focused tests and confirm they fail because the field is not in the
    model/domain input.
-3. Add the optional wire field, validate its members as non-empty strings, and
-   map it to the transport-independent tuple.
+3. Add the optional wire field, retain only the Pydantic `list[str]` type
+   constraint, and map every string—including empty or whitespace-only
+   strings—to the transport-independent tuple without trimming or filtering.
 4. Re-run the focused boundary tests.
 
 ### Task 3: Normalize into Engine-compatible resolution fields
@@ -61,8 +62,9 @@
    answers.
 2. Confirm the old implementation incorrectly places free text in
    `selectedOptions`.
-3. Render custom values with the `自定义输入: ` prefix and use `("other",)` as
-   the Engine selection row whenever custom input exists.
+3. Render every custom value, including empty or whitespace-only strings, with
+   the `自定义输入: ` prefix and use `("other",)` as the Engine selection row
+   whenever the `customValues` array contains an item.
 4. Verify the exact serialized Engine request and ensure ordinary answers are
    unchanged.
 5. Run all affected BaaS unit and ASGI contract tests.

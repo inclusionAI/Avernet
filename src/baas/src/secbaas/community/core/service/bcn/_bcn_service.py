@@ -94,8 +94,6 @@ def _normalize_interaction_resolution(
             or not source_answer.question.strip()
         ):
             raise ValueError("ask_user answer identity must be non-empty")
-        if any(not value.strip() for value in source_answer.custom_values):
-            raise ValueError("ask_user custom values must be non-empty")
         rendered_values = list(source_answer.values)
         rendered_values.extend(
             f"自定义输入: {value}" for value in source_answer.custom_values
