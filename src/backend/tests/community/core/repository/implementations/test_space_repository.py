@@ -38,7 +38,7 @@ def db():
 
 def _team(spaces: SpaceRepository, name="Team", creator="owner-1"):
     with spaces.create_team_transaction(
-        name=name, creator_id=creator, env="dev"
+        name=name, creator_id=creator, creator_user_name=None, env="dev"
     ) as row:
         row.sc_team_id = f"sc-{name}-{creator}"
         return row
@@ -53,7 +53,9 @@ def test_create_personal_transaction_preserves_unrelated_integrity_error() -> No
     repository.get_personal_space = MagicMock(return_value=None)
 
     with pytest.raises(IntegrityError) as raised:
-        with repository.create_personal_transaction(user_id="user-1", env="dev"):
+        with repository.create_personal_transaction(
+            user_id="user-1", creator_user_name=None, env="dev"
+        ):
             pass
 
     assert raised.value is original
@@ -69,7 +71,9 @@ def test_create_personal_transaction_translates_unique_race() -> None:
     repository.get_personal_space = MagicMock(return_value=object())
 
     with pytest.raises(SpaceAlreadyExistsError, match="personal space already exists"):
-        with repository.create_personal_transaction(user_id="user-1", env="dev"):
+        with repository.create_personal_transaction(
+            user_id="user-1", creator_user_name=None, env="dev"
+        ):
             pass
 
 
@@ -79,7 +83,7 @@ def test_initialize_personal_recovers_after_concurrent_unique_race() -> None:
     repository.get_personal_space = MagicMock(side_effect=[None, winner])
 
     @contextmanager
-    def conflicting_transaction(*, user_id: str, env: str):
+    def conflicting_transaction(*, user_id: str, creator_user_name: str | None, env: str):
         raise SpaceAlreadyExistsError("personal space already exists")
         yield  # pragma: no cover - contextmanager requires a generator
 
@@ -96,7 +100,7 @@ def test_initialize_personal_reraises_race_when_winner_is_not_visible() -> None:
     repository.get_personal_space = MagicMock(side_effect=[None, None])
 
     @contextmanager
-    def conflicting_transaction(*, user_id: str, env: str):
+    def conflicting_transaction(*, user_id: str, creator_user_name: str | None, env: str):
         raise SpaceAlreadyExistsError("personal space already exists")
         yield  # pragma: no cover - contextmanager requires a generator
 
@@ -112,6 +116,30 @@ def test_personal_sc_binding_rejects_missing_space(db) -> None:
     with pytest.raises(SpaceNotFoundError, match="personal space 999 not found"):
         with repository.personal_sc_team_binding_transaction(space_id=999, env="dev"):
             pass
+
+
+def test_space_creation_persists_creator_user_name_and_lists_it(db) -> None:
+    repository = SpaceRepository(db)
+    with repository.create_personal_transaction(
+        user_id="personal-1", creator_user_name="Personal Creator", env="dev"
+    ) as personal:
+        personal.sc_team_id = "sc-personal"
+    with repository.create_team_transaction(
+        name="Team", creator_id="team-owner", creator_user_name="Team Creator", env="dev"
+    ) as team:
+        team.sc_team_id = "sc-team"
+
+    assert repository.get_member(
+        space_id=personal.id, user_id="personal-1", env="dev"
+    ).user_name == "Personal Creator"
+    assert repository.get_member(
+        space_id=team.id, user_id="team-owner", env="dev"
+    ).user_name == "Team Creator"
+
+    _, summaries = repository.list_spaces(
+        user_id="team-owner", env="dev", keyword=None, space_type=None, offset=0, limit=20
+    )
+    assert next(item for item in summaries if item.space.id == team.id).creator_user_name == "Team Creator"
 
 
 def test_space_repository_full_member_lifecycle(db) -> None:

@@ -27,6 +27,18 @@ from agentclaw.community.plugin_api.base import Plugin
 
 
 @dataclass(frozen=True)
+class StaffProfileInfo:
+    """Basic employee profile data returned by the staff directory."""
+
+    work_no: str
+    nick_name: str | None = None
+
+
+class StaffProfileLookupError(RuntimeError):
+    """Raised when the staff profile infrastructure cannot be queried."""
+
+
+@dataclass(frozen=True)
 class StaffDeptInfo:
     """A person's department identity, read from the staff directory.
 
@@ -68,6 +80,10 @@ class StaffDeptPlugin(Plugin, Protocol):
     "no dept" / "no match" (data absence, 200) from "directory down" (infra
     failure, 5xx).
     """
+
+    def get_profile_by_work_no(self, *, work_no: str) -> StaffProfileInfo:
+        """Return the employee profile, or a null nickname when absent."""
+        ...
 
     def get_dept_by_work_no(self, *, work_no: str) -> StaffDeptInfo:
         """Return the department for ``work_no``, or an all-``None`` info.

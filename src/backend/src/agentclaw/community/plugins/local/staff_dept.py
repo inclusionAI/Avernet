@@ -12,6 +12,7 @@ from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_im
 from agentclaw.community.plugin_api.staff_dept import (
     DeptSearchItem,
     StaffDeptInfo,
+    StaffProfileInfo,
     StaffDeptPlugin,
 )
 from agentclaw.community.plugins.local._mock_seam import MockSeam
@@ -30,6 +31,13 @@ class LocalStaffDeptService(MockSeam, StaffDeptPlugin):
     No constructor deps (the prod impl needs MOSN/Layotto + a Mist secret; we
     have nothing to wire).
     """
+
+    def get_profile_by_work_no(self, *, work_no: str) -> StaffProfileInfo:
+        logger.info(
+            "[LocalStaffDeptService.get_profile_by_work_no] noop — work_no=%s",
+            work_no,
+        )
+        return StaffProfileInfo(work_no=work_no, nick_name=None)
 
     def get_dept_by_work_no(self, *, work_no: str) -> StaffDeptInfo:
         logger.info(
