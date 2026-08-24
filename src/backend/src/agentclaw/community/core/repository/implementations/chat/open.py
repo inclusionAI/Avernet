@@ -17,6 +17,7 @@ from agentclaw.community.core.bot_chat.models import (
     AcOtelLogTrace,
     AwLangfuseObservation,
     AwLangfuseTrace,
+    BcsGroupParticipant,
 )
 from agentclaw.community.core.bot_chat.query_support import (
     QueryScope,
@@ -36,6 +37,7 @@ from agentclaw.community.core.bot_chat.schemas import (
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.core.repository.protocols.chat import OpenBotChatRepositoryProtocol
+from agentclaw.community.utils.env_utils import get_current_env
 
 _OUTPUT_PREVIEW_LENGTH = 500
 
@@ -99,6 +101,20 @@ class OpenBotChatRepository(
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
+
+    def is_bot_in_group(self, group_id: str, bot_uuid: str) -> bool:
+        """Return whether the addressed Bot is a current group participant."""
+        with self._db.orm_session() as session:
+            return (
+                session.query(BcsGroupParticipant.id)
+                .filter(
+                    BcsGroupParticipant.env == get_current_env(),
+                    BcsGroupParticipant.group_id == group_id,
+                    BcsGroupParticipant.bot_uuid == bot_uuid,
+                )
+                .first()
+                is not None
+            )
 
     def list_scope_traces(
         self,
