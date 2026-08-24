@@ -59,7 +59,7 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
 | --- | --- |
 | `from` + `subpath` | 引用一个**命名源**（§2.3）并取其中某个子路径。多类目共用同一仓库同一版本时的推荐写法 |
 | `source` | 内联来源。两种形态：**HTTPS URL**（字符串），或**git 引用**（结构化对象，§2.2）。由平台在 apply 点经 guarded fetcher 拉取（design §4），支持变量替换（§4） |
-| `content` | 内联 UTF-8 文本，适合小的 md/配置 |
+| `content` | 内联 UTF-8 文本（YAML block scalar）。**不推荐**：内容游离于版本控制之外，仅用于 per-bot 一次性小片段；常规内容一律走取源。内联条目无 fetch 环节，`auth` / `digest` / `on_fetch_failure` 对它非法 |
 | （注册项引用） | 仅特定类别：MCP 的 `server_code`；v2 的 `center://` skill 引用 |
 
 通用可选字段：
@@ -323,18 +323,29 @@ resources:
 
 ### 3.3 `skills` — local skills
 
+两种来源形态并存：
+
 ```yaml
 skills:
-  - name: reviewer               # skill 名（必填，唯一）
-    source: https://my-svc.example.com/skills/reviewer.zip   # zip，形状同现有 upload API
-  - name: quality-check          # git 形态：skill 目录直接取自仓库，免打包
+  - name: quality-check          # 形态 A：git 仓库里的 skill 目录，免打包
     from: content
     subpath: skills/quality-check/
+  - name: order-lookup           # 形态 B：制品库上的 zip 包
+    from: artifacts
+    subpath: skills/order-lookup-1.4.0.zip
+    digest: "sha256:3e7a…"       # 非 git 形态：强制
 ```
 
 - 语义等价于现有 `POST /openapi/v1/bots/skills/upload`（zip 校验、大小限制
   复用现状）+ activate。git/命名源形态取到的是 skill **目录**，平台在
   物化后按同一路径入库，与 zip 上传殊途同归。
+- **非 git 形态 `digest` 强制**：skill 含会被 agent 加载执行的脚本，属
+  「代码」而非「数据」；git 形态有 commit SHA 天然兜底，URL/制品库形态
+  无钉子即等于每个 apply 点盲取最新。（resources 的归档不强制——那是
+  数据，`keep_last` 兜底足够。）
+- **归档自动识别**：平台按内容类型/扩展名判定是否需要解包，`unpack` 仅在
+  扩展名不可靠时作为显式覆盖。两种形态下用户声明的都是「我要这个
+  skill」，怎么取回来是平台的事。
 - teclaw：物化进 bot-data store 后以 `SkillRef(scope="user")` 进 artifact，
   与今天手工 upload 的 skill 走完全相同的路。
 - v2 预留来源：`source: center://<skill_uuid>@<version>`（skill center 引用，
