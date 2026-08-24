@@ -305,8 +305,10 @@ class BotSkillSetInstallations:
         the platform Default it inherits."""
 
         def rows(query):
-            # Ordered by id, defaults before owned, so two callers take these
-            # locks in one order and cannot deadlock each other.
+            # Ordered by id. The queries below run owned then defaults, and
+            # every caller reaches them through here, so callers agree with
+            # each other — but not with `_set`/`_snapshot`. That is the open
+            # lock-ordering gap, tracked separately.
             query = query.order_by(SkillSet.id)
             return (query.with_for_update() if locked else query).all()
 
