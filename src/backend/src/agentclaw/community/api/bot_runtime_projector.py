@@ -4,14 +4,14 @@ from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
-    BotRuntimeProjectionReconcilerProtocol as CoreBotRuntimeProjectionReconcilerProtocol,
+    BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
 )
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 
 
 @runtime_checkable
-class BotRuntimeProjectionReconcilerProtocol(
-    CoreBotRuntimeProjectionReconcilerProtocol, Protocol
+class BotRuntimeProjectorProtocol(
+    CoreBotRuntimeProjectorProtocol, Protocol
 ):
     """Transport-facing contract; Core depends only on its sibling contract."""
 
@@ -22,7 +22,7 @@ class BotRuntimeProjectionReconcilerProtocol(
         owner_id: str,
     ) -> tuple[PoolSkillMapping, ...]: ...
 
-    async def reconcile(
+    async def project(
         self,
         *,
         bot_id: str,
@@ -30,14 +30,14 @@ class BotRuntimeProjectionReconcilerProtocol(
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None: ...
 
-    async def reconcile_non_skill_projection(
+    async def project_mcp_and_cli(
         self,
         *,
         bot_id: str,
         owner_id: str,
     ) -> None: ...
 
-    async def reconcile_cleanup(
+    async def project_for_cleanup(
         self,
         *,
         bot_id: str,
@@ -45,4 +45,4 @@ class BotRuntimeProjectionReconcilerProtocol(
     ) -> None: ...
 
 
-__all__ = ["BotRuntimeProjectionReconcilerProtocol"]
+__all__ = ["BotRuntimeProjectorProtocol"]

@@ -200,7 +200,7 @@ class _RuntimeReconciler:
         self.calls: list[dict] = []
         self.cleanup_calls: list[dict] = []
 
-    async def reconcile(self, **kwargs) -> None:
+    async def project(self, **kwargs) -> None:
         self.calls.append(kwargs)
         projection = RuntimeProjectionResolver().resolve(
             RuntimeDesiredState(
@@ -260,7 +260,7 @@ class _RuntimeReconciler:
         ):
             raise RuntimeError("runtime reconcile failed")
 
-    async def reconcile_cleanup(self, **kwargs) -> None:
+    async def project_for_cleanup(self, **kwargs) -> None:
         self.cleanup_calls.append(kwargs)
         if not self.runtime.sync_runtime(
             desired_skills=[

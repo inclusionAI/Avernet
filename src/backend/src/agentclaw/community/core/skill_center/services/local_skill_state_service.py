@@ -31,7 +31,7 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeProjectionResolver,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
-    BotRuntimeProjectionReconcilerProtocol,
+    BotRuntimeProjectorProtocol,
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.repository.protocols.skill_center import (
@@ -104,7 +104,7 @@ class LocalSkillStateService:
         skill_set_service_factory: SkillSetServiceFactory,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
         skill_set_repo: SkillSetRepository,
-        runtime_reconciler: BotRuntimeProjectionReconcilerProtocol,
+        runtime_reconciler: BotRuntimeProjectorProtocol,
     ) -> None:
         self._skill_repo = skill_repo
         self._installations = installations
@@ -445,13 +445,13 @@ class LocalSkillStateService:
     ) -> bool:
         try:
             if retired_mappings:
-                await self._runtime_reconciler.reconcile(
+                await self._runtime_reconciler.project(
                     bot_id=bot_id,
                     owner_id=owner_id,
                     retired_mappings=retired_mappings,
                 )
             else:
-                await self._runtime_reconciler.reconcile(
+                await self._runtime_reconciler.project(
                     bot_id=bot_id,
                     owner_id=owner_id,
                 )

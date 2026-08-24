@@ -34,7 +34,7 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
     LegacySkillSetScope,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
-    BotRuntimeProjectionReconcilerProtocol,
+    BotRuntimeProjectorProtocol,
 )
 from agentclaw.community.core.workspace.skill_layout import (
     runtime_layout_engine_for_bot,
@@ -52,7 +52,7 @@ class SkillSetManagementService:
         self,
         repository: CapabilityDesiredStateRepositoryProtocol,
         bot_repo: BotRepository,
-        runtime: BotRuntimeProjectionReconcilerProtocol,
+        runtime: BotRuntimeProjectorProtocol,
         legacy_factory: LegacySkillSetCompatibilityFactoryProtocol,
         passport: PassportPlugin,
         authorization: BotCapabilityAuthorizationHookProtocol,
@@ -793,7 +793,7 @@ class SkillSetManagementService:
         owner_id: str,
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None:
-        await self._runtime.reconcile(
+        await self._runtime.project(
             bot_id=bot_id,
             owner_id=owner_id,
             retired_mappings=retired_mappings,

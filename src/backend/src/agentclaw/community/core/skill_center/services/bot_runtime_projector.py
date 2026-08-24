@@ -44,7 +44,7 @@ from agentclaw.community.core.workspace.skill_layout import runtime_layout_engin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
-class BotRuntimeProjectionReconciler:
+class BotRuntimeProjector:
     """Resolve and apply Skill, MCP, and CLI state through one boundary.
 
     Callers own command compensation. This module owns desired-state loading,
@@ -100,7 +100,7 @@ class BotRuntimeProjectionReconciler:
             raise SkillSetRuntimeReconcileError()
         return tuple(build_logical_skill_mappings(skill_assets))
 
-    async def reconcile(
+    async def project(
         self,
         *,
         bot_id: str,
@@ -131,7 +131,7 @@ class BotRuntimeProjectionReconciler:
             effective_cli_items=effective_cli_items,
         )
 
-    async def reconcile_non_skill_projection(
+    async def project_mcp_and_cli(
         self,
         *,
         bot_id: str,
@@ -151,7 +151,7 @@ class BotRuntimeProjectionReconciler:
             effective_cli_items=effective_cli_items,
         )
 
-    async def reconcile_cleanup(
+    async def project_for_cleanup(
         self,
         *,
         bot_id: str,
@@ -442,12 +442,7 @@ class BotRuntimeProjectionReconciler:
         ]
 
 
-# Compatibility names for existing constructors and tests. They are aliases,
-# not subclasses: the implementation authority remains this Bot-level module.
-SkillSetRuntimeReconciler = BotRuntimeProjectionReconciler
-
 
 __all__ = [
-    "BotRuntimeProjectionReconciler",
-    "SkillSetRuntimeReconciler",
+    "BotRuntimeProjector",
 ]

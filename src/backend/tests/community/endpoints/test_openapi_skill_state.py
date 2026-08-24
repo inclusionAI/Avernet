@@ -65,7 +65,7 @@ class _Runtime:
     async def verify_mappings(self, **_kwargs) -> bool:
         return self.success
 
-    async def reconcile(self, **_kwargs) -> None:
+    async def project(self, **_kwargs) -> None:
         if not self.success:
             raise RuntimeError("runtime reconcile failed")
 

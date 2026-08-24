@@ -23,7 +23,7 @@ lands in the same group as the migration of its last caller.
       `sync` → `legacy_activate`, `resources` → `list_resources`,
       `mcp_permissions` → `list_mcp_permissions`. Update protocols, DI,
       adapters, tests.
-- [ ] 1.3 `BotRuntimeProjectionReconciler` → `BotRuntimeProjector`:
+- [x] 1.3 `BotRuntimeProjectionReconciler` → `BotRuntimeProjector`:
       `bot_runtime_projection_reconciler.py` → `bot_runtime_projector.py`;
       methods `reconcile` → `project`, `reconcile_non_skill_projection` →
       `project_mcp_and_cli`, `reconcile_cleanup` → `project_for_cleanup`; both

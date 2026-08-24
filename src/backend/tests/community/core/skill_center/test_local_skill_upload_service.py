@@ -477,7 +477,7 @@ class _RuntimeFactory:
     def sync_runtime(self, *, desired_skills=None):
         return True
 
-    async def reconcile(self, **_kwargs):
+    async def project(self, **_kwargs):
         return None
 
 
@@ -586,7 +586,7 @@ class _ReplacementRuntime:
         self.calls += 1
         return next(self.results)
 
-    async def reconcile(self, **_kwargs):
+    async def project(self, **_kwargs):
         self.calls += 1
         if not next(self.results):
             raise RuntimeError("runtime reconcile failed")

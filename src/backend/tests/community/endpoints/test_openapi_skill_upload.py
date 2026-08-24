@@ -82,7 +82,7 @@ class _RuntimeFactory:
     def sync_runtime(self):
         return True
 
-    async def reconcile(self, **_kwargs):
+    async def project(self, **_kwargs):
         return None
 
 

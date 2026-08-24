@@ -68,7 +68,7 @@ class _Runtime:
     async def snapshot_skill_mappings(self, **_kwargs):
         return ()
 
-    async def reconcile(
+    async def project(
         self, *, bot_id: str, owner_id: str, retired_mappings=()
     ) -> None:
         self.calls.append((bot_id, owner_id))

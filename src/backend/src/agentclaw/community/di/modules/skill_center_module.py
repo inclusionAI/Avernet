@@ -11,8 +11,8 @@ from typing import Callable
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
-from agentclaw.community.api.bot_runtime_projection_reconciler import (
-    BotRuntimeProjectionReconcilerProtocol as ApiBotRuntimeProjectionReconcilerProtocol,
+from agentclaw.community.api.bot_runtime_projector import (
+    BotRuntimeProjectorProtocol as ApiBotRuntimeProjectorProtocol,
 )
 from agentclaw.community.api.bot_skill_asset_service import (
     BotSkillAssetServiceProtocol,
@@ -117,13 +117,13 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
     LegacySkillSetCompatibilityFactoryProtocol,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
-    BotRuntimeProjectionReconcilerProtocol as CoreBotRuntimeProjectionReconcilerProtocol,
+    BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
 )
 from agentclaw.community.core.skill_center.services.active_skillset_installation_materializer import (
     ActiveSkillSetInstallationMaterializer,
 )
-from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
-    BotRuntimeProjectionReconciler,
+from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
+    BotRuntimeProjector,
 )
 from agentclaw.community.core.skill_center.services.bot_skill_asset_service import (
     BotSkillAssetService,
@@ -325,8 +325,8 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             scope=singleton,
         )
         binder.bind(
-            BotRuntimeProjectionReconciler,
-            to=BotRuntimeProjectionReconciler,
+            BotRuntimeProjector,
+            to=BotRuntimeProjector,
             scope=singleton,
         )
         binder.bind(
@@ -349,8 +349,8 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
     @provider
     @inject
     def core_runtime_projection_reconciler_protocol(
-        self, service: BotRuntimeProjectionReconciler
-    ) -> CoreBotRuntimeProjectionReconcilerProtocol:
+        self, service: BotRuntimeProjector
+    ) -> CoreBotRuntimeProjectorProtocol:
         """Expose the one reconciler singleton to Core consumers."""
         return service
 
@@ -358,8 +358,8 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
     @provider
     @inject
     def api_runtime_projection_reconciler_protocol(
-        self, service: BotRuntimeProjectionReconciler
-    ) -> ApiBotRuntimeProjectionReconcilerProtocol:
+        self, service: BotRuntimeProjector
+    ) -> ApiBotRuntimeProjectorProtocol:
         """Expose that same singleton through the public Service API."""
         return service
 
@@ -428,7 +428,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         audit_log_repo: BotCollabLogRepositoryProtocol,
         edit_guard: SkillsPoolEditGuard,
         injector: Injector,
-        runtime_reconciler: CoreBotRuntimeProjectionReconcilerProtocol,
+        runtime_reconciler: CoreBotRuntimeProjectorProtocol,
     ) -> LocalSkillUploadServiceProtocol:
         return LocalSkillUploadService(
             skill_repo,
@@ -454,7 +454,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         collaborator_service: CollaboratorServiceProtocol,
         skill_set_service_factory: SkillSetServiceFactory,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
-        runtime_reconciler: CoreBotRuntimeProjectionReconcilerProtocol,
+        runtime_reconciler: CoreBotRuntimeProjectorProtocol,
     ) -> LocalSkillStateServiceProtocol:
         return LocalSkillStateService(
             skill_repo,
@@ -925,7 +925,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         device_sync_dispatcher: DeviceSyncDispatcher,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         skills_pool_wakeup: SkillsPoolReconcileWakeupListener,
-        runtime_reconciler: CoreBotRuntimeProjectionReconcilerProtocol,
+        runtime_reconciler: CoreBotRuntimeProjectorProtocol,
     ) -> SkillSymlinkListener:
         def desktop_layout_authority(bot: dict) -> str | None:
             if bot.get("bot_type") != "desktop":
@@ -957,11 +957,11 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             device_sync_dispatcher=device_sync_dispatcher,
             desktop_layout_authority=desktop_layout_authority,
             desktop_reconcile_wakeup=skills_pool_wakeup.handle,
-            runtime_reconcile=lambda bot_id, owner_id: runtime_reconciler.reconcile(
+            runtime_reconcile=lambda bot_id, owner_id: runtime_reconciler.project(
                 bot_id=bot_id, owner_id=owner_id
             ),
             runtime_non_skill_reconcile=lambda bot_id, owner_id: (
-                runtime_reconciler.reconcile_non_skill_projection(
+                runtime_reconciler.project_mcp_and_cli(
                     bot_id=bot_id,
                     owner_id=owner_id,
                 )

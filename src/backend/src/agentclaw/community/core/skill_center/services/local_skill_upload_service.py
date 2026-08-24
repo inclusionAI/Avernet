@@ -43,7 +43,7 @@ from agentclaw.community.core.skill_center.factories import (
     SkillServiceFactory,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
-    BotRuntimeProjectionReconcilerProtocol,
+    BotRuntimeProjectorProtocol,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import (
     SkillManifestError,
@@ -85,7 +85,7 @@ class LocalSkillUploadService:
         audit_log_repo: BotCollabLogRepositoryProtocol,
         edit_guard: SkillsPoolEditGuard,
         device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
-        runtime_reconciler: BotRuntimeProjectionReconcilerProtocol,
+        runtime_reconciler: BotRuntimeProjectorProtocol,
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
@@ -573,7 +573,7 @@ class LocalSkillUploadService:
 
     async def _sync_runtime(self, owner_id: str, bot_id: str) -> bool:
         try:
-            await self._runtime_reconciler.reconcile(
+            await self._runtime_reconciler.project(
                 bot_id=bot_id,
                 owner_id=owner_id,
             )

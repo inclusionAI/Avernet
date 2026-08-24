@@ -50,8 +50,8 @@ import pytest
 from agentclaw.community.api.bot_dormant_service import (
     BotDormantActivateServiceProtocol,
 )
-from agentclaw.community.api.bot_runtime_projection_reconciler import (
-    BotRuntimeProjectionReconcilerProtocol,
+from agentclaw.community.api.bot_runtime_projector import (
+    BotRuntimeProjectorProtocol,
 )
 from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
@@ -139,8 +139,8 @@ from agentclaw.community.core.skill_center.services.local_skill_query_service im
 from agentclaw.community.core.skill_center.services.bot_skill_asset_service import (
     BotSkillAssetService,
 )
-from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
-    BotRuntimeProjectionReconciler,
+from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
+    BotRuntimeProjector,
 )
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
@@ -185,7 +185,7 @@ _PAIRS = [
     (EngineConnectionServiceProtocol, EngineConnectionService),
     (HealthDiagnosisServiceProtocol, HealthDiagnosisService),
     (BotSkillAssetServiceProtocol, BotSkillAssetService),
-    (BotRuntimeProjectionReconcilerProtocol, BotRuntimeProjectionReconciler),
+    (BotRuntimeProjectorProtocol, BotRuntimeProjector),
     (LocalSkillQueryServiceProtocol, LocalSkillQueryService),
     (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
     (LocalSkillStateServiceProtocol, LocalSkillStateService),

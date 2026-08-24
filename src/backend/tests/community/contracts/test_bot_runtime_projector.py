@@ -5,14 +5,14 @@ from __future__ import annotations
 import pytest
 from injector import inject, singleton
 
-from agentclaw.community.api.bot_runtime_projection_reconciler import (
-    BotRuntimeProjectionReconcilerProtocol,
+from agentclaw.community.api.bot_runtime_projector import (
+    BotRuntimeProjectorProtocol,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
-    BotRuntimeProjectionReconcilerProtocol as CoreBotRuntimeProjectionReconcilerProtocol,
+    BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
 )
-from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
-    BotRuntimeProjectionReconciler,
+from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
+    BotRuntimeProjector,
 )
 
 
@@ -27,17 +27,17 @@ class _RecordingReconciler:
             raise self.error
         return ()
 
-    async def reconcile(self, **kwargs) -> None:
+    async def project(self, **kwargs) -> None:
         self.calls.append({"operation": "full", **kwargs})
         if self.error is not None:
             raise self.error
 
-    async def reconcile_non_skill_projection(self, **kwargs) -> None:
+    async def project_mcp_and_cli(self, **kwargs) -> None:
         self.calls.append({"operation": "non_skill", **kwargs})
         if self.error is not None:
             raise self.error
 
-    async def reconcile_cleanup(self, **kwargs) -> None:
+    async def project_for_cleanup(self, **kwargs) -> None:
         self.calls.append({"operation": "cleanup", **kwargs})
         if self.error is not None:
             raise self.error
@@ -45,24 +45,24 @@ class _RecordingReconciler:
 
 class _Consumer:
     @inject
-    def __init__(self, runtime: BotRuntimeProjectionReconcilerProtocol) -> None:
+    def __init__(self, runtime: BotRuntimeProjectorProtocol) -> None:
         self._runtime = runtime
 
     async def refresh(self) -> None:
-        await self._runtime.reconcile(bot_id="bot-1", owner_id="owner-1")
+        await self._runtime.project(bot_id="bot-1", owner_id="owner-1")
 
     async def snapshot_skill_mappings(self) -> None:
         await self._runtime.snapshot_skill_mappings(bot_id="bot-1", owner_id="owner-1")
 
     async def refresh_non_skill(self) -> None:
-        await self._runtime.reconcile_non_skill_projection(
+        await self._runtime.project_mcp_and_cli(
             bot_id="bot-1", owner_id="owner-1"
         )
 
 
 def _consumer(world, runtime: _RecordingReconciler) -> _Consumer:
     world.injector.binder.bind(
-        BotRuntimeProjectionReconcilerProtocol,
+        BotRuntimeProjectorProtocol,
         to=runtime,
         scope=singleton,
     )
@@ -71,11 +71,11 @@ def _consumer(world, runtime: _RecordingReconciler) -> _Consumer:
 
 def test_world_wires_service_api_to_the_real_reconciler(world) -> None:
     assert isinstance(
-        world.get(BotRuntimeProjectionReconcilerProtocol),
-        BotRuntimeProjectionReconciler,
+        world.get(BotRuntimeProjectorProtocol),
+        BotRuntimeProjector,
     )
-    assert world.get(BotRuntimeProjectionReconcilerProtocol) is world.get(
-        CoreBotRuntimeProjectionReconcilerProtocol
+    assert world.get(BotRuntimeProjectorProtocol) is world.get(
+        CoreBotRuntimeProjectorProtocol
     )
 
 
@@ -122,7 +122,7 @@ async def test_cleanup_service_api_reaches_the_bound_implementation(world) -> No
     runtime = _RecordingReconciler()
     consumer = _consumer(world, runtime)
 
-    await consumer._runtime.reconcile_cleanup(bot_id="bot-1", owner_id="owner-1")
+    await consumer._runtime.project_for_cleanup(bot_id="bot-1", owner_id="owner-1")
 
     assert runtime.calls == [
         {"operation": "cleanup", "bot_id": "bot-1", "owner_id": "owner-1"}
