@@ -377,7 +377,7 @@ def create_bot_with_authorization(
             spec.engine_type,
             spec.template_type,
             ext_info={"template_config": spec.template_config}
-            if spec.template_config
+            if spec.template_config is not None
             else None,
         ),
         use_first_passport=use_first_passport,

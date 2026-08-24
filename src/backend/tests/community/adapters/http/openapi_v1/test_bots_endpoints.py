@@ -586,6 +586,22 @@ def test_create_bot_202_pending(client, passport):
     assert body["data"]["iframe_url"] == "http://auth"
 
 
+def test_create_application_coding_requires_template_config(client, svc, passport):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine": "claude_code",
+            "cluster_name": "ACRA",
+            "bot_type": "personal",
+            "template_type": "applicationCoding",
+        },
+    )
+    assert response.status_code == 422, response.json()
+    passport.apply_first_agent_passport.assert_not_called()
+    svc.create_bot.assert_not_called()
+
+
 def test_create_bot_cluster_mismatch_400(client, svc):
     bad = {**_CREATE_BODY, "cluster_name": "ANDC"}  # openclaw must be ACRA
     with patch.object(bots_router, "generate_bot_id", return_value="default"):
@@ -731,6 +747,22 @@ def test_post_auth_status_preserves_create_attributes(client, svc, passport):
     assert kw["bot_name"] == "NewBot"
     assert kw["bot_desc"] == "d"
     assert kw["bot_type"] == "service"
+
+
+def test_post_auth_status_application_coding_requires_template_config(
+    client, svc, passport
+):
+    response = client.post(
+        "/openapi/v1/bots/b1/auth-status",
+        json={
+            "engine": "claude_code",
+            "cluster_name": "ACRA",
+            "template_type": "applicationCoding",
+        },
+    )
+    assert response.status_code == 422, response.json()
+    passport.query_auth_status.assert_not_called()
+    svc.create_bot.assert_not_called()
 
 
 def test_post_auth_status_engine_cluster_mismatch_400(client, svc):
