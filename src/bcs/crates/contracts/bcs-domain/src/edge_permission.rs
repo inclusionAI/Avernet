@@ -344,10 +344,10 @@ mod tests {
     #[test]
     fn edge_grant_roundtrip() {
         let g = EdgeGrant {
-            edge_id: "eg_1".into(), env: "prod".into(),
+            edge_id: 1, env: "prod".into(),
             from_id: "human_88001".into(), to_id: "20260421_x:85020".into(),
             grant_kind: GrantKind::PermissionProfile,
-            grant_ref_id: "pp_20260421_x:85020_default".into(),
+            grant_ref_id: 2,
             rules: None, status: EdgeStatus::Approved,
             originator_policy_type: OriginatorPolicyType::Any,
             originator_policy_data: None,
@@ -357,7 +357,7 @@ mod tests {
         assert_eq!(g, back);
         assert_eq!(back.status, EdgeStatus::Approved);
         let def: EdgeGrant = serde_json::from_str(
-            r#"{"edge_id":"e","env":"prod","from_id":"a","to_id":"b","grant_kind":"permission_profile","grant_ref_id":"r"}"#,
+            r#"{"edge_id":1,"env":"prod","from_id":"a","to_id":"b","grant_kind":"permission_profile","grant_ref_id":2}"#,
         ).unwrap();
         assert_eq!(def.status, EdgeStatus::Approved);
         assert_eq!(def.originator_policy_type, OriginatorPolicyType::Any);
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn permission_request_pending_has_no_edge() {
         let r = PermissionRequest {
-            request_id: "req_1".into(), edge_id: None, env: "prod".into(),
+            request_id: 3, edge_id: None, env: "prod".into(),
             from_id: "human_88001".into(), to_id: "b".into(),
             request_kind: RequestKind::Connect, requested_ref_id: None,
             requested_rules: None, message: None, status: RequestStatus::Pending,
