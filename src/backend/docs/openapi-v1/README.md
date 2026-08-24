@@ -28,6 +28,15 @@ ruling lives in a companion reference: **[`engine-surface.md`](engine-surface.md
 ([简体中文](engine-surface.zh-CN.md)). This README stays the single status board;
 that file holds the inventory.
 
+**Writing a client against this surface?** Start at **[`usage.md`](usage.md)**
+([简体中文](usage.zh-CN.md)) — the caller-facing guide: which credential to
+present in which scenario, how an application gets authorized for a user's bot,
+what each operation expects on the wire, and how to diagnose a refusal. It is
+written from outside the gateway and deliberately names none of the machinery
+this README documents — keep it that way when you edit it: a caller sees one
+address and one response shape, and the forwarded principal, the route table and
+the admission modes are exactly what that address exists to hide.
+
 ---
 
 ## The big picture (read this first)
