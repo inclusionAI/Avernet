@@ -46,7 +46,7 @@
   <rect x="40" y="190" width="640" height="76" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.3"/>
   <text x="360" y="212" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">CapabilityDesiredStateRepository — the one unit of work (the one writer)</text>
   <text x="360" y="231" text-anchor="middle" font-size="11" fill="#475569">composes per-table command modules (one owner per table's SQL) in one transaction</text>
-  <text x="360" y="246" text-anchor="middle" font-size="11" fill="#475569">Set state · membership · exclusions · installations — plus repair_bot_skillset_installations = the lazy flush</text>
+  <text x="360" y="246" text-anchor="middle" font-size="11" fill="#475569">Set state · membership · exclusions · installations — plus flush_installations(bot) = the lazy flush</text>
 
   <!-- UoW -> tables -->
   <line x1="200" y1="266" x2="200" y2="302" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>

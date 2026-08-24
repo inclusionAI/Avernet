@@ -34,7 +34,8 @@ never use exclusions: opting out there is removing the membership or
 deactivating the Set.
 
 **What the lazy flush does** (the existing
-`repair_bot_skillset_installations` bridge, stated plainly). For one Bot, it
+`repair_bot_skillset_installations` bridge, renamed `flush_installations`,
+stated plainly). For one Bot, it
 walks every Set the Bot has — its ordinary Sets plus the always-active
 Default Set — and makes Installation agree with what those Sets say:
 

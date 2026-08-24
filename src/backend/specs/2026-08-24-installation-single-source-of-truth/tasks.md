@@ -14,10 +14,19 @@ lands in the same group as the migration of its last caller.
       implementation file, `core/repository/protocols/skill_set_control_plane.py`
       → `capability_desired_state.py`, `skill_set_control_plane_types.py` →
       `capability_desired_state_types.py`; all importers.
+- [ ] 1.2b Method/type renames per the plan's method-rename table (zero
+      behavior): `SkillSetDesiredState` → `CapabilityDesiredState`,
+      `SkillSetMutation` → `DesiredStateMutation`;
+      `repair_bot_skillset_installations` → `flush_installations`;
+      `set_active` → `set_skill_set_active`; `activate_mcp_direct` /
+      `deactivate_mcp_direct` → `install_mcp` / `uninstall_mcp`; service
+      `sync` → `legacy_activate`, `resources` → `list_resources`,
+      `mcp_permissions` → `list_mcp_permissions`. Update protocols, DI,
+      adapters, tests.
 - [ ] 1.3 `BotRuntimeProjectionReconciler` → `BotRuntimeProjector`:
       `bot_runtime_projection_reconciler.py` → `bot_runtime_projector.py`;
       methods `reconcile` → `project`, `reconcile_non_skill_projection` →
-      `project_non_skill`, `reconcile_cleanup` → `project_cleanup`; both
+      `project_mcp_and_cli`, `reconcile_cleanup` → `project_for_cleanup`; both
       protocols (`api/` + `runtime_projection_contract.py`); delete the
       `SkillSetRuntimeReconciler` alias; DI, callers, tests
       (`tests/community/contracts/test_bot_runtime_projection_reconciler.py`
@@ -27,22 +36,23 @@ lands in the same group as the migration of its last caller.
 
 ## Group 2 — One flush: MCPs + new exclusion semantics, retire the materializer
 
-- [ ] 2.1 Add `mcp_activate` / `mcp_deactivate` (frozenset[str], default
-      empty) to `BotSkillSetBridge`.
-- [ ] 2.2 `_resolve_bridge`: collect MCP members per Set; **excluded
-      Default-Set members (skills and MCPs) become inactive claims** and
-      lose their Installation rows (spec Key domain rules). R3 keeps a
-      capability in one Set; on malformed two-Set data the bridge errs safe
-      (keeps a row an active Set accounts for).
-- [ ] 2.3 `repair_bot_skillset_installations`: fast path checks skill and
-      MCP deltas; write path applies both (SAVEPOINT-per-row inserts, delete
-      `*_deactivate ∩ installed`).
+- [ ] 2.1 Reshape the bridge type into `InstallationFlushPlan`
+      (`member_skill_ids`, `skills_to_install`, `skills_to_uninstall`,
+      `mcps_to_install`, `mcps_to_uninstall`) per plan component 1.
+- [ ] 2.2 `_resolve_bridge` → `_resolve_flush_plan`: collect MCP members per
+      Set; **excluded Default-Set members (skills and MCPs) become inactive
+      claims** and lose their Installation rows (spec Key domain rules). R3
+      keeps a capability in one Set; on malformed two-Set data the plan errs
+      safe (keeps a row an active Set accounts for).
+- [ ] 2.3 Extend `flush_installations`: fast path checks skill and MCP
+      deltas; write path applies both (SAVEPOINT-per-row inserts, delete
+      `*_to_uninstall ∩ installed`).
 - [ ] 2.4 Repository tests: MCP rows follow Set activation; excluded member
       rows removed (skill + MCP); malformed two-Set data errs safe (a row an
       active Set accounts for is kept); direct rows untouched; idempotent.
       Update the 2026-08-23 pinning test that asserted excluded rows are
       "left alone" (superseded — cite the spec).
-- [ ] 2.5 Swap the two materializer call sites to the repair
+- [ ] 2.5 Swap the two materializer call sites to `flush_installations`
       (`bot_runtime_projector._resolve_plan`, Service-Bot
       `build_stage.py`); delete the materializer +
       `ensure_active_skillset_installations` (impl, protocol, DI, tests);
@@ -96,15 +106,17 @@ lands in the same group as the migration of its last caller.
 ## Group 6 — CapabilityOwnershipPolicy
 
 - [ ] 6.1 Add `core/skill_center/policies/capability_ownership.py` (R1–R3
-      docstring; `skill_set_reaches_bot` moved verbatim; `governing_set` —
-      **no exclusion carve-out**; `membership_conflict` with R2-before-R3
-      precedence).
+      docstring; `is_set_managed` — **no exclusion carve-out** — over the
+      private `_set_belongs_to_bot`, moved from
+      `local_skill_state_service.skill_set_reaches_bot`;
+      `require_can_join_set` raising with R2-before-R3 precedence).
 - [ ] 6.2 Collapse `_reject_skill_set_member` /
       `_require_no_normal_skill_set_membership` / `_set_governs` into thin
-      raise-wrappers over `governing_set`; add the behavior-change test:
-      an excluded Default-Set member is refused direct activate/deactivate.
-- [ ] 6.3 Route `add_skill` / `add_mcp` conflict decisions through
-      `membership_conflict`; R3 now covers ANY Set — add the test: a
+      wrappers over `is_set_managed` (each asset kind keeps its legacy error
+      type); add the behavior-change test: an excluded Default-Set member is
+      refused direct activate/deactivate.
+- [ ] 6.3 Route `add_skill` / `add_mcp` conflict checks through
+      `require_can_join_set`; R3 now covers ANY Set — add the test: a
       Default-Set member (excluded or not) is refused when added to an
       ordinary Set; R2-before-R3 precedence pinned by a test.
 - [ ] 6.4 Policy unit tests
@@ -117,17 +129,18 @@ lands in the same group as the migration of its last caller.
       {skill_installations,mcp_installations,default_exclusions}.py`
       (session-in functions); the UoW and the flush use them — each table's
       SQL now has one owner.
-- [ ] 7.2 Add UoW commands `activate_skill_direct` /
-      `deactivate_skill_direct` (mirror of the existing MCP pair: snapshot,
-      R1/R2 facts, write, `SkillSetMutation` return).
+- [ ] 7.2 Add UoW commands `install_skill` / `uninstall_skill` (mirror of
+      the renamed `install_mcp` / `uninstall_mcp`: snapshot, R1 facts read
+      under the transaction, write, `DesiredStateMutation` return).
 - [ ] 7.3 Extract the shared mutate-reconcile-compensate helper from
       `SkillSetManagementService._mutate/_reconcile` (module-private, used by
       both command services).
 - [ ] 7.4 Create `core/skill_center/services/direct_activation_service.py`
-      (`DirectActivationService.set_skill_active` / `set_mcp_active` per plan
-      component 6) + `api/direct_activation_service.py`; MCP direct commands
-      move here from the Set service; OpenAPI MCP router re-injects;
-      `list_installed_mcps` reads move to the reader.
+      (`DirectActivationService.activate_skill` / `deactivate_skill` /
+      `activate_mcp` / `deactivate_mcp` per plan component 6) +
+      `api/direct_activation_service.py`; MCP direct commands move here from
+      the Set service; OpenAPI MCP router re-injects; `list_installed_mcps`
+      reads move to the reader.
 - [ ] 7.5 Delete `LocalSkillStateService` (+ `api/local_skill_state_service.py`)
       and `SkillInstallationRepository` (+ protocol) once their last callers
       are migrated; port their tests to the new service (including MCP↔skill
