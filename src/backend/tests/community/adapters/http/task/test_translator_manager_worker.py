@@ -100,7 +100,8 @@ def test_merge_session_completed_sets_reason_and_summary():
 
 
 def test_merge_reorder_tolerant_completed_first_then_assigned():
-    """乱序:task.completed 先到(异常),随后 task.assigned 追到——upsert 不崩,最终该 task 仍存在。"""
+    """乱序:task.completed 先到(异常),随后 task.assigned 追到——upsert 不崩,最终该 task 仍存在。
+    status 单调保护:已 completed 不被后到的 assigned 回退(乱序容忍的落地);assigned 的元数据照常补齐。"""
     p_completed = parse_manager_worker_bcn(_ce("task.completed", scope={"session_id": "s1", "task_id": "t1"},
                                                   data={"task_id": "t1", "result": {"ok": 1}}))
     st = merge_manager_worker_execution_graph(None, p_completed)
@@ -108,6 +109,8 @@ def test_merge_reorder_tolerant_completed_first_then_assigned():
     p_assigned = parse_manager_worker_bcn(_ce("task.assigned", scope={"session_id": "s1", "task_id": "t1"},
                                                   data={"task_id": "t1", "worker_id": "w"}))
     st = merge_manager_worker_execution_graph(st, p_assigned)
-    # 后到的 assigned 覆盖 status 回 assigned(乱序本不应发生;只验不崩 + upsert 单条)
+    # 单条 upsert;status 不回退(仍 completed);后到 assigned 的 worker_id 照常补齐
     assert len(st["tasks"]) == 1
-    assert st["tasks"][0]["status"] == "assigned"
+    assert st["tasks"][0]["status"] == "completed"
+    assert st["tasks"][0]["worker_id"] == "w"
+    assert st["tasks"][0]["result"] == {"ok": 1}

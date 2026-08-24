@@ -10,7 +10,7 @@ import hmac
 import time
 from typing import Mapping, Protocol, runtime_checkable
 
-from agentclaw.community.core.errors import ValidationError
+from agentclaw.community.core.errors import CallbackAuthError
 
 _TOKEN_HEADER = "X-TaskLoop-Token"
 _TIMESTAMP_HEADER = "X-TaskLoop-Timestamp"
@@ -36,22 +36,22 @@ class HmacCallbackAuthenticator:
     def verify(self, *, source, headers, raw_body, method, path) -> None:
         secret = self._secrets.get(source)
         if secret is None:
-            raise ValidationError(f"unknown callback source: {source}")
+            raise CallbackAuthError(f"unknown callback source: {source}")
         ts = headers.get(_TIMESTAMP_HEADER)
         sig = headers.get(_SIGNATURE_HEADER)
         if not ts or not sig:
-            raise ValidationError("missing timestamp/signature header")
+            raise CallbackAuthError("missing timestamp/signature header")
         try:
             ts_int = int(ts)
         except ValueError:
-            raise ValidationError("invalid timestamp")
+            raise CallbackAuthError("invalid timestamp")
         if abs(int(time.time()) - ts_int) > self._max_skew_s:
-            raise ValidationError("stale timestamp")
+            raise CallbackAuthError("stale timestamp")
         body_hex = hashlib.sha256(raw_body).hexdigest()
         sign_str = f"{ts}{method}{path}{body_hex}"
         expected = hmac.new(secret.encode(), sign_str.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected, sig):
-            raise ValidationError("signature mismatch")
+            raise CallbackAuthError("signature mismatch")
 
 
 class NoopCallbackAuthenticator:
