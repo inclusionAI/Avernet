@@ -597,9 +597,8 @@ pub struct ChatInjectParams {
 pub struct ChatAbortParams {
     /// Session key (or bcs_group_id) to abort chats for.
     pub session_key: String,
-    /// Specific run ID to abort (optional, aborts all if not provided).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub run_id: Option<String>,
+    /// Specific run ID to abort. Session-wide abort is not supported.
+    pub run_id: String,
 }
 
 // ---------------------------------------------------------------------------

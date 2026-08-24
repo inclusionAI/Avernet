@@ -159,10 +159,11 @@ pub struct GroupCallbackOutcome {
 
 #[derive(Debug, Clone)]
 pub struct ChatAbortCommand {
+    pub request_id: String,
     pub caller: CallerContext,
     pub group_id: String,
     pub session_id: Option<String>,
-    pub run_id: Option<String>,
+    pub run_id: String,
 }
 
 #[derive(Debug)]

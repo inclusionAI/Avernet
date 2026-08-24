@@ -222,6 +222,11 @@ export interface ChatSendResponse {
   run_id: string;
 }
 
+export interface ChatAbortParams {
+  session_key: string;
+  run_id: string;
+}
+
 /** Parameters for session.delete request (BCS → Bot). */
 export interface SessionDeleteParams {
   /** BCS group ID being deleted. */

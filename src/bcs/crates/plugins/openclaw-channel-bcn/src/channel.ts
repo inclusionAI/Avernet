@@ -13,7 +13,7 @@ import { formatAllowFromLowercase } from 'openclaw/plugin-sdk/allow-from';
 import { DEFAULT_ACCOUNT_ID } from './api.js';
 import { listAccountIds, resolveAccount } from './accounts.js';
 import { BcsWsClient, sanitizeBcsUrlForLog } from './bcs-ws-client.js';
-import { handleChatSend, handleChatInject, handleChatHistory, handleSessionDelete, abortAllStreams, initAgentEventsSubscription, cleanupAgentEventsSubscription, resolveGroupIdFromSessionKey } from './inbound-handler.js';
+import { handleChatSend, handleChatAbort, handleChatInject, handleChatHistory, handleSessionDelete, abortAllStreams, initAgentEventsSubscription, cleanupAgentEventsSubscription, resolveGroupIdFromSessionKey } from './inbound-handler.js';
 import { getBcsRuntime } from './runtime.js';
 import { resolveBcsSessionCleanupConfig, startBcsSessionCleanup } from './session-cleanup.js';
 import type { ResolvedBcsAccount } from './types.js';
@@ -257,6 +257,7 @@ export function createBcsPlugin(options: BcsChannelPluginOptions = {}) {
 
         // Register request handlers
         client.onRequest('chat.send', req => handleChatSend(req, client, account, log));
+        client.onRequest('chat.abort', req => handleChatAbort(req, client, account, log));
         client.onRequest('chat.inject', req => handleChatInject(req, client, account, log, dataDir));
         client.onRequest('chat.history', req => handleChatHistory(req, client, account, log, dataDir));
         client.onRequest('session.delete', req => handleSessionDelete(req, client, account, log, dataDir));

@@ -50,7 +50,7 @@ Provider 注册时提供一个 `webhook_url`。BCS 会向这个 URL 发送 `POST
 | --- | --- | --- |
 | `chat.send` | 必须实现 | 要求目标 bot 回复。Provider 应快速确认收到，再异步执行 bot 逻辑。 |
 | `chat.inject` | 必须实现 | 注入上下文，不触发 bot 回复。适合“旁观者接收上下文”的协作语义。 |
-| `chat.abort` | 建议实现 | 按 `session_id` 尽力停止当前会话下正在运行的任务。 |
+| `chat.abort` | 建议实现 | 按必填 `run_id` 尽力停止当前会话下对应的运行中任务。 |
 | `chat.history` | 建议实现 | 返回 Provider 自己维护的会话历史，便于恢复上下文和展示。 |
 | `bot.ping` | 可选 | 健康探测，返回 bot 是否 ready。 |
 
@@ -204,6 +204,8 @@ BCS 下行请求可能重试，Provider 必须避免重复执行同一任务。
 | `/bot/events` | `X-BCN-Event-Id`，Provider 重试同一事件时应保持不变 |
 
 Provider 需要按 `(provider_bot_ref, session_id)` 维护会话上下文。`chat.inject` 必须写入上下文，但不能触发 bot 推理。
+
+`chat.abort` 的 body 同时包含本次请求幂等键 `id` 和必填的目标 `run_id`（原 `chat.send.id`）。只允许取消 `RUNNING`；其他状态返回 `{"ok":true,"aborted":false,"reason":"not_running","run_id":"..."}`。成功受理返回 `{"ok":true,"aborted":true,"run_id":"..."}`，最终终态仍由后续 `state=aborted` 事件确认。abort 没有操作级 `tags` 字段；若通用 envelope 的 `to_bot.tags` 存在，服务会忽略它并复用原运行的 binding。
 
 ## 接入检查清单
 

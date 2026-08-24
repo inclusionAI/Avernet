@@ -193,7 +193,7 @@ export function resolveInboundSender(
 /** Active streams: run_id -> AbortController */
 const activeStreams = new Map<string, AbortController>();
 
-type RunContext = {
+export type RunContext = {
   groupId: string;
   client: BcsWsClient;
   sessionKey?: string;
@@ -1150,6 +1150,73 @@ function sendRunErrorOnce(
   context.finalSent = true;
   log?.warn?.(`[BCS] Sent chat.event error for run_id=${runId}${detail ? ` (${detail})` : ''}`);
   return true;
+}
+
+function sendRunAbortedOnce(
+  runId: string,
+  context: RunContext,
+  log?: { info: (...args: unknown[]) => void },
+): boolean {
+  if (context.finalSent) return false;
+  context.client.sendEvent(
+    'chat.event',
+    buildChatEventPayload(runId, context.groupId, 'aborted') as unknown as Record<string, unknown>,
+    nextSeq(context.client),
+  );
+  context.finalSent = true;
+  log?.info?.(`[BCS] Sent chat.event aborted for run_id=${runId}`);
+  return true;
+}
+
+export type ChatAbortExecutionResolver = (
+  runId: string,
+) => { context: RunContext; controller: AbortController } | undefined;
+
+const resolveActiveAbortExecution: ChatAbortExecutionResolver = runId => {
+  const context = runContexts.get(runId);
+  const controller = activeStreams.get(runId);
+  return context && controller ? { context, controller } : undefined;
+};
+
+export async function handleChatAbort(
+  request: RequestFrame,
+  client: BcsWsClient,
+  _account: ResolvedBcsAccount,
+  log?: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void },
+  resolveExecution: ChatAbortExecutionResolver = resolveActiveAbortExecution,
+): Promise<void> {
+  const params = request.params as { session_key?: unknown; run_id?: unknown; tags?: unknown };
+  const sessionKey = typeof params.session_key === 'string' ? params.session_key.trim() : '';
+  const runId = typeof params.run_id === 'string' ? params.run_id.trim() : '';
+  if (!sessionKey || !runId || params.tags !== undefined) {
+    client.sendResponse(request.id, false, undefined, {
+      code: 'INVALID_REQUEST',
+      message: 'chat.abort requires non-empty session_key and run_id and does not accept tags',
+      retryable: false,
+    });
+    return;
+  }
+
+  const execution = resolveExecution(runId);
+  if (!execution || execution.controller.signal.aborted) {
+    client.sendResponse(request.id, true, {
+      ok: true, aborted: false, run_id: runId, reason: 'not_running',
+    });
+    return;
+  }
+  const { context, controller } = execution;
+  if (context.client !== client || (context.sessionKey && context.sessionKey !== sessionKey)) {
+    client.sendResponse(request.id, false, undefined, {
+      code: 'NOT_FOUND',
+      message: 'run does not belong to this bot session',
+      retryable: false,
+    });
+    return;
+  }
+
+  controller.abort();
+  client.sendResponse(request.id, true, { ok: true, aborted: true, run_id: runId });
+  sendRunAbortedOnce(runId, context, log);
 }
 
 /** Extract GroupContext from params for logging/context. */

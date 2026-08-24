@@ -1753,9 +1753,47 @@ pub async fn handle_chat_abort(
     flow: &BcsMessageFlow,
     cmd: ChatAbortCommand,
 ) -> ServiceResult<ChatAbortOutcome> {
-    if !abort_run_matches_session_scope(flow, &cmd).await {
+    if cmd.run_id.trim().is_empty() {
+        return Err(ServiceError::InvalidOperation {
+            message: "chat.abort run_id is required".to_string(),
+            request_id: None,
+        });
+    }
+    let Some(run_context) = flow.bot_run_context.as_ref() else {
+        warn!(run_id = %cmd.run_id, "chat.abort run context store unavailable");
+        return Ok(ChatAbortOutcome {
+            aborted: false,
+            aborted_run_ids: Vec::new(),
+            bot_deliveries: Vec::new(),
+            frontend_deliveries: Vec::new(),
+        });
+    };
+    let Some(context) = run_context.get_context(&cmd.run_id).await else {
+        debug!(run_id = %cmd.run_id, "chat.abort target is not running");
+        return Ok(ChatAbortOutcome {
+            aborted: false,
+            aborted_run_ids: Vec::new(),
+            bot_deliveries: Vec::new(),
+            frontend_deliveries: Vec::new(),
+        });
+    };
+    if context.terminal {
+        debug!(run_id = %cmd.run_id, "chat.abort target is already terminal");
+        return Ok(ChatAbortOutcome {
+            aborted: false,
+            aborted_run_ids: Vec::new(),
+            bot_deliveries: Vec::new(),
+            frontend_deliveries: Vec::new(),
+        });
+    }
+    if context.group_id != cmd.group_id
+        || cmd.session_id.as_deref().is_some_and(|session_id| {
+            context.bcs_session_id.as_deref() != Some(session_id)
+        })
+    {
         warn!(
             group_id = %cmd.group_id,
+            run_id = %cmd.run_id,
             "chat.abort run does not belong to the bound session"
         );
         return Ok(ChatAbortOutcome {
@@ -1766,7 +1804,7 @@ pub async fn handle_chat_abort(
         });
     }
 
-    let Some(group) = flow.group.get(&cmd.group_id).await else {
+    let Some(_group) = flow.group.get(&cmd.group_id).await else {
         warn!(
             group_id = %cmd.group_id,
             "group not found for chat.abort; returning success"
@@ -1783,96 +1821,57 @@ pub async fn handle_chat_abort(
         .session_id
         .clone()
         .unwrap_or_else(|| build_session_key(&cmd.group_id));
-    let participant_ids: Vec<String> = group
-        .bot_participant_ids()
-        .into_iter()
-        .map(str::to_string)
-        .collect();
-    let has_participants = !participant_ids.is_empty();
-    let mut bot_deliveries = Vec::new();
-
-    for bot_id in participant_ids {
-        let delivery_target = match flow.registry.resolve_delivery_target(&bot_id).await {
-            Ok(target) => target,
-            Err(error) => {
-                bot_deliveries.push(BotDeliveryResult {
-                    target_bot_id: bot_id.clone(),
-                    delivered: false,
-                    error: Some(error),
-                });
-                continue;
-            }
-        };
-        if !flow.bot_delivery.is_available(&delivery_target).await {
-            debug!(bot_id = %bot_id, "bot target unavailable, skipping chat.abort");
-            continue;
-        }
-
-        let delivery_run_id = cmd
-            .run_id
-            .clone()
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let delivery = flow
-            .bot_delivery
-            .deliver(BotDeliveryCommand {
-                target: delivery_target,
-                run_id: delivery_run_id,
-                frame: build_chat_abort_frame(&session_key, cmd.run_id.as_deref()),
-                delivery_kind: BotDeliveryKind::Abort,
-                provider_transport: Default::default(),
-                provider_bypass_headers: Vec::new(),
-            })
-            .await;
-
-        match delivery {
-            Ok(result) => bot_deliveries.push(result),
-            Err(error) => {
-                warn!(
-                    group_id = %cmd.group_id,
-                    bot_id = %bot_id,
-                    error = %error,
-                    "failed to deliver chat.abort"
-                );
-                bot_deliveries.push(BotDeliveryResult {
-                    target_bot_id: bot_id,
-                    delivered: false,
-                    error: Some(error),
-                });
-            }
-        }
+    let bot_id = context.bot_id;
+    let delivery_target = flow.registry.resolve_delivery_target(&bot_id).await?;
+    if !flow.bot_delivery.is_available(&delivery_target).await {
+        return Ok(ChatAbortOutcome {
+            aborted: false,
+            aborted_run_ids: Vec::new(),
+            bot_deliveries: vec![BotDeliveryResult {
+                target_bot_id: bot_id,
+                delivered: false,
+                error: Some(ServiceError::InvalidOperation {
+                    message: "chat.abort target is unavailable".to_string(),
+                    request_id: Some(cmd.run_id),
+                }),
+            }],
+            frontend_deliveries: Vec::new(),
+        });
     }
 
-    let aborted_run_ids = cmd.run_id.into_iter().collect::<Vec<_>>();
-    let frontend_deliveries = publish_chat_abort_event(
-        flow,
-        &cmd.group_id,
-        cmd.session_id.as_deref(),
-        &aborted_run_ids,
-    )
-    .await;
+    let target_run_id = cmd.run_id;
+    let delivery = flow
+        .bot_delivery
+        .deliver(BotDeliveryCommand {
+            target: delivery_target,
+            run_id: target_run_id.clone(),
+            frame: build_chat_abort_frame(&cmd.request_id, &session_key, &target_run_id),
+            delivery_kind: BotDeliveryKind::Abort,
+            provider_transport: Default::default(),
+            provider_bypass_headers: Vec::new(),
+        })
+        .await;
+    let delivery_result = match delivery {
+        Ok(result) => result,
+        Err(error) => BotDeliveryResult {
+            target_bot_id: bot_id,
+            delivered: false,
+            error: Some(error),
+        },
+    };
+    let aborted = delivery_result.delivered;
+    let aborted_run_ids = if aborted {
+        vec![target_run_id]
+    } else {
+        Vec::new()
+    };
 
     Ok(ChatAbortOutcome {
-        aborted: !aborted_run_ids.is_empty() || !has_participants,
+        aborted,
         aborted_run_ids,
-        bot_deliveries,
-        frontend_deliveries,
+        bot_deliveries: vec![delivery_result],
+        frontend_deliveries: Vec::new(),
     })
-}
-
-async fn abort_run_matches_session_scope(flow: &BcsMessageFlow, cmd: &ChatAbortCommand) -> bool {
-    let Some(session_id) = cmd.session_id.as_deref() else {
-        return true;
-    };
-    let Some(run_id) = cmd.run_id.as_deref() else {
-        return true;
-    };
-    let Some(run_context) = flow.bot_run_context.as_ref() else {
-        return false;
-    };
-    let Some(context) = run_context.get_context(run_id).await else {
-        return false;
-    };
-    context.group_id == cmd.group_id && context.bcs_session_id.as_deref() == Some(session_id)
 }
 
 fn resolve_group_chat_sender(cmd: &GroupChatCommand) -> ServiceResult<String> {
@@ -2651,58 +2650,6 @@ async fn publish_group_callback_event(
     }
 }
 
-async fn publish_chat_abort_event(
-    flow: &BcsMessageFlow,
-    group_id: &str,
-    session_id: Option<&str>,
-    aborted_run_ids: &[String],
-) -> Vec<FrontendDeliveryResult> {
-    let event_json = build_chat_abort_event(group_id, aborted_run_ids);
-    let target = match session_id {
-        Some(session_id) => FrontendDeliveryTarget::Session {
-            session_id: session_id.to_string(),
-        },
-        None => FrontendDeliveryTarget::Group {
-            group_id: group_id.to_string(),
-        },
-    };
-    let delivery = flow
-        .frontend_delivery
-        .publish(FrontendDeliveryCommand {
-            target,
-            event_json,
-            delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
-            run_fallback: None,
-            exclude_conn_id: None,
-        })
-        .await;
-
-    match delivery {
-        Ok(result) => vec![result],
-        Err(error) => {
-            warn!(
-                group_id = %group_id,
-                error = %error,
-                "failed to publish chat.abort event"
-            );
-            Vec::new()
-        }
-    }
-}
-
-fn build_chat_abort_event(group_id: &str, aborted_run_ids: &[String]) -> String {
-    let frame = serde_json::json!({
-        "type": "event",
-        "event": "chat.abort",
-        "group_id": group_id,
-        "payload": {
-            "run_id": aborted_run_ids.first(),
-            "run_ids": aborted_run_ids,
-        },
-    });
-    serde_json::to_string(&frame).unwrap_or_default()
-}
-
 async fn build_workbench_user_event(flow: &BcsMessageFlow, cmd: &WebSendCommand) -> String {
     let run_id = uuid::Uuid::new_v4().to_string();
     let session_key = cmd.session_id.as_deref().unwrap_or(&cmd.group_id);
@@ -2894,17 +2841,14 @@ fn log_bot_deliver_result(
     }
 }
 
-pub fn build_chat_abort_frame(session_key: &str, run_id: Option<&str>) -> BcsFrame {
-    let mut params = serde_json::json!({
+pub fn build_chat_abort_frame(request_id: &str, session_key: &str, run_id: &str) -> BcsFrame {
+    let params = serde_json::json!({
         "session_key": session_key,
+        "run_id": run_id,
     });
 
-    if let Some(run_id) = run_id {
-        params["run_id"] = Value::String(run_id.to_string());
-    }
-
     BcsFrame::Request(RequestFrame::new(
-        uuid::Uuid::new_v4().to_string(),
+        request_id,
         "chat.abort",
         Some(params),
     ))

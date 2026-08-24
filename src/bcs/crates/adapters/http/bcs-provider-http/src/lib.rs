@@ -279,6 +279,7 @@ impl InteractionProviderPort for HttpProviderTransport {
             frame_type: "req".to_string(),
             id: uuid::Uuid::new_v4().to_string(),
             method: "interaction.resolve".to_string(),
+            run_id: None,
             params: Some(Value::Object(params)),
             session_id: command.bcs_session_id,
             bcn_group_id: command.group_id,
@@ -576,7 +577,8 @@ impl BotDeliveryPort for HttpProviderTransport {
             }
             return Ok(BotDeliveryResult {
                 target_bot_id,
-                delivered: ack.ok,
+                delivered: ack.ok
+                    && (method != "chat.abort" || ack.aborted.unwrap_or(true)),
                 error: (!ack.ok).then(|| {
                     ServiceError::InternalError(
                         ack.error.unwrap_or_else(|| "provider rejected".to_string()),
@@ -626,7 +628,8 @@ impl BotDeliveryPort for HttpProviderTransport {
         }
         Ok(BotDeliveryResult {
             target_bot_id,
-            delivered: ack.ok,
+            delivered: ack.ok
+                && (method != "chat.abort" || ack.aborted.unwrap_or(true)),
             error: (!ack.ok).then(|| {
                 ServiceError::InternalError(
                     ack.error.unwrap_or_else(|| "provider rejected".to_string()),
@@ -811,11 +814,25 @@ fn provider_request_from_frame(
             request_id: Some(request.id.clone()),
         })?
         .unwrap_or_default();
+    let abort_run_id = if request.method == "chat.abort" {
+        let run_id = params
+            .get("run_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| ServiceError::InvalidOperation {
+                message: "chat.abort requires a non-empty run_id".to_string(),
+                request_id: Some(request.id.clone()),
+            })?;
+        Some(run_id.to_string())
+    } else {
+        None
+    };
 
     Ok(ProviderWebhookRequest {
         frame_type: "req".to_string(),
         id: request.id.clone(),
         method: request.method.clone(),
+        run_id: abort_run_id,
         params: None,
         session_id,
         bcn_group_id: bcs_group_id,
@@ -2119,6 +2136,7 @@ Connection: keep-alive\r\n\
             frame_type: "request".to_string(),
             id: "frame-timeout".to_string(),
             method: "chat.send".to_string(),
+            run_id: None,
             params: None,
             session_id: "session-1".to_string(),
             bcn_group_id: "group-1".to_string(),
@@ -2179,6 +2197,7 @@ Connection: keep-alive\r\n\
             frame_type: "event".to_string(),
             id: "frame-1".to_string(),
             method: "chat.send".to_string(),
+            run_id: None,
             params: None,
             session_id: "session-1".to_string(),
             bcn_group_id: "group-1".to_string(),
@@ -2222,6 +2241,7 @@ Connection: keep-alive\r\n\
             frame_type: "req".to_string(),
             id: "resolve-frame-1".to_string(),
             method: "interaction.resolve".to_string(),
+            run_id: None,
             params: Some(serde_json::json!({
                 "bcsRunId": "bcs-run-1",
                 "runId": "provider-run-1",

@@ -875,7 +875,7 @@ struct ChatAbortResult {
 #[derive(Debug, Deserialize)]
 struct ClientChatAbortParams {
     group_id: String,
-    run_id: Option<String>,
+    run_id: String,
 }
 
 async fn handle_chat_abort(
@@ -889,6 +889,16 @@ async fn handle_chat_abort(
         serde_json::from_value(req.params.clone().unwrap_or(Value::Null)).map_err(|e| {
             WebWsDispatchError::InvalidFrameFormat(format!("Invalid chat.abort params: {}", e))
         })?;
+    if params.run_id.trim().is_empty() {
+        send_error(
+            tx,
+            &req.id,
+            "invalid_request",
+            "chat.abort run_id must be a non-empty string",
+        )
+        .await?;
+        return Ok(());
+    }
 
     let mut group_id = params.group_id;
     let run_id = params.run_id;
@@ -923,13 +933,14 @@ async fn handle_chat_abort(
 
     info!(
         group_id = %group_id,
-        run_id = ?run_id,
+        run_id = %run_id,
         "Processing chat.abort"
     );
 
     let outcome = state
         .message_flow
         .handle_chat_abort(ChatAbortCommand {
+            request_id: req.id.clone(),
             caller,
             group_id: group_id.clone(),
             session_id,

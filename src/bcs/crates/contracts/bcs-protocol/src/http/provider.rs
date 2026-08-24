@@ -237,6 +237,9 @@ pub struct ProviderWebhookRequest {
     pub frame_type: String,
     pub id: String,
     pub method: String,
+    /// Target run for `chat.abort`; omitted for other methods.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params: Option<Value>,
     pub session_id: String,
@@ -262,6 +265,12 @@ pub struct ProviderWebhookRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderAckResponse {
     pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aborted: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retryable: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -299,7 +299,7 @@ impl MessageFlowService for RecordingMessageFlow {
     }
 
     async fn handle_chat_abort(&self, cmd: ChatAbortCommand) -> ServiceResult<ChatAbortOutcome> {
-        let aborted_run_ids = cmd.run_id.clone().into_iter().collect();
+        let aborted_run_ids = vec![cmd.run_id.clone()];
         self.aborts.lock().await.push(cmd);
         Ok(ChatAbortOutcome {
             aborted: true,
@@ -1398,7 +1398,7 @@ async fn session_bound_chat_abort_passes_only_the_bound_session() {
     let aborts = state.message_flow.aborts.lock().await;
     assert_eq!(aborts.len(), 1);
     assert_eq!(aborts[0].group_id, "group-web-1");
-    assert_eq!(aborts[0].run_id.as_deref(), Some("run-bound"));
+    assert_eq!(aborts[0].run_id, "run-bound");
     assert_eq!(aborts[0].session_id.as_deref(), Some("session-bound-1"));
 }
 

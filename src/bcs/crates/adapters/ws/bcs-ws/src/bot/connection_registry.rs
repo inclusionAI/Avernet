@@ -86,8 +86,20 @@ impl BotConnectionRegistry {
         timeout_ms: u64,
     ) -> Result<serde_json::Value, String> {
         let request_id = uuid::Uuid::new_v4().to_string();
+        self.send_request_with_id(bot_id, &request_id, method, params, timeout_ms)
+            .await
+    }
+
+    async fn send_request_with_id(
+        &self,
+        bot_id: &str,
+        request_id: &str,
+        method: &str,
+        params: serde_json::Value,
+        timeout_ms: u64,
+    ) -> Result<serde_json::Value, String> {
         let frame = BcsFrame::Request(RequestFrame::new(
-            request_id.clone(),
+            request_id,
             method.to_string(),
             Some(params),
         ));
@@ -96,12 +108,12 @@ impl BotConnectionRegistry {
         let (tx, rx) = oneshot::channel::<serde_json::Value>();
         {
             let mut pending = self.pending_requests.write().await;
-            pending.insert(request_id.clone(), tx);
+            pending.insert(request_id.to_string(), tx);
         }
 
         if self.send_frame_json(bot_id, frame_str).await.is_err() {
             let mut pending = self.pending_requests.write().await;
-            pending.remove(&request_id);
+            pending.remove(request_id);
             return Err(format!("Bot '{}' not connected", bot_id));
         }
 
@@ -113,7 +125,7 @@ impl BotConnectionRegistry {
             Ok(Err(_)) => Err("Request channel closed".to_string()),
             Err(_) => {
                 let mut pending = self.pending_requests.write().await;
-                pending.remove(&request_id);
+                pending.remove(request_id);
                 Err(format!("Request to bot '{}' timed out after {}ms", bot_id, timeout_ms))
             }
         }
@@ -149,6 +161,49 @@ impl BotDeliveryPort for BotConnectionRegistry {
                 }),
             });
         };
+        if cmd.delivery_kind == bcs_protocol::BotDeliveryKind::Abort {
+            let BcsFrame::Request(request) = &cmd.frame else {
+                return Err(ServiceError::InvalidOperation {
+                    message: "chat.abort delivery requires request frame".to_string(),
+                    request_id: Some(cmd.run_id),
+                });
+            };
+            let response = self
+                .send_request_with_id(
+                    bot_id,
+                    &request.id,
+                    &request.method,
+                    request.params.clone().unwrap_or(serde_json::Value::Null),
+                    30_000,
+                )
+                .await;
+            return match response {
+                Ok(payload) if payload.get("error").is_none() => Ok(BotDeliveryResult {
+                    target_bot_id: bot_id.clone(),
+                    delivered: payload
+                        .get("aborted")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(true),
+                    error: None,
+                }),
+                Ok(payload) => Ok(BotDeliveryResult {
+                    target_bot_id: bot_id.clone(),
+                    delivered: false,
+                    error: Some(ServiceError::InternalError(
+                        payload
+                            .get("error")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("bot rejected chat.abort")
+                            .to_string(),
+                    )),
+                }),
+                Err(error) => Ok(BotDeliveryResult {
+                    target_bot_id: bot_id.clone(),
+                    delivered: false,
+                    error: Some(ServiceError::InternalError(error)),
+                }),
+            };
+        }
         let frame_json = serde_json::to_string(&cmd.frame)
             .map_err(|err| ServiceError::InternalError(format!("serialize bot frame: {err}")))?;
 

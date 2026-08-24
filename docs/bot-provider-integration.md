@@ -67,7 +67,7 @@ requests to that URL and uses the body `method` to identify the action.
 | --- | --- | --- |
 | `chat.send` | Required | Ask the target bot to reply. The Provider should acknowledge quickly, then run bot logic asynchronously. |
 | `chat.inject` | Required | Inject context without triggering a bot reply. This supports the collaboration semantic where observers receive context. |
-| `chat.abort` | Recommended | Best-effort cancellation for running tasks in the current session by `session_id`. |
+| `chat.abort` | Recommended | Best-effort cancellation of the RUNNING task identified by required `run_id`. |
 | `chat.history` | Recommended | Return the session history maintained by the Provider, useful for context recovery and display. |
 | `bot.ping` | Optional | Health probe that reports whether the bot is ready. |
 
@@ -237,6 +237,14 @@ same task more than once.
 The Provider should maintain session context by `(provider_bot_ref,
 session_id)`. `chat.inject` must write context but must not trigger bot
 reasoning.
+
+The `chat.abort` body carries both the abort request idempotency key `id` and a
+required target `run_id` (the original `chat.send.id`). Only `RUNNING` can be
+cancelled; other states return `{"ok":true,"aborted":false,"reason":"not_running","run_id":"..."}`.
+An accepted abort returns `{"ok":true,"aborted":true,"run_id":"..."}`; the
+later `state=aborted` event remains authoritative for the terminal state.
+Abort has no operation-local `tags` field. If shared-envelope `to_bot.tags` is
+present, it is ignored; abort must reuse the original run binding.
 
 ## Integration checklist
 

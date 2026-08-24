@@ -11,6 +11,7 @@ import {
   cleanupAgentEventsSubscription,
   combineDeliveredReplyParts,
   handleChatInject,
+  handleChatAbort,
   handleChatSend,
   handleBcsRouteTool,
   initAgentEventsSubscription,
@@ -675,7 +676,7 @@ describe('openclaw-channel-bcn', () => {
     assert.equal(registeredEvents.includes('before_tool_call'), false);
   });
 
-  it('does not expose unused chat.abort request handling in public source files', () => {
+  it('registers chat.abort request handling in public source files', () => {
     const matches: string[] = [];
 
     for (const file of listSourceFiles(join(__dirname, '..', 'src'))) {
@@ -685,7 +686,94 @@ describe('openclaw-channel-bcn', () => {
       }
     }
 
-    assert.deepEqual(matches, []);
+    assert.ok(matches.some(file => file.endsWith('channel.ts')));
+    assert.ok(matches.some(file => file.endsWith('inbound-handler.ts')));
+  });
+
+  it('aborts the active run and emits an aborted terminal event', async () => {
+    const responses: any[] = [];
+    const events: any[] = [];
+    const client = {
+      sendResponse(...args: unknown[]) { responses.push(args); },
+      sendEvent(...args: unknown[]) { events.push(args); },
+    };
+    const controller = new AbortController();
+    const context = {
+      groupId: 'group-1',
+      sessionKey: 'session-1',
+      client,
+      sawToolEvent: false,
+    };
+
+    await handleChatAbort({
+      type: 'req', id: 'abort-1', method: 'chat.abort',
+      params: { session_key: 'session-1', run_id: 'run-1' },
+    }, client as any, {} as any, undefined, () => ({ context: context as any, controller }));
+
+    assert.equal(controller.signal.aborted, true);
+    assert.deepEqual(responses[0], [ 'abort-1', true, { ok: true, aborted: true, run_id: 'run-1' }]);
+    assert.equal(events[0]?.[0], 'chat.event');
+    assert.equal(events[0]?.[1]?.state, 'aborted');
+    assert.equal(events[0]?.[1]?.run_id, 'run-1');
+  });
+
+  it('returns not_running without emitting an event for an unknown run', async () => {
+    const responses: any[] = [];
+    const client = {
+      sendResponse(...args: unknown[]) { responses.push(args); },
+      sendEvent() { throw new Error('must not emit'); },
+    };
+
+    await handleChatAbort({
+      type: 'req', id: 'abort-2', method: 'chat.abort',
+      params: { session_key: 'session-1', run_id: 'missing' },
+    }, client as any, {} as any, undefined, () => undefined);
+
+    assert.deepEqual(responses[0], [
+      'abort-2', true,
+      { ok: true, aborted: false, run_id: 'missing', reason: 'not_running' },
+    ]);
+  });
+
+  it('rejects a run owned by another session', async () => {
+    const responses: any[] = [];
+    const client = {
+      sendResponse(...args: unknown[]) { responses.push(args); },
+      sendEvent() {},
+    };
+    const controller = new AbortController();
+    const context = {
+      groupId: 'group-1', sessionKey: 'other-session', client, sawToolEvent: false,
+    };
+
+    await handleChatAbort({
+      type: 'req', id: 'abort-3', method: 'chat.abort',
+      params: { session_key: 'session-1', run_id: 'run-1' },
+    }, client as any, {} as any, undefined, () => ({ context: context as any, controller }));
+
+    assert.equal(controller.signal.aborted, false);
+    assert.equal(responses[0]?.[1], false);
+    assert.equal(responses[0]?.[3]?.code, 'NOT_FOUND');
+  });
+
+  it('returns not_running when the active controller was already aborted', async () => {
+    const responses: any[] = [];
+    const client = {
+      sendResponse(...args: unknown[]) { responses.push(args); },
+      sendEvent() {},
+    };
+    const controller = new AbortController();
+    controller.abort();
+    const context = {
+      groupId: 'group-1', sessionKey: 'session-1', client, sawToolEvent: false,
+    };
+
+    await handleChatAbort({
+      type: 'req', id: 'abort-4', method: 'chat.abort',
+      params: { session_key: 'session-1', run_id: 'run-1' },
+    }, client as any, {} as any, undefined, () => ({ context: context as any, controller }));
+
+    assert.equal(responses[0]?.[2]?.reason, 'not_running');
   });
 
   it('does not activate manager task tools for legacy task groups without a local bot uuid', () => {

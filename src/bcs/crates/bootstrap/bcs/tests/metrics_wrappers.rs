@@ -622,10 +622,11 @@ fn group_callback_cmd() -> GroupCallbackCommand {
 
 fn chat_abort_cmd() -> ChatAbortCommand {
     ChatAbortCommand {
+        request_id: "abort-wrapper".to_string(),
         caller: CallerContext::Public,
         group_id: "group-wrapper".to_string(),
         session_id: None,
-        run_id: Some("run-wrapper".to_string()),
+        run_id: "run-wrapper".to_string(),
     }
 }
 

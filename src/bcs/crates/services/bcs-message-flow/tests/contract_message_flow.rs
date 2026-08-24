@@ -3338,31 +3338,45 @@ async fn group_callback_all_mentions_use_routing_service() {
 }
 
 #[tokio::test]
-async fn chat_abort_delivers_abort_frame_to_bot_participants() {
+async fn chat_abort_delivers_abort_frame_only_to_the_run_owner() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let run_context = Arc::new(MemoryBotRunContextStore::new());
+    run_context
+        .put_context(bcs_service_api::BotRunContext {
+            run_id: "run-1".to_string(),
+            bot_id: "bot-driver".to_string(),
+            group_id: "group-1".to_string(),
+            bcs_session_id: None,
+            deadline_ms: u64::MAX,
+            terminal: false,
+        })
+        .await;
     let flow = BcsMessageFlow::new(
         support.group.clone(),
         support.routing.clone(),
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    );
+    )
+    .with_bot_run_context(run_context);
 
     let outcome = flow
         .handle_chat_abort(ChatAbortCommand {
+            request_id: "abort-request-1".to_string(),
             caller: CallerContext::Human(HumanActor {
                 actor_id: "human_1".to_string(),
                 staff_no: "1".to_string(),
             }),
             group_id: "group-1".to_string(),
             session_id: None,
-            run_id: Some("run-1".to_string()),
+            run_id: "run-1".to_string(),
         })
         .await
         .unwrap();
 
     assert!(outcome.aborted);
     assert_eq!(outcome.aborted_run_ids, vec!["run-1".to_string()]);
+    assert_eq!(support.bot_delivery.targets().await.len(), 1);
     assert!(
         support
             .bot_delivery
@@ -3377,39 +3391,49 @@ async fn chat_abort_delivers_abort_frame_to_bot_participants() {
             .frames()
             .await
             .into_iter()
-            .all(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.abort"))
+            .all(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.abort" && req.id == "abort-request-1"))
     );
 }
 
 #[tokio::test]
-async fn chat_abort_publishes_frontend_event_through_port() {
+async fn chat_abort_does_not_publish_a_premature_frontend_event() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let run_context = Arc::new(MemoryBotRunContextStore::new());
+    run_context
+        .put_context(bcs_service_api::BotRunContext {
+            run_id: "run-1".to_string(),
+            bot_id: "bot-driver".to_string(),
+            group_id: "group-1".to_string(),
+            bcs_session_id: None,
+            deadline_ms: u64::MAX,
+            terminal: false,
+        })
+        .await;
     let flow = BcsMessageFlow::new(
         support.group.clone(),
         support.routing.clone(),
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    );
+    )
+    .with_bot_run_context(run_context);
 
     let outcome = flow
         .handle_chat_abort(ChatAbortCommand {
+            request_id: "abort-request-1".to_string(),
             caller: CallerContext::Human(HumanActor {
                 actor_id: "human_1".to_string(),
                 staff_no: "1".to_string(),
             }),
             group_id: "group-1".to_string(),
             session_id: None,
-            run_id: Some("run-1".to_string()),
+            run_id: "run-1".to_string(),
         })
         .await
         .unwrap();
 
-    assert_eq!(outcome.frontend_deliveries.len(), 1);
-    let events = support.frontend_delivery.events().await;
-    assert_eq!(events.len(), 1);
-    assert!(events[0].contains(r#""event":"chat.abort""#));
-    assert!(events[0].contains(r#""run_id":"run-1""#));
+    assert!(outcome.frontend_deliveries.is_empty());
+    assert!(support.frontend_delivery.events().await.is_empty());
 }
 
 #[tokio::test]
@@ -3437,13 +3461,14 @@ async fn chat_abort_with_session_rejects_a_run_from_another_session() {
 
     let outcome = flow
         .handle_chat_abort(ChatAbortCommand {
+            request_id: "abort-request-other".to_string(),
             caller: CallerContext::Human(HumanActor {
                 actor_id: "human_1".to_string(),
                 staff_no: "1".to_string(),
             }),
             group_id: "group-1".to_string(),
             session_id: Some("session-bound".to_string()),
-            run_id: Some("run-other-session".to_string()),
+            run_id: "run-other-session".to_string(),
         })
         .await
         .unwrap();
@@ -3479,13 +3504,14 @@ async fn chat_abort_with_session_accepts_a_run_from_the_same_session() {
 
     let outcome = flow
         .handle_chat_abort(ChatAbortCommand {
+            request_id: "abort-request-bound".to_string(),
             caller: CallerContext::Human(HumanActor {
                 actor_id: "human_1".to_string(),
                 staff_no: "1".to_string(),
             }),
             group_id: "group-1".to_string(),
             session_id: Some("session-bound".to_string()),
-            run_id: Some("run-bound".to_string()),
+            run_id: "run-bound".to_string(),
         })
         .await
         .unwrap();
@@ -3496,7 +3522,7 @@ async fn chat_abort_with_session_accepts_a_run_from_the_same_session() {
 }
 
 #[tokio::test]
-async fn chat_abort_without_run_id_uses_only_the_bound_session_key() {
+async fn chat_abort_rejects_an_empty_run_id() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let flow = BcsMessageFlow::new(
         support.group.clone(),
@@ -3506,32 +3532,21 @@ async fn chat_abort_without_run_id_uses_only_the_bound_session_key() {
         support.frontend_delivery.clone(),
     );
 
-    flow.handle_chat_abort(ChatAbortCommand {
+    let error = flow.handle_chat_abort(ChatAbortCommand {
+        request_id: "abort-request-empty".to_string(),
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
             staff_no: "1".to_string(),
         }),
         group_id: "group-1".to_string(),
         session_id: Some("session-bound".to_string()),
-        run_id: None,
+        run_id: "  ".to_string(),
     })
     .await
-    .unwrap();
+    .unwrap_err();
 
-    assert!(
-        support
-            .bot_delivery
-            .frames()
-            .await
-            .into_iter()
-            .all(|frame| matches!(
-                frame,
-                BcsFrame::Request(req)
-                    if req.params.as_ref().and_then(|params| params["session_key"].as_str())
-                        == Some("session-bound")
-                    && req.params.as_ref().and_then(|params| params.get("run_id")).is_none()
-            ))
-    );
+    assert!(matches!(error, ServiceError::InvalidOperation { .. }));
+    assert!(support.bot_delivery.frames().await.is_empty());
 }
 
 #[tokio::test]

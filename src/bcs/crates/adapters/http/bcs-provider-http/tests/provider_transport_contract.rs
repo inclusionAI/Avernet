@@ -158,6 +158,42 @@ struct CapturedRequest {
     body: Value,
 }
 
+#[tokio::test]
+async fn provider_chat_abort_keeps_request_id_separate_from_target_run_id() {
+    let captured: CapturedState = Arc::new(Mutex::new(None));
+    let app = Router::new()
+        .route("/webhook", post(capture_ack))
+        .with_state(captured.clone());
+    let (webhook_url, server) = spawn_server(app).await;
+
+    HttpProviderTransport::allowing_private_networks_for_tests()
+        .deliver(BotDeliveryCommand {
+            target: provider_target_v2(webhook_url),
+            run_id: "target-run-1".to_string(),
+            frame: BcsFrame::Request(RequestFrame::new(
+                "abort-request-1",
+                "chat.abort",
+                Some(json!({
+                    "session_key": "session-1",
+                    "bcs_group_id": "group-1",
+                    "run_id": "target-run-1"
+                })),
+            )),
+            delivery_kind: BotDeliveryKind::Abort,
+            provider_transport: Default::default(),
+            provider_bypass_headers: Vec::new(),
+        })
+        .await
+        .unwrap();
+
+    let request = captured.lock().await.clone().unwrap();
+    assert_eq!(request.body["id"], "abort-request-1");
+    assert_eq!(request.body["run_id"], "target-run-1");
+    assert_eq!(request.body["session_id"], "session-1");
+    assert!(request.body.get("params").is_none());
+    server.abort();
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn provider_delivery_injects_current_gateway_span_context() {
     use opentelemetry::{global, trace::{TraceContextExt as _, TracerProvider as _}};
