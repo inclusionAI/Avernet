@@ -95,7 +95,7 @@ def _seed_app_coding_bot_with_member_collaborator(world):
         "bot_id": "bot_app_coding_collab",
         "bot_name": "AppBotCollab",
         "owner_id": "u_owner",
-        "bot_type": "personal",
+        "bot_type": "service",
         "status": "ACTIVE",
         "entity_id": "u_owner",
         "entity_type": "staff",
