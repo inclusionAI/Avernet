@@ -73,7 +73,7 @@ def test_cards_are_batched_and_expand_each_service_bot(monkeypatch) -> None:
     assert result["service-1"][0].display_state is DisplayState.SERVICE_DRAFT
     assert result["service-1"][0].status == "draft"
     assert result["service-1"][0].internal_status == PublishStatus.DRAFT.value
-    assert BotAction.DELETE not in result["service-1"][0].actions
+    assert BotAction.DELETE in result["service-1"][0].actions
     assert result["service-2"][0].display_state is DisplayState.SERVICE_ONLINE
     assert result["service-2"][0].status == "running"
     assert result["service-2"][0].live_version == 7
@@ -148,3 +148,13 @@ def test_service_actions_follow_the_confirmed_product_matrix(status, expected) -
     row = record(1, 10, "service-1", status, 1)
 
     assert ServiceLifecycleView._record_actions(row, [row]) == expected
+
+
+@pytest.mark.unit
+def test_draft_delete_is_blocked_while_an_online_version_exists() -> None:
+    draft = record(2, 10, "service-1", PublishStatus.DRAFT, 2)
+    online = record(1, 10, "service-1", PublishStatus.SUCCESS, 1)
+
+    actions = ServiceLifecycleView._record_actions(draft, [draft, online])
+
+    assert BotAction.DELETE not in actions

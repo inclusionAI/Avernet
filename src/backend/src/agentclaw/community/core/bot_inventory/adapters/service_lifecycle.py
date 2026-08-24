@@ -30,11 +30,6 @@ _DEPLOYING = {
     PublishStatus.FAILED.value,
 }
 _ONLINE = {PublishStatus.SUCCESS.value}
-_PUBLISHED_HISTORY = {
-    PublishStatus.SUCCESS.value,
-    PublishStatus.UPGRADED.value,
-    PublishStatus.RELEASED.value,
-}
 
 
 class ServiceLifecycleView(ServiceLifecyclePort):
@@ -118,7 +113,9 @@ class ServiceLifecycleView(ServiceLifecyclePort):
 
         if record.status == PublishStatus.DRAFT.value:
             add(BotAction.EDIT, BotAction.PUBLISH_STAGING)
-            if not any(item.status in _PUBLISHED_HISTORY for item in all_records):
+            if not any(
+                item.status == PublishStatus.SUCCESS.value for item in all_records
+            ):
                 add(BotAction.DELETE)
         elif record.status == PublishStatus.VALIDATING.value:
             add(

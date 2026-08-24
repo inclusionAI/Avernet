@@ -75,13 +75,6 @@ _DEPLOYING = {
     PublishStatus.VALIDATE_PUB.value,
     PublishStatus.ONLINE_PUB.value,
 }
-_PUBLISHED_HISTORY = {
-    PublishStatus.SUCCESS.value,
-    PublishStatus.UPGRADED.value,
-    PublishStatus.RELEASED.value,
-}
-
-
 @dataclass(frozen=True)
 class _ServiceEditLockInfo:
     """Public lock projection enriched with service-draft applicability."""
@@ -283,7 +276,7 @@ class ServicePublicationFacade:
         if record.status == PublishStatus.DRAFT.value:
             actions.append("publish_staging")
             if level >= PermissionLevel.OWNER and not any(
-                item.status in _PUBLISHED_HISTORY for item in all_records
+                item.status == PublishStatus.SUCCESS.value for item in all_records
             ):
                 actions.append("delete")
         elif record.status == PublishStatus.VALIDATING.value:

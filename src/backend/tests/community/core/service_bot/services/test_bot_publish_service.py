@@ -899,10 +899,10 @@ class TestCanDeleteBot:
         "historical_status",
         [PublishStatus.UPGRADED, PublishStatus.RELEASED],
     )
-    def test_can_delete_bot_rejects_formally_published_history(
+    def test_can_delete_bot_allows_inactive_publish_history(
         self, historical_status
     ):
-        """下线/升级后新建的草稿不能反向删除整个服务 Bot。"""
+        """历史版本已升级或下线时，当前草稿仍可删除。"""
         mock_repo = Mock()
         draft_record = _create_mock_record(
             record_id=2,
@@ -917,7 +917,7 @@ class TestCanDeleteBot:
 
         service = _make_service(bot_publish_repo=mock_repo)
 
-        assert service.can_delete_bot(publish_id=2) is False
+        assert service.can_delete_bot(publish_id=2) is True
 
 
 class TestCanEditBot:
