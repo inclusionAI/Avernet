@@ -41,9 +41,8 @@ Default Set — and makes Installation agree with what those Sets say:
 - A Set that is active (an ordinary Set with `is_active=1`, or the Default
   Set) means: every member must hold an Installation row. The flush inserts
   the missing rows.
-- An excluded Default-Set member is deactivated *by the Set*: the flush
-  treats it as an inactive claim, so it must not hold a row (unless an
-  active ordinary Set also claims it — an active claim always wins).
+- An excluded Default-Set member is deactivated *by the Set*: it must not
+  hold a row, and the flush removes one if present.
 - An ordinary Set that is inactive means: its members must not hold rows.
   The flush deletes rows only inactive claims account for.
 - Installation rows that no Set explains — capabilities activated *directly*
@@ -55,6 +54,23 @@ the MCP members of those same Sets (`ac_skill_set_mcp` rows) against
 `ac_bot_mcp_installation`, exclusions included. Engine/template *default*
 MCPs are platform code config, not membership — they never enter the flush
 (see criterion 2 for why).
+
+**One Set per capability.** A capability belongs to at most one Set — R3
+below enforces it on every add, the Default Set included (excluded or not).
+The flush therefore never has to arbitrate between two Sets' claims; where
+historical malformed data does present two, it errs safe and keeps a row an
+active Set accounts for rather than uninstalling something live.
+
+**Flush vs runtime projection — two different syncs.** The *flush* is
+DB-side only: it reconciles the Installation tables with SkillSet
+configuration and never touches a device. The *runtime projection* is
+DB→engine: pushing Installation-backed desired state to the Bot's running
+engine (symlinks / Pool mappings, MCP details, Passport scope) through
+`BotRuntimeProjectionReconciler`. Every command ends with a synchronous
+runtime projection, compensated on failure — that responsibility stays with
+the two command services. The reader's flush never triggers one; read paths
+that need the runtime updated go through the reconciler, which reads via the
+reader.
 
 ## Motivation — the inconsistencies as they exist today
 
@@ -186,8 +202,8 @@ MCPs are platform code config, not membership — they never enter the flush
      members). Direct activate/deactivate is refused.
    - **R2 — deactivate before joining.** A capability holding a direct
      Installation row cannot be added to a Set.
-   - **R3 — one ordinary Set per capability.** A capability held by one
-     ordinary Set cannot be added to another.
+   - **R3 — one Set per capability.** A capability held by *any* Set —
+     ordinary or Default, excluded or not — cannot be added to another Set.
 9. Both enforcement sites consume the policy and nothing else re-implements
    it: the direct-activation service and the membership/exclusion commands in
    the UoW repository. Existing error types stay on the wire.
@@ -267,6 +283,8 @@ MCPs are platform code config, not membership — they never enter the flush
       11) — today they are unreachable.
     - Direct MCP activate/deactivate refuses membership in *any* reaching
       Set, Default Set included, excluded or not (parity with skills).
+    - Adding a Default-Set member (excluded or not) to an ordinary Set is
+      refused — R3 previously covered only ordinary Sets.
     - The runtime projection selects Default Sets with the
       layout-engine-first precedence (`bot_default_engine_types`) the listing
       and commands already use.

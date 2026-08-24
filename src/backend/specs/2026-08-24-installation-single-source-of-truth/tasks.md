@@ -21,18 +21,19 @@ lands in the same group as the migration of its last caller.
 
 - [ ] 2.1 Add `mcp_activate` / `mcp_deactivate` (frozenset[str], default
       empty) to `BotSkillSetBridge`.
-- [ ] 2.2 `_resolve_bridge`: collect MCP members per Set with the same
-      active-claim-wins rule; **excluded Default-Set members (skills and
-      MCPs) become inactive claims** — they lose their Installation rows
-      unless an active ordinary Set also claims them (spec Key domain rules).
+- [ ] 2.2 `_resolve_bridge`: collect MCP members per Set; **excluded
+      Default-Set members (skills and MCPs) become inactive claims** and
+      lose their Installation rows (spec Key domain rules). R3 keeps a
+      capability in one Set; on malformed two-Set data the bridge errs safe
+      (keeps a row an active Set accounts for).
 - [ ] 2.3 `repair_bot_skillset_installations`: fast path checks skill and
       MCP deltas; write path applies both (SAVEPOINT-per-row inserts, delete
       `*_deactivate ∩ installed`).
 - [ ] 2.4 Repository tests: MCP rows follow Set activation; excluded member
-      rows removed (skill + MCP); excluded member claimed by an active
-      ordinary Set keeps its row; direct rows untouched; idempotent. Update
-      the 2026-08-23 pinning test that asserted excluded rows are "left
-      alone" (superseded — cite the spec).
+      rows removed (skill + MCP); malformed two-Set data errs safe (a row an
+      active Set accounts for is kept); direct rows untouched; idempotent.
+      Update the 2026-08-23 pinning test that asserted excluded rows are
+      "left alone" (superseded — cite the spec).
 - [ ] 2.5 Swap the two materializer call sites to the repair
       (`bot_runtime_projection_reconciler._resolve_plan`, Service-Bot
       `build_stage.py`); delete the materializer +
@@ -95,7 +96,9 @@ lands in the same group as the migration of its last caller.
       raise-wrappers over `governing_set`; add the behavior-change test:
       an excluded Default-Set member is refused direct activate/deactivate.
 - [ ] 6.3 Route `add_skill` / `add_mcp` conflict decisions through
-      `membership_conflict`; precedence pinned by a test.
+      `membership_conflict`; R3 now covers ANY Set — add the test: a
+      Default-Set member (excluded or not) is refused when added to an
+      ordinary Set; R2-before-R3 precedence pinned by a test.
 - [ ] 6.4 Policy unit tests
       (`tests/community/core/skill_center/test_capability_ownership.py`).
 

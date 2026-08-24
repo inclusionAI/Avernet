@@ -25,6 +25,12 @@ Principles applied:
   enforcement sites.
 - **Skills ≡ MCPs.** Every MCP operation mirrors its skill counterpart —
   same service, same UoW pattern, same policy, same flush treatment.
+- **Flush ≠ runtime projection.** The flush is DB-side only (Set config →
+  Installation; the reader's job, never touches a device). The runtime
+  projection is DB→engine (Installation-backed state → symlinks / MCP /
+  Passport via `BotRuntimeProjectionReconciler`) and ends every command,
+  synchronously, compensated on failure — that stays with the two command
+  services.
 - **Fewer layers.** `BotSkillAssetService` (dispatch layer) and
   `LocalSkillStateService` (misnamed, parallel write path) dissolve into
   `DirectActivationService` + `SkillQueryService`.
@@ -56,8 +62,10 @@ class BotSkillSetBridge:
 
     activate  = members of active/Default Sets; deactivate = members only
     inactive claims account for. An excluded Default-Set member is an
-    INACTIVE claim (exclusion is the Default Set's per-Bot deactivation),
-    and an active claim always wins. ``mcp_activate``/``mcp_deactivate``
+    INACTIVE claim (exclusion is the Default Set's per-Bot deactivation).
+    R3 keeps a capability in at most one Set, so claims never truly
+    compete; on historical malformed data the flush errs safe and keeps a
+    row an active Set accounts for. ``mcp_activate``/``mcp_deactivate``
     are the identical split for the same Sets' MCP members.
     """
     members: frozenset[int]
@@ -154,6 +162,7 @@ class BotCapabilityStateReaderProtocol(Protocol):
 Engine scope from the Bot row via `bot_engine_scope` (layout-engine-first
 Default-Set precedence); `bot` omitted → loaded via
 `bot_repo.get_by_id_and_owner`, missing Bot raises `LocalSkillNotFoundError`.
+The flush is DB-side only — the reader never triggers a runtime projection.
 
 Backing read: `SkillRepository.list_bot_active_assets` loses its merge and
 becomes a pure Installation→`ac_skill` join, renamed
@@ -181,7 +190,8 @@ R1 — Set-managed, no direct control. A capability that is a member of ANY
      deactivate the Set; exclude/un-exclude for Default-Set members).
 R2 — Deactivate before joining. A capability holding a direct Installation
      row cannot be added to a Set (checked before R3 — today's precedence).
-R3 — One ordinary Set per capability.
+R3 — One Set per capability: held by ANY Set (ordinary or Default, excluded
+     or not) ⇒ cannot be added to another.
 Identical for skills and MCPs.
 """
 
@@ -199,10 +209,11 @@ def governing_set(
     controllable."""
 
 def membership_conflict(
-    *, directly_installed: bool, held_by_other_ordinary_set: bool,
+    *, directly_installed: bool, held_by_other_set: bool,
 ) -> str | None:
-    """R2 + R3: 'RESOURCE_DIRECT_ACTIVE' |
-    'RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET' | None."""
+    """R2 + R3 (``held_by_other_set`` covers ordinary AND Default Sets):
+    'RESOURCE_DIRECT_ACTIVE' | 'RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET' |
+    None."""
 ```
 
 Enforcement sites:
@@ -215,8 +226,10 @@ Enforcement sites:
 
 ### 5. Command service A — `SkillSetManagementService` (renamed)
 
-Everything done *to a SkillSet*. Existing shape (ACL via `_bot`, one UoW
-mutation, one reconcile with compensating restore) is kept; additions:
+Everything done *to a SkillSet*. Existing shape is kept — ACL via `_bot`,
+one UoW mutation, then one synchronous **runtime projection** via
+`BotRuntimeProjectionReconciler` with compensating restore (this is the
+DB→engine sync, not the flush); additions:
 
 ```python
 class SkillSetManagementService:
