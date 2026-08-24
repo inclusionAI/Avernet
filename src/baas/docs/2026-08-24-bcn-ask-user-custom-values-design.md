@@ -9,8 +9,22 @@ fails Engine's canonical-option validation and leaves the interaction unresolved
 
 ## Contract
 
-Each BCN ask-user answer keeps declared option selections in `values` and may
-add free-form selections in `customValues`:
+Frontend keeps its existing values-only request. It puts declared option
+selections and free-form input together in `values`:
+
+```json
+{
+  "answers": {
+    "tradeoff": {
+      "values": ["sensory", "less sugar"]
+    }
+  }
+}
+```
+
+BCS compares those values exactly with the requested question's
+`options[].value`. It sends declared selections to the Provider in `values` and
+free-form selections in `customValues`:
 
 ```json
 {
@@ -25,11 +39,14 @@ add free-form selections in `customValues`:
 }
 ```
 
-`values` and `customValues` are independent and may both be non-empty for a
-multi-select question. BCS accepts `customValues` only for a requested question
-with `allowOther=true`; it validates every `values` entry against the declared
-options. BCS remains the authority for `header` and `question` and overwrites
-client-supplied copies from the stored requested interaction.
+The Provider-facing `values` and `customValues` are independent and may both be
+non-empty for a multi-select question. For a question with options, missing
+`allowOther` means true. An explicit `allowOther=false` rejects any Frontend
+value that does not exactly match a declared option; BCS returns a clear
+`invalid_request` response and logs the BCS run, Provider run, session, group,
+bot, interaction, and resolver identifiers. BCS remains the authority for
+`header` and `question` and overwrites client-supplied copies from the stored
+requested interaction.
 
 BaaS requires non-empty `header` and `question` for every submitted answer. It
 does not infer custom input from an unknown `values` entry and does not derive
@@ -53,15 +70,19 @@ Engine selection row is the synthetic `other` marker.
 
 ## Compatibility and Persistence
 
-The change is additive on BCN Provider 2.0: existing requests containing only
-`values` keep their current behavior. No database migration is required. BCS
-stores the resolution as JSON, and BaaS normalizes the incoming fields into its
-existing durable Engine-resolution shape.
+The Frontend contract remains values-only. `customValues` is an internal
+BCS-to-Provider field, so Frontend does not need an additional input control or
+sentinel. No database migration is required. BCS stores the normalized
+resolution as JSON, and BaaS maps it into its existing durable Engine-resolution
+shape.
 
-Malformed or unmarked off-list values are not reclassified as custom input.
+BaaS does not perform fallback classification: it consumes the explicit
+`values/customValues` split produced by BCS.
 
 ## Validation
 
 Contract and unit tests cover ordinary selections, custom-only answers, mixed
-multi-select answers, rejected custom values when `allowOther` is false, BCS
-metadata augmentation, BaaS boundary parsing, and exact Engine request output.
+multi-select answers, missing `allowOther`, rejected custom values when
+`allowOther` is explicitly false, correlated warning logs, Frontend error
+propagation, BCS metadata augmentation, BaaS boundary parsing, and exact Engine
+request output.

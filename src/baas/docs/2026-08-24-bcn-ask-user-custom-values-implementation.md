@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Preserve explicitly marked custom ask-user answers from BCN through BCS and BaaS while producing Engine-compatible resolution frames.
+**Goal:** Classify values-only Frontend ask-user answers in BCS and preserve explicit custom values through BaaS while producing Engine-compatible resolution frames.
 
-**Architecture:** BCN adds optional per-answer `customValues` alongside canonical `values`. BCS validates and forwards both fields with stored question metadata; BaaS normalizes them into existing durable resolution fields and emits Engine's synthetic `other` selection marker whenever custom input is present.
+**Architecture:** Frontend continues to send only `values`. BCS compares them with stored requested `options[].value`, forwards declared selections in `values` and off-list input in `customValues`, and augments both with stored question metadata. Missing `allowOther` means true; explicit false rejects off-list input with a correlated warning and a clear Frontend error. BaaS normalizes the explicit split into existing durable resolution fields and emits Engine's synthetic `other` selection marker whenever custom input is present.
 
 **Tech Stack:** Rust, serde_json, Python 3.12, Pydantic v2, pytest
 
@@ -17,18 +17,21 @@
 - Modify: `src/bcs/crates/adapters/http/bcs-provider-http/tests/provider_transport_contract.rs`
 - Modify: `src/bcs/docs/bcs-provider-2.0-sse-protocol.md`
 
-1. Add failing tests showing that a multi-select answer may contain canonical
-   `values` and non-empty `customValues` when `allowOther=true`.
-2. Add a failing test showing that custom input is rejected when
-   `allowOther=false`.
+1. Add failing tests showing that BCS partitions a values-only multi-select
+   answer into canonical `values` and non-empty `customValues`.
+2. Add failing tests showing that missing `allowOther` means true and custom
+   input is rejected only when `allowOther=false`.
 3. Run the focused `bcs-interaction` tests and confirm the expected failures.
-4. Update ask-user validation so at least one of the two arrays is populated,
-   canonical values are always offered values, custom values are explicit and
-   allowed only by `allowOther`, and single-select cardinality spans both arrays.
-5. Preserve `customValues` while augmenting the answer with stored
-   `question/header`.
-6. Update the Provider 2.0 protocol examples and compatibility rules.
-7. Run focused BCS service and Provider transport tests.
+4. Update ask-user validation so Frontend supplies only non-empty `values`,
+   single-select cardinality is enforced, and off-list values are rejected only
+   by an explicit `allowOther=false`.
+5. Partition values by exact requested option value, generate `customValues`,
+   and augment the answer with stored `question/header`.
+6. Log rejected resolutions with run/session/group/bot/interaction/resolver
+   context and preserve the validation message in the Frontend
+   `invalid_request` response.
+7. Update the Provider 2.0 protocol examples and compatibility rules.
+8. Run focused BCS service, WebSocket, and Provider transport tests.
 
 ### Task 2: Accept custom values at the BaaS boundary
 
