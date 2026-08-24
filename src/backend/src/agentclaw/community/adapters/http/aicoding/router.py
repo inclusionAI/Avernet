@@ -302,6 +302,7 @@ class DimaWorkspaceResponse(BaseModel):
     required_level=PermissionLevel.MEMBER,
     bot_id="$bot_id",
     owner_id="$user_id",
+    skip_lock_check=True,
 ))
 async def create_bot_dima_workspace(
     bot_id: str,
