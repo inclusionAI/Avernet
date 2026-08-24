@@ -1,21 +1,14 @@
+# ===== 1. Header rules ConfigMap (from outbound_operation_rule) =====
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: api-key-proxy-config-${UID}
+  name: envoy-header-rules-${UID}
   namespace: ${NAMESPACE}
 data:
-  default.conf: |
-    server {
-        listen 8080;
-        location / {
-            proxy_pass https://dashscope.aliyuncs.com/compatible-mode/v1;
-            proxy_set_header Authorization "Bearer sk-xxxxxxxxxxxxxxxxxxxxxxxx";
-            proxy_set_header Host "";
-            proxy_ssl_server_name on;
-            proxy_pass_request_headers on;
-        }
-    }
+  header-rules.yaml: |
+${HEADER_RULES_YAML}
 ---
+# ===== 2. Deployment (openclaw + envoy-sidecar) =====
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -48,9 +41,6 @@ spec:
         image: ${OPENCLAW_IMAGE}
         ports:
         - containerPort: 20003
-        env:
-        - name: LLM_API_BASE_URL
-          value: "http://127.0.0.1:8080"
         volumeMounts:
         - name: data
           mountPath: ${MOUNT_PATH}
@@ -62,25 +52,31 @@ spec:
           limits:
             cpu: "${CPU_LIMIT}"
             memory: "${MEMORY_LIMIT}"
-      - name: api-key-proxy
-        image: ${API_KEY_PROXY_IMAGE}
+      - name: envoy-sidecar
+        image: ${ENVOY_SIDECAR_IMAGE}
         ports:
-        - containerPort: 8080
+        - containerPort: 38080
+        - containerPort: 38081
         volumeMounts:
-        - name: proxy-config
-          mountPath: /etc/nginx/conf.d
+        - name: header-rules
+          mountPath: /etc/sidecar/header-rules.yaml
+          subPath: header-rules.yaml
         resources:
           requests:
             cpu: "50m"
             memory: "64Mi"
           limits:
             cpu: "200m"
-            memory: "128Mi"
+            memory: "256Mi"
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
       volumes:
       - name: data
         nfs:
           server: ${NAS_SERVER}
           path: /
-      - name: proxy-config
+      - name: header-rules
         configMap:
-          name: api-key-proxy-config-${UID}
+          name: envoy-header-rules-${UID}
