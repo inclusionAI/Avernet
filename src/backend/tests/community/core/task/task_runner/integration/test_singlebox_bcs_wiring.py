@@ -1,9 +1,8 @@
 """singlebox 环境 BCS 端口接线测试:复用 BcsHttpAdapter + 本地 LocalBcsTokenProvider。
 
 本地 BCS(Rust :21000)与生产 BCS 同 REST、`require_authentication=false`,
-HMAC `X-ECB-*` 头被本地忽略 → singlebox 直接用 BcsHttpAdapter(本地 token provider)即可,
-无需新建 adapter 类。本测覆盖:本地 provider 取值、_resolve_ports 单 box 装配出真 BcsHttpAdapter、
-BcsHttpAdapter+本地 provider 的 create_group 契约。
+HMAC `X-ECB-*` 头被本地忽略 → singlebox 直接使用本地 BCS 凭据。
+本测覆盖:本地凭据取值、_resolve_ports 装配真实 BcsHttpAdapter、create_group 契约。
 """
 from __future__ import annotations
 
@@ -56,12 +55,11 @@ def test_resolve_ports_singlebox_uses_singlebox_bcs_adapter(monkeypatch):
     monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
     monkeypatch.setenv("SINGLEBOX_BCS_URL", "http://localhost:21000")
     monkeypatch.setenv("SINGLEBOX_USER_ID", "35983")
-    bot, bcs = TaskModule._resolve_ports()  # provider_id 由 BCS token 自带，task_provider_id 不再单独透传
+    bot, bcs = TaskModule._resolve_ports()
     try:
         assert isinstance(bot, SingleboxEngineAdapter)
         assert isinstance(bcs, SingleboxBcsAdapter), "singlebox bcs 端口应为 SingleboxBcsAdapter"
         assert isinstance(bcs, BcsHttpAdapter)  # 继承 BcsHttpAdapter
-        assert bcs.provider_id == ""  # 测试未设 SINGLEBOX_BCS_PROVIDER_ID → 圈定关闭;provider_id 由端口自带
         client = bcs._client  # type: ignore[attr-defined]
         assert client.base_url.host == "localhost"
         assert client.base_url.port == 21000

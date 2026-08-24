@@ -139,7 +139,7 @@ class TaskRunner:
         否则 stub 记日志(Avernet 无后端兜底,不抛)。"""
         if self._execution_backend is not None:
             return await self._execution_backend.run_bbs(execution_graph)
-        logger.info("[runner] run_bbs stub (no execution_backend) task=%s", execution_graph.task_id)
+        logger.info("[task][runner] run_bbs stub (no execution_backend) task=%s", execution_graph.task_id)
 
     def _build_context(self, task_id: str, node_id: str) -> dict[str, Any]:
         """上下文组装(Runner 内聚;内部自动判定,无 NODE/SUBTREE/TASK scope 入参)。

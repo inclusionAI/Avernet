@@ -18,6 +18,8 @@ from typing import Any, Optional
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult,
     AcceptanceVerdict,
+    NodeAction,
+    NodeActionEvent,
     Relation,
     RelationType,
     Status,
@@ -34,6 +36,14 @@ class TaskInfoRecord:
     execution_config: Optional[dict[str, Any]]
     task_spec: dict[str, Any]
     status: Status
+    graph_run_id: Optional[str] = None
+    graph_loop_round: int = 0
+    graph_output: Optional[dict[str, Any]] = None
+    graph_extend_props: Optional[dict[str, Any]] = None
+    graph_version: int = 0
+    lease_owner: Optional[str] = None
+    lease_until: Optional[int] = None
+    heartbeat_at: Optional[int] = None
     gmt_create: Optional[datetime] = None
     gmt_modified: Optional[datetime] = None
 
@@ -129,5 +139,38 @@ class TaskCallbackRecord:
     result_success: Optional[bool]
     exec_error: Optional[str]
     extend_props: Optional[dict[str, Any]]
+    event_id: Optional[str] = None
+    process_status: Optional[str] = None
+    processed_at: Optional[datetime] = None
     gmt_create: Optional[datetime] = None
     gmt_modified: Optional[datetime] = None
+
+@dataclass(frozen=True)
+class TaskActionLogRecord:
+    """Table-faithful record for one append-only node action."""
+
+    id: int
+    event_id: str
+    task_id: str
+    node_id: str
+    seq: int
+    action: NodeAction
+    loop_round: Optional[int]
+    attempt: int
+    status_from: Optional[Status]
+    status_to: Optional[Status]
+    payload: dict[str, Any]
+    instance_id: Optional[str]
+    gmt_create: Optional[datetime] = None
+
+    def to_event(self) -> NodeActionEvent:
+        return NodeActionEvent(
+            seq=self.seq,
+            ts=int(self.gmt_create.timestamp() * 1000) if self.gmt_create else 0,
+            action=self.action,
+            loop_round=self.loop_round or 0,
+            attempt=self.attempt,
+            status_from=self.status_from,
+            status_to=self.status_to,
+            payload=dict(self.payload),
+        )

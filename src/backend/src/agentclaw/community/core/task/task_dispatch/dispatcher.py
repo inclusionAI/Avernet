@@ -70,7 +70,7 @@ class TaskDispatcher:
                     node.run_info.extend_props["miss_events"] = [result.miss_reason or "no_bot"]
                 return node
             except Exception as ex:  # noqa: BLE001  搜推异常→吞掉,留 PENDING 交 harness 按超时重试
-                logger.warning("[dispatch] node=%s 搜推异常→留 PENDING 交 harness: %s", node.node_id, ex)
+                logger.warning("[task][dispatch] node=%s 搜推异常→留 PENDING 交 harness: %s", node.node_id, ex)
                 node.run_info.extend_props["dispatch_error"] = f"dispatch_exception:{type(ex).__name__}"
                 return node
         out = list(await _aio.gather(*[_one(n) for n in toDoTaskList]))

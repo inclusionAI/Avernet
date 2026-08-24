@@ -8,5 +8,6 @@ CREATE TABLE IF NOT EXISTS `task_node` (
     `gmt_create`     timestamp         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `gmt_modified`   timestamp         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_task_node_identity` (`task_id`, `node_id`),
     KEY `idx_task_status` (`task_id`, `status`)
 ) DEFAULT CHARSET = utf8mb4 COMMENT='任务执行节点';

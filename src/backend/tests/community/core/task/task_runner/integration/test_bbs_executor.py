@@ -9,9 +9,14 @@ def _run(coro):
 
 
 def test_task_executor_run_bbs_delegates_to_bbs_runner():
-    """TaskExecutor.run_bbs delegates to bbs_runner.notify with correct args."""
-    exe = TaskExecutor(bot=MagicMock(), bcs=MagicMock(), formatter=None, context=None,
-                       sink=None, poller=None, api_base_url="http://test:8888")
+    """TaskExecutor.run_bbs delegates to bbs_runner.notify with correct args.
+
+    BBS 候选 roster 经注入的 BcnService(复用统一 provider 身份)查询:notify 以
+    ``bcn=``(BcnService)、``bot=`` 透传,不再传 ``bcs``。
+    """
+    exe = TaskExecutor(bot=MagicMock(), bcs=MagicMock(), bcn=MagicMock(),
+                       formatter=None, context=None, sink=None, poller=None,
+                       api_base_url="http://test:8888")
     g = MagicMock()
     g.task_id = "t1"
     with patch("agentclaw.community.core.task.task_runner.integration.bbs_runner.notify", new_callable=AsyncMock) as mock_notify:
@@ -20,3 +25,5 @@ def test_task_executor_run_bbs_delegates_to_bbs_runner():
         call_kwargs = mock_notify.call_args
         assert call_kwargs.kwargs["backend_url"] == "http://test:8888"
         assert call_kwargs.kwargs["execution_graph"] is g
+        assert call_kwargs.kwargs["bcn"] is exe._bcn
+        assert call_kwargs.kwargs["bot"] is exe._bot

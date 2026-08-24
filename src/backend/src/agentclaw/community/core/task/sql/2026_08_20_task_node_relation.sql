@@ -9,6 +9,6 @@ CREATE TABLE IF NOT EXISTS `task_node_relation` (
     `gmt_create`    timestamp        NOT NULL DEFAULT CURRENT_TIMESTAMP     COMMENT '创建时间',
     `gmt_modified`  timestamp        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_src_dst` (`src_node_id`, `dst_node_id`) BLOCK_SIZE 16384 LOCAL,
+    UNIQUE KEY `uk_src_dst` (`task_id`, `src_node_id`, `dst_node_id`) BLOCK_SIZE 16384 LOCAL,
     KEY `idx_src` (`task_id`, `src_node_id`)
 ) DEFAULT CHARSET = utf8mb4 COMMENT='任务节点关系(Relation)';
