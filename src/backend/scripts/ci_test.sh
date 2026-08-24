@@ -104,6 +104,12 @@ export COVERAGE_CORE="${BACKEND_CI_COVERAGE_CORE:-sysmon}"
 # for ~30s of the run and no information the job does not already keep. A
 # failure prints its full section at any verbosity, and the per-test record is
 # in the JUnit XML this step writes and the job uploads.
+#
+# No ``term-missing``: it prints one line per source file under coverage
+# (~1,340 lines and growing) purely for a human reading the raw log.
+# report_check.py below is the only consumer that matters and it reads the
+# XML report, never stdout, so the terminal table adds log volume with no
+# gate depending on it.
 set +e
 DEPLOY_PROFILE=test \
 PYTHONPATH="$backend_dir/src:$backend_dir:${PYTHONPATH:-}" \
@@ -112,8 +118,7 @@ run_without_git_local_env "$backend_python" -m pytest tests/community \
   --continue-on-collection-errors \
   --junitxml="$junit_report" \
   --cov="$ci_workspace/src/backend/src" \
-  --cov-report="xml:$coverage_report" \
-  --cov-report=term-missing
+  --cov-report="xml:$coverage_report"
 pytest_status=$?
 set -e
 
