@@ -576,6 +576,8 @@ UpdateGroup:
   properties:
     name:
       type: string
+    context:
+      type: string
     opening_message:
       oneOf:
         - $ref: ../domain-models.yaml#/OpeningMessage
