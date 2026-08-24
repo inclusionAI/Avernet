@@ -19140,6 +19140,120 @@
               "title": "Page Size",
               "type": "integer"
             }
+          },
+          {
+            "description": "Optional BCS visibility filter; repeat or comma-separate public, protected, private.",
+            "in": "query",
+            "name": "visibility",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional BCS visibility filter; repeat or comma-separate public, protected, private.",
+              "title": "Visibility"
+            }
+          },
+          {
+            "description": "Optional BCS user visibility filter; repeat or comma-separate public, protected, private.",
+            "in": "query",
+            "name": "user_visibility",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional BCS user visibility filter; repeat or comma-separate public, protected, private.",
+              "title": "User Visibility"
+            }
+          },
+          {
+            "description": "Optional BCS status filter: online or hidden.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional BCS status filter: online or hidden.",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Explicit BCS viewer actor type: human or bot.",
+            "in": "query",
+            "name": "viewer_actor_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Explicit BCS viewer actor type: human or bot.",
+              "title": "Viewer Actor Type"
+            }
+          },
+          {
+            "description": "Explicit BCS viewer actor id; requires viewer_actor_type.",
+            "in": "query",
+            "name": "viewer_actor_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Explicit BCS viewer actor id; requires viewer_actor_type.",
+              "title": "Viewer Actor Id"
+            }
+          },
+          {
+            "description": "Optional BCS friendship filter: all, friends, or non_friends.",
+            "in": "query",
+            "name": "friendship",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional BCS friendship filter: all, friends, or non_friends.",
+              "title": "Friendship"
+            }
           }
         ],
         "responses": {
