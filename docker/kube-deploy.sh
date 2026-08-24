@@ -3,11 +3,11 @@
 # kube-deploy.sh — Render and deploy a service to Kubernetes
 #
 # Usage:
-#   docker/services/kube-deploy.sh \
+#   docker/kube-deploy.sh \
 #       --service baas \
 #       --image registry/baas:latest \
 #       --env REDIS_URL=redis://redis:6379/0 \
-#       --env DB_URL=sqlite:////tmp/baas.db \
+#       --env-file baas.env \
 #       [--namespace avernet] \
 #       [--apply]                 # apply with kubectl (default: dry-run print)
 #
@@ -20,18 +20,28 @@
 # The script renders docker/services/service-deployment.yaml via
 # envsubst, then optionally applies it with kubectl.
 #
+# --env-file format (one KEY=VALUE per line, # for comments):
+#   # baas.env
+#   REDIS_URL=redis://redis:6379/0
+#   DB_URL=postgres://user:pass@db:5432/baas
+#
 # Examples:
 #   # Dry-run (just print the rendered YAML)
-#   docker/services/kube-deploy.sh --service baas --image baas:local
+#   docker/kube-deploy.sh --service baas --image baas:local
 #
-#   # Deploy with env vars
-#   docker/services/kube-deploy.sh --service baas \
+#   # Deploy with inline env vars
+#   docker/kube-deploy.sh --service baas \
 #       --image registry/baas:v1 \
 #       --env REDIS_URL=redis://redis:6379/0 \
 #       --apply
 #
+#   # Deploy with env file
+#   docker/kube-deploy.sh --service baas \
+#       --image registry/baas:v1 \
+#       --env-file baas.env --apply
+#
 #   # Custom namespace
-#   docker/services/kube-deploy.sh --service gateway \
+#   docker/kube-deploy.sh --service gateway \
 #       --image registry/gateway:v1 \
 #       --namespace staging --apply
 # ============================================================
@@ -41,7 +51,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE="${SCRIPT_DIR}/services/service-deployment.yaml"
 
-
 # --- Default values ---
 
 SERVICE=""
@@ -49,6 +58,7 @@ IMAGE=""
 NAMESPACE="avernet"
 APPLY=0
 ENV_VARS=()
+ENV_FILE=""
 
 # Service-specific defaults
 declare -A DEFAULT_PORT=(
@@ -107,6 +117,9 @@ while [[ $# -gt 0 ]]; do
         --env)
             [[ $# -ge 2 ]] || { echo "error: --env requires key=value" >&2; exit 2; }
             ENV_VARS+=("$2"); shift 2 ;;
+        --env-file)
+            [[ $# -ge 2 ]] || { echo "error: --env-file requires a file path" >&2; exit 2; }
+            ENV_FILE="$2"; shift 2 ;;
         --apply)
             APPLY=1; shift ;;
         --help|-h)
@@ -138,6 +151,23 @@ CPU_LIMIT="${DEFAULT_CPU_LIMIT[$SERVICE]}"
 MEMORY_REQUEST="${DEFAULT_MEM_REQ[$SERVICE]}"
 MEMORY_LIMIT="${DEFAULT_MEM_LIMIT[$SERVICE]}"
 
+# --- Load env vars from file (if --env-file given) ---
+
+if [[ -n "$ENV_FILE" ]]; then
+    if [[ ! -f "$ENV_FILE" ]]; then
+        echo "error: env file not found: $ENV_FILE" >&2
+        exit 2
+    fi
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Skip empty lines and comments
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        # Trim leading/trailing whitespace
+        line="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        ENV_VARS+=("$line")
+    done < "$ENV_FILE"
+    echo "==> Loaded ${#ENV_VARS[@]} env vars from $ENV_FILE" >&2
+fi
+
 # --- Render env vars into YAML ---
 
 ENV_YAML=""
@@ -153,14 +183,9 @@ fi
 # --- Render template via envsubst ---
 
 export SERVICE NAMESPACE IMAGE PORT CPU_REQUEST CPU_LIMIT MEMORY_REQUEST MEMORY_LIMIT
-export ENV_VARS_YAML="$ENV_YAML"
 
-# envsubst doesn't support multi-line variables well, so use sed
-RENDERED="$(cat "$TEMPLATE")"
-RENDERED="${RENDERED//\$\{SERVICE\>/$SERVICE}"  # not needed, envsubst handles it
+RENDERED="$(cat "$TEMPLATE" | envsubst)"
 
-# Use envsubst for simple vars, then sed for ENV_VARS block
-RENDERED="$(echo "$RENDERED" | envsubst)"
 # Replace the ENV_VARS placeholder
 if [[ -n "$ENV_YAML" ]]; then
     RENDERED="$(echo "$RENDERED" | sed "s|\${ENV_VARS}|${ENV_YAML//$'\n'/\\n}|g")"
@@ -175,7 +200,7 @@ if [[ "$APPLY" -eq 1 ]]; then
     echo "    image: $IMAGE"
     echo "    port:  $PORT"
     if [[ ${#ENV_VARS[@]} -gt 0 ]]; then
-        echo "    env:   ${ENV_VARS[*]}"
+        echo "    env:   ${#ENV_VARS[@]} vars"
     fi
     echo
 
