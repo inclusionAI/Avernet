@@ -507,6 +507,13 @@ impl ProviderManagementService for NoopProviderManagementService {
         Err(service_not_configured("provider management service"))
     }
 
+    async fn update_provider_bot(
+        &self,
+        _command: UpdateProviderBotCommand,
+    ) -> ServiceResult<UpdateProviderBotOutcome> {
+        Err(service_not_configured("provider management service"))
+    }
+
     async fn set_provider_disabled(
         &self,
         _provider_id: &str,

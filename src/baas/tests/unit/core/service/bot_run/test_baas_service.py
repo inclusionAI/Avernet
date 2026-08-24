@@ -2739,3 +2739,259 @@ class TestBaasBotServiceAttachmentPassthrough:
         mock_client.send_message.assert_awaited_once()
         call_kw = mock_client.send_message.call_args.kwargs
         assert call_kw.get("attachments") is None
+
+
+# ==================== Test SendMessage Eval Consistency Check ====================
+
+
+class TestSendMessageEvalConsistencyCheck:
+    """send_message / send_message_stream 中的 eval 一致性检查。"""
+
+    @pytest.fixture
+    def service_with_eval(self, config, wss_resolver, mock_pool):
+        """创建带 eval_consistency_check 的 BaasBotService。"""
+        from unittest.mock import MagicMock
+
+        eval_check = MagicMock()
+        eval_check.check_default_tag_consistency.return_value = True
+        return BaasBotService(
+            config=config,
+            client_pool=mock_pool,
+            wss_resolver=wss_resolver,
+            session_service=MagicMock(),
+            eval_consistency_check=eval_check,
+        ), eval_check
+
+    @pytest.mark.asyncio
+    async def test_send_message_with_eval_id_calls_consistency_check(
+        self, service_with_eval, mock_pool
+    ):
+        """send_message 中 metadata 包含 eval_id 时应调用一致性检查。"""
+        service, eval_check = service_with_eval
+        binding = _make_binding_info(baas_session_id="SESSION-eval")
+
+        mock_client = AsyncMock()
+        mock_client.send_message = AsyncMock(return_value=("eval response", "done"))
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed"),
+        ):
+            await service.send_message(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+                chat_metadata={"eval_id": "eval-123"},
+            )
+
+        eval_check.check_default_tag_consistency.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_send_message_without_eval_id_skips_consistency_check(
+        self, service_with_eval, mock_pool
+    ):
+        """send_message 中 metadata 不含 eval_id 时不调用一致性检查。"""
+        service, eval_check = service_with_eval
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+
+        mock_client = AsyncMock()
+        mock_client.send_message = AsyncMock(return_value=("ok", "done"))
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed"),
+        ):
+            await service.send_message(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+                chat_metadata={},
+            )
+
+        eval_check.check_default_tag_consistency.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_message_eval_id_no_plugin_logs_warning(
+        self, config, wss_resolver, mock_pool
+    ):
+        """send_message 中 eval_id 存在但 eval_consistency_check=None 时记录警告。"""
+        service = BaasBotService(
+            config=config,
+            client_pool=mock_pool,
+            wss_resolver=wss_resolver,
+            session_service=MagicMock(),
+            eval_consistency_check=None,
+        )
+        binding = _make_binding_info(baas_session_id="SESSION-eval")
+
+        mock_client = AsyncMock()
+        mock_client.send_message = AsyncMock(return_value=("ok", "done"))
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed"),
+        ):
+            await service.send_message(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+                chat_metadata={"eval_id": "eval-123"},
+            )
+
+
+class TestSendMessageStreamEvalConsistencyCheck:
+    """send_message_stream 中的 eval 一致性检查。"""
+
+    @pytest.fixture
+    def service_with_eval(self, config, wss_resolver, mock_pool):
+        """创建带 eval_consistency_check 的 BaasBotService。"""
+        from unittest.mock import MagicMock
+
+        eval_check = MagicMock()
+        eval_check.check_default_tag_consistency.return_value = True
+        return BaasBotService(
+            config=config,
+            client_pool=mock_pool,
+            wss_resolver=wss_resolver,
+            session_service=MagicMock(),
+            eval_consistency_check=eval_check,
+        ), eval_check
+
+    @pytest.mark.asyncio
+    async def test_send_message_stream_with_eval_id_calls_consistency_check(
+        self, service_with_eval, mock_pool
+    ):
+        """send_message_stream 中 metadata 包含 eval_id 时应调用一致性检查。"""
+        from secbaas.community.api.sse import StreamChunk
+
+        service, eval_check = service_with_eval
+        binding = _make_binding_info(baas_session_id="SESSION-eval")
+
+        mock_client = AsyncMock()
+
+        async def _stream_chunks(*args, **kwargs):
+            yield StreamChunk(type="delta", content="chunk1")
+
+        mock_client.send_message_stream = _stream_chunks
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed"),
+            patch.object(service, "_mark_session_failed"),
+        ):
+            chunks = []
+            async for chunk in service.send_message_stream(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+                chat_metadata={"eval_id": "eval-456"},
+            ):
+                chunks.append(chunk)
+
+        eval_check.check_default_tag_consistency.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_send_message_stream_without_eval_id_skips_check(
+        self, service_with_eval, mock_pool
+    ):
+        """send_message_stream 中 metadata 不含 eval_id 时不调用一致性检查。"""
+        from secbaas.community.api.sse import StreamChunk
+
+        service, eval_check = service_with_eval
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+
+        mock_client = AsyncMock()
+
+        async def _stream_chunks(*args, **kwargs):
+            yield StreamChunk(type="delta", content="chunk1")
+
+        mock_client.send_message_stream = _stream_chunks
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed"),
+            patch.object(service, "_mark_session_failed"),
+        ):
+            chunks = []
+            async for chunk in service.send_message_stream(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+                chat_metadata={},
+            ):
+                chunks.append(chunk)
+
+        eval_check.check_default_tag_consistency.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_message_stream_eval_id_no_plugin_logs_warning(
+        self, config, wss_resolver, mock_pool
+    ):
+        """send_message_stream 中 eval_id 存在但 eval_consistency_check=None 时记录警告。"""
+        from secbaas.community.api.sse import StreamChunk
+
+        service = BaasBotService(
+            config=config,
+            client_pool=mock_pool,
+            wss_resolver=wss_resolver,
+            session_service=MagicMock(),
+            eval_consistency_check=None,
+        )
+        binding = _make_binding_info(baas_session_id="SESSION-eval")
+
+        mock_client = AsyncMock()
+
+        async def _stream_chunks(*args, **kwargs):
+            yield StreamChunk(type="delta", content="chunk1")
+
+        mock_client.send_message_stream = _stream_chunks
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed"),
+            patch.object(service, "_mark_session_failed"),
+        ):
+            chunks = []
+            async for chunk in service.send_message_stream(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+                chat_metadata={"eval_id": "eval-789"},
+            ):
+                chunks.append(chunk)

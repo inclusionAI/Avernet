@@ -43,7 +43,7 @@ class BotServiceProtocol(Protocol):
     def check_create_bot_preflight(self, *args: Any, **kwargs: Any) -> Any: ...
 
     # Whether Workspace Hosting (applicationCoding) is bound in this deployment.
-    # The route preflight consults this to answer 503 before any side effect.
+    # The shared create flow consults this before Passport or persistence effects.
     def is_workspace_hosting_available(self) -> bool: ...
 
     # Whether the owner has no Bots yet. ``create_flow`` keeps this separate

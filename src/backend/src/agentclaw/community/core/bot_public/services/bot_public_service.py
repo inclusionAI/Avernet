@@ -78,10 +78,10 @@ _BCS_VISIBILITY_FIELD_BY_SCOPE: dict[str, str] = {
 }
 
 # 慢连路径(走工单)在 BCS friend_ext 下记录工单的 sub-key 随 public_scope 联动:
-# user → public_user_approval; agent → public_public_approval。内层 block 形状一致。
+# user → public_user_approval; agent → public_agent_approval。内层 block 形状一致。
 _BCS_APPROVAL_KEY_BY_SCOPE: dict[str, str] = {
     "user": "public_user_approval",
-    "agent": "public_public_approval",
+    "agent": "public_agent_approval",
 }
 
 # AGREE 回调时把 public_*_approval 子块里的 view_friend_deps 提到 friend_ext 顶层,
@@ -812,7 +812,7 @@ class BotPublicService:
 
         public_scope 非空即新版发布回调 (caller 保证 bot_id == bot_uid):
         - 把 (_BCS_APPROVAL_KEY_BY_SCOPE) 对应的 friend_ext 子块
-          (public_user_approval/public_public_approval) 的 status 写成 last_operate
+          (public_user_approval/public_agent_approval) 的 status 写成 last_operate
           (AGREE/DISAGREE/CANCEL)。
         - AGREE 时同时翻 BCS 可见性字段 (_BCS_VISIBILITY_FIELD_BY_SCOPE):
             - public_scope=user → user_visibility = block.visibility (block 存的请求值,
@@ -886,7 +886,7 @@ class BotPublicService:
         if public_scope:
             # New-version callback (public_scope 非空 → bot_id 即 bot_uid):
             # GET friend_ext → 按 public_scope 子块 (public_user_approval/
-            # public_public_approval) 写 status = last_operate → PATCH 回。
+            # public_agent_approval) 写 status = last_operate → PATCH 回。
             try:
                 return self._apply_callback_decision(
                     bot_uid=bot_id, public_scope=public_scope, last_operate=last_operate
@@ -1495,6 +1495,11 @@ class BotPublicService:
             if bot is None:
                 continue
             metadata_item = metadata_by_address[address]
+            # COSEC: The BCS value reached this service only after the adapter
+            # validated its composite address; fall back only to the exact joined Backend address.
+            bot["bot_uuid"] = metadata_item.bot_uuid or (
+                f"{address.bot_id}:{address.entity_id}"
+            )
             for field_name in (
                 "is_friend",
                 "visibility",

@@ -203,6 +203,10 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     ticket_repository = providers.Dependency()
     session_ticket_repository = providers.Dependency()
     device_callback_handler = providers.Dependency()
+    # 评测环境 Plugin 依赖（由 ApplicationContainer 注入 real/stub 实现）
+    eval_binding_resolver = providers.Dependency()
+    eval_consistency_check = providers.Dependency()
+    eval_session_log = providers.Dependency()
 
     # ── Auth service ──────────────────────────────────────────────────────────
 
@@ -394,6 +398,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         ac_bot_repo=ac_bot_repo,
         publish_repo=ac_bot_publish_repo,
         binding_repo=device_binding_repo,
+        eval_binding_resolver=eval_binding_resolver,
     )
 
     # Engine adapter registry — 按 config.plugins.engine_adapter 切 stub/real,
@@ -478,6 +483,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         wss_resolver=bot_wss_dispatcher,
         session_service=session_service,
         engine_adapter_registry=engine_adapter_registry,
+        eval_consistency_check=eval_consistency_check,
     )
 
     bot_qpm_manage_service = providers.Singleton(
@@ -635,6 +641,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         ),
         system_config_service=system_config_service,
         default_request_timeout=config.bot_runner.default_timeout,
+        eval_session_log=eval_session_log,
     )
 
     bcn_downlink_service = providers.Singleton(

@@ -1325,6 +1325,33 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}/startup-script` | Set/replace it; takes effect next start | `Envelope[StartupScript]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/startup-script` | Clear it | `Envelope[Deleted]` |
 
+#### Creating an Application Coding Bot
+
+Application Coding uses `engine=claude_code` and keeps template-specific creation parameters under `engine_properties.template` rather than flattening them into the Bot request:
+
+```json
+{
+  "bot_name": "my-app-coding-bot",
+  "bot_desc": "application coding bot",
+  "engine": "claude_code",
+  "cluster_name": "ACRA",
+  "bot_type": "personal",
+  "engine_properties": {
+    "template": {
+      "devflow_workflow": "app-flow",
+      "yuque_kb_repos": [],
+      "code_repos": [],
+      "bot_template_config": {
+        "preset_capabilities": {},
+        "ext_config": {"thetaKey": "value"}
+      }
+    }
+  }
+}
+```
+
+If create returns 202, echo the same `engine_properties` object in the POST `/{bot_id}/auth-status` body. Legacy top-level `template_type` / `template_config` are not public contract fields and return 422. The HTTP adapter maps `engine_properties.template` to the internal creation contract; it is not the server-derived runtime `extra_properties` envelope.
+
 #### Owning Business Space reassignment
 
 `PUT /openapi/v1/bots/{bot_id}/space` explicitly requires `user_id` and a JSON
@@ -1500,7 +1527,7 @@ that one design choice, and none of it is visible in the OpenAPI document.
   that restarts a container in place, the sequence does not re-run and
   neither does the script.
 
-_Deliberately **not** exposed on bots: `engine_options` on create (nothing
+_Deliberately **not** exposed on bots: top-level `template_type`/`template_config` and `engine_options` on create (nothing
 downstream reads `BotCreateSpec.extra_properties` yet, so advertising it would
 promise something the server ignores), and `cluster_name`/`engine_options` on
 update. With `extra="forbid"` these are now a 422 rather than a silent drop._

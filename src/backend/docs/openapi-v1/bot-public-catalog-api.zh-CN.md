@@ -35,7 +35,8 @@ BCS 的排序和分页边界保持不变。`tc_bot=true` 使正常数据下 BCS 
 返回实际 join 的记录。BCS 不可用或返回非法记录时固定返回 `502000 / Catalog service unavailable`，
 不会回退为 Backend-only 搜索。
 
-若 BCS 当前目录项提供 `visibility`、`is_online`、`actor_kind`、`is_friend`、`friend_ext`、
+每个成功 join 的 Search item 还会返回 `bot_uuid`：优先使用通过 BCS `<bot_id>:<entity_id>` 解析和精确 join
+校验后的 BCS 返回值；元信息端口未提供时，才以 Backend 的 `bot_id:entity_id` 兜底。若 BCS 当前目录项提供 `visibility`、`is_online`、`actor_kind`、`is_friend`、`friend_ext`、
 `friend_check_in_strategy` 或 `user_visibility`，Backend 在精确 `(bot_id, entity_id)` join 后原样返回；字段缺失或为
 `null` 时响应中省略。`is_friend` 仅在前端成对传入 `viewer_actor_type` 与 `viewer_actor_id` 且 BCS 返回该字段时出现；未传 viewer 不会以 `false` 代替。`friend_ext` 不删除内部键，前端可按需使用。Backend 不重新查询、推导或覆盖这些 BCS 值。
 
@@ -85,6 +86,7 @@ GET /openapi/v1/bots/catalog/discover?keyword=contract&top_k=10
 ```ts
 type PublicBot = {
   bot_id: string;
+  bot_uuid?: string; // 优先 BCS 返回值，缺失时为 Backend <bot_id>:<entity_id>
   entity_id: string;
   bot_type: unknown;
   name: string;

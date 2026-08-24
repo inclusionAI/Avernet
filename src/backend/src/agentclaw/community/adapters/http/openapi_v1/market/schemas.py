@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _STRICT = ConfigDict(extra="forbid", populate_by_name=True)
 _UPSTREAM_ITEM = ConfigDict(extra="allow", populate_by_name=True)
@@ -122,6 +122,12 @@ class SkillCenterTag(BaseModel):
     children: list["SkillCenterTag"] = Field(
         default_factory=list, description="Nested child tags."
     )
+
+    @field_validator("children", mode="before")
+    @classmethod
+    def normalize_children(cls, value):
+        """Normalize Skill Center leaf tags from ``null`` to an empty list."""
+        return [] if value is None else value
 
 
 class SkillMarketItem(BaseModel):

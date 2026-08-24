@@ -11,12 +11,16 @@ from __future__ import annotations
 from agentclaw.community.plugin_api.staff_dept import (
     DeptSearchItem,
     StaffDeptInfo,
+    StaffProfileInfo,
     StaffDeptPlugin,
 )
 
 
 class NoStaffDept(StaffDeptPlugin):
     """Community profile: staff department info is not available."""
+
+    def get_profile_by_work_no(self, *, work_no: str) -> StaffProfileInfo:
+        return StaffProfileInfo(work_no=work_no, nick_name=None)
 
     def get_dept_by_work_no(self, *, work_no: str) -> StaffDeptInfo:
         return StaffDeptInfo()

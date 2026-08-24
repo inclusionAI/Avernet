@@ -3292,6 +3292,7 @@ def test_eval_teardown_success():
     assert result == {
         "success": True,
         "bot_uuid": "BOT-EVAL-2",
+        "default_tag": "",
         "message": "Eval environment teardown enqueued",
     }
     # #197: teardown is now enqueued as the durable eval_teardown task (delay 0),
@@ -3302,6 +3303,66 @@ def test_eval_teardown_success():
     assert call.args[0] == EVAL_TEARDOWN_TASK
     assert call.args[1] == {"publish_id": 301, "bot_uuid": "BOT-EVAL-2", "operator": "u1"}
     assert call.kwargs["delay_seconds"] == 0
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_with_default_tag():
+    """场景三：eval_publish 传入 default_tag 时写入 ext_info。"""
+    publish_service = Mock()
+    build_service = Mock()
+    build_service.release_async = AsyncMock(
+        return_value={"bot_uuid": "BOT-EVAL-TAG", "publish_id": 902, "status": "RUNNING"}
+    )
+    build_service.generate_request_id = Mock(return_value="rid-eval-tag")
+    baas_service = Mock()
+    bot_service = Mock()
+    bot_service.get_bot.return_value = {
+        "bot_id": "bot-source",
+        "entity_id": "u1",
+        "entity_type": "staff",
+        "ext": {},
+    }
+
+    task_queue_service = Mock()
+    svc = _pf(
+        publish_service, build_service, baas_service, bot_service, _arca_router(build_service),
+        task_queue_service=task_queue_service,
+    )
+    publish_service.get_publish_by_id.return_value = _make_publish_record(
+        id=302,
+        version=3,
+        ext={"migration_path": "/tmp/m302", "config_artifact": {"engine_ext": {}}},
+    )
+
+    result = await svc.eval_publish(302, "u1", biz_id="eval_chat:bot-1:eval", default_tag="eval")
+
+    assert result["success"] is True
+    assert result["bot_uuid"] == "BOT-EVAL-TAG"
+    ext_info = build_service.release_async.await_args.kwargs["ext_info"]
+    assert ext_info["biz_id"] == "eval_chat:bot-1:eval"
+    assert ext_info["default_tag"] == "eval"
+
+
+def test_eval_teardown_with_default_tag():
+    """场景三：eval_teardown 传入 default_tag 时记录到 result。"""
+    from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+        EVAL_TEARDOWN_TASK,
+    )
+
+    build_service = Mock()
+    baas_service = Mock()
+    task_queue_service = Mock()
+    svc = _pf(
+        Mock(), build_service, baas_service, Mock(), _arca_router(build_service),
+        task_queue_service=task_queue_service,
+    )
+
+    result = svc.eval_teardown("BOT-EVAL-3", operator="u1", publish_id=303, default_tag="eval")
+
+    assert result["success"] is True
+    assert result["bot_uuid"] == "BOT-EVAL-3"
+    assert result["default_tag"] == "eval"
+    task_queue_service.enqueue.assert_called_once()
 
 
 def test_get_baas_publish_progress_success_default_include_devices_public_name():

@@ -67,6 +67,7 @@ class SpaceSummaryRecord(BaseModel):
     join_status: SpaceJoinStatus
     member_count: int
     owner_count: int
+    creator_user_name: str | None = None
 
 
 class SpaceMemberSummaryRecord(BaseModel):

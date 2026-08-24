@@ -18,10 +18,17 @@ import pytest
 
 from agentclaw.community.core.bot_management.create_flow import (
     AuthPending,
+    BotCreateContext,
+    BotCreateDeploymentMode,
     BotCreateSpec,
     create_bot_with_authorization,
 )
 from agentclaw.community.plugin_api.passport import PassportError
+
+_CONTEXT = BotCreateContext(
+    deployment_mode=BotCreateDeploymentMode.CLOUD,
+    space_kind="personal",
+)
 
 _SPEC = BotCreateSpec(
     entity_id="u1",
@@ -44,6 +51,7 @@ def _run(apply_result):
         nick_name="u1",
         bot_id="default",
         spec=_SPEC,
+        context=_CONTEXT,
         bot_service=bot_service,
         passport_plugin=passport,
         auth_rel_plugin=MagicMock(),
