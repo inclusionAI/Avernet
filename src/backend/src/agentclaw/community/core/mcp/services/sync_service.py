@@ -920,13 +920,13 @@ class MCPSyncService:
             logger.error("[MCPSyncService] %s, bot_id=%s", error, bot_id)
             return {"success": False, "error": error}
 
+        identity_modes: Mapping[str, object] = {}
         try:
-            identity_modes = self.caller_identity_repository.list_draft_call_types(
-                int(bot["id"]), str(engine_type)
-            )
-            mcp_items = passport_mcp_items_from_entries(
-                synced_mcps, identity_modes=identity_modes
-            )
+            if bot:
+                identity_modes = self.caller_identity_repository.list_draft_call_types(int(bot["id"]), str(engine_type))
+            else:
+                logger.info("[MCPSyncService] 未找到持久化 bot，按 owner 刷新 MCP scope: bot_id=%s", bot_id)
+            mcp_items = passport_mcp_items_from_entries(synced_mcps, identity_modes=identity_modes)
         except Exception as e:
             error = f"查询 MCP 调用身份失败: {e}"
             logger.error("[MCPSyncService] %s, bot_id=%s", error, bot_id)

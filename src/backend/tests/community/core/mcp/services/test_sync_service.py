@@ -144,7 +144,7 @@ class TestRefreshMcpScope:
         result = await service.refresh_mcp_scope(
             user_id="owner-1",
             entity_id="entity-1",
-            bot_id="bot-1",
+            bot_id="default",
             entity_type="staff",
             engine_type="claude_code",
         )
@@ -154,6 +154,7 @@ class TestRefreshMcpScope:
             42,
             "claude_code",
         )
+        bot_repository.get_by_id_and_owner.assert_called_once_with("default", "owner-1")
         assert passport_update.update_passport.call_args.kwargs["resource_scope"][
             "mcp_items"
         ] == [
@@ -166,6 +167,45 @@ class TestRefreshMcpScope:
             {
                 "mcp_code": "mcp.owner",
                 "mcp_name": "Owner MCP",
+                "mcp_desc": None,
+                "identity_mode": "owner",
+            },
+        ]
+
+    @pytest.mark.asyncio
+    async def test_updates_virtual_default_bot_without_caller_identity_lookup(self):
+        """A default bot without an ac_bots row still refreshes owner MCP scope."""
+        caller_identity_repository = MagicMock()
+        bot_repository = MagicMock()
+        bot_repository.get_by_id_and_owner.return_value = None
+        passport_update = MagicMock()
+        passport_update.query_passport_clis.return_value = []
+
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[
+                {"server_code": "mcp.default", "name": "Default MCP"},
+            ]),
+            passport_update=passport_update,
+            bot_repository=bot_repository,
+            caller_identity_repository=caller_identity_repository,
+        )
+
+        result = await service.refresh_mcp_scope(
+            user_id="owner-1",
+            entity_id="entity-1",
+            bot_id="default",
+            entity_type="staff",
+            engine_type="openclaw",
+        )
+
+        assert result["success"] is True
+        caller_identity_repository.list_draft_call_types.assert_not_called()
+        assert passport_update.update_passport.call_args.kwargs["resource_scope"][
+            "mcp_items"
+        ] == [
+            {
+                "mcp_code": "mcp.default",
+                "mcp_name": "Default MCP",
                 "mcp_desc": None,
                 "identity_mode": "owner",
             },
