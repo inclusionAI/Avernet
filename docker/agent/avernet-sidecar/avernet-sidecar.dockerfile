@@ -41,25 +41,23 @@ RUN apt-get update && \
 
 # Optionally trust an internal gateway CA. Place the cert at
 # docker/agent/avernet-sidecar/internal-gateway-ca.crt in the build
-# context. Not committed to the repository.
-COPY docker/agent/avernet-sidecar/internal-gateway-ca.crt /usr/local/share/ca-certificates/ant-internal-gateway-ca.crt
-RUN update-ca-certificates
+# context (not committed). Absent = skipped.
+COPY docker/agent/avernet-sidecar/internal-gateway-ca.crt* /tmp/
+RUN if [ -f /tmp/internal-gateway-ca.crt ]; then \
+        cp /tmp/internal-gateway-ca.crt /usr/local/share/ca-certificates/ant-internal-gateway-ca.crt; \
+    fi \
+    && update-ca-certificates
 
 # Config renderer (Python, no compilation needed).
 COPY docker/agent/avernet-sidecar/render.py /usr/local/bin/config-renderer
 RUN chmod +x /usr/local/bin/config-renderer && \
     sed -i '1s|^#!/usr/bin/env python3|#!/usr/bin/python3|' /usr/local/bin/config-renderer
 
-# MITM CA certificate and key. COPY from build context — the caller
-# must place ca.crt and ca.key in docker/agent/avernet-sidecar/ before
-# building. These are NOT committed to the repository (.gitignore'd).
+# MITM CA certificate and key. Generate with gen-mitm-ca.sh before building.
+# These are .gitignore'd and NOT committed to the repository.
+RUN mkdir -p /etc/sidecar/certs/mitm-ca
 COPY docker/agent/avernet-sidecar/mitm-ca.crt /etc/sidecar/certs/mitm-ca/ca.crt
 COPY docker/agent/avernet-sidecar/mitm-ca.key /etc/sidecar/certs/mitm-ca/ca.key
-RUN mkdir -p /etc/sidecar/certs/mitm-ca && \
-    curl -fsSL docker/agent/avernet-sidecar/mitm-ca.crt \
-         -o /etc/sidecar/certs/mitm-ca/ca.crt && \
-    curl -fsSL docker/agent/avernet-sidecar/mitm-ca.key \
-         -o /etc/sidecar/certs/mitm-ca/ca.key
 
 # Scripts and configs.
 COPY docker/agent/avernet-sidecar/iptables-setup.sh    /usr/local/bin/iptables-setup.sh
