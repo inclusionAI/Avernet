@@ -68,12 +68,12 @@ class TaskRecoveryLifecycle(LifecycleBase):
         try:
             graph_repo = self._injector.get(TaskGraphRepositoryProtocol)
         except Exception:  # noqa: BLE101 未绑图仓储 → 无可恢复图
-            logger.info("[task-recovery] graph repository not bound, recovery disabled")
+            logger.info("[task][task-recovery] graph repository not bound, recovery disabled")
             return None
         try:
             task_service = self._injector.get(TaskService)
         except Exception as exc:  # noqa: BLE101 任务服务装配失败 → 本周期跳过
-            logger.warning("[task-recovery] task service not resolvable: %s", exc)
+            logger.warning("[task][task-recovery] task service not resolvable: %s", exc)
             return None
         self._worker = TaskRecoveryWorker(
             graph_repo,
@@ -85,13 +85,13 @@ class TaskRecoveryLifecycle(LifecycleBase):
 
     async def startup(self) -> None:
         if not self._enabled:
-            logger.info("[task-recovery] disabled (set TASK_RECOVERY_ENABLED=1 to enable)")
+            logger.info("[task][task-recovery] disabled (set TASK_RECOVERY_ENABLED=1 to enable)")
             return
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
         logger.info(
-            "[task-recovery] started: interval=%ss lease=%ss instance=%s",
+            "[task][task-recovery] started: interval=%ss lease=%ss instance=%s",
             self._interval, self._lease_seconds, self._instance_id,
         )
 
@@ -101,7 +101,7 @@ class TaskRecoveryLifecycle(LifecycleBase):
         self._stop_event.set()
         if self._thread.is_alive():
             self._thread.join(timeout=5)
-        logger.info("[task-recovery] stopped")
+        logger.info("[task][task-recovery] stopped")
 
     def _loop(self) -> None:
         while not self._stop_event.is_set():
@@ -110,8 +110,8 @@ class TaskRecoveryLifecycle(LifecycleBase):
                 try:
                     recovered = asyncio.run(worker.recover_once(limit=100))
                     if recovered:
-                        logger.info("[task-recovery] recovered tasks=%s", recovered)
+                        logger.info("[task][task-recovery] recovered tasks=%s", recovered)
                 except Exception:
-                    logger.exception("[task-recovery] scan error")
+                    logger.exception("[task][task-recovery] scan error")
             # honor shutdown without sleeping the full interval when asked to stop
             self._stop_event.wait(timeout=self._interval)

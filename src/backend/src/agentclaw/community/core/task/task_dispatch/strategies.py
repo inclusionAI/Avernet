@@ -115,7 +115,7 @@ class SearchBasedDispatchStrategy:
             return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_owner")
         candidates = await _prefetch_candidates(self._discover, node, graph)
         prompt = _compose_search_prompt(node, candidates)
-        logger.info("[search] owner=%s node=%s 候选=%s", owner, node.node_id,
+        logger.info("[task][search] owner=%s node=%s 候选=%s", owner, node.node_id,
                     [c.get("bot_id") for c in candidates])
         run = await self._bot.send_and_wait_async(
             bot_id=owner, message=prompt, metadata={"phase": "search"},
@@ -128,7 +128,7 @@ class SearchBasedDispatchStrategy:
             _tc = ((_spec.goal.objective or _spec.metadata.instruction or _spec.metadata.title) or "").strip()
             if _tc:
                 sr.group_formation.extend_props["task_context"] = _tc
-        logger.info("[task_dispatch_search] node=%s → outcome=%s bot_id=%s group=%s miss=%s",
+        logger.info("[task][task_dispatch_search] node=%s → outcome=%s bot_id=%s group=%s miss=%s",
                     node.node_id, sr.outcome, sr.bot_id, sr.group_id, sr.miss_reason)
         return sr
 
@@ -173,7 +173,7 @@ async def _prefetch_candidates(discover, node: TaskNode, graph: TaskExecutionGra
                 tokens.append(t)
     if not tokens:
         return []
-    logger.info("[search] node=%s 分词 tokens=%s", node.node_id, tokens)
+    logger.info("[task][search] node=%s 分词 tokens=%s", node.node_id, tokens)
 
     async def _q(kw: str) -> list[dict]:
         try:

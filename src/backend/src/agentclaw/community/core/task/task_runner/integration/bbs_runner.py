@@ -22,7 +22,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     """
     task_id = execution_graph.task_id
     if bcn is None or bot is None:
-        logger.info("[bbs-runner] skip: bcn/bot 缺失 task=%s", task_id)
+        logger.info("[task][bbs-runner] skip: bcn/bot 缺失 task=%s", task_id)
         return
     try:
         entries = await asyncio.to_thread(
@@ -31,13 +31,13 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         if len(entries) > 10:
             entries = entries[:10]
     except Exception as exc:
-        logger.warning("[bbs-runner] roster 取失败 task=%s:%s", task_id, exc)
+        logger.warning("[task][bbs-runner] roster 取失败 task=%s:%s", task_id, exc)
         return
     if not entries:
-        logger.info("[bbs-runner] 无 dream bot 命中 task=%s,留可恢复态", task_id)
+        logger.info("[task][bbs-runner] 无 dream bot 命中 task=%s,留可恢复态", task_id)
         return
 
-    logger.info("[bbs-runner] roster 取成功 task=%s, num=%d", task_id, len(entries))
+    logger.info("[task][bbs-runner] roster 取成功 task=%s, num=%d", task_id, len(entries))
     # Phase 1: bid (并发评估,3分钟超时)
     try:
         bid_results = await asyncio.wait_for(
@@ -48,7 +48,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
             timeout=_OVERALL_TIMEOUT,
         )
     except asyncio.TimeoutError:
-        logger.info("[bbs-runner] bid 超时(180s)task=%s,取已回复", task_id)
+        logger.info("[task][bbs-runner] bid 超时(180s)task=%s,取已回复", task_id)
         bid_results = []
 
     # 解析回复
@@ -58,7 +58,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         if bid and bid.get("completion_rate", 0) > 0:
             bids.append(bid)
     if not bids:
-        logger.info("[bbs-runner] 无有效 bid task=%s,留可恢复态", task_id)
+        logger.info("[task][bbs-runner] 无有效 bid task=%s,留可恢复态", task_id)
         return
 
     # Phase 2: select + claim + dispatch
@@ -67,7 +67,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     try:
         graph.claim_bbs_owner(task_id, winner_bot_id)
     except Exception as exc:
-        logger.warning("[bbs-runner] claim 失败 task=%s:%s", task_id, exc)
+        logger.warning("[task][bbs-runner] claim 失败 task=%s:%s", task_id, exc)
         return
 
     msg = _task_msg(skill_name, task_id, backend_url, winner_bot_id)
@@ -81,7 +81,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         graph.update_task_node_info(
             TaskNodePatch(task_id=task_id, node_id=task_id, extend_props_patch={"bbs_owner": None})
         )
-        logger.warning("[bbs-runner] send 失败 bot=%s task=%s:%s", winner_bot_id, task_id, exc)
+        logger.warning("[task][bbs-runner] send 失败 bot=%s task=%s:%s", winner_bot_id, task_id, exc)
 
 
 async def _bid_one(bot, rost_entry, execution_graph) -> dict | None:
@@ -95,7 +95,7 @@ async def _bid_one(bot, rost_entry, execution_graph) -> dict | None:
             metadata={"biz_task_id": task_id}, timeout=_BID_TIMEOUT,
         )
     except Exception as exc:
-        logger.warning("[bbs-runner] bid send_and_wait 失败 bot=%s:%s", bot_id, exc)
+        logger.warning("[task][bbs-runner] bid send_and_wait 失败 bot=%s:%s", bot_id, exc)
         return None
     return {"bot_id": bot_id, "run": run}
 

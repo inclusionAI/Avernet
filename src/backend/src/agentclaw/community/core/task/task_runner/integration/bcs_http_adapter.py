@@ -116,7 +116,7 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         # Do not move the persistent pool to another loop. A per-call client
         # is safe here and is closed on the loop that created it.
         logger.warning(
-            "[bcs_http] event loop changed; using isolated client previous_loop=%s current_loop=%s",
+            "[task][bcs_http] event loop changed; using isolated client previous_loop=%s current_loop=%s",
             id(self._client_loop),
             id(current_loop),
         )
@@ -139,24 +139,24 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         if extra_headers:
             headers.update(extra_headers)
         logger.info(
-            "[bcs_http] request method=%s path=%s json_keys=%s idempotency=%s",
+            "[task][bcs_http] request method=%s path=%s json_keys=%s idempotency=%s",
             method, path, sorted((json or {}).keys()), bool(idempotency_key),
         )
         try:
             async with self._client_for_current_loop() as client:
                 r = await client.request(method, path, json=json, headers=headers)
         except Exception:
-            logger.exception("[bcs_http] request transport failed method=%s path=%s", method, path)
+            logger.exception("[task][bcs_http] request transport failed method=%s path=%s", method, path)
             raise
         logger.info(
-            "[bcs_http] response method=%s path=%s status=%s body=%s",
+            "[task][bcs_http] response method=%s path=%s status=%s body=%s",
             method, path, r.status_code, _response_summary(r),
         )
         try:
             _map_status(r)
         except Exception:
             logger.exception(
-                "[bcs_http] response rejected method=%s path=%s status=%s body=%s",
+                "[task][bcs_http] response rejected method=%s path=%s status=%s body=%s",
                 method, path, r.status_code, _response_summary(r),
             )
             raise

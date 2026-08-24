@@ -40,7 +40,7 @@ class TaskRecoveryWorker:
                 await self._resume(task_id)
                 recovered.append(task_id)
             except Exception:
-                logger.exception("task recovery failed task_id=%s", task_id)
+                logger.exception("[task]task recovery failed task_id=%s", task_id)
             finally:
                 self._repo.release_lease(task_id, instance_id=self._instance_id)
         return recovered

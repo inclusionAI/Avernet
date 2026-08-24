@@ -87,7 +87,7 @@ class TaskService:
             self._harness.set_on_harness(self._engine.on_harness)
             import threading as _t
             _t.Thread(target=self._harness.run_poll_loop, daemon=True, name="task-harness").start()
-            logger.info("[task-service] harness 旁路巡检线程已启动(SLA 超时/FAILED 重派/PENDING 派发超时重搜推)")
+            logger.info("[task][task-service] harness 旁路巡检线程已启动(SLA 超时/FAILED 重派/PENDING 派发超时重搜推)")
 
     def _build_engine(self, *, bot=None, bcs=None, discover=None) -> ExecutionEngine:
         """构造编排核:ExecutionEngine(graph, bot=, bcs=, discover=)。引擎内部 ``_build_*`` new 自带策略 +
@@ -131,7 +131,7 @@ class TaskService:
             except IntegrityError as exc:
                 return TaskOpResult(task_id=task_id, success=False, error=f"persist failed: {exc}")
         graph = self._graph.initialize_graph(task_info)
-        logger.info("[execute] task=%s source=%s title=%s → initialize(run_id=%s)+on_execute(后台推进)",
+        logger.info("[task][execute] task=%s source=%s title=%s → initialize(run_id=%s)+on_execute(后台推进)",
                     task_id, task_info.owner_bot_id,
                     task_info.task_spec.metadata.title, graph.run_id)
         task_type = request.execution_config.get("task_type")
@@ -243,7 +243,7 @@ class TaskService:
             return False
         rec = self._run_info_repo.get_by_session_id(session_id)
         if rec is None:
-            logger.warning("[converge] session_id=%s 在 task_node_run_info 中未找到", session_id)
+            logger.warning("[task][converge] session_id=%s 在 task_node_run_info 中未找到", session_id)
             return False
         loop_task_id = f"{rec.task_id}::{rec.node_id}"
         result: dict[str, Any] = {"success": success}
@@ -256,11 +256,11 @@ class TaskService:
         })
         try:
             await self._callback.report_result(data)
-            logger.info("[converge] session_id=%s → loop_task_id=%s success=%s → on_report 收敛已触发",
+            logger.info("[task][converge] session_id=%s → loop_task_id=%s success=%s → on_report 收敛已触发",
                         session_id, loop_task_id, success)
             return True
         except Exception as exc:  # noqa: BLE001 收敛失败不阻断落库(回调查询/落库已完成)
-            logger.warning("[converge] session_id=%s → on_report 失败: %s", session_id, exc)
+            logger.warning("[task][converge] session_id=%s → on_report 失败: %s", session_id, exc)
             return False
 
     async def apply_manager_worker_event(self, raw: dict) -> None:
@@ -299,13 +299,13 @@ class TaskService:
                 )
                 self._callback_repo.upsert(rec)
             except Exception as exc:  # noqa: BLE001 落库失败不阻断收敛
-                logger.warning("[manager_worker] upsert task_callback 失败 session_id=%s: %s", sid, exc)
+                logger.warning("[task][manager_worker] upsert task_callback 失败 session_id=%s: %s", sid, exc)
         if et == "session.completed" and sid:
             try:
                 success = (data.get("reason") == "completed")
                 await self.converge_by_session(sid, success=success, output=data.get("summary"))
             except Exception as exc:  # noqa: BLE001 收敛失败不阻断落库
-                logger.warning("[manager_worker] session.completed 收敛失败 session_id=%s: %s", sid, exc)
+                logger.warning("[task][manager_worker] session.completed 收敛失败 session_id=%s: %s", sid, exc)
 
     def _on_bg_done(self, bg: "asyncio.Task") -> None:
         """后台 on_execute 完成:脱离跟踪集 + 异常可见(记 log,不抛)。"""
@@ -314,7 +314,7 @@ class TaskService:
             return
         exc = bg.exception()
         if exc is not None:
-            logger.error("[execute] 后台 on_execute 异常: %s", exc, exc_info=exc)
+            logger.error("[task][execute] 后台 on_execute 异常: %s", exc, exc_info=exc)
 
     async def redrive_task(self, task_id: str) -> None:
         """Recovery resume:重投一个已 hydrate 的非终态任务(实例重启 / 滚动发布后)。
@@ -324,7 +324,7 @@ class TaskService:
         bg = asyncio.create_task(self._engine.redrive(task_id))
         self._bg_tasks.add(bg)
         bg.add_done_callback(self._on_bg_done)
-        logger.info("[redrive] task=%s 后台 redrive 已调度", task_id)
+        logger.info("[task][redrive] task=%s 后台 redrive 已调度", task_id)
 
     async def drain_background(self) -> None:
         """await 所有在途后台 on_execute 推进完成。
@@ -356,7 +356,7 @@ class TaskService:
             try:
                 rec = self._callback_repo.get_latest_by_session(sid)
             except Exception as exc:  # noqa: BLE001 反查失败不阻断只读 dashboard
-                logger.warning("[dashboard] execution_graph 反查失败 session_id=%s: %s", sid, exc)
+                logger.warning("[task][dashboard] execution_graph 反查失败 session_id=%s: %s", sid, exc)
                 rec = None
             if rec is not None and rec.execution_graph is not None:
                 graph.execution_graph = rec.execution_graph
@@ -381,7 +381,7 @@ class TaskService:
                 try:
                     cache[bot_id] = self._bot_service.get_bot_by_id(bot_id)
                 except Exception as exc:  # noqa: BLE001 查 bot 失败不阻断只读 dashboard
-                    logger.warning("[dashboard] get_bot_by_id 失败 bot_id=%s: %s", bot_id, exc)
+                    logger.warning("[task][dashboard] get_bot_by_id 失败 bot_id=%s: %s", bot_id, exc)
                     cache[bot_id] = None
             info = cache.get(bot_id)
             if isinstance(info, dict):

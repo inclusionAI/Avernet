@@ -64,7 +64,7 @@ class TaskExecutor:
         async def _one(node: TaskNode) -> bool:
             mode = node.run_info.run_mode
             if mode == "bbs":
-                logger.info("[task_executor] bbs node dispatched (no-op): task=%s node=%s assignee=%s",
+                logger.info("[task][task_executor] bbs node dispatched (no-op): task=%s node=%s assignee=%s",
                             node.task_id, node.node_id, node.run_info.assignee)
                 return True
             if mode == "single_bot":
@@ -179,7 +179,7 @@ class TaskExecutor:
                 f"group bindings reference bots outside GroupFormation.bot_ids: {unknown}"
             )
         logger.info(
-            "[task_executor] form_coop_group start collab=%s bot_ids=%s referenced_ids=%s manager_bot_id=%s originator_bot_id=%s",
+            "[task][task_executor] form_coop_group start collab=%s bot_ids=%s referenced_ids=%s manager_bot_id=%s originator_bot_id=%s",
             mode,
             bot_ids,
             referenced_ids,
@@ -190,12 +190,12 @@ class TaskExecutor:
             resolved = self._identity_resolver.resolve_many(referenced_ids)
         except Exception:
             logger.exception(
-                "[task_executor] form_coop_group identity resolution failed collab=%s bot_ids=%s referenced_ids=%s",
+                "[task][task_executor] form_coop_group identity resolution failed collab=%s bot_ids=%s referenced_ids=%s",
                 mode, bot_ids, referenced_ids,
             )
             raise
         logger.info(
-            "[task_executor] form_coop_group identities resolved collab=%s resolved=%s",
+            "[task][task_executor] form_coop_group identities resolved collab=%s resolved=%s",
             mode, resolved,
         )
 
@@ -306,7 +306,7 @@ class TaskExecutor:
             req_kwargs["context"] = _task_context
         req = BcsCreateGroupRequest(**req_kwargs)
         logger.info(
-            "[task_executor] form_coop_group create_group request collab=%s driver_bot=%s participants=%s group_strategy=%s has_definition=%s has_bindings=%s",
+            "[task][task_executor] form_coop_group create_group request collab=%s driver_bot=%s participants=%s group_strategy=%s has_definition=%s has_bindings=%s",
             mode,
             req.driver_bot,
             req.participants,
@@ -318,12 +318,12 @@ class TaskExecutor:
             res = await self._bcs.create_group(req)
         except Exception:
             logger.exception(
-                "[task_executor] form_coop_group create_group failed collab=%s driver_bot=%s participants=%s group_strategy=%s",
+                "[task][task_executor] form_coop_group create_group failed collab=%s driver_bot=%s participants=%s group_strategy=%s",
                 mode, req.driver_bot, req.participants, req.group_strategy,
             )
             raise
         logger.info(
-            "[task_executor] form_coop_group create_group succeeded collab=%s group_id=%s session_id=%s run_id=%s",
+            "[task][task_executor] form_coop_group create_group succeeded collab=%s group_id=%s session_id=%s run_id=%s",
             mode, res.group_id, res.session_id, res.run_id,
         )
         self._group_meta[res.group_id] = {

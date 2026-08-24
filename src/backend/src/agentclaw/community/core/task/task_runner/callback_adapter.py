@@ -237,7 +237,7 @@ class TaskLoopCallback:
         try:
             prior = finder(event_id)
         except Exception as exc:  # noqa: BLE001 查幂等键失败不阻断回投(落库/推进仍进行)
-            logger.warning("[task-callback] idempotency check failed event_id=%s: %s", event_id, exc)
+            logger.warning("[task][task-callback] idempotency check failed event_id=%s: %s", event_id, exc)
             return False
         return prior is not None and prior.process_status == "PROCESSED"
 
@@ -258,7 +258,7 @@ class TaskLoopCallback:
         if payload is not None:
             event_id = _derive_event_id(payload, "start")
             if self._is_already_processed(event_id):
-                logger.info("[task-callback] idempotent start event_id=%s", event_id)
+                logger.info("[task][task-callback] idempotent start event_id=%s", event_id)
                 return
             record = _to_callback_record(payload, event_id=event_id, process_status="PROCESSED")
         patch = self._adapter.adapt_start(data)
@@ -280,7 +280,7 @@ class TaskLoopCallback:
         if payload is not None:
             event_id = _derive_event_id(payload, "result")
             if self._is_already_processed(event_id):
-                logger.info("[task-callback] idempotent result event_id=%s", event_id)
+                logger.info("[task][task-callback] idempotent result event_id=%s", event_id)
                 return
             record = _to_callback_record(payload, event_id=event_id, process_status="PROCESSED")
         patch = self._adapter.adapt(data)
@@ -311,7 +311,7 @@ class TaskLoopCallback:
         try:
             self._callback_repo.upsert(record)
         except Exception as exc:  # noqa: BLE001 审计落库失败不阻断回投推进
-            logger.warning("[task-callback] fallback persist task_callback failed: %s", exc)
+            logger.warning("[task][task-callback] fallback persist task_callback failed: %s", exc)
 
     def _persist(self, data: TaskCallbackData, *, disposition: str = "ingest") -> None:
         """``data`` 为 dict → 解析回调记录字段,落 ``task_callback``(按 (run_id,node_id) upsert);
@@ -328,4 +328,4 @@ class TaskLoopCallback:
         try:
             self._callback_repo.upsert(_to_callback_record(payload, event_id=event_id))
         except Exception as exc:  # noqa: BLE001 落库失败不影响编排核推进
-            logger.warning("[task-callback] persist task_callback failed: %s", exc)
+            logger.warning("[task][task-callback] persist task_callback failed: %s", exc)
