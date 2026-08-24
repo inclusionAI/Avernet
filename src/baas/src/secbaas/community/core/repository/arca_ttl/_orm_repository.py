@@ -1,4 +1,4 @@
-"""ORM-based repository for baas_arca_ttl_renewal_schedule table.
+"""ORM-based repository for baas_bot_ttl_renewal_schedule table.
 
 Implements the full 11-method TtlRenewalScheduleRepository contract:
 the registration slice (register / register_if_missing) via a shared
