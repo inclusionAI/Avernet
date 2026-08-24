@@ -3,7 +3,7 @@
 Proves the ORM pipeline end-to-end on a real in-memory SQLite database
 without booting the container (RESEARCH study 7 / D-06'):
 
-1. plugin ``create_all()`` builds ``baas_arca_ttl_renewal_schedule``
+1. plugin ``create_all()`` builds ``baas_bot_ttl_renewal_schedule``
 2. first ``register()`` inserts an ACTIVE row
 3. re-registering the same uk_source performs the dialect upsert
    (sandbox_id/next_renew_at overwrite, STOPPED resurrect, fail-count
@@ -32,7 +32,7 @@ from secbaas.community.core.repository.device_binding._orm_model import (
 )
 from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 
-TABLE = "baas_arca_ttl_renewal_schedule"
+TABLE = "baas_bot_ttl_renewal_schedule"
 HOT_DEVICE_TABLE = "baas_device"
 HOT_BINDING_TABLE = "ac_entity_device_binding"
 ENV = "pre"
