@@ -34,7 +34,17 @@ SEG_MARKER = {
 }
 ORDER = ["recognition", "planning", "search", "acceptance", "bbs", "arch_analysis", "planning_arch"]
 
-# 部署期清洗:预发包把本地联调 URL 重定向到预发网关;置 None 则保留源 localhost(本地 e2e 变体)。
+# 部署变体源(DEPLOY_GATEWAY 置非空=预发部署包时覆盖):acceptance 段改用 push 变体
+# (协作群 driver/owner 验收+push 上报);本地 e2e(DEPLOY_GATEWAY=None)用原 poll 源。
+SRC_DEPLOY = {
+    "acceptance": os.path.join(FEAT, "segments", "acceptance-push.md"),
+}
+SEG_MARKER_DEPLOY = {
+    "acceptance": "> 段4 · 任务验收(acceptance;协作群 driver/owner 验收+push 上报)",
+}
+
+# 部署期清洗:预发部署包剥 recognition 段 execute 行的 host 联调注释,留纯路径(skill 不写死 url,host 由平台层运行时解析);
+# 置 None 则保留源 localhost 联调注释(本地 e2e 变体)。DEPLOY_GATEWAY 仅作变体开关,其 URL 不再注入 skill。
 DEPLOY_GATEWAY = "https://teamclawgw-pre.alipay.com"
 
 
@@ -68,12 +78,53 @@ def body(path):
     with open(path, encoding="utf-8") as f:
         raw = f.read()
     return demote_one(strip_frontmatter(raw)).strip("\n")
+
+
+_HOST_COMMENT = re.compile(r"(POST /api/v1/collaboration/tasks/execute)\s*#[^\n]*")
+
+
 def deploy_strip(text):
-    """部署期清洗:本地联调 base url -> 预发网关 + "本地联调"注释 -> "预发"(源保留 localhost 供本地 e2e)。DEPLOY_GATEWAY=None 时透传(本地变体)。"""
+    """部署期清洗:剥 recognition 段 execute 行的 host 联调注释,留纯路径 `POST /api/v1/collaboration/tasks/execute`
+    (skill 不写死 url,host 由平台层运行时解析;适配最新调用方式:recognition 仅出路径,acceptance 走 poll 输出 JSON,
+    bbs 走 push 从引擎消息取 {backend})。DEPLOY_GATEWAY=None 时透传(本地 e2e 变体保留 localhost 注释)。"""
     if not DEPLOY_GATEWAY:
         return text
-    text = text.replace("http://localhost:8888", DEPLOY_GATEWAY)
-    text = text.replace("本地联调：", "预发：")  # 注释前缀随网关重定向:本地联调 -> 预发
+    return _HOST_COMMENT.sub(r"\1", text)
+
+
+# acceptance 段 poll→push 文案替换对(仅部署变体启用;HEADER/README 内的 acceptance 描述随之翻转)
+_ACC_PAIRS = [
+    ("- 任务验收(acceptance):worker bot——叶子执行后自验收",
+     "- 任务验收(acceptance):协作群 driver/owner bot——群产出后自验收并 push 上报(single_bot 叶子由框架内联 JSON 走 poll,不走本段)"),
+    ("| 你是 worker bot,刚执行完叶子子任务,需按其 goal.acceptances 自验收(已收到 goal / instruction / sibling_outputs / execute_output) | 段4 任务验收 | 折叠进回投 result={success, data, gaps};不独立回投 |",
+     "| 你是协作群 driver/owner bot,群已跑完叶子并产出交付物,需按其 goal.acceptances 自验收并上报(从群上下文取 {backend}/{loop_task_id}) | 段4 任务验收 | push:POST {backend}/api/v1/collaboration/tasks/callback/report {loop_task_id,result{success,data,gaps}}→on_report;single_bot 叶子不走本段(框架内联 JSON→poll) |"),
+    ("段4(worker 叶子自验收)",
+     "段4(协作群 driver/owner 验收+push)"),
+    ("| worker 叶子自验收 | 段4 任务验收 | Avernet singlebox_e2e/skills/acceptance/SKILL.md |",
+     "| 协作群 driver/owner 验收+push | 段4 任务验收 | 部署变体 segments/acceptance-push.md(本地 e2e 用源 acceptance/SKILL.md,poll) |"),
+]
+
+
+def src_for(k):
+    """部署变体(DEPLOY_GATEWAY 非空)用 SRC_DEPLOY 覆盖;否则原 SRC。"""
+    if DEPLOY_GATEWAY and k in SRC_DEPLOY:
+        return SRC_DEPLOY[k]
+    return SRC[k]
+
+
+def marker_for(k):
+    """部署变体的段 marker 覆盖(acceptance 段 poll→push 描述)。"""
+    if DEPLOY_GATEWAY and k in SEG_MARKER_DEPLOY:
+        return SEG_MARKER_DEPLOY[k]
+    return SEG_MARKER[k]
+
+
+def acceptance_replace(text):
+    """部署变体:把 HEADER/README 内 acceptance 的 poll 描述翻为 push(段体已由 SRC_DEPLOY 提供 push 变体)。"""
+    if not DEPLOY_GATEWAY:
+        return text
+    for poll, push in _ACC_PAIRS:
+        text = text.replace(poll, push)
     return text
 
 
@@ -137,10 +188,11 @@ def main():
     os.makedirs(REFS, exist_ok=True)
     parts = [HEADER]
     for k in ORDER:
-        parts.append(SEG_MARKER[k] + "\n\n")
-        parts.append(body(SRC[k]) + "\n\n")
+        parts.append(marker_for(k) + "\n\n")
+        parts.append(body(src_for(k)) + "\n\n")
     skillmd = "".join(parts).rstrip("\n") + "\n"
-    skillmd = deploy_strip(skillmd)  # 部署期清洗:localhost->预发网关(recognition 段体仅此处重定向,余零改)
+    skillmd = deploy_strip(skillmd)  # 部署期清洗:剥 recognition 段 execute 行 host 注释(skill 不写死 url,平台层解析 host)
+    skillmd = acceptance_replace(skillmd)  # 部署变体:acceptance 段 poll→push(marker/段体/路由表文案)
     with open(os.path.join(PKG, "SKILL.md"), "w", encoding="utf-8") as f:
         f.write(skillmd)
 
@@ -199,7 +251,7 @@ task-loop/
 `assemble.py` 常量 `DEPLOY_GATEWAY` 控制变体:置预发网关 `https://teamclawgw-pre.alipay.com` 则把 recognition 段本地联调 URL 重定向到预发(生成预发部署包);置 `None` 则保留源 localhost(本地 e2e 变体)。源 SKILL.md 不动,两变体一键再生。
 """
     with open(os.path.join(PKG, "README.md"), "w", encoding="utf-8") as f:
-        f.write(README)
+        f.write(acceptance_replace(README))
 
     print("assembled task-loop skill at", PKG)
 

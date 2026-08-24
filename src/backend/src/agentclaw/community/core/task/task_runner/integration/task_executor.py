@@ -295,6 +295,13 @@ class TaskExecutor:
         # 任务描述(目标)→ BCS 创建群的 context 字段。BCS ``resolve_session_topic`` 把 group.context
         # 兜底注入 <GroupContext> 的 `目标` 行(session input 为空时,如建群 BotJoined)。
         _task_context = gf.extend_props.get("task_context")
+        # 任务验收 push 链路:协作群叶子派发期注入 loop_task_id,此处写入群 context,
+        # 供 driver/owner bot 按 acceptance 段4 自验收后 push 回投 /callback/report
+        # (loop_task_id 定位执行节点;backend 取本 TaskExecutor 的 api_base_url,不写死)。
+        _loop_task_id = gf.extend_props.get("loop_task_id")
+        if _loop_task_id and self._api_base_url:
+            _task_context = ((_task_context or "") +
+                             f"\n[task-loop] loop_task_id={_loop_task_id}; backend={self._api_base_url}")
         if _task_context:
             req_kwargs["context"] = _task_context
         req = BcsCreateGroupRequest(**req_kwargs)

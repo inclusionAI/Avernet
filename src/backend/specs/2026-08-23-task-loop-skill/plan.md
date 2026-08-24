@@ -95,4 +95,14 @@
 
 ## 部署期清洗(本地 e2e vs 预发双变体)
 
-`assemble.py` 常量 `DEPLOY_GATEWAY` 控制变体:置 `https://teamclawgw-pre.alipay.com` → 生成预发部署包(本地联调 `http://localhost:8888` → 预发网关;`本地联调`注释→`预发`);置 `None` → 保留源 localhost(本地 e2e 变体)。源 SKILL.md 不动,两变体均可一键再生;校验脚本按 `deploy_strip(expected)` 比对。recognition 段体除该 URL 重定向外逐字节不变(零改硬约束的唯一下沉豁免)。`assemble.py` 暴露 `strip_frontmatter`/`demote_one`/`body` 与源路径常量供校验脚本 import(顶部 `if __name__` 守卫,import 无副作用)。
+`assemble.py` 常量 `DEPLOY_GATEWAY` 控制变体:置非空(预发部署包)→ 剥 recognition 段 execute 行的 host 联调注释,留纯路径 `POST /api/v1/collaboration/tasks/execute`(skill 不写死 url,host 由平台层运行时解析);置 `None` → 保留源 localhost 联调注释(本地 e2e 变体)。源 SKILL.md 不动,两变体均可一键再生;校验脚本按 `deploy_strip(expected)` 比对。recognition 段体除该注释剥除外逐字节不变(零改硬约束的唯一下沉豁免)。`assemble.py` 暴露 `strip_frontmatter`/`demote_one`/`body` 与源路径常量供校验脚本 import(顶部 `if __name__` 守卫,import 无副作用)。
+
+### 调用方式适配(对齐 Avernet 最新代码,全 skill 不写死 url)
+
+- recognition:仅出 `POST /api/v1/collaboration/tasks/execute` 路径,host 由平台层运行时解析(预发/本地由平台配置决定)。
+- acceptance(worker 叶):走 **poll**——worker 只输出 JSON `{success:bool,data:{result},gaps:[...]}`,框架 `TaskExecutorResultPoller` 轮询终态 → `Translator.adapt` → `TaskCallbackData` → `engine.on_report` 写执行节点;不调 API、不写死 url。`success` 必须为 JSON bool,FAIL 须非空 gaps,否则 `terminal_result_invalid`→harness。
+- bbs(中继):走 **push**——`{backend}/{task_id}/{bot_id}` 由引擎 `bbs_runner._task_msg` 注入 BBS 通知消息,skill 从消息取(不写死),POST `{backend}/api/v1/collaboration/tasks/bbs/attach|result`;endpoint/body 对齐 `BbsAttachDTO`/`BbsResultDTO`/`AcceptanceResultDTO`。
+- planning/search/arch/planning-arch:输出 JSON 由框架消费,无 url。
+- **acceptance push(协作群叶子,已落地)**:部署变体 acceptance 段(本 feature dir `segments/acceptance-push.md`)描述 driver/owner bot 判定后 push `POST {backend}/api/v1/collaboration/tasks/callback/report` body `{loop_task_id,result{success,data,gaps}}` → 兜底 `TaskCallbackDataDTO` → `report_result` → `on_report`;`{backend}/{loop_task_id}` 由引擎注入群 context,不写死。single_bot 叶子走 poll(`format_execute` 内联 JSON,不命中 acceptance 段)。
+- **引擎注入(最小侵入,gating 安全)**:`ExecutionEngine [drain]` 拉群处 `gf.extend_props.setdefault("loop_task_id", f"{task_id}::{node_id}")`;`TaskExecutor.form_coop_group` 在群 `context` 追加 `[task-loop] loop_task_id=...; backend={api_base_url}`(仅 `loop_task_id` 存在才追加→建群/单 bot 路径不侵入;现有测试均不设 `loop_task_id`→不触发→不受影响)。`on_report` 幂等,push 与 poll 并存安全。
+- **遗留(后续)**:① 协作群产出后 verify-dispatch 触发 driver/owner 跑 acceptance(当前 bot 自触发);② HIT_GROUP 既有群无 form_coop_group→另设注入点;③ 按需关 coop_group poll 仅留 push。

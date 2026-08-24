@@ -68,7 +68,10 @@
 - N2 单包多段：单 `SKILL.md` 承载 5 段；段体原文嵌入，顶层路由为唯一新增逻辑。
 - N3 可再生：`SKILL.md` 由 5 个源 SKILL.md + 路由模板拼装；附再生成步骤，源更新时按相同规则再生成。
 - N4 无行为漂移：除顶层路由外不动各段内部。
-- N5 双变体 + 部署清洗:`assemble.py` 常量 `DEPLOY_GATEWAY` 控制变体——置预发网关则生成预发部署包(recognition 段本地联调 `http://localhost:8888` → `https://teamclawgw-pre.alipay.com`,`本地联调`注释→`预发`),置 None 则保留源 localhost(本地 e2e 变体);源 SKILL.md 不动,两变体可再生。recognition 段体除该 URL 重定向外逐字节不变(零改硬约束的唯一下沉豁免)。
+- N5 双变体 + 部署清洗:`assemble.py` 常量 `DEPLOY_GATEWAY` 控制变体——置非空(预发部署包)则剥 recognition 段 execute 行的 host 联调注释,留纯路径 `POST /api/v1/collaboration/tasks/execute`(skill 不写死 url,host 由平台层运行时解析);置 None 则保留源 localhost 联调注释(本地 e2e 变体)。源 SKILL.md 不动,两变体可再生;recognition 段体除该注释剥除外逐字节不变(零改硬约束的唯一下沉豁免)。
+- N6 调用方式适配(最新代码):各段调用契约对齐 Avernet 最新实现,且全 skill 不写死 host——recognition 仅出路径,host 由平台层运行时解析;**acceptance 协作群叶子走 push**(部署变体:driver/owner bot 判定后 POST `{backend}/api/v1/collaboration/tasks/callback/report` body `{loop_task_id,result{success,data,gaps}}` → 兜底 `TaskCallbackDataDTO` → `report_result` → `on_report` 写执行节点;`{backend}/{loop_task_id}` 由引擎注入群 context,skill 从群上下文取,不写死),**single_bot 叶子走 poll**(`format_execute` 内联指示 worker 输出 JSON,经 `TaskExecutorResultPoller→Translator→on_report`,不命中 acceptance 段、不 push);bbs(中继)走 push(`{backend}/{task_id}/{bot_id}` 由引擎 `bbs_runner._task_msg` 注入消息,POST `{backend}/.../bbs/attach|result`);planning/search/arch/planning-arch 输出 JSON 由框架消费,无 url。 deployed SKILL.md grep `localhost|teamclawgw` = 0(仅 example.com 样例数据)。
+- N7 acceptance push 协作群注入(引擎侧,最小侵入):`ExecutionEngine` `[drain]` 拉群处对协作群叶子 `gf.extend_props.setdefault("loop_task_id", f"{task_id}::{node_id}")`;`TaskExecutor.form_coop_group` 在群 `context` 末尾追加 `[task-loop] loop_task_id=...; backend={api_base_url}`(gating:仅 `loop_task_id` 存在才追加→建群/单 bot 路径不侵入)。driver/owner bot 读群 context 取 `{backend}/{loop_task_id}` 后按 acceptance 段4 push。`on_report` 幂等,push 与兜底 poll 可安全并存。
+- N8 遗留(后续):① 协作群产出后触发 driver/owner 跑 acceptance 段4 的 verify-dispatch 编排(当前依赖 bot 自触发/观察群产出);② HIT_GROUP(复用既有群)无 `form_coop_group`→需另注入点;③ 按需关 coop_group poll 仅留 push。
 
 ## 成功标准
 

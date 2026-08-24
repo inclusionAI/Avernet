@@ -44,7 +44,8 @@
 - [x] 7a.4 逐字节校验:arch-analysis/planning-arch 段体 == `demote(strip(源))`(仅标题降一级);两段体无 `---` HR
 - [x] 7a.5 frontmatter description 改 7 段单行(CSC002),tags 增 `arch-analysis`/`task-planning-arch`;README 改 7 段触发对照
 - [x] 7a.6 场景叠加层契约:SKILL.md 增 `## 场景叠加层` 子节(泛化主干段1~段5 默认不可改 + 案例叠加段信号门控可插拔 + 扩展契约);spec/plan 同步两层结构与 D6/R6
-- [x] 7b.1 部署期清洗:assemble.py 增 `DEPLOY_GATEWAY`+`deploy_strip`,预发包把 recognition 段 `http://localhost:8888` → `https://teamclawgw-pre.alipay.com`(+ `本地联调`注释→`预发`)(源不动,`DEPLOY_GATEWAY=None` 留本地变体);verify 按 `deploy_strip(expected)` 比对通过
+- [x] 7b.1 部署期清洗:assemble.py `deploy_strip` 改为**剥 host 注释**(预发包剥 recognition 段 execute 行 `# 本地联调：http://localhost:8888/...` 注释,留纯路径 `POST /api/v1/collaboration/tasks/execute`,skill 不写死 url,host 由平台层解析;源不动,`DEPLOY_GATEWAY=None` 留本地变体);verify 按 `deploy_strip(expected)` 比对 7 段全通过
+- [x] 7b.2 调用方式适配(最新代码):全 skill 无写死 host(deployed grep `localhost|teamclawgw`=0,仅 example.com 样例);acceptance=poll 输出 JSON→on_report;bbs=push 从消息取 `{backend}`;recognition 仅出路径平台层解析;7 段逐字节一致 + H1=1/`---`=8/refs=5/CSC002 单行 全通过
 
 ## G7 包装校验、再生成脚本与 README
 - [x] 7.1 校验：顶部 frontmatter 仅一组 `---`；recognition 段保留源 `---` 横线(全文 `grep -c '^---$'` = 8：2 frontmatter + 6 HR);SkillParser 只解析顶部 frontmatter 不受影响
@@ -52,4 +53,11 @@
 - [x] 7.3 写 `assemble.sh`：按拼装规则从 5 源 + 路由模板再生成 `SKILL.md` 与 `references/`
 - [x] 7.4 跑 `assemble.sh` 产出与手写 SKILL.md 逐字节一致（再生性验证）
 - [x] 7.5 写 README：预装到所有 bot 的说明 + 从源再生成步骤 + 真源清单 + 版本 pin
+## G7c acceptance 走 push(仅协作群;single_bot 保持 poll)
+- [x] 7c.1 部署变体 acceptance 段:新增 `segments/acceptance-push.md`(driver/owner bot 判定后 push `POST {backend}/api/v1/collaboration/tasks/callback/report` `{loop_task_id,result{success,data,gaps}}`,不写死 url;single_bot 叶子不走本段)
+- [x] 7c.2 assemble.py 变体感知:`SRC_DEPLOY`/`SEG_MARKER_DEPLOY`/`src_for`/`marker_for`/`acceptance_replace`(部署模式 acceptance 段体+marker+路由表/README 文案翻 push;本地 e2e 仍 poll 源)
+- [x] 7c.3 引擎注入(最小):`engine.py [drain]` 拉群 `gf.extend_props.setdefault(loop_task_id)` + `task_executor.form_coop_group` 群 context 追加 `[task-loop] loop_task_id=..; backend=..`(gating:仅 loop_task_id 存在;建群/单 bot 路径不侵入)
+- [x] 7c.4 校验:7 段逐字节一致(acceptance 部署变体 2406)+ H1=1/`---`=8/refs=5/CSC002 单行 + deployed 无 `localhost|teamclawgw` + 现有测试不设 loop_task_id→enrichment 不触发(无回归)
+- [ ] 7c.5 遗留:协作群产出后 verify-dispatch 触发 / HIT_GROUP 注入点 / 按需关 coop_group poll(后续)
+
 - [ ] 7.6 回归：装到 chat/owner/worker/relay 各触发一轮(含 arch 场景:owner 段7 规划→N_architects MISS 升 BBS;中继 bot 段5 接力 + 段6 mock 名册)，输出与"单独装该段"一致（recognition 卡片 / planning `List[TaskSpec]`+has_gap / search 4 态 / acceptance result / bbs result）；无 cue 时静默  > ⏳ 待环境验证：需 Avernet singlebox + 4 类 bot(chat/owner/worker/relay) 触发一轮做端到端回归,本会话无该环境,留待联调环境补验。除 G7.6 外静态校验(段体逐字节 / frontmatter / 路由 / references)均通过。

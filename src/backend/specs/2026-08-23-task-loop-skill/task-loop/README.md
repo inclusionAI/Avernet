@@ -25,7 +25,7 @@ task-loop/
 | 框架 [planning](非 arch 场景) | 段2 任务规划 | Avernet singlebox_e2e/skills/planning/SKILL.md |
 | 框架 [planning] 且 prompt 含「某某某公司」 | 段7 任务规划·arch 场景 | Avernet singlebox_e2e/skills/planning-arch/SKILL.md |
 | 框架 [search] | 段3 派发搜推 | Avernet singlebox_e2e/skills/search/SKILL.md |
-| worker 叶子自验收 | 段4 任务验收 | Avernet singlebox_e2e/skills/acceptance/SKILL.md |
+| 协作群 driver/owner 验收+push | 段4 任务验收 | 部署变体 segments/acceptance-push.md(本地 e2e 用源 acceptance/SKILL.md,poll) |
 | 引擎 BBS 通知 | 段5 BBS 接力 | Avernet specs/2026-08-09-.../bbs-relay-single-task/SKILL.md |
 | 叶子 instruction 含「某某某公司」 | 段6 架构师名册 mock | Avernet singlebox_e2e/skills/arch-analysis/SKILL.md |
 

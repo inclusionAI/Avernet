@@ -14,7 +14,7 @@ tags: [task, loop, orchestrate, task-recognition, task-planning, task-search, ta
 - 任务规划(planning):owner bot——框架 prompt 头部 `[planning]`(非 arch 场景)
 - 任务规划·arch 场景(planning-arch):owner bot——框架 `[planning]` 且 prompt 含「某某某公司」,按根验收交付物集合 + done_children 确定式查表
 - 任务派发搜推(search):owner bot——框架 prompt 头部 `[search]`
-- 任务验收(acceptance):worker bot——叶子执行后自验收
+- 任务验收(acceptance):协作群 driver/owner bot——群产出后自验收并 push 上报(single_bot 叶子由框架内联 JSON 走 poll,不走本段)
 - BBS 接力(bbs-relay-single-task):中继 bot——引擎主动通知
 - 架构师名册 mock(arch-analysis):中继/worker bot——叶子 instruction 含「某某某公司」,返伪造架构师名册
 
@@ -30,11 +30,11 @@ tags: [task, loop, orchestrate, task-recognition, task-planning, task-search, ta
 | prompt 头部标记 `[planning]`,含目标节点 node_id 与任务态快照,**且 prompt 不含「某某某公司」**(非 arch 场景) | 段2 任务规划 | 返回 JSON 对象 {tasks: List[TaskSpec], has_gap, gap_detail};tasks 为空即 gap 闭=验收通过 |
 | prompt 头部标记 `[planning]`,**且 prompt 含「某某某公司」**(arch 场景;交付物含架构师名册/技术栈概览/双视角分析等) | 段7 任务规划·arch 场景 | 同段2 输出契约;按根验收交付物集合 + done_children 确定式查表产 N_tech_stack / N_dual_view / N_architects |
 | prompt 头部标记 `[search]`,含子任务需求与候选集 catalog | 段3 任务派发搜推 | 返回 4 态 JSON(HIT_SINGLE / HIT_GROUP / HIT_MULTI_BOTS / MISS) |
-| 你是 worker bot,刚执行完叶子子任务,需按其 goal.acceptances 自验收(已收到 goal / instruction / sibling_outputs / execute_output) | 段4 任务验收 | 折叠进回投 result={success, data, gaps};不独立回投 |
+| 你是协作群 driver/owner bot,群已跑完叶子并产出交付物,需按其 goal.acceptances 自验收并上报(从群上下文取 {backend}/{loop_task_id}) | 段4 任务验收 | push:POST {backend}/api/v1/collaboration/tasks/callback/report {loop_task_id,result{success,data,gaps}}→on_report;single_bot 叶子不走本段(框架内联 JSON→poll) |
 | 收到引擎主动发的 BBS 任务消息(含 task_id + 后端 base url + 自身 bot_id,且引擎已替你占根) | 段5 BBS 接力 | 跳过 scan / claim / 自判,直接 attach -> 执行 -> result |
 | 叶子执行输入(instruction)含关键词「某某某公司」,且非框架 `[planning]`/`[search]` 头 | 段6 架构师名册 mock | 不联网,直接返 mock 伪造架构师名册 JSON(domain/architects[]/note) |
 
-**优先级**(实际多互斥,显式定义避免歧义):段5(引擎 BBS 通知) > 段7/段2/段3(框架 `[planning]`/`[search]` 头;arch 场景「某某某公司」命中段7,优先于段2) > 段4(worker 叶子自验收) > 段1(`/task` / `[RESUME_TASK]` / 副屏标签) > 段6(叶子 instruction 含「某某某公司」)。
+**优先级**(实际多互斥,显式定义避免歧义):段5(引擎 BBS 通知) > 段7/段2/段3(框架 `[planning]`/`[search]` 头;arch 场景「某某某公司」命中段7,优先于段2) > 段4(协作群 driver/owner 验收+push) > 段1(`/task` / `[RESUME_TASK]` / 副屏标签) > 段6(叶子 instruction 含「某某某公司」)。
 
 **段5 ↔ 段6 并用(arch 接力链路唯一例外)**:段5 命中(BBS 通知)时,其 attach 的 scoped 叶子若 instruction 含「某某某公司」,叶子产出按**段6 arch-analysis** 规则(mock 名册),段5 仍管 attach / result 协议。除此之外严格"只跑命中段"。
 
@@ -330,7 +330,7 @@ tags: [task, loop, orchestrate, task-recognition, task-planning, task-search, ta
 Skill 到 `task_ready` 即完成任务定义；用户点击「执行」后，**不再调用本 Skill**。平台层必须读取 `task_ready.task` 和本次 `/task` 指令解析出的任务模式，转换为任务协作中心请求并调用：
 
 ```http
-POST /api/v1/collaboration/tasks/execute  # 预发：https://teamclawgw-pre.alipay.com/api/v1/collaboration/tasks/execute
+POST /api/v1/collaboration/tasks/execute
 ```
 
 请求体类型为接口文档中的 `TaskRequest`：
@@ -717,52 +717,61 @@ target 仍是 `t_case`)。按目标 `node_id` **+ 快照 `done_children`(已 DON
 
 > 同强约束:严格按 `demand.node_id` 查表;`bot_id`/`bot_ids` 须在 `catalog` 里按 `bot_name` 匹配取真实 `bot_id`,匹配不到 → 该节点 MISS(不得用其它 bot 顶替);catalog 里表未提及的 bot(owner、中继 bot 等)是预查噪音,必须忽略。
 
-> 段4 · 任务验收(acceptance;worker 叶子自验收)
+> 段4 · 任务验收(acceptance;协作群 driver/owner 验收+push 上报)
 
 ## task-acceptance
 
-任务目标驱动的**验收** skill,运行在 **worker bot**(**方案 Y**);叶子节点 execute 时 worker 内部自调判定,框架不感知、不主动 dispatch verify。判定结果折叠进 execute 回投 `result.success`/`result.data`/`result.gaps`,经 `TaskExecutorResultPoller → 翻译器 → TaskCallbackData → on_report` 翻态。
+任务目标驱动的**验收 + push 上报** skill,运行在 **协作群的 driver/owner bot**;协作群跑完叶子子任务并产出交付物后,driver/owner 自调本段判定是否达到该叶 `goal.acceptances`,并**主动 push 上报**到任务后端(参考 bbs 接力上报方式,不写死 url)。**single_bot 叶子不走本段**:由框架 `format_execute` 内联指示 worker 直接输出 JSON `{success,data,gaps}`,经 `TaskExecutorResultPoller` poll 收口 → `on_report`,不 push。
 
-> 聚合节点 / 根节点的"验收"≠独立步骤,而是 **planning 的 gap 计算**(返回 `[]` = gap 闭 = 验收通过),由 owner bot 上的 `task-planning` skill 承担,本 skill 不参与聚合/根验收。
+> 聚合节点 / 根节点验收 = planning 的 gap 计算(返回 `[]` = gap 闭 = 验收通过),由 owner bot 的 task-planning 承担,本段不参与聚合/根验收。
 
 ### 环境约束(必须遵守)
 
-> **禁止联网搜索**。本 skill 运行在 singlebox 本地 teamclaw bot,**无任何联网能力**:
-> 不得调用任何 web_search / 联网检索 / 外部 HTTP 工具。
-> 验收判定仅基于 worker 本次 execute 已产出的 `execute_output`、`goal.acceptances` 与上游 `sibling_outputs`,结合自身知识判定;不得因"无法联网核实"而判 FAIL。
+> **禁止联网搜索**。本 skill 运行在 teamclaw bot,无联网能力:不得调用任何 web_search / 联网检索 / 外部 HTTP 工具。验收判定仅依据协作群本次叶子产出、`goal.acceptances` 与上游上下文,结合自身知识判定;不得因"无法联网核实"而判 FAIL。
+> **不写死 url**:后端 base url 与 loop_task_id 从协作群上下文/指令取(派发期注入群 context),不假设固定地址。
+
 ### 触发条件
 
-worker bot 收到 execute 指令(框架 `format_execute` 组装的 prompt:目标 `goal` + 指令 `instruction` + 上游产出 `sibling_outputs`),执行完子任务后**自调**本 skill 判定是否达到该叶节点的 `goal.acceptances`。
+你是协作群的 driver/owner bot,协作群已跑完叶子子任务并产出交付物;需按该叶 `goal.acceptances` 自验收并 push 上报结果。single_bot 叶子不命中本段。
 
-### 输入(执行完子任务后 worker 内部传入)
+### 输入(从协作群上下文/指令取)
 
 | 字段 | 含义 |
 |---|---|
-| `goal.objective` / `goal.acceptances[]` | 该叶子子任务自身的目标与验收标准 |
-| `node_instruction` | 节点执行指令 |
-| `sibling_outputs` | 上游兄弟产出(执行上下文) |
-| `execute_output` | 本次 worker 执行产出的内容 |
+| `{backend}` | 任务后端 base url(派发期注入协作群 context,不写死) |
+| `{loop_task_id}` | `{task_id}::{node_id}`(派发期注入协作群 context,定位要回投的执行节点) |
+| `goal.objective` / `goal.acceptances[]` | 该叶子子任务的目标与验收标准 |
+| 协作群产出 | 协作群本次叶子执行产出的交付物(从群会话/最终输出取) |
 
-### 输出(折叠进 execute 回投 result)
+### 执行步骤
 
-本 skill 不独立回投;判定结论折叠进 `TaskCallbackData.result`:
+1. **判定**:比对协作群产出与 `goal.acceptances[]`,得出 success 与 gaps(逻辑同 single_bot 自验收)。
 
-- 验收通过 → `result={"success": true, "data": {"result": "实际产出"}, "gaps": []}`
-- 验收不通过 → `result={"success": false, "data": {"result": "已有产出"}, "gaps": ["gap 描述"]}`
-  - `success` 必须是 JSON bool;FAIL 的 `gaps` 必须为非空字符串列表,驱动 `on_report` FAIL 链路。
-  - 最终只输出 JSON 对象,不要输出 Markdown 代码块或额外解释;否则框架按 `terminal_result_invalid` 进入 Harness。
+2. **push 上报**:发 HTTP 请求
 
-### 确定式判定剧本(案例 gwqie46v7hzr1w6h)
+   `POST {backend}/api/v1/collaboration/tasks/callback/report`
 
-| 叶节点 | 默认判定 | FAIL 注入位(AC-5 治愈路径) |
-|---|---|---|
-| `N_overview` | PASS(产"行业全貌") | — |
-| `N_market` / `N_tech` / `N_compete` / `N_customer` | PASS(产对应维度分析) | 可注入:`gaps=["tech 深度不足,缺 NAND 层数演进数据"]`(触发 N_tech 重试) |
-| `N_practice_bbs` | PASS(产"一手实践") | — |
-| `N_report` | PASS(产"尽调报告") | — |
-| `N_<x>_remediate`(补救子) | PASS(产补救产出) | — |
+   请求体(JSON 对象,不要输出 Markdown 代码块或额外解释):
+   ```
+   {"loop_task_id": "{loop_task_id}", "result": {"success": true|false, "data": {"result": "实际产出"}, "gaps": []}}
+   ```
+   - 验收通过 → `{"success": true, "data": {"result": "..."}, "gaps": []}`
+   - 验收不通过 → `{"success": false, "data": {"result": "已有产出"}, "gaps": ["gap 描述"]}`
+   - `success` 必须是 JSON bool;FAIL 的 `gaps` 必须为非空字符串列表(驱动 FAIL→补救链路);`data.result` 为实际产出内容;否则框架按 `terminal_result_invalid` 进入 Harness。
 
-> 当用例要验证 FAIL 治愈(AC-5),setup 时向对应叶节点的 worker bot 注入 FAIL 分支(本 skill 按 node_id 产非空 `gaps`);否则默认 PASS。
+3. **收口**:HTTP 200 → 上报完成,框架经 `on_report` 写执行节点并翻态(`success=true`→DONE / `success=false`+非空 gaps→补救 / `result.exec_error`→harness 重投),本段结束。非 200 按下面幂等重试。
+
+### 幂等与重试
+
+`on_report` 按 `event_id`/结果摘要幂等:重复 push 同一结果不会重复翻态。网络抖动返回非 200 时,重发**同一请求体**即可(幂等保证不重复翻态);不要改换 success/gaps 重发。
+
+### 与 bbs 接力上报的关系
+
+本段 push 契约(`/callback/report` + `{loop_task_id,result{success,data,gaps}}`)与 bbs 接力上报方式一致(从消息/上下文取 `{backend}`,不写死);区别:bbs 走 `bbs/attach`+`bbs/result` 专属端点(中继 scoped 节点);本段走统一 `/callback/report`(协作群叶子节点,框架已建好节点,直接用 loop_task_id 定位回投)。
+
+### single_bot 叶子(不走本段)
+
+single_bot 叶子由框架 `format_execute` 内联指示 worker 直接输出 JSON `{success,data,gaps}`(经 poll 收口 → `on_report`),不命中本段、不 push。本段仅协作群 driver/owner 命中。
 
 > 段5 · BBS 接力(bbs-relay-single-task;触发 引擎 BBS 通知;参考文档见 references/)
 

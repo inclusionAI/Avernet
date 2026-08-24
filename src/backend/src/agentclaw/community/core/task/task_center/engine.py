@@ -866,6 +866,10 @@ class ExecutionEngine:
                     list(getattr(gf, "bot_ids", []) or []),
                     list(getattr(gf, "members_info", []) or []),
                 )
+                # 协作群叶子:注入 loop_task_id 供 form_coop_group 写入群 context,
+                # 供 driver/owner bot 验收后 push 回投 /callback/report 定位执行节点
+                # (acceptance 段4;single_bot 走 poll,不经此拉群路径)。
+                gf.extend_props.setdefault("loop_task_id", f"{node.task_id}::{node.node_id}")
                 try:
                     gid = await self._runner.form_coop_group(gf)
                     logger.info(
