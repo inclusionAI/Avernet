@@ -256,6 +256,36 @@ def test_public_local_delete_commits_cleanup_work_with_derived_state(skills, set
             assert session.query(DefaultSkillsetSkillExclusion).count() == 0
 
 
+def test_public_local_replace_rejects_a_locator_change(skills, db):
+    with avernet_tenant_scope("tenant-a"):
+        skill = skills.create(
+            {
+                "name": "local",
+                "description": "old",
+                "git_path": "local:///skills/local",
+                "user_id": "owner",
+                "bolt_id": "bot",
+            }
+        )
+
+        with pytest.raises(
+            ValueError, match="Local Skill replacement cannot change git_path"
+        ):
+            skills.replace_bot_local_skill(
+                skill_id=skill["id"],
+                owner_id="owner",
+                bot_id="bot",
+                old_locator="/skills/local",
+                new_locator="/skills/.local.replacement-1",
+                description="new",
+            )
+
+        with db.orm_session() as session:
+            persisted = session.query(Skill).one()
+            assert persisted.git_path == "local:///skills/local"
+            assert persisted.description == "old"
+
+
 @pytest.mark.skip(reason="durable cleanup work was removed")
 def test_public_local_replace_commits_locator_and_cleanup_work_atomically(skills, db):
     from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import SqlLocalSkillCleanupRepository
