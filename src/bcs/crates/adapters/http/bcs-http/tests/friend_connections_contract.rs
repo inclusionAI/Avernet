@@ -27,10 +27,10 @@ use tower::ServiceExt;
 
 struct RecordingConnectService {
     create_commands: Mutex<Vec<(String, String, Option<String>)>>,
-    approve_commands: Mutex<Vec<(String, String)>>,
-    reject_commands: Mutex<Vec<(String, String, Option<String>)>>,
-    cancel_commands: Mutex<Vec<String>>,
-    request_lookup: Mutex<std::collections::HashMap<String, PermissionRequest>>,
+    approve_commands: Mutex<Vec<(u64, String)>>,
+    reject_commands: Mutex<Vec<(u64, String, Option<String>)>>,
+    cancel_commands: Mutex<Vec<u64>>,
+    request_lookup: Mutex<std::collections::HashMap<u64, PermissionRequest>>,
     revoke_commands: Mutex<Vec<(String, String)>>,
     list_friends_commands: Mutex<Vec<String>>,
     list_requests_commands: Mutex<Vec<(String, RequestDirection, Option<RequestStatus>, u32, u32)>>,
@@ -51,8 +51,8 @@ impl Default for RecordingConnectService {
             list_friends_commands: Mutex::new(Vec::new()),
             list_requests_commands: Mutex::new(Vec::new()),
             create_result: ConnectResult {
-                request_ids: vec!["req-1".to_string()],
-                edge_ids: vec!["edge-1".to_string()],
+                request_ids: vec![1],
+                edge_ids: vec![11],
                 status: ConnectStatus::Pending,
                 auto_accepted: false,
             },
@@ -88,49 +88,49 @@ impl ConnectService for RecordingConnectService {
         Ok(self.create_result.clone())
     }
 
-    async fn approve(&self, request_id: &str, decider: &str) -> ServiceResult<Vec<String>> {
+    async fn approve(&self, request_id: u64, decider: &str) -> ServiceResult<Vec<u64>> {
         self.approve_commands
             .lock()
             .await
-            .push((request_id.to_string(), decider.to_string()));
-        Ok(vec!["edge-approved".to_string()])
+            .push((request_id, decider.to_string()));
+        Ok(vec![211])
     }
 
     async fn reject(
         &self,
-        request_id: &str,
+        request_id: u64,
         decider: &str,
         reason: Option<String>,
     ) -> ServiceResult<()> {
         self.reject_commands
             .lock()
             .await
-            .push((request_id.to_string(), decider.to_string(), reason));
+            .push((request_id, decider.to_string(), reason));
         Ok(())
     }
 
-    async fn cancel(&self, request_id: &str) -> ServiceResult<()> {
-        self.cancel_commands.lock().await.push(request_id.to_string());
+    async fn cancel(&self, request_id: u64) -> ServiceResult<()> {
+        self.cancel_commands.lock().await.push(request_id);
         Ok(())
     }
 
-    async fn get_request(&self, request_id: &str) -> ServiceResult<PermissionRequest> {
+    async fn get_request(&self, request_id: u64) -> ServiceResult<PermissionRequest> {
         self.request_lookup
             .lock()
             .await
-            .get(request_id)
+            .get(&request_id)
             .cloned()
             .ok_or_else(|| {
                 ServiceError::FriendRequestNotFound(request_id.to_string())
             })
     }
 
-    async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<Vec<String>> {
+    async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<Vec<u64>> {
         self.revoke_commands
             .lock()
             .await
             .push((caller.to_string(), target.to_string()));
-        Ok(vec!["edge-revoked".to_string()])
+        Ok(vec![311])
     }
 
     async fn list_friends(&self, actor: &str) -> ServiceResult<Vec<FriendListEntry>> {
@@ -399,7 +399,7 @@ async fn friend_connection_request_allows_human_to_act_as_owned_bot() {
     let json: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["success"], true);
     assert_eq!(json["data"]["status"], "pending");
-    assert_eq!(json["data"]["request_ids"], serde_json::json!(["req-1"]));
+    assert_eq!(json["data"]["request_ids"], serde_json::json!([1]));
 
     let calls = connect.create_commands.lock().await;
     assert_eq!(
@@ -556,8 +556,8 @@ async fn friend_connection_list_by_actor_translates_human_actor_kind() {
 async fn friend_connection_request_maps_connect_status_variants_and_accepted_alias() {
     let connect_approved = Arc::new(RecordingConnectService {
         create_result: ConnectResult {
-            request_ids: vec!["req-approved".to_string()],
-            edge_ids: vec!["edge-approved".to_string()],
+            request_ids: vec![101],
+            edge_ids: vec![111],
             status: ConnectStatus::Approved,
             auto_accepted: true,
         },
@@ -598,8 +598,8 @@ async fn friend_connection_request_maps_connect_status_variants_and_accepted_ali
 
     let connect_public = Arc::new(RecordingConnectService {
         create_result: ConnectResult {
-            request_ids: vec!["req-public".to_string()],
-            edge_ids: vec!["edge-public".to_string()],
+            request_ids: vec![102],
+            edge_ids: vec![112],
             status: ConnectStatus::PublicNoEdge,
             auto_accepted: true,
         },
@@ -676,7 +676,7 @@ async fn friend_connection_request_accepts_via_recorded_service() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/collaboration/friend-connections/requests/req-77/accept")
+                .uri("/collaboration/friend-connections/requests/77/accept")
                 .header("authorization", "Bearer caller-token")
                 .body(Body::empty())
                 .unwrap(),
@@ -688,10 +688,10 @@ async fn friend_connection_request_accepts_via_recorded_service() {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["success"], true);
-    assert_eq!(json["data"]["edge_ids"], serde_json::json!(["edge-approved"]));
+    assert_eq!(json["data"]["edge_ids"], serde_json::json!([211]));
 
     let calls = connect.approve_commands.lock().await;
-    assert_eq!(calls.as_slice(), &[("req-77".to_string(), "caller-bot".to_string())]);
+    assert_eq!(calls.as_slice(), &[(77, "caller-bot".to_string())]);
 }
 
 #[tokio::test]
@@ -711,7 +711,7 @@ async fn friend_connection_request_rejects_with_reason() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/collaboration/friend-connections/requests/req-88/reject")
+                .uri("/collaboration/friend-connections/requests/88/reject")
                 .header("authorization", "Bearer caller-token")
                 .header("content-type", "application/json")
                 .body(Body::from(serde_json::json!({ "reason": "nope" }).to_string()))
@@ -729,7 +729,7 @@ async fn friend_connection_request_rejects_with_reason() {
     let calls = connect.reject_commands.lock().await;
     assert_eq!(
         calls.as_slice(),
-        &[("req-88".to_string(), "caller-bot".to_string(), Some("nope".to_string()))]
+        &[(88, "caller-bot".to_string(), Some("nope".to_string()))]
     );
 }
 
@@ -737,9 +737,9 @@ async fn friend_connection_request_rejects_with_reason() {
 async fn friend_connection_request_cancel_and_revoke_delegate_to_service() {
     let connect = Arc::new(RecordingConnectService::default());
     connect.request_lookup.lock().await.insert(
-        "req-99".to_string(),
+        99,
         PermissionRequest {
-            request_id: "req-99".to_string(),
+            request_id: 99,
             edge_id: None,
             env: "dev".to_string(),
             from_id: "caller-bot".to_string(),
@@ -770,7 +770,7 @@ async fn friend_connection_request_cancel_and_revoke_delegate_to_service() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/collaboration/friend-connections/requests/req-99/cancel")
+                .uri("/collaboration/friend-connections/requests/99/cancel")
                 .header("authorization", "Bearer caller-token")
                 .body(Body::empty())
                 .unwrap(),
@@ -796,10 +796,10 @@ async fn friend_connection_request_cancel_and_revoke_delegate_to_service() {
     assert_eq!(revoke_response.status(), StatusCode::OK);
     let revoke_body = to_bytes(revoke_response.into_body(), usize::MAX).await.unwrap();
     let revoke_json: Value = serde_json::from_slice(&revoke_body).unwrap();
-    assert_eq!(revoke_json["data"]["revoked_edges"], serde_json::json!(["edge-revoked"]));
+    assert_eq!(revoke_json["data"]["revoked_edges"], serde_json::json!([311]));
 
     let cancel_calls = connect.cancel_commands.lock().await;
-    assert_eq!(cancel_calls.as_slice(), &["req-99".to_string()]);
+    assert_eq!(cancel_calls.as_slice(), &[99]);
     let revoke_calls = connect.revoke_commands.lock().await;
     assert_eq!(revoke_calls.as_slice(), &[("caller-bot".to_string(), "peer-bot".to_string())]);
 }
@@ -809,9 +809,9 @@ async fn friend_connection_request_cancel_and_revoke_delegate_to_service() {
 async fn friend_connection_request_cancel_rejects_other_caller() {
     let connect = Arc::new(RecordingConnectService::default());
     connect.request_lookup.lock().await.insert(
-        "req-100".to_string(),
+        100,
         PermissionRequest {
-            request_id: "req-100".to_string(),
+            request_id: 100,
             edge_id: None,
             env: "dev".to_string(),
             from_id: "other-bot".to_string(),
@@ -841,7 +841,7 @@ async fn friend_connection_request_cancel_rejects_other_caller() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/collaboration/friend-connections/requests/req-100/cancel")
+                .uri("/collaboration/friend-connections/requests/100/cancel")
                 .header("authorization", "Bearer caller-token")
                 .body(Body::empty())
                 .unwrap(),

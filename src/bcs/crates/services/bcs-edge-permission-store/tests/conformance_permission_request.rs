@@ -27,13 +27,13 @@ async fn sqlite_with_schema() -> Arc<dyn DbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("local sqlite"));
     db.execute(DbStatement::new(
         "CREATE TABLE permission_requests (\
-            request_id VARCHAR(128) NOT NULL, \
-            edge_id VARCHAR(128), \
+            id INTEGER PRIMARY KEY AUTOINCREMENT, \
+            edge_id INTEGER, \
             env VARCHAR(32) NOT NULL, \
             from_id VARCHAR(128) NOT NULL, \
             to_id VARCHAR(128) NOT NULL, \
             request_kind VARCHAR(32) NOT NULL, \
-            requested_ref_id VARCHAR(128), \
+            requested_ref_id INTEGER, \
             requested_rules TEXT, \
             message TEXT, \
             status VARCHAR(16) NOT NULL DEFAULT 'pending', \
@@ -42,8 +42,7 @@ async fn sqlite_with_schema() -> Arc<dyn DbPlugin> {
             decided_by VARCHAR(128), \
             decided_at TEXT, \
             gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-            gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-            PRIMARY KEY (request_id))",
+            gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     ))
     .await
     .expect("create permission_requests");

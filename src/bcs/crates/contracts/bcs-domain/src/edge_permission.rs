@@ -55,14 +55,14 @@ pub enum OriginatorPolicyType {
 /// `target`'s default profile id (D12).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EdgeGrant {
-    pub edge_id: String,
+    pub edge_id: u64,
     pub env: String,
     pub from_id: String,
     pub to_id: String,
     pub grant_kind: GrantKind,
     /// `PermissionProfile` -> target's default (or other) profile id;
     /// `Rules` -> opaque rules ref.
-    pub grant_ref_id: String,
+    pub grant_ref_id: u64,
     /// Inline rules; `None` unless `GrantKind::Rules`.
     #[serde(default)]
     pub rules: Option<Value>,
@@ -108,7 +108,7 @@ pub enum CapabilityStatus {
 /// default profile regardless of capabilities). See spec §3.1.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Capability {
-    pub capability_id: String,
+    pub capability_id: u64,
     pub bot_id: String,
     pub env: String,
     pub tool: String,
@@ -149,7 +149,7 @@ pub struct Rule {
 /// Every bot seeds exactly one `default` profile (wildcard-allow) at onboard.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PermissionProfile {
-    pub permission_profile_id: String,
+    pub permission_profile_id: u64,
     pub bot_id: String,
     pub env: String,
     pub name: String,
@@ -195,16 +195,16 @@ pub enum RequestStatus {
 /// A connect/apply/revoke request record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PermissionRequest {
-    pub request_id: String,
+    pub request_id: u64,
     /// Back-filled after approval creates the edge; `None` while pending.
     #[serde(default)]
-    pub edge_id: Option<String>,
+    pub edge_id: Option<u64>,
     pub env: String,
     pub from_id: String,
     pub to_id: String,
     pub request_kind: RequestKind,
     #[serde(default)]
-    pub requested_ref_id: Option<String>,
+    pub requested_ref_id: Option<u64>,
     #[serde(default)]
     pub requested_rules: Option<Value>,
     #[serde(default)]
@@ -234,7 +234,7 @@ pub enum GrantSource {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthzGrantRef {
     pub kind: GrantKind,
-    pub ref_id: String,
+    pub ref_id: u64,
     #[serde(default)]
     pub revision: Option<u64>,
     #[serde(default)]

@@ -898,16 +898,16 @@ impl FriendConnectionService for InvitationFriendshipServiceImpl {
     ) -> Result<FriendConnectionRequestView, ApplicationError> {
         let connect = self.connect_service()?;
         let request = connect
-            .get_request(&command.request_id)
+            .get_request(command.request_id)
             .await
             .map_err(map_service_error)?;
         let decider = self.resolve_request_decider(&command.caller, &request).await?;
         connect
-            .approve(&command.request_id, &decider)
+            .approve(command.request_id, &decider)
             .await
             .map_err(map_service_error)?;
         let updated = connect
-            .get_request(&command.request_id)
+            .get_request(command.request_id)
             .await
             .map_err(map_service_error)?;
         Ok(project_friend_connection_request(&updated))
@@ -919,16 +919,16 @@ impl FriendConnectionService for InvitationFriendshipServiceImpl {
     ) -> Result<FriendConnectionRequestView, ApplicationError> {
         let connect = self.connect_service()?;
         let request = connect
-            .get_request(&command.request_id)
+            .get_request(command.request_id)
             .await
             .map_err(map_service_error)?;
         let decider = self.resolve_request_decider(&command.caller, &request).await?;
         connect
-            .reject(&command.request_id, &decider, command.reason)
+            .reject(command.request_id, &decider, command.reason)
             .await
             .map_err(map_service_error)?;
         let updated = connect
-            .get_request(&command.request_id)
+            .get_request(command.request_id)
             .await
             .map_err(map_service_error)?;
         Ok(project_friend_connection_request(&updated))
@@ -940,16 +940,16 @@ impl FriendConnectionService for InvitationFriendshipServiceImpl {
     ) -> Result<FriendConnectionRequestView, ApplicationError> {
         let connect = self.connect_service()?;
         let request = connect
-            .get_request(&command.request_id)
+            .get_request(command.request_id)
             .await
             .map_err(map_service_error)?;
         self.ensure_can_cancel_request(&command.caller, &request).await?;
         connect
-            .cancel(&command.request_id)
+            .cancel(command.request_id)
             .await
             .map_err(map_service_error)?;
         let updated = connect
-            .get_request(&command.request_id)
+            .get_request(command.request_id)
             .await
             .map_err(map_service_error)?;
         Ok(project_friend_connection_request(&updated))

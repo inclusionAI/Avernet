@@ -75,7 +75,7 @@ impl RejectFriendConnectionRequestBody {
     pub fn into_command(
         self,
         caller: AuthenticatedCaller,
-        request_id: String,
+        request_id: u64,
     ) -> RejectFriendConnectionRequest {
         RejectFriendConnectionRequest {
             caller,
@@ -125,7 +125,7 @@ impl DeleteFriendConnectionQuery {
 
 pub fn cancel_command(
     caller: AuthenticatedCaller,
-    request_id: String,
+    request_id: u64,
 ) -> CancelFriendConnectionRequest {
     CancelFriendConnectionRequest { caller, request_id }
 }

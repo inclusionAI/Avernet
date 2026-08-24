@@ -28,17 +28,17 @@ pub struct CreateFriendRequestBody {
 /// `POST /friends/request` response.
 #[derive(Debug, Clone, Serialize)]
 pub struct CreateFriendRequestResponse {
-    pub request_ids: Vec<String>,
+    pub request_ids: Vec<u64>,
     /// "pending" | "approved" | "public_no_edge"
     pub status: String,
-    pub edge_ids: Vec<String>,
+    pub edge_ids: Vec<u64>,
     pub auto_accepted: bool,
 }
 
 /// `POST /friends/requests/{id}/accept` response.
 #[derive(Debug, Clone, Serialize)]
 pub struct AcceptFriendRequestResponse {
-    pub edge_ids: Vec<String>,
+    pub edge_ids: Vec<u64>,
 }
 
 /// Body for reject/cancel/revoke decision endpoints.
@@ -85,7 +85,7 @@ fn default_page_size() -> u32 {
 /// `POST /friends/{actor}/revoke` response.
 #[derive(Debug, Clone, Serialize)]
 pub struct RevokeFriendResponse {
-    pub revoked_edges: Vec<String>,
+    pub revoked_edges: Vec<u64>,
 }
 
 /// `GET /bots/{id}/friends` response.

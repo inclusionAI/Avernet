@@ -1390,20 +1390,20 @@ async fn add_sqlite_human_input_output_metadata_schema(db: &dyn DbPlugin) -> DbR
 async fn add_sqlite_edge_permission_schema(db: &dyn DbPlugin) -> DbResult<()> {
     // Five edge-permission tables (idempotent; spec §3.1).
     for stmt in [
-        "CREATE TABLE IF NOT EXISTS edge_grants (edge_id TEXT PRIMARY KEY, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, grant_kind TEXT NOT NULL, grant_ref_id TEXT NOT NULL, rules TEXT, status TEXT NOT NULL DEFAULT 'approved', originator_policy_type TEXT NOT NULL DEFAULT 'any', originator_policy_data TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS edge_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, grant_kind TEXT NOT NULL, grant_ref_id INTEGER NOT NULL, rules TEXT, status TEXT NOT NULL DEFAULT 'approved', originator_policy_type TEXT NOT NULL DEFAULT 'any', originator_policy_data TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uk_edge_from_to_env_ref ON edge_grants(from_id, to_id, env, grant_ref_id)",
         "CREATE INDEX IF NOT EXISTS idx_edge_from_env_status ON edge_grants(from_id, env, status)",
         "CREATE INDEX IF NOT EXISTS idx_edge_to_env_status ON edge_grants(to_id, env, status)",
-        "CREATE TABLE IF NOT EXISTS permission_profiles (permission_profile_id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, env TEXT NOT NULL, name TEXT NOT NULL DEFAULT 'default', description TEXT, rules_template TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, digest TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active', created_by TEXT NOT NULL, updated_by TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS permission_profiles (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT NOT NULL, env TEXT NOT NULL, name TEXT NOT NULL DEFAULT 'default', description TEXT, rules_template TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, digest TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active', created_by TEXT NOT NULL, updated_by TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uk_profile_bot_env_default ON permission_profiles(bot_id, env, is_default) WHERE status = 'active'",
         "CREATE INDEX IF NOT EXISTS idx_profile_bot_env ON permission_profiles(bot_id, env, status)",
-        "CREATE TABLE IF NOT EXISTS permission_requests (request_id TEXT PRIMARY KEY, edge_id TEXT, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, request_kind TEXT NOT NULL, requested_ref_id TEXT, requested_rules TEXT, message TEXT, status TEXT NOT NULL DEFAULT 'pending', decision_reason TEXT, created_by TEXT NOT NULL, decided_by TEXT, decided_at TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS permission_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, edge_id INTEGER, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, request_kind TEXT NOT NULL, requested_ref_id INTEGER, requested_rules TEXT, message TEXT, status TEXT NOT NULL DEFAULT 'pending', decision_reason TEXT, created_by TEXT NOT NULL, decided_by TEXT, decided_at TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
         "CREATE INDEX IF NOT EXISTS idx_req_to_env_status ON permission_requests(to_id, env, status)",
         "CREATE INDEX IF NOT EXISTS idx_req_from_env_status ON permission_requests(from_id, env, status)",
         "CREATE INDEX IF NOT EXISTS idx_req_edge ON permission_requests(edge_id)",
-        "CREATE TABLE IF NOT EXISTS capabilities (capability_id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, env TEXT NOT NULL, tool TEXT NOT NULL, operation TEXT, specifier_schema TEXT, source TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', raw_metadata TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS capabilities (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT NOT NULL, env TEXT NOT NULL, tool TEXT NOT NULL, operation TEXT, specifier_schema TEXT, source TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', raw_metadata TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
         "CREATE INDEX IF NOT EXISTS idx_cap_bot_env ON capabilities(bot_id, env, status)",
-        "CREATE TABLE IF NOT EXISTS authz_decision_logs (decision_id TEXT PRIMARY KEY, env TEXT NOT NULL, task_id TEXT, run_id TEXT, from_id TEXT NOT NULL, to_id TEXT NOT NULL, originator TEXT, context_type TEXT NOT NULL, decision TEXT NOT NULL, reason_code TEXT NOT NULL, grant_refs TEXT NOT NULL, context_json TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS authz_decision_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, env TEXT NOT NULL, task_id TEXT, run_id TEXT, from_id TEXT NOT NULL, to_id TEXT NOT NULL, originator TEXT, context_type TEXT NOT NULL, decision TEXT NOT NULL, reason_code TEXT NOT NULL, grant_refs TEXT NOT NULL, context_json TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
         "CREATE INDEX IF NOT EXISTS idx_adl_env_from_to ON authz_decision_logs(env, from_id, to_id)",
     ] {
         db.execute(DbStatement::new(stmt)).await?;
@@ -2068,11 +2068,11 @@ assert_eq!(report.pending_versions[10].version, 11);
     async fn edge_table_audit_columns_backfilled_for_legacy_db() -> DbResult<()> {
         let db = LocalSqliteDbPlugin::new()?;
         // Legacy shape: edge_grants as built before the gmt_* audit-column
-        // requirement landed (full real columns, minus gmt_create/gmt_modified).
+        // requirement landed (current bigint PK + real columns, minus gmt_create/gmt_modified).
         db.execute(DbStatement::new(
-            "CREATE TABLE edge_grants (edge_id TEXT PRIMARY KEY, env TEXT NOT NULL, \
+            "CREATE TABLE edge_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, env TEXT NOT NULL, \
              from_id TEXT NOT NULL, to_id TEXT NOT NULL, grant_kind TEXT NOT NULL, \
-             grant_ref_id TEXT NOT NULL, rules TEXT, status TEXT NOT NULL DEFAULT 'approved', \
+             grant_ref_id INTEGER NOT NULL, rules TEXT, status TEXT NOT NULL DEFAULT 'approved', \
              originator_policy_type TEXT NOT NULL DEFAULT 'any', originator_policy_data TEXT)",
         ))
         .await?;
