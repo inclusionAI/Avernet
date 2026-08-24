@@ -1348,6 +1348,7 @@ class TestSearchPublicBotsByKeyword:
 
         assert result["total"] == 1
         assert [bot["bot_id"] for bot in result["items"]] == ["bot-1"]
+        assert [bot["bot_uuid"] for bot in result["items"]] == ["bot-1:entity-1"]
         metadata.search_public_bot_metadata.assert_called_once_with(
             search="agent",
             page=3,
@@ -1382,7 +1383,11 @@ class TestSearchPublicBotsByKeyword:
         )
 
         assert result["items"] == [
-            {**_make_catalog_bot("shared", "entity-a"), "is_friend": False}
+            {
+                **_make_catalog_bot("shared", "entity-a"),
+                "bot_uuid": "shared:entity-a",
+                "is_friend": False,
+            }
         ]
 
     def test_catalog_search_preserves_requested_bcs_metadata_on_its_exact_address(self):
@@ -1420,6 +1425,7 @@ class TestSearchPublicBotsByKeyword:
         assert result["items"] == [
             {
                 **_make_catalog_bot("shared", "entity-a"),
+                "bot_uuid": "shared:entity-a",
                 "is_friend": False,
                 "visibility": "protected",
                 "is_online": False,
