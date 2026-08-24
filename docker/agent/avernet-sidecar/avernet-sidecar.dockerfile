@@ -39,15 +39,6 @@ RUN apt-get update && \
     && groupadd -g 1337 sidecar \
     && useradd -u 1337 -g sidecar -s /sbin/nologin -M sidecar
 
-# Optionally trust an internal gateway CA. Place the cert at
-# docker/agent/avernet-sidecar/internal-gateway-ca.crt in the build
-# context (not committed). Absent = skipped.
-COPY docker/agent/avernet-sidecar/internal-gateway-ca.crt* /tmp/
-RUN if [ -f /tmp/internal-gateway-ca.crt ]; then \
-        cp /tmp/internal-gateway-ca.crt /usr/local/share/ca-certificates/ant-internal-gateway-ca.crt; \
-    fi \
-    && update-ca-certificates
-
 # Config renderer (Python, no compilation needed).
 COPY docker/agent/avernet-sidecar/render.py /usr/local/bin/config-renderer
 RUN chmod +x /usr/local/bin/config-renderer && \
