@@ -46,7 +46,7 @@ lands in the same group as the migration of its last caller.
       claims** and lose their Installation rows (spec Key domain rules). R3
       keeps a capability in one Set; on malformed two-Set data the plan errs
       safe (keeps a row an active Set accounts for).
-- [ ] 2.3 Extend `flush_installations`: fast path checks skill and MCP
+- [x] 2.3 Extend `flush_installations`: fast path checks skill and MCP
       deltas; write path applies both (SAVEPOINT-per-row inserts, delete
       `*_to_uninstall ∩ installed`).
 - [ ] 2.4 Repository tests: MCP rows follow Set activation; excluded member
