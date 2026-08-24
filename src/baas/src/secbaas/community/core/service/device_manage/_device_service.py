@@ -2342,6 +2342,7 @@ class DefaultDeviceService(DeviceService):
             tenant=tenant,
             env=env,
             status=DeviceStatus.STOPPED.value,
+            modifier=modifier,
         )
         logger.info(f"Device {device_uuid} status updated to STOPPED")
 

@@ -11,6 +11,8 @@ from secbaas.community.core.service.scheduler import (
     BotRunRecoveryTaskConfig,
     DeviceTtlTimerTask,
     DeviceTtlTimerTaskConfig,
+    ExpireSandboxTimerTask,
+    ExpireSandboxTimerTaskConfig,
     FileTransferPoller,
     FileTransferPollerConfig,
 )
@@ -36,6 +38,7 @@ class CoreTaskContainer(containers.DeclarativeContainer):
 
     # Provided by ApplicationContainer (cross-container wiring)
     distributed_lock_service = providers.Dependency()
+    device_repo = providers.Dependency()
     device_binding_repo = providers.Dependency()
     sandbox_device_router = providers.Dependency()
     bot_run_queue_repository = providers.Dependency()
@@ -43,6 +46,10 @@ class CoreTaskContainer(containers.DeclarativeContainer):
     paas_service_facade = providers.Dependency()
     file_transfer_backend = providers.Dependency()
     ttl_renewal_schedule_repository = providers.Dependency()
+    device_service = providers.Dependency()
+    bot_manage_service = providers.Dependency()
+    bot_repo = providers.Dependency()
+    bot_device_rel_repo = providers.Dependency()
 
     # ── DeviceTtlTimer task ──────────────────────────────────────────────────
 
@@ -128,3 +135,30 @@ class CoreTaskContainer(containers.DeclarativeContainer):
         )
     else:
         deadline_renewal_scheduler = providers.Object(None)
+
+    # ── ExpireSandboxTimer task ───────────────────────────────────────────────
+
+    expire_sandbox_timer_config = providers.Singleton(
+        ExpireSandboxTimerTaskConfig,
+        enabled=config.expire_sandbox_timer.enabled,
+        arca_provider=config.plugins.sandbox.arca,
+        lock_name=config.expire_sandbox_timer.lock_name,
+        lock_expire_seconds=config.expire_sandbox_timer.lock_expire_seconds,
+        cron_interval_seconds=config.expire_sandbox_timer.cron_interval_seconds,
+        batch_size=config.expire_sandbox_timer.batch_size,
+        max_page_concurrency=config.expire_sandbox_timer.max_page_concurrency,
+        query_retries=config.expire_sandbox_timer.query_retries,
+        dry_run=config.expire_sandbox_timer.dry_run,
+        grace_seconds=config.expire_sandbox_timer.grace_seconds,
+        default_ttl_minutes=config.expire_sandbox_timer.default_ttl_minutes,
+    )
+
+    expire_sandbox_timer_task = providers.Singleton(
+        ExpireSandboxTimerTask,
+        config=expire_sandbox_timer_config,
+        lock_service=distributed_lock_service,
+        device_repo=device_repo,
+        bot_manage_service=bot_manage_service,
+        bot_repo=bot_repo,
+        bot_device_rel_repo=bot_device_rel_repo,
+    )

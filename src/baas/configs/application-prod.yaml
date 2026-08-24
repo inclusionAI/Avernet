@@ -96,6 +96,23 @@ user_config:
     lock_expire_seconds: 1750  # 分布式锁租约（秒），须 < cron 间隔以允许其它实例在轮次间获取，默认: 1750
     dry_run: false  # 测试模式：只打印日志
 
+  # Expired ACK sandbox timer config (periodically scans expired devices, destroys Pod, stops bot)
+  # NOTE: This task only takes effect for Aliyun ACK-created sandboxes
+  # (plugins.sandbox.arca == "aliyun_ack"). Enterprise arc_sdk sandboxes are
+  # reclaimed by the ARC platform itself; this task must not destroy sandboxes
+  # still within their ARC platform lease.
+  expire_sandbox_timer:
+    enabled: false  # 默认禁用过期沙箱销毁定时任务，验证通过后再显式启用
+    cron_interval_seconds: 86400  # 执行间隔（秒），默认: 86400（1天）
+    batch_size: 100  # 每页拉取条数，默认: 100
+    max_page_concurrency: 10  # 每页内并发停 bot 的最大并发数
+    query_retries: 3  # 单页查询 DB 失败时的重试次数
+    lock_name: "expire_sandbox_timer_lock"  # 分布式锁名称基准，运行时追加环境后缀
+    lock_expire_seconds: 1750  # 分布式锁租约（秒），须 < cron 间隔
+    dry_run: true  # staged rollout：先观察到期量，确认后再转 false
+    grace_seconds: 0  # 到期判定余量（秒），抵消时钟偏差
+    default_ttl_minutes: 10080  # 业务默认 TTL（分钟），extra_config 缺失时回退（7 天）
+
   # Bot Health Checker 配置
   bot_health_checker:
     health_check:
