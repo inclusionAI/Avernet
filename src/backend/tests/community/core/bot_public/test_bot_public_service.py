@@ -413,7 +413,7 @@ class TestPublicBcsBot:
         # merge 仍保留已有 friend_ext 子键
         assert bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]["old"] == "x"
 
-    def test_agent_publish_stores_public_public_approval_block(self):
+    def test_agent_publish_stores_public_agent_approval_block(self):
         process = MagicMock()
         process.start_approval.return_value = {
             "success": True, "puid": "p1", "approval_url": "u1", "state": "PROCESSING",
@@ -430,9 +430,9 @@ class TestPublicBcsBot:
             visibility="public",
         )
         friend_ext = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]
-        # agent → public_public_approval subkey (NOT public_user_approval); same block shape
+        # agent → public_agent_approval subkey (NOT public_user_approval); same block shape
         assert "public_user_approval" not in friend_ext
-        block = friend_ext["public_public_approval"]
+        block = friend_ext["public_agent_approval"]
         assert block["puid"] == "p1"
         assert block["approval_url"] == "u1"
         assert block["view_friend_deps"] == [{"deptNo": "D1", "deptName": "Tech"}]
@@ -464,11 +464,11 @@ class TestPublicBcsBot:
         assert block["puid"] == "p1"
         assert block["visibility"] == "public"
 
-    def test_callback_cancel_updates_public_public_approval_for_agent(self):
+    def test_callback_cancel_updates_public_agent_approval_for_agent(self):
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
             "friend_ext": {
-                "public_public_approval": {"puid": "p1", "status": "PROCESSING"}
+                "public_agent_approval": {"puid": "p1", "status": "PROCESSING"}
             }
         }
         svc = _make_service(bcn_service=bcn)
@@ -476,7 +476,7 @@ class TestPublicBcsBot:
             bot_id="b", owner_id="u", puid="p1",
             last_operate="CANCEL", public_scope="agent",
         )
-        block = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]["public_public_approval"]
+        block = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]["public_agent_approval"]
         assert block["status"] == "CANCEL"
 
     def test_callback_agree_user_writes_block_visibility_to_user_visibility(self):
@@ -513,7 +513,7 @@ class TestPublicBcsBot:
     def test_callback_agree_agent_public_when_friend_check_open(self):
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
-            "friend_ext": {"public_public_approval": {"puid": "p1", "status": "PROCESSING"}},
+            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING"}},
             "friend_check_in_strategy": "OPEN",
         }
         svc = _make_service(bcn_service=bcn)
@@ -522,14 +522,14 @@ class TestPublicBcsBot:
             last_operate="AGREE", public_scope="agent",
         )
         body = bcn.patch_attributes.call_args.kwargs["body"]
-        assert body["friend_ext"]["public_public_approval"]["status"] == "AGREE"
+        assert body["friend_ext"]["public_agent_approval"]["status"] == "AGREE"
         # agent: visibility 由 friend_check_in_strategy=OPEN → public
         assert body["visibility"] == "public"
 
     def test_callback_agree_agent_protected_when_friend_check_not_open(self):
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
-            "friend_ext": {"public_public_approval": {"puid": "p1", "status": "PROCESSING"}},
+            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING"}},
             "friend_check_in_strategy": "APPROVAL",
         }
         svc = _make_service(bcn_service=bcn)
@@ -566,7 +566,7 @@ class TestPublicBcsBot:
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
             "friend_ext": {
-                "public_public_approval": {
+                "public_agent_approval": {
                     "puid": "p1", "status": "PROCESSING",
                     "view_friend_deps": [{"deptNo": "D2", "deptName": "Sales"}],
                 }
