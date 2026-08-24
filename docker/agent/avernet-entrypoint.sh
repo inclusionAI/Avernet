@@ -9,9 +9,10 @@
 #   - [program:openclaw]  autostart=false — started by engine on demand
 #
 # Flow:
-#   1. Create runtime directories
-#   2. Generate ~/.openclaw/openclaw.json from template + env vars (if not mounted)
-#   3. exec supervisord (becomes PID 1)
+#   1. Create runtime directories (system dirs as root, /home/admin as admin)
+#   2. Verify build artifacts
+#   3. Generate ~/.openclaw/openclaw.json from template + env vars (as admin)
+#   4. exec supervisord (becomes PID 1)
 #
 # The platform invokes start_service.sh externally (docker exec) with
 # --token/--client_id to save credentials and start the engine.
@@ -27,8 +28,11 @@ TEMPLATE_FILE="/opt/openclaw.json.template"
 
 # --- 1. Create runtime directories
 
-mkdir -p "${CONFIG_DIR}/extensions" "${WORKSPACE_DIR}" "${LOG_DIR}"
+# System directories need root.
 mkdir -p /var/run/agentclaw /var/log/supervisor /var/run
+
+# All /home/admin directories created as admin.
+su admin -s /bin/bash -c "mkdir -p '${CONFIG_DIR}/extensions' '${WORKSPACE_DIR}' '${LOG_DIR}'"
 
 # --- 2. Verify build artifacts
 
@@ -59,7 +63,7 @@ echo "     Logs:     ${LOG_DIR}"
 if [ ! -f "${CONFIG_FILE}" ]; then
     echo "===> generating ${CONFIG_FILE} from template"
 
-    # Run config generation as admin so the file is admin-owned directly.
+    # Run config generation as admin so all files are admin-owned.
     _gen_config() {
         cp "${TEMPLATE_FILE}" "${CONFIG_FILE}"
 
