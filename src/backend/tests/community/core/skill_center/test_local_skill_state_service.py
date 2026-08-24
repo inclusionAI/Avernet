@@ -11,6 +11,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillStorageError,
     SkillManagedBySkillSetError,
     SkillRuntimeNameConflictError,
+    SkillSetManagedResourceError,
 )
 from agentclaw.community.core.skill_center.services.local_skill_state_service import (
     LocalSkillStateService,
@@ -466,19 +467,32 @@ class _RepoBots(_Bots):
 
 
 class _RepoSetService:
-    def __init__(self, *, normal_member: bool) -> None:
+    def __init__(self, *, normal_member: bool, engine: str = "openclaw") -> None:
         self.normal_member = normal_member
+        self.engine = engine
 
     def get_skill_set(self, skill_set_id: str, user_id: str):
         assert skill_set_id == "17"
         assert user_id == "owner"
-        return {"id": "17", "bolt_id": "bot", "is_default": not self.normal_member}
+        # The owner and engine come off the real row: ``get_skill_set`` does
+        # not scope by either (it forwards straight to ``get_by_id``), so the
+        # guard has to read them, and a fixture that omits them would let a
+        # Set govern a Bot the listing never bridges it to.
+        return {
+            "id": "17",
+            "bolt_id": "bot",
+            "user_id": "owner",
+            "engine_type": self.engine,
+            "is_default": not self.normal_member,
+        }
 
 
 class _RepoFactory(_Factory):
-    def __init__(self, runtime: _Runtime, *, normal_member: bool = False) -> None:
+    def __init__(
+        self, runtime: _Runtime, *, normal_member: bool = False, engine: str = "openclaw"
+    ) -> None:
         super().__init__(runtime)
-        self.set_service = _RepoSetService(normal_member=normal_member)
+        self.set_service = _RepoSetService(normal_member=normal_member, engine=engine)
 
     def create(self, **kwargs):
         self.kwargs = kwargs
@@ -498,7 +512,9 @@ def _repo_service(
     installations = _Installations(skills)
     runtime = _Runtime(sync_success)
     runtime_reconciler = _RuntimeReconciler(runtime, skills)
-    factory = _RepoFactory(runtime, normal_member=bool(references))
+    factory = _RepoFactory(
+        runtime, normal_member=bool(references), engine=engine
+    )
     if active_assets is not None:
         skills.list_bot_active_assets = lambda **_kwargs: active_assets
     service = LocalSkillStateService(
@@ -926,3 +942,228 @@ async def test_non_ready_or_unauthorized_request_never_mutates_or_syncs_runtime(
             skill_id="9", actor_id="attacker", active=True
         )
     assert runtime.calls == 0
+
+
+class _GuardSets:
+    """The SkillSet repository as the activation guards use it."""
+
+    def __init__(self, skill_set: dict, excluded=()) -> None:
+        self._skill_set = {"id": "9", **skill_set}
+        self._excluded = list(excluded)
+
+    def get_by_id(self, skill_set_id):
+        return self._skill_set
+
+    def get_excluded_skills(self, user_id, bot_id, skill_set_id):
+        return self._excluded
+
+
+_ENGINE_BOT = {
+    "entity_id": "owner",
+    "entity_type": "staff",
+    "active_engine": "openclaw",
+    "template_type": "",
+}
+
+
+def test_direct_state_is_refused_for_a_member_of_a_default_skill_set():
+    """A Set owns its members' activity — Default Sets included.
+
+    A Default Set is always active, so a Skill in one is always active. Letting
+    a direct deactivate delete its Installation row put two authorities on one
+    fact: the row came straight back the next time anything reconciled
+    Installation against membership, undoing the user's command with no
+    error. Refusing the command is what makes the two agree.
+    """
+
+    class _Skills:
+        def get_by_id(self, skill_id):
+            return {"id": skill_id, "skill_uuid": None}
+
+        def list_skill_set_references(self, skill_id, skill_uuid):
+            return [{"skill_set_id": "9"}]
+
+    def _reject(skill_set, *, excluded=()):
+        service = LocalSkillStateService.__new__(LocalSkillStateService)
+        service._skill_repo = _Skills()
+        service._skill_set_repo = _GuardSets(skill_set, excluded)
+        service._reject_skill_set_member(
+            skill_id="1", bot_id="bot", bot=_ENGINE_BOT, owner_id="owner"
+        )
+
+    # The Bot's own Default Set.
+    with pytest.raises(SkillSetManagedResourceError):
+        _reject(
+            {
+                "is_default": True,
+                "bolt_id": "bot",
+                "user_id": "owner",
+                "engine_type": "openclaw",
+            }
+        )
+    # The platform Default Set. Its bolt_id column is null, and the repository
+    # projects that to the literal string "default" — so it must be recognised
+    # by having no owner, not by an empty bolt_id.
+    with pytest.raises(SkillSetManagedResourceError):
+        _reject(
+            {
+                "is_default": True,
+                "bolt_id": "default",
+                "user_id": None,
+                "engine_type": "openclaw",
+            }
+        )
+    # An ordinary Set of the Bot's, as before.
+    with pytest.raises(SkillSetManagedResourceError):
+        _reject(
+            {
+                "is_default": False,
+                "bolt_id": "bot",
+                "user_id": "owner",
+                "engine_type": "openclaw",
+            }
+        )
+    # Another Bot's Set never governs this Bot's Skill — including one that
+    # belongs to the legacy "default" Bot, which shares the sentinel's spelling.
+    _reject({"is_default": False, "bolt_id": "another-bot", "user_id": "owner"})
+    _reject({"is_default": False, "bolt_id": "default", "user_id": "someone-else"})
+    # A platform Default Set for a different engine does not reach this Bot at
+    # all — the listing never bridges it — so refusing direct control on its
+    # account would be a false 409.
+    _reject(
+        {
+            "is_default": True,
+            "bolt_id": "default",
+            "user_id": None,
+            "engine_type": "aicoding",
+        }
+    )
+    # An ordinary Set carrying this bot_id but another owner's name. The
+    # legacy "default" Bot exists once per owner, so bolt_id alone does not
+    # identify a Bot, and the listing's bridge requires the owner too.
+    _reject(
+        {
+            "is_default": False,
+            "bolt_id": "bot",
+            "user_id": "someone-else",
+            "engine_type": "openclaw",
+        }
+    )
+    # And one left behind on an engine the Bot no longer runs.
+    _reject(
+        {
+            "is_default": False,
+            "bolt_id": "bot",
+            "user_id": "owner",
+            "engine_type": "aicoding",
+        }
+    )
+    # Nor does a Default Set the owner excluded this Skill from: the listing
+    # drops it and takes its Installation away, so refusing direct activation
+    # on that Set's account would strand the Skill entirely.
+    _reject(
+        {
+            "is_default": True,
+            "bolt_id": "default",
+            "user_id": None,
+            "engine_type": "openclaw",
+        },
+        excluded=[1],
+    )
+
+
+def test_direct_state_on_a_repo_skill_is_refused_for_a_default_set_member():
+    """The Repo path needs the same all-Set rule as the Local one.
+
+    A Default SkillSet is where shared ``git://`` Repo Skills live, so this is
+    the path where the two-authorities defect actually bites: a direct
+    deactivate deleted the Installation row and returned success, and the next
+    reconciliation against membership put it back.
+    """
+
+    class _Skills:
+        def list_skill_set_references(self, skill_id):
+            return [{"skill_set_id": "9"}]
+
+    class _SetService:
+        def __init__(self, skill_set):
+            self._skill_set = skill_set
+
+        def get_skill_set(self, set_id, user_id=None):
+            # The real repository always carries the id on the row it returns.
+            return {"id": set_id, **self._skill_set}
+
+    class _Factory:
+        def __init__(self, skill_set):
+            self._skill_set = skill_set
+
+        def create(self, **_kwargs):
+            return _SetService(self._skill_set)
+
+    def _require(skill_set, *, excluded=()):
+        service = LocalSkillStateService.__new__(LocalSkillStateService)
+        service._skill_repo = _Skills()
+        service._skill_set_service_factory = _Factory(skill_set)
+        service._skill_set_repo = _GuardSets(skill_set, excluded)
+        service._require_no_normal_skill_set_membership(
+            skill_id="1",
+            bot=_ENGINE_BOT,
+            owner_id="owner",
+            bot_id="bot",
+        )
+
+    # The platform Default Set, in the shape the repository really returns:
+    # its null bolt_id column is projected to the literal string "default",
+    # so an empty-bolt_id test would silently never match it.
+    with pytest.raises(SkillManagedBySkillSetError):
+        _require(
+            {
+                "is_default": True,
+                "bolt_id": "default",
+                "user_id": None,
+                "engine_type": "openclaw",
+            }
+        )
+    # The Bot's own Default Set.
+    with pytest.raises(SkillManagedBySkillSetError):
+        _require(
+            {
+                "is_default": True,
+                "bolt_id": "bot",
+                "user_id": "owner",
+                "engine_type": "openclaw",
+            }
+        )
+    # An ordinary Set of the Bot's, as before.
+    with pytest.raises(SkillManagedBySkillSetError):
+        _require(
+            {
+                "is_default": False,
+                "bolt_id": "bot",
+                "user_id": "owner",
+                "engine_type": "openclaw",
+            }
+        )
+    # Another Bot's Set never governs this Bot's Skill — including one owned by
+    # the legacy "default" Bot, which shares the sentinel's spelling.
+    _require({"is_default": False, "bolt_id": "another-bot", "user_id": "owner"})
+    _require({"is_default": False, "bolt_id": "default", "user_id": "someone-else"})
+    # And a platform Default for another engine, which this Bot never inherits.
+    _require(
+        {
+            "is_default": True,
+            "bolt_id": "default",
+            "user_id": None,
+            "engine_type": "aicoding",
+        }
+    )
+    # And one this Skill is excluded from — the Set no longer reaches it.
+    _require(
+        {
+            "is_default": True,
+            "bolt_id": "default",
+            "user_id": None,
+            "engine_type": "openclaw",
+        },
+        excluded=[1],
+    )

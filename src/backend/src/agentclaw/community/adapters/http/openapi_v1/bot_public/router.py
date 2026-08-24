@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -23,6 +23,7 @@ from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProto
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogCaller,
+    BotCatalogSearchFilters,
     BotCatalogSearchUnavailableError,
 )
 from agentclaw.community.di import Injected
@@ -34,6 +35,11 @@ from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPI
 logger = get_logger()
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 router = APIRouter(prefix="/openapi/v1/bots/catalog", tags=["bot-catalog"], route_class=PublicAPIRoute)
+
+_CATALOG_VISIBILITIES = frozenset({"public", "protected", "private"})
+_CATALOG_STATUSES = frozenset({"online", "hidden"})
+_CATALOG_VIEWER_TYPES = frozenset({"human", "bot"})
+_CATALOG_FRIENDSHIPS = frozenset({"all", "friends", "non_friends"})
 
 
 def _request_id(request: Request) -> str:
@@ -55,6 +61,77 @@ def _log_failure(operation: str, request: Request, category: str) -> None:
         operation,
         _request_id(request),
         category,
+    )
+
+
+def _normalize_catalog_values(
+    values: Sequence[str] | None,
+    *,
+    allowed: frozenset[str],
+) -> tuple[str, ...]:
+    """Normalize repeated and comma-separated optional Catalog filters."""
+    if values is None:
+        return ()
+    normalized: list[str] = []
+    for raw_value in values:
+        for value in raw_value.split(","):
+            candidate = value.strip()
+            if not candidate or candidate not in allowed:
+                raise ValueError("invalid catalog filter value")
+            if candidate not in normalized:
+                normalized.append(candidate)
+    return tuple(normalized)
+
+
+def _optional_catalog_value(
+    value: str | None,
+    *,
+    allowed: frozenset[str],
+) -> str | None:
+    if value is None:
+        return None
+    candidate = value.strip()
+    if not candidate or candidate not in allowed:
+        raise ValueError("invalid catalog filter value")
+    return candidate
+
+
+def _catalog_search_filters(
+    *,
+    visibility: Sequence[str] | None,
+    user_visibility: Sequence[str] | None,
+    status: str | None,
+    viewer_actor_type: str | None,
+    viewer_actor_id: str | None,
+    friendship: str | None,
+) -> BotCatalogSearchFilters:
+    """Validate frontend filters before sending the fixed BCS query."""
+    normalized_viewer_type = _optional_catalog_value(
+        viewer_actor_type, allowed=_CATALOG_VIEWER_TYPES
+    )
+    normalized_viewer_id = viewer_actor_id.strip() if viewer_actor_id else None
+    if viewer_actor_id is not None and not normalized_viewer_id:
+        raise ValueError("invalid catalog viewer")
+    if (normalized_viewer_type is None) != (normalized_viewer_id is None):
+        raise ValueError("catalog viewer must be supplied as a pair")
+
+    normalized_friendship = _optional_catalog_value(
+        friendship, allowed=_CATALOG_FRIENDSHIPS
+    )
+    if normalized_friendship in {"friends", "non_friends"} and normalized_viewer_id is None:
+        raise ValueError("catalog friendship filter requires viewer")
+
+    return BotCatalogSearchFilters(
+        visibility=_normalize_catalog_values(
+            visibility, allowed=_CATALOG_VISIBILITIES
+        ),
+        user_visibility=_normalize_catalog_values(
+            user_visibility, allowed=_CATALOG_VISIBILITIES
+        ),
+        status=_optional_catalog_value(status, allowed=_CATALOG_STATUSES),
+        viewer_actor_type=normalized_viewer_type,
+        viewer_actor_id=normalized_viewer_id,
+        friendship=normalized_friendship,
     )
 
 
@@ -100,13 +177,47 @@ async def search_public_bots(
         default=1, alias="page", ge=1, description="1-based page number."
     ),
     page_size: int = Query(default=20, ge=1, le=100, description="Items per page."),
+    visibility: list[str] | None = Query(
+        default=None,
+        description="Optional BCS visibility filter; repeat or comma-separate public, protected, private.",
+    ),
+    user_visibility: list[str] | None = Query(
+        default=None,
+        description="Optional BCS user visibility filter; repeat or comma-separate public, protected, private.",
+    ),
+    status: str | None = Query(
+        default=None, description="Optional BCS status filter: online or hidden."
+    ),
+    viewer_actor_type: str | None = Query(
+        default=None, description="Explicit BCS viewer actor type: human or bot."
+    ),
+    viewer_actor_id: str | None = Query(
+        default=None, description="Explicit BCS viewer actor id; requires viewer_actor_type."
+    ),
+    friendship: str | None = Query(
+        default=None,
+        description="Optional BCS friendship filter: all, friends, or non_friends.",
+    ),
     service: BotPublicServiceProtocol = Injected(BotPublicServiceProtocol),
 ) -> Envelope[Page[PublicBot]]:
+    try:
+        filters = _catalog_search_filters(
+            visibility=visibility,
+            user_visibility=user_visibility,
+            status=status,
+            viewer_actor_type=viewer_actor_type,
+            viewer_actor_id=viewer_actor_id,
+            friendship=friendship,
+        )
+    except ValueError:
+        _log_failure("search", request, "invalid_filters")
+        return error_response(422, "Invalid Catalog Search filters", request)
     try:
         result = service.search_catalog_public_bots_by_keyword(
             search=search,
             page=page_number,
             page_size=page_size,
+            filters=filters,
             caller=BotCatalogCaller(
                 tenant_id=principal.tenant,
                 user_id=principal.user_id or None,

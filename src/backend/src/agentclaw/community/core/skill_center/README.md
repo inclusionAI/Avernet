@@ -117,6 +117,15 @@ Artifact build; it never
 deletes rows, reads historical Default exclusions, or runs in HTTP GET/list,
 Pool convergence, or file-snapshot paths.
 
+`GET /openapi/v1/bots/{bot_id}/skills` is the one deliberate exception, through
+`repair_bot_skillset_installations` rather than the materializer. It lists every
+Skill a Bot reaches — the rows it owns plus the ones a SkillSet bridges — and
+`active` is a *filter*, deciding `total` and the page boundary, so the listing
+repairs before it filters. Unlike the materializer this repair also deletes rows
+and reads Default exclusions. It writes only the difference, in one transaction,
+after the caller's Bot access has been checked, and never reconciles runtime.
+See `specs/2026-08-23-openapi-v1-bot-skill-listing/`.
+
 MCP Direct activation and ordinary SkillSet MCP membership share the same
 active-only desired-state and compensation boundary as Skills.  The MCP
 catalogue, user configuration, and permission grant remain separate facts;
@@ -158,19 +167,17 @@ SkillSet/Direct commands continue to maintain Installation synchronously; the
 lazy materializer only fills the missing active ordinary SkillSet rows that
 pre-date the new command path.
 
-Local Skill replacement stages a complete package before switching the existing
-Skill metadata. Its old-package cleanup work is persisted before an Active
-runtime switch can commit; a rollback cancels that old-locator work before the
-old package becomes authoritative again. Failed post-switch obsolete-byte deletion is recorded through
-`LocalSkillCleanupRepository` in the exact deployment-wide Bot scope
-`(env, owner_id, bot_id)`.  The next serialized Local Skill mutation retries
-pending work; it marks successful work `cleaned` and retains failures with an
-attempt count and a stable operator-safe error.  A task that follows a failed
-Active rollback retains its staged bytes and restores the old runtime mapping
-before it attempts byte cleanup. Cleanup identity uses the full SHA-256 of the
-locator, while retaining the locator itself for execution; a digest collision
-fails closed. Apply
-`sql/2026_08_04_local_skill_cleanup_work.sql` before deploying this behavior.
+Local Skill replacement is defined only for an existing complete package at the
+stable layout-owned `skills-local/<skill-name>` locator. It stages and verifies
+the new package, backs up the old package, and publishes the replacement back to
+that same locator; the Skill ID, `git_path`, desired active state, membership,
+and Installation identity do not change. Staging and rollback directories are
+temporary implementation details and are removed before success is returned.
+If publication, metadata persistence, runtime reconcile, audit persistence, or
+temporary-package cleanup fails, the old canonical package and metadata are
+restored before the request fails. A non-canonical locator or a metadata row
+whose authoritative package is missing fails closed and is repaired outside the
+upload path.
 
 Public Local Skill deletion first persists a non-purgeable `preparing` record,
 then promotes it to `repair_required` before copying and verifying package

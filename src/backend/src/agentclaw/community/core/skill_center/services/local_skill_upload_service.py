@@ -341,18 +341,16 @@ class LocalSkillUploadService:
                 name=name,
             )
         )
-        staged_locator, staged = (
-            self._skill_service_factory.local_skill_package_storage(
-                entity_id=str(bot["entity_id"]),
-                owner_id=owner_id,
-                bot_id=bot_id,
-                engine_type=bot.get("active_engine"),
-                entity_type=str(bot.get("entity_type") or "staff"),
-                is_desktop=bot.get("bot_type") == "desktop",
-                is_teclaw=is_teclaw,
-                name=name,
-                directory_name=version_dir,
-            )
+        _, staged = self._skill_service_factory.local_skill_package_storage(
+            entity_id=str(bot["entity_id"]),
+            owner_id=owner_id,
+            bot_id=bot_id,
+            engine_type=bot.get("active_engine"),
+            entity_type=str(bot.get("entity_type") or "staff"),
+            is_desktop=bot.get("bot_type") == "desktop",
+            is_teclaw=is_teclaw,
+            name=name,
+            directory_name=version_dir,
         )
         old_storage = (
             self._skill_service_factory.local_skill_package_storage_for_locator(
@@ -367,13 +365,12 @@ class LocalSkillUploadService:
             )
         )
         has_old_package = await old_storage.exists()
-        # A previous delete can leave a stale Local Skill row while its
-        # canonical package directory is already gone.  That row still makes
-        # this a same-name replacement, but it provides no bytes to back up.
-        # Treat it as a metadata-only legacy record and publish the staged
-        # package directly to the stable canonical locator.
-        old_is_canonical = old_locator == canonical_locator and has_old_package
-        obsolete_storage = old_storage if has_old_package else None
+        # Replacement is defined only for the stable layout-owned locator.
+        # It must never migrate ``git_path`` or manufacture a new package for a
+        # metadata row whose old bytes are already missing: either case would
+        # leave no authoritative old package to restore on failure.
+        if old_locator != canonical_locator or not has_old_package:
+            raise LocalSkillStorageError()
         backup = None
         old_metadata = {
             "description": skill.get("description"),
@@ -386,23 +383,19 @@ class LocalSkillUploadService:
         try:
             await staged.write(files)
             await staged.verify()
-            if old_is_canonical:
-                backup_dir = f".{name}.rollback-{uuid4().hex}"
-                _, backup = (
-                    self._skill_service_factory.local_skill_package_storage(
-                        entity_id=str(bot["entity_id"]),
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        engine_type=bot.get("active_engine"),
-                        entity_type=str(bot.get("entity_type") or "staff"),
-                        is_desktop=bot.get("bot_type") == "desktop",
-                        is_teclaw=is_teclaw,
-                        name=name,
-                        directory_name=backup_dir,
-                    )
-                )
-                await old_storage.copy_to(backup)
-                obsolete_storage = backup
+            backup_dir = f".{name}.rollback-{uuid4().hex}"
+            _, backup = self._skill_service_factory.local_skill_package_storage(
+                entity_id=str(bot["entity_id"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                engine_type=bot.get("active_engine"),
+                entity_type=str(bot.get("entity_type") or "staff"),
+                is_desktop=bot.get("bot_type") == "desktop",
+                is_teclaw=is_teclaw,
+                name=name,
+                directory_name=backup_dir,
+            )
+            await old_storage.copy_to(backup)
             # ``copy_to(..., replace=True)`` can fail after clearing or partly
             # writing the canonical directory.  Mark the mutation before the
             # call so every such failure restores the old authority.
@@ -436,14 +429,10 @@ class LocalSkillUploadService:
             await self._restore_replacement(
                 skill=skill,
                 old_metadata=old_metadata,
-                bot=bot,
                 owner_id=owner_id,
                 bot_id=bot_id,
                 staged=staged,
-                staged_locator=staged_locator,
                 canonical=canonical,
-                canonical_locator=canonical_locator,
-                old_is_canonical=old_is_canonical,
                 backup=backup,
                 canonical_published=canonical_published,
                 switched=switched,
@@ -455,14 +444,10 @@ class LocalSkillUploadService:
                 await self._restore_replacement(
                     skill=skill,
                     old_metadata=old_metadata,
-                    bot=bot,
                     owner_id=owner_id,
                     bot_id=bot_id,
                     staged=staged,
-                    staged_locator=staged_locator,
                     canonical=canonical,
-                    canonical_locator=canonical_locator,
-                    old_is_canonical=old_is_canonical,
                     backup=backup,
                     canonical_published=canonical_published,
                     switched=switched,
@@ -473,9 +458,29 @@ class LocalSkillUploadService:
                     await self._discard(backup)
                 await self._discard(staged)
             raise LocalSkillStorageError() from exc
-        if obsolete_storage is not None:
-            await self._discard(obsolete_storage)
-        await self._discard(staged)
+        try:
+            # Keep the rollback copy until every other temporary package has
+            # been removed.  If any cleanup fails, the operation still has the
+            # bytes required to restore the old canonical package.
+            await self._discard(staged)
+            await self._discard(backup)
+        except Exception as exc:
+            try:
+                await self._restore_replacement(
+                    skill=skill,
+                    old_metadata=old_metadata,
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    staged=staged,
+                    canonical=canonical,
+                    backup=backup,
+                    canonical_published=canonical_published,
+                    switched=switched,
+                    runtime_sync_attempted=runtime_sync_attempted,
+                )
+            except Exception as rollback_exc:
+                raise LocalSkillStorageError() from rollback_exc
+            raise LocalSkillStorageError() from exc
         return {
             "operation": "updated",
             "skill": {
@@ -492,14 +497,10 @@ class LocalSkillUploadService:
         *,
         skill: dict[str, Any],
         old_metadata: dict[str, Any],
-        bot: dict[str, Any],
         owner_id: str,
         bot_id: str,
         staged,
-        staged_locator: str,
         canonical,
-        canonical_locator: str,
-        old_is_canonical: bool,
         backup,
         canonical_published: bool,
         switched: bool,
@@ -507,12 +508,9 @@ class LocalSkillUploadService:
     ) -> None:
         if canonical_published:
             try:
-                if old_is_canonical:
-                    if backup is None:
-                        raise LocalSkillStorageError()
-                    await backup.copy_to(canonical, replace=True)
-                elif not await canonical.cleanup():
+                if backup is None:
                     raise LocalSkillStorageError()
+                await backup.copy_to(canonical, replace=True)
             except Exception as exc:
                 raise LocalSkillStorageError() from exc
         if switched:
@@ -543,6 +541,7 @@ class LocalSkillUploadService:
         except Exception as exc:
             raise LocalSkillStorageError() from exc
         return context.provider == "teclaw"
+
     def _same_name_matches(
         self, *, bot_id: str, owner_id: str, name: str
     ) -> list[dict[str, Any]]:

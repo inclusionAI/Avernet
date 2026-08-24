@@ -4246,6 +4246,17 @@ class BotService:
                 extra_configs,
                 template_service=self._template_service,
             )
+            # Re-sync the engine's external authorization scope (e.g. the
+            # aicoding Passport MCP/CLI grants) to match what was provisioned
+            # at create time, so a restart does not silently drop grants.
+            strategy.refresh_restart_authorization(
+                ctx,
+                bot,
+                extra_configs,
+                passport_plugin=self._passport_plugin,
+                skill_set_factory=self._skill_set_factory,
+                template_service=self._template_service,
+            )
         except Exception as exc:
             # Optional engine extensions must never block the existing restart path.
             logger.warning(

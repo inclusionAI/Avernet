@@ -123,6 +123,34 @@ class EngineProvisioningStrategy(ABC):
         """
 
     @abstractmethod
+    def refresh_restart_authorization(
+        self,
+        ctx: BotProvisioningContext,
+        bot: Dict[str, Any],
+        extra_configs: Dict[str, Any] | None,
+        *,
+        passport_plugin: Any,
+        skill_set_factory: Any,
+        template_service: Any,
+    ) -> None:
+        """Re-sync engine-owned external authorization on restart.
+
+        Engines that mint/provision external credentials at create time (e.g.
+        the AICoding Passport MCP/CLI grants from ``create_flow._apply_passport``)
+        recompute and push the same grants here so a restart does not silently
+        drop the authorization scope the bot was created with. Engines without
+        such external authorization should no-op.
+
+        ``extra_configs`` is the restart extension envelope from the caller; a
+        strategy may require an opt-in flag (e.g. ``confirmed_template_update``)
+        before performing any side effect so a plain restart never silently
+        rewrites authorization.
+
+        Failures must not block the restart: the call site wraps this in the
+        same try/except as the restart extension envelope.
+        """
+
+    @abstractmethod
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         """Post-create hook. Default strategies should no-op."""
 

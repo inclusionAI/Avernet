@@ -11,6 +11,7 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogCaller,
     BotCatalogMetadata,
     BotCatalogMetadataUnavailableError,
+    BotCatalogSearchFilters,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.http_client import HttpClient
@@ -31,6 +32,7 @@ class BcsBotCatalogMetadataService:
         search: str | None,
         page: int,
         page_size: int,
+        filters: BotCatalogSearchFilters | None = None,
         caller: BotCatalogCaller,
         request_id: str,
     ) -> Sequence[BotCatalogMetadata]:
@@ -43,6 +45,19 @@ class BcsBotCatalogMetadataService:
         }
         if search and search.strip():
             params["q"] = search
+        if filters is not None:
+            if filters.visibility:
+                params["visibility"] = ",".join(filters.visibility)
+            if filters.user_visibility:
+                params["user_visibility"] = ",".join(filters.user_visibility)
+            if filters.status is not None:
+                params["status"] = filters.status
+            if filters.viewer_actor_type is not None:
+                params["viewer_actor_type"] = filters.viewer_actor_type
+            if filters.viewer_actor_id is not None:
+                params["viewer_actor_id"] = filters.viewer_actor_id
+            if filters.friendship is not None:
+                params["friendship"] = filters.friendship
         try:
             # COSEC: The injected BCS client supplies the configured upstream host and
             # this constant relative path prevents request data from selecting a target.
@@ -107,11 +122,30 @@ class BcsBotCatalogMetadataService:
             )
             raise BotCatalogMetadataUnavailableError() from None
         logger.info(
-            "[BcsBotCatalogMetadataService.search] request_id=%s result_count=%s",
+            "[BcsBotCatalogMetadataService.search] request_id=%s result_count=%s "
+            "filter_count=%s has_viewer=%s",
             request_id,
             len(metadata),
+            self._filter_count(filters),
+            filters is not None and filters.viewer_actor_id is not None,
         )
         return metadata
+
+    @staticmethod
+    def _filter_count(filters: BotCatalogSearchFilters | None) -> int:
+        if filters is None:
+            return 0
+        return sum(
+            value is not None and value != ()
+            for value in (
+                filters.visibility,
+                filters.user_visibility,
+                filters.status,
+                filters.viewer_actor_type,
+                filters.viewer_actor_id,
+                filters.friendship,
+            )
+        )
 
     @staticmethod
     def _address_from_bot_uuid(value: object) -> BotCatalogAddress | None:

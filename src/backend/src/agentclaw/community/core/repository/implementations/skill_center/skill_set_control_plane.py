@@ -35,6 +35,10 @@ from agentclaw.community.core.repository.protocols.skill_installation import (
 from agentclaw.community.core.repository.implementations.skill_center.installation import (
     SkillInstallationRepository,
 )
+from agentclaw.community.core.repository.implementations.skill_center.bot_skillset_installations import (
+    BotSkillSetInstallations,
+    set_member_skill_ids,
+)
 from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_set_control_plane import (
     McpSkillSetControlPlaneCommands,
 )
@@ -55,7 +59,9 @@ from agentclaw.community.core.skill_center.errors import (
 
 
 class SkillSetControlPlaneRepository(
-    LegacySkillSetScopeQueries, McpSkillSetControlPlaneCommands,
+    BotSkillSetInstallations,
+    LegacySkillSetScopeQueries,
+    McpSkillSetControlPlaneCommands,
     SkillSetControlPlaneRepositoryProtocol,
 ):
     """Desired-state UoW for SkillSet Membership and Installations."""
@@ -111,54 +117,6 @@ class SkillSetControlPlaneRepository(
                     break
             rows = [*defaults, *ordinary.order_by(SkillSet.id).all()]
             return [_item(row) for row in rows]
-
-    def ensure_active_skillset_installations(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        engine_type: str | None = None,
-    ) -> int:
-        """Insert only missing rows for legacy active ordinary SkillSet members.
-
-        The canonical mutation commands already keep Installation rows in sync.
-        This is intentionally a narrow cutover repair: it never reads the
-        Default Set, never removes rows, and never changes existing Direct
-        desired state.
-        """
-        with self._db.orm_session() as session:
-            sets = self._scope(session.query(SkillSet), SkillSet).filter(
-                SkillSet.bolt_id == bot_id,
-                SkillSet.user_id == owner_id,
-                SkillSet.is_default.is_(False),
-                SkillSet.is_active.is_(True),
-            )
-            if engine_type is not None:
-                sets = sets.filter(SkillSet.engine_type == engine_type)
-            active_set_ids = {int(row.id) for row in sets.all()}
-            if not active_set_ids:
-                return 0
-
-            member_ids = {
-                int(row.skill_id)
-                for row in self._scope(
-                    session.query(SkillSetSkill), SkillSetSkill
-                )
-                .filter(SkillSetSkill.skill_set_id.in_(active_set_ids))
-                .all()
-            }
-            if not member_ids:
-                return 0
-
-        return sum(
-            self._installation_repository.install(
-                env=get_current_env(),
-                owner_id=owner_id,
-                bot_id=bot_id,
-                skill_id=skill_id,
-            )
-            for skill_id in member_ids
-        )
 
     def get_set(
         self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None,
@@ -462,15 +420,20 @@ class SkillSetControlPlaneRepository(
             )
             if membership is None:
                 return SkillSetMutation(_item(row), False, old)
+            # The difference is what this membership was providing.
+            before = self._teardown_ids(session, {int(row.id)})
             session.delete(membership)
+            session.flush()
             if row.is_active:
-                self._scope(
-                    session.query(BotSkillInstallation), BotSkillInstallation
-                ).filter(
-                    BotSkillInstallation.owner_id == owner_id,
-                    BotSkillInstallation.bot_id == bot_id,
-                    BotSkillInstallation.skill_id == int(skill_id),
-                ).delete(synchronize_session=False)
+                retired = before - self._teardown_ids(session, {int(row.id)})
+                if retired:
+                    self._scope(
+                        session.query(BotSkillInstallation), BotSkillInstallation
+                    ).filter(
+                        BotSkillInstallation.owner_id == owner_id,
+                        BotSkillInstallation.bot_id == bot_id,
+                        BotSkillInstallation.skill_id.in_(sorted(retired)),
+                    ).delete(synchronize_session=False)
             session.flush()
             return SkillSetMutation(_item(row), True, old)
 
@@ -507,13 +470,12 @@ class SkillSetControlPlaneRepository(
             old = self._snapshot(
                 session, bot_id, owner_id, engine_type=engine_type
             )
-            members = (
-                self._scope(session.query(SkillSetSkill), SkillSetSkill)
-                .filter(SkillSetSkill.skill_set_id == row.id)
-                .with_for_update()
-                .all()
-            )
-            ids = {int(member.skill_id) for member in members}
+            # Taken for the lock, not the ids.
+            self._scope(session.query(SkillSetSkill), SkillSetSkill).filter(
+                SkillSetSkill.skill_set_id == row.id
+            ).with_for_update().all()
+            ids = self._member_ids(session, {int(row.id)})
+            retired = self._teardown_ids(session, {int(row.id)})
             mcp_members = (
                 self._scope(
                     session.query(SkillSetMCPServer), SkillSetMCPServer
@@ -551,13 +513,13 @@ class SkillSetControlPlaneRepository(
                             avernet_tenant=get_current_avernet_tenant(),
                         )
                     )
-            elif ids:
+            elif retired:
                 self._scope(
                     session.query(BotSkillInstallation), BotSkillInstallation
                 ).filter(
                     BotSkillInstallation.owner_id == owner_id,
                     BotSkillInstallation.bot_id == bot_id,
-                    BotSkillInstallation.skill_id.in_(ids),
+                    BotSkillInstallation.skill_id.in_(sorted(retired)),
                 ).delete(synchronize_session=False)
             if not active and mcp_codes:
                 self._scope(
@@ -569,154 +531,6 @@ class SkillSetControlPlaneRepository(
                 ).delete(synchronize_session=False)
             session.flush()
             return SkillSetMutation(_item(row), changed, old)
-
-    def replace_active_set(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        set_id: str,
-        engine_type: str | None = None,
-        default_engine_types: tuple[str, ...] | None = None,
-    ) -> SkillSetMutation:
-        """Atomically replace all ordinary active sets with ``set_id``.
-
-        This is deliberately distinct from canonical ``activate``.  It exists
-        only for the deprecated single-select switch wire, whose published
-        operation is an all-or-nothing replacement rather than a sequence of
-        deactivate/activate calls.
-        """
-        with self._db.transactional_orm_session() as session:
-            target = self._set(
-                session,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                set_id=set_id,
-                engine_type=engine_type,
-                default_engine_types=default_engine_types,
-                locked=True,
-            )
-            self._ordinary(target)
-            old = self._snapshot(
-                session, bot_id, owner_id, engine_type=engine_type
-            )
-            query = self._scope(session.query(SkillSet), SkillSet).filter(
-                SkillSet.bolt_id == bot_id,
-                SkillSet.user_id == owner_id,
-                SkillSet.is_default.is_(False),
-            )
-            if engine_type is not None:
-                query = query.filter(SkillSet.engine_type == engine_type)
-            sets = query.with_for_update().all()
-            set_ids = {int(row.id) for row in sets}
-            memberships = []
-            if set_ids:
-                memberships = (
-                    self._scope(session.query(SkillSetSkill), SkillSetSkill)
-                    .filter(SkillSetSkill.skill_set_id.in_(set_ids))
-                    .with_for_update()
-                    .all()
-                )
-                mcp_memberships = (
-                    self._scope(
-                        session.query(SkillSetMCPServer), SkillSetMCPServer
-                    )
-                    .filter(SkillSetMCPServer.skill_set_id.in_(set_ids))
-                    .with_for_update()
-                    .all()
-                )
-            else:
-                mcp_memberships = []
-            active_member_ids = {
-                int(member.skill_id)
-                for member in memberships
-                if old.set_active.get(int(member.skill_set_id), False)
-            }
-            target_member_ids = {
-                int(member.skill_id)
-                for member in memberships
-                if int(member.skill_set_id) == int(target.id)
-            }
-            active_mcp_codes = {
-                str(member.server_code)
-                for member in mcp_memberships
-                if old.set_active.get(int(member.skill_set_id), False)
-            }
-            target_mcp_codes = {
-                str(member.server_code)
-                for member in mcp_memberships
-                if int(member.skill_set_id) == int(target.id)
-            }
-            for row in sets:
-                row.is_active = int(row.id) == int(target.id)
-            self._require_unique_runtime_names(
-                session,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                candidate_ids=target_member_ids,
-                retired_ids=active_member_ids,
-            )
-            if active_member_ids:
-                self._scope(
-                    session.query(BotSkillInstallation), BotSkillInstallation
-                ).filter(
-                    BotSkillInstallation.owner_id == owner_id,
-                    BotSkillInstallation.bot_id == bot_id,
-                    BotSkillInstallation.skill_id.in_(active_member_ids),
-                ).delete(synchronize_session=False)
-            existing = self._installations(session, bot_id, owner_id)
-            for skill_id in target_member_ids - existing:
-                session.add(
-                    BotSkillInstallation(
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        skill_id=skill_id,
-                        env=get_current_env(),
-                        avernet_tenant=get_current_avernet_tenant(),
-                    )
-                )
-            if active_mcp_codes:
-                self._scope(
-                    session.query(BotMCPInstallation), BotMCPInstallation
-                ).filter(
-                    BotMCPInstallation.bot_id == bot_id,
-                    BotMCPInstallation.owner_id == owner_id,
-                    BotMCPInstallation.server_code.in_(active_mcp_codes),
-                ).delete(synchronize_session=False)
-            existing_mcps = self._mcp_installations(session, bot_id, owner_id)
-            for server_code in target_mcp_codes - existing_mcps:
-                session.add(
-                    BotMCPInstallation(
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        server_code=server_code,
-                        env=get_current_env(),
-                        avernet_tenant=get_current_avernet_tenant(),
-                    )
-                )
-            session.flush()
-            activated = (
-                [str(target.id)]
-                if not old.set_active.get(int(target.id), False)
-                else []
-            )
-            deactivated = [
-                str(row.id)
-                for row in sets
-                if int(row.id) != int(target.id)
-                and old.set_active.get(int(row.id), False)
-            ]
-            changed = any(
-                old.set_active.get(int(row.id), False)
-                != (int(row.id) == int(target.id))
-                for row in sets
-            )
-            return SkillSetMutation(
-                _item(target),
-                changed,
-                old,
-                {"activated": activated, "deactivated": deactivated},
-            )
 
     def restore_desired_state(
         self,
@@ -871,6 +685,37 @@ class SkillSetControlPlaneRepository(
     def _ordinary(row: SkillSet) -> None:
         if row.is_default:
             raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")
+
+    def _member_ids(self, session, set_ids: set[int]) -> set[int]:
+        """The Skill ids the given Sets provide.
+
+        The same resolver the repair uses, so a mutation writes and removes
+        exactly the rows a repair would.
+        """
+        ids: set[int] = set()
+        for set_id in sorted(set_ids):
+            ids |= set_member_skill_ids(self._scope, session, skill_set_id=set_id)
+        return ids
+
+    def _teardown_ids(self, session, set_ids: set[int]) -> set[int]:
+        """Every Skill id these Sets could be holding installed.
+
+        Wider than :meth:`_member_ids` on purpose: a member that no longer
+        resolves — an OFFLINE ``center://`` row — still has an Installation row
+        to remove, and the guards would not let its owner remove it by hand.
+        Install from ``_member_ids``, tear down from here.
+        """
+        ids = self._member_ids(session, set_ids)
+        if not set_ids:
+            return ids
+        return ids | {
+            int(value[0])
+            for value in self._scope(
+                session.query(SkillSetSkill.skill_id), SkillSetSkill
+            )
+            .filter(SkillSetSkill.skill_set_id.in_(sorted(set_ids)))
+            .all()
+        }
 
     def _installations(self, session, bot_id: str, owner_id: str) -> set[int]:
         return {

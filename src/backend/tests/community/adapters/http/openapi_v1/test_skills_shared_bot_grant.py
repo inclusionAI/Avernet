@@ -124,7 +124,7 @@ class _Skills:
             "gmt_modified": datetime(2026, 8, 2),
         }
 
-    def list_local_skills(
+    def list_bot_skills(
         self, *, bot_id, owner_id, actor_id, page, page_size, active=None, keyword=None
     ):
         assert (bot_id, owner_id) == (BOT, OWNER), (bot_id, owner_id)
