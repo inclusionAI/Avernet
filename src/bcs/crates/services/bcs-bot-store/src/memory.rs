@@ -551,6 +551,31 @@ impl BotRepoPort for MemoryBotRepo {
         Ok(())
     }
 
+    async fn update_capabilities(
+        &self,
+        bot_id: &str,
+        capabilities: BotCapabilities,
+    ) -> ServiceResult<()> {
+        self.deleted_bot_ids.write().await.remove(bot_id);
+        self.sync_binding_channel_index(bot_id, &capabilities)
+            .await;
+        // Persist to disk verbatim (no empty-array skip), matching the
+        // wholesale replacement semantics of the core update path.
+        self.save_capabilities_to_disk(bot_id, &capabilities).await?;
+        let mut bots = self.bots.write().await;
+        if let Some(existing) = bots.get_mut(bot_id) {
+            existing.last_heartbeat = Instant::now();
+            existing.capabilities = capabilities;
+            let mut audit = self.control_plane_audit.write().await;
+            let now = unix_millis();
+            let entry = audit.entry(bot_id.to_string()).or_insert((now, now));
+            entry.1 = now;
+            Ok(())
+        } else {
+            Err(ServiceError::BotNotFound(bot_id.to_string()))
+        }
+    }
+
     async fn register_with_owner_and_token(
         &self,
         bot_id: String,
