@@ -114,6 +114,39 @@ pub struct DeleteProviderBotOutcome {
     pub deleted: bool,
 }
 
+/// Command for partially updating a provider-managed bot.
+///
+/// Each `Option` is a PATCH field: `Some` replaces (empty `Vec` clears),
+/// `None` leaves the existing value. `provider_bot_ref` and the resolved
+/// `bot_uuid` are identifiers and are not changed by this command.
+#[derive(Debug, Clone)]
+pub struct UpdateProviderBotCommand {
+    pub provider_id: String,
+    pub provider_admin_token: String,
+    pub provider_bot_ref: String,
+    pub name: Option<String>,
+    pub summary: Option<String>,
+    pub domains: Option<Vec<String>>,
+    pub skills: Option<Vec<Skill>>,
+    pub scopes: Option<Vec<String>>,
+    pub visibility: Option<String>,
+}
+
+/// Result of updating a provider-managed bot: the post-update capabilities
+/// projected onto the unchanged binding identifiers.
+#[derive(Debug, Clone)]
+pub struct UpdateProviderBotOutcome {
+    pub bot_uuid: String,
+    pub provider_id: String,
+    pub provider_bot_ref: String,
+    pub name: Option<String>,
+    pub summary: Option<String>,
+    pub domains: Vec<String>,
+    pub skills: Vec<Skill>,
+    pub scopes: Vec<String>,
+    pub visibility: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ProviderBotEventCommand {
     pub provider_id: String,
@@ -263,6 +296,11 @@ pub trait ProviderManagementService: Send + Sync {
         &self,
         command: DeleteProviderBotCommand,
     ) -> ServiceResult<DeleteProviderBotOutcome>;
+
+    async fn update_provider_bot(
+        &self,
+        command: UpdateProviderBotCommand,
+    ) -> ServiceResult<UpdateProviderBotOutcome>;
 
     async fn set_provider_disabled(
         &self,

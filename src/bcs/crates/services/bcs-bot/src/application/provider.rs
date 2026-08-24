@@ -10,7 +10,7 @@ use bcs_service_api::{
     ProviderManagementService, ProviderRecord, RegisterProviderBotCommand,
     RegisterProviderBotOutcome, RegisterProviderBotParams, RegisterProviderCommand,
     RegisterProviderOutcome, RelationCoreService, ServiceError, ServiceResult,
-    UpdateProviderCommand,
+    UpdateProviderBotCommand, UpdateProviderBotOutcome, UpdateProviderCommand,
 };
 use bcs_user_directory_api::UserDirectoryPlugin;
 
@@ -419,6 +419,38 @@ impl ProviderManagementService for ProviderManagement {
                 disabled,
             )
             .await
+    }
+
+    async fn update_provider_bot(
+        &self,
+        command: UpdateProviderBotCommand,
+    ) -> ServiceResult<UpdateProviderBotOutcome> {
+        let result = self
+            .provider_bot_core
+            .update_provider_bot(
+                &command.provider_id,
+                &command.provider_admin_token,
+                &command.provider_bot_ref,
+                command.name,
+                command.summary,
+                command.domains,
+                command.skills,
+                command.scopes,
+                command.visibility,
+            )
+            .await?;
+        let capabilities = result.capabilities;
+        Ok(UpdateProviderBotOutcome {
+            bot_uuid: result.binding.bot_uuid,
+            provider_id: result.binding.provider_id,
+            provider_bot_ref: result.binding.provider_bot_ref,
+            name: capabilities.name,
+            summary: capabilities.summary,
+            domains: capabilities.domains,
+            skills: capabilities.skills,
+            scopes: capabilities.scopes,
+            visibility: capabilities.visibility,
+        })
     }
 }
 

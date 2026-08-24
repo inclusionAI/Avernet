@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bcs_protocol::{
-    BCN_PROVIDER_ID_HEADER, PatchProviderRequest, ProviderAuthModeDto,
+    BCN_PROVIDER_ID_HEADER, PatchProviderBotRequest, PatchProviderRequest, ProviderAuthModeDto,
     ProviderBotConnectionModeDto, ProviderCoordinationConfigDto, ProviderCoordinationModeDto,
     ProviderInfoResponse, ProviderOrganizationManagementConfigDto, RegisterProviderBotRequest,
     RegisterProviderBotResponse, RegisterProviderRequest, RegisterProviderResponse,
@@ -20,13 +20,13 @@ use bcs_service_api::{
     ProviderBotTaskModesFilter, ProviderCoordinationConfig, ProviderOrganizationManagementConfig,
     ProviderRecord, RegisterProviderBotCommand, RegisterProviderCommand, ServiceError,
     SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult, TaskModeMatch,
-    UpdateProviderCommand,
+    UpdateProviderBotCommand, UpdateProviderCommand,
 };
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value, json};
 use tracing::{info, warn};
 
-use crate::mapping::capabilities::to_core_skill;
+use crate::mapping::capabilities::{to_core_skill, to_wire_skill};
 use crate::state::HttpAppState;
 
 #[derive(Debug, serde::Deserialize)]
@@ -438,6 +438,45 @@ fn delete_provider_bot_response(
         body["message"] = json!(message);
     }
     Json(body)
+}
+
+pub async fn patch_provider_bot(
+    State(state): State<HttpAppState>,
+    Path((provider_id, provider_bot_ref)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(req): Json<PatchProviderBotRequest>,
+) -> Result<Json<Value>, ProviderRouteError> {
+    let provider_admin_token = bearer_token(&headers)?;
+    let outcome = state
+        .services
+        .provider_management
+        .update_provider_bot(UpdateProviderBotCommand {
+            provider_id,
+            provider_admin_token,
+            provider_bot_ref,
+            name: req.name,
+            summary: req.summary,
+            domains: req.domains,
+            skills: req
+                .skills
+                .map(|skills| skills.into_iter().map(|name| to_core_skill(name.into())).collect()),
+            scopes: req.scopes,
+            visibility: req.visibility,
+        })
+        .await
+        .map_err(provider_error)?;
+
+    Ok(Json(json!({
+        "bot_uuid": outcome.bot_uuid,
+        "provider_id": outcome.provider_id,
+        "provider_bot_ref": outcome.provider_bot_ref,
+        "name": outcome.name,
+        "summary": outcome.summary,
+        "domains": outcome.domains,
+        "skills": outcome.skills.into_iter().map(to_wire_skill).collect::<Vec<_>>(),
+        "scopes": outcome.scopes,
+        "visibility": outcome.visibility,
+    })))
 }
 
 pub async fn resolve_agentpass_bot(

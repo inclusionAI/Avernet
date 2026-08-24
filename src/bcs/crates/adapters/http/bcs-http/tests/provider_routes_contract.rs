@@ -982,6 +982,300 @@ async fn register_agentpass_provider_bot_omits_runtime_token() {
     assert!(bot.get("bot_runtime_token").is_none());
 }
 
+async fn patch_provider_bot(
+    app: &Router,
+    provider_id: &str,
+    admin_token: &str,
+    provider_bot_ref: &str,
+    patch: Value,
+) -> (StatusCode, Value) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/providers/{provider_id}/bots/{provider_bot_ref}"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(patch.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    (status, response_json(response).await)
+}
+
+#[tokio::test]
+async fn patch_provider_bot_merges_and_preserves_unmodified_fields() {
+    let TestApp {
+        app, registry, _temp_dir, ..
+    } = test_app();
+    let provider = register_provider(&app, json!({"mode": "static_bearer"})).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+
+    // Seed a bot with full capabilities in one POST (the default helper omits
+    // domains/skills/scopes; a second POST with the same ref is idempotent and
+    // would NOT update them).
+    let seeded = response_json(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/providers/{provider_id}/bots"))
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .body(
+                        Body::from(
+                            json!({
+                                "name": "Code Reviewer",
+                                "summary": "Reviews code",
+                                "owners": ["12345678"],
+                                "provider_bot_ref": "reviewer-v2",
+                                "domains": ["development", "security"],
+                                "skills": ["code_review"],
+                                "scopes": ["production"]
+                            })
+                            .to_string(),
+                        ),
+                    )
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
+    let bot_uuid = seeded["bot_uuid"].as_str().unwrap();
+
+    let (status, body) = patch_provider_bot(
+        &app,
+        provider_id,
+        admin_token,
+        "reviewer-v2",
+        json!({
+            "name": "Senior Reviewer",
+            "domains": ["database"]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["bot_uuid"], bot_uuid);
+    assert_eq!(body["name"], "Senior Reviewer");
+    assert_eq!(body["domains"], json!(["database"]));
+    // Unmodified fields preserved.
+    assert_eq!(body["summary"], "Reviews code");
+    assert_eq!(body["scopes"], json!(["production"]));
+    let skills: Vec<&str> = body["skills"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(skills, vec!["code_review"]);
+    // Persisted to the registry.
+    let bot = registry.get(bot_uuid).await.expect("bot registered");
+    assert_eq!(bot.capabilities.name.as_deref(), Some("Senior Reviewer"));
+    assert_eq!(bot.capabilities.domains, vec!["database"]);
+    assert_eq!(bot.capabilities.summary.as_deref(), Some("Reviews code"));
+}
+
+#[tokio::test]
+async fn patch_provider_bot_clears_array_with_empty_vec_and_keeps_when_field_absent() {
+    let TestApp { app, _temp_dir, .. } = test_app();
+    let provider = register_provider(&app, json!({"mode": "static_bearer"})).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+
+    let bot =
+        register_provider_bot(&app, provider_id, admin_token, "reviewer-v2").await;
+    let bot_uuid = bot["bot_uuid"].as_str().unwrap();
+
+    // Absent fields leave the (default) empty arrays unchanged.
+    let (status, body) =
+        patch_provider_bot(&app, provider_id, admin_token, "reviewer-v2", json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["bot_uuid"], bot_uuid);
+
+    // Now seed domains/scopes and clear them with empty vecs.
+    patch_provider_bot(
+        &app,
+        provider_id,
+        admin_token,
+        "reviewer-v2",
+        json!({"domains": ["development"], "scopes": ["production"]}),
+    )
+    .await;
+    let (status, body) = patch_provider_bot(
+        &app,
+        provider_id,
+        admin_token,
+        "reviewer-v2",
+        json!({"domains": [], "scopes": []}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["domains"], json!([]));
+    assert_eq!(body["scopes"], json!([]));
+}
+
+#[tokio::test]
+async fn patch_provider_bot_rejects_invalid_visibility() {
+    let TestApp { app, _temp_dir, .. } = test_app();
+    let provider = register_provider(&app, json!({"mode": "static_bearer"})).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+    register_provider_bot(&app, provider_id, admin_token, "reviewer-v2").await;
+
+    let (status, body) = patch_provider_bot(
+        &app,
+        provider_id,
+        admin_token,
+        "reviewer-v2",
+        json!({"visibility": "friends"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("visibility must be 'public', 'protected', or 'private'")
+    );
+}
+
+#[tokio::test]
+async fn patch_provider_bot_accepts_admin_token_without_human_identity() {
+    let TestApp { app, _temp_dir, .. } = test_app();
+    let provider = register_provider(&app, json!({"mode": "static_bearer"})).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+    register_provider_bot(&app, provider_id, admin_token, "reviewer-v2").await;
+
+    let (status, _) = patch_provider_bot(
+        &app,
+        provider_id,
+        admin_token,
+        "reviewer-v2",
+        json!({"name": "Renamed"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn patch_provider_bot_rejects_without_admin_token() {
+    let TestApp { app, _temp_dir, .. } = test_app();
+    let provider = register_provider(&app, json!({"mode": "static_bearer"})).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+    register_provider_bot(&app, provider_id, admin_token, "reviewer-v2").await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/providers/{provider_id}/bots/reviewer-v2"))
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"name": "Renamed"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/providers/{provider_id}/bots/reviewer-v2"))
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer not-the-admin-token")
+                .body(Body::from(json!({"name": "Renamed"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn patch_provider_bot_preserves_agent_code_for_agentpass_bot() {
+    // The whole point of the core-layer agent_code reconstruction: an AgentPass
+    // bot's routing identifier (== its provider_bot_ref) must survive an update.
+    // `registry.get()` strips agent_code, so assert via `find_bot_by_agent_code`.
+    let TestApp { app, registry, _temp_dir, .. } = test_app();
+    let provider = register_provider(&app, json!({"mode": "agentpass"})).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+
+    let bot = register_provider_bot(&app, provider_id, admin_token, "reviewer-v2").await;
+    let bot_uuid = bot["bot_uuid"].as_str().unwrap();
+    assert_eq!(
+        registry.find_bot_by_agent_code("reviewer-v2").await,
+        Some(bot_uuid.to_string())
+    );
+
+    let (status, _) = patch_provider_bot(
+        &app,
+        provider_id,
+        admin_token,
+        "reviewer-v2",
+        json!({"name": "Renamed Agent"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // agent_code must still resolve to the same bot after the update.
+    assert_eq!(
+        registry.find_bot_by_agent_code("reviewer-v2").await,
+        Some(bot_uuid.to_string())
+    );
+}
+
+#[tokio::test]
+async fn patch_provider_bot_rejects_unreachable_bot() {
+    // When the bound bot has been soft-deleted (unreachable from the registry),
+    // the update surfaces BotNotFound (404), never silently no-ops.
+    let TestApp { app, registry, _temp_dir, .. } = test_app();
+    let provider = register_provider(&app, json!({"mode": "static_bearer"})).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+    let bot = register_provider_bot(&app, provider_id, admin_token, "reviewer-v2").await;
+    let bot_uuid = bot["bot_uuid"].as_str().unwrap();
+
+    let _ = registry.soft_delete(bot_uuid).await;
+
+    let (status, _) = patch_provider_bot(
+        &app,
+        provider_id,
+        admin_token,
+        "reviewer-v2",
+        json!({"name": "Renamed"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn patch_provider_bot_returns_not_found_for_unknown_ref() {
+    let TestApp { app, _temp_dir, .. } = test_app();
+    let provider = register_provider(&app, json!({"mode": "static_bearer"})).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+
+    let (status, _) = patch_provider_bot(
+        &app,
+        provider_id,
+        admin_token,
+        "nonexistent-bot",
+        json!({"name": "Renamed"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
 #[tokio::test]
 async fn delete_provider_bot_soft_deletes_bound_bot_and_runtime_token() {
     let TestApp {
