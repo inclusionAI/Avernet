@@ -28,6 +28,7 @@ import logging
 import threading
 from dataclasses import dataclass
 
+from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.domain.errors import NodeNotFoundError, TaskStateError
 from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
@@ -65,13 +66,13 @@ class ExecutionEngine:
     跨 task 并行。投递/拉群 IO 锁外 await,gather+Semaphore 并发。loop_round 仅升 BBS 时 ++。
     测试可经 facade/engine 子类覆写 ``_build_*`` 注入 stub 策略/投递(测试 seam)。"""
 
-    def __init__(self, graph, *, bot=None, bcs=None, discover=None, bcs_identity=None,
-                 api_base_url: str = "") -> None:
+    def __init__(self, graph, *, bot=None, bcs=None, discover=None, bcn: BcnService | None = None,
+                 bcs_identity=None, api_base_url: str = "") -> None:
         """graph: TaskGraphService;bot: OpenApiBotPort;bcs: BcsClientPort;discover: BotDiscoverServiceProtocol。
         端口由 DI 从配置注入(local/prod/double 只换端口实现,引擎代码不变)。prod 必传;测试子类覆写
         ``_build_*`` 注入 stub 策略/投递时可省略(走 super 路径默认 berth)。
 
-        BBS 任务模式候选通过 ``bcs.list_bots_by_task_modes`` 查询 BCS 当前环境的全局物理 Bot。
+        BBS 任务模式候选通过 ``bcn.list_bots_by_task_modes``(注入的 BcnService,复用统一 provider 身份)查询。
 
         ``api_base_url``:任务后端 base url,经 _build_executor 透传给 TaskExecutor→bbs_runner.notify,
         拼成发给胜出 bot 的任务消息(spec §5:主动触发回投路径)。"""
@@ -79,6 +80,7 @@ class ExecutionEngine:
         self._bot = bot
         self._bcs = bcs
         self._discover = discover
+        self._bcn = bcn
         self._bcs_identity = bcs_identity
         self._api_base_url = api_base_url
         self._bg_tasks: set[asyncio.Task] = set()
@@ -121,7 +123,7 @@ class ExecutionEngine:
         exe = TaskExecutor(
             bot=self._bot, bcs=self._bcs, formatter=PromptFormatterImpl(),
             context=self, sink=self, poller=poller, identity_resolver=self._bcs_identity,
-            graph=self._graph, api_base_url=self._api_base_url,
+            graph=self._graph, api_base_url=self._api_base_url, bcn=self._bcn,
         )
         import threading as _t
         self._poller_thread = _t.Thread(target=poller.run_poll_loop, daemon=True, name="task-exec-poller")
@@ -148,7 +150,7 @@ class ExecutionEngine:
         pool = [DirectDispatchStrategy()]
         if self._bot is not None and self._discover is not None:
             pool.append(SearchBasedDispatchStrategy(
-                self._bot, self._discover, bcs=self._bcs))
+                self._bot, self._discover))
         else:
             pool.append(SearchBasedDispatchStrategy())
         return TaskDispatcher(self._graph, pool=pool)

@@ -5,7 +5,7 @@ import uuid
 from typing import Any
 
 from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
-    BcsCreateGroupRequest, BcsCreateGroupResult, BotTaskModeRoster,
+    BcsCreateGroupRequest, BcsCreateGroupResult,
 )
 
 
@@ -55,15 +55,6 @@ class _DoubleBcsClient:
 
     async def validate_definition(self, definition_yaml: str) -> None:
         return None
-
-    async def list_bots_by_task_modes(
-        self,
-        *,
-        claim: bool | None = None,
-        dream: bool | None = None,
-        match: str = "any",
-    ) -> list[BotTaskModeRoster]:
-        return []
 
     def _resolve(self, final_status: str, final_output: Any, counts: dict[str, int], key: str) -> tuple[str, Any]:
         if not self._poll_mode:

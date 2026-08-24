@@ -13,8 +13,7 @@
   先继承 ``BcsHttpAdapter``;真跑 singlebox coop_group e2e 时若 translator 拿不到 ``status``/``output``/
   ``session.*``,据真实响应再覆写归一。
 
-任务模式候选查询直接继承 ``BcsHttpAdapter``，调用
-``GET /bots/by-task-modes``。
+任务模式候选查询经 ``BcnService``(复用统一 provider 身份,``GET /providers/{provider_id}/bots/by-task-modes``)提供,不再继承 ``BcsHttpAdapter``。
 """
 from __future__ import annotations
 

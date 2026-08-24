@@ -32,6 +32,7 @@ from agentclaw.community.core.task.task_graph.task_graph_service import TaskGrap
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
 )
+from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.di.profile import DeployProfile
 
 
@@ -68,6 +69,13 @@ class TaskModule(Module):
         """
         bot, bcs = self._resolve_ports()
         discover_port = self._resolve_discover(default=discover, bot_public=bot_public)
+        # BBS 候选查询复用 BcnService 的统一 provider 身份(BcnConfig prod/pre,与 register/switch
+        # provider-bot 同源)。任务模块作为普通消费方经 DI 注入 BcnService;纯内核/未装 BotManagement 的
+        # DI 测试路径取不到 → None(BBS 按可恢复态跳过;singlebox 无凭据亦走 not-configured 静默)。
+        try:
+            bcn = injector.get(BcnService)
+        except Exception:  # noqa: BLE001 未绑定 → 跳过 BBS roster
+            bcn = None
         bcs_identity = None
         if bcs is not None:
             from agentclaw.community.core.task.task_runner.integration.bcs_bot_identity_resolver import (
@@ -110,7 +118,7 @@ class TaskModule(Module):
             bot_service = None
         return TaskService(
             graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
-            bcs_identity=bcs_identity, task_info_repo=task_info_repo,
+            bcn=bcn, bcs_identity=bcs_identity, task_info_repo=task_info_repo,
             callback_repo=callback_repo, task_node_repo=task_node_repo,
             task_node_run_info_repo=task_node_run_info_repo,
             bot_service=bot_service,

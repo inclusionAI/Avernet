@@ -5,7 +5,6 @@ import pytest
 
 from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
     BcsClientRequestError, BcsCreateGroupRequest, BcsHttpAdapter, BcsServerError,
-    BotTaskModeRoster,
 )
 
 
@@ -106,70 +105,6 @@ def test_client_4xx_raises():
 
     with pytest.raises(BcsClientRequestError):
         _run(_adapter(h).get_group("g1"))
-
-
-def test_list_bots_by_task_modes_calls_global_bcs_route_and_maps_items():
-    seen = {}
-
-    def h(req):
-        seen["path"] = req.url.path
-        seen["claim"] = req.url.params.get("task_claim_mode")
-        seen["dream"] = req.url.params.get("task_dream_mode")
-        seen["match"] = req.url.params.get("match")
-        return httpx.Response(200, json={"items": [
-            {
-                "bot_id": "b1",
-                "name": "Bot One",
-                "env": "local",
-                "task_claim_mode": True,
-                "task_dream_mode": True,
-            },
-        ]})
-
-    roster = _run(
-        _adapter(h).list_bots_by_task_modes(
-            claim=True,
-            dream=True,
-            match="all",
-        )
-    )
-
-    assert seen == {
-        "path": "/bots/by-task-modes",
-        "claim": "true",
-        "dream": "true",
-        "match": "all",
-    }
-    assert roster == [
-        BotTaskModeRoster(
-            bot_id="b1",
-            name="Bot One",
-            env="local",
-            task_claim_mode=True,
-            task_dream_mode=True,
-        )
-    ]
-
-
-def test_list_bots_by_task_modes_omits_unset_toggles():
-    seen = {}
-
-    def h(req):
-        seen["claim"] = req.url.params.get("task_claim_mode")
-        seen["dream"] = req.url.params.get("task_dream_mode")
-        seen["match"] = req.url.params.get("match")
-        return httpx.Response(200, json={"items": []})
-
-    assert _run(_adapter(h).list_bots_by_task_modes()) == []
-    assert seen == {"claim": None, "dream": None, "match": "any"}
-
-
-def test_list_bots_by_task_modes_4xx_raises():
-    def h(req):
-        return httpx.Response(400, json={"error": "invalid match"})
-
-    with pytest.raises(BcsClientRequestError):
-        _run(_adapter(h).list_bots_by_task_modes(match="invalid"))
 
 
 def test_owned_client_isolated_when_event_loop_changes(monkeypatch):

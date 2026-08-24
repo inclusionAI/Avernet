@@ -29,6 +29,7 @@ from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 from agentclaw.community.core.task.repository.types import (
     TaskInfoRecord, TaskNodeRecord, TaskNodeRunInfoRecord,
 )
+from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_runner.callback_adapter import (
     CallbackAdapter,
@@ -47,7 +48,7 @@ class TaskService:
     验收 100% 走回调回投;engine 不主动验,无 verify/bbs port。engine 对调用方不可见(无 property)。
     """
 
-    def __init__(self, graph, harness=None, *, bot=None, bcs=None, discover=None,
+    def __init__(self, graph, harness=None, *, bot=None, bcs=None, discover=None, bcn: BcnService | None = None,
                  bcs_identity=None, task_info_repo: TaskInfoRepositoryProtocol | None = None,
                  callback_repo: TaskCallbackRepositoryProtocol | None = None,
                  task_id_provider: Callable[[], str] | None = None,
@@ -57,7 +58,7 @@ class TaskService:
                  api_base_url: str | None = None) -> None:
         """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
         bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。
-        BBS 候选通过 bcs.list_bots_by_task_modes 查询 BCS 当前环境的全局物理 Bot。
+        BBS 候选通过注入的 BcnService.list_bots_by_task_modes(复用统一 provider 身份)查询。
 
         ``task_info_repo``(可选):task_info 持久化协议(DI 在 prod 注入真实实现;``None``
         时 execute 跳过持久化,纯内核/单测路径用)。``callback_repo``(可选):回投落库协议(同上,
@@ -67,6 +68,7 @@ class TaskService:
         start_time)用;``None`` 时跳过持久化(纯内核/单测路径用,与 ``task_info_repo`` 同语义)。"""
         self._graph = graph
         self._harness = harness
+        self._bcn = bcn
         self._bcs_identity = bcs_identity
         self._task_info_repo = task_info_repo
         self._task_id_provider = task_id_provider or (lambda: str(uuid.uuid4()))
@@ -91,7 +93,7 @@ class TaskService:
         """构造编排核:ExecutionEngine(graph, bot=, bcs=, discover=)。引擎内部 ``_build_*`` new 自带策略 +
         接线 TaskExecutor。测试可经 facade/engine 子类覆写本方法注入 stub 策略/投递的引擎(测试 seam)。"""
         return ExecutionEngine(
-            self._graph, bot=bot, bcs=bcs, discover=discover,
+            self._graph, bot=bot, bcs=bcs, discover=discover, bcn=self._bcn,
             bcs_identity=self._bcs_identity,
             api_base_url=self._api_base_url,
         )

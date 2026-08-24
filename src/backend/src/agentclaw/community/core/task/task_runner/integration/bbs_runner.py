@@ -1,4 +1,4 @@
-"""BBS 主动触发:全局 bcs_bots 候选→bid→select→claim→dispatch。"""
+"""BBS 主动触发:provider 任务模式 roster(复用统一 provider 身份)→bid→select→claim→dispatch。"""
 from __future__ import annotations
 
 import asyncio
@@ -13,32 +13,36 @@ _BID_TIMEOUT = 170.0
 _OVERALL_TIMEOUT = 180.0
 
 
-async def notify(execution_graph, *, bcs, bot, graph, backend_url: str,
+async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
                  skill_name: str = _BBS_SKILL_NAME) -> None:
-    """查询同时开启 claim/dream 的全局 BCS Bot,再执行 bid→select→claim→dispatch。"""
+    """查询同时开启 claim/dream 的 provider Bot(复用统一 provider 身份 BcnService),再执行 bid→select→claim→dispatch。
+
+    ``bcn``: :class:`BcnService`(由 DI 注入的任务模块普通消费依赖),复用 register/switch provider-bot 同源
+    统一身份访问 ``GET /providers/{provider_id}/bots/by-task-modes``。``None``/异常 → 静默留可恢复态。
+    """
     task_id = execution_graph.task_id
-    if bcs is None or bot is None:
-        logger.info("[bbs-runner] skip: bcs/bot 缺失 task=%s", task_id)
+    if bcn is None or bot is None:
+        logger.info("[bbs-runner] skip: bcn/bot 缺失 task=%s", task_id)
         return
     try:
-        roster = await bcs.list_bots_by_task_modes(
-            claim=True, dream=True, match="all",
+        entries = await asyncio.to_thread(
+            bcn.list_bots_by_task_modes, claim=True, dream=True, match="all",
         )
-        if len(roster) > 10:
-            roster = roster[:10]
+        if len(entries) > 10:
+            entries = entries[:10]
     except Exception as exc:
         logger.warning("[bbs-runner] roster 取失败 task=%s:%s", task_id, exc)
         return
-    if not roster:
+    if not entries:
         logger.info("[bbs-runner] 无 dream bot 命中 task=%s,留可恢复态", task_id)
         return
 
-    logger.info("[bbs-runner] roster 取成功 task=%s, roster=%s, num=%d", task_id, roster, len(roster))
+    logger.info("[bbs-runner] roster 取成功 task=%s, num=%d", task_id, len(entries))
     # Phase 1: bid (并发评估,3分钟超时)
     try:
         bid_results = await asyncio.wait_for(
             asyncio.gather(
-                *[_bid_one(bot, r, execution_graph) for r in roster],
+                *[_bid_one(bot, r, execution_graph) for r in entries],
                 return_exceptions=True,
             ),
             timeout=_OVERALL_TIMEOUT,
@@ -83,16 +87,17 @@ async def notify(execution_graph, *, bcs, bot, graph, backend_url: str,
 async def _bid_one(bot, rost_entry, execution_graph) -> dict | None:
     """一发一收:发给 bot 评估 prompt,取回复 content JSON {completion_rate}。"""
     task_id = execution_graph.task_id
-    prompt = _bid_prompt(task_id, rost_entry.bot_id)
+    bot_id = rost_entry["bot_id"]
+    prompt = _bid_prompt(task_id, bot_id)
     try:
         run = await bot.send_and_wait_async(
-            bot_id=rost_entry.bot_id, message=prompt,
+            bot_id=bot_id, message=prompt,
             metadata={"biz_task_id": task_id}, timeout=_BID_TIMEOUT,
         )
     except Exception as exc:
-        logger.warning("[bbs-runner] bid send_and_wait 失败 bot=%s:%s", rost_entry.bot_id, exc)
+        logger.warning("[bbs-runner] bid send_and_wait 失败 bot=%s:%s", bot_id, exc)
         return None
-    return {"bot_id": rost_entry.bot_id, "run": run}
+    return {"bot_id": bot_id, "run": run}
 
 
 def _parse_bid(bid_result: Any) -> dict | None:

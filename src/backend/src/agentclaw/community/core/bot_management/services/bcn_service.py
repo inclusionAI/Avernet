@@ -588,6 +588,64 @@ class BcnService:
         except Exception as e:
             raise BcnServiceError(f"BCS attributes get error: {e}")
 
+    def list_bots_by_task_modes(
+        self,
+        *,
+        claim: bool | None = None,
+        dream: bool | None = None,
+        match: str = "any",
+    ) -> List[Dict[str, Any]]:
+        """查询满足任务模式开关的 provider bot roster(BCS provider 路由,Bearer)。
+
+        ``GET /providers/{provider_id}/bots/by-task-modes`` ——与 register/switch/attributes
+        provider-bot 同套鉴权:仅 ``Authorization: Bearer {provider_admin_token}``，``provider_id``
+        在 path，复用 ``_get_provider_config`` 解析的统一 provider 身份(BcnConfig prod/pre)。与其它
+        BcnService 方法一致直接返回 BCN 响应原结构(``{"items": [...]}`` 取 ``items``)。
+
+        ``claim``/``dream`` 为 ``None`` 表示该开关不过滤(不下发 query)；``match`` 为 any|all。
+        非 prod/pre 或凭据空时抛 :class:`BcnServiceError`(BBS 调用方按 fail-open 处理)。
+        """
+        env = get_current_env()
+        provider_cfg = _get_provider_config(env, self._config)
+        if not provider_cfg:
+            raise BcnServiceError(
+                f"task-mode roster provider credentials not configured for env={env}"
+            )
+        provider_id = provider_cfg["provider_id"]
+        token = provider_cfg["provider_admin_token"]
+        path = f"/providers/{provider_id}/bots/by-task-modes"
+        params: Dict[str, str] = {"match": match}
+        if claim is not None:
+            params["task_claim_mode"] = "true" if claim else "false"
+        if dream is not None:
+            params["task_dream_mode"] = "true" if dream else "false"
+        logger.info(
+            "[BcnService.list_bots_by_task_modes] GET %s claim=%s dream=%s match=%s",
+            path, claim, dream, match,
+        )
+        try:
+            response = self._http.get(
+                path,
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=self._timeout,
+            )
+            response.raise_for_status()
+            items = response.json().get("items", [])
+            return items if isinstance(items, list) else []
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else "No response"
+            status = e.response.status_code if e.response else "N/A"
+            raise BcnServiceError(
+                f"BCN list_bots_by_task_modes HTTP error: {status} - {error_body}"
+            )
+        except httpx.TimeoutException as e:
+            raise BcnServiceError(f"BCN list_bots_by_task_modes timeout: {e}")
+        except BcnServiceError:
+            raise
+        except Exception as e:
+            raise BcnServiceError(f"BCN list_bots_by_task_modes error: {e}")
+
     def patch_attributes(
         self, *, bot_uuid: str, body: Dict[str, Any]
     ) -> Dict[str, Any]:

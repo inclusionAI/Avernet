@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from agentclaw.community.core.task.domain.models import TaskNode, TaskNodePatch
+from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 
@@ -38,15 +39,16 @@ _BCN_EVENT_CALLBACK_PATH = "/api/v1/collaboration/tasks/callback/report"
 class TaskExecutor:
     def __init__(self, *, bot, bcs, formatter, context, sink, poller,
                  identity_resolver=None, graph=None,
-                 api_base_url: str = "") -> None:
+                 api_base_url: str = "", bcn: BcnService | None = None) -> None:
         """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None;
         context: TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。
         graph: TaskGraphService|None,动态派发后把 group_id/session_id/run_id 落节点 run_info.extend_props
         (dashboard 可见);None 时跳过(单测/无图路径)。R0 骨架允许 None。
-        bbs_runner 通过 bcs.list_bots_by_task_modes 查询全局任务模式候选。
+        bbs_runner 通过注入的 BcnService.list_bots_by_task_modes(复用统一 provider 身份)查询任务模式候选。
         api_base_url: 任务后端 base url,传给 bbs_runner 拼发给胜出 bot 的任务消息。"""
         self._bot = bot
         self._bcs = bcs
+        self._bcn = bcn
         self._formatter = formatter
         self._context = context
         self._sink = sink
@@ -353,7 +355,7 @@ class TaskExecutor:
         from agentclaw.community.core.task.task_runner.integration import bbs_runner
         await bbs_runner.notify(
             execution_graph=execution_graph,
-            bcs=self._bcs, bot=self._bot,
+            bcn=self._bcn, bot=self._bot,
             graph=self._graph,
             backend_url=self._api_base_url,
             skill_name=bbs_runner._BBS_SKILL_NAME,

@@ -74,17 +74,6 @@ class BcsCreateGroupResult:
     definition_ref: dict[str, Any] | None = None
 
 
-@dataclass
-class BotTaskModeRoster:
-    """Backend task-mode query DTO projected directly from ``bcs_bots``."""
-
-    bot_id: str
-    name: str
-    env: str
-    task_claim_mode: bool
-    task_dream_mode: bool
-
-
 def _map_status(resp: httpx.Response) -> None:
     if resp.status_code == 429:
         raise BcsRateLimitError(f"429 {resp.text}")
@@ -249,34 +238,3 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
 
     async def validate_definition(self, definition_yaml: str) -> None:
         await self._req("POST", "/collaboration/definitions/validate", json={"yaml": definition_yaml})
-
-    async def list_bots_by_task_modes(
-        self,
-        *,
-        claim: bool | None = None,
-        dream: bool | None = None,
-        match: str = "any",
-    ) -> list[BotTaskModeRoster]:
-        """Query the environment-isolated global physical-Bot roster from BCS."""
-        path = "/bots/by-task-modes"
-        params: dict[str, str] = {"match": match}
-        if claim is not None:
-            params["task_claim_mode"] = "true" if claim else "false"
-        if dream is not None:
-            params["task_dream_mode"] = "true" if dream else "false"
-        ts = str(int(time.time()))
-        headers = self._sign("GET", path, ts)
-        async with self._client_for_current_loop() as client:
-            response = await client.request("GET", path, params=params, headers=headers)
-        _map_status(response)
-        items = response.json().get("items", [])
-        return [
-            BotTaskModeRoster(
-                bot_id=str(item.get("bot_id", "")),
-                name=str(item.get("name", "")),
-                env=str(item.get("env", "")),
-                task_claim_mode=bool(item.get("task_claim_mode", False)),
-                task_dream_mode=bool(item.get("task_dream_mode", False)),
-            )
-            for item in items
-        ]

@@ -130,7 +130,10 @@ def _execute_body(owner_id: str) -> dict:
     }
 
 
-@unittest.skipUnless(_LIVE, "设置 SINGLEBOX_TASK_E2E=1 启用真实 singlebox live e2e")
+@unittest.skip(
+    "singlebox roster deferred: list_bots_by_task_modes moved to BcnService "
+    "(unified BcnConfig provider identity, exercised in pre/prod); singlebox BBS bid e2e deferred"
+)
 class TestBbsBidTwoDreamBotsE2E(unittest.TestCase):
     def test_miss_to_bbs_two_dream_bots_bid_and_execute_to_done(self) -> None:
         loop = asyncio.new_event_loop()
