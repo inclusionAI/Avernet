@@ -1317,7 +1317,7 @@ def test_resources_forwards_resolved_bot_owner_to_owner_scoped_set_listing():
         mcp_auth=_McpAuth(allowed=True),
     )
 
-    assert service.resources(
+    assert service.list_resources(
         bot_id="bot-1", owner_id="true-owner", user_id="true-owner"
     ) == []
     assert repository.list_set_calls == [
@@ -1404,7 +1404,7 @@ def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_sc
         mcp_auth=_McpAuth(allowed=True),
     )
 
-    result = service.resources(
+    result = service.list_resources(
         bot_id="bot-1", owner_id="true-owner", user_id="collaborator"
     )
 
@@ -1435,7 +1435,7 @@ def test_resources_keeps_ordinary_mcp_membership_on_canonical_repository_path():
         mcp_auth=_McpAuth(allowed=True),
     )
 
-    result = service.resources(
+    result = service.list_resources(
         bot_id="bot-1", owner_id="true-owner", user_id="true-owner"
     )
 

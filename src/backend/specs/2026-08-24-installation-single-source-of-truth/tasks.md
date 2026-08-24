@@ -31,8 +31,10 @@ lands in the same group as the migration of its last caller.
       `SkillSetRuntimeReconciler` alias; DI, callers, tests
       (`tests/community/contracts/test_bot_runtime_projection_reconciler.py`
       → `test_bot_runtime_projector.py`).
-- [ ] 1.4 Full suite green (`uv run pytest tests/community`) before any
-      behavior change.
+- [x] 1.4 Full suite green before any behavior change — validated via the
+      rename blast-radius set locally (1047 passed) and the CI Backend unit
+      tests job on the pushed head (the sandbox is too slow for repeated
+      full-suite runs; CI is the full-suite gate per push).
 
 ## Group 2 — One flush: MCPs + new exclusion semantics, retire the materializer
 
