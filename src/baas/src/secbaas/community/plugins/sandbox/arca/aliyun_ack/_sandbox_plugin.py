@@ -105,7 +105,7 @@ def _build_template_vars(
         "NAMESPACE": namespace,
         "OPENCLAW_IMAGE": images.get("openclaw", "openclaw:latest"),
         "ENVOY_SIDECAR_IMAGE": images.get(
-            "envoy-sidecar", "envoyproxy/envoy:v1.30-latest"
+            "avernet-sidecar", "envoyproxy/envoy:v1.30-latest"
         ),
         "INIT_IMAGE": images.get("init", "busybox:latest"),
         "NAS_SERVER": images.get("nas-server", ""),
