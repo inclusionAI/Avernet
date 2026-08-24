@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS `permission_profiles` (
 -- decided_* 置位。Bot↔Bot 单次 accept 会连带批准反向 pending（AC-20，§4.1）。
 CREATE TABLE IF NOT EXISTS `permission_requests` (
   `id`               BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'PK；自增 bigint',
+  `request_id`       VARCHAR(64)  NOT NULL COMMENT '外部业务 id（裸 UUID v4）；内部 bigint PK 见 id 列',
   `edge_id`          BIGINT       DEFAULT NULL COMMENT '批准后回填对应 edge_grants.id；pending 时 NULL',
   `env`               VARCHAR(16)  NOT NULL COMMENT '环境标签',
   `from_id`           VARCHAR(256) NOT NULL COMMENT '发起方 actor id',
@@ -75,6 +76,7 @@ CREATE TABLE IF NOT EXISTS `permission_requests` (
   `gmt_create`        timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `gmt_modified`      timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_permission_requests_request_id` (`request_id`) COMMENT '外部 request_id 全局唯一',
   KEY `idx_req_to_env_status` (`to_id`, `env`, `status`) COMMENT '收件箱（received）扫描',
   KEY `idx_req_from_env_status` (`from_id`, `env`, `status`) COMMENT '发件箱（sent）扫描',
   KEY `idx_req_edge` (`edge_id`) COMMENT '按边反查请求'

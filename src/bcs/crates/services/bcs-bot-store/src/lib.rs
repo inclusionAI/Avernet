@@ -1648,25 +1648,20 @@ impl BotRepoPort for PersistentBotRepo {
             )
             .await
         {
-            Ok(rows) => Some(
-                rows.into_iter()
-                    .filter_map(|row| db_get_column::<String>(&row, "bot_uuid").ok())
-                    .collect::<std::collections::HashSet<_>>(),
-            ),
+            Ok(rows) => rows
+                .into_iter()
+                .filter_map(|row| db_get_column::<String>(&row, "bot_uuid").ok())
+                .collect::<std::collections::HashSet<_>>(),
             Err(error) => {
-                warn!(env = %env, error = %error, "list_active: failed to load active bot ids from DB; falling back to memory-only filtering");
-                None
+                warn!(env = %env, error = %error, "list_active: failed to load active bot ids from DB; returning empty result to preserve DB tombstone authority");
+                return Vec::new();
             }
         };
 
         let bots = self.bots.read().await;
         bots.values()
             .filter(|b| !b.is_expired())
-            .filter(|b| {
-                active_bot_ids
-                    .as_ref()
-                    .map_or(true, |ids| ids.contains(&b.bot_uuid))
-            })
+            .filter(|b| active_bot_ids.contains(&b.bot_uuid))
             .map(|b| b.to_registered_bot())
             .collect()
     }
