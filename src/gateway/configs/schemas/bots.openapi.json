@@ -3661,7 +3661,7 @@
                 "type": "null"
               }
             ],
-            "description": "Canonical BCS Bot UUID returned by Catalog Search when available.",
+            "description": "Catalog Search Bot UUID, preferring BCS with a Backend address fallback.",
             "title": "Bot Uuid"
           },
           "bot_type": {
@@ -13092,7 +13092,7 @@
                 "type": "null"
               }
             ],
-            "description": "Canonical BCS Bot UUID returned by Catalog Search when available.",
+            "description": "Catalog Search Bot UUID, preferring BCS with a Backend address fallback.",
             "title": "Bot Uuid"
           },
           "bot_type": {

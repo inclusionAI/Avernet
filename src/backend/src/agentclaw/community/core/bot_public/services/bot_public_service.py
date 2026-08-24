@@ -1495,9 +1495,11 @@ class BotPublicService:
             if bot is None:
                 continue
             metadata_item = metadata_by_address[address]
-            # COSEC: Return only the canonical UUID reconstructed from the BCS
-            # address that passed exact composite-key validation, never raw upstream data.
-            bot["bot_uuid"] = f"{address.bot_id}:{address.entity_id}"
+            # COSEC: The BCS value reached this service only after the adapter
+            # validated its composite address; fall back only to the exact joined Backend address.
+            bot["bot_uuid"] = metadata_item.bot_uuid or (
+                f"{address.bot_id}:{address.entity_id}"
+            )
             for field_name in (
                 "is_friend",
                 "visibility",

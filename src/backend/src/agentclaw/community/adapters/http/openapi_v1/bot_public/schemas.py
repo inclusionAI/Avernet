@@ -13,7 +13,7 @@ class PublicBot(BaseModel):
     bot_id: str = Field(description="Stable public Bot identifier.")
     bot_uuid: str | None = Field(
         default=None,
-        description="Canonical BCS Bot UUID returned by Catalog Search when available.",
+        description="Catalog Search Bot UUID, preferring BCS with a Backend address fallback.",
     )
     entity_id: str = Field(description="Public entity identifier for the Bot owner.")
     bot_type: Any = Field(description="Published kind of Bot.")

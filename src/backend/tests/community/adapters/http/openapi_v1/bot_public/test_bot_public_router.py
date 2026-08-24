@@ -337,7 +337,7 @@ def test_search_openapi_declares_optional_bcs_is_friend(app: FastAPI) -> None:
     assert is_friend["anyOf"] == [{"type": "boolean"}, {"type": "null"}]
 
 
-def test_search_openapi_declares_optional_canonical_bcs_bot_uuid(
+def test_search_openapi_declares_optional_bcs_preferred_bot_uuid(
     app: FastAPI,
 ) -> None:
     bot_uuid = app.openapi()["components"]["schemas"]["PublicBot"]["properties"][
@@ -346,7 +346,7 @@ def test_search_openapi_declares_optional_canonical_bcs_bot_uuid(
 
     assert bot_uuid["anyOf"] == [{"type": "string"}, {"type": "null"}]
     assert bot_uuid["description"] == (
-        "Canonical BCS Bot UUID returned by Catalog Search when available."
+        "Catalog Search Bot UUID, preferring BCS with a Backend address fallback."
     )
 
 
