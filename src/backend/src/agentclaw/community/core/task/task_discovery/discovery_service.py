@@ -309,7 +309,44 @@ class DiscoveryService:
         return self._discoveries.get(task_id)
 
 
+class _SessionCreatorAdapter:
+    """Adapt the single-task HTTP creator to the discovery service protocol."""
+
+    def __init__(self, creator) -> None:
+        self._creator = creator
+
+    async def initiate_session(
+        self,
+        tasks: list[DiscoveredTask],
+        *,
+        bot_id: str,
+        owner_id: str,
+        agent_id: str,
+        model: str | None = None,
+    ) -> DiscoverySession:
+        if not tasks:
+            raise ValueError("at least one task is required")
+        return await self._creator.create_session(
+            tasks[0],
+            user_id=owner_id,
+            agent_id=agent_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            model=model,
+        )
+
+
+def create_default_service(*, data_file: str, notify_sender, session_creator) -> DiscoveryService:
+    """Build the lifecycle's default service from its infrastructure seams."""
+    return DiscoveryService(
+        reader=SqliteTaskReader(data_file),
+        session_initiator=_SessionCreatorAdapter(session_creator),
+        notify_sender=notify_sender,
+    )
+
+
 __all__ = [
     "DiscoveryService",
     "DiscoveryResult",
+    "create_default_service",
 ]

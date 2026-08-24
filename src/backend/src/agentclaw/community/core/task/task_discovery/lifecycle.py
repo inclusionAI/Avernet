@@ -150,7 +150,6 @@ class TaskDiscoveryLifecycle(LifecycleBase):
                     session_creator=session_creator,
                 )
                 results = await service.discover(
-                    user_id=owner_id,
                     agent_id=bot_id,
                     bot_id=bot_id,
                     owner_id=owner_id,

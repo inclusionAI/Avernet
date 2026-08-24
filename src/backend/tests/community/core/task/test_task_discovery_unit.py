@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+
+import pytest
 from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
@@ -22,6 +24,9 @@ from agentclaw.community.core.task.task_discovery.discovery_service import (
 from agentclaw.community.core.task.task_discovery.models import (
     DiscoveredTask,
     DiscoverySession,
+)
+from agentclaw.community.core.task.task_discovery.session_creator import (
+    HttpSessionCreator,
 )
 from agentclaw.community.core.task.task_discovery.session_initiator import (
     CronRelaySessionInitiator,
@@ -339,3 +344,183 @@ class TestTaskDiscoveryScheduler:
         assert sched._scheduler is not None
         asyncio.run(sched.shutdown())
         assert sched._scheduler is None
+
+# ---------------------------------------------------------------------------
+# TaskDiscoveryLifecycle — backend lifecycle scheduling and discovery
+# ---------------------------------------------------------------------------
+
+class TestTaskDiscoveryLifecycle:
+    def _make_lifecycle(self, bots=None):
+        from agentclaw.community.core.task.task_discovery.lifecycle import (
+            TaskDiscoveryLifecycle,
+        )
+
+        bot_service = MagicMock()
+        bot_service.list_bots.return_value = {"items": bots or []}
+        return TaskDiscoveryLifecycle(bot_service, MagicMock()), bot_service
+
+    def test_startup_disabled_does_not_schedule(self):
+        lifecycle, _ = self._make_lifecycle()
+        with patch.dict(os.environ, {"TASK_DISCOVERY_AUTO_START": "false"}):
+            asyncio.run(lifecycle.startup())
+        assert lifecycle._task is None
+
+    def test_startup_and_shutdown_schedule_and_cancel(self):
+        lifecycle, _ = self._make_lifecycle()
+        with patch.dict(
+            os.environ,
+            {
+                "TASK_DISCOVERY_AUTO_START": "true",
+                "TASK_DISCOVERY_SCHEDULE_HOUR": "23",
+                "TASK_DISCOVERY_SCHEDULE_MINUTE": "59",
+            },
+        ):
+            async def run():
+                await lifecycle.startup()
+                assert lifecycle._task is not None
+                await lifecycle.shutdown()
+                assert lifecycle._task.cancelled()
+
+            asyncio.run(run())
+
+    def test_list_all_bots_returns_empty_on_service_failure(self):
+        lifecycle, bot_service = self._make_lifecycle()
+        bot_service.list_bots.side_effect = RuntimeError("database unavailable")
+        assert lifecycle._list_all_bots() == []
+
+    def test_resolve_data_file_honors_environment_override(self):
+        lifecycle, _ = self._make_lifecycle()
+        with patch.dict(os.environ, {"TASK_DISCOVERY_DATA_FILE": "/tmp/tasks.db"}):
+            assert lifecycle._resolve_data_file() == "/tmp/tasks.db"
+
+    def test_discover_once_skips_when_no_bots(self):
+        lifecycle, _ = self._make_lifecycle()
+        asyncio.run(lifecycle._discover_once())
+
+    def test_discover_once_skips_incomplete_bot_and_handles_results(self):
+        lifecycle, _ = self._make_lifecycle(
+            [
+                {"bot_id": "", "owner_id": "owner"},
+                {"bot_id": "bot-1", "owner_id": "owner-1"},
+            ]
+        )
+        task = MagicMock(task_id="task-1")
+        task.project_name = "Project"
+        result = MagicMock(
+            success=True,
+            task=task,
+            session=MagicMock(session_id="session-1"),
+            notification_sent=True,
+            error=None,
+        )
+        service = MagicMock()
+        service.discover = AsyncMock(return_value=[result])
+        with patch(
+            "agentclaw.community.core.task.task_discovery.lifecycle.create_default_service",
+            return_value=service,
+        ):
+            asyncio.run(lifecycle._discover_once())
+        service.discover.assert_awaited_once_with(
+            agent_id="bot-1",
+            bot_id="bot-1",
+            owner_id="owner-1",
+        )
+
+
+class TestHttpSessionCreator:
+    def test_create_session_resolves_target_and_builds_url(self, monkeypatch):
+        import httpx
+
+        task = replace(_TASK, task_id="task-http", project_name="HTTP task")
+        requests = []
+
+        class _Response:
+            def __init__(self, payload):
+                self._payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self._payload
+
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def get(self, url, **kwargs):
+                requests.append(("GET", url, kwargs))
+                if "/api/bots/" in url:
+                    return _Response({"data": {"binding_id": 42}})
+                return _Response({"data": {"target": "engine:20010"}})
+
+            async def post(self, url, **kwargs):
+                requests.append(("POST", url, kwargs))
+                return _Response({"success": True, "data": {"id": "session-1"}})
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **_kwargs: _Client())
+        creator = HttpSessionCreator(
+            backend_url="http://backend/", frontend_url="http://frontend/"
+        )
+
+        result = asyncio.run(
+            creator.create_session(
+                task,
+                user_id="owner",
+                agent_id="bot-1",
+                bot_id="bot-1",
+                owner_id="owner",
+                model="model-a",
+            )
+        )
+
+        assert result.session_id == "session-1"
+        assert result.session_url == (
+            "http://frontend/bcn/chat/session?bot_uuid=bot-1"
+            "&id=bot-1&session=session-1"
+        )
+        assert requests[0][2]["params"] == {"owner_id": "owner"}
+        assert requests[1][2]["headers"] == {"x-user-id": "owner"}
+        assert requests[2][2]["json"]["model"] == "model-a"
+        assert requests[2][2]["json"]["extInfo"]["source"] == "task_discovery"
+
+    def test_missing_binding_id_is_rejected(self, monkeypatch):
+        import httpx
+
+        class _Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"data": {}}
+
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def get(self, *_args, **_kwargs):
+                return _Response()
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **_kwargs: _Client())
+        creator = HttpSessionCreator(backend_url="http://backend")
+        with pytest.raises(RuntimeError, match="no binding_id"):
+            asyncio.run(creator._resolve_engine_target("bot", "owner", "user"))
+
+    def test_session_creator_adapter_rejects_empty_tasks(self):
+        from agentclaw.community.core.task.task_discovery.discovery_service import (
+            _SessionCreatorAdapter,
+        )
+
+        adapter = _SessionCreatorAdapter(MagicMock())
+        with pytest.raises(ValueError, match="at least one task"):
+            asyncio.run(
+                adapter.initiate_session(
+                    [], bot_id="bot", owner_id="owner", agent_id="bot"
+                )
+            )
