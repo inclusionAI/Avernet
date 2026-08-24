@@ -229,12 +229,24 @@ class InteractionResolveAnswer(BaseModel):
     values: list[str]
     question: str
     header: str
+    custom_values: list[str] | None = Field(default=None, alias="customValues")
 
     @field_validator("question", "header")
     @classmethod
     def _text_fields_must_be_non_empty(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("interaction answer text fields must be non-empty")
+        return value
+
+    @field_validator("custom_values")
+    @classmethod
+    def _custom_values_must_be_non_empty(
+        cls, value: list[str] | None
+    ) -> list[str] | None:
+        if value is not None and any(not item.strip() for item in value):
+            raise ValueError(
+                "interaction answer customValues must be non-empty strings"
+            )
         return value
 
 

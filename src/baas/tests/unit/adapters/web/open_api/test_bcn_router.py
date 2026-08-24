@@ -62,13 +62,25 @@ def _interaction_resolve_body(**param_overrides):
 
 
 def test_interaction_resolve_request_accepts_bcs_ask_user_shape() -> None:
-    request = InteractionResolveRequest.model_validate(_interaction_resolve_body())
+    body = _interaction_resolve_body()
+    body["params"]["answers"]["components"]["customValues"] = ["scheduler"]
+
+    request = InteractionResolveRequest.model_validate(body)
 
     assert request.params.interaction_id == "interaction-ask-1"
     assert request.params.action == "submit"
     assert request.params.answers is not None
     assert request.params.answers["components"].values == ["web", "worker"]
+    assert request.params.answers["components"].custom_values == ["scheduler"]
     assert request.params.answers["deploy_target"].header == ("Deployment environment")
+
+
+def test_interaction_resolve_request_rejects_blank_custom_values() -> None:
+    body = _interaction_resolve_body()
+    body["params"]["answers"]["components"]["customValues"] = ["   "]
+
+    with pytest.raises(ValidationError, match="customValues"):
+        InteractionResolveRequest.model_validate(body)
 
 
 @pytest.mark.parametrize("values", [[], [""], ["   "], ["custom raw value"]])
@@ -107,7 +119,9 @@ async def test_dispatch_interaction_resolve_preserves_full_request() -> None:
             captured["input"] = resolve_input
             return BcnInteractionResolveResult(ok=True)
 
-    request = InteractionResolveRequest.model_validate(_interaction_resolve_body())
+    body = _interaction_resolve_body()
+    body["params"]["answers"]["components"]["customValues"] = ["scheduler"]
+    request = InteractionResolveRequest.model_validate(body)
 
     response = await _dispatch_interaction_resolve(request, _CapturingService())
 
@@ -121,9 +135,10 @@ async def test_dispatch_interaction_resolve_preserves_full_request() -> None:
     assert resolve_input.idempotency_key == "idem-ask-1"
     assert resolve_input.action == "submit"
     assert resolve_input.answers["components"].values == ("web", "worker")
+    assert resolve_input.answers["components"].custom_values == ("scheduler",)
     assert resolve_input.answers["components"].question == "whats' the components?"
     assert resolve_input.answers["deploy_target"].header == "Deployment environment"
-    assert resolve_input.request_envelope == _interaction_resolve_body()
+    assert resolve_input.request_envelope == body
 
 
 @pytest.mark.asyncio
