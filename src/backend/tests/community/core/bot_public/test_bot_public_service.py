@@ -1348,6 +1348,7 @@ class TestSearchPublicBotsByKeyword:
 
         assert result["total"] == 1
         assert [bot["bot_id"] for bot in result["items"]] == ["bot-1"]
+        assert [bot["bot_uuid"] for bot in result["items"]] == ["bot-1:entity-1"]
         metadata.search_public_bot_metadata.assert_called_once_with(
             search="agent",
             page=3,
@@ -1360,6 +1361,31 @@ class TestSearchPublicBotsByKeyword:
             page=1,
             page_size=2,
         )
+
+    def test_catalog_search_prefers_validated_bcs_bot_uuid(self):
+        metadata = MagicMock()
+        metadata.search_public_bot_metadata.return_value = [
+            BotCatalogMetadata(
+                BotCatalogAddress("bot-1", "entity-1"),
+                "bot",
+                bot_uuid=" bot-1 : entity-1 ",
+            )
+        ]
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (
+            1,
+            [_make_catalog_bot("bot-1", "entity-1")],
+        )
+        svc = _make_service(
+            bot_repository=repository, catalog_metadata_service=metadata
+        )
+
+        result = svc.search_catalog_public_bots_by_keyword(
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace-bcs-bot-uuid",
+        )
+
+        assert result["items"][0]["bot_uuid"] == " bot-1 : entity-1 "
 
     def test_catalog_search_preserves_bcs_is_friend_on_its_exact_address(self):
         metadata = MagicMock()
@@ -1382,7 +1408,11 @@ class TestSearchPublicBotsByKeyword:
         )
 
         assert result["items"] == [
-            {**_make_catalog_bot("shared", "entity-a"), "is_friend": False}
+            {
+                **_make_catalog_bot("shared", "entity-a"),
+                "bot_uuid": "shared:entity-a",
+                "is_friend": False,
+            }
         ]
 
     def test_catalog_search_preserves_requested_bcs_metadata_on_its_exact_address(self):
@@ -1420,6 +1450,7 @@ class TestSearchPublicBotsByKeyword:
         assert result["items"] == [
             {
                 **_make_catalog_bot("shared", "entity-a"),
+                "bot_uuid": "shared:entity-a",
                 "is_friend": False,
                 "visibility": "protected",
                 "is_online": False,

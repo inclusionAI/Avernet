@@ -3652,6 +3652,18 @@
             "title": "Bot Id",
             "type": "string"
           },
+          "bot_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Catalog Search Bot UUID, preferring BCS with a Backend address fallback.",
+            "title": "Bot Uuid"
+          },
           "bot_type": {
             "description": "Published kind of Bot.",
             "title": "Bot Type"
@@ -13070,6 +13082,18 @@
             "description": "Stable public Bot identifier.",
             "title": "Bot Id",
             "type": "string"
+          },
+          "bot_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Catalog Search Bot UUID, preferring BCS with a Backend address fallback.",
+            "title": "Bot Uuid"
           },
           "bot_type": {
             "description": "Published kind of Bot.",

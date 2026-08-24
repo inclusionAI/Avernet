@@ -41,6 +41,7 @@ class BotCatalogMetadata:
 
     address: BotCatalogAddress
     kind: str
+    bot_uuid: str | None = None
     is_friend: bool | None = None
     visibility: Any = None
     is_online: Any = None

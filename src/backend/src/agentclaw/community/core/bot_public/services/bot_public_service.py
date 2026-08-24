@@ -1495,6 +1495,11 @@ class BotPublicService:
             if bot is None:
                 continue
             metadata_item = metadata_by_address[address]
+            # COSEC: The BCS value reached this service only after the adapter
+            # validated its composite address; fall back only to the exact joined Backend address.
+            bot["bot_uuid"] = metadata_item.bot_uuid or (
+                f"{address.bot_id}:{address.entity_id}"
+            )
             for field_name in (
                 "is_friend",
                 "visibility",
