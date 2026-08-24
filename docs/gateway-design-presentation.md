@@ -181,6 +181,52 @@ upstreams:
     baas:    { base_url: "${baas_server_url}" }
 ```
 
+**整体拓扑**（客户端 → 网关内部各阶段 → 上游服务；边上标注的是 `application.yaml` 里真实存在的代表性 domain）：
+
+```mermaid
+flowchart LR
+    subgraph Clients["调用方"]
+        FE["第一方前端<br/>（浏览器，会话 Cookie）"]
+        TP["第三方 App<br/>（Bearer API Key + 租户令牌）"]
+        BOT["Bot / Agent<br/>（Bot 凭证）"]
+    end
+
+    subgraph GW["Avernet Gateway（同一个应用进程）"]
+        direction TB
+        CORS["① CORS 边缘中间件"]
+        ROUTE["② Domain 路由解析<br/>match + 具体度判定"]
+        AUTHN["③ 身份提取<br/>user / app / bot / access_key"]
+        SIGN["④ Principal 签名"]
+        FWD["⑤ 转发 Forwarder<br/>（流式，路径默认原样透传）"]
+        CORS --> ROUTE --> AUTHN --> SIGN --> FWD
+    end
+
+    BACKEND[("backend")]
+    BCS[("bcs")]
+    BAAS[("baas")]
+    BCSFUSE[("bcsfuse")]
+    ENGINE[("engine proxy")]
+    CLAWWEB[("clawweb")]
+
+    FE --> CORS
+    TP --> CORS
+    BOT --> CORS
+
+    FWD -->|"/openapi/v1/bots/**<br/>/openapi/v1/org/**"| BACKEND
+    FWD -->|"/openapi/v1/collaboration/**"| BCS
+    FWD -->|"/openapi/v1/chat/**"| BAAS
+    FWD -->|"/openapi/v1/bcsfuse/**"| BCSFUSE
+    FWD -->|"WS /openapi/v1/bots/messages/ws/**"| ENGINE
+    FWD -->|"/openapi/v1/harnessflow/**"| CLAWWEB
+```
+
+**读图要点：**
+
+- 客户端**不直连任何上游**——三类调用方（前端 / 第三方 App / Bot）都只认识网关这一个地址，网关内部才知道每个 domain 该去哪个上游。
+- 网关内部①～⑤ 是**同一个请求生命周期里的顺序阶段**，不是几个独立服务（呼应 §6.0："转发和认证是同一个不可分割的动作"）——身份必须先解析出来、签好名，才轮到转发。
+- 一个上游可能同时被**多个 domain** 指向（如 `backend` 同时接住 `bots`、`org`、`repository-skills`、`spaces` 等好几个 domain 的流量），图上只画了每个上游的代表性前缀；完整映射见 §8.1 与 `configs/application.yaml`。
+- 到达上游的请求会带着网关签好名的 Principal（§5.3），上游只需验签，不用再各自对接认证系统。
+
 ### 6.2 进阶能力一览
 
 | 能力 | 说明 |
