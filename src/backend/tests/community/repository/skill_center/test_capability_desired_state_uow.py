@@ -1054,9 +1054,10 @@ def test_repair_drops_only_the_owners_own_default_exclusions():
     # naming an ordinary Set has no effect.
     assert bridge.member_skill_ids == frozenset({1, 3})
     assert bridge.skills_to_install == frozenset({1, 3})
-    # The excluded one is absent from the listing, and the repair speaks for it
-    # in neither direction — it belongs to direct activate/deactivate now.
-    assert bridge.skills_to_uninstall == frozenset()
+    # Exclusion is the Default Set's per-Bot deactivation: the excluded member
+    # is absent from the listing AND must not hold an Installation row
+    # (spec 2026-08-24-installation-single-source-of-truth, Key domain rules).
+    assert bridge.skills_to_uninstall == frozenset({2})
 
 
 def test_repair_does_not_branch_on_a_skills_source_prefix():
@@ -1450,14 +1451,13 @@ def test_repair_survives_a_concurrent_listing_winning_the_same_insert():
         } == {1, 2}
 
 
-def test_repair_leaves_an_excluded_members_installation_to_direct_control():
-    """An excluded Skill is no longer the Set's to speak for, either way.
+def test_flush_removes_an_excluded_members_installation_row():
+    """Exclusion deactivates the member — the flush takes its row away.
 
-    Removing it from a shared Default Set is what makes it directly
-    controllable again — ``_set_governs`` stops refusing activate/deactivate
-    for exactly that reason. So the repair must not take its Installation row
-    away: doing so would undo the owner's command at the next listing, the
-    same two-authorities defect this PR exists to remove.
+    An excluded Default-Set member still belongs to the Set (it is NOT handed
+    back to direct control); re-activating it means removing the exclusion
+    row. Supersedes the 2026-08-23 "left alone in both directions" decision,
+    per spec 2026-08-24-installation-single-source-of-truth Key domain rules.
     """
     db = _Database()
     with db.transactional_orm_session() as session:
@@ -1500,18 +1500,23 @@ def test_repair_leaves_an_excluded_members_installation_to_direct_control():
 
     bridge = _bridge(db)
 
-    # Absent from the listing, and its Installation row left exactly as the
-    # last direct command left it.
+    # Absent from the listing, claimed inactive, and its stray Installation
+    # row removed; the kept member gains the row it was missing.
     assert bridge.member_skill_ids == frozenset({2})
-    assert bridge.skills_to_uninstall == frozenset()
+    assert bridge.skills_to_uninstall == frozenset({1})
     with db.orm_session() as session:
         assert {
             row.skill_id for row in session.query(BotSkillInstallation).all()
-        } == {1, 2}
+        } == {2}
 
 
 def test_an_active_ordinary_set_outranks_a_default_exclusion():
-    """Exclusion removes a Skill from *that* Set, not from every Set."""
+    """Err-safe on malformed two-Set data: an active claim keeps the row.
+
+    R3 keeps a capability in at most one Set, so this state should not arise;
+    when historical data presents it anyway, the flush must not uninstall a
+    member a live Set accounts for.
+    """
     db = _Database()
     with db.transactional_orm_session() as session:
         platform_default = SkillSet(

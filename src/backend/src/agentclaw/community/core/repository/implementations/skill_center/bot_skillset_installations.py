@@ -9,6 +9,7 @@ from __future__ import annotations
 from sqlalchemy import and_, func
 from sqlalchemy.exc import IntegrityError
 
+from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
     Skill,
@@ -16,6 +17,7 @@ from agentclaw.community.core.models.skill import (
     SkillSetSkill,
 )
 from agentclaw.community.core.repository.implementations.skill_center.default_skillset_projection import (
+    excluded_mcp_codes,
     excluded_skill_ids,
     global_default_scope,
 )
@@ -76,6 +78,18 @@ def set_member_skill_ids(scope, session, *, skill_set_id: int) -> set[int]:
     return non_center | center
 
 
+def set_member_mcp_codes(scope, session, *, skill_set_id: int) -> set[str]:
+    """The MCP server codes one SkillSet provides (its membership rows)."""
+    return {
+        str(row[0])
+        for row in scope(
+            session.query(SkillSetMCPServer.server_code), SkillSetMCPServer
+        )
+        .filter(SkillSetMCPServer.skill_set_id == skill_set_id)
+        .all()
+    }
+
+
 class BotSkillSetInstallations:
     """Mixed into the control-plane repository; uses its ``_db``, ``_scope``,
     ``_owned_set_scope`` and ``_installation_repository``."""
@@ -96,7 +110,7 @@ class BotSkillSetInstallations:
         # Resolve unlocked first: a Bot that already agrees — the common case —
         # answers here without a row lock or a write transaction.
         with self._db.orm_session() as session:
-            bridge = self._resolve_bridge(
+            bridge = self._resolve_flush_plan(
                 session,
                 bot_id=bot_id,
                 owner_id=owner_id,
@@ -112,7 +126,7 @@ class BotSkillSetInstallations:
         # There is something to write, so resolve again holding the Set rows —
         # the same locks every SkillSet mutation takes.
         with self._db.transactional_orm_session() as session:
-            bridge = self._resolve_bridge(
+            bridge = self._resolve_flush_plan(
                 session,
                 bot_id=bot_id,
                 owner_id=owner_id,
@@ -192,7 +206,7 @@ class BotSkillSetInstallations:
             ).all()
         }
 
-    def _resolve_bridge(
+    def _resolve_flush_plan(
         self,
         session,
         *,
@@ -204,12 +218,14 @@ class BotSkillSetInstallations:
     ) -> InstallationFlushPlan:
         """What Installation should say, given the Sets this Bot has.
 
-        Runs in the caller's session so a repair can resolve and write in one
+        Runs in the caller's session so the flush can resolve and write in one
         transaction; ``locked`` holds the Set rows for its duration.
         """
         members: set[int] = set()
-        activate: set[int] = set()
-        inactive: set[int] = set()
+        active_skills: set[int] = set()
+        inactive_skills: set[int] = set()
+        active_mcps: set[str] = set()
+        inactive_mcps: set[str] = set()
         for row in self._bot_sets(
             session,
             bot_id=bot_id,
@@ -222,6 +238,7 @@ class BotSkillSetInstallations:
             # the only Set whose members are removed by an exclusion row rather
             # than by deleting the membership.
             is_default = bool(row.is_default)
+            set_is_active = is_default or bool(row.is_active)
             excluded = (
                 excluded_skill_ids(
                     session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
@@ -232,19 +249,37 @@ class BotSkillSetInstallations:
             for member_id in set_member_skill_ids(
                 self._scope, session, skill_set_id=int(row.id)
             ):
-                # An excluded member is under direct control from then on, so
-                # the repair speaks for it in neither direction.
+                # Exclusion is the Default Set's per-Bot deactivation: an
+                # excluded member stays the Set's, is absent from the listing,
+                # and must not hold an Installation row.
                 if member_id in excluded:
+                    inactive_skills.add(member_id)
                     continue
                 members.add(member_id)
-                claimed = activate if is_default or bool(row.is_active) else inactive
-                claimed.add(member_id)
+                (active_skills if set_is_active else inactive_skills).add(member_id)
+            excluded_mcps = (
+                excluded_mcp_codes(
+                    session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
+                )
+                if is_default
+                else frozenset()
+            )
+            for server_code in set_member_mcp_codes(
+                self._scope, session, skill_set_id=int(row.id)
+            ):
+                if server_code in excluded_mcps:
+                    inactive_mcps.add(server_code)
+                    continue
+                (active_mcps if set_is_active else inactive_mcps).add(server_code)
         return InstallationFlushPlan(
             member_skill_ids=frozenset(members),
-            skills_to_install=frozenset(activate),
-            # An active claim wins, so a stale inactive membership cannot
-            # uninstall a live member.
-            skills_to_uninstall=frozenset(inactive - activate),
+            skills_to_install=frozenset(active_skills),
+            # An active claim wins: R3 keeps a capability in one Set, so on
+            # historical malformed two-Set data the flush errs safe and never
+            # uninstalls a member a live Set accounts for.
+            skills_to_uninstall=frozenset(inactive_skills - active_skills),
+            mcps_to_install=frozenset(active_mcps),
+            mcps_to_uninstall=frozenset(inactive_mcps - active_mcps),
         )
 
     def ensure_active_skillset_installations(

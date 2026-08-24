@@ -41,7 +41,7 @@ lands in the same group as the migration of its last caller.
 - [x] 2.1 Reshape the bridge type into `InstallationFlushPlan`
       (`member_skill_ids`, `skills_to_install`, `skills_to_uninstall`,
       `mcps_to_install`, `mcps_to_uninstall`) per plan component 1.
-- [ ] 2.2 `_resolve_bridge` → `_resolve_flush_plan`: collect MCP members per
+- [x] 2.2 `_resolve_bridge` → `_resolve_flush_plan`: collect MCP members per
       Set; **excluded Default-Set members (skills and MCPs) become inactive
       claims** and lose their Installation rows (spec Key domain rules). R3
       keeps a capability in one Set; on malformed two-Set data the plan errs
