@@ -177,26 +177,45 @@ def cmd_render(args):
 
     # MITM SNI domains: auto-derived from rules (exclude catch-all '*')
     sni_domains = extract_sni_domains(config.rules)
-    if sni_domains:
-        mitm_sni_match = "[" + ", ".join(f'"{d}"' for d in sni_domains) + "]"
-    else:
-        mitm_sni_match = "[]"
-
     mitm_cert_dir = "/etc/sidecar/certs/mitm-ca"
 
-    # Replace placeholders
-    replacements = {
-        "{{SIDECAR_ADMIN_PORT}}": str(args.admin_port),
-        "{{SIDECAR_PROXY_PORT}}": str(args.proxy_port),
-        "{{MITM_CERT_PATH}}": mitm_cert_dir,
-        "{{MITM_SNI_MATCH}}": mitm_sni_match,
-        "{{OUTBOUND_VIRTUAL_HOSTS}}": outbound_vhs,
-        "{{OUTBOUND_HTTPS_VIRTUAL_HOSTS}}": outbound_vhs,
-    }
-
     result = template
-    for placeholder, value in replacements.items():
-        result = result.replace(placeholder, value)
+
+    if sni_domains:
+        # Has MITM domains: render the MITM filter chain with SNI matching
+        mitm_sni_match = "[" + ", ".join(f'"{d}"' for d in sni_domains) + "]"
+        replacements = {
+            "{{SIDECAR_ADMIN_PORT}}": str(args.admin_port),
+            "{{SIDECAR_PROXY_PORT}}": str(args.proxy_port),
+            "{{MITM_CERT_PATH}}": mitm_cert_dir,
+            "{{MITM_SNI_MATCH}}": mitm_sni_match,
+            "{{OUTBOUND_VIRTUAL_HOSTS}}": outbound_vhs,
+            "{{OUTBOUND_HTTPS_VIRTUAL_HOSTS}}": outbound_vhs,
+        }
+        for placeholder, value in replacements.items():
+            result = result.replace(placeholder, value)
+        # Remove marker comments
+        result = result.replace("{{#MITM_CHAIN_START}}", "")
+        result = result.replace("{{#MITM_CHAIN_END}}", "")
+    else:
+        # No MITM domains: remove the entire MITM filter chain block
+        # to avoid duplicate TLS filter chain match.
+        import re
+        # Remove the MITM chain block between markers (inclusive of markers)
+        result = re.sub(
+            r"\{\{#MITM_CHAIN_START\}\}.*?\{\{#MITM_CHAIN_END\}\}\n?",
+            "",
+            result,
+            flags=re.DOTALL,
+        )
+        replacements = {
+            "{{SIDECAR_ADMIN_PORT}}": str(args.admin_port),
+            "{{SIDECAR_PROXY_PORT}}": str(args.proxy_port),
+            "{{MITM_CERT_PATH}}": mitm_cert_dir,
+            "{{OUTBOUND_VIRTUAL_HOSTS}}": outbound_vhs,
+        }
+        for placeholder, value in replacements.items():
+            result = result.replace(placeholder, value)
 
     # Write output
     with open(args.output, "w") as f:
