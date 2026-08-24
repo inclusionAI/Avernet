@@ -17,10 +17,12 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.services.local_skill_state_service import (
     LocalSkillStateService,
 )
-from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillSetRepository,
+)
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.repository.protocols.skills_pool import (
-    SkillsPoolLayoutRepositoryProtocol,
+from agentclaw.community.core.repository.protocols.skill_installation import (
+    SkillInstallationRepositoryProtocol,
 )
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
@@ -50,15 +52,6 @@ class _Resolver:
         return _Secret()
 
 
-class _Guard:
-    def acquire_for_edit(self, *, scope):
-        assert (scope.env, scope.entity_id, scope.bot_id) == ("dev", _OWNER, _BOT_ID)
-        return object()
-
-    def release(self, _lease):
-        return True
-
-
 class _Runtime:
     def __init__(self, success: bool) -> None:
         self.success = success
@@ -71,6 +64,10 @@ class _Runtime:
 
     async def verify_mappings(self, **_kwargs) -> bool:
         return self.success
+
+    async def reconcile(self, **_kwargs) -> None:
+        if not self.success:
+            raise RuntimeError("runtime reconcile failed")
 
 
 class _RuntimeFactory:
@@ -103,7 +100,7 @@ def _principal() -> str:
                         "owners": "state-org",
                         "tenant": _TENANT,
                     },
-                }
+                },
             ],
         },
         _KEY,
@@ -166,14 +163,13 @@ def _seed_state(world, *, runtime_success: bool) -> None:
         LocalSkillStateServiceProtocol,
         to=LocalSkillStateService(
             world.get(SkillRepository),
-            world.get(SkillSetRepository),
+            world.get(SkillInstallationRepositoryProtocol),
             world.get(BotRepository),
             world.get(CollaboratorServiceProtocol),
             runtime_factory,
-            _Guard(),
-            runtime_factory._runtime,
             world.get(SkillRepository),
-            world.get(SkillsPoolLayoutRepositoryProtocol),
+            world.get(SkillSetRepository),
+            runtime_factory._runtime,
         ),
         scope=None,
     )

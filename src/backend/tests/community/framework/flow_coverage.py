@@ -79,6 +79,14 @@ _SESSION_RESOURCES_EXEMPT_REASON = (
     "covers the module with core and HTTP API tests."
 )
 
+_RUNTIME_BINDING_EXEMPT_REASON = (
+    "Read-only binding selection used only by the Session File OpenAPI upload "
+    "intent. A real flow requires a signed OpenAPI principal and the same "
+    "Frontend/BaaS/Engine upload lifecycle as session_resources; covered by "
+    "core resolver and HTTP endpoint tests. Drain when that lifecycle can run "
+    "in singlebox."
+)
+
 _TASK_FRAMEWORK_EXEMPT_REASON = (
     "Task goal-driven execution framework skeleton (core/task). No HTTP/router or DI surface is wired yet (no adapters/http/openapi_v1/task/, no di/modules/task_module.py), so there is no endpoint for an e2e flow to drive. Covered by domain/unit tests on the graph, planner, dispatcher, runner, and harness as each lands. Drain this when a router + DI provider expose the TaskService facade over a real singlebox stack."
 )
@@ -132,12 +140,36 @@ _BOT_APP_GRANT_EXEMPT_REASON = (
     "both."
 )
 
+_SPACES_FAMILY_EXEMPT_REASON = (
+    "TEMPORARY, and blocked on the same single thing as "
+    "_GATEWAY_PRINCIPAL_EXEMPT_REASON above: the spaces / market-favorites / "
+    "work-orders family serves /openapi/v1 routes requiring a signed "
+    "principal only a gateway can mint (the one exception, the internal "
+    "personal-space batch query, is a trusted-integration seam with no user "
+    "story of its own), and singlebox runs the backend without a gateway — a "
+    "flow here could assert 401s and nothing else. Covered meanwhile by "
+    "per-endpoint happy + error cases in "
+    "tests/community/endpoints/test_spaces_router.py and "
+    "test_work_orders_router.py (real services over a real database behind "
+    "the same DI graph), plus the core service tests of each module. Drain "
+    "these three together with _GATEWAY_PRINCIPAL_EXEMPT_REASON — one "
+    "gateway in the box unblocks them all."
+)
+
 SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "aicoding": _EXEMPT_REASON,
+    "spaces": _SPACES_FAMILY_EXEMPT_REASON,
+    "market_favorites": _SPACES_FAMILY_EXEMPT_REASON,
+    "work_orders": _SPACES_FAMILY_EXEMPT_REASON,
     "bot_app_grant": _BOT_APP_GRANT_EXEMPT_REASON,
     "engine_runtime": _ENGINE_RUNTIME_EXEMPT_REASON,
     # antcode relocated to agentclaw/corp/core (B11 T3.3) — no longer a core module.
     "bot_dormant": _EXEMPT_REASON,
+    "bot_inventory": (
+        "New public inventory/local Bot aggregation module. Covered by HTTP endpoint, "
+        "service conformance, and architecture tests in this change; drain when "
+        "singlebox has a signed /openapi/v1 principal flow for the new routes."
+    ),
     "approval": _EXEMPT_REASON,
     "auth": _EXEMPT_REASON,
     "bot_public": _EXEMPT_REASON,
@@ -174,6 +206,7 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "notify": _EXEMPT_REASON,
     "nas_usage": _EXEMPT_REASON,
     "service_bot": _EXEMPT_REASON,
+    "runtime_binding": _RUNTIME_BINDING_EXEMPT_REASON,
     "session_resources": _SESSION_RESOURCES_EXEMPT_REASON,
     "services": _EXEMPT_REASON,
     "skill_center": _EXEMPT_REASON,

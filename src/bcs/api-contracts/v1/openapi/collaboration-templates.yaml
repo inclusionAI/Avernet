@@ -1,0 +1,326 @@
+TemplateIdPath:
+  name: template_id
+  in: path
+  required: true
+  description: >-
+    Identifier of the collaboration template. Maps to the legacy
+    `template_id` path segment; a template name is accepted as its identifier.
+  schema:
+    type: string
+    minLength: 1
+
+LangQuery:
+  name: lang
+  in: query
+  required: false
+  description: >-
+    Preferred localized language tag for template text. When omitted the
+    service falls back to `Accept-Language` and then the registry default
+    language. A language that is not available for the requested template
+    resolves to `LANGUAGE_NOT_AVAILABLE` on the single-template read.
+  schema:
+    type: string
+    minLength: 1
+
+TagsQuery:
+  name: tags
+  in: query
+  required: false
+  description: >-
+    Optional comma-separated tag filter. Empty segments are ignored. A
+    non-empty value that the registry rejects as malformed resolves to
+    `INVALID_TEMPLATE_TAGS`.
+  schema:
+    type: string
+
+FormatQuery:
+  name: format
+  in: query
+  required: false
+  description: >-
+    Response encoding for the single-template read. `yaml` (default) streams
+    the raw collaboration-definition YAML with `text/yaml`; `json` returns the
+    template detail inside the standard envelope. Any other value resolves to
+    `INVALID_TEMPLATE_FORMAT`.
+  schema:
+    type: string
+    enum: [yaml, json]
+    default: yaml
+
+CollaborationTemplateParticipantSummary:
+  type: object
+  additionalProperties: false
+  required: [required]
+  properties:
+    display_name:
+      type: string
+      minLength: 1
+    description:
+      type: string
+      minLength: 1
+    required:
+      type: boolean
+
+CollaborationTemplateSummary:
+  type: object
+  additionalProperties: false
+  required:
+    - id
+    - name
+    - description
+    - participants
+    - tags
+    - priority
+    - available_languages
+  properties:
+    id:
+      type: string
+      minLength: 1
+    name:
+      type: string
+      minLength: 1
+    description:
+      type: string
+    participants:
+      type: object
+      additionalProperties:
+        $ref: "#/CollaborationTemplateParticipantSummary"
+    tags:
+      type: array
+      items:
+        type: string
+        minLength: 1
+    priority:
+      type: integer
+      format: int32
+      minimum: 0
+    available_languages:
+      type: array
+      items:
+        type: string
+        minLength: 1
+
+CollaborationTemplateListData:
+  type: object
+  additionalProperties: false
+  required:
+    - templates
+    - tag_labels
+    - default_language
+    - supported_languages
+  properties:
+    templates:
+      type: array
+      items:
+        $ref: "#/CollaborationTemplateSummary"
+    tag_labels:
+      type: object
+      additionalProperties:
+        type: object
+        additionalProperties:
+          type: string
+    default_language:
+      type: string
+      minLength: 1
+    supported_languages:
+      type: array
+      items:
+        type: string
+        minLength: 1
+
+CollaborationTemplateListEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      $ref: "#/CollaborationTemplateListData"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+CollaborationTemplateDetail:
+  type: object
+  additionalProperties: false
+  required: [id, lang, name, yaml, definition]
+  properties:
+    id:
+      type: string
+      minLength: 1
+    lang:
+      type: string
+      minLength: 1
+    name:
+      type: string
+      minLength: 1
+    yaml:
+      type: string
+      minLength: 1
+    definition:
+      type: object
+      additionalProperties: true
+      description: >-
+        Parsed collaboration-definition document. The shape is governed by the
+        collaboration runtime, not by this contract; BCN preserves it verbatim.
+
+CollaborationTemplateDetailEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      $ref: "#/CollaborationTemplateDetail"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+BadRequestResponse:
+  description: Invalid template query.
+  x-error-codes:
+    - invalid_request
+    - invalid_template_format
+    - invalid_template_tags
+    - invalid_template_language
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+UnauthenticatedResponse:
+  description: Gateway Principal is missing or invalid.
+  x-error-codes: [unauthenticated]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+NotFoundResponse:
+  description: Template or requested localized template was not found.
+  x-error-codes:
+    - template_not_found
+    - language_not_available
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+CollaborationTemplatesPath:
+  get:
+    operationId: list_templates
+    tags: ["Collaboration / Templates"]
+    summary: List available collaboration templates.
+    description: >-
+      Versioned projection of legacy `GET /collaboration/templates`. Returns the
+      catalog of collaboration-definition templates the registry exposes, with
+      localized names and descriptions. The `lang` query selects a preferred
+      language, falling back to `Accept-Language` and then the registry default.
+      The optional `tags` filter narrows the catalog by comma-separated tags;
+      empty segments are ignored. The returned catalogs are read-only and not
+      scoped to a Bot or Session.
+    x-avernet-security:
+      user: optional
+      app: optional
+      bot: optional
+    x-avernet-behavior:
+      legacy_equivalent: /collaboration/templates
+      result_kind: template
+      language_resolution:
+        - requested_lang
+        - accept_language
+        - registry_default
+    parameters:
+      - $ref: "#/LangQuery"
+      - $ref: "#/TagsQuery"
+    responses:
+      "200":
+        description: >-
+          Collaboration template catalog with supported languages and tag
+          labels, wrapped in the standard envelope.
+        content:
+          application/json:
+            schema:
+              $ref: "#/CollaborationTemplateListEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+CollaborationTemplatePath:
+  get:
+    operationId: get_template
+    tags: ["Collaboration / Templates"]
+    summary: Get a single collaboration template.
+    description: >-
+      Versioned projection of legacy `GET /collaboration/templates/{template_id}`.
+      Fetches one template by identifier and selected language. `format=yaml`
+      (default) streams the raw collaboration-definition YAML as `text/yaml`,
+      preserving the legacy raw response and `content-language`,
+      `x-template-id`, and `x-template-lang` headers. `format=json` returns the
+      template detail inside the standard envelope. A template that is missing
+      resolves to `TEMPLATE_NOT_FOUND`; a language the template does not
+      provide resolves to `LANGUAGE_NOT_AVAILABLE`. Catalog reads are read-only
+      and not scoped to a Bot or Session.
+    x-avernet-security:
+      user: optional
+      app: optional
+      bot: optional
+    x-avernet-raw-response: true
+    x-avernet-behavior:
+      legacy_equivalent: /collaboration/templates/{template_id}
+      result_kind: template
+      language_resolution:
+        - requested_lang
+        - accept_language
+        - registry_default
+      format:
+        yaml:
+          content_type: text/yaml
+          headers:
+            - content-language
+            - x-template-id
+            - x-template-lang
+        json:
+          envelope: standard
+    parameters:
+      - $ref: "#/TemplateIdPath"
+      - $ref: "#/LangQuery"
+      - $ref: "#/FormatQuery"
+    responses:
+      "200":
+        description: >-
+          The requested template. `format=yaml` streams `text/yaml`; `format=json`
+          returns the detail wrapped in the standard envelope.
+        headers:
+          Content-Language:
+            description: >-
+              Language tag of the returned template text. Present on the
+              `text/yaml` response and on the `application/json` response.
+            schema:
+              type: string
+              minLength: 1
+          x-template-id:
+            description: Identifier of the returned template.
+            schema:
+              type: string
+              minLength: 1
+          x-template-lang:
+            description: Language tag of the returned template text.
+            schema:
+              type: string
+              minLength: 1
+        content:
+          text/yaml:
+            schema:
+              type: string
+          application/json:
+            schema:
+              $ref: "#/CollaborationTemplateDetailEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }

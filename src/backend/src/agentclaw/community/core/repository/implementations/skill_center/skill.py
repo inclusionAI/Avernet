@@ -414,20 +414,22 @@ class SkillRepository(
         keyword: str | None,
     ) -> tuple[int, list[dict]]:
         """Page exact Bot-owned ``local://`` rows by desired active state."""
-        from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
+        from agentclaw.community.core.models.skill import BotSkillInstallation
 
         with self._db.orm_session() as db:
-            excluded = (
-                db.query(DefaultSkillsetSkillExclusion.id)
+            installed = (
+                db.query(BotSkillInstallation.id)
                 .filter(
-                    DefaultSkillsetSkillExclusion.user_id
-                    == _normalize_user_id(user_id),
-                    DefaultSkillsetSkillExclusion.bot_id == bot_id,
-                    DefaultSkillsetSkillExclusion.skill_id == self.Skill.id,
+                    BotSkillInstallation.avernet_tenant
+                    == get_current_avernet_tenant(),
+                    BotSkillInstallation.env == get_current_env(),
+                    BotSkillInstallation.owner_id == _normalize_user_id(user_id),
+                    BotSkillInstallation.bot_id == bot_id,
+                    BotSkillInstallation.skill_id == self.Skill.id,
                 )
                 .exists()
             )
-            query = db.query(self.Skill, (~excluded).label("active")).filter(
+            query = db.query(self.Skill, installed.label("active")).filter(
                 self.Skill.env == get_current_env(),
                 self.Skill.bolt_id == bot_id,
                 self.Skill.user_id == _normalize_user_id(user_id),
@@ -444,7 +446,7 @@ class SkillRepository(
                     )
                 )
             if active is not None:
-                query = query.filter((~excluded) == active)
+                query = query.filter(installed == active)
             total = query.count()
             rows = (
                 query.order_by(self.Skill.gmt_modified.desc(), self.Skill.id.desc())
@@ -460,21 +462,23 @@ class SkillRepository(
         self, *, skill_id: str, bot_id: str, user_id: str
     ) -> dict | None:
         """Return one exact Bot-owned ``local://`` row or no row."""
-        from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
+        from agentclaw.community.core.models.skill import BotSkillInstallation
 
         with self._db.orm_session() as db:
-            excluded = (
-                db.query(DefaultSkillsetSkillExclusion.id)
+            installed = (
+                db.query(BotSkillInstallation.id)
                 .filter(
-                    DefaultSkillsetSkillExclusion.user_id
-                    == _normalize_user_id(user_id),
-                    DefaultSkillsetSkillExclusion.bot_id == bot_id,
-                    DefaultSkillsetSkillExclusion.skill_id == self.Skill.id,
+                    BotSkillInstallation.avernet_tenant
+                    == get_current_avernet_tenant(),
+                    BotSkillInstallation.env == get_current_env(),
+                    BotSkillInstallation.owner_id == _normalize_user_id(user_id),
+                    BotSkillInstallation.bot_id == bot_id,
+                    BotSkillInstallation.skill_id == self.Skill.id,
                 )
                 .exists()
             )
             row = (
-                db.query(self.Skill, (~excluded).label("active"))
+                db.query(self.Skill, installed.label("active"))
                 .filter(
                     self.Skill.id == int(skill_id),
                     self.Skill.env == get_current_env(),
@@ -486,10 +490,37 @@ class SkillRepository(
             )
             return self._public_local_skill(*row) if row else None
 
+    def list_bot_installed_skills(
+        self, *, env: str, owner_id: str, bot_id: str
+    ) -> list[dict]:
+        """Return assets selected by the active-only Installation fact."""
+        from agentclaw.community.core.models.skill import BotSkillInstallation
+
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self.Skill)
+                .join(
+                    BotSkillInstallation,
+                    BotSkillInstallation.skill_id == self.Skill.id,
+                )
+                .filter(
+                    BotSkillInstallation.avernet_tenant
+                    == get_current_avernet_tenant(),
+                    BotSkillInstallation.env == env,
+                    BotSkillInstallation.owner_id == _normalize_user_id(owner_id),
+                    BotSkillInstallation.bot_id == bot_id,
+                    self.Skill.env == env,
+                )
+                .order_by(self.Skill.id)
+                .all()
+            )
+            return [_skill_to_dict(row) for row in rows]
+
     def list_bot_local_assets(
         self,
         *,
         env: str,
+        owner_id: str,
         bot_id: str,
     ):
         """列出精确 Bot 范围内的全部 local 来源行，不包含全局记录。"""
@@ -503,6 +534,7 @@ class SkillRepository(
                 db.query(self.Skill)
                 .filter(
                     self.Skill.env == env,
+                    self.Skill.user_id == _normalize_user_id(owner_id),
                     self.Skill.bolt_id == bot_id,
                     self.Skill.git_path.like("local://%"),
                 )
@@ -514,6 +546,9 @@ class SkillRepository(
                     skill_id=row.id,
                     name=row.name,
                     git_path=row.git_path,
+                    skill_uuid=getattr(row, "skill_uuid", None),
+                    sc_version_number=getattr(row, "sc_version_number", None),
+                    mcp_dependencies=tuple(_skill_to_dict(row).get("mcp_dependencies") or ()),
                 )
                 for row in rows
             ]
@@ -523,10 +558,16 @@ class SkillRepository(
         *,
         env: str,
         bot_id: str,
-        user_id: str,
+        owner_id: str,
         engine: str,
     ):
-        """返回普通 active sets 与该引擎默认 set 的完整、去重来源。"""
+        """Return active SkillSet assets plus direct Installation assets.
+
+        The Default SkillSet's historical Local exclusion is read only by the
+        one-shot migration.  Runtime projection instead consumes the
+        active-only Installation fact, so an API command and its subsequent
+        reconciliation cannot disagree about whether a Local Skill is active.
+        """
 
         from agentclaw.community.core.skills_pool.models import (
             RegisteredSkillAsset,
@@ -534,7 +575,7 @@ class SkillRepository(
 
         skill_sets = SkillSetRepository(self._db)
         active_sets = skill_sets.get_all_active_skill_sets_for_env(
-            user_id=user_id,
+            user_id=owner_id,
             bolt_id=bot_id,
             engine_type=engine,
             env=env,
@@ -547,17 +588,14 @@ class SkillRepository(
                 env=env,
             )
             if skill_set.get("is_default"):
-                excluded = set(
-                    skill_sets.get_excluded_skills(
-                        user_id=user_id,
-                        bot_id=bot_id,
-                        skill_set_id=int(skill_set["id"]),
-                    )
-                )
+                # System Default is an independent input to the Resolver.
+                # The historical per-Bot Local exclusion is migration-only
+                # compatibility data and must never decide a runtime entry.
+                # Bot-owned Local assets are selected solely by Installation.
                 rows = [
                     row
                     for row in rows
-                    if int(row.get("id", 0)) not in excluded
+                    if not str(row.get("git_path") or "").startswith("local://")
                 ]
             for row in rows:
                 git_path = str(row.get("git_path") or "")
@@ -569,8 +607,40 @@ class SkillRepository(
                         skill_id=int(row["id"]),
                         name=str(row["name"]),
                         git_path=git_path,
+                        skill_uuid=(
+                            str(row["skill_uuid"])
+                            if row.get("skill_uuid") is not None
+                            else None
+                        ),
+                        sc_version_number=(
+                            str(row["sc_version_number"])
+                            if row.get("sc_version_number") is not None
+                            else None
+                        ),
+                        mcp_dependencies=tuple(row.get("mcp_dependencies") or ()),
                     )
                 )
+        for row in self.list_bot_installed_skills(
+            env=env, owner_id=owner_id, bot_id=bot_id
+        ):
+            skill_id = int(row["id"])
+            name = str(row["name"])
+            git_path = str(row.get("git_path") or "")
+            skill_uuid = str(row["skill_uuid"]) if row.get("skill_uuid") else None
+            sc_version_number = row.get("sc_version_number")
+            if not git_path or git_path in seen:
+                continue
+            seen.add(git_path)
+            assets.append(
+                RegisteredSkillAsset(
+                    skill_id=skill_id,
+                    name=name,
+                    git_path=git_path,
+                    skill_uuid=skill_uuid,
+                    sc_version_number=sc_version_number,
+                    mcp_dependencies=tuple(row.get("mcp_dependencies") or ()),
+                )
+            )
         return assets
 
     def create(self, skill_data: dict) -> dict:
@@ -1427,6 +1497,20 @@ class SkillSetRepository(
             )
             if skill_set is None or skill is None:
                 return False
+            # Existing membership remains the successful idempotent result.
+            # Canonical cross-Set uniqueness is enforced by the new control
+            # plane under its Bot mutation lease, not by this legacy writer.
+            if (
+                db.query(self.SkillSetSkill)
+                .filter(
+                    self.SkillSetSkill.skill_set_id == int(skill_set_id),
+                    self.SkillSetSkill.skill_id == int(skill_id),
+                    self.SkillSetSkill.env == get_current_env(),
+                )
+                .first()
+                is not None
+            ):
+                return True
             db.add(
                 self.SkillSetSkill(
                     skill_set_id=int(skill_set_id),

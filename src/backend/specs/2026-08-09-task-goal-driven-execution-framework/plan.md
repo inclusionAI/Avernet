@@ -57,8 +57,8 @@ class RelationType(StrEnum):      DEPENDENCY    # 节点间依赖关系
 
 @dataclass TaskInfo:              # 对外 execute 入参
     task_spec: TaskSpec
-    source_channel_type: str      # "bot" | "coop_group"
-    source_channel_id: str
+    source_type: str      # "bot" | "coop_group"
+    owner_bot_id: str
     execution_config: dict        # 用户指定执行配置(指定 bot/workflow yaml/MAX_DEPTH 等)
 
 @dataclass AcceptanceResult:      # 无 verifier 字段
@@ -726,7 +726,7 @@ sequenceDiagram
 9. **BBS 阶段**:四专题全 PASS→DONE。查结构父 n_root=`get_parent_task`(任一专题)=PLANNING;n_root 的结构子(N_overview+四专题)全 DONE ∧ 无 RUNNING(本批齐)→条件 c→`plan`→委托 `decompose(graph)`:seam 据阶段三 AC 产 `[N_practice_bbs]`→`add_task_nodes(…, parent_node_id="n_root")`:relations 登记 `n_root→N_practice_bbs`→`dispatch`→假设搜推 MISS(本 case 演示升 BBS 路径)→`on_miss`:MISS+多轮补救仍 MISS→depth 达 `MAX_DEPTH`→**自动升 BBS**:`remove_subtree`(若该节点下有未执行的 MISS 子树)+`loop_round++`+标 BBS+挂任务广场。n_root 仍根不传播。
 10. **BBS bot 认领执行**:BBS bot 主动认领任务→加载完整上下文(已完成 output+验收 **vs** task_spec/goal/context)→**自己算 gap+据自能力规划子任务**→`add_task_nodes(…, parent_node_id="n_root")`(落图 `run_mode="bbs"`,`assignee=bot_id`,挂 `n_root` 下)→自执行→不管验收通过与否都上报:`report_result(TaskCallbackData{workflow_type=bbs, result{success,data=一手实践}})`→`on_report`→`update_task_node_info`(落 output+acceptance→翻态)。
 11. **报告聚合(普通子节点)**:BBS bot 上报 PASS→该子任务 DONE。查结构父 n_root=PLANNING;n_root 的结构子全 DONE ∧ 无 RUNNING→条件 c→`plan`→委托 `decompose(graph)`:seam 产 `[N_report]`(挂 n_root 下;`add_task_nodes(…, parent_node_id="n_root")` relations 登记 `n_root→N_report`)(**普通叶节点,不是"终验节点";框架不识别特殊节点**)→`dispatch→HIT_SINGLE(报告聚合Bot)→start_run`。N_report 执行模式聚合结构父 n_root 的聚合上下文={n_root.spec/goal + 已 DONE 兄弟产出(全图 DONE output)}→报告 Bot 据此生成报告→回投 PASS→`update_task_node_info(N_report DONE)`。N_report 自己的 acceptance 是"产出报告",验收由报告 Bot skill 回投,与全 AC 终验无关。
-12. **根终验(主动验证)**:`plan(graph)==[]` ∧ 全非根 DONE ∧ 无 RUNNING →委托 `decompose(graph)` 判全 AC 已被现有子产出结构 cover,无可再产,返回 [] → 编排核经 `source_channel_type=bot` 回调 owner bot **终验 skill**(输入=验收模式聚合 root 结构子=全图 DONE 产出,Runner 自判,验 root.goal 5 条全 AC)→ owner bot 回投 `on_report(patch{root,PASS})`→`update_task_node_info(root DONE)`+graph.status=DONE。若终验 FAIL+gaps → plan(root) 按 gaps 补救子(根不特殊化),继续驱动。
+12. **根终验(主动验证)**:`plan(graph)==[]` ∧ 全非根 DONE ∧ 无 RUNNING →委托 `decompose(graph)` 判全 AC 已被现有子产出结构 cover,无可再产,返回 [] → 编排核经 `source_type=bot` 回调 owner bot **终验 skill**(输入=验收模式聚合 root 结构子=全图 DONE 产出,Runner 自判,验 root.goal 5 条全 AC)→ owner bot 回投 `on_report(patch{root,PASS})`→`update_task_node_info(root DONE)`+graph.status=DONE。若终验 FAIL+gaps → plan(root) 按 gaps 补救子(根不特殊化),继续驱动。
 
 **未触分支(可 singlebox 注入验证)**:任一专题 FAIL+gaps→补救子挂该专题节点下(该节点→PLANNING);协作群 MISS(无群 cover)+form_coop_group 不适用→`on_miss` 按深度裁决;MISS+多轮补救仍 MISS→depth 达 MAX_DEPTH→自动升 BBS(remove_subtree+loop_round+++标 BBS+挂广场);BBS loop_round≥BBS_MAX_DEPTH→STUCK→HUNG(人介入);Harness 周期超时 `update_task_node_info(复位 PENDING)重投`。
 

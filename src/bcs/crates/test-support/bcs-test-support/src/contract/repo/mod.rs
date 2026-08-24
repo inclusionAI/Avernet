@@ -3,6 +3,14 @@
 //! Concrete repository implementations call these functions from
 //! `tests/conformance_*.rs`.
 
+pub mod edge_grant;
+pub mod permission_profile;
+pub mod permission_request;
+
+pub use edge_grant::run_edge_grant_repo_contract;
+pub use permission_profile::run_permission_profile_repo_contract;
+pub use permission_request::run_permission_request_repo_contract;
+
 use bcs_domain::{MessageOwnerFilter, MessageQuery, NewMessage, SenderType};
 use bcs_service_api::ServiceError;
 use bcs_service_api::port::repo::{
@@ -1420,14 +1428,12 @@ pub async fn group_repo_contract_tests<T: GroupRepoPort + ?Sized>(repo: &T) {
     assert!(repo.get("repo-contract-missing-group").await.is_none());
     assert_eq!(repo.count().await, 0);
 
-    let mut helper = Participant::bot("repo-helper", ParticipantRole::Consultant);
-    helper.tags = vec!["tenant-a".to_string(), "scene-review".to_string()];
     let mut group = Group::new(
         "repo-contract-group",
         "repo-driver",
         vec![
             Participant::bot("repo-driver", ParticipantRole::Driver),
-            helper,
+            Participant::bot("repo-helper", ParticipantRole::Consultant),
         ],
     );
     group.label = Some("initial label".to_string());
@@ -1447,20 +1453,12 @@ pub async fn group_repo_contract_tests<T: GroupRepoPort + ?Sized>(repo: &T) {
         .expect("group exists after upsert");
     assert_eq!(stored.label.as_deref(), Some("initial label"));
     assert_eq!(stored.participants.len(), 2);
-    assert_eq!(
-        stored
-            .participants
-            .iter()
-            .find(|participant| participant.bot_uuid == "repo-helper")
-            .expect("helper participant")
-            .tags,
-        vec!["tenant-a".to_string(), "scene-review".to_string()]
-    );
     assert_eq!(repo.count().await, 1);
 
-    let mut observer = Participant::bot("repo-observer", ParticipantRole::Observer);
-    observer.tags = vec!["observer-tag".to_string()];
-    repo.add_participant(&group.id, observer)
+    repo.add_participant(
+        &group.id,
+        Participant::bot("repo-observer", ParticipantRole::Observer),
+    )
     .await
     .expect("add participant");
     let stored = repo.get(&group.id).await.expect("group after add");
@@ -1469,15 +1467,6 @@ pub async fn group_repo_contract_tests<T: GroupRepoPort + ?Sized>(repo: &T) {
             .participants
             .iter()
             .any(|p| p.bot_uuid == "repo-observer")
-    );
-    assert_eq!(
-        stored
-            .participants
-            .iter()
-            .find(|participant| participant.bot_uuid == "repo-observer")
-            .expect("observer participant")
-            .tags,
-        vec!["observer-tag".to_string()]
     );
 
     repo.update_participant_mode(&group.id, "repo-helper", ParticipantMode::Muted)

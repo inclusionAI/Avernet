@@ -12,6 +12,10 @@
 - ``get_state_machine_run``/``start_state_machine_run``/``get_session_messages``/``get_group``:
   先继承 ``BcsHttpAdapter``;真跑 singlebox coop_group e2e 时若 translator 拿不到 ``status``/``output``/
   ``session.*``,据真实响应再覆写归一。
+
+已继承(不覆写,本地与生产响应形状一致):
+- ``list_bots_by_task_modes``:provider 任务模式 roster 路由,返 ``{"items":[...]}``,Bearer provider_admin_token
+  来自 ``BcsTokenProvider``;本地 BCS 同 bcs-http 代码,响应形状与生产一致。
 """
 from __future__ import annotations
 
@@ -33,13 +37,17 @@ class SingleboxBcsAdapter(BcsHttpAdapter):  # pragma: no cover — live singlebo
         is_sm = req.group_strategy == "state_machine" or req.collaboration_definition_yaml
         if is_sm:
             body["group_strategy"] = "state_machine"
-            body["start_initial_run"] = False
+            # 透传调用方(form_coop_group)的 start_initial_run;未设时默认 False(向后兼容)。
+            # 不得硬编码 False —— state_machine + event_subscriptions 时 BCS 要求自动启动(groups.rs:627)。
+            body["start_initial_run"] = req.start_initial_run if req.start_initial_run is not None else False
             if req.collaboration_definition_yaml:
                 body["collaboration_definition_yaml"] = req.collaboration_definition_yaml
             if req.participant_bindings:
                 body["participant_bindings"] = req.participant_bindings
         elif req.group_strategy:
             body["group_strategy"] = req.group_strategy
+        if req.event_subscriptions:
+            body["event_subscriptions"] = req.event_subscriptions
         for opt in ("context", "topic", "service_spec", "originator", "visibility"):
             v = getattr(req, opt)
             if v is not None:

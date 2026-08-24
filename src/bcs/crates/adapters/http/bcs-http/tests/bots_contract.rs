@@ -15,9 +15,9 @@ use bcs_service_api::{
     ActorKind, ActorStatus, BotConnectCommand, BotConnectResult, BotDetailCommand, BotDetailResult,
     BotDynamicStatus, BotLeaveResult, BotListCommand, BotListEntry, BotListResult,
     BotManagementService, BotPagedListResult, BotQueryByIdsResult, BotQueryEntry, BotQueryService,
-    BotRegistryCoreService, BotStatusUpdateCommand, BotStatusUpdateResult, BotUseCaseError,
-    BotVisibilityCommand, BotVisibilityQueryResult, BotVisibilityResult, ConnectError,
-    DynamicStatusResponse, ServiceError, Skill,
+    BotRegistryCoreService, BotSearchResult, BotStatusUpdateCommand, BotStatusUpdateResult,
+    BotUseCaseError, BotVisibilityCommand, BotVisibilityQueryResult, BotVisibilityResult,
+    ConnectError, DynamicStatusResponse, ServiceError, Skill,
 };
 use bcs_services_container::Services;
 use serde_json::Value;
@@ -1127,6 +1127,163 @@ fn assert_invalid_operation<T>(result: Result<T, BotUseCaseError>, expected_mess
         ),
         "expected InvalidOperation with message {expected_message}"
     );
+}
+
+#[tokio::test]
+async fn search_bots_route_rejects_oversized_limit() {
+    let query = Arc::new(RecordingBotQueryService {
+        search_result: Ok(BotSearchResult { items: vec![], total: 0 }),
+        ..Default::default()
+    });
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    let app = build_router(HttpAppState::new(services));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/search?limit=101")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(query.search_commands.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn search_bots_route_rejects_invalid_visibility() {
+    let query = Arc::new(RecordingBotQueryService {
+        search_result: Ok(BotSearchResult { items: vec![], total: 0 }),
+        ..Default::default()
+    });
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    let app = build_router(HttpAppState::new(services));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/search?visibility=internet")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(query.search_commands.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn search_bots_route_forces_public_scope_without_bearer() {
+    let query = Arc::new(RecordingBotQueryService {
+        search_result: Ok(BotSearchResult {
+            items: vec![query_entry("bot-alpha"), query_entry("bot-beta")],
+            total: 2,
+        }),
+        ..Default::default()
+    });
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    // No user-identity port ⇒ anonymous caller.
+    let app = build_router(HttpAppState::new(services));
+
+    // Client tries visibility=protected, but without a Bearer it must be forced
+    // to public (spec §3.6.2).
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/search?visibility=protected&offset=0&limit=20")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["total"], 2);
+    assert_eq!(json["offset"], 0);
+    assert_eq!(json["limit"], 20);
+    let items = json["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    // Anonymous callers do not get the is_friend field (spec §3.4).
+    assert!(items[0].get("is_friend").is_none());
+    // status / visibility / is_online are surfaced from the registry query.
+    assert_eq!(items[0]["status"], "online");
+    assert_eq!(items[0]["visibility"], "public");
+    assert_eq!(items[0]["is_online"], true);
+
+    let commands = query.search_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].visibility.as_deref(), Some("public"));
+}
+
+#[tokio::test]
+async fn search_bots_route_includes_is_friend_field_with_bearer() {
+    let query = Arc::new(RecordingBotQueryService {
+        search_result: Ok(BotSearchResult {
+            items: vec![query_entry("bot-alpha")],
+            total: 1,
+        }),
+        ..Default::default()
+    });
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
+        ChainUserIdentityPort::new(chain),
+    )));
+
+    // No visibility param ⇒ default public+protected scope (None), and the
+    // is_friend field is included (false, since the noop connect service knows
+    // no friends).
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/search?offset=0&limit=20")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    let items = json["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["is_friend"], false);
+
+    let commands = query.search_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert!(commands[0].visibility.is_none());
+    assert_eq!(commands[0].requester_actor_id.as_deref(), Some("human_alice"));
+}
+
+#[tokio::test]
+async fn search_bots_route_forwards_tc_bot_filter_param() {
+    let query = Arc::new(RecordingBotQueryService {
+        search_result: Ok(BotSearchResult { items: vec![], total: 0 }),
+        ..Default::default()
+    });
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    let app = build_router(HttpAppState::new(services));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/search?tc_bot=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let commands = query.search_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].tc_bot, Some(true));
 }
 
 fn query_entry(bot_uuid: &str) -> BotQueryEntry {

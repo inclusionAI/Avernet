@@ -11,8 +11,7 @@ exercise a real route end to end (see
 """
 import pytest
 from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock, patch
-import asyncio
+from unittest.mock import MagicMock
 
 
 class TestSkillSetAutoActivateDeviceRouting:
@@ -35,12 +34,8 @@ class TestSkillSetAutoActivateDeviceRouting:
         device_plugin = MagicMock()
         path_factory = MagicMock()
 
-        # Mock get_by_id 返回带 owner_id 的 bot
-        def mock_get_bot(bot_id):
-            bot = MagicMock()
-            bot.get.return_value = "staff_197444"
-            return bot
-        bot_repo.get_by_id = mock_get_bot
+        # Runtime routing resolves the addressed Bot by (bot_id, owner_id).
+        bot_repo.get_by_id_and_owner.return_value = {"owner_id": "staff_197444"}
 
         # 路径
         test_path = Path("/tmp/test_passes")
@@ -98,7 +93,7 @@ class TestSkillSetAutoActivateDeviceRouting:
         service._sync_symlinks_to_device_if_needed = MagicMock(return_value=True)
 
         # 执行添加 skill 到已激活的技能集
-        result = await service.add_skills_to_set(
+        await service.add_skills_to_set(
             skill_set_id="1",
             skill_ids=["1"],
             user_id="197444"
@@ -119,8 +114,8 @@ class TestSkillSetAutoActivateDeviceRouting:
         shutil.rmtree("/tmp/test_local_p", ignore_errors=True)
 
     @pytest.mark.asyncio
-    async def test_auto_activate_uses_owner_id_for_collaboration_bot(self):
-        """测试协作模式（服务Bot）使用 owner_id 而不是 entity_id"""
+    async def test_auto_activate_uses_owner_scoped_entity_id_for_collaboration_bot(self):
+        """协作场景由 BFF 将 Bot owner 传入 entity_id。"""
         import sys
         sys.path.insert(0, 'src')
         from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
@@ -134,13 +129,7 @@ class TestSkillSetAutoActivateDeviceRouting:
         device_plugin = MagicMock()
         path_factory = MagicMock()
 
-        # 协作模式：entity_id 是 team_xxx，但 owner_id 应该是管理员的 staff 号
-        def mock_get_bot_collab(bot_id):
-            bot = MagicMock()
-            # 返回 owner_id（服务Bot 的 owner）
-            bot.get.side_effect = lambda k, d=None: {"owner_id": "staff_999999"}.get(k, d)
-            return bot
-        bot_repo.get_by_id = mock_get_bot_collab
+        # entity_id 已是服务 Bot 的 owner，不再由此旧 Service 重新解析。
 
         test_path = Path("/tmp/test_collab")
         test_path.mkdir(parents=True, exist_ok=True)
@@ -169,7 +158,7 @@ class TestSkillSetAutoActivateDeviceRouting:
         skill_repo.list_skills.return_value = [{"id": "1", "name": "test_skill", "git_path": "git://business/test_skill"}]
         skill_set_repo.get_skills_in_set.return_value = []
 
-        # entity_id 是 team_xxx（协作模式）
+        # Skill/SkillSet BFF 传入的 entity_id 就是 Bot owner。
         service = SkillSetService(
             skill_repo=skill_repo,
             skill_set_repo=skill_set_repo,
@@ -177,7 +166,7 @@ class TestSkillSetAutoActivateDeviceRouting:
             mcp_config_service=mcp_config_service,
             skill_service=skill_service,
             bot_repo=bot_repo,
-            entity_id="team_xxx",  # 协作模式
+            entity_id="staff_999999",
             bot_id="service_bot_123",
             engine_type="openclaw",
             device_plugin=device_plugin,
@@ -193,13 +182,13 @@ class TestSkillSetAutoActivateDeviceRouting:
         service.mcp_center.get_mcp_by_skill_set.return_value = []
         service._sync_symlinks_to_device_if_needed = MagicMock(return_value=True)
 
-        result = await service.add_skills_to_set(
+        await service.add_skills_to_set(
             skill_set_id="1",
             skill_ids=["1"],
             user_id="197444"
         )
 
-        # 验证使用的是 owner_id (staff_999999)，不是 entity_id (team_xxx)
+        # 验证使用 BFF 传入的 owner-scoped entity_id。
         assert len(calls) > 0
         assert calls[0]["user_id"] == "staff_999999", f"Should use owner_id staff_999999, got {calls[0]['user_id']}"
 
@@ -224,8 +213,8 @@ class TestSkillSetAutoActivateDeviceRouting:
         device_plugin = MagicMock()
         path_factory = MagicMock()
 
-        # get_by_id 返回 None（查不到 bot）
-        bot_repo.get_by_id.return_value = None
+        # 精确 owner-qualified lookup 查不到 Bot。
+        bot_repo.get_by_id_and_owner.return_value = None
 
         test_path = Path("/tmp/test_fallback")
         test_path.mkdir(parents=True, exist_ok=True)
@@ -278,7 +267,7 @@ class TestSkillSetAutoActivateDeviceRouting:
         service.mcp_center.get_mcp_by_skill_set.return_value = []
         service._sync_symlinks_to_device_if_needed = MagicMock(return_value=True)
 
-        result = await service.add_skills_to_set(
+        await service.add_skills_to_set(
             skill_set_id="1",
             skill_ids=["1"],
             user_id="197444"
@@ -570,4 +559,3 @@ class TestActivationFailedVisibility:
         shutil.rmtree("/tmp/test_empty", ignore_errors=True)
         shutil.rmtree("/tmp/test_repo_empty", ignore_errors=True)
         shutil.rmtree("/tmp/test_local_empty", ignore_errors=True)
-

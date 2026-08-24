@@ -21,6 +21,7 @@ def make_bot(
     owner_name: str | None = None,
     bot_type: str = "service",
     status: str = "ACTIVE",
+    active_engine: str | None = None,
     binding_id: int | None = None,
 ) -> dict:
     """Seed a bot and return the resulting record.
@@ -31,25 +32,27 @@ def make_bot(
         owner_name: Owner display name (optional)
         bot_type: Bot type (service, desktop, personal)
         status: Bot status (ACTIVE, PENDING, etc.)
+        active_engine: Optional active engine for engine-specific flows.
         binding_id: Device binding ID to link (for relay/cron flows that
             resolve a device connection). Seed it via
             ``tests.community.factories.devices.make_active_local_device`` first.
     """
     bot_repo = world.get(BotRepository)
-    return bot_repo.insert(
-        {
-            "bot_id": bot_id,
-            "bot_name": f"Bot {bot_id}",
-            "owner_id": owner_id,
-            "owner_name": owner_name,
-            "bot_type": bot_type,
-            "status": status,
-            "entity_id": owner_id,
-            "entity_type": "user",
-            "creator_id": owner_id,
-            "binding_id": binding_id,
-        }
-    )
+    bot_data = {
+        "bot_id": bot_id,
+        "bot_name": f"Bot {bot_id}",
+        "owner_id": owner_id,
+        "owner_name": owner_name,
+        "bot_type": bot_type,
+        "status": status,
+        "entity_id": owner_id,
+        "entity_type": "user",
+        "creator_id": owner_id,
+        "binding_id": binding_id,
+    }
+    if active_engine is not None:
+        bot_data["active_engine"] = active_engine
+    return bot_repo.insert(bot_data)
 
 
 def make_collaborator(

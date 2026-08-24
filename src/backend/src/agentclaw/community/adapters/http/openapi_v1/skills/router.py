@@ -10,8 +10,7 @@ from __future__ import annotations
 import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response
-
+from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     EXAMPLE_TRACE_ID,
     BotIdPath,
@@ -21,16 +20,28 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
+)
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     UserIdDep,
     require_granted_addressed_bot,
 )
+from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
+)
+from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
+)
+from agentclaw.community.api.bot_skill_asset_service import (
+    BotSkillAssetServiceProtocol,
+)
+from agentclaw.community.api.local_skill_delete_service import (
+    LocalSkillDeleteServiceProtocol,
 )
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
@@ -38,21 +49,75 @@ from agentclaw.community.api.local_skill_query_service import (
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
-)
-from agentclaw.community.api.local_skill_delete_service import (
-    LocalSkillDeleteServiceProtocol,
-)
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillInvalidPackageError,
     LocalSkillNotFoundError,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.plugin_api.skill_center_client import (
+    SkillCenterClient,
+    SkillCenterPublishStatusError,
+)
 
-from .schemas import Skill, SkillState, SkillUpload
+from .schemas import (
+    Skill,
+    SkillContent,
+    SkillFolderUpload,
+    SkillParameters,
+    SkillPublishStatus,
+    SkillState,
+    SkillUpload,
+)
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    Form,
+    Path,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/skills", tags=["skills"])
+publish_status_router = APIRouter(
+    prefix="/openapi/v1/bots/skills",
+    tags=["skills"],
+    dependencies=[Depends(require_principal)],
+    route_class=PublicAPIRoute,
+)
+
+
+@publish_status_router.get(
+    "/{skill_code}/publish/status",
+    response_model=Envelope[SkillPublishStatus],
+)
+@envelope_errors
+async def get_skill_publish_status(
+    request: Request,
+    skill_code: str = Path(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="Skill Center skill code.",
+    ),
+    client: SkillCenterClient = Injected(SkillCenterClient),
+) -> Envelope[SkillPublishStatus]:
+    """Query a Skill's publish status from Skill Center.
+
+    This is the new Skill Workbench entry point. It deliberately does not
+    consult or mutate the legacy local Skill state machine.
+    """
+    upstream = client.query_publish_status(skill_code)
+    if not isinstance(upstream, dict) or upstream.get("success") is not True:
+        raise SkillCenterPublishStatusError()
+    data = upstream.get("data")
+    if not isinstance(data, dict):
+        raise SkillCenterPublishStatusError()
+    return envelope(SkillPublishStatus.model_validate(data), request)
+
+
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/skills", tags=["skills"], route_class=PublicAPIRoute)
 
 #: The bot authorization for an application caller, on the two operations the
 #: shared dependency can decide — the **addressed-bot** dependency, because the
@@ -96,44 +161,6 @@ def _tags(value: Any) -> list[str]:
     return []
 
 
-def _authorize_skills_bot(
-    caller: ActingCaller,
-    query_service: LocalSkillQueryServiceProtocol,
-    *,
-    skill_id: str,
-    actor_id: str,
-    bot_id: str,
-) -> None:
-    """Authorize the bot behind a skill, for an application caller.
-
-    The four ``{skill_id}`` operations name no bot, and the services beneath
-    them scope by *user* alone — so without this an application holding a grant
-    on one of a user's bots would reach that user's skills on **every** bot they
-    own. Admitting them unchecked was never an option; the choice was between
-    this and refusing all four.
-
-    The bot is resolved through the ordinary user-scoped read, deliberately.
-    That read already refuses a skill belonging to someone else, so another
-    user's skill is rejected *before* the grant is consulted and the grant check
-    never becomes the thing that leaks a skill's existence.
-
-    **The grant half is a no-op for a human caller.** Their own operation's
-    user-scoped resolve is the check; re-deciding it here would risk a second,
-    different answer.
-
-    The read itself is no longer skipped for them, because the addressed bot has
-    to be checked against the skill's own for every caller — an address that is
-    only verified for applications is not an address. That costs one query per
-    request on these four operations, which is the price of the ``{bot_id}``
-    segment meaning what it says.
-    """
-    record = query_service.get_local_skill(skill_id=skill_id, actor_id=actor_id)
-    _require_addressed_bot(record, bot_id)
-    if not caller.is_application:
-        return
-    _require_skills_grant(caller, record)
-
-
 def _require_addressed_bot(record: dict[str, Any], bot_id: str) -> None:
     """The skill must belong to the bot the address names.
 
@@ -163,9 +190,7 @@ def _require_skills_grant(caller: ActingCaller, record: dict[str, Any]) -> None:
     checking the grant against the *caller* rather than the skill's owner would
     authorize work on one bot with a grant for a different, same-named one.
     """
-    caller.require_bot(
-        str(record["bolt_id"]), owner_id=str(record["user_id"])
-    )
+    caller.require_bot(str(record["bolt_id"]), owner_id=str(record["user_id"]))
 
 
 def _to_skill(record: dict[str, Any]) -> Skill:
@@ -181,20 +206,50 @@ def _to_skill(record: dict[str, Any]) -> Skill:
     )
 
 
+def _uploaded_skill_response(
+    result: dict[str, Any], request: Request, response: Response
+) -> Envelope[SkillUpload]:
+    operation = str(result["operation"])
+    if operation == "updated":
+        response.status_code = 200
+    return envelope(
+        SkillUpload(operation=operation, skill=_to_skill(result["skill"])),
+        request,
+        code=201000 if operation == "created" else 200000,
+        message="Created" if operation == "created" else "OK",
+    )
+
+
+def _directory_relative_paths(
+    raw_paths: str | None, files: list[UploadFile]
+) -> list[str]:
+    """Preserve the legacy multipart folder wire without trusting filenames."""
+    if raw_paths is None:
+        paths = [file.filename or "" for file in files]
+    else:
+        try:
+            paths = json.loads(raw_paths)
+        except json.JSONDecodeError as exc:
+            raise LocalSkillInvalidPackageError() from exc
+        if not isinstance(paths, list) or not all(
+            isinstance(path, str) for path in paths
+        ):
+            raise LocalSkillInvalidPackageError()
+    if len(paths) != len(files):
+        raise LocalSkillInvalidPackageError()
+    return paths
+
+
 @router.get(
     "", response_model=Envelope[Page[Skill]], dependencies=_GRANT_CHECKED_ADDRESSED_BOT
 )
 @envelope_errors
 async def list_skills(
     page: PageParamsDep,
-    actor_id: UserIdDep,
+    user_id: UserIdDep,
     request: Request,
     bot_id: BotIdPath,
-    owner_id: str | None = Query(
-        default=None,
-        description="Owner of the bot; defaults to the caller. Name it only "
-        "to list skills of a bot shared with you.",
-    ),
+    owner_id: OwnerIdDep,
     active: bool | None = Query(
         default=None,
         description="Filter: true for only active skills, false for only "
@@ -216,8 +271,8 @@ async def list_skills(
     """
     total, records = query_service.list_local_skills(
         bot_id=bot_id,
-        owner_id=owner_id or actor_id,
-        actor_id=actor_id,
+        owner_id=owner_id,
+        actor_id=user_id,
         page=page.page,
         page_size=page.page_size,
         active=active,
@@ -226,27 +281,139 @@ async def list_skills(
     return page_envelope(total, [_to_skill(record) for record in records], request)
 
 
-@router.get("/{skill_id}", response_model=Envelope[Skill])
+@router.get(
+    "/{skill_id}",
+    response_model=Envelope[Skill],
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+)
 @envelope_errors
 async def get_skill(
     bot_id: BotIdPath,
     skill_id: SkillIdPath,
-    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
-    query_service: LocalSkillQueryServiceProtocol = Injected(
-        LocalSkillQueryServiceProtocol
+    asset_service: BotSkillAssetServiceProtocol = Injected(
+        BotSkillAssetServiceProtocol
     ),
 ) -> Envelope[Skill]:
     """Get public metadata for one Local Skill; the Skill ID selects its Bot."""
-    record = query_service.get_local_skill(
-        skill_id=skill_id, actor_id=actor_id
+    record = asset_service.get_skill(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
     )
     _require_addressed_bot(record, bot_id)
     # The record is already in hand, so this one checks the grant directly
     # rather than through the helper — one read, not two.
     _require_skills_grant(caller, record)
     return envelope(_to_skill(record), request)
+
+
+@router.get(
+    "/{skill_id}/content",
+    response_model=Envelope[SkillContent],
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+)
+@envelope_errors
+async def get_skill_content(
+    bot_id: BotIdPath,
+    skill_id: SkillIdPath,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
+    caller: ActingCallerDep,
+    request: Request,
+    asset_service: BotSkillAssetServiceProtocol = Injected(
+        BotSkillAssetServiceProtocol
+    ),
+) -> Envelope[SkillContent]:
+    record = asset_service.get_skill(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
+    )
+    _require_addressed_bot(record, bot_id)
+    _require_skills_grant(caller, record)
+    content = await asset_service.get_content(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
+    )
+    return envelope(SkillContent(content=content), request)
+
+
+@router.get(
+    "/{skill_id}/parameters",
+    response_model=Envelope[SkillParameters],
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+)
+@envelope_errors
+async def get_skill_parameters(
+    bot_id: BotIdPath,
+    skill_id: SkillIdPath,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
+    caller: ActingCallerDep,
+    request: Request,
+    asset_service: BotSkillAssetServiceProtocol = Injected(
+        BotSkillAssetServiceProtocol
+    ),
+) -> Envelope[SkillParameters]:
+    record = asset_service.get_skill(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
+    )
+    _require_addressed_bot(record, bot_id)
+    _require_skills_grant(caller, record)
+    parameters = await asset_service.get_parameters(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
+    )
+    return envelope(SkillParameters(parameters=parameters), request)
+
+
+@router.put(
+    "/{skill_id}/parameters",
+    response_model=Envelope[SkillParameters],
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+)
+@envelope_errors
+async def replace_skill_parameters(
+    bot_id: BotIdPath,
+    skill_id: SkillIdPath,
+    payload: SkillParameters,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
+    caller: ActingCallerDep,
+    request: Request,
+    asset_service: BotSkillAssetServiceProtocol = Injected(
+        BotSkillAssetServiceProtocol
+    ),
+) -> Envelope[SkillParameters]:
+    record = asset_service.get_skill(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
+    )
+    _require_addressed_bot(record, bot_id)
+    _require_skills_grant(caller, record)
+    parameters = await asset_service.replace_parameters(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
+        parameters=payload.parameters,
+    )
+    return envelope(SkillParameters(parameters=parameters), request)
 
 
 @router.post(
@@ -278,13 +445,11 @@ async def get_skill(
 @envelope_errors
 async def upload_skill(
     bot_id: BotIdPath,
-    actor_id: UserIdDep,
+    user_id: UserIdDep,
     request: Request,
     response: Response,
+    owner_id: OwnerIdDep,
     package: bytes = Body(..., media_type="application/zip"),
-    owner_id: str | None = Query(
-        default=None, description="Verified Bot owner locator."
-    ),
     upload_service: LocalSkillUploadServiceProtocol = Injected(
         LocalSkillUploadServiceProtocol
     ),
@@ -305,37 +470,76 @@ async def upload_skill(
         raise LocalSkillInvalidPackageError()
     result = await upload_service.upload_local_skill(
         bot_id=bot_id,
-        owner_id=owner_id or actor_id,
-        actor_id=actor_id,
+        owner_id=owner_id,
+        actor_id=user_id,
         package=package,
     )
-    operation = str(result["operation"])
-    if operation == "updated":
-        response.status_code = 200
-    return envelope(
-        SkillUpload(operation=operation, skill=_to_skill(result["skill"])),
-        request,
-        code=201000 if operation == "created" else 200000,
-        message="Created" if operation == "created" else "OK",
+    return _uploaded_skill_response(result, request, response)
+
+
+@router.post(
+    "/upload-folder",
+    status_code=201,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+    response_model=Envelope[SkillUpload],
+    responses={
+        200: {
+            "model": Envelope[SkillUpload],
+            "description": "Existing Local Skill safely replaced.",
+        },
+        413: {
+            "model": ErrorEnvelope,
+            "description": "Directory package exceeds an upload limit.",
+        },
+    },
+)
+@envelope_errors
+async def upload_skill_folder(
+    bot_id: BotIdPath,
+    user_id: UserIdDep,
+    request: Request,
+    response: Response,
+    owner_id: OwnerIdDep,
+    payload: Annotated[SkillFolderUpload, Form(media_type="multipart/form-data")],
+    upload_service: LocalSkillUploadServiceProtocol = Injected(
+        LocalSkillUploadServiceProtocol
+    ),
+) -> Envelope[SkillUpload]:
+    """Upload a browser-selected local Skill directory.
+
+    This preserves the legacy multipart files and file_paths contract.
+    The Service API converts the directory into the exact same validated
+    package authority as the existing raw-ZIP endpoint.
+    """
+    paths = _directory_relative_paths(payload.file_paths, payload.files)
+    uploaded = [
+        (path, await file.read())
+        for path, file in zip(paths, payload.files, strict=True)
+    ]
+    result = await upload_service.upload_local_skill_files(
+        bot_id=bot_id,
+        owner_id=owner_id,
+        actor_id=user_id,
+        files=uploaded,
     )
+    return _uploaded_skill_response(result, request, response)
 
 
 @router.post(
     "/{skill_id}/activate",
     response_model=Envelope[SkillState],
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def activate_skill(
     bot_id: BotIdPath,
     skill_id: SkillIdPath,
-    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
-    query_service: LocalSkillQueryServiceProtocol = Injected(
-        LocalSkillQueryServiceProtocol
-    ),
-    state_service: LocalSkillStateServiceProtocol = Injected(
-        LocalSkillStateServiceProtocol
+    asset_service: BotSkillAssetServiceProtocol = Injected(
+        BotSkillAssetServiceProtocol
     ),
 ) -> Envelope[SkillState]:
     """Activate a skill so its bot can use it.
@@ -343,11 +547,20 @@ async def activate_skill(
     Idempotent — activating an already-active skill succeeds with changed
     false. The bot's runtime is reconciled synchronously either way.
     """
-    _authorize_skills_bot(
-        caller, query_service, skill_id=skill_id, actor_id=actor_id, bot_id=bot_id
+    record = asset_service.get_skill(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
     )
-    result = await state_service.set_local_skill_active(
-        skill_id=skill_id, actor_id=actor_id, active=True
+    _require_addressed_bot(record, bot_id)
+    _require_skills_grant(caller, record)
+    result = await asset_service.set_active(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
+        active=True,
     )
     return envelope(
         SkillState(skill=_to_skill(result), changed=bool(result["changed"])),
@@ -358,19 +571,18 @@ async def activate_skill(
 @router.post(
     "/{skill_id}/deactivate",
     response_model=Envelope[SkillState],
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def deactivate_skill(
     bot_id: BotIdPath,
     skill_id: SkillIdPath,
-    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
-    query_service: LocalSkillQueryServiceProtocol = Injected(
-        LocalSkillQueryServiceProtocol
-    ),
-    state_service: LocalSkillStateServiceProtocol = Injected(
-        LocalSkillStateServiceProtocol
+    asset_service: BotSkillAssetServiceProtocol = Injected(
+        BotSkillAssetServiceProtocol
     ),
 ) -> Envelope[SkillState]:
     """Deactivate a skill so its bot stops using it.
@@ -378,11 +590,20 @@ async def deactivate_skill(
     Idempotent — deactivating an already-inactive skill succeeds with changed
     false. The bot's runtime is reconciled synchronously either way.
     """
-    _authorize_skills_bot(
-        caller, query_service, skill_id=skill_id, actor_id=actor_id, bot_id=bot_id
+    record = asset_service.get_skill(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
     )
-    result = await state_service.set_local_skill_active(
-        skill_id=skill_id, actor_id=actor_id, active=False
+    _require_addressed_bot(record, bot_id)
+    _require_skills_grant(caller, record)
+    result = await asset_service.set_active(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
+        active=False,
     )
     return envelope(
         SkillState(skill=_to_skill(result), changed=bool(result["changed"])),
@@ -390,19 +611,24 @@ async def deactivate_skill(
     )
 
 
-@router.delete("/{skill_id}", response_model=Envelope[Deleted])
+@router.delete(
+    "/{skill_id}",
+    response_model=Envelope[Deleted],
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+)
 @envelope_errors
 async def delete_skill(
     bot_id: BotIdPath,
     skill_id: SkillIdPath,
-    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
     delete_service: LocalSkillDeleteServiceProtocol = Injected(
         LocalSkillDeleteServiceProtocol
     ),
-    query_service: LocalSkillQueryServiceProtocol = Injected(
-        LocalSkillQueryServiceProtocol
+    asset_service: BotSkillAssetServiceProtocol = Injected(
+        BotSkillAssetServiceProtocol
     ),
 ) -> Envelope[Deleted]:
     """Delete a skill by id.
@@ -410,10 +636,17 @@ async def delete_skill(
     Only an inactive skill can be deleted — deactivate it first; deleting an
     active one answers 409.
     """
-    _authorize_skills_bot(
-        caller, query_service, skill_id=skill_id, actor_id=actor_id, bot_id=bot_id
+    record = asset_service.get_skill(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
     )
+    _require_addressed_bot(record, bot_id)
+    _require_skills_grant(caller, record)
     await delete_service.delete_local_skill(
-        skill_id=skill_id, actor_id=actor_id
+        skill_id=skill_id,
+        owner_id=owner_id,
+        user_id=user_id,
     )
     return envelope(Deleted(), request)

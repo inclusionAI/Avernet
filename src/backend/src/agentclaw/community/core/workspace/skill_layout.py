@@ -10,7 +10,12 @@ the DI composition root.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+
+from agentclaw.community.core.workspace.runtime_identity import (
+    claude_code_uses_aicoding_runtime,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +60,29 @@ PoolPaths = (
 FILESYSTEM_POOL_ENGINES = ("openclaw", "claude_code", "aicoding", "hermes")
 
 
+def runtime_layout_engine_for_bot(bot: Mapping[str, object]) -> str:
+    """Return the filesystem identity for a Bot's Skill runtime.
+
+    ``claude_code`` remains the logical product engine for coding templates:
+    catalogue selection, Passport, and persisted control-plane state therefore
+    continue to use it.  Those templates run in an AICoding image, however,
+    so every filesystem Pool operation must address AICoding's physical roots.
+
+    This dependency-free workspace contract is deliberately shared by Skill
+    Center and Skills Pool.  It prevents either domain from inferring a
+    physical path from ``active_engine`` alone.
+    """
+
+    engine = str(bot.get("active_engine") or "")
+    template_type = str(bot.get("template_type") or "")
+    if claude_code_uses_aicoding_runtime(
+        active_engine=engine,
+        template_type=template_type,
+    ):
+        return "aicoding"
+    return engine
+
+
 def pool_paths_for_engine(engine: str) -> PoolPaths:
     """Resolve explicitly supported filesystem engines; never fall back."""
 
@@ -77,4 +105,5 @@ __all__ = [
     "OpenClawPoolPaths",
     "PoolPaths",
     "pool_paths_for_engine",
+    "runtime_layout_engine_for_bot",
 ]

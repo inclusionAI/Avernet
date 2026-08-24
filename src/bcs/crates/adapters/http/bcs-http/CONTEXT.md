@@ -32,6 +32,11 @@
 
 - Route registration, auth adapter wiring, and service handles are injected by bootstrap.
 - Handlers in this crate must not read env or choose concrete service implementations.
+- `GET`/`PATCH /providers/{provider_id}/bots/{bot_uuid}/attributes` require the
+  Provider Admin Bearer token, a Provider ID listed in
+  `allowed_switch_provider_ids`, and an active binding between that Provider and
+  Bot. The PATCH body is a strict partial update of `user_visibility`,
+  `friend_ext`, and `friend_check_in_strategy`.
 
 ## Runtime ownership
 

@@ -1247,6 +1247,7 @@ class BotService:
         template_type: Optional[str] = None,
         template_config: Optional[Dict[str, Any]] = None,
         cookie: Optional[str] = None,
+        space_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Create a new bot with async device allocation.
@@ -1384,6 +1385,7 @@ class BotService:
                 "ext": ext,
                 "bot_type": resolved_bot_type,
                 "template_type": template_type,  # Template type (e.g., "applicationCoding")
+                "space_id": space_id,  # Business-space ownership: NULL -> personal fallback
             }
 
             bot_record = self._repository.insert(bot_data)
@@ -2167,6 +2169,7 @@ class BotService:
         owner_id: Optional[str] = None,
         engine: Optional[str] = None,
         status: Optional[str] = None,
+        space_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
         bot_ids: Optional[List[str]] = None,
@@ -2180,6 +2183,7 @@ class BotService:
             owner_name: Filter by owner name
             bot_id: Filter by bot ID (exact match)
             owner_id: Filter by owner id (exact match) — scopes to one owner
+            space_id: Filter by numeric business-space id (exact match)
             engine: Filter by active engine (exact match)
             status: Filter by lifecycle status (exact match)
             page: Page number (1-based)
@@ -2200,6 +2204,7 @@ class BotService:
             owner_id=owner_id,
             engine=engine,
             status=status,
+            space_id=space_id,
             page=page,
             page_size=page_size,
             bot_ids=bot_ids,
@@ -2210,12 +2215,36 @@ class BotService:
             "items": items,
         }
 
+    def get_bot_by_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
+        """按 bot_id 单查 bot 详情(owner_id / bot_name 等),不限 caller/owner;查不到返 ``None``。
+
+        供内部读侧用——例如 dashboard 给任务节点 ``assignee`` 附加归属(owner_id)/名称(bot_name),
+        不需 owner 权限校验。复用 ``list_bots_by_conditions(bot_id=...)`` 精确单查,取 ``items[0]``。"""
+        page = self.list_bots_by_conditions(bot_id=bot_id, page=1, page_size=1)
+        items = (page or {}).get("items") or []
+        return items[0] if items else None
+
+    def list_bots_by_owner_bot_pairs(
+        self,
+        *,
+        pairs: List[tuple[str, str]],
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """Return display-source records for exact Bot and owner pairs."""
+        total, items = self._repository.list_bots_by_owner_bot_pairs(
+            pairs,
+            page=page,
+            page_size=page_size,
+        )
+        return {"total": total, "items": items}
+
     def list_bots_by_search(
         self,
         public: Optional[str] = None,
         search: Optional[str] = None,
-        page: int = 1,
-        page_size: int = 20,
+        page: int | None = 1,
+        page_size: int | None = 20,
     ) -> Dict[str, Any]:
         """
         List bots with search and pagination.

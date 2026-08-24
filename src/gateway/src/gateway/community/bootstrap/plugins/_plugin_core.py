@@ -7,6 +7,7 @@ from gateway.community.plugins.auth.stub import StubAuthPlugin
 from gateway.community.plugins.authn.access_key_token import AccessKeyTokenStrategy
 from gateway.community.plugins.authn.app_token import AppTokenStrategy
 from gateway.community.plugins.authn.bot_token import BotTokenStrategy
+from gateway.community.plugins.authn.dev_cookie import DevCookieUserStrategy
 from gateway.community.plugins.authn.google_token import GoogleUserStrategy
 from gateway.community.plugins.cache.in_memory import InMemoryCachePlugin
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
@@ -74,6 +75,8 @@ class PluginContainer(containers.DeclarativeContainer):
             "https://openidconnect.googleapis.com/v1/userinfo",
         ),
     )
+    dev_cookie_strategy = providers.Singleton(DevCookieUserStrategy)
+
     bot_token_strategy = providers.Singleton(
         BotTokenStrategy,
         registry=bot_registry,
@@ -100,8 +103,14 @@ class PluginContainer(containers.DeclarativeContainer):
         ),
     )
 
+    # The dev auth mock (plugins/authn/dev_header) is deliberately NOT in this
+    # pool: this container is the production DI graph — enterprise merges its
+    # strategies into this same dict — and the mock must not exist in it. The
+    # bootstrap constructs it directly, only under GATEWAY_AUTH_MOCK=1
+    # (bootstrap/_authn.py), so without the env var it is never even imported.
     authn_strategies = providers.Dict(
         google=google_strategy,
+        dev_cookie=dev_cookie_strategy,
         bot_token=bot_token_strategy,
         app_token=app_token_strategy,
         access_key_token=access_key_token_strategy,

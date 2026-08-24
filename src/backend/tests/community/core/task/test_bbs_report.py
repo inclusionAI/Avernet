@@ -1,10 +1,10 @@
 """BBS 接力步⑤ on_bbs_report / report_bbs_result 回投单测。
 
-对齐 task-7 brief。scoped 节点终态回投(PASS→DONE / FAIL+gaps→FAILED + output_patch fold)+ 释放
-bbs_owner claim。收口不由 bot 声明:``on_bbs_report`` 翻 scoped 终态后走 ``_on_pass_collect``/
-``_on_fail_collect`` 收口路径,根目标满足由框架经 owner 复核(``plan(root)``→``_maybe_finish_graph``)判定。
-单测无 owner bot → ``plan(root)`` 走 ``no_planning_port``→``gap_no_progress``→根 HUNG,故单测只断
-mechanics(scoped 终态 + claim 释放),收口见 live e2e(``test_bbs_relay_e2e_natual``)。
+对齐 task-7 brief。scoped 节点回投:**PASS→DONE**(走 ``_on_pass_collect`` 收口)/ **FAIL+gaps→删 scoped
+节点**(丢弃本次接力尝试:不翻 FAILED、不 fold output_patch;图回 root PLANNING+bbs_mode 可恢复态等下段重
+claim),+ 释放 bbs_owner claim。收口不由 bot 声明:根目标满足由框架经 owner 复核(``plan(root)``→
+``_maybe_finish_graph``)判定。单测无 owner bot → ``plan(root)`` 走 ``no_planning_port``→``gap_no_progress``
+→根 HUNG,故单测只断 mechanics(scoped 终态 / 删除 + claim 释放),收口见 live e2e。
 """
 import uuid
 
@@ -35,8 +35,8 @@ def _ti(tid):
             context=Context(background="", extend_props={}),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
-        source_channel_type="bot",
-        source_channel_id="b1",
+        source_type="bot",
+        owner_bot_id="b1",
         execution_config={},
     )
 
@@ -92,18 +92,20 @@ async def test_report_pass_marks_scoped_done_and_releases_claim(task_service_wit
 
 
 @pytest.mark.asyncio
-async def test_report_fail_partial_releases_claim(task_service_with_bbs_node):
+async def test_report_fail_deletes_node_and_releases_claim(task_service_with_bbs_node):
+    """步⑤ FAIL:丢弃本次接力尝试——scoped 节点从图删除(不翻 FAILED、不 fold output_patch)+ 释放 claim。
+    图回 root PLANNING+bbs_mode 可恢复态等下段重 claim/attach(不再"部分交棒 checkpoint")。"""
     svc, task_id, node_id, bot = task_service_with_bbs_node
     await svc.report_bbs_result(
         task_id, node_id, bot,
         acceptance_result=AcceptanceResult(AcceptanceVerdict.FAIL, gaps=["partial"]),
         output_patch={"progress": 30},
     )
-    root = next(n for n in svc.get_task_dashboard(task_id).tasks if n.node_id == task_id)
-    assert root.run_info.extend_props.get("bbs_owner") is None  # 释放
-    scoped = next(n for n in svc.get_task_dashboard(task_id).tasks if n.node_id == node_id)
-    assert scoped.status == Status.FAILED
-    assert scoped.run_info.output.get("progress") == 30  # checkpoint 保留
+    tasks = svc.get_task_dashboard(task_id).tasks
+    root = next(n for n in tasks if n.node_id == task_id)
+    assert root.run_info.extend_props.get("bbs_owner") is None  # claim 已释放
+    assert not any(n.node_id == node_id for n in tasks), \
+        "FAIL → scoped 节点应被删除,不再留 FAILED/checkpoint"
 
 
 @pytest.mark.asyncio

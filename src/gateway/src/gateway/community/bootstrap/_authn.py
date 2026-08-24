@@ -3,12 +3,15 @@
 Concrete authn strategies are provided by the DI container. This module only
 turns the configured strategy names and route-security table into the core
 ``Authenticator`` model; it does not construct plugins and does not read any
-module-level strategy registry.
+module-level strategy registry. The single exception is the env-gated dev auth
+mock (:func:`_append_dev_mock`), constructed here precisely so it never has to
+exist in the DI container that production modes share.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Mapping
 from typing import Any, cast
 
@@ -44,9 +47,49 @@ def build_authenticator(
     user_config: UserConfig,
 ) -> Authenticator:
     """Build the identity-chain registry + route table from DI and typed config."""
+    chains = _strategy_chains(strategies, user_config=user_config)
+    _append_dev_mock(chains)
     return Authenticator(
-        strategies=_strategy_chains(strategies, user_config=user_config),
+        strategies=chains,
         route_security=_load_route_security(user_config),
+    )
+
+
+# TODO(totalfrank): production code should carry ZERO mock code, including this
+# env-gated hook. Move the dev_header strategy (plugins/authn/dev_header) into a
+# dev-only distribution discovered via entry points — the same mechanism the
+# ``gateway.runner`` sofa/bare selection uses — installed only by the singlebox
+# dev flow, so this function and the plugin module disappear from production
+# installs entirely. Until then this hook is the single production touchpoint:
+# one env read that no-ops unless GATEWAY_AUTH_MOCK=1.
+def _append_dev_mock(chains: dict[PrincipalType, IdentityChain]) -> None:
+    """Append the ``dev_header`` strategy to the user chain under the env gate.
+
+    ``GATEWAY_AUTH_MOCK=1`` is an env var and not config on purpose: the mock
+    is not in the DI strategy pool, so ``identity_strategies`` cannot name it
+    — an overlay that tries is refused at boot as an unknown strategy — and
+    only the operator of the process can switch it on. The import sits behind
+    the gate too, so a production boot never even loads the module. Appended
+    last, so a real Google token keeps winning when one is presented; the
+    strategy re-checks the same env var per request (its second gate), so this
+    composition is the convenience half, not the security boundary.
+    """
+    if os.getenv("GATEWAY_AUTH_MOCK", "").strip() != "1":
+        return
+    from gateway.community.plugins.authn.dev_header import (
+        DEV_USER_HEADER,
+        DevHeaderUserStrategy,
+    )
+
+    chain = chains.get(PrincipalType.USER)
+    existing = chain._strategies if chain is not None else ()
+    chains[PrincipalType.USER] = IdentityChain(
+        PrincipalType.USER, (*existing, DevHeaderUserStrategy())
+    )
+    _logger.warning(
+        "DEV AUTH MOCK ACTIVE (GATEWAY_AUTH_MOCK=1): the '%s' header is "
+        "trusted verbatim as the user identity — local development only",
+        DEV_USER_HEADER,
     )
 
 

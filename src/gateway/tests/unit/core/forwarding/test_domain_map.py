@@ -79,6 +79,25 @@ def test_shipped_config_loads() -> None:
     dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
     assert dm.http_domain_for("/openapi/v1/bots") is not None
 
+    spaces = dm.http_domain_for("/openapi/v1/bots/spaces/1/members")
+    assert spaces is not None
+    assert spaces.server.name == "backend"
+    assert spaces.server.base_url == "http://backend:8080"
+    assert spaces.schema.source == "file"
+    assert spaces.schema.location == "schemas/bots.openapi.json"
+
+
+def test_shipped_config_routes_org_user_verbatim_to_backend() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
+
+    org = dm.http_domain_for("/openapi/v1/org/user")
+
+    assert org is not None
+    assert org.server.name == "backend"
+    assert org.upstream_path("/openapi/v1/org/user") == "/openapi/v1/org/user"
+    assert org.schema.location == "schemas/bots.openapi.json"
+
 
 def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
@@ -96,10 +115,26 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     )
     assert collaboration.schema.location == "schemas/bcn.openapi.json"
 
+    friend_connections = dm.http_domain_for(
+        "/openapi/v1/collaboration/friend-connections/requests"
+    )
+    assert friend_connections is not None
+    assert friend_connections.server.name == "bcs"
+    assert friend_connections.rewrite is None
+    assert friend_connections.upstream_path(
+        "/openapi/v1/collaboration/friend-connections/requests"
+    ) == "/openapi/v1/collaboration/friend-connections/requests"
+
     security = RouteSecurity.from_table(raw["user_config"]["route_security"])
     requirement = security.resolve("GET", "/openapi/v1/collaboration/groups/group-1")
     assert requirement is not None
     assert requirement[PrincipalType.USER] is Presence.REQUIRED
+
+    friend_requirement = security.resolve(
+        "POST", "/openapi/v1/collaboration/friend-connections/requests"
+    )
+    assert friend_requirement is not None
+    assert friend_requirement[PrincipalType.USER] is Presence.REQUIRED
 
     websocket_requirement = security.resolve(
         "WEBSOCKET", "/openapi/v1/collaboration/messages/ws"
@@ -120,9 +155,10 @@ def test_shipped_config_routes_internal_collaboration_verbatim_to_bcs() -> None:
     assert internal.serves_http
     assert not internal.serves_websocket
     assert internal.rewrite is None
-    assert internal.upstream_path(
-        "/api/v1/collaboration/sessions/session-1/files/file-1"
-    ) == "/api/v1/collaboration/sessions/session-1/files/file-1"
+    assert (
+        internal.upstream_path("/api/v1/collaboration/sessions/session-1/files/file-1")
+        == "/api/v1/collaboration/sessions/session-1/files/file-1"
+    )
     assert internal.schema.location == ""
 
     public = dm.http_domain_for("/openapi/v1/collaboration/groups/group-1")
@@ -1031,13 +1067,20 @@ def test_an_over_broad_pattern_is_refused_at_boot(pattern: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "pattern", ["/openapi/v1/{tenant}/**", "/openapi/v1/**/bots/**"]
+    "pattern", ["/openapi/v1/{tenant}/**", "/{tenant}/openapi/v1/bots/**"]
 )
-def test_a_pattern_that_pins_no_prefix_is_refused(pattern: str) -> None:
-    """A leading parameter matches every domain's traffic while looking specific,
-    and neither it nor an inner glob yields a prefix to mount a route on."""
-    with pytest.raises(ValueError, match="literal segments"):
+def test_a_pattern_whose_parameter_precedes_the_pin_is_refused(pattern: str) -> None:
+    """A parameter pins nothing: `/openapi/v1/{x}/**` matches every domain's
+    traffic while looking specific, so the base plus one more segment must be
+    literal before any parameter appears."""
+    with pytest.raises(ValueError, match="too broad"):
         _match_map(pattern)
+
+
+def test_an_inner_glob_is_refused() -> None:
+    """An inner glob yields no prefix to mount a route on."""
+    with pytest.raises(ValueError, match="final segment"):
+        _match_map("/openapi/v1/**/bots/**")
 
 
 def test_a_pattern_must_declare_its_glob() -> None:
@@ -1084,6 +1127,178 @@ def test_one_pattern_may_be_declared_once_per_plane() -> None:
     ws = dm.websocket_domain_for("/openapi/v1/z/x")
     assert http is not None and http.name == "z-http"
     assert ws is not None and ws.name == "z-ws"
+
+
+# ── parameter segments in a pattern ──────────────────────────────────────────
+
+
+def _param_map() -> DomainMap:
+    """A parameterised claim carved out of a broader literal domain."""
+    return DomainMap.from_config(
+        {
+            "domains": {
+                "bots": {"server": "backend"},
+                "bot-shell": {
+                    "match": "/openapi/v1/bots/{bot_id}/shell/**",
+                    "server": "shell",
+                },
+            },
+            "servers": {
+                "backend": {"base_url": "http://backend:8080"},
+                "shell": {"base_url": "http://shell:7070"},
+            },
+        },
+        variables={},
+    )
+
+
+def test_a_parameter_claims_one_segment_whatever_it_holds() -> None:
+    domain = _param_map().http_domain_for("/openapi/v1/bots/b-1/shell/tty")
+    assert domain is not None
+    assert domain.name == "bot-shell"
+    assert domain.server.name == "shell"
+
+
+def test_a_parameterised_pattern_serves_its_own_bare_shape() -> None:
+    """`**` matches no remaining segments here exactly as it does after literals."""
+    domain = _param_map().http_domain_for("/openapi/v1/bots/b-2/shell")
+    assert domain is not None
+    assert domain.name == "bot-shell"
+
+
+def test_outside_the_parameterised_claim_the_broader_domain_serves() -> None:
+    """The carve-out claims one subtree per bot, not the whole bot."""
+    domain = _param_map().http_domain_for("/openapi/v1/bots/b-1/restart")
+    assert domain is not None
+    assert domain.name == "bots"
+    bare = _param_map().http_domain_for("/openapi/v1/bots/b-1")
+    assert bare is not None
+    assert bare.name == "bots"
+
+
+def test_a_parameterised_pattern_mounts_at_its_leading_literal_run() -> None:
+    """Wider than the claim — the entrypoints re-resolve, so a mount may be."""
+    assert _param_map().domains["bot-shell"].mount_prefix == "/openapi/v1/bots"
+
+
+def test_a_literal_pattern_outranks_a_parameter_at_the_same_depth() -> None:
+    """A literal names one resource; a parameter names a shape."""
+    dm = DomainMap.from_config(
+        {
+            "domains": {
+                "per-bot": {
+                    "match": "/openapi/v1/bots/{bot_id}/shell/**",
+                    "server": "a",
+                },
+                "system": {
+                    "match": "/openapi/v1/bots/system/shell/**",
+                    "server": "b",
+                },
+            },
+            "servers": {
+                "a": {"base_url": "http://a"},
+                "b": {"base_url": "http://b"},
+            },
+        },
+        variables={},
+    )
+    system = dm.http_domain_for("/openapi/v1/bots/system/shell/tty")
+    assert system is not None and system.name == "system"
+    per_bot = dm.http_domain_for("/openapi/v1/bots/b-1/shell/tty")
+    assert per_bot is not None and per_bot.name == "per-bot"
+
+
+def test_two_parameter_spellings_of_one_claim_are_refused() -> None:
+    """`{x}` and `{y}` claim the same paths at the same rank — no winner."""
+    with pytest.raises(ValueError, match="undefined"):
+        DomainMap.from_config(
+            {
+                "domains": {
+                    "a": {"match": "/openapi/v1/z/{x}/**", "server": "s"},
+                    "b": {"match": "/openapi/v1/z/{y}/**", "server": "s"},
+                },
+                "servers": {"s": {"base_url": "http://s"}},
+            },
+            variables={},
+        )
+
+
+def test_two_tied_patterns_overlapping_on_a_common_path_are_refused() -> None:
+    """Identity is no longer the only collision.
+
+    `/openapi/v1/z/x/{p}/**` and `/openapi/v1/z/{q}/y/**` are different
+    patterns, yet both claim `/openapi/v1/z/x/y/…` — with equal literal and
+    parameter counts, so ranking picks no winner there.
+    """
+    with pytest.raises(ValueError, match="undefined"):
+        DomainMap.from_config(
+            {
+                "domains": {
+                    "a": {"match": "/openapi/v1/z/x/{p}/**", "server": "s"},
+                    "b": {"match": "/openapi/v1/z/{q}/y/**", "server": "s"},
+                },
+                "servers": {"s": {"base_url": "http://s"}},
+            },
+            variables={},
+        )
+
+
+def test_a_parameterised_claim_may_be_declared_once_per_plane() -> None:
+    """The per-plane split works for parameterised claims exactly as for
+    literal ones."""
+    dm = DomainMap.from_config(
+        {
+            "domains": {
+                "z-http": {"match": "/openapi/v1/z/{x}/**", "server": "s"},
+                "z-ws": {
+                    "match": "/openapi/v1/z/{x}/**",
+                    "server": "s",
+                    "protocols": ["websocket"],
+                },
+            },
+            "servers": {"s": {"base_url": "http://s"}},
+        },
+        variables={},
+    )
+    http = dm.http_domain_for("/openapi/v1/z/anything")
+    ws = dm.websocket_domain_for("/openapi/v1/z/anything")
+    assert http is not None and http.name == "z-http"
+    assert ws is not None and ws.name == "z-ws"
+
+
+# ── Domain.raw_path_agrees ───────────────────────────────────────────────────
+
+
+def _shell_ws_domain():
+    dm = DomainMap.from_config(
+        {
+            "domains": {
+                "bot-shell-ws": {
+                    "match": "/openapi/v1/bots/{bot_id}/shell/**",
+                    "server": "p",
+                    "protocols": ["websocket"],
+                }
+            },
+            "servers": {"p": {"base_url": "wss://proxy.internal"}},
+        },
+        variables={},
+    )
+    return dm.domains["bot-shell-ws"]
+
+
+def test_the_raw_path_may_encode_a_parameter_value() -> None:
+    """A parameter's value decides nothing, so it may travel as written."""
+    domain = _shell_ws_domain()
+    assert domain.raw_path_agrees("/openapi/v1/bots/b%401/shell/tty")
+    assert domain.raw_path_agrees("/openapi/v1/bots/b-1/shell")
+
+
+def test_the_raw_path_may_not_encode_a_literal_that_decided_the_route() -> None:
+    """`shell` decided the route as much as the prefix did — and sits past the
+    mount prefix, so the prefix check alone would not pin it."""
+    domain = _shell_ws_domain()
+    assert not domain.raw_path_agrees("/openapi/v1/bots/b-1/%73hell/tty")
+    assert not domain.raw_path_agrees("/openapi/v1/%62ots/b-1/shell/tty")
 
 
 def test_the_rewrite_anchor_follows_the_declared_pattern() -> None:

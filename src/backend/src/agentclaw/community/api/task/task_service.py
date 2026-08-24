@@ -7,22 +7,22 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceResult,
     NodeOpResult,
     TaskExecutionGraph,
-    TaskInfo,
     TaskNode,
     TaskOpResult,
     TaskSpec,
-    TaskSummary,
 )
+from agentclaw.community.core.task.domain.requests import TaskInfoRequest
+from agentclaw.community.core.task.repository.types import TaskInfoRecord
 
 
 @runtime_checkable
 class TaskServiceProtocol(Protocol):
-    """系统唯一对外入口(2 API)。facade 内部由 ExecutionEngine 编排核协调
+    """系统唯一对外入口。facade 内部由 ExecutionEngine 编排核协调
     TaskGraphService/TaskPlanner/TaskDispatcher/TaskRunner。"""
 
-    async def execute(self, task_info: TaskInfo) -> TaskOpResult:
-        """提交执行任务:initialize_graph(根 PENDING)→ 编排核 on_execute
-        首帧推进(plan→add_task_nodes→dispatch→start_run)。返回 TaskOpResult。"""
+    async def execute(self, request: TaskInfoRequest) -> TaskOpResult:
+        """提交执行任务:持久化 task_info(PENDING)→ initialize_graph(根 PENDING)→ 编排核 on_execute
+        首帧推进。task_id 服务端生成(uuid4)。返回 TaskOpResult(含 task_id + run_id)。"""
         ...
 
     def get_task_dashboard(
@@ -31,10 +31,12 @@ class TaskServiceProtocol(Protocol):
         """任务执行详情可视化(整图或按 node_id 子树投影),只读。"""
         ...
 
-    def list_tasks(self, status: "str | None" = None) -> list[TaskSummary]:
-        """列出任务摘要(轻量投影),按 run_id 降序(最新在前);可选按图级 status 过滤。
-
-        visualization/看板列表视图用;不返回完整图对象。"""
+    def list_tasks(
+        self,
+        status: "str | None" = None,
+        owner_user_id: "str | None" = None,
+    ) -> list[TaskInfoRecord]:
+        """列持久化任务记录,可选按状态和 owner 过滤。"""
         ...
 
     def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:
@@ -62,4 +64,22 @@ class TaskServiceProtocol(Protocol):
         acceptance_result(PASS→DONE / FAIL+gaps→FAILED)/ output_patch(checkpoint fold)/
         exec_error(执行报错 fold)。bot_id 须为当前 bbs_owner,否则 TaskStateError。委托 ExecutionEngine.on_bbs_report。
         """
+        ...
+
+    async def converge_by_session(
+        self, session_id: str, *, success: bool, output: object = None,
+    ) -> bool:
+        """BCN/ClawMind 终态回调后收敛:按 ``session_id`` 查 ``task_node_run_info`` →
+        框架 ``(task_id, node_id)`` → ``report_result`` → ``on_report`` → 翻态(引擎验收+传播+根收敛)。
+
+        ``session_id`` = BCN 回调 ``scope.session_id`` / ClawMind ``flow_runs.origin_session_id``,
+        与 ``task_node_run_info.session_id``(派发时写入 BCS session)同源。
+        """
+        ...
+
+    async def apply_manager_worker_event(self, raw: dict) -> None:
+        """manager_worker(BCN 任务协作群)CloudEvent 回调处理:按 ``scope.session_id`` 把事件 merge 进
+        ``execution_graph`` 并 upsert ``task_callback`` 单 session 行;``session.completed`` →
+        ``converge_by_session`` 收敛整协作(ManagerWorker 无整协作级 run,终态由 session.completed 表征)。
+        非 manager_worker 事件 → no-op。"""
         ...

@@ -13,9 +13,9 @@ description rather than a hand-kept list, so an operation added later is covered
 without editing this file.
 
 The refusal is the load-bearing part. Making the user explicit must not make it
-*forgeable*: until delegation lands the only user a caller may name is itself,
-so a parameter naming anyone else is a 403 and nothing about who may call what
-has changed.
+*forgeable*: a human caller may name only themselves, while an application may
+name only the end user carried by its verified delegation context. A mismatch is
+a 403, so making the parameter explicit does not widen who may act for whom.
 """
 
 from __future__ import annotations
@@ -189,9 +189,7 @@ def test_a_rejected_id_cannot_choose_how_much_it_logs(caplog):
 
     with caplog.at_level(logging.WARNING):
         with pytest.raises(UserIdMismatchError):
-            asyncio.run(
-                require_user_id(principal={"user_id": _CALLER}, user_id=flood)
-            )
+            asyncio.run(require_user_id(principal={"user_id": _CALLER}, user_id=flood))
 
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert len(logged) < 500, "a caller must not choose the size of the log line"
@@ -265,22 +263,44 @@ def _without_request_id(response) -> dict:
 
 #: The operations that take no ``user_id``, and why each one cannot.
 #:
-#: Pinned by address rather than counted, so adding a fifth is a deliberate edit
+#: Pinned by address rather than counted, so adding another is a deliberate edit
 #: to this list with a reason attached — which is the only thing standing
 #: between "this operation has no user dimension" and "somebody found the
 #: parameter inconvenient".
 _NO_USER_DIMENSION = {
+    # The user-identity read is how a client LEARNS the id it must thread
+    # everywhere else — requiring the parameter here would make the id a
+    # precondition of discovering it. The answer is read off the verified
+    # principal, so there is no caller-supplied user to compare against and no
+    # 403 to answer.
+    ("get", f"{PUBLIC_API_PREFIX}/org/user"),
     # Name uniqueness is checked across the tenant, not within one user's bots.
     ("get", f"{PUBLIC_API_PREFIX}/bots/check-name"),
     # The marketplace catalogue is identical for every caller in the tenant.
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers/{{server_code}}"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/tenants"),
+    # The department directory is a tenant-wide catalogue — not the caller's.
+    ("get", f"{PUBLIC_API_PREFIX}/org/dept"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/discover"),
+    # Tenant-identical marketplace searches expose no user-scoped state.
+    ("post", f"{PUBLIC_API_PREFIX}/bots/market/skills"),
+    ("post", f"{PUBLIC_API_PREFIX}/bots/market/mcp-servers"),
+    ("post", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/skills"),
+    # Public Skill Center status and tag catalogues are tenant-wide reads.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/skills/{{skill_code}}/publish/status"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/tags"),
     # The load-test endpoint answers a constant. It reads nothing and writes
     # nothing, so there is no scope for a user id to name — and a synthetic
     # endpoint measuring the shared path must not be the one exception that
     # measures a dependency the path does not have.
     ("get", f"{PUBLIC_API_PREFIX}/bots/loadtest/hello"),
+    # Task public surface: execute submits (owner in body), dashboard reads by
+    # task_id — neither scopes to a caller-supplied user_id. list does, so it
+    # is NOT here.
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/execute"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/dashboard"),
 }
 
 #: Bot Logs is excluded for a different reason and must stay that way — see the
@@ -318,10 +338,47 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: operations that named no bot at all (the resources and routines collection
 #: roots, skills list and upload) now do.
 #:
-#: The public harness group moved ``path`` 54 → 60: its six operations
-#: (diagnose/preview/apply/rollback/dim-report/dim-history) all address a bot
-#: under ``/openapi/v1/bots/{bot_id}/harness/…`` and name it in the path.
-_BOT_ID_PLACEMENT = {"path": 60, "query": 1, "none": 16}
+#: ``none`` then moved 16 → 35 when the 19 collaboration operations for Spaces,
+#: work orders and recipient notifications were added. None of those operations
+#: addresses a bot, so the path and query counts remain unchanged.
+#:
+#: ``path`` then moved 54 → 56 when the two Bot Chats operations were added.
+#:
+#: ``none`` then moved 35 → 36 with the user-identity read: it answers who
+#: the caller is and addresses no bot.
+#:
+#: The combined Bot Workshop surface then adds a net 27 bot-addressed operations
+#: and five account-level operations. The trace filter remains the sole query
+#: placement. Together with the user-identity read, the combined contract is
+#: 83/1/45. Channels adds six Bot-addressed operations, and the Bot Space
+#: reassignment endpoint adds one more, yielding 90/1/45. Session Favorites then
+#: adds three Bot-addressed operations. IAM-token retrieval and optional Caller
+#: preparation share one Bot-addressed operation. The Space
+#: Skill list adds one more account-level operation. Editors and render screens
+#: add another nine Bot-addressed operations, while the Bot catalog contributes
+#: two account-level reads, and the read-only Node inventory adds one more
+#: Bot-addressed operation, yielding 104/1/49. Skill Installation then adds
+#: three Bot-addressed operations. Repo Catalog then adds three more
+#: Bot-addressed plus eight account-level operations, yielding 110/1/57.
+#: The merged contract contains 132 path-addressed Bots, one legacy
+#: query-addressed operation, and 53 non-Bot operations — the six Harness
+#: operations are Bot-addressed under ``/bots/{bot_id}/harness``.
+#:
+#: ``none`` then moved 53 → 54 with the department directory search
+#: (``/openapi/v1/org/dept``), an account-level catalogue read that addresses no bot.
+#:
+#: ``path`` then moved 132 → 133 with the BCS publish-to-users operation
+#: (``POST /openapi/v1/bots/{bot_id}/public-bcs``): it addresses a bot and acts
+#: for the operator, so it is bot-path-addressed like the rest of the surface.
+#: The two IAM operations then merged into one Bot-addressed operation: the
+#: existing Caller path was renamed while the account-level IAM read went away,
+#: so ``path`` stays unchanged and ``none`` decreases by one. Bot editor
+#: requests then add one path-addressed Bot operation. The metadata query
+#: added alongside it is user-scoped but has no ``bot_id`` parameter. The BCS
+#: publish-to-users route moved from /bots/{bot_id}/public-bcs to the external
+#: /collaboration/bots/{bot_uuid}/public, so one path-addressed {bot_id}
+#: operation became a {bot_uuid}-named one: path -1, none +1.
+_BOT_ID_PLACEMENT = {"path": 140, "query": 1, "none": 62}
 
 
 def _schema() -> dict:
@@ -362,8 +419,7 @@ def _param(operation: dict, name: str) -> dict | None:
 
 def _user_scoped(path: str, method: str) -> bool:
     return (
-        not path.startswith(_LOGS_PREFIX)
-        and (method, path) not in _NO_USER_DIMENSION
+        not path.startswith(_LOGS_PREFIX) and (method, path) not in _NO_USER_DIMENSION
     )
 
 
@@ -392,6 +448,12 @@ def test_the_pinned_number_of_operations_take_it():
     this pin exists to catch, so it is worth saying plainly that this one is
     intended — the five went away with the link resources they served, not by
     losing the dependency.
+
+    61 → 77 with the service-Bot lifecycle surface: conversion, approval config,
+    version reads/actions and edit-lock operations all act for an explicit user.
+    The five bot-first Editors operations bring the total to 119, and the four
+    render-screen operations bring the total to 123, and the read-only Node
+    inventory brings the current total to 124.
     """
     taking = [
         1
@@ -400,14 +462,28 @@ def test_the_pinned_number_of_operations_take_it():
     ]
     # 60 on the merge base, +3 for the startup-script operations, +2 for the
     # resources file endpoints re-addressed by workspace path (#1000), then -4
-    # for the files-only resources group, then +6 for the public harness group
-    # (diagnose/preview/apply/rollback/dim-report/dim-history), all of which
-    # take the caller's ``user_id`` like the rest of the user-scoped surface.
-    assert len(taking) == 67
+    # for the files-only resources group, then +19 for Spaces, work orders and
+    # recipient-notification operations added by the collaboration API, then +2
+    # for the Bot Chats operations. The combined Bot Workshop surface adds a
+    # further net 32 user-scoped operations (27 bot-addressed and five
+    # account-level operations), then +6 for Bot-scoped Channels CRUD/status,
+    # then +1 for Bot Space reassignment, +3 for Session Favorites, +2 for
+    # the merged IAM-token/Caller preparation operation, +1 for Space Skill list, then
+    # +5 for Editors and +4 for render screens. The read-only Node inventory adds
+    # the final operation. Skill Installation adds three further Bot-addressed
+    # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
+    # MCP adds eight operations, the Harness surface adds six Bot-addressed
+    # operations, Session File adds six more, Bot metadata queries add one, and
+    # Bot editor requests add one. The BCS publish-to-users route moved from the
+    # internal /bots/{bot_id}/public-bcs path to the external contract path
+    # /collaboration/bots/{bot_uuid}/public (same op count, {bot_uuid} not {bot_id}).
+    # The task public surface adds one more: GET .../collaboration/tasks/list
+    # (execute/dashboard have no user dimension — see _NO_USER_DIMENSION).
+    assert len(taking) == 182
 
 
 def test_the_exempt_operations_take_none():
-    """The four with no user dimension ask for nothing they cannot use."""
+    """The exempt operations ask for nothing they cannot use."""
     schema = _schema()
     for method, path in _NO_USER_DIMENSION:
         operation = schema["paths"][path][method]

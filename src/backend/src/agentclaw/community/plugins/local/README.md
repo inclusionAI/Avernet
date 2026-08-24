@@ -25,6 +25,9 @@ internal_dependencies:
   - agentclaw.community.core.bot_dormant   # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.caller_identity.models  # SQLite ORM side-effect import for caller identity tables
   - agentclaw.community.core.user_list.models  # SQLite ORM side-effect import for user-list tables
+  - agentclaw.community.core.spaces.repository.models  # SQLite ORM side-effect import for Space tables
+  - agentclaw.community.core.market_favorites.repository.models  # SQLite ORM side-effect import for favorites table
+  - agentclaw.community.core.work_orders.repository.models  # SQLite ORM side-effect import for work-order tables
   - agentclaw.community.core.economy.governance.contracts.models  # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.economy.governance.repositories.orm  # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.system_config.orm  # SQLite ORM side-effect import for ac_config_* table creation
@@ -46,6 +49,7 @@ internal_dependencies:
   - agentclaw.community.core.skill_center
   - agentclaw.community.core.skills_pool  # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.task_queue   # SQLite ORM side-effect import for local table creation
+  - agentclaw.community.core.task.repository.models  # SQLite ORM side-effect import for task_* table creation
   - agentclaw.community.core.workspace
   - agentclaw.community.kernel
   - agentclaw.community.log
@@ -80,6 +84,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.skill_center_client
   - agentclaw.community.plugin_api.skill_repo_sync
   - agentclaw.community.plugin_api.skill_scanner
+  - agentclaw.community.plugin_api.staff_dept
   - agentclaw.community.plugin_api.storage
   - agentclaw.community.plugin_api.token_exchange
   - agentclaw.community.plugin_api.tracer

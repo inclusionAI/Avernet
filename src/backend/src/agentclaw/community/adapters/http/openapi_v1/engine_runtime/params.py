@@ -117,7 +117,7 @@ async def resolve_owner_id(
     request acts for.
 
     **This is the one place an application caller differs from a human on these
-    sixteen operations.** For an application the addressed owner comes from the
+    runtime operations.** For an application the addressed owner comes from the
     **grant record** (``granted_owner_id``), never from the request, and an
     explicitly supplied value must agree with it. Two reasons it is refused here
     rather than left to fail downstream:

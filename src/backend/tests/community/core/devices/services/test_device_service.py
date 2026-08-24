@@ -872,6 +872,32 @@ class TestReportDeviceAlive:
         assert event.sandbox_id == "sbx-abc@alt-0"
         reset_event_bus()
 
+    def test_pending_activation_has_one_mcp_writer_owned_by_device_event(self):
+        """The Device callback publishes one event; it must not also sync MCP."""
+        from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
+        from agentclaw.community.core.events.types import DeviceActivatedEvent
+
+        reset_event_bus()
+        received: list[DeviceActivatedEvent] = []
+        get_event_bus().subscribe(DeviceActivatedEvent, received.append)
+        record = _make_record(
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={"callback_token": "tok123"},
+        )
+        updated = _make_record(status=DeviceBindingStatus.ACTIVE.value)
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        repo.get_by_id.return_value = updated
+        svc = _make_service(repo=repo, bot_query=MagicMock())
+        legacy_mcp_writer = MagicMock()
+        svc._sync_mcps_when_device_active = legacy_mcp_writer
+
+        svc.report_device_alive(device_id=record.device_id, token="tok123")
+
+        assert len(received) == 1
+        legacy_mcp_writer.assert_not_called()
+        reset_event_bus()
+
     def test_no_event_published_on_alive_refresh_when_already_active(self):
         from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
         from agentclaw.community.core.events.types import DeviceActivatedEvent

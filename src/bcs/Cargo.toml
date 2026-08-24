@@ -44,6 +44,8 @@ members = [
     "crates/services/bcs-leader-election",
     "crates/services/bcs-relation",
     "crates/services/bcs-relation-store",
+    "crates/services/bcs-edge-permission-store",
+    "crates/services/bcs-edge-permission",
     "crates/services/bcs-user-identity",
     "crates/services/bcs-proposal",
     "crates/services/bcs-proposal-store",
@@ -53,6 +55,8 @@ members = [
     "crates/services/bcs-session-store",
     "crates/application/v1/bcs-app-session",
     "crates/application/v1/bcs-app-invitation",
+    "crates/application/v1/bcs-app-collaboration-template",
+    "crates/application/v1/bcs-app-collaboration-definition",
     "crates/services/bcs-session-file",
     "crates/services/bcs-session-file-store",
     "crates/services/bcs-routing",
@@ -265,6 +269,8 @@ bcs-friend     = { path = "crates/services/bcs-friend" }
 bcs-friend-store = { path = "crates/services/bcs-friend-store" }
 bcs-relation   = { path = "crates/services/bcs-relation" }
 bcs-relation-store = { path = "crates/services/bcs-relation-store" }
+bcs-edge-permission-store = { path = "crates/services/bcs-edge-permission-store" }
+bcs-edge-permission = { path = "crates/services/bcs-edge-permission" }
 bcs-secret         = { path = "crates/services/bcs-secret" }
 bcs-telemetry      = { path = "crates/auxiliary/bcs-telemetry" }
 ding-logger    = { path = "crates/auxiliary/ding-logger" }
@@ -286,6 +292,8 @@ bcs-session                = { path = "crates/services/bcs-session" }
 bcs-session-store          = { path = "crates/services/bcs-session-store" }
 bcs-app-session             = { path = "crates/application/v1/bcs-app-session" }
 bcs-app-invitation = { path = "crates/application/v1/bcs-app-invitation" }
+bcs-app-collaboration-template = { path = "crates/application/v1/bcs-app-collaboration-template" }
+bcs-app-collaboration-definition = { path = "crates/application/v1/bcs-app-collaboration-definition" }
 bcs-session-file-store     = { path = "crates/services/bcs-session-file-store" }
 bcs-session-file           = { path = "crates/services/bcs-session-file" }
 bcs-system-message         = { path = "crates/services/bcs-system-message" }

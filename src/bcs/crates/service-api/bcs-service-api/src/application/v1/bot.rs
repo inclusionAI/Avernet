@@ -80,6 +80,8 @@ pub struct PhysicalBot {
     pub provider: Option<BotProvider>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_code: Option<String>,
+    pub task_claim_mode: bool,
+    pub task_dream_mode: bool,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -210,6 +212,8 @@ pub struct BotPatch {
     pub visibility: Option<BotVisibility>,
     pub status: Option<BotStatus>,
     pub descriptor: Option<BotDescriptorPatch>,
+    pub task_claim_mode: Option<bool>,
+    pub task_dream_mode: Option<bool>,
 }
 
 impl BotPatch {
@@ -218,6 +222,8 @@ impl BotPatch {
             && self.visibility.is_none()
             && self.status.is_none()
             && self.descriptor.is_none()
+            && self.task_claim_mode.is_none()
+            && self.task_dream_mode.is_none()
     }
 }
 

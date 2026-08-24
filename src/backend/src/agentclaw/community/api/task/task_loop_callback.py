@@ -20,3 +20,8 @@ class TaskLoopCallbackProtocol(Protocol):
         → 编排核 on_report(await) → graph.update_task_node_info → 按 verdict 翻态/传播/补救。
         协程化:on_report async,回投不阻塞调用方(任务执行是耗时任务,回投驱动编排核 async)。"""
         ...
+
+    async def ingest(self, data: TaskCallbackData) -> None:
+        """仅落回投审计(``task_callback``),不推进编排核。供事件/工作流级回投(ClawMind/BCN)用:
+        其 run_id/workflow_id 不对应框架节点,走 ``start_run``/``report_result`` 会 NodeNotFoundError。"""
+        ...

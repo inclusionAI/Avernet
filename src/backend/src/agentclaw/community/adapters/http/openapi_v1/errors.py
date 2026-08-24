@@ -75,6 +75,30 @@ class UserIdMismatchError(Exception):
     """
 
 
+class IamTokenUnavailableError(Exception):
+    """The authenticated browser request carried no usable IAM token."""
+
+
+class CallerIdentityOpenApiError(Exception):
+    """A stable Caller-identity failure safe to map at the HTTP boundary."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+class CallerIdentityInvalidError(CallerIdentityOpenApiError):
+    """Caller identity preparation was requested with an invalid target."""
+
+
+class CallerIdentityForbiddenError(CallerIdentityOpenApiError):
+    """The authenticated user may not perform this Caller operation."""
+
+
+class CallerIdentityConflictError(CallerIdentityOpenApiError):
+    """The Caller target cannot be resolved unambiguously."""
+
+
 class UnsupportedEngineError(Exception):
     """Raised when a request names an engine the platform does not support (→ 400).
 
@@ -93,3 +117,32 @@ class StartupScriptUnsupportedError(Exception):
     this refusal, because the surface's messages are fixed by contract.
     """
 
+
+class DeptLookupError(Exception):
+    """The staff directory could not answer a department lookup (→ 502).
+
+    Distinct from "no dept" (a 200 with null ``dept_*``): this is infrastructure
+    failure — the backing master-data service was unreachable, errored, or a
+    needed secret could not be resolved. ``StaffDeptPlugin.get_dept_by_work_no``
+    raises it on those, and the ``org/user`` whoami surfaces it as a 5xx so an
+    operator can tell "directory down" from "person has no dept" from "not
+    authenticated" (401). Fixed message: the specific cause is logged, never
+    returned, mirroring how ``MissingPrincipalError`` keeps its reason off the wire.
+    """
+
+
+class BotAccessRefusedError(Exception):
+    """Raised when a caller is below an operation's collaborator level (→ 404).
+
+    **The response is byte-identical to a bot that does not exist**, and that
+    is the reason this is a distinct type rather than a reused one: like
+    :class:`GrantNotResolvableError` it is raised in a *dependency*, so
+    ``@envelope_errors`` never sees it and ``app.py`` must handle it directly.
+
+    ``403`` would be exactly wrong, for the reason it is wrong there: on this
+    surface it means "you are authenticated and this is not yours", which
+    confirms the bot exists — the one fact the refusal is protecting. A caller
+    who may not reach a bot must not be able to tell it from one that is not
+    there, or the surface becomes an enumeration oracle over other people's
+    bots.
+    """

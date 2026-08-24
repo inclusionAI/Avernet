@@ -104,14 +104,7 @@ impl InteractionService for InteractionManagement {
                 request_id: Some(command.bcs_run_id.clone()),
             });
         }
-        let mut payload = command.payload;
-        normalize_requested_payload(
-            command.kind,
-            &mut payload,
-            &command.bcs_run_id,
-            &command.interaction_id,
-        );
-        validate_requested_payload(command.kind, &payload).map_err(|message| {
+        validate_requested_payload(command.kind, &command.payload).map_err(|message| {
             ServiceError::InvalidOperation {
                 message,
                 request_id: Some(command.bcs_run_id.clone()),
@@ -131,7 +124,7 @@ impl InteractionService for InteractionManagement {
             run_deadline_ms: command.run_deadline_ms,
             provider_target: command.provider_target,
             provider_bypass_headers: command.provider_bypass_headers,
-            requested_payload: payload,
+            requested_payload: command.payload,
             status: InteractionStatus::Pending,
             in_flight: false,
             accepted_idempotency_key: None,
@@ -554,37 +547,6 @@ fn validate_requested_payload(
     }
 }
 
-fn normalize_requested_payload(
-    kind: bcs_service_api::InteractionKind,
-    payload: &mut Value,
-    bcs_run_id: &str,
-    interaction_id: &str,
-) {
-    if kind != bcs_service_api::InteractionKind::AskUser {
-        return;
-    }
-    let Some(questions) = payload.get_mut("questions").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for (question_index, question) in questions.iter_mut().enumerate() {
-        let Some(question) = question.as_object_mut() else {
-            continue;
-        };
-        if question
-            .get("allowOther")
-            .is_some_and(|allow_other| !allow_other.is_boolean())
-        {
-            question.remove("allowOther");
-            warn!(
-                %bcs_run_id,
-                %interaction_id,
-                question_index,
-                "ask_user allowOther is not boolean; treating it as omitted"
-            );
-        }
-    }
-}
-
 fn validate_decision_options(options: Option<&Value>, required: bool) -> Result<(), String> {
     let Some(options) = options.and_then(Value::as_array) else {
         return if required {
@@ -733,19 +695,44 @@ fn validate_ask_user_resolution(
             .get("values")
             .and_then(Value::as_array)
             .ok_or_else(|| format!("ask_user answer {question_id} requires values"))?;
-        if values.iter().any(|value| !value.is_string()) {
+        if values.is_empty()
+            || values
+                .iter()
+                .any(|value| value.as_str().is_none_or(str::is_empty))
+        {
             return Err(format!(
-                "ask_user answer {question_id} values must be strings"
+                "ask_user answer {question_id} values must be non-empty strings"
             ));
         }
         let multi_select = question
             .get("multiSelect")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        if !multi_select && values.len() > 1 {
-            return Err(format!(
-                "ask_user answer {question_id} accepts at most one value"
-            ));
+        if !multi_select && values.len() != 1 {
+            return Err(format!("ask_user answer {question_id} accepts one value"));
+        }
+        if let Some(options) = question.get("options").and_then(Value::as_array) {
+            let allow_other = question
+                .get("allowOther")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if !allow_other {
+                let offered = options
+                    .iter()
+                    .filter_map(|option| option.get("value").and_then(Value::as_str))
+                    .collect::<HashSet<_>>();
+                if values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(|value| !offered.contains(value))
+                {
+                    return Err(format!(
+                        "ask_user answer {question_id} contains a value not offered by Provider"
+                    ));
+                }
+            }
+        } else if values.len() != 1 {
+            return Err(format!("free-text answer {question_id} accepts one value"));
         }
     }
     Ok(())
@@ -1634,172 +1621,6 @@ mod tests {
             Err(InteractionServiceError::InvalidRequest(_))
         ));
         assert!(provider.calls.lock().await.is_empty());
-    }
-
-    #[tokio::test]
-    async fn ask_user_accepts_custom_values_regardless_of_allow_other() {
-        let (service, _store, provider, _frontend) = service(true);
-        let mut ask = requested("ask-custom");
-        ask.kind = InteractionKind::AskUser;
-        ask.payload = json!({
-            "runId":"provider-run-1",
-            "phase":"requested",
-            "interactionId":"ask-custom",
-            "kind":"ask_user",
-            "questions":[
-                {
-                    "questionId":"missing_hint",
-                    "question":"Choose or customize",
-                    "options":[{"value":"offered","label":"Offered"}]
-                },
-                {
-                    "questionId":"false_hint",
-                    "question":"Choose or customize anyway",
-                    "allowOther":false,
-                    "options":[{"value":"offered","label":"Offered"}]
-                }
-            ]
-        });
-        service.on_provider_requested(ask).await.unwrap();
-
-        let mut command = resolve("ask-custom", "idem-custom");
-        command.resolution = json!({
-            "action":"submit",
-            "answers":{
-                "missing_hint":{"values":["custom without hint"]},
-                "false_hint":{"values":["custom despite false"]}
-            }
-        });
-
-        let result = service.resolve(command).await.unwrap();
-
-        assert!(result.accepted);
-        let calls = provider.calls.lock().await;
-        assert_eq!(calls.len(), 1);
-        assert_eq!(
-            calls[0].resolution["answers"]["missing_hint"]["values"],
-            json!(["custom without hint"])
-        );
-        assert_eq!(
-            calls[0].resolution["answers"]["false_hint"]["values"],
-            json!(["custom despite false"])
-        );
-    }
-
-    #[tokio::test]
-    async fn ask_user_accepts_skipped_values_and_forwards_them_unchanged() {
-        let (service, _store, provider, _frontend) = service(true);
-        let mut ask = requested("ask-skip");
-        ask.kind = InteractionKind::AskUser;
-        ask.payload = json!({
-            "runId":"provider-run-1",
-            "phase":"requested",
-            "interactionId":"ask-skip",
-            "kind":"ask_user",
-            "questions":[
-                {
-                    "questionId":"empty_array",
-                    "question":"Skip with an empty array?",
-                    "options":[{"value":"offered","label":"Offered"}]
-                },
-                {
-                    "questionId":"empty_string",
-                    "question":"Skip with an empty string?",
-                    "options":[{"value":"offered","label":"Offered"}]
-                },
-                {
-                    "questionId":"whitespace",
-                    "question":"Skip with whitespace?"
-                }
-            ]
-        });
-        service.on_provider_requested(ask).await.unwrap();
-
-        let mut command = resolve("ask-skip", "idem-skip");
-        command.resolution = json!({
-            "action":"submit",
-            "answers":{
-                "empty_array":{"values":[]},
-                "empty_string":{"values":[""]},
-                "whitespace":{"values":["   "]}
-            }
-        });
-
-        let result = service.resolve(command).await.unwrap();
-
-        assert!(result.accepted);
-        let calls = provider.calls.lock().await;
-        assert_eq!(calls.len(), 1);
-        let answers = &calls[0].resolution["answers"];
-        assert_eq!(answers["empty_array"]["values"], json!([]));
-        assert_eq!(answers["empty_string"]["values"], json!([""]));
-        assert_eq!(answers["whitespace"]["values"], json!(["   "]));
-    }
-
-    #[tokio::test]
-    async fn ask_user_still_rejects_non_string_values() {
-        let (service, _store, provider, _frontend) = service(true);
-        let mut ask = requested("ask-non-string");
-        ask.kind = InteractionKind::AskUser;
-        ask.payload = json!({
-            "runId":"provider-run-1",
-            "phase":"requested",
-            "interactionId":"ask-non-string",
-            "kind":"ask_user",
-            "questions":[{
-                "questionId":"target",
-                "question":"Choose or skip",
-                "options":[{"value":"offered","label":"Offered"}]
-            }]
-        });
-        service.on_provider_requested(ask).await.unwrap();
-
-        let mut command = resolve("ask-non-string", "idem-non-string");
-        command.resolution = json!({
-            "action":"submit",
-            "answers":{"target":{"values":[null]}}
-        });
-
-        assert!(matches!(
-            service.resolve(command).await,
-            Err(InteractionServiceError::InvalidRequest(_))
-        ));
-        assert!(provider.calls.lock().await.is_empty());
-    }
-
-    #[tokio::test]
-    async fn ask_user_treats_non_boolean_allow_other_as_omitted() {
-        let (service, store, _provider, frontend) = service(true);
-        let mut ask = requested("ask-invalid-hint");
-        ask.kind = InteractionKind::AskUser;
-        ask.payload = json!({
-            "runId":"provider-run-1",
-            "phase":"requested",
-            "interactionId":"ask-invalid-hint",
-            "kind":"ask_user",
-            "questions":[{
-                "questionId":"target",
-                "question":"Choose or customize",
-                "allowOther":"yes",
-                "options":[{"value":"offered","label":"Offered"}]
-            }]
-        });
-
-        service.on_provider_requested(ask).await.unwrap();
-
-        let stored = store
-            .get(&InteractionKey {
-                bcs_run_id: "bcs-run-1".to_string(),
-                interaction_id: "ask-invalid-hint".to_string(),
-            })
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(stored.requested_payload["questions"][0]
-            .get("allowOther")
-            .is_none());
-        let calls = frontend.calls.lock().await;
-        assert!(calls[0].payload["questions"][0].get("allowOther").is_none());
     }
 
     #[tokio::test]

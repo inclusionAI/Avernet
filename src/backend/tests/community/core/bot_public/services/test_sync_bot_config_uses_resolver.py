@@ -29,6 +29,7 @@ def _make_service(
     *,
     resolver=None,
     device_sync_dispatcher=None,
+    bcn_service=None,
 ):
     """构造 BotPublicService — 注入 resolver + dispatcher。
 
@@ -39,12 +40,14 @@ def _make_service(
         bot_repository=MagicMock(),
         process_service=MagicMock(),
         bot_service=MagicMock(),
+        bcn_service=bcn_service or MagicMock(),
         passport_plugin=MagicMock(),
         auth_relationship_plugin=MagicMock(),
         publish_approval_plugin=MagicMock(),
         skill_set_service_factory=MagicMock(),
         device_context_resolver=resolver or MagicMock(),
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
+        catalog_metadata_service=MagicMock(),
     )
 
 

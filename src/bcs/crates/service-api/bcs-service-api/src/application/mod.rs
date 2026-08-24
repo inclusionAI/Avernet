@@ -1,11 +1,13 @@
 pub mod a2a_chat;
 pub mod actor_directory;
+pub mod admission;
 pub mod bot_management;
 pub mod bot_onboarding;
 pub mod bot_query;
 pub mod channel;
 pub mod collaboration_template;
 pub mod collaboration_runtime;
+pub mod connect;
 pub mod error;
 pub mod friends;
 pub mod group_management;
@@ -54,3 +56,6 @@ pub use system_message::*;
 pub use crate::port::{
     ChatRunCleanupPort, ChatRunEventPort, GroupHistoryBotRequestPort,
 };
+
+pub use admission::AdmissionService;
+pub use connect::{ConnectResult, ConnectService, ConnectStatus, RequestDirection, RequestsPage};

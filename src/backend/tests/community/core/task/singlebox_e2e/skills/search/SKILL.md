@@ -8,7 +8,7 @@ tags: [task, search, dispatch]
 
 # task-search
 
-任务目标驱动的**任务派发搜推决策** skill,运行在 **owner bot**(source_channel_id)。框架语义预查候选 bot 集(分字段 title/objective/background 调 BCSFuse recommend),把候选集喂入 prompt;本 skill 在候选里决出**谁执行 + 怎么执行(多 bot 拉哪种协作群)**,不自取 BCSFuse。
+任务目标驱动的**任务派发搜推决策** skill,运行在 **owner bot**(owner_bot_id)。框架语义预查候选 bot 集(分字段 title/objective/background 调 BCSFuse recommend),把候选集喂入 prompt;本 skill 在候选里决出**谁执行 + 怎么执行(多 bot 拉哪种协作群)**,不自取 BCSFuse。
 
 ## 环境约束(必须遵守)
 
@@ -67,3 +67,16 @@ tags: [task, search, dispatch]
 | 候选都不匹配 / 未知 | MISS | `miss_reason="候选 bot 均无法覆盖子任务需求"` |
 
 > 协作群名 / 成员角色分工知识只在本 skill;`members_info` 承载 `{bot_id, role, responsibility}` 透传 BCS `participants[].role`。
+
+## 确定式决策剧本(arch 场景:planning-arch 产出的 node_id)
+
+`planning-arch` 通用规划产出的 arch 子任务 node_id(非 storage 案例),同样**按 `demand.node_id` 查下表**返回(同 storage 方式:严格按表,禁止自由组合候选 bot)。供 2-mode / 3-mode natural e2e 用。
+
+| node_id | 输出 outcome | 执行者/拉群 |
+|---|---|---|
+| `N_tech_stack` | HIT_SINGLE | `技术栈概览Bot` |
+| `N_dual_view` | HIT_MULTI_BOTS(manager_worker) | `业务架构视角Bot`+`数据架构视角Bot`,群名"业务与数据架构双视角分析群",manager=业务架构视角Bot |
+| `N_architects` | MISS | `miss_reason="候选 bot 均无法覆盖子任务需求(架构师名册无对应现成 bot,走 BBS 中继)"` |
+| `N_tech_stack_remediate` / `N_dual_view_remediate`(补救子,若出现) | HIT_SINGLE | 对应原 bot(同主体) |
+
+> 同强约束:严格按 `demand.node_id` 查表;`bot_id`/`bot_ids` 须在 `catalog` 里按 `bot_name` 匹配取真实 `bot_id`,匹配不到 → 该节点 MISS(不得用其它 bot 顶替);catalog 里表未提及的 bot(owner、中继 bot 等)是预查噪音,必须忽略。

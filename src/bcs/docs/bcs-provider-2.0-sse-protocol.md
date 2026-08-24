@@ -370,10 +370,7 @@ Resolve 数据：
 
 约束：
 
-- 非空 `options` 必填；`command/cwd/toolCallId` 可选。
-- Provider 提供 `command` 时必须是非空字符串；部分 runtime 只能提供
-  `interactionId/toolCallId` 等审批关联信息，此时可以省略 `command`，消费者也必须
-  支持无 command 的展示。
+- `command`、非空 `options` 必填；`cwd/toolCallId` 可选。
 - 每项 `decision/label` 必填，`description` 可选；decision 在本 interaction 内唯一。
 - decision 是 Provider 定义的可扩展字符串，BCS 不维护封闭枚举，但 resolve 必须
   选择原 requested options 中的值。
@@ -468,19 +465,15 @@ Cancel：
 
 - `questions` 必填，1～4 项；`questionId/question` 必填且 questionId 唯一。
 - `header` 可选，是短标题或分组标签，与完整问题 `question` 不同；协议不设置字符数限制。
-- `multiSelect`、`allowOther` 可选。`multiSelect` 省略为 false；`allowOther`
-  省略为 true。`allowOther` 非 boolean 时 BCS 记录脱敏 warning、删除该字段并按省略
-  处理。
+- `multiSelect`、`allowOther` 可选，省略为 false。
 - question 的 `options` 可选；存在时 1～4 项，`value/label` 必填，
   `description` 可选，不定义 `optionId`。
-- 省略 options 表示自由文本题，同时应省略 `allowOther`，答案放在 `values[]`。
-- 自定义输入直接放入 `values[]`，不引入第二套 custom 字段。BCS 不使用
-  `options[].value` 作为答案 allowlist，也不根据 `allowOther` 拒绝自定义值；
-  `allowOther` 仅供 Frontend 决定是否展示自定义输入控件，显式 false 也不改变服务端
-  校验。
+- 省略 options 表示自由文本题，同时应省略 `allowOther`，答案仍放单元素
+  `values[]`。
+- `allowOther=true` 时自定义输入直接合并进 `values[]`；Provider 根据是否命中原
+  option value 区分预定义值和自由文本，不引入第二套 custom 字段。
 - resolve 的 `action` 必须是 `submit/cancel`。submit 必须提供 answers，且
-  questionId 集合与 requested 完全一致；跳过问题仍须保留对应 answer，使用
-  `values: []`、`values: [""]` 或仅空白字符串表达。
+  questionId 集合与 requested 完全一致；本期所有问题都必须回答。
 - answers 的键是 `questionId`；每个 Frontend answer 只需 `values`。BCS 按
   `questionId` 从 requested 存储数据补齐 `question` 和存在时的 `header` 后转发给
   Provider，并覆盖前端可能回传的同名字段。header 缺失时不 fallback。
@@ -489,8 +482,8 @@ Cancel：
   answer 都包含非空 header。
 - cancel 的语义由 action 决定。BCS 不额外禁止携带 answers，但 Provider/Frontend
   应发送最小的 `{action:"cancel"}`，避免产生歧义。
-- 单选和纯文本接受零或一个 value；多选接受零个或多个。每项必须是字符串，但允许
-  空字符串或仅空白字符串，BCS 原样转发且不 trim/过滤。
+- 单选和纯文本恰好一个 value；多选一个或多个；每项都是非空字符串。
+- `allowOther=false` 的选择题只接受原 options value；true 时也接受原样自由文本。
 - 本期不支持 `secret/isSecret`。Provider 遇到原生 secret question 必须拒绝转换，
   不能降级为普通明文问题。
 
@@ -769,10 +762,10 @@ stateDiagram-v2
   active 状态不直接按 TTL 删除。
 - 本期不写 `bcs_messages`，也不新增 interaction 数据库表。
 
-为支持线上诊断，interaction 业务 payload（例如 command、questions、answers）会完整
-写入 Provider 请求体 INFO 日志或 `bcs_sse_detail` 日志；`interaction.resolve` 的 action、
-answers 和 Provider 扩展字段也会保留原文。认证 Token、Authorization Header 和临时附件
-URL 继续沿用独立的脱敏规则，不因 interaction 日志放开而输出。
+interaction 业务 payload（例如 command、questions、answers）不会写入普通 INFO/WARN
+或 `bcs_sse_detail` 日志；detail 日志只保留 runId、seq、ts、phase、interactionId、kind
+和字节数等关联元数据。resolve 接受、失败和失效日志记录 resolver actor 与状态，但不
+记录具体选择内容。
 
 ## 10. 线上真实事件样例
 
@@ -871,7 +864,7 @@ request/interaction ID、运行上下文以及 engine-native response。统一�
 
 | kind | Provider requested 必须能提供 | resolve 转回引擎所需信息 |
 | --- | --- | --- |
-| `exec` | interactionId、动态 decisions；command/toolCallId 可选 | interactionId + decision；toolCallId 可选关联 |
+| `exec` | interactionId、command、动态 decisions | interactionId + decision；toolCallId 可选关联 |
 | `ask_user` | 稳定 questionId、question、可选 options | action + questionId 到 values[]；Provider 可按原顺序或问题文本转回 |
 | `mode_switch` | 当前可用 decisions；fromMode/targetMode 可选 | interactionId + decision；Provider 查回目标模式/原生 reply |
 

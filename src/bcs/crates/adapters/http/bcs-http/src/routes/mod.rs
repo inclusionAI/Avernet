@@ -1,5 +1,6 @@
 pub mod actors;
 pub mod admin_invocations;
+pub mod admission;
 pub mod assets;
 pub mod bot_chat;
 pub mod bot_events;
@@ -9,6 +10,7 @@ pub mod collaboration_definitions;
 pub mod collaboration_runs;
 mod caller;
 pub mod discover;
+pub mod ensure;
 pub mod friends;
 pub mod group_messages;
 pub mod group_requests;
@@ -76,3 +78,4 @@ pub(crate) fn reject_judge_definition_when_unavailable(
     }
     Ok(())
 }
+pub mod friend_connections;

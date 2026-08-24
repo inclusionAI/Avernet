@@ -51,6 +51,31 @@ pub struct BotOnboardResult {
     pub actor_kind: ActorKind,
 }
 
+/// Command for the Phase 0 `ensure_bot` backfill (spec §8.2 Phase 0, §4.2 Step 0b).
+///
+/// Unlike [`BotOnboardCommand`] this is a service-credential call (no user JWT):
+/// it registers the bot if absent and binds the owner identity in one
+/// idempotent call. Empty `"staff_no"` skips the owner-edge binding (registration
+/// only).
+#[derive(Debug, Clone)]
+pub struct EnsureBotCommand {
+    pub bot_uuid: String,
+    pub name: String,
+    pub summary: Option<String>,
+    pub visibility: String,
+    pub actor_identity: Option<OnboardActorIdentity>,
+}
+
+/// Outcome of [`BotOnboardingService::ensure_bot`].
+#[derive(Debug, Clone)]
+pub struct EnsureBotResult {
+    pub bot_uuid: String,
+    pub ensured: bool,
+    /// `true` when a new `bcs_bots` row was created; `false` when it already
+    /// existed and was only updated.
+    pub created: bool,
+}
+
 #[async_trait]
 pub trait BotOnboardingService: Send + Sync {
     async fn onboard_bot(&self, command: BotOnboardCommand) -> ServiceResult<BotOnboardResult>;
@@ -59,4 +84,10 @@ pub trait BotOnboardingService: Send + Sync {
         &self,
         command: AdminBotOnboardCommand,
     ) -> ServiceResult<BotOnboardResult>;
+
+    /// Phase 0 idempotent backfill: ensure the bot is registered in `bcs_bots`,
+    /// bind the creator's human actor + owner edges, and seed the default
+    /// permission profile. Returns `created=true` when the bot row was newly
+    /// inserted, `false` when it already existed (spec §4.2 Step 0b).
+    async fn ensure_bot(&self, command: EnsureBotCommand) -> ServiceResult<EnsureBotResult>;
 }

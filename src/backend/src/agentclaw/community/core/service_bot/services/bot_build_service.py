@@ -782,15 +782,15 @@ class BotBuildService:
         return completed.returncode == 0
 
     def _sync_extra_include_files(
-        self,
-        *,
-        source_dir: Path,
-        target_dir: Path,
-        build_plan: EngineBuildPlan | None,
-        command_name: str,
-        error_message: str,
-        chown: str | None = None,
-        timeout_seconds: float | None = None,
+            self,
+            *,
+            source_dir: Path,
+            target_dir: Path,
+            build_plan: EngineBuildPlan | None,
+            command_name: str,
+            error_message: str,
+            chown: str | None = None,
+            timeout_seconds: float | None = None,
     ) -> None:
         if not build_plan or not build_plan.extra_include_files:
             return

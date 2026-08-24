@@ -37,8 +37,16 @@ from agentclaw.community.api.bot_startup_script_service import (
 )
 from agentclaw.community.api.bot_publish_service import BotPublishServiceProtocol
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
+from agentclaw.community.api.device_service import DeviceServiceProtocol
 from agentclaw.community.api.publish_flow_service import PublishFlowServiceProtocol
 from agentclaw.community.api.publish_approval import PublishApprovalServiceProtocol
+from agentclaw.community.api.service_publication_facade import (
+    ServicePublicationFacadeProtocol,
+)
+from agentclaw.community.api.collaborator_lock_service import (
+    CollaboratorLockServiceProtocol,
+)
+from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
@@ -68,6 +76,9 @@ from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemD
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.repository.protocols.publishing import PublishOperationRepository
+from agentclaw.community.core.skill_center.services.active_skillset_installation_materializer import (
+    ActiveSkillSetInstallationMaterializer,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.bot_process import (
@@ -99,6 +110,9 @@ from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
 from agentclaw.community.core.service_bot.services.publish_approval_service import PublishApprovalService
+from agentclaw.community.core.service_bot.services.service_publication_facade import (
+    ServicePublicationFacade,
+)
 from agentclaw.community.core.system_config import SystemConfigService
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
 from agentclaw.community.core.workspace.engines import create_engine_sandbox_registry
@@ -459,6 +473,7 @@ class ServiceBotModule(Module):
         channel_overrides_reader: ChannelEngineOverridesReader,
         task_queue_service: TaskQueueService,
         publish_operation_repo: PublishOperationRepository,
+        active_skillset_materializer: ActiveSkillSetInstallationMaterializer,
     ) -> PublishFlowService:
         """Construct ``PublishFlowService``.
 
@@ -483,6 +498,7 @@ class ServiceBotModule(Module):
             channel_overrides_reader=channel_overrides_reader,
             task_queue_service=task_queue_service,
             publish_operation_repo=publish_operation_repo,
+            active_skillset_materializer=active_skillset_materializer,
         )
 
     @singleton
@@ -578,3 +594,39 @@ class ServiceBotModule(Module):
         self, svc: PublishApprovalService
     ) -> PublishApprovalServiceProtocol:
         return svc
+
+    @singleton
+    @provider
+    @inject
+    def service_publication_facade(
+        self,
+        bot_repo: BotRepository,
+        publish_repo: BotPublishRepositoryProtocol,
+        publish_service: BotPublishServiceProtocol,
+        flow_service: PublishFlowServiceProtocol,
+        approval_service: PublishApprovalServiceProtocol,
+        collaborator_service: CollaboratorServiceProtocol,
+        lock_service: CollaboratorLockServiceProtocol,
+        bot_service: BotService,
+        device_service: DeviceServiceProtocol,
+    ) -> ServicePublicationFacade:
+        """Construct the public publication facade from existing domain services."""
+        return ServicePublicationFacade(
+            bot_repo=bot_repo,
+            publish_repo=publish_repo,
+            publish_service=publish_service,
+            flow_service=flow_service,
+            approval_service=approval_service,
+            collaborator_service=collaborator_service,
+            lock_service=lock_service,
+            bot_service=bot_service,
+            device_service=device_service,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def _service_publication_facade_protocol(
+        self, facade: ServicePublicationFacade
+    ) -> ServicePublicationFacadeProtocol:
+        return facade

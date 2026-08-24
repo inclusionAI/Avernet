@@ -5,16 +5,19 @@ layer was introduced — it was never written, so nothing checked that a concret
 service still satisfies the Protocol adapters inject. The README states the
 contract:
 
-    Conformance is **structural**: concrete services under
-    ``core/<module>/services/`` do *not* inherit from the Protocol (that would
-    force a ``core → api`` import, which the layering rule forbids). Instead
-    ``test_service_api_conformance.py`` parametrizes over every
-    ``(Protocol, ConcreteService)`` pair and asserts ``issubclass`` against the
-    ``@runtime_checkable`` Protocol — so a missing or renamed method on the
-    concrete class fails CI rather than only showing up as a router-time
-    ``AttributeError``.
+    Conformance is checked **structurally**, and a concrete service *may* also
+    inherit its Protocol. Either way ``test_service_api_conformance.py``
+    parametrizes over every ``(Protocol, ConcreteService)`` pair and asserts
+    ``issubclass`` against the ``@runtime_checkable`` Protocol — so a missing
+    or renamed method on the concrete class fails CI rather than only showing
+    up as a router-time ``AttributeError``.
 
-Two checks per pair, because ``issubclass`` on a ``runtime_checkable`` Protocol
+An inheriting service whose Protocol members are all ``@abstractmethod`` already
+fails at construction, so for those pairs this file is a backstop; it stays the
+only gate for the structural-only services, and its signature check below
+catches drift that inheritance does not.
+
+Three checks per pair, because ``issubclass`` on a ``runtime_checkable`` Protocol
 verifies method **names only**:
 
 1. ``issubclass`` — catches a removed or renamed method (the README's contract).
@@ -24,6 +27,12 @@ verifies method **names only**:
    when a keyword-only parameter becomes positional-only (the adapter then
    calls it by keyword). Both fail every affected request while the gate stays
    green, so the comparison has to cover the whole shape.
+
+3. No leftover ``__abstractmethods__``. Checks 1 and 2 are *blind* for a
+   service that inherits its Protocol: drop a method and the Protocol's own
+   ``...`` stub is inherited in its place, so the name still resolves and the
+   signature is compared against itself. Both pass on a class that cannot even
+   be constructed, moving the failure from CI to DI startup.
 
 ``_PAIRS`` starts with the contract added in this PR. It is a registry, not a
 discovery walk: most Protocols in ``api/`` still declare
@@ -38,9 +47,19 @@ import inspect
 
 import pytest
 
+from agentclaw.community.api.bot_dormant_service import (
+    BotDormantActivateServiceProtocol,
+)
+from agentclaw.community.api.bot_runtime_projection_reconciler import (
+    BotRuntimeProjectionReconcilerProtocol,
+)
+from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
+from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
+from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
 )
+from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
@@ -49,6 +68,12 @@ from agentclaw.community.api.bot_app_grant_service import (
     BotAppGrantServiceProtocol,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.health_diagnosis_service import (
+    HealthDiagnosisServiceProtocol,
+)
+from agentclaw.community.api.local_bot_workflow_service import (
+    LocalBotWorkflowServiceProtocol,
+)
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
 )
@@ -61,14 +86,61 @@ from agentclaw.community.api.local_skill_state_service import (
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
+from agentclaw.community.api.skill_set_control_plane import (
+    SkillSetControlPlaneServiceProtocol,
+)
+from agentclaw.community.api.market_favorite_service import (
+    MarketFavoriteServiceProtocol,
+)
+from agentclaw.community.api.repository_catalog_service import (
+    RepositoryCatalogServiceProtocol,
+)
+from agentclaw.community.api.service_publication_facade import (
+    ServicePublicationFacadeProtocol,
+)
+from agentclaw.community.api.space_service import (
+    SpaceAccessServiceProtocol,
+    SpaceMemberServiceProtocol,
+    SpaceServiceProtocol,
+)
+from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
+from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
+    CollaboratorService,
+)
+from agentclaw.community.core.bot_inventory.protocols import (
+    BotInventoryBotPort,
+    DesktopBotInventoryPort,
+)
+from agentclaw.community.core.bot_inventory.services.bot_inventory_service import (
+    BotInventoryService,
+)
+from agentclaw.community.core.bot_inventory.services.local_bot_workflow import (
+    LocalBotWorkflowService,
+)
+from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_management.services.bot_space_service import (
+    BotSpaceService,
+)
 from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
     BotStartupScriptService,
 )
+from agentclaw.community.core.desktop_bot.services.desktop_bot_service import (
+    DesktopBotService,
+)
 from agentclaw.community.core.engine_runtime.connection import EngineConnectionService
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
+from agentclaw.community.core.harness.services.health_diagnosis_service import (
+    HealthDiagnosisService,
+)
 from agentclaw.community.core.services.engine_config import EngineConfigService
 from agentclaw.community.core.skill_center.services.local_skill_query_service import (
     LocalSkillQueryService,
+)
+from agentclaw.community.core.skill_center.services.bot_skill_asset_service import (
+    BotSkillAssetService,
+)
+from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
+    BotRuntimeProjectionReconciler,
 )
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
@@ -80,19 +152,51 @@ from agentclaw.community.core.bot_app_grant.services import BotAppGrantService
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
 )
+from agentclaw.community.core.skill_center.services.repository_catalog_service import (
+    RepositoryCatalogService,
+)
+from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
+    SkillSetControlPlaneService,
+)
+from agentclaw.community.core.market_favorites.services import MarketFavoriteService
+from agentclaw.community.core.service_bot.services.service_publication_facade import (
+    ServicePublicationFacade,
+)
+from agentclaw.community.core.spaces.services import (
+    SpaceAccessService,
+    SpaceMemberService,
+    SpaceService,
+)
 
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
     (BotAppGrantServiceProtocol, BotAppGrantService),
+    (CollaboratorServiceProtocol, CollaboratorService),
+    (BotInventoryServiceProtocol, BotInventoryService),
     (BotStartupScriptServiceProtocol, BotStartupScriptService),
+    (BotSpaceServiceProtocol, BotSpaceService),
+    (LocalBotWorkflowServiceProtocol, LocalBotWorkflowService),
+    (BotDormantActivateServiceProtocol, ActivateBotService),
+    (BotInventoryBotPort, BotService),
+    (DesktopBotInventoryPort, DesktopBotService),
     (EngineConfigServiceProtocol, EngineConfigService),
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
     (EngineConnectionServiceProtocol, EngineConnectionService),
+    (HealthDiagnosisServiceProtocol, HealthDiagnosisService),
+    (BotSkillAssetServiceProtocol, BotSkillAssetService),
+    (BotRuntimeProjectionReconcilerProtocol, BotRuntimeProjectionReconciler),
     (LocalSkillQueryServiceProtocol, LocalSkillQueryService),
     (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
     (LocalSkillStateServiceProtocol, LocalSkillStateService),
     (LocalSkillDeleteServiceProtocol, LocalSkillDeleteService),
+    (RepositoryCatalogServiceProtocol, RepositoryCatalogService),
+    (SkillSetControlPlaneServiceProtocol, SkillSetControlPlaneService),
+    (SpaceServiceProtocol, SpaceService),
+    (SpaceAccessServiceProtocol, SpaceAccessService),
+    (SpaceMemberServiceProtocol, SpaceMemberService),
+    (MarketFavoriteServiceProtocol, MarketFavoriteService),
+    (ServicePublicationFacadeProtocol, ServicePublicationFacade),
 ]
 
 _IDS = [f"{p.__name__}->{c.__name__}" for p, c in _PAIRS]
@@ -165,3 +269,25 @@ def test_protocol_signatures_match_the_implementation(protocol, concrete) -> Non
 def test_registry_is_not_empty() -> None:
     """Guard the guard — an emptied registry would pass everything silently."""
     assert _PAIRS, "no (Protocol, ConcreteService) pairs registered"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("protocol", "concrete"), _PAIRS, ids=_IDS)
+def test_concrete_service_is_not_left_abstract(protocol, concrete) -> None:
+    """A service that inherits its Protocol must implement every member.
+
+    ``api/README.md`` permits a concrete service to inherit its Protocol. That
+    creates a blind spot in the two checks above — a dropped method is silently
+    replaced by the Protocol's inherited ``...`` stub, which satisfies both — so
+    check the ABC side too: anything left abstract cannot be constructed and
+    would fail at DI startup instead of here.
+
+    Structural services are unaffected; they inherit nothing and have no
+    ``__abstractmethods__``.
+    """
+    left_abstract = sorted(getattr(concrete, "__abstractmethods__", frozenset()))
+    assert not left_abstract, (
+        f"{concrete.__name__} inherits {protocol.__name__} but leaves "
+        f"{left_abstract} unimplemented — the class is abstract and DI would "
+        "fail at startup."
+    )

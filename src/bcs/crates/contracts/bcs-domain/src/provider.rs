@@ -11,6 +11,17 @@ pub enum ProviderAuthMode {
     ProviderAdmin,
 }
 
+/// How a provider-registered bot connects to BCS. `Gateway` (default) writes a
+/// provider_binding row (HTTP webhook downlink); `Plugin` skips the binding so
+/// the bot connects over WebSocket through a BCN plugin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderBotConnectionMode {
+    #[default]
+    Gateway,
+    Plugin,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderRecord {
     pub provider_id: String,

@@ -30,8 +30,14 @@ def handle_approval_callback(
     last_operate = (data.get("last_operate") or "").upper()
     owner_id = data.get("owner_id") or ""
     bot_id = data.get("bot_id") or ""
+    # public_scope 区分新版发布(走 BCS, 值如 user/agent)与老版发布(写 ac_bots)；
+    # 平台回传字符串，非空即新版、空即老版，原样透传给 service 分支。
+    public_scope = (data.get("public_scope") or "").strip()
 
-    logger.info("[回调] global_unique_id=%s, last_operate=%s", global_unique_id, last_operate)
+    logger.info(
+        "[回调] global_unique_id=%s, last_operate=%s, public_scope=%s",
+        global_unique_id, last_operate, public_scope or "(legacy)",
+    )
 
     # 从 global_unique_id 提取 publish_id（取 _ 分隔的最后部分）
     if not global_unique_id:
@@ -39,5 +45,6 @@ def handle_approval_callback(
         return {"success": False, "message": "global_unique_id is empty"}
 
     return bot_public_service.handle_public_approval_callback(
-        bot_id=bot_id, owner_id=owner_id, puid=global_unique_id, last_operate=last_operate,
+        bot_id=bot_id, owner_id=owner_id, puid=global_unique_id,
+        last_operate=last_operate, public_scope=public_scope,
     )

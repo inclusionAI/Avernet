@@ -259,12 +259,13 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         self,
         *,
         scope: BotSkillLayoutScope,
+        owner_id: str,
         migration_generation: str,
         lease_owner: str,
         preparation_id: str,
         local_locators: dict[int, str],
     ) -> bool:
-        """在一个事务中更新该 Bot 全部 local locator 并提交 Pool Active。"""
+        """在一个事务中更新该 Bot Owner 的全部 local locator 并提交 Pool Active。"""
         ...
 
     @abstractmethod
@@ -418,7 +419,7 @@ class SkillsPoolSkillRepositoryProtocol(Protocol):
 
     @abstractmethod
     def list_bot_local_assets(
-        self, *, env: str, bot_id: str
+        self, *, env: str, owner_id: str, bot_id: str
     ) -> list[RegisteredSkillAsset]: ...
 
     @abstractmethod
@@ -427,7 +428,7 @@ class SkillsPoolSkillRepositoryProtocol(Protocol):
         *,
         env: str,
         bot_id: str,
-        user_id: str,
+        owner_id: str,
         engine: str,
     ) -> list[RegisteredSkillAsset]: ...
 

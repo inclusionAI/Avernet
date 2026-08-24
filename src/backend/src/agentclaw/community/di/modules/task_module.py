@@ -12,7 +12,7 @@ import os
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
-from agentclaw.community.adapters.http.openapi_v1.task.auth import (
+from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator, NoopCallbackAuthenticator,
 )
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
@@ -20,6 +20,12 @@ from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.core.repository.protocols.task import (
+    TaskCallbackRepositoryProtocol,
+    TaskInfoRepositoryProtocol,
+    TaskNodeRepositoryProtocol,
+    TaskNodeRunInfoRepositoryProtocol,
+)
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
@@ -74,9 +80,41 @@ class TaskModule(Module):
         # harness 旁路常驻巡检(SLA 超时复位 / FAILED 重派重试 / PENDING 派发超时重搜推);
         # facade 内部 set_on_harness 回填编排核入口并启动 daemon 巡检线程。
         harness = TaskHarness(graph)
+        # TaskPersistenceModule is optional for the pure-core and lightweight DI
+        # test paths. Resolve every persistence port lazily so Injector never
+        # attempts to instantiate an abstract repository protocol.
+        try:
+            task_info_repo = injector.get(TaskInfoRepositoryProtocol)
+        except Exception:  # noqa: BLE101 未绑定 → execute 跳过 task_info 落库
+            task_info_repo = None
+        # 回投落库:TaskPersistenceModule 装了即取到(与 task_info_repo 同模块绑定);测试/纯内核
+        # fixture 若未装则取不到 → 跳过回投落库(与 task_info_repo 缺省同语义,不阻断编排核推进)。
+        try:
+            callback_repo = injector.get(TaskCallbackRepositoryProtocol)
+        except Exception:  # noqa: BLE101 未绑定 → 跳过回投落库
+            callback_repo = None
+        # task_node / task_node_run_info 落库(workflow/yaml 分支):TaskPersistenceModule 装了即取到
+        # (与 task_info_repo/callback_repo 同模块绑定);测试/纯内核 fixture 未装则取不到 → 跳过节点落库
+        # (与 task_info_repo 缺省同语义,不阻断编排核推进;dynamic 分支本就不落这两个表)。
+        try:
+            task_node_repo = injector.get(TaskNodeRepositoryProtocol)
+        except Exception:  # noqa: BLE101 未绑定 → 跳过 task_node 落库
+            task_node_repo = None
+        try:
+            task_node_run_info_repo = injector.get(TaskNodeRunInfoRepositoryProtocol)
+        except Exception:  # noqa: BLE101 未绑定 → 跳过 task_node_run_info 落库
+            task_node_run_info_repo = None
+        try:
+            bot_service = injector.get(BotServiceProtocol)
+        except Exception:  # noqa: BLE101 未绑定 → dashboard 不附加 assignee 的 bot 归属/名
+            bot_service = None
         return TaskService(
             graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
-            bcs_identity=bcs_identity,
+            bcs_identity=bcs_identity, task_info_repo=task_info_repo,
+            callback_repo=callback_repo, task_node_repo=task_node_repo,
+            task_node_run_info_repo=task_node_run_info_repo,
+            bot_service=bot_service, bot_public=bot_public,
+            api_base_url=self._resolve_api_base_url(),
         )
 
     @singleton
@@ -109,6 +147,15 @@ class TaskModule(Module):
     ) -> CallbackAuthenticator:
         """回调鉴权(社区 Noop 直通;corp adapter 覆写绑 HmacCallbackAuthenticator + 密钥)。"""
         return auth
+
+    @staticmethod
+    def _resolve_api_base_url() -> str:
+        """Resolve the backend callback base URL from composition-root configuration."""
+        import os
+        from agentclaw.community.di.profile import DeployProfile
+        if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == DeployProfile.SINGLEBOX.value:
+            return os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
+        return os.environ.get("TASK_API_BASE_URL", "http://localhost:8888")
 
     @staticmethod
     def _resolve_ports():
@@ -149,8 +196,11 @@ class TaskModule(Module):
                 sm_status="completed", sm_output=_coop_pass_output,
                 poll_once_then_terminal=True, terminal_after=1,
             )
+            # double 端口不参与 roster 圈定,沿用全部候选。
         else:
-            bcs = SingleboxBcsAdapter(LocalBcsTokenProvider.from_env())
+            token = LocalBcsTokenProvider.from_env()
+            bcs = SingleboxBcsAdapter(token)
+            # provider_id 由 bcs 端口自带(token.provider_id=SINGLEBOX_BCS_PROVIDER_ID);空→roster 圈定关闭(旧行为)。
         return bot, bcs
 
     @staticmethod

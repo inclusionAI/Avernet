@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use axum::{
     Router,
     body::{Body, to_bytes},
@@ -7,19 +8,23 @@ use axum::{
 };
 use bcs_auth_api::{AuthError, AuthPluginChain, AuthPrincipal, UserIdentityInfo};
 use bcs_auth_local::StaticAuthPlugin;
-use bcs_bot::{BotCore, ProviderCore, ProviderManagement};
+use bcs_bot::{BotControlPlaneCore, BotCore, ProviderCore, ProviderManagement};
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
+use bcs_config::resolve_env_str;
 use bcs_http::{
     router::build_router,
     service_key::{ApiKeyEntry, ApiKeyRegistry, sha256_hex},
     state::{ChainUserIdentityPort, HttpAppState, HttpUserIdentity, UserIdentityPort},
 };
+use bcs_service_api::application::v1::ApplicationError;
 use bcs_user_directory_api::{UserDirectoryPlugin, UserDirectoryProfile};
 use bcs_service_api::{
-    ActorKind, EnsureOwnerEdgesResult, BotRegistryCoreService, ProviderBotBindingRepoPort,
+    ActorKind, BotControlPlaneCoreService, BotControlPlanePatch, BotInternalAttributes,
+    BotRegistryCoreService, EnsureOwnerEdgesResult, FriendCheckInStrategy,
+    InternalBotAttributesService, PatchBotInternalAttributes, ProviderBotBindingRepoPort,
     ProviderBotCoreService, ProviderCoreService, ProviderCredential, ProviderCredentialRepoPort,
     ProviderRecord, ProviderRepoPort, ProviderStreamGrayList, RelationCoreService, RelationEdge,
-    ServiceResult,
+    ServiceResult, UserVisibility,
 };
 use bcs_services_container::Services;
 use serde_json::{Value, json};
@@ -33,7 +38,45 @@ struct TestApp {
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
     registry: Arc<BotCore>,
     relation: Arc<RecordingRelationCoreService>,
+    control_plane: Arc<BotControlPlaneCore>,
+    internal_bot_attributes: Arc<RecordingInternalBotAttributesService>,
     _temp_dir: TempDir,
+}
+
+#[derive(Default)]
+struct RecordingInternalBotAttributesService {
+    patches: tokio::sync::Mutex<Vec<PatchBotInternalAttributes>>,
+}
+
+#[async_trait]
+impl InternalBotAttributesService for RecordingInternalBotAttributesService {
+    async fn get(&self, _bot_id: String) -> Result<BotInternalAttributes, ApplicationError> {
+        Ok(BotInternalAttributes {
+            visibility: "protected".to_string(),
+            user_visibility: UserVisibility::Protected,
+            friend_ext: serde_json::Map::new(),
+            friend_check_in_strategy: FriendCheckInStrategy::Approval,
+        })
+    }
+
+    async fn patch(
+        &self,
+        command: PatchBotInternalAttributes,
+    ) -> Result<BotInternalAttributes, ApplicationError> {
+        let attributes = BotInternalAttributes {
+            visibility: command
+                .visibility
+                .clone()
+                .unwrap_or_else(|| "protected".to_string()),
+            user_visibility: command.user_visibility.unwrap_or(UserVisibility::Protected),
+            friend_ext: command.friend_ext.clone().unwrap_or_default(),
+            friend_check_in_strategy: command
+                .friend_check_in_strategy
+                .unwrap_or(FriendCheckInStrategy::Approval),
+        };
+        self.patches.lock().await.push(command);
+        Ok(attributes)
+    }
 }
 
 fn test_app() -> TestApp {
@@ -84,7 +127,13 @@ fn test_app_with_options(
     let provider_credentials: Arc<dyn ProviderCredentialRepoPort> = provider_store.clone();
     let provider_bindings: Arc<dyn ProviderBotBindingRepoPort> = provider_store.clone();
     let provider_stream_gray_list = Arc::new(ProviderStreamGrayList::default());
+    let internal_bot_attributes = Arc::new(RecordingInternalBotAttributesService::default());
     let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+    let control_plane = Arc::new(BotControlPlaneCore::new(
+        bot_repo.clone(),
+        provider_repo.clone(),
+        provider_bindings.clone(),
+    ));
     let registry = Arc::new(BotCore::with_provider_repos(
         bot_repo,
         provider_repo.clone(),
@@ -110,6 +159,7 @@ fn test_app_with_options(
     if let Some(user_directory) = user_directory {
         provider_management = provider_management.with_user_directory(user_directory);
     }
+    provider_management = provider_management.with_control_plane(control_plane.clone());
     let provider_management = Arc::new(provider_management);
 
     let services = Services::builder()
@@ -124,6 +174,7 @@ fn test_app_with_options(
             HttpAppState::new(services)
                 .with_user_identity(user_identity)
                 .with_allowed_switch_provider_ids(allowed_provider_ids)
+                .with_internal_bot_attributes_service(internal_bot_attributes.clone())
                 .with_service_api_keys(Arc::new(ApiKeyRegistry::new(service_keys)))
                 .with_provider_stream_gray_list(provider_stream_gray_list.clone()),
         ),
@@ -132,6 +183,8 @@ fn test_app_with_options(
         provider_stream_gray_list,
         registry,
         relation,
+        control_plane,
+        internal_bot_attributes,
         _temp_dir: temp_dir,
     }
 }
@@ -1800,6 +1853,310 @@ async fn register_provider_bot_reuses_provider_ref_as_bot_uuid_for_allowed_switc
 }
 
 #[tokio::test]
+async fn provider_bot_attributes_require_an_allowlisted_provider_admin_and_bound_bot() {
+    let provider_id = "prv_internal_attributes".to_string();
+    let admin_token = "admin-token";
+    let TestApp {
+        app,
+        provider_repo,
+        provider_credentials,
+        internal_bot_attributes,
+        _temp_dir,
+        ..
+    } = test_app_with_allowed_switch_provider_ids(vec![provider_id.clone()]);
+    provider_repo
+        .insert_provider(ProviderRecord {
+            provider_id: provider_id.clone(),
+            name: "Provider".to_string(),
+            config: json!({
+                "downlink": {
+                    "enabled": true,
+                    "webhook_url": "https://provider.example.com/bcs/webhook",
+                    "auth_mode": "static_bearer",
+                    "protocol_version": "1.0"
+                }
+            })
+            .to_string(),
+            created_by: "11111111".to_string(),
+            owners: r#"["11111111"]"#.to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed provider");
+    provider_credentials
+        .insert_credential(ProviderCredential {
+            provider_id: provider_id.clone(),
+            credential_kind: "provider_admin".to_string(),
+            secret_value: admin_token.to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed provider admin credential");
+
+    let register = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/providers/{provider_id}/bots"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "name": "Teamclaw Bot",
+                        "owners": ["alice"],
+                        "provider_bot_ref": "teamclaw-bot:alice"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(register.status(), StatusCode::OK);
+
+    let get = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/providers/{provider_id}/bots/teamclaw-bot:alice/attributes"
+                ))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(get.status(), StatusCode::OK);
+    let get_body = response_json(get).await;
+    assert_eq!(get_body["visibility"], "protected");
+    assert_eq!(get_body["user_visibility"], "protected");
+    assert_eq!(get_body["friend_ext"], json!({}));
+    assert_eq!(get_body["friend_check_in_strategy"], "APPROVAL");
+
+    let patch = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!(
+                    "/providers/{provider_id}/bots/teamclaw-bot:alice/attributes"
+                ))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "visibility": "private",
+                        "user_visibility": "public",
+                        "friend_ext": {"department_code": "TECH"},
+                        "friend_check_in_strategy": "DEPT_FREE"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(patch.status(), StatusCode::OK);
+    let patch_body = response_json(patch).await;
+    assert_eq!(patch_body["visibility"], "private");
+    assert_eq!(patch_body["user_visibility"], "public");
+    assert_eq!(patch_body["friend_ext"]["department_code"], "TECH");
+    assert_eq!(patch_body["friend_check_in_strategy"], "DEPT_FREE");
+
+    for body in [
+        json!({}),
+        json!({"user_visibility": "public", "forged": true}),
+        json!({"user_visibility": null}),
+        json!({"friend_ext": []}),
+    ] {
+        let invalid = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!(
+                        "/providers/{provider_id}/bots/teamclaw-bot:alice/attributes"
+                    ))
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    }
+
+    let patches = internal_bot_attributes.patches.lock().await;
+    assert_eq!(patches.len(), 1);
+    assert_eq!(patches[0].bot_id, "teamclaw-bot:alice");
+    assert_eq!(patches[0].visibility.as_deref(), Some("private"));
+    assert_eq!(patches[0].user_visibility, Some(UserVisibility::Public));
+    assert_eq!(
+        patches[0].friend_check_in_strategy,
+        Some(FriendCheckInStrategy::DeptFree)
+    );
+}
+
+#[tokio::test]
+async fn provider_bot_attributes_reject_a_disabled_provider_for_get_and_patch() {
+    let provider_id = "prv_disabled_attributes".to_string();
+    let admin_token = "admin-token";
+    let TestApp {
+        app,
+        provider_repo,
+        provider_credentials,
+        _temp_dir,
+        ..
+    } = test_app_with_allowed_switch_provider_ids(vec![provider_id.clone()]);
+    provider_repo
+        .insert_provider(ProviderRecord {
+            provider_id: provider_id.clone(),
+            name: "Provider".to_string(),
+            config: json!({
+                "downlink": {
+                    "enabled": true,
+                    "webhook_url": "https://provider.example.com/bcs/webhook",
+                    "auth_mode": "static_bearer",
+                    "protocol_version": "1.0"
+                }
+            })
+            .to_string(),
+            created_by: "11111111".to_string(),
+            owners: r#"["11111111"]"#.to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed provider");
+    provider_credentials
+        .insert_credential(ProviderCredential {
+            provider_id: provider_id.clone(),
+            credential_kind: "provider_admin".to_string(),
+            secret_value: admin_token.to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed provider admin credential");
+
+    let register = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/providers/{provider_id}/bots"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "name": "Teamclaw Bot",
+                        "owners": ["alice"],
+                        "provider_bot_ref": "teamclaw-bot:alice"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(register.status(), StatusCode::OK);
+
+    provider_repo
+        .update_provider_disabled(&provider_id, true, 2)
+        .await
+        .expect("disable provider");
+
+    let get = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/providers/{provider_id}/bots/teamclaw-bot:alice/attributes"
+                ))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(get.status(), StatusCode::FORBIDDEN);
+
+    let patch = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!(
+                    "/providers/{provider_id}/bots/teamclaw-bot:alice/attributes"
+                ))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(json!({ "user_visibility": "public" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(patch.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn provider_bot_attributes_fail_closed_when_provider_is_not_allowlisted() {
+    let TestApp { app, _temp_dir, .. } = test_app();
+    let provider = register_provider_as(&app, "11111111").await;
+    let provider_id = provider["provider_id"].as_str().expect("provider id");
+    let admin_token = provider["provider_admin_token"]
+        .as_str()
+        .expect("provider admin token");
+    let registered_bot = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/providers/{provider_id}/bots"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "name": "Code Reviewer",
+                        "owners": ["11111111"],
+                        "provider_bot_ref": "reviewer"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bot_uuid = response_json(registered_bot).await["bot_uuid"]
+        .as_str()
+        .expect("bot uuid")
+        .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/providers/{provider_id}/bots/{bot_uuid}/attributes"))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn register_provider_bot_rejects_allowed_switch_provider_ref_that_is_existing_bot_uuid() {
     let provider_id = "prv_allowed_switch".to_string();
     let admin_token = "admin-token";
@@ -1931,6 +2288,180 @@ async fn provider_admin_token_cannot_manage_another_provider() {
     assert_eq!(body["error"], "provider_id_mismatch");
 }
 
+async fn set_task_modes(
+    control_plane: &Arc<BotControlPlaneCore>,
+    bot_uuid: &str,
+    env: &str,
+    task_claim_mode: Option<bool>,
+    task_dream_mode: Option<bool>,
+) {
+    control_plane
+        .patch(
+            bot_uuid,
+            env,
+            BotControlPlanePatch {
+                name: None,
+                visibility: None,
+                status: None,
+                descriptor: None,
+                task_claim_mode,
+                task_dream_mode,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("patch control-plane toggles")
+        .expect("bot control-plane record should exist after onboarding");
+}
+
+async fn task_mode_roster(
+    app: &Router,
+    provider_id: &str,
+    token: Option<&str>,
+    query: &str,
+) -> (StatusCode, Value) {
+    let mut builder = Request::builder()
+        .method("GET")
+        .uri(format!("/providers/{provider_id}/bots/by-task-modes{query}"));
+    if let Some(token) = token {
+        builder = builder.header("authorization", format!("Bearer {token}"));
+    }
+    let response = app
+        .clone()
+        .oneshot(builder.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    (status, response_json(response).await)
+}
+
+fn roster_bot_ids(body: &Value) -> Vec<String> {
+    body["items"]
+        .as_array()
+        .expect("roster response has items array")
+        .iter()
+        .map(|item| item["bot_id"].as_str().expect("item has bot_id").to_string())
+        .collect()
+}
+
+fn sorted_ids(mut ids: Vec<String>) -> Vec<String> {
+    ids.sort();
+    ids
+}
+
+#[tokio::test]
+async fn list_provider_bots_by_task_modes_filters_and_scopes_to_provider() {
+    let TestApp {
+        app, control_plane, ..
+    } = test_app();
+
+    let provider = register_provider(&app, json!({ "mode": "static_bearer" })).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+
+    // A second provider whose bots must NOT appear in provider_id's roster
+    // (provider-scoped intersect).
+    let other = register_provider(&app, json!({ "mode": "static_bearer" })).await;
+    let other_provider_id = other["provider_id"].as_str().unwrap();
+    let other_token = other["provider_admin_token"].as_str().unwrap();
+
+    let bot_a = register_provider_bot(&app, provider_id, admin_token, "bot-a").await;
+    let bot_b = register_provider_bot(&app, provider_id, admin_token, "bot-b").await;
+    let bot_c = register_provider_bot(&app, provider_id, admin_token, "bot-c").await;
+    let bot_d = register_provider_bot(&app, other_provider_id, other_token, "bot-d").await;
+    let uuid_a = bot_a["bot_uuid"].as_str().unwrap().to_string();
+    let uuid_b = bot_b["bot_uuid"].as_str().unwrap().to_string();
+    let uuid_c = bot_c["bot_uuid"].as_str().unwrap().to_string();
+    let uuid_d = bot_d["bot_uuid"].as_str().unwrap().to_string();
+
+    let env = resolve_env_str();
+    // a = claim, b = dream, c = claim+dream, d = claim+dream (other provider).
+    set_task_modes(&control_plane, &uuid_a, &env, Some(true), Some(false)).await;
+    set_task_modes(&control_plane, &uuid_b, &env, Some(false), Some(true)).await;
+    set_task_modes(&control_plane, &uuid_c, &env, Some(true), Some(true)).await;
+    set_task_modes(&control_plane, &uuid_d, &env, Some(true), Some(true)).await;
+
+    // No toggles => all bots bound to provider_id (d excluded by provider scoping).
+    let (status, body) =
+        task_mode_roster(&app, provider_id, Some(admin_token), "").await;
+    assert_eq!(status, StatusCode::OK, "no-filter roster failed: {body}");
+    assert_eq!(
+        sorted_ids(roster_bot_ids(&body)),
+        sorted_ids(vec![uuid_a.clone(), uuid_b.clone(), uuid_c.clone()])
+    );
+    assert!(!body.to_string().contains(&uuid_d));
+
+    // claim_mode=true, match=any => a, c.
+    let (status, body) = task_mode_roster(
+        &app,
+        provider_id,
+        Some(admin_token),
+        "?task_claim_mode=true&match=any",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        sorted_ids(roster_bot_ids(&body)),
+        sorted_ids(vec![uuid_a.clone(), uuid_c.clone()])
+    );
+
+    // claim=true AND dream=true, match=all => c only.
+    let (status, body) = task_mode_roster(
+        &app,
+        provider_id,
+        Some(admin_token),
+        "?task_claim_mode=true&task_dream_mode=true&match=all",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(roster_bot_ids(&body), vec![uuid_c.clone()]);
+
+    // claim=true OR dream=true, match=any => a, b, c.
+    let (status, body) = task_mode_roster(
+        &app,
+        provider_id,
+        Some(admin_token),
+        "?task_claim_mode=true&task_dream_mode=true&match=any",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        sorted_ids(roster_bot_ids(&body)),
+        sorted_ids(vec![uuid_a.clone(), uuid_b.clone(), uuid_c.clone()])
+    );
+
+    // dream=true, match=any => b, c.
+    let (status, body) = task_mode_roster(
+        &app,
+        provider_id,
+        Some(admin_token),
+        "?task_dream_mode=true&match=any",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        sorted_ids(roster_bot_ids(&body)),
+        sorted_ids(vec![uuid_b.clone(), uuid_c.clone()])
+    );
+
+    // Missing token => 401.
+    let (status, body) =
+        task_mode_roster(&app, provider_id, None, "?task_claim_mode=true").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["status"], 401);
+
+    // Wrong token => 401.
+    let (status, body) = task_mode_roster(
+        &app,
+        provider_id,
+        Some("not-the-admin-token"),
+        "?task_claim_mode=true",
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["status"], 401);
+}
+
 async fn register_provider(app: &Router, auth: Value) -> Value {
     let response = app
         .clone()
@@ -2013,7 +2544,150 @@ async fn register_provider_bot(
     response_json(response).await
 }
 
+/// Register a provider bot with an explicit `connection_mode` and return the
+/// raw response (status not asserted — caller decides).
+async fn register_provider_bot_mode(
+    app: &Router,
+    provider_id: &str,
+    admin_token: &str,
+    provider_bot_ref: &str,
+    mode: &str,
+) -> (StatusCode, Value) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/providers/{provider_id}/bots"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "name": "Plugin Bot",
+                        "summary": "Connected via BCN plugin",
+                        "owners": ["11111111"],
+                        "provider_bot_ref": provider_bot_ref,
+                        "connection_mode": mode
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    (status, response_json(response).await)
+}
+
+#[tokio::test]
+async fn register_provider_bot_plugin_mode_rejected_for_non_allow_listed_provider() {
+    // The default test_app is NOT allow-listed, so plugin mode must be
+    // refused with 400 before reaching the service layer.
+    let app = test_app().app;
+    let provider = register_provider(&app, json!({ "mode": "static_bearer" })).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+
+    let (status, body) =
+        register_provider_bot_mode(&app, provider_id, admin_token, "plugin-bot-1", "plugin").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let msg = body["error"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("connection_mode plugin requires an allow-listed provider"),
+        "unexpected rejection message: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn register_provider_bot_plugin_mode_accepted_for_allow_listed_provider() {
+    let provider_id = "prv_plugin_allowed".to_string();
+    let admin_token = "admin-token";
+    let TestApp {
+        app,
+        provider_repo,
+        provider_credentials,
+        ..
+    } = test_app_with_allowed_switch_provider_ids(vec![provider_id.clone()]);
+    provider_repo
+        .insert_provider(ProviderRecord {
+            provider_id: provider_id.clone(),
+            name: "Provider".to_string(),
+            config: json!({
+                "downlink": {
+                    "enabled": true,
+                    "webhook_url": "https://provider.example.com/bcs/webhook",
+                    "auth_mode": "static_bearer",
+                    "protocol_version": "1.0"
+                }
+            })
+            .to_string(),
+            created_by: "11111111".to_string(),
+            owners: r#"["11111111"]"#.to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed plugin provider record");
+    provider_credentials
+        .insert_credential(ProviderCredential {
+            provider_id: provider_id.clone(),
+            credential_kind: "provider_admin".to_string(),
+            secret_value: admin_token.to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed plugin provider admin credential");
+
+    let bot_ref = "plugin-bot:alice";
+    let (status, body) =
+        register_provider_bot_mode(&app, &provider_id, admin_token, bot_ref, "plugin").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "plugin mode should be accepted for allow-listed provider: {body}"
+    );
+    // deterministic id == provider_bot_ref (allow-listed + plugin)
+    assert_eq!(body["bot_uuid"].as_str(), Some(bot_ref));
+    // plugin mode never writes a binding → response carries no runtime token
+    // (the real token comes from the WS handshake); the MOCK sentinel is not
+    // exposed.
+    assert!(
+        body["bot_runtime_token"].is_null(),
+        "plugin mode response must not expose a runtime token, got: {body}"
+    );
+}
+
 async fn response_json(response: axum::response::Response) -> Value {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     serde_json::from_slice(&body).unwrap()
+}
+
+#[tokio::test]
+async fn list_provider_bots_by_task_modes_rejects_invalid_toggle_and_accepts_false() {
+    let TestApp { app, .. } = test_app();
+    let provider = register_provider(&app, json!({ "mode": "static_bearer" })).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+
+    // `false` parses to Some(false) — exercises the false/0 arm of
+    // parse_task_mode_toggle. With no bots bound the roster is empty but 200.
+    let (status, body) =
+        task_mode_roster(&app, provider_id, Some(admin_token), "?task_claim_mode=false").await;
+    assert_eq!(status, StatusCode::OK, "false toggle failed: {body}");
+    assert!(body["items"].is_array(), "false toggle response missing items: {body}");
+
+    // `0` is the other accepted false spelling (same parse arm).
+    let (status, _body) =
+        task_mode_roster(&app, provider_id, Some(admin_token), "?task_dream_mode=0").await;
+    assert_eq!(status, StatusCode::OK, "0 toggle failed");
+
+    // An unrecognized toggle value surfaces as 400 bad_request from the handler
+    // (parse_task_mode_toggle error arm), before the service is consulted.
+    let (status, body) =
+        task_mode_roster(&app, provider_id, Some(admin_token), "?task_claim_mode=maybe").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "invalid toggle not rejected: {body}");
+    assert_eq!(body["status"], 400);
 }
