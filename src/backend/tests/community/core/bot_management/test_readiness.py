@@ -35,3 +35,38 @@ def test_explicit_application_initialization_state_remains_authoritative() -> No
     }
 
     assert is_bot_ready(bot) is False
+
+
+def test_application_bot_ready_when_start_succeeded_and_binding_active() -> None:
+    bot = {
+        "status": "ACTIVE",
+        "active_engine": "claude_code",
+        "template_type": "applicationCoding",
+        "device_binding": {"status": "ACTIVE"},
+        "ext": {"start_status": "SUCCEEDED"},
+    }
+
+    assert is_bot_ready(bot) is True
+
+
+def test_application_bot_not_ready_when_start_failed() -> None:
+    bot = {
+        "status": "ACTIVE",
+        "active_engine": "claude_code",
+        "template_type": "applicationCoding",
+        "device_binding": {"status": "ACTIVE"},
+        "ext": {"start_status": "FAILED"},
+    }
+
+    assert is_bot_ready(bot) is False
+
+
+def test_non_application_bot_ignores_start_status() -> None:
+    bot = {
+        "status": "ACTIVE",
+        "active_engine": "openclaw",
+        "device_binding": {"status": "ACTIVE"},
+        "ext": {"start_status": "FAILED"},
+    }
+
+    assert is_bot_ready(bot) is True
