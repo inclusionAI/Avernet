@@ -168,7 +168,7 @@ def render_lua_filter_config(lua_code: str) -> str:
     # 18 spaces = indent of http_filters items in both MITM and HTTP chains
     indent = "                  "
     return (
-        f'- name: envoy.filters.http.lua\n'
+        f'{indent}- name: envoy.filters.http.lua\n'
         f'{indent}  typed_config:\n'
         f'{indent}    "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua\n'
         f'{indent}    inline_code: {code_json}\n'
