@@ -68,11 +68,14 @@ class MariaDbOrmPlugin(DataSourcePlugin):
         The generic ``db_url`` (from the base ``application.yaml``) may point at
         SQLite by default; it is only honored here when it is explicitly a
         MySQL-compatible URL, so a MariaDB backend never resolves to SQLite.
+        ``DATABASE_URL`` gets the same guard: it is the exact env var the
+        SQLite plugin consumes, so a leaked SQLite value must not make a
+        MARIADB_ORM deployment silently build a meaningless engine.
         """
         import os
 
         env_url = os.environ.get("DATABASE_URL")
-        if env_url:
+        if env_url and not env_url.startswith("sqlite://"):
             return env_url
 
         if self._database_url:
@@ -108,12 +111,14 @@ class MariaDbOrmPlugin(DataSourcePlugin):
         if db_url and not db_url.startswith("sqlite://"):
             return db_url
 
-        if not database:
-            raise RuntimeError(
-                "MariaDB backend requires a database — set MARIADB_DATABASE, "
-                "plugins.database.mariadb_database, or a mysql+:// database_url"
-            )
-        return _build_async_url(host, port, database, user, password)
+        # WR-04: no reachable resolution left — the `if database:` branch
+        # above already returned for a non-empty database, so this point is
+        # only reached when no usable URL source exists. The former final
+        # ``return _build_async_url(...)`` after this raise was dead code.
+        raise RuntimeError(
+            "MariaDB backend requires a database — set MARIADB_DATABASE, "
+            "plugins.database.mariadb_database, or a mysql+:// database_url"
+        )
 
     def _init_engines(self, async_url: str) -> None:
         """Build sync (mysqlconnector) and async (aiomysql) engines.
