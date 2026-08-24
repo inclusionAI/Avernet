@@ -31,6 +31,9 @@ from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.identity import (
+    CallerIdentityRepositoryProtocol,
+)
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -116,6 +119,7 @@ class McpModule(Module):
         passport_update: PassportPlugin,
         mcp_config_service: MCPConfigService,
         bot_repository: BotRepository,
+        caller_identity_repository: CallerIdentityRepositoryProtocol,
         injector: Injector,
     ) -> MCPSyncService:
         """Cycle break: lazy thunks for ``DeviceContextResolver`` /
@@ -133,6 +137,7 @@ class McpModule(Module):
             passport_update=passport_update,
             mcp_config_service=mcp_config_service,
             bot_repository=bot_repository,
+            caller_identity_repository=caller_identity_repository,
             resolver_provider=lambda: injector.get(DeviceContextResolver),
             device_sync_dispatcher_provider=lambda: injector.get(DeviceSyncDispatcher),
         )

@@ -17,6 +17,7 @@ async def test_identity_sync_replaces_complete_non_local_mcp_manifest() -> None:
         passport_update=passport,
         mcp_config_service=MagicMock(),
         bot_repository=MagicMock(),
+        caller_identity_repository=MagicMock(),
         resolver_provider=MagicMock(),
         device_sync_dispatcher_provider=MagicMock(),
     )

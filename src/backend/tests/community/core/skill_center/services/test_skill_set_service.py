@@ -989,6 +989,8 @@ class TestAddMcpToSkillSetTeclawEndToEnd:
         svc.mcp_config_service = MagicMock()
         svc.mcp_config_service.build_mcp_sync_payload.return_value = (None, {}, "PROD", None)
         svc.bot_repository = MagicMock()
+        svc.caller_identity_repository = MagicMock()
+        svc.caller_identity_repository.list_draft_call_types.return_value = {}
         # 新链路:resolver + dispatcher (旧 device_sync_supplier 已废弃) — provider thunks
         svc._resolver_provider = lambda: resolver
         svc._device_sync_dispatcher_provider = lambda: dispatcher
