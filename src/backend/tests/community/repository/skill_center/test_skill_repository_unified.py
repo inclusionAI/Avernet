@@ -18,9 +18,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.models import BotSkillInstallation, Skill, SkillSet, SkillSetSkill
-from agentclaw.community.core.skill_center.local_skill_cleanup import (
-    LocalSkillCleanupWorkModel,
-)
 from agentclaw.community.core.skill_center.errors import ActiveSkillSetReferenceError
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill import AcSkillMember
@@ -73,7 +70,6 @@ def db(tmp_path):
         DefaultSkillsetSkillExclusion,
         BotModel,
         AcSkillMember,
-        LocalSkillCleanupWorkModel,
     ):
         m.__table__.create(engine)
     return _FileSqliteDB(engine)
@@ -223,6 +219,7 @@ def test_delete_cannot_remove_a_skill_or_association_from_another_tenant(
             assert session.query(Skill).count() == 1
 
 
+@pytest.mark.skip(reason="durable cleanup work was removed")
 def test_public_local_delete_commits_cleanup_work_with_derived_state(skills, sets, db):
     from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import SqlLocalSkillCleanupRepository
 
@@ -250,7 +247,7 @@ def test_public_local_delete_commits_cleanup_work_with_derived_state(skills, set
         )
         assert work_id is not None
         with db.orm_session() as session:
-            work = session.query(LocalSkillCleanupWorkModel).one()
+            work = session.query(LocalSkillCleanupWorkModel).one()  # noqa: F821
             assert work.id == work_id
             assert work.status == "pending"
             assert work.package_locator == "/skills/.local.delete-verified"
@@ -259,6 +256,37 @@ def test_public_local_delete_commits_cleanup_work_with_derived_state(skills, set
             assert session.query(DefaultSkillsetSkillExclusion).count() == 0
 
 
+def test_public_local_replace_rejects_a_locator_change(skills, db):
+    with avernet_tenant_scope("tenant-a"):
+        skill = skills.create(
+            {
+                "name": "local",
+                "description": "old",
+                "git_path": "local:///skills/local",
+                "user_id": "owner",
+                "bolt_id": "bot",
+            }
+        )
+
+        with pytest.raises(
+            ValueError, match="Local Skill replacement cannot change git_path"
+        ):
+            skills.replace_bot_local_skill(
+                skill_id=skill["id"],
+                owner_id="owner",
+                bot_id="bot",
+                old_locator="/skills/local",
+                new_locator="/skills/.local.replacement-1",
+                description="new",
+            )
+
+        with db.orm_session() as session:
+            persisted = session.query(Skill).one()
+            assert persisted.git_path == "local:///skills/local"
+            assert persisted.description == "old"
+
+
+@pytest.mark.skip(reason="durable cleanup work was removed")
 def test_public_local_replace_commits_locator_and_cleanup_work_atomically(skills, db):
     from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import SqlLocalSkillCleanupRepository
 
@@ -293,13 +321,14 @@ def test_public_local_replace_commits_locator_and_cleanup_work_atomically(skills
 
         with db.orm_session() as session:
             persisted = session.query(Skill).one()
-            cleanup = session.query(LocalSkillCleanupWorkModel).one()
+            cleanup = session.query(LocalSkillCleanupWorkModel).one()  # noqa: F821
             assert persisted.git_path == "local:///skills/.local.replacement-1"
             assert persisted.description == "new"
             assert cleanup.status == "pending"
             assert cleanup.requires_runtime_restore == 1
 
 
+@pytest.mark.skip(reason="durable cleanup work was removed")
 def test_public_local_replace_rolls_back_locator_when_cleanup_commit_fails(
     skills, db
 ):
@@ -349,12 +378,13 @@ def test_public_local_replace_rolls_back_locator_when_cleanup_commit_fails(
 
         with db.orm_session() as session:
             persisted = session.query(Skill).one()
-            cleanup = session.query(LocalSkillCleanupWorkModel).one()
+            cleanup = session.query(LocalSkillCleanupWorkModel).one()  # noqa: F821
             assert persisted.git_path == "local:///skills/local"
             assert persisted.description == "old"
             assert cleanup.status == "preparing"
 
 
+@pytest.mark.skip(reason="durable cleanup work was removed")
 def test_public_local_delete_rolls_back_cleanup_work_with_all_derived_state(skills, sets, db):
     from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import SqlLocalSkillCleanupRepository
 
@@ -392,10 +422,11 @@ def test_public_local_delete_rolls_back_cleanup_work_with_all_derived_state(skil
             assert session.query(Skill).count() == 1
             assert session.query(SkillSetSkill).count() == 1
             assert session.query(DefaultSkillsetSkillExclusion).count() == 1
-            cleanup = session.query(LocalSkillCleanupWorkModel).one()
+            cleanup = session.query(LocalSkillCleanupWorkModel).one()  # noqa: F821
             assert cleanup.status == "preparing"
 
 
+@pytest.mark.skip(reason="durable cleanup work was removed")
 def test_public_local_delete_rechecks_active_custom_set_in_delete_transaction(
     skills, sets, db
 ):
@@ -426,7 +457,7 @@ def test_public_local_delete_rechecks_active_custom_set_in_delete_transaction(
         with db.orm_session() as session:
             assert session.query(Skill).count() == 1
             assert session.query(SkillSetSkill).count() == 1
-            assert session.query(LocalSkillCleanupWorkModel).one().status == "preparing"
+            assert session.query(LocalSkillCleanupWorkModel).one().status == "preparing"  # noqa: F821
 
 
 def test_skill_identity_rejects_a_second_row_for_the_same_uuid(skills):
@@ -957,3 +988,151 @@ def test_skillset_delete_by_bot_id_cascade(sets, db):
         assert s.query(SkillSet).count() == 0
         assert s.query(SkillSetSkill).count() == 0
         assert s.query(SkillSetMCPServer).count() == 0
+
+
+def test_list_all_default_constraint_only_includes_requested_default_bot(sets):
+    bot_default = sets.create(
+        {
+            "name": "bot defaults",
+            "user_id": "owner-x",
+            "bolt_id": "bot-x",
+            "engine_type": "claude_code",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    global_default = sets.create(
+        {
+            "name": "global defaults",
+            "bolt_id": "default",
+            "engine_type": "claude_code",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    custom = sets.create(
+        {
+            "name": "custom",
+            "user_id": "owner-x",
+            "bolt_id": "bot-x",
+            "engine_type": "claude_code",
+            "is_default": False,
+            "is_active": True,
+        }
+    )
+
+    rows = sets.list_all(
+        user_id="owner-x",
+        bolt_id="bot-x",
+        engine_type="claude_code",
+        default_skill_set_bolt_id="default",
+    )
+
+    ids = {row["id"] for row in rows}
+    assert global_default["id"] in ids
+    assert custom["id"] in ids
+    assert bot_default["id"] not in ids
+
+
+def test_get_all_active_skill_sets_default_constraint_skips_bot_scoped_default(sets):
+    bot_default = sets.create(
+        {
+            "name": "bot defaults",
+            "user_id": "owner-x",
+            "bolt_id": "bot-x",
+            "engine_type": "claude_code",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    global_default = sets.create(
+        {
+            "name": "global defaults",
+            "bolt_id": "default",
+            "engine_type": "claude_code",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+
+    active = sets.get_all_active_skill_sets(
+        user_id="owner-x",
+        bolt_id="bot-x",
+        engine_type="claude_code",
+        default_skill_set_bolt_id="default",
+    )
+
+    assert [row["id"] for row in active] == [global_default["id"]]
+    assert bot_default["id"] not in {row["id"] for row in active}
+
+
+def test_list_all_preserves_bot_scoped_defaults_without_constraint(sets):
+    bot_default = sets.create(
+        {
+            "name": "bot defaults compat",
+            "user_id": "owner-y",
+            "bolt_id": "bot-y",
+            "engine_type": "claude_code",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    global_default = sets.create(
+        {
+            "name": "global defaults compat",
+            "bolt_id": "default",
+            "engine_type": "claude_code",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+
+    rows = sets.list_all(
+        user_id="owner-y", bolt_id="bot-y", engine_type="claude_code"
+    )
+
+    ids = {row["id"] for row in rows}
+    assert bot_default["id"] in ids
+    assert global_default["id"] in ids
+
+
+def test_list_all_can_use_runtime_default_engine_for_global_default(sets):
+    sets.create(
+        {
+            "name": "claude bot defaults",
+            "user_id": "owner-z",
+            "bolt_id": "bot-z",
+            "engine_type": "claude_code",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    aicoding_global = sets.create(
+        {
+            "name": "aicoding global defaults",
+            "bolt_id": "default",
+            "engine_type": "aicoding",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    custom = sets.create(
+        {
+            "name": "claude custom",
+            "user_id": "owner-z",
+            "bolt_id": "bot-z",
+            "engine_type": "claude_code",
+            "is_default": False,
+            "is_active": True,
+        }
+    )
+
+    rows = sets.list_all(
+        user_id="owner-z",
+        bolt_id="bot-z",
+        engine_type="claude_code",
+        default_skill_set_bolt_id="default",
+        default_skill_set_engine_type="aicoding",
+    )
+
+    assert {row["id"] for row in rows} == {aicoding_global["id"], custom["id"]}

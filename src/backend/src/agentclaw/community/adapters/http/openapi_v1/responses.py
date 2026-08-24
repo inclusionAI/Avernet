@@ -45,7 +45,10 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptTooLargeError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
+    ApplicationCodingUnavailableError,
     BotAccessRefusedError,
+    BotCombinationUnsupportedError,
+    BotTemplateInvalidError,
     CallerIdentityConflictError,
     CallerIdentityForbiddenError,
     CallerIdentityInvalidError,
@@ -500,6 +503,12 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ChannelEditLockedError: (423, "Edit lock required"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
+    BotTemplateInvalidError: (422, "Invalid coding template"),
+    BotCombinationUnsupportedError: (409, "Coding template combination not supported"),
+    ApplicationCodingUnavailableError: (
+        503,
+        "Application coding is unavailable in this deployment",
+    ),
     PassportError: (502, "Authorization service error"),
     AuthRelationshipError: (502, "Authorization relationship service error"),
     # Engine-config failures. None of these is a BotServiceError, so the base

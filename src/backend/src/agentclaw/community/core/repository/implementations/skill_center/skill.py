@@ -790,7 +790,10 @@ class SkillRepository(
         new_locator: str,
         description: str,
     ) -> dict | None:
-        """Atomically switch one Local Skill to its canonical package locator."""
+        """Update one Local Skill while preserving its canonical locator."""
+
+        if old_locator != new_locator:
+            raise ValueError("Local Skill replacement cannot change git_path")
 
         with self._db.transactional_orm_session() as db:
             skill = (
@@ -808,7 +811,6 @@ class SkillRepository(
             if skill is None:
                 return None
             skill.description = description
-            skill.git_path = f"local://{new_locator}"
             skill.user_id = _normalize_user_id(owner_id)
             skill.gmt_modified = func.now()
             db.flush()

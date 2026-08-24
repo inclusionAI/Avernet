@@ -1392,28 +1392,51 @@ class BotService:
             logger.info(f"[bot_service.create_bot] Bot {bot_id} created with PENDING status")
 
             # Step 1.5: Create template record if template_config is provided
-            if template_config and template_type:
-                try:
-                    logger.info(
-                        "[bot_service.create_bot] Creating template for bot %s, template_type=%s",
-                        bot_id, template_type,
-                    )
-
-                    # For applicationCoding template, ensure DIMA workspace exists
-                    if template_type == "applicationCoding":
-                        # Create DIMA workspace and update template_config with dima_space_id
+            if template_type and template_config is not None:
+                if template_type == "applicationCoding":
+                    # A coding bot without a hosted workspace is unusable, so a
+                    # failed workspace create is fatal here (unlike a plain bot,
+                    # where template creation stays best-effort). The already-
+                    # inserted bot row is soft-deleted; deeper compensation
+                    # (Passport / workspace / template) stays best-effort-by-
+                    # caller, per the plan's explicit deferral.
+                    try:
                         workspace_id = self._require_workspace_hosting().create_workspace_for_bot(
                             staff_id=user_id,
                             bot_id=bot_id,
                             bot_name=resolved_bot_name,
                             template_config=template_config,
                         )
+                    except Exception as exc:
+                        logger.exception(
+                            "[bot_service.create_bot] hosted workspace creation failed bot_id=%s",
+                            bot_id,
+                        )
+                        self._repository.soft_delete_by_owner(bot_id, user_id)
+                        raise BotServiceError(
+                            "applicationCoding workspace creation failed"
+                        ) from exc
+                    if not workspace_id:
+                        logger.error(
+                            "[bot_service.create_bot] hosted workspace creation returned "
+                            "no id bot_id=%s",
+                            bot_id,
+                        )
+                        self._repository.soft_delete_by_owner(bot_id, user_id)
+                        raise BotServiceError(
+                            "applicationCoding workspace creation returned no id"
+                        )
+                    logger.info(
+                        "[bot_service.create_bot] Created hosted workspace %s for bot %s",
+                        workspace_id,
+                        bot_id,
+                    )
 
-                        if workspace_id:
-                            logger.info(f"[bot_service.create_bot] Created DIMA workspace {workspace_id} for bot {bot_id}")
-                        else:
-                            logger.warning(f"[bot_service.create_bot] Failed to create DIMA workspace for bot {bot_id}, continuing without it")
-
+                try:
+                    logger.info(
+                        "[bot_service.create_bot] Creating template for bot %s, template_type=%s",
+                        bot_id, template_type,
+                    )
                     self._template_service.create_template(
                         bot_id=bot_id,
                         template_config=template_config,
@@ -1423,8 +1446,18 @@ class BotService:
                     logger.info(f"[bot_service.create_bot] Template created for bot {bot_id}")
                 except Exception as e:
                     logger.error(f"[bot_service.create_bot] Failed to create template for bot {bot_id}: {e}", exc_info=True)
-                    # Don't fail bot creation if template creation fails
-                    # Just log the error
+                    if template_type == "applicationCoding":
+                        # An applicationCoding bot without its template record is
+                        # not a usable bot. Do not report success after hosting
+                        # succeeded but local template persistence failed. The
+                        # remote workspace may require manual cleanup because the
+                        # delete contract is intentionally deferred.
+                        self._repository.soft_delete_by_owner(bot_id, user_id)
+                        raise BotServiceError(
+                            "applicationCoding template creation failed"
+                        ) from e
+                    # Keep the historical best-effort behavior for non-coding
+                    # template creation.
 
             # 桌面 bot 的设备分配走 BaaS 流程（DesktopBotService._execute_creation），
             # 不应走 DeviceService.apply_device()（会生成 staff_xxx 格式 device_id）。
@@ -5695,6 +5728,15 @@ class BotService:
                 "applicationCoding bots require it."
             )
         return self._workspace_hosting_service
+
+    def is_workspace_hosting_available(self) -> bool:
+        """Whether this deployment has a bound Workspace Hosting implementation.
+
+        The route preflight calls this so applicationCoding can be refused (503)
+        before a bot id is allocated or a Passport is applied, rather than
+        tripping ``_require_workspace_hosting`` mid-create after side effects.
+        """
+        return self._workspace_hosting_service is not None
 
     def ensure_hosted_workspace(self, bot_id: str, user_id: str) -> Optional[str]:
         """为 Coding bot 确保 DIMA workspace 存在（幂等）。
