@@ -38,7 +38,7 @@ class DeadlineRenewalScheduler:
     for registration with the AppScheduler cron lifecycle.
 
     The scheduler selects containers due for renewal by querying the
-    baas_arca_ttl_renewal_schedule cold table rather than scanning the
+    baas_bot_ttl_renewal_schedule cold table rather than scanning the
     hot tables, reducing per-run query volume by >99%.
 
     Constructor dependencies (injected by DI container):

@@ -5,7 +5,7 @@ hook semantics via a subclass instead of inline hooks in the community
 _device_service.py core path (D-08'/D-09'):
 
 - start_device() — after a successful create, register the ARCA container
-  in the baas_arca_ttl_renewal_schedule cold table (defensive posture:
+  in the baas_bot_ttl_renewal_schedule cold table (defensive posture:
   never blocks device creation).
 - stop_device_by_uuid() / destroy_device_by_uuid() — after a successful
   stop/destroy (DestroyDeviceResponse.success is True), mark the schedule
