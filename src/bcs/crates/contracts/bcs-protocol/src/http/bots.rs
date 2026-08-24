@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 use crate::{BindingChannels, Skill, deserialize_skills};
 
@@ -10,9 +11,12 @@ pub struct BotSearchQuery {
     /// Name/summary fuzzy search (contains, case-insensitive).
     #[serde(default)]
     pub q: Option<String>,
-    /// Visibility filter: public | protected | private.
+    /// Visibility filter: comma-separated public | protected | private values.
     #[serde(default)]
     pub visibility: Option<String>,
+    /// User visibility filter: comma-separated public | protected | private values.
+    #[serde(default)]
+    pub user_visibility: Option<String>,
     /// Status filter: online | hidden.
     #[serde(default)]
     pub status: Option<String>,
@@ -22,7 +26,10 @@ pub struct BotSearchQuery {
     /// Viewer actor id used to calculate friendship.
     #[serde(default)]
     pub viewer_actor_id: Option<String>,
-    /// Friend status filter relative to the explicit viewer: true | false.
+    /// Friendship filter relative to the explicit viewer: all | friends | non_friends.
+    #[serde(default)]
+    pub friendship: Option<String>,
+    /// Deprecated compatibility alias for `friendship`: true -> friends, false -> non_friends.
     #[serde(default)]
     pub is_friend: Option<bool>,
     /// TC (TeamClaw backend) bot filter. `true` → only bots onboarded from the
@@ -46,6 +53,9 @@ pub struct BotSearchEntry {
     pub name: Option<String>,
     pub summary: Option<String>,
     pub visibility: String,
+    pub user_visibility: String,
+    pub friend_ext: Map<String, Value>,
+    pub friend_check_in_strategy: String,
     pub status: String,
     pub actor_kind: String,
     pub is_online: bool,

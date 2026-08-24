@@ -110,6 +110,34 @@ async fn search_bots_tc_bot_filter_keeps_only_owner_suffixed_bots() {
     assert_eq!(native_uuids, vec!["ws-native-bot"]);
 }
 
+
+
+#[tokio::test]
+async fn search_bots_visibility_filter_accepts_multiple_values() {
+    let (bot, core, _data_dir) = build_bot().await;
+    core.register("public-bot".to_string(), capabilities("Public", "public"))
+        .await
+        .expect("register public bot");
+    core.register("protected-bot".to_string(), capabilities("Protected", "protected"))
+        .await
+        .expect("register protected bot");
+    core.register("private-bot".to_string(), capabilities("Private", "private"))
+        .await
+        .expect("register private bot");
+
+    let result = bot
+        .search_bots(SearchBotsCommand {
+            visibility: Some(vec!["public".to_string(), "private".to_string()]),
+            ..Default::default()
+        })
+        .await
+        .expect("search bots by multiple visibility values");
+
+    let uuids: Vec<&str> = result.items.iter().map(|b| b.bot_uuid.as_str()).collect();
+    assert_eq!(uuids, vec!["private-bot", "public-bot"]);
+    assert_eq!(result.total, 2);
+}
+
 #[tokio::test]
 async fn search_bots_excludes_soft_deleted_persistent_rows_even_if_memory_has_bot() {
     let cache = Arc::new(InMemoryCachePlugin::new());

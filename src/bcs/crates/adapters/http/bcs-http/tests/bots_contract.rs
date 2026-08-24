@@ -17,6 +17,10 @@ use bcs_service_api::{
     application::connect::{
         ConnectResult, ConnectService, ConnectStatus, RequestDirection, RequestsPage,
     },
+    application::v1::{
+        ApplicationError, BotInternalAttributes, FriendCheckInStrategy,
+        InternalBotAttributesService, UserVisibility,
+    },
     ActorKind, ActorStatus, BotConnectCommand, BotConnectResult, BotDetailCommand, BotDetailResult,
     BotDynamicStatus, BotLeaveResult, BotListCommand, BotListEntry, BotListResult,
     BotManagementService, BotPagedListResult, BotQueryByIdsResult, BotQueryEntry, BotQueryService,
@@ -26,10 +30,31 @@ use bcs_service_api::{
 };
 use bcs_services_container::Services;
 use serde_json::Value;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use support::bot_use_cases::{RecordingBotManagementService, RecordingBotQueryService};
 use tempfile::TempDir;
 use tower::ServiceExt;
+
+struct RecordingSearchPolicyService {
+    attributes: HashMap<String, BotInternalAttributes>,
+}
+
+#[async_trait]
+impl InternalBotAttributesService for RecordingSearchPolicyService {
+    async fn get(&self, bot_id: String) -> Result<BotInternalAttributes, ApplicationError> {
+        self.attributes
+            .get(&bot_id)
+            .cloned()
+            .ok_or_else(|| ApplicationError::not_found("bot_not_found", "bot not found"))
+    }
+
+    async fn patch(
+        &self,
+        _command: bcs_service_api::application::v1::PatchBotInternalAttributes,
+    ) -> Result<BotInternalAttributes, ApplicationError> {
+        Err(ApplicationError::internal("patch is not configured"))
+    }
+}
 
 struct RecordingSearchConnectService {
     list_friends_commands: tokio::sync::Mutex<Vec<String>>,
@@ -1260,8 +1285,8 @@ async fn search_bots_route_forces_public_scope_without_bearer() {
     // No user-identity port ⇒ anonymous caller.
     let app = build_router(HttpAppState::new(services));
 
-    // Client tries visibility=protected, but without a Bearer it must be forced
-    // to public (spec §3.6.2).
+    // Client tries visibility=protected, but without a Bearer it is intersected
+    // with the anonymous public-only scope, producing an empty visibility set.
     let response = app
         .oneshot(
             Request::builder()
@@ -1275,21 +1300,14 @@ async fn search_bots_route_forces_public_scope_without_bearer() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["total"], 2);
+    assert_eq!(json["total"], 0);
     assert_eq!(json["offset"], 0);
     assert_eq!(json["limit"], 20);
-    let items = json["items"].as_array().unwrap();
-    assert_eq!(items.len(), 2);
-    // Anonymous callers do not get the is_friend field (spec §3.4).
-    assert!(items[0].get("is_friend").is_none());
-    // status / visibility / is_online are surfaced from the registry query.
-    assert_eq!(items[0]["status"], "online");
-    assert_eq!(items[0]["visibility"], "public");
-    assert_eq!(items[0]["is_online"], true);
+    assert_eq!(json["items"].as_array().unwrap().len(), 0);
 
     let commands = query.search_commands.lock().await;
     assert_eq!(commands.len(), 1);
-    assert_eq!(commands[0].visibility.as_deref(), Some("public"));
+    assert!(commands[0].visibility.as_ref().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -1354,7 +1372,7 @@ async fn search_bots_route_uses_explicit_viewer_for_is_friend_filter() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/bots/search?viewer_actor_type=bot&viewer_actor_id=viewer-bot&is_friend=true")
+                .uri("/bots/search?viewer_actor_type=bot&viewer_actor_id=viewer-bot&friendship=friends")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1376,7 +1394,7 @@ async fn search_bots_route_uses_explicit_viewer_for_is_friend_filter() {
 }
 
 #[tokio::test]
-async fn search_bots_route_rejects_is_friend_without_explicit_viewer() {
+async fn search_bots_route_rejects_friendship_filter_without_explicit_viewer() {
     let query = Arc::new(RecordingBotQueryService {
         search_result: Ok(BotSearchResult { items: vec![], total: 0 }),
         ..Default::default()
@@ -1387,7 +1405,7 @@ async fn search_bots_route_rejects_is_friend_without_explicit_viewer() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/bots/search?is_friend=true")
+                .uri("/bots/search?friendship=friends")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1421,6 +1439,136 @@ async fn search_bots_route_forwards_tc_bot_filter_param() {
     let commands = query.search_commands.lock().await;
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].tc_bot, Some(true));
+}
+
+
+#[tokio::test]
+async fn search_bots_route_accepts_multi_visibility_and_returns_friend_policy_fields() {
+    let query = Arc::new(RecordingBotQueryService {
+        search_result: Ok(BotSearchResult {
+            items: vec![query_entry("bot-alpha")],
+            total: 1,
+        }),
+        ..Default::default()
+    });
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
+        ChainUserIdentityPort::new(chain),
+    )));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/search?visibility=public,protected")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    let items = json["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["user_visibility"], "protected");
+    assert_eq!(items[0]["friend_ext"], serde_json::json!({}));
+    assert_eq!(items[0]["friend_check_in_strategy"], "APPROVAL");
+
+    let commands = query.search_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(
+        commands[0].visibility.as_ref().unwrap(),
+        &vec!["public".to_string(), "protected".to_string()]
+    );
+}
+
+
+#[tokio::test]
+async fn search_bots_route_filters_and_returns_internal_user_visibility() {
+    let query = Arc::new(RecordingBotQueryService {
+        search_result: Ok(BotSearchResult {
+            items: vec![query_entry("bot-alpha"), query_entry("bot-beta")],
+            total: 2,
+        }),
+        ..Default::default()
+    });
+    let mut attributes = HashMap::new();
+    attributes.insert(
+        "bot-alpha".to_string(),
+        BotInternalAttributes {
+            visibility: "public".to_string(),
+            user_visibility: UserVisibility::Public,
+            friend_ext: serde_json::json!({"view_scope_user_friend_deps": ["dep-1"]})
+                .as_object()
+                .unwrap()
+                .clone(),
+            friend_check_in_strategy: FriendCheckInStrategy::Open,
+        },
+    );
+    attributes.insert(
+        "bot-beta".to_string(),
+        BotInternalAttributes {
+            visibility: "public".to_string(),
+            user_visibility: UserVisibility::Private,
+            friend_ext: serde_json::Map::new(),
+            friend_check_in_strategy: FriendCheckInStrategy::Approval,
+        },
+    );
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    let app = build_router(HttpAppState::new(services).with_internal_bot_attributes_service(
+        Arc::new(RecordingSearchPolicyService { attributes }),
+    ));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/search?user_visibility=public")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["total"], 1);
+    let items = json["items"].as_array().unwrap();
+    assert_eq!(items[0]["bot_uuid"], "bot-alpha");
+    assert_eq!(items[0]["user_visibility"], "public");
+    assert_eq!(items[0]["friend_ext"]["view_scope_user_friend_deps"][0], "dep-1");
+    assert_eq!(items[0]["friend_check_in_strategy"], "OPEN");
+}
+
+#[tokio::test]
+async fn search_bots_route_filters_default_user_visibility() {
+    let query = Arc::new(RecordingBotQueryService {
+        search_result: Ok(BotSearchResult {
+            items: vec![query_entry("bot-alpha")],
+            total: 1,
+        }),
+        ..Default::default()
+    });
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    let app = build_router(HttpAppState::new(services));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/search?user_visibility=private")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["total"], 0);
+    assert_eq!(json["items"].as_array().unwrap().len(), 0);
 }
 
 fn query_entry(bot_uuid: &str) -> BotQueryEntry {
