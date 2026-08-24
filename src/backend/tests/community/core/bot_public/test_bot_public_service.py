@@ -40,6 +40,7 @@ def _make_service(
     device_sync_dispatcher=None,
     catalog_metadata_service=None,
 ):
+    resolver = device_context_resolver or MagicMock()
     return BotPublicService(
         bot_friend_repo=bot_friend_repo or MagicMock(),
         bot_repository=bot_repository or MagicMock(),
@@ -50,7 +51,7 @@ def _make_service(
         auth_relationship_plugin=auth_relationship_plugin or MagicMock(),
         publish_approval_plugin=publish_approval_plugin or MagicMock(),
         skill_set_service_factory=skill_set_service_factory or MagicMock(),
-        device_context_resolver=device_context_resolver or MagicMock(),
+        device_context_resolver_factory=lambda: resolver,
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
         catalog_metadata_service=catalog_metadata_service or MagicMock(),
     )

@@ -8,7 +8,7 @@ import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlugin
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -133,7 +133,7 @@ class BotPublicService:
         auth_relationship_plugin: AuthRelationshipPlugin,
         publish_approval_plugin: BotPublishApprovalPlugin,
         skill_set_service_factory: "SkillSetServiceFactory",
-        device_context_resolver: DeviceContextResolver,
+        device_context_resolver_factory: "Callable[[], DeviceContextResolver]",
         device_sync_dispatcher: "DeviceSyncDispatcher",
         catalog_metadata_service: BotCatalogMetadataServiceProtocol,
     ) -> None:
@@ -148,7 +148,10 @@ class BotPublicService:
         self._skill_set_service_factory = skill_set_service_factory
         # Task 2.1: resolver + dispatcher 替代 device_sync_supplier 在
         # sync_bot_config_to_device 路径上的角色。Task 6 收口后 supplier 已删。
-        self._resolver = device_context_resolver
+        # Lazy: DeviceContextResolver's conn-info builders transitively reach
+        # DeviceService, which (corp) depends on BotPublicService itself —
+        # eager injection here would cycle. Resolved at call time instead.
+        self._resolver_factory = device_context_resolver_factory
         self._device_sync_dispatcher = device_sync_dispatcher
         self._catalog_metadata_service = catalog_metadata_service
         self._sync_lock = threading.Lock()
@@ -1029,7 +1032,7 @@ class BotPublicService:
             UnknownProviderError,
         )
         try:
-            ctx = self._resolver.resolve_for_bot(bot_id, user_id)
+            ctx = self._resolver_factory().resolve_for_bot(bot_id, user_id)
         except (DeviceNotBoundError, UnknownProviderError) as e:
             logger.warning(
                 "[bot_service.sync_bot_config_to_device] bot=%s no syncable device: %s",
