@@ -21,6 +21,7 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceContext,
     DeviceNotBoundError,
 )
+from agentclaw.community.core.caller_identity.models import McpCallType
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 
 
@@ -74,6 +75,7 @@ def _make_sync_service(
     passport_update=None,
     mcp_config_service=None,
     bot_repository=None,
+    caller_identity_repository=None,
     mcp_center=None,
     resolver=None,
     dispatcher=None,
@@ -96,6 +98,10 @@ def _make_sync_service(
         None, {}, "PROD", None
     )
     service.bot_repository = bot_repository or MagicMock()
+    if caller_identity_repository is None:
+        caller_identity_repository = MagicMock()
+        caller_identity_repository.list_draft_call_types.return_value = {}
+    service.caller_identity_repository = caller_identity_repository
     if resolver is None or dispatcher is None:
         _r, _d, _ = _make_resolver_and_dispatcher(plugin=plugin)
         service._resolver_provider = (lambda r=(resolver or _r): r)
@@ -108,6 +114,95 @@ def _make_sync_service(
 
 class TestRefreshMcpScope:
     """Test refresh_mcp_scope: scope declaration + passport update."""
+
+    @pytest.mark.asyncio
+    async def test_preserves_explicit_caller_identity_in_passport_scope(self):
+        """A normal MCP refresh must not rewrite a configured caller MCP to owner."""
+        caller_identity_repository = MagicMock()
+        caller_identity_repository.list_draft_call_types.return_value = {
+            "mcp.deepinsight": McpCallType.CALLER,
+        }
+        bot_repository = MagicMock()
+        bot_repository.get_by_id_and_owner.return_value = {
+            "id": 42,
+            "active_engine": "claude_code",
+            "template_type": "generalCC",
+        }
+        passport_update = MagicMock()
+        passport_update.query_passport_clis.return_value = []
+
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[
+                {"server_code": "mcp.deepinsight", "name": "DeepInsight"},
+                {"server_code": "mcp.owner", "name": "Owner MCP"},
+            ]),
+            passport_update=passport_update,
+            bot_repository=bot_repository,
+            caller_identity_repository=caller_identity_repository,
+        )
+
+        result = await service.refresh_mcp_scope(
+            user_id="owner-1",
+            entity_id="entity-1",
+            bot_id="bot-1",
+            entity_type="staff",
+            engine_type="claude_code",
+        )
+
+        assert result["success"] is True
+        caller_identity_repository.list_draft_call_types.assert_called_once_with(
+            42,
+            "claude_code",
+        )
+        assert passport_update.update_passport.call_args.kwargs["resource_scope"][
+            "mcp_items"
+        ] == [
+            {
+                "mcp_code": "mcp.deepinsight",
+                "mcp_name": "DeepInsight",
+                "mcp_desc": None,
+                "identity_mode": "caller",
+            },
+            {
+                "mcp_code": "mcp.owner",
+                "mcp_name": "Owner MCP",
+                "mcp_desc": None,
+                "identity_mode": "owner",
+            },
+        ]
+
+    @pytest.mark.asyncio
+    async def test_does_not_update_passport_when_identity_scope_lookup_fails(self):
+        """Do not replace a Passport scope when caller identity cannot be read."""
+        caller_identity_repository = MagicMock()
+        caller_identity_repository.list_draft_call_types.side_effect = RuntimeError(
+            "database unavailable"
+        )
+        bot_repository = MagicMock()
+        bot_repository.get_by_id_and_owner.return_value = {
+            "id": 42,
+            "active_engine": "claude_code",
+        }
+        passport_update = MagicMock()
+
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[{"server_code": "mcp.deepinsight"}]),
+            passport_update=passport_update,
+            bot_repository=bot_repository,
+            caller_identity_repository=caller_identity_repository,
+        )
+
+        result = await service.refresh_mcp_scope(
+            user_id="owner-1",
+            entity_id="entity-1",
+            bot_id="bot-1",
+            entity_type="staff",
+            engine_type="claude_code",
+        )
+
+        assert result["success"] is False
+        assert "查询 MCP 调用身份失败" in result["error"]
+        passport_update.update_passport.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_updates_passport_when_scope_ok(self):
@@ -192,6 +287,7 @@ class TestRefreshMcpScope:
         passport_update.query_passport_clis.return_value = []
         bot_repository = MagicMock()
         bot_repository.get_by_id_and_owner.return_value = {
+            "id": 1,
             "bot_name": "AICoding Bot",
             "bot_desc": "desc",
             "active_engine": "aicoding",
@@ -236,6 +332,7 @@ class TestRefreshMcpScope:
         ]
         bot_repository = MagicMock()
         bot_repository.get_by_id_and_owner.return_value = {
+            "id": 1,
             "active_engine": "claude_code",
             "template_type": "personalCoding",
         }
@@ -274,6 +371,7 @@ class TestRefreshMcpScope:
         passport_update.query_passport_clis.return_value = []
         bot_repository = MagicMock()
         bot_repository.get_by_id_and_owner.return_value = {
+            "id": 1,
             "active_engine": "aicoding",
             "template_type": "personalCoding",
         }
@@ -414,6 +512,7 @@ class TestRefreshMcpScope:
         passport_update.update_passport.assert_called_once()
         assert passport_update.update_passport.call_args.kwargs["resource_scope"] == {
             "mcp_codes": [],
+            "mcp_items": [],
             "cli_items": [],
         }
 

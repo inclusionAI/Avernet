@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
 from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
@@ -116,6 +117,7 @@ class MCPSyncService:
         passport_update: PassportPlugin,
         mcp_config_service: MCPConfigService,
         bot_repository: BotRepository,
+        caller_identity_repository: CallerIdentityRepositoryProtocol,
         resolver_provider: 'Callable[[], "DeviceContextResolver"]',
         device_sync_dispatcher_provider: 'Callable[[], "DeviceSyncDispatcher"]',
     ) -> None:
@@ -129,6 +131,7 @@ class MCPSyncService:
             passport_update: Passport 插件，用于更新 passport MCP 列表。
             mcp_config_service: MCP 配置服务，用于构建同步请求参数。
             bot_repository: Bot 仓库，用于查询 bot 信息。
+            caller_identity_repository: Caller 身份仓库，用于保留显式 MCP 调用身份。
             resolver_provider: Lazy thunk 返回 ``DeviceContextResolver`` — 全仓
                 唯一 provider 解析点。以 ``(bot_id, user_id)`` 入参,经 binding +
                 ConnInfoBuilder 输出 typed ``DeviceContext``,取代旧
@@ -150,6 +153,7 @@ class MCPSyncService:
         self.passport_update = passport_update
         self.mcp_config_service = mcp_config_service
         self.bot_repository = bot_repository
+        self.caller_identity_repository = caller_identity_repository
         self._resolver_provider = resolver_provider
         self._device_sync_dispatcher_provider = device_sync_dispatcher_provider
 
@@ -480,7 +484,7 @@ class MCPSyncService:
         passport_result = await self._update_passport(
             bot_id=bot_id,
             user_id=user_id,
-            synced_server_codes=passport_mcp_codes,
+            synced_mcps=active_mcps,
             engine_type=effective_engine,
         )
         if not passport_result.get("success"):
@@ -894,24 +898,10 @@ class MCPSyncService:
         self,
         bot_id: str,
         user_id: str,
-        synced_server_codes: list[str],
+        synced_mcps: list[dict[str, Any]],
         engine_type: Optional[str] = None,
     ) -> dict[str, Any]:
-        """通知 passport 系统更新 bot 当前可用的 MCP codes 列表。
-
-        passport 用该列表做前端权限校验等下游消费。bot 元数据同时用于
-        解析默认 CLI 授权范围；若查询失败，为避免写入不完整的 CLI 快照，
-        本次 passport 更新会中止并返回失败。
-
-        Args:
-            bot_id: 目标 bot ID。
-            user_id: 用户 ID。
-            synced_server_codes: 当前应生效的 MCP server code 列表。
-            engine_type: 引擎类型。
-
-        Returns:
-            ``{"success": bool, "error": str|None}`` 格式的结果字典。
-        """
+        """更新完整 MCP scope；身份或 bot 元数据不可读取时中止覆盖。"""
         bot_name: Optional[str] = None
         bot_desc: Optional[str] = None
         template_type: Optional[str] = None
@@ -923,21 +913,33 @@ class MCPSyncService:
                 bot_desc = bot.get("bot_desc")
                 template_type = bot.get("template_type")
                 raw_template_config = bot.get("template_config")
-                if isinstance(raw_template_config, Mapping):
-                    template_config = raw_template_config
-                engine_type = (
-                    bot.get("active_engine") or bot.get("engine_type") or engine_type
-                )
+                template_config = raw_template_config if isinstance(raw_template_config, Mapping) else None
+                engine_type = bot.get("active_engine") or bot.get("engine_type") or engine_type
         except Exception as e:
             error = f"获取 bot 信息失败，无法安全解析默认 CLI 范围: {e}"
             logger.error("[MCPSyncService] %s, bot_id=%s", error, bot_id)
             return {"success": False, "error": error}
 
+        try:
+            identity_modes = self.caller_identity_repository.list_draft_call_types(
+                int(bot["id"]), str(engine_type)
+            )
+            mcp_items = passport_mcp_items_from_entries(
+                synced_mcps, identity_modes=identity_modes
+            )
+        except Exception as e:
+            error = f"查询 MCP 调用身份失败: {e}"
+            logger.error("[MCPSyncService] %s, bot_id=%s", error, bot_id)
+            return {"success": False, "error": error}
+
+        synced_server_codes = [item["mcp_code"] for item in mcp_items]
+        caller_mcp_codes = [
+            item["mcp_code"] for item in mcp_items if item["identity_mode"] == "caller"
+        ]
+
         # MCP 同步触发 resourceManifest 更新时，要回填当前 CLI，避免覆盖式更新丢失 CLI 授权。
         try:
-            current_cli_items = self.passport_update.query_passport_clis(
-                bot_id, user_id
-            )
+            current_cli_items = self.passport_update.query_passport_clis(bot_id, user_id)
         except Exception as e:
             error = f"查询 CLI 范围失败: {e}"
             logger.error("[MCPSyncService] %s", error)
@@ -964,12 +966,13 @@ class MCPSyncService:
             )
 
         try:
-            # resource_scope 是完整快照：MCP 来自同步结果，CLI 来自当前许可证 + 引擎默认 CLI。
+            # resource_scope 是完整快照：MCP 身份与 CLI 都必须回传，避免覆盖丢失授权。
             self.passport_update.update_passport(
                 bot_id=bot_id,
                 user_id=user_id,
                 resource_scope={
                     "mcp_codes": synced_server_codes,
+                    "mcp_items": mcp_items,
                     "cli_items": cli_items,
                 },
                 bot_name=bot_name,
@@ -978,11 +981,12 @@ class MCPSyncService:
             )
             logger.info(
                 "[MCPSyncService] updatePassport 成功: "
-                "bot_id=%s, user_id=%s, mcps=%s, clis=%s, "
+                "bot_id=%s, user_id=%s, mcps=%s, caller_mcps=%s, clis=%s, "
                 "engine_type=%s, bot_name=%s",
                 bot_id,
                 user_id,
                 synced_server_codes,
+                caller_mcp_codes,
                 cli_items,
                 engine_type,
                 bot_name,
