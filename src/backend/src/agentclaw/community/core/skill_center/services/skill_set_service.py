@@ -1493,20 +1493,73 @@ class SkillSetService:
         # Set's per-Bot deactivation.
         excluded_codes = set(self.skill_set_repo.get_all_excluded_mcps(user_id, bot_id))
 
-        active_mcps = []
-        seen_server_codes = set()
+        # Each phase appends entries and marks their codes in
+        # ``seen_server_codes``, so a later phase never duplicates an earlier
+        # one; ordering is the union's precedence (rows, policy, installed).
+        active_mcps: List[dict] = []
+        seen_server_codes: set = set()
+        active_mcps.extend(
+            self._default_set_mcp_rows(
+                active_skill_sets,
+                user_id=user_id,
+                bot_id=bot_id,
+                engine_type=effective_engine,
+                template_type=effective_template_type,
+                ext_info=effective_ext_info,
+                excluded_codes=excluded_codes,
+                seen_server_codes=seen_server_codes,
+            )
+        )
+        active_mcps.extend(
+            self._default_policy_mcp_entries(
+                engine_type=effective_engine,
+                template_type=effective_template_type,
+                ext_info=effective_ext_info,
+                excluded_codes=excluded_codes,
+                seen_server_codes=seen_server_codes,
+            )
+        )
+        active_mcps.extend(
+            self._installed_only_mcp_entries(
+                installed_codes=self._installed_mcp_codes(
+                    entity_id=entity_id, bot_id=bot_id, user_id=user_id
+                ),
+                active_skill_sets=active_skill_sets,
+                seen_server_codes=seen_server_codes,
+            )
+        )
+
+        logger.info(
+            f"[collect_bot_active_mcps] bot_id={bot_id}, engine_type={effective_engine}, "
+            f"total_mcps={len(active_mcps)}, codes={[m.get('server_code') for m in active_mcps]}"
+        )
+        return active_mcps
+
+    def _default_set_mcp_rows(
+        self,
+        active_skill_sets: List[dict],
+        *,
+        user_id: str,
+        bot_id: str,
+        engine_type: Optional[str],
+        template_type: Optional[str],
+        ext_info,
+        excluded_codes: set,
+        seen_server_codes: set,
+    ) -> List[dict]:
+        """The Default Set's association-row members, minus exclusions."""
+        rows: List[dict] = []
         for skill_set in active_skill_sets:
             if not skill_set.get("is_default"):
                 continue
-            mcps_in_set = self.get_set_mcp_servers(
+            for mcp in self.get_set_mcp_servers(
                 str(skill_set.get("id")),
                 user_id,
                 bot_id,
-                effective_engine,
-                effective_template_type,
-                ext_info=effective_ext_info,
-            )
-            for mcp in mcps_in_set:
+                engine_type,
+                template_type,
+                ext_info=ext_info,
+            ):
                 server_code = mcp.get("server_code")
                 if (
                     server_code
@@ -1514,32 +1567,48 @@ class SkillSetService:
                     and server_code not in seen_server_codes
                 ):
                     seen_server_codes.add(server_code)
-                    active_mcps.append(mcp)
+                    rows.append(mcp)
+        return rows
 
-        default_mcp_configs = get_default_mcp_servers(
-            effective_engine,
-            effective_template_type,
-            ext_info=effective_ext_info,
-        )
-        for config in default_mcp_configs:
+    def _default_policy_mcp_entries(
+        self,
+        *,
+        engine_type: Optional[str],
+        template_type: Optional[str],
+        ext_info,
+        excluded_codes: set,
+        seen_server_codes: set,
+    ) -> List[dict]:
+        """The static engine/template default configs, minus exclusions."""
+        entries: List[dict] = []
+        for config in get_default_mcp_servers(
+            engine_type,
+            template_type,
+            ext_info=ext_info,
+        ):
             server_code = config["server_code"]
             if server_code in excluded_codes or server_code in seen_server_codes:
                 continue  # Skip user-excluded default MCPs
-            mcp_entry = {
+            entry = {
                 "server_code": server_code,
                 "name": config.get("name") or server_code,
                 "description": config.get("description", "Default MCP"),
                 "status": "ONLINE",
             }
             if "icon" in config and config.get("icon"):
-                mcp_entry["icon"] = config["icon"]
+                entry["icon"] = config["icon"]
             if "headers" in config:
-                mcp_entry["headers"] = config["headers"]
+                entry["headers"] = config["headers"]
             seen_server_codes.add(server_code)
-            active_mcps.append(mcp_entry)
+            entries.append(entry)
+        return entries
 
+    def _installed_mcp_codes(
+        self, *, entity_id: str, bot_id: str, user_id: str
+    ) -> frozenset:
+        """The installed half, read through the reader (which flushes first)."""
         try:
-            installed_codes = self._reader.active_mcp_server_codes(
+            return self._reader.active_mcp_server_codes(
                 bot_id=bot_id, owner_id=user_id
             )
         except LocalSkillNotFoundError:
@@ -1550,38 +1619,53 @@ class SkillSetService:
             bot = self._bot_repo.get_by_id_and_entity(bot_id, entity_id)
             owner = str(bot.get("owner_id") or "") if bot else ""
             if bot is not None and owner and owner != user_id:
-                installed_codes = self._reader.active_mcp_server_codes(
+                return self._reader.active_mcp_server_codes(
                     bot_id=bot_id, owner_id=owner, bot=bot
                 )
-            else:
-                logger.warning(
-                    "[collect_bot_active_mcps] Bot not found: user_id=%s, "
-                    "bot_id=%s",
-                    user_id,
-                    bot_id,
-                )
-                installed_codes = frozenset()
+            logger.warning(
+                "[collect_bot_active_mcps] Bot not found: user_id=%s, "
+                "bot_id=%s",
+                user_id,
+                bot_id,
+            )
+            return frozenset()
 
+    def _installed_only_mcp_entries(
+        self,
+        *,
+        installed_codes,
+        active_skill_sets: List[dict],
+        seen_server_codes: set,
+    ) -> List[dict]:
+        """Installed codes no Default entry covered, with membership metadata.
+
+        An ordinary Set's association row is the best metadata an installed
+        code can have; a direct installation has none, so its entry is
+        minimal.
+        """
         missing_codes = [
             code for code in sorted(installed_codes)
             if code not in seen_server_codes
         ]
-        if missing_codes:
-            membership_metadata: dict[str, dict] = {}
-            for skill_set in active_skill_sets:
-                if skill_set.get("is_default"):
-                    continue
-                for assoc in self.skill_set_repo.get_mcp_servers_in_set(
-                    str(skill_set.get("id"))
-                ):
-                    code = assoc.get("server_code")
-                    if code and code not in membership_metadata:
-                        membership_metadata[code] = assoc
-            for code in missing_codes:
-                assoc = membership_metadata.get(code)
-                # One shape for every union entry, matching
-                # ``get_set_mcp_servers``'s normalization.
-                entry = {
+        if not missing_codes:
+            return []
+        membership_metadata: dict[str, dict] = {}
+        for skill_set in active_skill_sets:
+            if skill_set.get("is_default"):
+                continue
+            for assoc in self.skill_set_repo.get_mcp_servers_in_set(
+                str(skill_set.get("id"))
+            ):
+                code = assoc.get("server_code")
+                if code and code not in membership_metadata:
+                    membership_metadata[code] = assoc
+        entries: List[dict] = []
+        for code in missing_codes:
+            assoc = membership_metadata.get(code)
+            # One shape for every union entry, matching
+            # ``get_set_mcp_servers``'s normalization.
+            entries.append(
+                {
                     "id": assoc.get("id") if assoc else None,
                     "server_code": code,
                     "name": (assoc.get("name") if assoc else None) or code,
@@ -1592,14 +1676,9 @@ class SkillSetService:
                     "status": "ONLINE",
                     "is_default": False,
                 }
-                seen_server_codes.add(code)
-                active_mcps.append(entry)
-
-        logger.info(
-            f"[collect_bot_active_mcps] bot_id={bot_id}, engine_type={effective_engine}, "
-            f"total_mcps={len(active_mcps)}, codes={[m.get('server_code') for m in active_mcps]}"
-        )
-        return active_mcps
+            )
+            seen_server_codes.add(code)
+        return entries
 
     def collect_bot_mcps(
         self,

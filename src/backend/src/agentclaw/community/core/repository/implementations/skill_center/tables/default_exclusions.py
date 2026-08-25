@@ -9,6 +9,14 @@ are per-Bot.
 The UoW exclusion commands (spec E.11) compose these with the Installation
 deltas in one transaction; the legacy ``SkillRepository`` writers retire
 with their dead callers.
+
+These functions are deliberately dumb SQL: they do not re-verify that
+``set_id`` names a Default Set or that the member belongs to it. Those
+invariants are the UoW commands' — ``_default_set`` refuses a non-Default
+address and the exclusion commands gate on effective membership before
+writing — and the write-ownership architecture test keeps the UoW composition
+modules this package's only importers, so no caller can reach these writes
+without passing those gates.
 """
 
 from __future__ import annotations
