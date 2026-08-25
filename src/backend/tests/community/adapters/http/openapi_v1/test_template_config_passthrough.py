@@ -1,4 +1,4 @@
-"""Unit tests for the ``engine_properties.template`` passthrough contract.
+"""Unit tests for the ``template.properties`` passthrough contract.
 
 The public property bag is a thin passthrough into the owning template adapter's
 own structure (legacy flat applicationCoding vs nested template factory) — there
@@ -13,7 +13,7 @@ import pytest
 from agentclaw.community.core.bot_management.errors import (
     BotTemplateInvalidError,
 )
-from agentclaw.community.core.bot_management.create_flow import (
+from agentclaw.community.core.bot_management.engines.provisioning import (
     to_internal_template_config,
 )
 
@@ -26,6 +26,17 @@ def test_empty_dict_is_a_valid_passthrough() -> None:
     # An empty object is a legitimate (if minimal) template payload, and must
     # survive as {} rather than being collapsed to None by a truthiness check.
     assert to_internal_template_config({}) == {}
+
+
+def test_legacy_mode_keeps_server_managed_fields() -> None:
+    # Internal snapshots may carry platform-managed fields (#1442): the
+    # explicit opt-in accepts them while still detaching the input.
+    payload = {"template_uid": "legacy-template", "devflow_workflow": "x"}
+    result = to_internal_template_config(
+        payload, reject_server_managed_fields=False
+    )
+    assert result == payload
+    assert result is not payload
 
 
 def test_payload_passes_through_unchanged_flat() -> None:
