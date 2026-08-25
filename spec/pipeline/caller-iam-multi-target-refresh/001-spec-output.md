@@ -19,6 +19,8 @@ Session Files runtime-binding resolver.
   instance, independently of the service lock.
 - Treat the IAM refresh as successful when at least one target is updated.
 - Return a controlled error only when no target is available or updated.
+- Exchange the opaque Caller credential once per IAM request, then reuse that
+  credential for every selected binding update.
 
 ## Explicit non-goals
 

@@ -8,6 +8,7 @@ from agentclaw.community.core.caller_identity.credential import (
     CALLER_CREDENTIAL_REQUEST_INVALID,
     CALLER_OUTBOUND_UPDATE_FAILED,
     CallerCredentialError,
+    CallerToken,
 )
 from agentclaw.community.core.caller_identity.contracts import (
     CallerIdentityAmbiguousError,
@@ -126,6 +127,14 @@ class CallerIamTokenService:
                 stage=stage,
             )
             updated_targets = 0
+            caller_token = await asyncio.to_thread(
+                self._caller_identity.exchange_caller_token,
+                iam_token=iam_token,
+                caller_user_id=identity.staffId,
+                bot_id=bot_id,
+                owner_user_id=context.owner_id,
+                token_provider=self._token_provider,
+            )
             for target in targets:
                 try:
                     await self._exchange_target(
@@ -138,6 +147,7 @@ class CallerIamTokenService:
                         entity_id=entity_id,
                         binding_id=target.binding_id,
                         is_test_exchange=False,
+                        caller_token=caller_token,
                     )
                     updated_targets += 1
                     logger.info(
@@ -182,6 +192,7 @@ class CallerIamTokenService:
         entity_id: str | None,
         binding_id: int | None,
         is_test_exchange: bool,
+        caller_token: CallerToken | None = None,
     ) -> None:
         await asyncio.to_thread(
             self._caller_identity.exchange_caller_identity,
@@ -196,6 +207,7 @@ class CallerIamTokenService:
             entity_id=entity_id,
             binding_id=binding_id,
             is_test_exchange=is_test_exchange,
+            caller_token=caller_token,
         )
 
     def _resolve_refresh_targets(

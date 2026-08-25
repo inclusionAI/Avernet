@@ -20,6 +20,8 @@ source: current-worktree
   Instance targets and treat one successful target update as success.
 - Applied the existing Bot collaboration lock rule to Caller Service target
   selection; no Agent Run locking or BaaS append behavior was changed.
+- Exchange one Caller Token per IAM request and reuse it for all selected
+  runtime binding updates.
 - Added focused tests for target resolution, owner/no-lock, lock-holder,
   non-holder, partial success, and no-target failure behavior.
 

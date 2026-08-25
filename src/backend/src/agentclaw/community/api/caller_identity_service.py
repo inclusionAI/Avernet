@@ -8,6 +8,7 @@ from agentclaw.community.core.caller_identity.protocols import (
     CallerRuntimeUpdaterProtocol,
     CallerTokenProviderProtocol,
 )
+from agentclaw.community.core.caller_identity.credential import CallerToken
 from agentclaw.community.core.caller_identity.contracts import (
     CALLER_IDENTITY_CAPABILITY,
     CallerCallTypeInvalidError,
@@ -29,6 +30,16 @@ from agentclaw.community.core.caller_identity.contracts import (
 
 @runtime_checkable
 class CallerIdentityServiceProtocol(Protocol):
+    def exchange_caller_token(
+        self,
+        *,
+        iam_token: str,
+        caller_user_id: str,
+        bot_id: str,
+        owner_user_id: str,
+        token_provider: CallerTokenProviderProtocol,
+    ) -> CallerToken: ...
+
     async def update_mcp_call_type(
         self,
         *,
@@ -97,7 +108,8 @@ class CallerIdentityServiceProtocol(Protocol):
         entity_id: str | None = None,
         binding_id: int | None = None,
         is_test_exchange: bool = False,
-    ) -> None: ...
+        caller_token: CallerToken | None = None,
+    ) -> CallerToken: ...
 
 
 __all__ = [
