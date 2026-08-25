@@ -152,7 +152,7 @@ Idempotency-Key: required
 ```
 
 POST 返回 `202` 和 `reference_id`；前端轮询 GET，状态为
-`PENDING/RUNNING/SUCCEEDED/FAILED`。Backend 冻结精确 SC Version，完成 Canonical OSS
+`PENDING/RUNNING/SUCCEEDED/FAILED`。Backend 冻结精确 SC Version，完成 TeamClaw Canonical Store Ready
 物化并使 Version=`PUBLISHED` 后才写普通 SkillSet Membership；前端不编排“物化后再
 添加”两步。当前仅冻结该接口合同，未实现完整链路前不得加入 Gateway 正式 OpenAPI artifact，也不得返回“已引用成功”的假结果。
 
