@@ -13,6 +13,9 @@ from agentclaw.community.core.repository.implementations.skill_center.default_sk
 from agentclaw.community.core.repository.capability_desired_state_types import (
     DesiredStateMutation,
 )
+from agentclaw.community.core.skill_center.policies.capability_ownership import (
+    require_can_join_set,
+)
 from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
 )
@@ -76,21 +79,32 @@ class McpSkillSetControlPlaneCommands:
             )
             if current is not None:
                 return DesiredStateMutation(self._as_item(row), False, old)
-            if server_code in old.mcp_installations:
-                raise SkillSetControlPlaneConflictError("RESOURCE_DIRECT_ACTIVE")
-            owner = (
-                self._scope(session.query(SkillSet), SkillSet)
-                .join(SkillSetMCPServer, SkillSetMCPServer.skill_set_id == SkillSet.id)
+            # R3 covers ANY of the Bot's Sets — the Default included, its
+            # members excluded or not.
+            reachable_ids = {
+                int(candidate.id)
+                for candidate in self._bot_sets(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    engine_type=engine_type,
+                    default_engine_types=default_engine_types,
+                )
+            } - {int(row.id)}
+            membership = (
+                self._scope(session.query(SkillSetMCPServer), SkillSetMCPServer)
                 .filter(
-                    SkillSet.bolt_id == bot_id,
-                    SkillSet.user_id == owner_id,
-                    SkillSet.is_default.is_(False),
+                    SkillSetMCPServer.skill_set_id.in_(reachable_ids),
                     SkillSetMCPServer.server_code == server_code,
                 )
                 .first()
+                if reachable_ids
+                else None
             )
-            if owner is not None:
-                raise SkillSetControlPlaneConflictError("RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET")
+            require_can_join_set(
+                is_directly_active=server_code in old.mcp_installations,
+                is_in_another_set=membership is not None,
+            )
             session.add(SkillSetMCPServer(
                 skill_set_id=row.id, server_code=server_code, name=server_code,
                 user_id=row.user_id, env=get_current_env(),

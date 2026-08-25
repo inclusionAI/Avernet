@@ -117,7 +117,7 @@ lands in the same group as the migration of its last caller.
       wrappers over `is_set_managed` (each asset kind keeps its legacy error
       type); add the behavior-change test: an excluded Default-Set member is
       refused direct activate/deactivate.
-- [ ] 6.3 Route `add_skill` / `add_mcp` conflict checks through
+- [x] 6.3 Route `add_skill` / `add_mcp` conflict checks through
       `require_can_join_set`; R3 now covers ANY Set — add the test: a
       Default-Set member (excluded or not) is refused when added to an
       ordinary Set; R2-before-R3 precedence pinned by a test.

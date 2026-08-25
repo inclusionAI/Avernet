@@ -145,7 +145,11 @@ def _seed_state(world, *, runtime_success: bool) -> None:
                 "engine_type": "openclaw",
             }
         )
-        skill = world.get(SkillRepository).create(
+        # A direct-controlled Local Skill: no Set membership. A Set-managed
+        # member — the Default included, excluded or not — refuses the
+        # Skill-level command (R1, no exclusion carve-out); the dedicated
+        # 409 case below pins that.
+        world.get(SkillRepository).create(
             {
                 "name": "state-skill",
                 "description": "State endpoint coverage",
@@ -157,12 +161,6 @@ def _seed_state(world, *, runtime_success: bool) -> None:
                 "bolt_id": _BOT_ID,
                 "source_type": "upload",
             }
-        )
-        world.get(SkillSetRepository).add_skill_to_set(
-            skill_set["id"], skill["id"], user_id=_OWNER
-        )
-        world.get(SkillSetRepository).add_default_skill_exclusion(
-            _OWNER, _BOT_ID, int(skill_set["id"]), int(skill["id"])
         )
     runtime_factory = _RuntimeFactory(runtime_success)
     world.injector.binder.bind(
@@ -191,6 +189,16 @@ def _seed_activate(world) -> None:
 
 def _seed_runtime_failure(world) -> None:
     _seed_state(world, runtime_success=False)
+
+
+def _seed_excluded_default_member(world) -> None:
+    """The Bot's Default Set holds the Skill, and the owner excluded it."""
+    _seed_state(world, runtime_success=True)
+    with avernet_tenant_scope(_TENANT):
+        sets = world.get(SkillSetRepository)
+        default_set = sets.get_default(user_id=_OWNER, bolt_id=_BOT_ID)
+        sets.add_skill_to_set(default_set["id"], "1", user_id=_OWNER)
+        sets.add_default_skill_exclusion(_OWNER, _BOT_ID, int(default_set["id"]), 1)
 
 
 def _assert_skill_remains_inactive(_response, world) -> None:
@@ -244,6 +252,26 @@ def activate_local_skill_reconciles_runtime():
 )
 def activate_local_skill_runtime_failure_is_publicly_safe():
     """The activation command maps a runtime transport failure to the fixed envelope."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate",
+    scenario="excluded_default_member_refuses_direct_control",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
+    seed=_seed_excluded_default_member,
+    expect=ExpectError(
+        status=409,
+        json_contains={"code": 409202},
+    ),
+)
+def excluded_default_member_stays_set_managed():
+    """R1 with no exclusion carve-out: re-activation removes the exclusion
+    through the Set wire, never the Skill-level command."""
 
 
 @endpoint_test(

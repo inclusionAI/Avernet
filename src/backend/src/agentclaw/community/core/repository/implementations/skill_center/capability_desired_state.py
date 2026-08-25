@@ -50,6 +50,9 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
 )
+from agentclaw.community.core.skill_center.policies.capability_ownership import (
+    require_can_join_set,
+)
 
 
 class CapabilityDesiredStateRepository(
@@ -324,24 +327,35 @@ class CapabilityDesiredStateRepository(
             )
             if current is not None:
                 return DesiredStateMutation(_item(row), False, old)
-            # An installed skill without an ordinary Membership is Direct-active.
-            if skill.id in old.installations:
-                raise SkillSetControlPlaneConflictError("RESOURCE_DIRECT_ACTIVE")
-            owner = (
-                self._scope(session.query(SkillSet), SkillSet)
-                .join(SkillSetSkill, SkillSetSkill.skill_set_id == SkillSet.id)
+            # R3 covers ANY of the Bot's Sets — the Default included, its
+            # members excluded or not.
+            reachable_ids = {
+                int(candidate.id)
+                for candidate in self._bot_sets(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    engine_type=engine_type,
+                    default_engine_types=default_engine_types,
+                )
+            } - {int(row.id)}
+            identity = [SkillSetSkill.skill_id == skill.id]
+            if skill.skill_uuid:
+                identity.append(SkillSetSkill.skill_uuid == skill.skill_uuid)
+            membership = (
+                self._scope(session.query(SkillSetSkill), SkillSetSkill)
                 .filter(
-                    SkillSet.bolt_id == bot_id,
-                    SkillSet.user_id == owner_id,
-                    SkillSet.is_default.is_(False),
-                    SkillSetSkill.skill_id == skill.id,
+                    SkillSetSkill.skill_set_id.in_(reachable_ids),
+                    or_(*identity),
                 )
                 .first()
+                if reachable_ids
+                else None
             )
-            if owner is not None:
-                raise SkillSetControlPlaneConflictError(
-                    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
-                )
+            require_can_join_set(
+                is_directly_active=skill.id in old.installations,
+                is_in_another_set=membership is not None,
+            )
             if row.is_active:
                 self._require_unique_runtime_names(
                     session,

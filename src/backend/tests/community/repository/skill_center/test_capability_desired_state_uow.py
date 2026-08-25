@@ -1902,3 +1902,149 @@ def test_flush_removes_an_excluded_default_mcp_members_row():
         assert {
             row.server_code for row in session.query(BotMCPInstallation).all()
         } == {"kept-mcp"}
+
+
+def test_a_default_set_member_cannot_join_an_ordinary_set():
+    """R3 covers ANY Set: the Default included, its members excluded or not."""
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        default_set = SkillSet(
+            name="defaults",
+            user_id="",
+            bolt_id="",
+            engine_type="openclaw",
+            is_default=True,
+            is_active=True,
+            env="dev",
+        )
+        ordinary = SkillSet(
+            name="mine",
+            user_id="owner",
+            bolt_id="bot",
+            engine_type="openclaw",
+            is_active=False,
+            env="dev",
+        )
+        member = Skill(name="member", git_path="git://defaults/member", env="dev")
+        excluded = Skill(
+            name="excluded", git_path="git://defaults/excluded", env="dev"
+        )
+        session.add_all([default_set, ordinary, member, excluded])
+        session.flush()
+        session.add_all(
+            [
+                SkillSetSkill(
+                    skill_set_id=default_set.id, skill_id=member.id, env="dev"
+                ),
+                SkillSetSkill(
+                    skill_set_id=default_set.id, skill_id=excluded.id, env="dev"
+                ),
+                DefaultSkillsetSkillExclusion(
+                    user_id="owner",
+                    bot_id="bot",
+                    skill_set_id=int(default_set.id),
+                    skill_id=int(excluded.id),
+                ),
+            ]
+        )
+
+    repository = CapabilityDesiredStateRepository(db)
+
+    for skill_id in ("1", "2"):
+        with pytest.raises(SkillSetControlPlaneConflictError) as error:
+            repository.add_skill(
+                bot_id="bot",
+                owner_id="owner",
+                set_id=str(ordinary.id),
+                skill_id=skill_id,
+                engine_type="openclaw",
+                default_engine_types=("openclaw",),
+            )
+        assert "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET" in str(error.value)
+
+
+def test_direct_active_precedes_membership_when_both_forbid_joining():
+    """R2 before R3 — today's error precedence, now encoded in the policy."""
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        other = SkillSet(
+            name="other",
+            user_id="owner",
+            bolt_id="bot",
+            engine_type="openclaw",
+            is_active=False,
+            env="dev",
+        )
+        target = SkillSet(
+            name="target",
+            user_id="owner",
+            bolt_id="bot",
+            engine_type="openclaw",
+            is_active=False,
+            env="dev",
+        )
+        skill = Skill(name="both", git_path="git://team/both", env="dev")
+        session.add_all([other, target, skill])
+        session.flush()
+        session.add_all(
+            [
+                SkillSetSkill(skill_set_id=other.id, skill_id=skill.id, env="dev"),
+                BotSkillInstallation(
+                    bot_id="bot", owner_id="owner", skill_id=skill.id, env="dev"
+                ),
+            ]
+        )
+
+    with pytest.raises(SkillSetControlPlaneConflictError) as error:
+        CapabilityDesiredStateRepository(db).add_skill(
+            bot_id="bot",
+            owner_id="owner",
+            set_id=str(target.id),
+            skill_id="1",
+            engine_type="openclaw",
+        )
+    assert "RESOURCE_DIRECT_ACTIVE" in str(error.value)
+
+
+def test_a_default_set_mcp_member_cannot_join_an_ordinary_set():
+    """The MCP twin of R3's any-Set coverage."""
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        default_set = SkillSet(
+            name="defaults",
+            user_id="",
+            bolt_id="",
+            engine_type="openclaw",
+            is_default=True,
+            is_active=True,
+            env="dev",
+        )
+        ordinary = SkillSet(
+            name="mine",
+            user_id="owner",
+            bolt_id="bot",
+            engine_type="openclaw",
+            is_active=False,
+            env="dev",
+        )
+        session.add_all([default_set, ordinary])
+        session.flush()
+        session.add(
+            SkillSetMCPServer(
+                skill_set_id=default_set.id,
+                server_code="mcp.default-member",
+                name="mcp.default-member",
+                env="dev",
+            )
+        )
+
+    with pytest.raises(SkillSetControlPlaneConflictError) as error:
+        CapabilityDesiredStateRepository(db).add_mcp(
+            bot_id="bot",
+            owner_id="owner",
+            set_id=str(ordinary.id),
+            server_code="mcp.default-member",
+            engine_type="openclaw",
+            default_engine_types=("openclaw",),
+        )
+    assert "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET" in str(error.value)
