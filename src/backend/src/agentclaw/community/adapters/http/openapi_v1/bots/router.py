@@ -70,6 +70,7 @@ from agentclaw.community.core.bot_management.create_flow import (
     BotCreateContext,
     BotCreateDeploymentMode,
     BotCreateSpec,
+    BotCreateTemplateValidationMode,
     complete_bot_authorization,
     create_bot_with_authorization,
 )
@@ -433,6 +434,7 @@ async def create_bot(
                 "applicationCoding" if template_properties is not None else None
             ),
             template_config=template_properties,
+            template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
         ),
         context=BotCreateContext(
             deployment_mode=BotCreateDeploymentMode.CLOUD,
@@ -1035,6 +1037,7 @@ def _complete_auth_status(
                 space_id=current_space.numeric_id,
                 template_type=template_type,
                 template_config=template_config,
+                template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
             ),
             context=BotCreateContext(
                 deployment_mode=BotCreateDeploymentMode.CLOUD,
