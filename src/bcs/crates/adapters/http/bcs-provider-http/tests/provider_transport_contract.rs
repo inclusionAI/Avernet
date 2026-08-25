@@ -977,6 +977,7 @@ async fn provider_delivery_posts_chat_inject_body_with_bcn_group_id() {
                     "message": {
                         "text": "observe"
                     },
+                    "tags": ["draft", "tenant-a"],
                     "attachments": [{
                         "attachment_id": "att-1",
                         "type": "image",
@@ -1003,6 +1004,7 @@ async fn provider_delivery_posts_chat_inject_body_with_bcn_group_id() {
     assert_eq!(request.body["session_id"], "group-1:feedbeef");
     assert_eq!(request.body["bcn_group_id"], "group-1");
     assert!(request.body.get("bcs_group_id").is_none());
+    assert_eq!(request.body["to_bot"]["tags"], json!(["draft", "tenant-a"]));
     assert_eq!(request.body["from"]["kind"], "bot");
     assert_eq!(request.body["from"]["name"], "Sender Bot");
     assert_eq!(request.body["message"]["text"], "observe");

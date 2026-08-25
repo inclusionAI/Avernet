@@ -154,12 +154,22 @@ class SpaceService:
         normalized = name.strip()
         if not normalized or len(normalized) > 128:
             raise SpaceNameInvalidError("space name must contain 1-128 characters")
+        env = get_current_env()
+        if (
+            self._repository.get_team_space_by_name(
+                creator_id=creator_id, name=normalized, env=env
+            )
+            is not None
+        ):
+            raise SpaceAlreadyExistsError(
+                "a team space with the same name already exists for this creator"
+            )
         creator_user_name = self._get_creator_user_name(user_id=creator_id)
         with self._repository.create_team_transaction(
             name=normalized,
             creator_id=creator_id,
             creator_user_name=creator_user_name,
-            env=get_current_env(),
+            env=env,
         ) as record:
             result = self._skill_center_client.create_team(
                 SkillCenterTeamCreateRequest(

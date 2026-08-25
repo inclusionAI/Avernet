@@ -10,14 +10,14 @@ use super::{ApplicationError, AuthenticatedCaller, DeleteResult};
 /// upload completes. The system-message download URL points at this share link.
 pub const UPLOAD_COMPLETION_SHARE_TTL_SECONDS: u64 = 15 * 86_400;
 
-/// Builds no-auth shared-content download URLs for session files.
+/// Builds internal-collaboration download URLs for session files.
 ///
 /// The upload-completion notification links to a share link instead of the
 /// authenticated content endpoint so message receivers (including other bots)
 /// can fetch the file without credentials. Core logic stays transport-agnostic:
 /// the concrete public-facing base is supplied by the delivery adapter that
 /// implements this trait.
-pub trait SessionFileSharedContentUrlProjector: Send + Sync {
+pub trait SessionFileInternalContentUrlProjector: Send + Sync {
     /// Returns the full public URL for consuming the shared file content
     /// behind `token`.
     fn shared_content_url(&self, token: &str) -> String;

@@ -24,6 +24,7 @@ from typing import Any
 from injector import Module, inject, provider, singleton
 
 from agentclaw.community.di import config as cfg
+from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -404,6 +405,28 @@ class ConfigModule(Module):
             ),
             default_ttl_minutes=int(ttl),
         )
+
+    @singleton
+    @provider
+    def deploy_runtime(self) -> cfg.DeployRuntimeConfig:
+        """Which container this deployment runs (``baas.deploy_runtime``).
+
+        Validated here rather than where the composer is chosen, so a typo is
+        a config-load error naming the values that would have worked — not a
+        deployment that boots on the wrong image's payload and reports healthy
+        while its bots do not work.
+        """
+        raw = _block("baas").get("deploy_runtime")
+        default = cfg.DeployRuntimeConfig()
+        if raw is None:
+            return default
+        try:
+            return cfg.DeployRuntimeConfig(DeployRuntime(str(raw).strip()))
+        except ValueError:
+            valid = ", ".join(repr(r.value) for r in DeployRuntime)
+            raise ValueError(
+                f"unknown baas.deploy_runtime {raw!r}; expected one of {valid}"
+            ) from None
 
     @singleton
     @provider

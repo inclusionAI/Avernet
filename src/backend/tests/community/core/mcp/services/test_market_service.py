@@ -17,7 +17,9 @@ class TestMCPMarketService:
             "page_size": 20,
         }
         svc = MCPMarketService(mcp_center=mock_center)
-        result = svc.get_mcp_list(page_num=1, page_size=10, search_key="test")
+        result = svc.get_mcp_list(
+            page_num=1, page_size=10, search_key="test", tags=["productivity"]
+        )
         assert result["success"] is True
         mock_center.get_mcp_list.assert_called_once_with(
             page_num=1,
@@ -33,6 +35,7 @@ class TestMCPMarketService:
             network_types=None,
             categories=None,
             tenants=None,
+            tags=["productivity"],
         )
 
     def test_get_mcp_detail_delegates_to_plugin(self):

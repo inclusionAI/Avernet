@@ -228,6 +228,16 @@ def list_marketplace_servers(
     keyword: str | None,
     network_types: tuple[str, ...],
     market_service: Any,
+    server_codes: list[str] | None = None,
+    platform_server_codes: list[str] | None = None,
+    run_modes: list[str] | None = None,
+    statuses: list[str] | None = None,
+    transport_protocols: list[str] | None = None,
+    host_platforms: list[str] | None = None,
+    owners: list[str] | None = None,
+    categories: list[str] | None = None,
+    tenants: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> dict[str, Any]:
     """List marketplace servers, raising on an upstream failure.
 
@@ -238,7 +248,17 @@ def list_marketplace_servers(
         page_num=page,
         page_size=page_size,
         search_key=keyword,
+        server_codes=server_codes,
+        platform_server_codes=platform_server_codes,
+        run_modes=run_modes,
+        statuses=statuses,
+        transport_protocols=transport_protocols,
+        host_platforms=host_platforms,
+        owners=owners,
         network_types=list(network_types),
+        categories=categories,
+        tenants=tenants,
+        tags=tags,
     )
     if not result.get("success"):
         raise McpMarketUnavailableError(result.get("message") or "marketplace error")

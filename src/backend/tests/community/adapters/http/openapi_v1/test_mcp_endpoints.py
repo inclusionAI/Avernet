@@ -41,7 +41,10 @@ def _server(**ov):
         "networkTypes": ["INTERNET"],
         "transportProtocol": "SSE",
         "tools": [
-            {"name": "get", "inputSchema": {"properties": {"extInfo": {"z": 1}, "q": 2}}}
+            {
+                "name": "get",
+                "inputSchema": {"properties": {"extInfo": {"z": 1}, "q": 2}},
+            }
         ],
     }
     base.update(ov)
@@ -163,6 +166,264 @@ def test_server_detail_strips_ext_info(client):
     assert "extInfo" not in props and props["q"] == 2
 
 
+def test_server_detail_preserves_legacy_business_content(client, market):
+    market.get_mcp_detail.return_value = _server(
+        source="internal",
+        icon="icon.svg",
+        hostPlatform="MARKET",
+        platformServerCode="platform.weather",
+        hostAppName="Weather App",
+        accessLevel="PUBLIC",
+        docs={"overview": "# Weather\nMarkdown overview", "internal": "keep-me"},
+        endpoints=[
+            {
+                "networkType": "INTERNET",
+                "transportProtocol": "STREAMABLE_HTTP",
+                "env": "PROD",
+                "url": "https://mcp.example.invalid/mcp",
+                "headers": {"Authorization": "Bearer legacy-value"},
+            },
+            {
+                "networkType": "SECRET",
+                "transportProtocol": "SSE",
+                "env": "PRE",
+                "url": "https://secret.example.invalid/sse",
+                "headers": {"x-api-key": "legacy-value"},
+            },
+            {
+                "networkTypes": ["SECRET", "OFFICE"],
+                "transportProtocol": "SSE",
+                "env": "PROD",
+                "url": "https://office.example.invalid/sse",
+            },
+            "malformed",
+        ],
+        stdioConfigs=[
+            {
+                "command": "node",
+                "arguments": ["server.js"],
+                "envVariables": {"API_TOKEN": "legacy-value"},
+            }
+        ],
+        vendor={"name": "Example Vendor", "internalId": "vendor-7"},
+        status="ONLINE",
+        runMode="REMOTE",
+        category={"code": "DEV", "name": "Developer Tools"},
+        site="global",
+        tenant={"code": "community", "name": "Community"},
+        buCode="BU-1",
+        productCode="PRODUCT-1",
+        archDomainCode="DOMAIN-1",
+        tags=["weather", {"name": "structured-tag"}, "forecast"],
+        owner={"userId": "1001", "userName": "Owner"},
+        creator={"userId": "1002", "userName": "Creator"},
+        ownersInfo=[
+            {"userId": "1003", "userName": "Maintainer"},
+            {"userId": "1004"},
+            "malformed",
+        ],
+        codeRepoUrl="https://code.example.invalid/weather",
+        launchChannels=["WEB"],
+        futureField={"nestedFuture": "retained"},
+    )
+
+    data = _ok(client.get("/openapi/v1/bots/mcp/servers/mcp.weather"))
+
+    assert data["source"] == "internal"
+    assert data["icon"] == "icon.svg"
+    assert data["host_platform"] == "MARKET"
+    assert data["platform_server_code"] == "platform.weather"
+    assert data["host_app_name"] == "Weather App"
+    assert data["access_level"] == "PUBLIC"
+    assert data["docs"] == {
+        "overview": "# Weather\nMarkdown overview",
+        "internal": "keep-me",
+    }
+    assert data["endpoints"] == [
+        {
+            "network_type": "INTERNET",
+            "transport_protocol": "STREAMABLE_HTTP",
+            "env": "PROD",
+            "url": "https://mcp.example.invalid/mcp",
+            "headers": {"Authorization": "Bearer legacy-value"},
+        },
+        {
+            "network_type": "SECRET",
+            "transport_protocol": "SSE",
+            "env": "PRE",
+            "url": "https://secret.example.invalid/sse",
+            "headers": {"x-api-key": "legacy-value"},
+        },
+        {
+            "network_types": ["SECRET", "OFFICE"],
+            "transport_protocol": "SSE",
+            "env": "PROD",
+            "url": "https://office.example.invalid/sse",
+        },
+        "malformed",
+    ]
+    assert data["stdio_configs"] == [
+        {
+            "command": "node",
+            "arguments": ["server.js"],
+            "env_variables": {"API_TOKEN": "legacy-value"},
+        }
+    ]
+    assert data["vendor"] == {"name": "Example Vendor", "internal_id": "vendor-7"}
+    assert data["status"] == "ONLINE"
+    assert data["run_mode"] == "REMOTE"
+    assert data["category"] == {"code": "DEV", "name": "Developer Tools"}
+    assert data["site"] == "global"
+    assert data["tenant"] == {"code": "community", "name": "Community"}
+    assert data["bu_code"] == "BU-1"
+    assert data["product_code"] == "PRODUCT-1"
+    assert data["arch_domain_code"] == "DOMAIN-1"
+    assert data["tags"] == ["weather", {"name": "structured-tag"}, "forecast"]
+    assert data["owner"] == {"user_id": "1001", "user_name": "Owner"}
+    assert data["creator"] == {"user_id": "1002", "user_name": "Creator"}
+    assert data["owners_info"] == [
+        {"user_id": "1003", "user_name": "Maintainer"},
+        {"user_id": "1004"},
+        "malformed",
+    ]
+    assert data["code_repo_url"] == "https://code.example.invalid/weather"
+    assert data["launch_channels"] == ["WEB"]
+    assert data["future_field"] == {"nested_future": "retained"}
+
+
+def test_server_detail_accepts_legacy_and_snake_case_metadata_shapes(client, market):
+    market.get_mcp_detail.return_value = _server(
+        docs="Legacy Markdown",
+        endpoints=[
+            {
+                "transport_protocol": "SSE",
+                "env": "PRE",
+                "url": "https://legacy.example.invalid/sse",
+            }
+        ],
+        vendor="Legacy Vendor",
+        runMode=None,
+        run_mode="LOCAL",
+        category={"code": "TOOLS"},
+        site={"code": "cn"},
+        tenant={"code": "tenant-1"},
+        bu_code="BU-SNAKE",
+        product_code="PRODUCT-SNAKE",
+        arch_domain_code="DOMAIN-SNAKE",
+        ownersInfo={"name": "Single Maintainer", "userId": "private-id"},
+        owner="malformed",
+        creator={"user_name": "Snake Creator"},
+        tags="malformed",
+        tools="malformed",
+    )
+
+    data = _ok(client.get("/openapi/v1/bots/mcp/servers/mcp.weather"))
+
+    assert data["docs"] == "Legacy Markdown"
+    assert data["endpoints"] == [
+        {
+            "transport_protocol": "SSE",
+            "env": "PRE",
+            "url": "https://legacy.example.invalid/sse",
+        }
+    ]
+    assert data["vendor"] == "Legacy Vendor"
+    assert data["runMode"] is None
+    assert data["run_mode"] == "LOCAL"
+    assert data["category"] == {"code": "TOOLS"}
+    assert data["site"] == {"code": "cn"}
+    assert data["tenant"] == {"code": "tenant-1"}
+    assert data["bu_code"] == "BU-SNAKE"
+    assert data["product_code"] == "PRODUCT-SNAKE"
+    assert data["arch_domain_code"] == "DOMAIN-SNAKE"
+    assert data["owner"] == "malformed"
+    assert data["creator"] == {"user_name": "Snake Creator"}
+    assert data["owners_info"] == {
+        "name": "Single Maintainer",
+        "user_id": "private-id",
+    }
+    assert data["tags"] == "malformed"
+    assert data["tools"] == "malformed"
+
+
+def test_server_detail_preserves_malformed_legacy_values(client, market):
+    market.get_mcp_detail.return_value = _server(
+        docs={"overview": {"not": "markdown"}},
+        endpoints={"not": "a-list"},
+        vendor={"name": ""},
+        status={"not": "text"},
+        runMode={"not": "text"},
+        category=[],
+        site=None,
+        tenant=7,
+        buCode=1,
+        productCode=[],
+        archDomainCode={},
+        tags=None,
+        owner={"userName": ""},
+        creator=None,
+        ownersInfo=None,
+    )
+
+    data = _ok(client.get("/openapi/v1/bots/mcp/servers/mcp.weather"))
+
+    assert data["docs"] == {"overview": {"not": "markdown"}}
+    assert data["endpoints"] == {"not": "a-list"}
+    assert data["vendor"] == {"name": ""}
+    assert data["status"] == {"not": "text"}
+    assert data["run_mode"] == {"not": "text"}
+    assert data["category"] == []
+    assert data["site"] is None
+    assert data["tenant"] == 7
+    assert data["bu_code"] == 1
+    assert data["product_code"] == []
+    assert data["arch_domain_code"] == {}
+    assert data["tags"] is None
+    assert data["owner"] == {"user_name": ""}
+    assert data["creator"] is None
+    assert data["owners_info"] is None
+
+
+def test_server_detail_openapi_schema_covers_legacy_detail_fields(client):
+    schemas = client.app.openapi()["components"]["schemas"]
+    detail_properties = schemas["McpServerDetail"]["properties"]
+
+    assert {
+        "server_code",
+        "name",
+        "description",
+        "network_types",
+        "transport_protocol",
+        "source",
+        "icon",
+        "docs",
+        "endpoints",
+        "vendor",
+        "status",
+        "run_mode",
+        "host_platform",
+        "platform_server_code",
+        "host_app_name",
+        "category",
+        "site",
+        "tenant",
+        "access_level",
+        "stdio_configs",
+        "bu_code",
+        "product_code",
+        "arch_domain_code",
+        "tags",
+        "owner",
+        "creator",
+        "owners_info",
+        "code_repo_url",
+        "launch_channels",
+        "tools",
+    } <= detail_properties.keys()
+    assert "headers" in schemas["McpEndpoint"]["properties"]
+    assert "user_id" in schemas["McpPerson"]["properties"]
+
+
 def test_unknown_server_is_404_not_found(client, market):
     market.get_mcp_detail.return_value = None
     resp = client.get("/openapi/v1/bots/mcp/servers/nope")
@@ -201,8 +462,12 @@ def test_projection_reads_transport_protocol_from_endpoints(client, market):
     rec = _server()
     rec.pop("transportProtocol")
     rec["endpoints"] = [
-        {"env": "PRE", "networkType": "INTERNET",
-         "transportProtocol": "STREAMABLE_HTTP", "url": "https://x"}
+        {
+            "env": "PRE",
+            "networkType": "INTERNET",
+            "transportProtocol": "STREAMABLE_HTTP",
+            "url": "https://x",
+        }
     ]
     market.get_mcp_detail.return_value = rec
     market.get_mcp_list.return_value = {"success": True, "data": [rec], "total": 1}

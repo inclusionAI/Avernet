@@ -17,7 +17,7 @@ use bcs_service_api::application::v1::{
     DownloadSessionFile, DownloadSharedSessionFile, GetSessionFile, IdentityPolicy,
     ListSessionFiles, PrepareSessionFile, PrepareSessionFileResult, Principal,
     SessionFileActor, SessionFileActorKind, SessionFileApplicationService,
-    SessionFileContent, SessionFilePage, SessionFileSharedContentUrlProjector,
+    SessionFileContent, SessionFilePage, SessionFileInternalContentUrlProjector,
     SessionFileStatus, SessionFileView, ShareSessionFile, ShareSessionFileResult,
     UPLOAD_COMPLETION_SHARE_TTL_SECONDS, UploadSessionFileContent,
     UploadSessionFileResult, select_principal,
@@ -32,7 +32,7 @@ pub struct SessionFileApplicationServiceImpl {
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     system_message: Arc<dyn SystemMessageService>,
-    shared_content_projector: Arc<dyn SessionFileSharedContentUrlProjector>,
+    internal_content_projector: Arc<dyn SessionFileInternalContentUrlProjector>,
 }
 
 impl SessionFileApplicationServiceImpl {
@@ -42,7 +42,7 @@ impl SessionFileApplicationServiceImpl {
         groups: Arc<dyn GroupCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
         system_message: Arc<dyn SystemMessageService>,
-        shared_content_projector: Arc<dyn SessionFileSharedContentUrlProjector>,
+        internal_content_projector: Arc<dyn SessionFileInternalContentUrlProjector>,
     ) -> Self {
         Self {
             files,
@@ -50,7 +50,7 @@ impl SessionFileApplicationServiceImpl {
             groups,
             registry,
             system_message,
-            shared_content_projector,
+            internal_content_projector,
         }
     }
 
@@ -262,7 +262,7 @@ impl SessionFileApplicationServiceImpl {
             .await
         {
             Ok(result) => Some(
-                self.shared_content_projector
+                self.internal_content_projector
                     .shared_content_url(&result.share_token),
             ),
             Err(error) => {

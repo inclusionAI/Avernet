@@ -1187,6 +1187,112 @@ async fn bot_final_event_relays_through_bot_delivery_port() {
 }
 
 #[tokio::test]
+async fn bot_final_event_relay_uses_each_provider_targets_session_tags() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    support
+        .registry
+        .insert_named_actor("bot-consultant", "Consultant")
+        .await;
+    support
+        .registry
+        .set_delivery_target(
+            "bot-driver",
+            support::FakeRegistryService::provider_target("bot-driver"),
+        )
+        .await;
+    support
+        .registry
+        .set_delivery_target(
+            "bot-consultant",
+            support::FakeRegistryService::provider_target("bot-consultant"),
+        )
+        .await;
+
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.routing_policy = Some(RoutingPolicy {
+        mode: RoutingMode::Structured,
+        default_bot_final_delivery: DefaultDelivery::SendToDriver,
+        ..RoutingPolicy::default()
+    });
+    let mut stale_consultant =
+        Participant::bot("bot-consultant", ParticipantRole::Consultant);
+    stale_consultant.tags = vec!["stale-consultant".to_string()];
+    group.participants.push(stale_consultant);
+    group
+        .participants
+        .iter_mut()
+        .find(|participant| participant.bot_uuid == "bot-driver")
+        .expect("driver participant")
+        .tags = vec!["stale-driver".to_string()];
+    support.group.upsert(group).await.unwrap();
+
+    let mut driver = Participant::bot("bot-driver", ParticipantRole::Driver);
+    driver.tags = vec!["draft".to_string(), "driver-only".to_string()];
+    let mut sender = Participant::bot("bot-observer", ParticipantRole::Observer);
+    sender.tags = vec!["sender-tag".to_string()];
+    let mut consultant = Participant::bot("bot-consultant", ParticipantRole::Consultant);
+    consultant.tags = vec!["online".to_string(), "consultant-only".to_string()];
+    let mut session = test_session(
+        "group-1:abcdef12",
+        "group-1",
+        SessionKind::ServiceInvocation,
+    );
+    session.participants = vec![driver, sender, consultant];
+    let session_management = Arc::new(RecordingSessionManagement::new(vec![session]));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_session_management(session_management);
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "run-provider-tags".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({
+            "state": "final",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "done with tags"}],
+            },
+        }),
+        state: ChatEventState::Final,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    let frames = support.bot_delivery.frames().await;
+    assert_eq!(frames.len(), 2);
+    assert!(support
+        .bot_delivery
+        .targets()
+        .await
+        .iter()
+        .all(BotDeliveryTarget::is_http_provider));
+    let send = frames
+        .iter()
+        .find(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.send"))
+        .expect("driver chat.send frame");
+    assert_eq!(
+        request_params(send)["tags"],
+        json!(["draft", "driver-only"])
+    );
+    let inject = frames
+        .iter()
+        .find(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.inject"))
+        .expect("consultant chat.inject frame");
+    assert_eq!(
+        request_params(inject)["tags"],
+        json!(["online", "consultant-only"])
+    );
+}
+
+#[tokio::test]
 async fn bot_final_event_relay_preserves_session_id_for_legacy_target() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
@@ -3391,6 +3497,89 @@ async fn manager_worker_task_final_delta_mode_flushes_only_open_worker_segment()
         manager_result.content,
         json!("intro before tool. answer after tool")
     );
+}
+
+#[tokio::test]
+async fn manager_worker_sse_task_response_appends_raw_deltas_across_thinking_boundary() {
+    let (_support, repo, flow) = manager_worker_flow_with_repo().await;
+    register_manager_worker_task(
+        &flow,
+        "task-response-delta-thinking",
+        ChatResponseMode::AfterLastToolCall,
+    )
+    .await;
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-worker".to_string(),
+        run_id: "task-response-delta-thinking".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({ "state": "delta", "delta_text": "A" }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-worker".to_string(),
+        run_id: "task-response-delta-thinking".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: json!({
+            "stream": "thinking",
+            "data": { "delta": "checking" },
+        }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+    for delta in ["B1", "B2"] {
+        flow.handle_bot_event(BotEventCommand {
+            bot_id: "bot-worker".to_string(),
+            run_id: "task-response-delta-thinking".to_string(),
+            group_id: "group-1".to_string(),
+            event_type: "chat.event".to_string(),
+            event_payload: json!({ "state": "delta", "delta_text": delta }),
+            state: ChatEventState::Delta,
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+        })
+        .await
+        .unwrap();
+    }
+
+    assert_eq!(
+        flow.task_store
+            .get("task-response-delta-thinking")
+            .await
+            .unwrap()
+            .response_content,
+        "AB1B2",
+        "TaskStore must append raw SSE deltas instead of synthesized segment snapshots"
+    );
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-worker".to_string(),
+        run_id: "task-response-delta-thinking".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({ "state": "final" }),
+        state: ChatEventState::Final,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    let appended = repo.appended().await;
+    let manager_result = appended
+        .iter()
+        .find(|msg| {
+            msg.sender_id == "bot-worker"
+                && msg.message_type == "chat"
+                && msg.owner_bot_id.is_none()
+        })
+        .expect("manager result history");
+    assert_eq!(manager_result.content, json!("AB1B2"));
 }
 
 #[tokio::test]

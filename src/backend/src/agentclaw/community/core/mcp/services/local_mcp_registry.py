@@ -46,6 +46,7 @@ class LocalMCPRegistry:
         network_types: list[str] | None = None,
         categories: list[str] | None = None,
         tenants: list[str] | None = None,
+        tags: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         items = self._load_servers()
         filtered = [
@@ -64,6 +65,7 @@ class LocalMCPRegistry:
                 network_types=network_types,
                 categories=categories,
                 tenants=tenants,
+                tags=tags,
             )
         ]
         return copy.deepcopy(filtered)
@@ -204,6 +206,7 @@ class LocalMCPRegistry:
         network_types: list[str] | None,
         categories: list[str] | None,
         tenants: list[str] | None,
+        tags: list[str] | None,
     ) -> bool:
         if server_codes and item.get("serverCode") not in set(server_codes):
             return False
@@ -226,6 +229,8 @@ class LocalMCPRegistry:
         if not self._field_in(item, ("category", "categoryCode", "category_code"), categories):
             return False
         if not self._field_in(item, ("tenantCode", "tenant_code", "tenant"), tenants):
+            return False
+        if not self._field_in(item, ("tags", "tagList", "tag_list"), tags):
             return False
         return True
 

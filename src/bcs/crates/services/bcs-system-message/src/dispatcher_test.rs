@@ -1198,7 +1198,7 @@ async fn dispatch_inject_system_message_does_not_record_run_context() {
             role: ParticipantRole::Driver,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
-            tags: Vec::new(),
+            tags: vec!["draft".to_string(), "tenant-a".to_string()],
         }],
         messages: vec![],
         workspace: Default::default(),
@@ -1249,6 +1249,7 @@ async fn dispatch_inject_system_message_does_not_record_run_context() {
     };
     assert_eq!(params["bcs_group_id"], "group-provider");
     assert_eq!(params["bcs_session_id"], session_id);
+    assert_eq!(params["tags"], serde_json::json!(["draft", "tenant-a"]));
     assert_eq!(run_context.len(), 0);
 }
 

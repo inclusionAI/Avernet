@@ -1376,24 +1376,34 @@ impl BotRepoPort for PersistentBotRepo {
             let bots = self.bots.read().await;
             bots.get(bot_id).and_then(|b| b.session_token.clone())
         };
-        // `save_to_db` writes the capability arrays (domains/skills/scopes) to
-        // the DB verbatim, so a cleared (empty) array persists correctly there.
-        self.save_to_db(bot_id, &capabilities, session_token.as_deref(), None)
-            .await
-            .map_err(|e| {
-                warn!(bot_id = %bot_id, error = %e, "Failed to save bot to database during update_capabilities");
-                e
-            })?;
+        let exists_in_db = self.exists_in_db(bot_id).await;
+        if exists_in_db {
+            self.save_to_db(bot_id, &capabilities, session_token.as_deref(), None)
+                .await?;
+        }
+
         // Wholesale in-memory replacement (no `is_empty` skip, unlike
         // `register`) so a PATCH that clears a field also takes effect in the
         // live registry and runtime discovery, not only in the database.
         // Session token / created_by / runtime state are on `RegisteredBotInner`
         // and are left untouched here.
-        let mut bots = self.bots.write().await;
-        if let Some(existing) = bots.get_mut(bot_id) {
-            existing.last_heartbeat = Instant::now();
-            existing.capabilities = capabilities;
-            info!(bot_id = %bot_id, "update_capabilities: replaced capabilities in memory");
+        let updated_in_memory = {
+            let mut bots = self.bots.write().await;
+            if let Some(existing) = bots.get_mut(bot_id) {
+                existing.last_heartbeat = Instant::now();
+                existing.capabilities = capabilities;
+                info!(bot_id = %bot_id, "update_capabilities: replaced capabilities in memory");
+                true
+            } else {
+                info!(
+                    bot_id = %bot_id,
+                    "update_capabilities: skipped in-memory update because bot is not loaded"
+                );
+                false
+            }
+        };
+
+        if updated_in_memory || exists_in_db {
             Ok(())
         } else {
             Err(ServiceError::BotNotFound(bot_id.to_string()))

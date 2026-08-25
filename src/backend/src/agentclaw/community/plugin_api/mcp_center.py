@@ -42,6 +42,7 @@ class MCPCenterPlugin(Plugin, Protocol):
         network_types: list[str] | None = None,
         categories: list[str] | None = None,
         tenants: list[str] | None = None,
+        tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """Query MCP server list with filters.
 
@@ -59,6 +60,7 @@ class MCPCenterPlugin(Plugin, Protocol):
             network_types: Filter by network type (INTERNET/OFFICE/INTRANET).
             categories: Filter by category.
             tenants: Filter by tenant.
+            tags: Filter by marketplace tag.
 
         Returns:
             Dict with keys: success, data (list of MCP dicts), total, page_num, page_size.

@@ -374,6 +374,12 @@ user_config:
     "POST /openapi/v1/collaboration/bots/{bot_uuid}/public":
       user: required
 
+    # Public group plaza: any authenticated end user can browse public groups
+    # without an app credential. Method-qualified exact path outranks the
+    # broad collaboration/** (user+app required) rule above.
+    "GET /openapi/v1/collaboration/public-groups":
+      user: required
+
     "/api/v1/collaboration/**":
       user: optional
       app: optional

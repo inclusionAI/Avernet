@@ -191,3 +191,25 @@ fn participant_commands_carry_caller_and_no_raw_credentials() {
         assert!(!s.contains("Cookie") && !s.contains("Bearer") && !s.contains("sender"));
     }
 }
+
+#[tokio::test]
+async fn list_public_groups_default_is_internal_error() {
+    use bcs_service_api::application::v1::{
+        ApplicationError, GroupService, ListPublicGroups,
+    };
+    let service = NoopGroupService;
+    let result = service
+        .list_public_groups(ListPublicGroups {
+            offset: 0,
+            limit: 20,
+            q: None,
+            strategy: None,
+        })
+        .await;
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, ApplicationError::Internal(_)),
+        "expected Internal error, got {err:?}"
+    );
+}
