@@ -68,32 +68,35 @@ declare -A DEFAULT_PORT=(
     [backend]=8090
 )
 
+# Assuming a 4-core 8GB node, assign roughly:
+#   baas/bcs:   1 CPU / 3Gi request, 3 CPU / 6Gi limit (main workloads)
+#   gateway/backend: 0.5 CPU / 1Gi request, 1 CPU / 2Gi limit (lighter)
 declare -A DEFAULT_CPU_REQ=(
-    [baas]="500m"
-    [gateway]="250m"
-    [bcs]="500m"
-    [backend]="250m"
+    [baas]="1000m"
+    [gateway]="500m"
+    [bcs]="1000m"
+    [backend]="500m"
 )
 
 declare -A DEFAULT_CPU_LIMIT=(
-    [baas]="2000m"
+    [baas]="3000m"
     [gateway]="1000m"
-    [bcs]="2000m"
+    [bcs]="3000m"
     [backend]="1000m"
 )
 
 declare -A DEFAULT_MEM_REQ=(
-    [baas]="512Mi"
-    [gateway]="256Mi"
-    [bcs]="512Mi"
-    [backend]="256Mi"
+    [baas]="3Gi"
+    [gateway]="1Gi"
+    [bcs]="3Gi"
+    [backend]="1Gi"
 )
 
 declare -A DEFAULT_MEM_LIMIT=(
-    [baas]="2Gi"
-    [gateway]="1Gi"
-    [bcs]="2Gi"
-    [backend]="1Gi"
+    [baas]="6Gi"
+    [gateway]="2Gi"
+    [bcs]="6Gi"
+    [backend]="2Gi"
 )
 
 # --- Parse arguments ---
