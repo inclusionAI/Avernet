@@ -30,8 +30,8 @@ from agentclaw.community.core.mcp.services.passport_scope import (
     passport_mcp_items_from_entries,
 )
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
+from agentclaw.community.core.devices.services.device_sync import DeviceSync
 from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepository
-from agentclaw.community.plugin_api.device_sync import DeviceSyncPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.passport import CliItem, PassportPlugin
 from agentclaw.community.log import get_logger
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+    from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 
 logger = get_logger()
 
@@ -132,17 +132,15 @@ class MCPSyncService:
             mcp_config_service: MCP 配置服务，用于构建同步请求参数。
             bot_repository: Bot 仓库，用于查询 bot 信息。
             caller_identity_repository: Caller 身份仓库，用于保留显式 MCP 调用身份。
-            resolver_provider: Lazy thunk 返回 ``DeviceContextResolver`` — 全仓
-                唯一 provider 解析点。以 ``(bot_id, user_id)`` 入参,经 binding +
-                ConnInfoBuilder 输出 typed ``DeviceContext``,取代旧
-                ``DeviceSyncPluginSupplier`` 闭包。caller 无需再传 ``engine_type``
-                (``ctx.conn_info`` 已含)。Lazy 是为了打破构造期 DI 循环:
+            resolver_provider: Lazy thunk 返回 ``DeviceContextResolver``。它以
+                ``(bot_id, user_id)`` 解析 binding，并通过 ConnInfoBuilder 生成
+                typed ``DeviceContext``。Lazy 用于打破构造期 DI 循环:
                 ``BotService → SkillSetServiceFactory → MCPSyncService
                 → DeviceContextResolver → ArcaConnInfoBuilder → DeviceService
                 → BotService`` —— 与 ``SkillSetServiceFactory`` 同款手法。
-            device_sync_dispatcher_provider: Lazy thunk 返回 ``DeviceSyncDispatcher``
-                — 按 ``ctx.provider`` 选 ``DeviceSyncPlugin`` 实例(arca/baas/teclaw)。
-                MCP 投递不再分支 ``device_provider``;插件按容器类型决定投递方式
+            device_sync_dispatcher_provider: Lazy thunk 返回 ``DeviceSyncDispatcher``，
+                按 ``ctx.provider`` 选择 Core ``DeviceSync`` 服务。MCP 投递不再由
+                caller 分支 ``device_provider``；服务按容器类型决定投递方式
                 (arca/baas 单条 ``/api/mcp`` 增量,teclaw 重组并投递整份
                 ``BotConfigArtifact``)。Lazy 与 ``resolver_provider`` 同因。
         """
@@ -723,10 +721,10 @@ class MCPSyncService:
                 为 False 时推送该 bot 关联的**全部** MCP（含 inactive）。
 
         返回 (successes, failures)。
-        不重试——per-bot DeviceSyncPlugin 的 MCP 投递内部已做 HTTP 重试（3 次）。
+        不重试——per-bot ``DeviceSync`` 的 MCP 投递内部已处理 HTTP 重试。
         """
-        # 1. 取 per-bot 投递插件；无可投递设备时抛异常，阻断整个详情同步流程。
-        #    用 entity_id（与下方 collect_bot_*mcps 的 entity 口径一致）。投递走插件：
+        # 1. 取 per-bot DeviceSync；无可投递设备时抛异常，阻断整个详情同步流程。
+        #    用 entity_id（与下方 collect_bot_*mcps 的 entity 口径一致）。
         #    arca/baas 逐条 sync_single_mcp；teclaw 的 sync_single_mcp 重组并投递整产物
         #    （逐条调用会重复投递同一整产物，幂等但冗余——可接受；_declare_mcp_scope 已覆盖
         #    空列表场景的 teclaw 投递）。
@@ -796,7 +794,7 @@ class MCPSyncService:
     async def _sync_mcp_detail(
         self,
         *,
-        plugin: DeviceSyncPlugin,
+        plugin: DeviceSync,
         user_id: str,
         mcp_data: dict[str, Any],
         api_key: Optional[str] = None,
@@ -808,10 +806,10 @@ class MCPSyncService:
         """向单个 bot 的设备推送 MCP 配置。
 
         由 ``sync_mcp_detail``、``sync_mcp_detail_to_all_bots`` 与 ``_sync_mcp_details``
-        复用：合并 payload（core 职责）后经 per-bot 的 ``DeviceSyncPlugin`` 投递。
+        复用：合并 payload 后经 per-bot 的 Core ``DeviceSync`` 服务投递。
 
         Args:
-            plugin: 由 ``_device_sync_dispatcher_provider().dispatch(ctx)`` 取得的 per-bot 投递插件。
+            plugin: 由 ``_device_sync_dispatcher_provider().dispatch(ctx)`` 取得的 per-bot ``DeviceSync`` 服务。
             user_id: 用户 ID。
             mcp_data: MCP 配置数据。
             api_key: 可选的 API key，覆盖默认值。

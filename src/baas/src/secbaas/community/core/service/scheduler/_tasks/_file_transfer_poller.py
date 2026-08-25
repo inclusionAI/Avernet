@@ -33,7 +33,9 @@ _DOWNLOAD_URL_EXPIRE_SECONDS = 86400
 class FileTransferPollerConfig:
     """文件传输轮询器配置"""
 
-    enabled: bool = True
+    # Disabled by default: the community edition ships only a no-op backend,
+    # so the poller must not run unless a real backend is configured.
+    enabled: bool = False
     lock_expire_seconds: int = 300
     cron_interval_seconds: int = 10
     upload_timeout_seconds: int = 3600
@@ -72,12 +74,26 @@ class FileTransferPoller:
     def interval_seconds(self) -> int:
         return self._config.cron_interval_seconds
 
+    @property
+    def enabled(self) -> bool:
+        """Whether the poller should run.
+
+        Fail-closed: a real backend must be configured AND the poller enabled.
+        When the backend reports disabled (community no-op), the poller is off
+        regardless of the config flag so no-op storage operations are never
+        attempted.
+        """
+        return bool(self._config.enabled) and not self._file_backend.disabled
+
     async def run(self) -> None:
         start_time = time.monotonic()
         log.info("[FileTransferPoller] Task triggered at %s", datetime.now())
 
-        if not self._config.enabled:
-            log.info("[FileTransferPoller] Disabled, skipping")
+        if not self.enabled:
+            log.info(
+                "[FileTransferPoller] Disabled (no real backend or disabled by "
+                "config), skipping"
+            )
             return
 
         if self._config.dry_run:

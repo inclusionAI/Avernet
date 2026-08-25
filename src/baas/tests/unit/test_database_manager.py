@@ -77,27 +77,10 @@ class TestDatabaseManagerPluginInit:
         plugin.close.assert_called_once()
 
 
-class TestDatabaseManagerUrlInit:
-    def test_init_from_config_disabled(self) -> None:
-        dm = DatabaseManager()
-        dm._plugin = None
-
-        dm.init_from_config({"enabled": False})
-
-        assert dm._engine is None
-
-    def test_init_from_config_no_datasources(self) -> None:
-        dm = DatabaseManager()
-        dm._plugin = None
-
-        dm.init_from_config({"enabled": True, "datasources": []})
-
-        assert dm._engine is None
-
+class TestDatabaseManagerNotInitialized:
     def test_session_raises_when_not_initialized(self) -> None:
         dm = DatabaseManager()
         dm._plugin = None
-        dm._connection_factory = None
 
         with pytest.raises(RuntimeError):
             with dm.session("default"):
@@ -107,7 +90,6 @@ class TestDatabaseManagerUrlInit:
     async def test_get_session_raises_when_not_initialized(self) -> None:
         dm = DatabaseManager()
         dm._plugin = None
-        dm._session_factory = None
 
         with pytest.raises(RuntimeError):
             async with dm.get_session():

@@ -17,7 +17,6 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from gateway.community.bootstrap import initialize_database
-from gateway.community.bootstrap._configs import DatabaseConfig
 from gateway.community.core.app import (
     APIKeyGenerator,
     AppRepository,
@@ -53,9 +52,7 @@ def _seed(session, key: str, *, app_name: str, status: str = "ACTIVE") -> None:
 
 @pytest.fixture(scope="module")
 def db() -> DataSourcePlugin:
-    plugin = initialize_database(
-        SqliteDatabasePlugin(), DatabaseConfig(plugin_type="SQLITE_ORM", db_url="")
-    )
+    plugin = initialize_database(SqliteDatabasePlugin())
     with plugin.orm_session() as session:
         _seed(session, _ACTIVE_KEY, app_name="Demo App")
         _seed(session, _INACTIVE_KEY, app_name="Dormant App", status="INACTIVE")

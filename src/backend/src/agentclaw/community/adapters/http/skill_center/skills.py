@@ -152,9 +152,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
 )
-from agentclaw.community.core.devices.services.device_sync_dispatcher import (
-    DeviceSyncDispatcher,
-)
+from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,

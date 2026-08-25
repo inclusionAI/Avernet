@@ -7,7 +7,6 @@ from datetime import datetime
 import pytest
 
 from gateway.community.bootstrap import initialize_database
-from gateway.community.bootstrap._configs import DatabaseConfig
 from gateway.community.core.access_key import AccessKeyRepository, AccessKeyRow
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.access_key import RegisteredAccessKey
@@ -15,7 +14,7 @@ from gateway.community.spi.access_key import RegisteredAccessKey
 
 def _make_db():
     db = SqliteDatabasePlugin()
-    db = initialize_database(db, DatabaseConfig(plugin_type="SQLITE_ORM", db_url=""))
+    db = initialize_database(db)
     with db.orm_session() as session:
         session.add(
             AccessKeyRow(

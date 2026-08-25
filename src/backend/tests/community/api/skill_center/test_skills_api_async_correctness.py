@@ -162,8 +162,7 @@ def _skill_service_di_app(
     app.include_router(skills_router)
     app.dependency_overrides[get_request_context] = lambda: mock_ctx
 
-    # New (Task 3): the skills endpoints now depend on
-    # DeviceContextResolver + DeviceSyncDispatcher (not the old supplier).
+    # The skills endpoints resolve DeviceContext before dispatching DeviceSync.
     mock_ctx_obj = MagicMock()
     mock_resolver = MagicMock()
     mock_resolver.resolve_for_bot.return_value = mock_ctx_obj
@@ -209,7 +208,7 @@ def _skill_service_di_app(
             from agentclaw.community.di.modules.skill_center_module import (
                 SkillSetServiceFactory,
             )
-            from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+            from agentclaw.community.plugin_api.device_sync_dispatcher import (
                 DeviceSyncDispatcher,
             )
 

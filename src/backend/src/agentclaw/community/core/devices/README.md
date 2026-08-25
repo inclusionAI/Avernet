@@ -44,6 +44,7 @@ internal_dependencies:
   - agentclaw.community.kernel.device_dto    # neutral CommandResult / ResourceSpecification / OutBound DTOs (B6)
   - agentclaw.community.log
   - agentclaw.community.core.devices.services.device_filesystem    # DeviceFileSystem — return type of the core device-fs dispatcher (B6)
+  - agentclaw.community.plugin_api.http_client    # HttpClient used by BaaS transports
   - agentclaw.community.plugin_api.device_sync    # DeviceSyncPlugin — return type of the core device-sync dispatcher (B6)
   - agentclaw.community.plugin_api.devices    # DeviceAccessor — injected into DeviceFilesystemDispatcher (B6)
   - agentclaw.community.plugin_api.drm    # DRM dynamic-config reader plugin (B6)

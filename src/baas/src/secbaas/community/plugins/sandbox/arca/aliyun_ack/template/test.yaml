@@ -1,0 +1,186 @@
+# ===== 1. 注入规则（可热更新） =====
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-inject-rules
+  namespace: default
+data:
+  inject.conf: |
+    {
+      "routes": {
+        "api.openai.com": {
+          "upstream": "https://api.openai.com",
+          "headers": {
+            "Authorization": "Bearer sk-openai-xxxx"
+          }
+        },
+        "api.anthropic.com": {
+          "upstream": "https://api.anthropic.com",
+          "headers": {
+            "x-api-key": "sk-anthropic-xxxx",
+            "anthropic-version": "2023-06-01"
+          }
+        },
+        "dashscope.aliyuncs.com": {
+          "upstream": "https://dashscope.aliyuncs.com",
+          "headers": {
+            "Authorization": "Bearer sk-dashscope-xxxx"
+          }
+        }
+      },
+      "default": {
+        "upstream": "https://httpbin.org",
+        "headers": {}
+      }
+    }
+---
+# ===== 2. Lua 注入脚本 =====
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openresty-lua-scripts
+  namespace: default
+data:
+  inject.lua: |
+    local cjson = require("cjson.safe")
+
+    local function load_rules()
+        local f, err = io.open("/etc/openresty/rules/inject.conf", "r")
+        if not f then
+            ngx.log(ngx.ERR, "failed to open inject.conf: ", err)
+            return nil
+        end
+        local content = f:read("*a")
+        f:close()
+        local rules, parse_err = cjson.decode(content)
+        if not rules then
+            ngx.log(ngx.ERR, "failed to parse inject.conf: ", parse_err)
+            return nil
+        end
+        return rules
+    end
+
+    local rules = load_rules()
+    if not rules then
+        ngx.status = 502
+        ngx.say("inject rules not available")
+        return ngx.exit(502)
+    end
+
+    local host = ngx.var.host:gsub(":%d+$", "")
+    local route = rules.routes[host] or rules.default
+
+    if not route or not route.upstream then
+        ngx.status = 502
+        ngx.say("no route for host: ", host)
+        return ngx.exit(502)
+    end
+
+    for key, value in pairs(route.headers or {}) do
+        ngx.req.set_header(key, value)
+    end
+
+    ngx.var.target_upstream = route.upstream
+---
+# ===== 3. Nginx 配置 =====
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openresty-nginx-conf
+  namespace: default
+data:
+  nginx.conf: |
+    worker_processes 1;
+    error_log /dev/stderr warn;
+    pid /tmp/openresty.pid;
+
+    events {
+        worker_connections 64;
+    }
+
+    http {
+        lua_package_path "/etc/openresty/lua/?.lua;;";
+        resolver 100.100.2.136 valid=30s;
+
+        server {
+            listen 8080;
+
+            location / {
+                set $target_upstream 'http://localhost';
+                access_by_lua_file /etc/openresty/lua/inject.lua;
+                proxy_pass $target_upstream;
+                proxy_set_header Host $proxy_host;
+                proxy_ssl_server_name on;
+                proxy_buffering off;
+            }
+        }
+    }
+---
+# ===== 4. Deployment =====
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openclaw-agent
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openclaw-agent
+  template:
+    metadata:
+      labels:
+        app: openclaw-agent
+    spec:
+      hostAliases:
+      - ip: "127.0.0.1"
+        hostnames:
+        - "api.openai.com"
+        - "api.anthropic.com"
+        - "dashscope.aliyuncs.com"
+
+      containers:
+      # ===== 业务容器 =====
+      - name: openclaw
+        image: avernet-registry-vpc.cn-beijing.cr.aliyuncs.com/avernet/agent:20260820
+        env:
+        - name: LLM_API_BASE_URL
+          value: "http://api.openai.com/v1/chat"
+        ports:
+        - containerPort: 8000
+
+      # ===== OpenResty Sidecar =====
+      - name: api-inject-proxy
+        image: registry-vpc.cn-beijing.aliyuncs.com/acs/openresty:latest
+        command: ["/usr/local/openresty/bin/openresty", "-g", "daemon off;", "-c", "/etc/openresty/nginx.conf"]
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: rules
+          mountPath: /etc/openresty/rules
+          readOnly: true
+        - name: lua-scripts
+          mountPath: /etc/openresty/lua
+          readOnly: true
+        - name: nginx-conf
+          mountPath: /etc/openresty/nginx.conf
+          subPath: nginx.conf
+          readOnly: true
+        resources:
+          requests:
+            cpu: "0.25"
+            memory: "128Mi"
+          limits:
+            cpu: "0.5"
+            memory: "256Mi"
+
+      volumes:
+      - name: rules
+        configMap:
+          name: api-inject-rules
+      - name: lua-scripts
+        configMap:
+          name: openresty-lua-scripts
+      - name: nginx-conf
+        configMap:
+          name: openresty-nginx-conf

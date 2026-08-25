@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, text
+from sqlalchemy import BigInteger, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.community.spi.access_key import RegisteredAccessKey
@@ -25,12 +25,12 @@ class AccessKeyRow(Base):  # type: ignore[misc]
     __tablename__ = "avernet_access_key_token"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    token: Mapped[str] = mapped_column(unique=True)
-    access_key: Mapped[str] = mapped_column()
-    tenant: Mapped[str] = mapped_column()
+    token: Mapped[str] = mapped_column(String(700), unique=True)
+    access_key: Mapped[str] = mapped_column(String(256), index=True)
+    tenant: Mapped[str] = mapped_column(String(64))
     expire_at: Mapped[datetime] = mapped_column()
-    creator: Mapped[str] = mapped_column(default="")
-    modifier: Mapped[str] = mapped_column(default="")
+    creator: Mapped[str] = mapped_column(String(128), default="")
+    modifier: Mapped[str] = mapped_column(String(128), default="")
     gmt_create: Mapped[datetime] = mapped_column(
         server_default=text("CURRENT_TIMESTAMP")
     )

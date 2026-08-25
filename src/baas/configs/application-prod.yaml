@@ -1,0 +1,167 @@
+# 基础配置
+app_name: "secbaas"
+workers: 1
+
+log_config:
+  trace_log_dir: ""
+  log_level: "INFO"
+  log_dir: ""
+
+# 中间件配置总览
+module_config:
+  web:
+    port: 8080
+
+user_config:
+  # 插件配置
+  plugins:
+    auth: "oauth"
+    secret: "env"
+    cache: "redis"
+    bot_service: "real"
+    engine_adapter: "real"
+    file_transfer: "stub"
+    database: "mariadb"
+    sandbox:
+      arca: "aliyun_ack"
+      desktop: "stub"
+      k8s: "stub"
+      docker: "stub"
+      poolab: "stub"
+    bot:
+      teclaw: "stub"
+
+  # 数据库连接配置
+  database:
+    database_url: "${DATABASE_URL}"
+    create_schema: false
+    seed_data: false
+
+  # Redis 缓存配置
+  cache_redis:
+    url: "${REDIS_URL}"
+    socket_timeout: 5.0
+    socket_connect_timeout: 5.0
+
+  # Aliyun ACK 集群连接配置
+  aliyun_ack_cluster:
+    api_server: "${ACK_SERVER}"
+    token: "${ACK_TOKEN}"
+    namespace: "default"
+
+  # 沙箱镜像配置（按引擎 template_id → 容器名 → 镜像地址）
+  sandbox_images:
+    ALIYUN_ACK_DEFAULT:
+      avernet-agent: "${AGENT_IMAGE}"
+      avernet-sidecar: "${SIDECAR_IMAGE}"
+      init: "${INIT_IMAGE}"
+      nas-server: "${NAS_SERVER}"
+
+  bot_service:
+    proxy_base_url: "${BOT_SERVICE_PROXY_BASE_URL:-https://backend.avernet-inc.com}"
+    proxy_ws_base_url: "${BOT_SERVICE_PROXY_WS_BASE_URL:-wss://backend.avernet-inc.com}"
+    adapter_port: 20003
+    ws_path: "/api/openclaw/ws"
+    connect_timeout: 10
+    request_timeout: 600
+
+  # Chat client pool 配置
+  chat_client_pool:
+    max_size: 100                    # 池中最大总连接数
+    max_conns_per_sandbox: 1         # 每个 sandbox_id 最多连接数
+    max_concurrent_per_conn: 0       # 每连接最大并发会话数（0=不限）
+    session_key_timeout: 30.0        # 同 sessionKey 等待超时（秒）
+    max_retries: 1                   # WS 断连重试次数（0=不重试）
+    retry_base_backoff: 0.5          # 重试退避基数（秒）
+
+  # BotRun 队列 Worker 配置
+  bot_run_queue:
+    enabled: false                    # 是否启用队列 Worker
+
+  teamclaw:
+    base_url: "${TEAMCLAW_BASE_URL:-https://teamclaw.example.com}"
+    timeout: 30
+
+  # OAuth 客户端配置
+  oauth:
+    base_url: "${OAUTH_BASE_URL:-https://oauth.example.com}"
+
+  # 设备 TTL 定时器配置（每 30 分钟扫描整个到期队列并续期+探活）
+  device_ttl_timer:
+    enabled: true  # 是否启用定时任务
+    cron_interval_seconds: 1800  # 执行间隔（秒），默认: 1800（30分钟）
+    batch_size: 100  # 每页拉取条数，默认: 100
+    max_page_concurrency: 10  # 每页内并发续期的最大并发数
+    query_retries: 3  # 单页查询 DB 失败时的重试次数
+    lock_name: "device_ttl_timer_lock"  # 分布式锁名称基准，运行时追加环境后缀（如 _pre/_prod）以实现环境隔离
+    lock_expire_seconds: 1750  # 分布式锁租约（秒），须 < cron 间隔以允许其它实例在轮次间获取，默认: 1750
+    dry_run: false  # 测试模式：只打印日志
+
+  # Expired ACK sandbox timer config (periodically scans expired devices, destroys Pod, stops bot)
+  # NOTE: This task only takes effect for Aliyun ACK-created sandboxes
+  # (plugins.sandbox.arca == "aliyun_ack"). Enterprise arc_sdk sandboxes are
+  # reclaimed by the ARC platform itself; this task must not destroy sandboxes
+  # still within their ARC platform lease.
+  expire_sandbox_timer:
+    enabled: false  # 默认禁用过期沙箱销毁定时任务，验证通过后再显式启用
+    cron_interval_seconds: 86400  # 执行间隔（秒），默认: 86400（1天）
+    batch_size: 100  # 每页拉取条数，默认: 100
+    max_page_concurrency: 10  # 每页内并发停 bot 的最大并发数
+    query_retries: 3  # 单页查询 DB 失败时的重试次数
+    lock_name: "expire_sandbox_timer_lock"  # 分布式锁名称基准，运行时追加环境后缀
+    lock_expire_seconds: 1750  # 分布式锁租约（秒），须 < cron 间隔
+    dry_run: true  # staged rollout：先观察到期量，确认后再转 false
+    grace_seconds: 0  # 到期判定余量（秒），抵消时钟偏差
+    default_ttl_minutes: 10080  # 业务默认 TTL（分钟），extra_config 缺失时回退（7 天）
+
+  # Bot Health Checker 配置
+  bot_health_checker:
+    health_check:
+      timeout_seconds: 10           # 单个健康检查超时时间
+      max_concurrent: 10            # 最大并发健康检查数
+    ttl:
+      extend_when_remaining_hours: 16  # 剩余时间 ≤ 16 小时才续期
+      target_ttl_hours: 24             # 续期目标 TTL（小时）
+
+  bot_chat_log_relation:
+    base_url: "${BOT_CHAT_LOG_RELATION_BASE_URL:-https://backend.avernet-inc.com}"
+    timeout: 10
+    max_retries: 0
+
+  agentclawproxy:
+    host:
+      dev: "${PROXY_HOST_DEV:-proxy-dev.avernet-inc.com}"
+      pre: "${PROXY_HOST_PRE:-proxy-pre.avernet-inc.com}"
+      prod: "${PROXY_HOST_PROD:-proxy.avernet-inc.com}"
+
+  poolab:
+    endpoint:
+      dev: "${POOLAB_ENDPOINT_DEV:-https://poolab-dev.example.com}"
+      pre: "${POOLAB_ENDPOINT_PRE:-https://poolab-pre.example.com}"
+      prod: "${POOLAB_ENDPOINT_PROD:-https://poolab-prod.example.com}"
+
+# File transfer OSS storage backend configuration (enterprise/prod deployments only)
+  file_transfer_oss:
+    endpoint: ""
+    external_endpoint: ""
+    bucket_name: ""
+    staging_root_path: "baas-file-transfer"
+    secret_name: ""
+
+  secbaas:
+    callback:
+      host:
+        dev: "${BAAS_CALLBACK_HOST_DEV:-https://baas-dev.avernet-inc.com}"
+        pre: "${BAAS_CALLBACK_HOST_PRE:-https://baas-pre.avernet-inc.com}"
+        prod: "${BAAS_CALLBACK_HOST_PROD:-https://baas.avernet-inc.com}"
+
+  api_gateway:
+    admin_operators:
+      - "operator-001"
+      - "operator-002"
+      - "operator-003"
+      - "000001"
+
+  env:
+    # 用于探测当前部署环境的环境变量名称
+    deploy_env_var: "DEPLOY_ENV"

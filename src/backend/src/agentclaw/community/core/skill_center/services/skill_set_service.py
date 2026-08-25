@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from agentclaw.community.di.modules.skill_center_module import (
         DeviceFilesystemDispatcher,
     )
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+    from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.core.mcp.services._defaults import (
     get_default_mcp_config,
     get_default_mcp_server_codes,
@@ -492,7 +492,7 @@ class SkillSetService:
                 mapping_kwargs["desired_skills"] = desired_skills
             symlinks = self.get_symlink_mappings(**mapping_kwargs)
 
-            # 通过 DeviceSyncPlugin 同步到设备 — 经 resolver + dispatcher 收口
+            # Resolve and invoke the provider-specific DeviceSync service.
             effective_user_id = user_id or self.entity_id or "default"
             ctx = self._resolver.resolve_for_bot(self.bot_id, effective_user_id)
             device_sync = self._device_sync_dispatcher.dispatch(ctx)
@@ -2524,7 +2524,7 @@ class _DeviceSyncMixin:
         )
 
     def _do_device_sync(self, user_id: str | None, caller: str = "DeviceSyncMixin") -> dict:
-        """Sync symlink mappings to device via DeviceSyncPlugin.
+        """Sync symlink mappings through the provider-specific DeviceSync service.
 
         Returns:
             dict: {"success": bool, "message": str, "error": str|None}
@@ -2904,7 +2904,7 @@ class SkillSetSwitcher(_DeviceSyncMixin):
         # Update metadata file
         SkillSetMetadataWriter(skill_set_repo=self.skill_set_service.skill_set_repo, skill_repo=self.skill_set_service.skill_repo, skills_dir=self.skills_dir, user_id=user_id, bot_id=self.skill_set_service.bot_id).write_metadata()
 
-        # 同步软链到远程设备（通过 DeviceSyncPlugin）
+        # 同步软链到远程设备。
         if result.success:
             sync_result = self._do_device_sync(user_id, caller="SkillSetSwitcher.switch")
             if not sync_result.get("success"):
@@ -3315,7 +3315,7 @@ class SkillSetActivator(_DeviceSyncMixin):
                 bot_id=self.skill_set_service.bot_id,
             ).write_metadata()
 
-        # 8. 同步软链到远程设备（通过 DeviceSyncPlugin）
+        # 8. 同步软链到远程设备。
         if result.success:
             sync_result = self._do_device_sync(user_id, caller="SkillSetActivator.activate")
             if not sync_result.get("success"):
@@ -3458,7 +3458,7 @@ class SkillSetActivator(_DeviceSyncMixin):
                 bot_id=self.skill_set_service.bot_id,
             ).write_metadata()
 
-        # 8. 同步软链到远程设备（通过 DeviceSyncPlugin）
+        # 8. 同步软链到远程设备。
         if result.success:
             sync_result = self._do_device_sync(user_id, caller="SkillSetActivator.deactivate")
             if not sync_result.get("success"):

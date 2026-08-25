@@ -48,8 +48,8 @@ from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlu
 from agentclaw.community.plugin_api.bot_publish_approval import BotPublishApprovalPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.core.repository.implementations.bot.friend import BotFriendRepository as UnifiedBotFriendRepository
-from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.plugin_api.http_client import QUALIFIER_BCN, HttpClient
+from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 
 
 logger = get_logger()
@@ -127,6 +127,7 @@ class BotPublicModule(Module):
         skill_set_service_factory: SkillSetServiceFactory,
         device_context_resolver_factory: Callable[[], DeviceContextResolver],
         device_sync_dispatcher: DeviceSyncDispatcher,
+        bcsfuse_config: cfg.BcsFuseConfig,
         catalog_metadata_service: BotCatalogMetadataServiceProtocol,
     ) -> BotPublicService:
         # Explicit provider (not ``binder.bind``): BotPublicService types
@@ -145,6 +146,7 @@ class BotPublicModule(Module):
             skill_set_service_factory=skill_set_service_factory,
             device_context_resolver_factory=device_context_resolver_factory,
             device_sync_dispatcher=device_sync_dispatcher,
+            bcsfuse_config=bcsfuse_config,
             catalog_metadata_service=catalog_metadata_service,
         )
 

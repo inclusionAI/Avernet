@@ -12,6 +12,8 @@ from secbaas.community.spi.file_transfer import (
     PartInfo,
 )
 
+_DISABLED_MESSAGE = "file_transfer is disabled in this deployment"
+
 
 class NoopFileTransferBackend(FileTransferBackend):
     """No-op implementation for when file transfer is disabled.
@@ -21,19 +23,18 @@ class NoopFileTransferBackend(FileTransferBackend):
     raises NotImplementedError.
     """
 
+    @property
+    def disabled(self) -> bool:
+        """Report that this no-op backend is disabled."""
+        return True
+
     def generate_upload_url(
         self, staging_path: str, expire_seconds: int, content_type: str | None = None
     ) -> str:
-        raise NotImplementedError(
-            "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'real' to enable."
-        )
+        raise NotImplementedError(_DISABLED_MESSAGE)
 
     def check_object_exists(self, staging_path: str) -> bool:
-        raise NotImplementedError(
-            "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'real' to enable."
-        )
+        raise NotImplementedError(_DISABLED_MESSAGE)
 
     def generate_download_url(
         self,
@@ -41,10 +42,7 @@ class NoopFileTransferBackend(FileTransferBackend):
         expire_seconds: int,
         response_params: dict | None = None,
     ) -> str:
-        raise NotImplementedError(
-            "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'real' to enable."
-        )
+        raise NotImplementedError(_DISABLED_MESSAGE)
 
     def initiate_multipart_upload(
         self,
@@ -53,36 +51,21 @@ class NoopFileTransferBackend(FileTransferBackend):
         part_count: int = 2,
         content_type: str | None = None,
     ) -> MultipartSession:
-        raise NotImplementedError(
-            "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'real' to enable."
-        )
+        raise NotImplementedError(_DISABLED_MESSAGE)
 
     def list_parts(self, staging_path: str, session_id: str) -> list[PartInfo]:
-        raise NotImplementedError(
-            "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'real' to enable."
-        )
+        raise NotImplementedError(_DISABLED_MESSAGE)
 
     def complete_multipart_upload(
         self, staging_path: str, session_id: str, parts: list[PartInfo]
     ) -> None:
-        raise NotImplementedError(
-            "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'real' to enable."
-        )
+        raise NotImplementedError(_DISABLED_MESSAGE)
 
     def abort_multipart_upload(self, staging_path: str, session_id: str) -> None:
-        raise NotImplementedError(
-            "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'real' to enable."
-        )
+        raise NotImplementedError(_DISABLED_MESSAGE)
 
     def delete_object(self, key: str) -> None:
-        raise NotImplementedError(
-            "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'real' to enable."
-        )
+        raise NotImplementedError(_DISABLED_MESSAGE)
 
     def build_staging_path(
         self,
@@ -91,10 +74,7 @@ class NoopFileTransferBackend(FileTransferBackend):
         filename: str,
         subdir: str | None = None,
     ) -> str:
-        raise NotImplementedError(
-            "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'real' to enable."
-        )
+        raise NotImplementedError(_DISABLED_MESSAGE)
 
     def build_session_staging_path(
         self,
@@ -104,7 +84,4 @@ class NoopFileTransferBackend(FileTransferBackend):
         filename: str,
         subdir: str | None = None,
     ) -> str:
-        raise NotImplementedError(
-            "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'real' to enable."
-        )
+        raise NotImplementedError(_DISABLED_MESSAGE)

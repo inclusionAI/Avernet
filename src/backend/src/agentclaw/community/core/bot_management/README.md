@@ -11,7 +11,6 @@ provides:
   - "BotCreateContext"
   - "BotCreateDeploymentMode"
   - "PreparedBotCreate"
-  - "prepare_bot_create"
   - "BotRepository protocol + impl"
   - "EngineResolver"
   - "DataInitService"

@@ -32,16 +32,45 @@ user_config:
     forwarder: "httpx"
     schema_catalog: "file"
     cache: "stub"
+    # To use the Redis-backed cache plugin, set ``cache: "redis"`` and provide
+    # a top-level ``cache_redis`` block (see below). Default ``stub`` is the
+    # in-memory, single-process option.
+    #
+    # cache: "redis"
     auth: "stub"
     # SecretResolver flavor. Community reads creds from env; enterprise overlays
     # this with a corp/KMS-backed selector registered via the plugin_registry.
+    # Set ``secret: "aliyun_kms"`` to resolve signing keys/credentials from
+    # Aliyun KMS, with the resolver's own access credentials provided as secret
+    # references in ``plugins.secret_aliyun_kms``.
     secret: "community"
+    # secret_aliyun_kms:
+    #   endpoint: ""
+    #   region_id: ""
+    #   access_key_id: "@kms_access_key_id"
+    #   access_key_secret: "@kms_access_key_secret"
+    #   secret_name_prefix: ""
     authn:
       app_token: "stub"
       tenant: "stub"
-    database:
-      plugin_database: "SQLITE_ORM"
-      database_url: ""
+    database: "sqlite"
+
+  # Database plugin connection params for the plugin selected by
+  # ``plugins.database`` (mirrors BaaS: a sibling top-level section).
+  database:
+    database_url: ""
+    # create_schema / seed_data default to false (matching BaaS). Set them to
+    # true only in the E2E overlays (e.g. e2e-mariadb.yaml) so a freshly
+    # provisioned test database is created and seeded.
+    create_schema: false
+    seed_data: false
+
+  # Redis cache plugin connection params for ``plugins.cache: "redis"``
+  # (mirrors BaaS: a sibling top-level section).
+  cache_redis:
+    url: "redis://localhost:6379/0"
+    socket_timeout: 5.0
+    socket_connect_timeout: 5.0
 
   # SecretResolver configuration. The community (env-backed) resolver reads
   # ``{env_prefix}{NAME}_VALUE`` / ``_USER`` from the process environment.

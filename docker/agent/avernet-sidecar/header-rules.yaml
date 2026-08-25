@@ -1,0 +1,17 @@
+# ============================================================
+# header-rules.yaml
+# Sidecar outbound header manipulation rules.
+#
+# Only outbound traffic (Pod → external), request headers only.
+# Two operations per rule:
+#   set:    Set header (overwrite if exists, add if missing)
+#   remove: Remove header
+#
+# Encrypted values use "enc:" prefix, auto-decrypted at render time:
+#   value: "enc:BASE64" -> XOR decrypt -> plaintext
+#   Encryption: config-renderer encrypt "plaintext"
+#
+# Rules with explicit domains enable MITM (HTTPS decryption).
+# ============================================================
+
+rules: []
