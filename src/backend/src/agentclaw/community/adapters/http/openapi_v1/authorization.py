@@ -245,6 +245,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/restart"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/retry"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"): Check(PermissionLevel.OWNER),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade"): Check(PermissionLevel.ADMIN),
     ("DELETE", "/openapi/v1/bots/{bot_id}/local"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local/auth-status"): OWNER_SCOPED,

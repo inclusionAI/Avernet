@@ -25,6 +25,7 @@ from agentclaw.community.adapters.http.openapi_v1.service_publications.router im
     retry_lifecycle,
     steal_edit_lock,
     update_approval_config,
+    upgrade_publication,
     upgrade_to_service,
 )
 from agentclaw.community.adapters.http.openapi_v1.service_publications.schemas import (
@@ -86,6 +87,30 @@ async def test_upgrade_and_lifecycle_handlers():
     assert upgraded.data.publication_id == 7
     assert lifecycle.data.items[0].card_id == "service:bot-1:7"
     assert lifecycle.request_id == "trace-1"
+
+
+@pytest.mark.asyncio
+async def test_upgrade_publication_handler():
+    facade = Mock()
+    facade.upgrade_publication.return_value = publication()
+
+    response = await upgrade_publication(
+        "bot-1",
+        7,
+        request(),
+        "actor",
+        "owner",
+        facade,
+    )
+
+    assert response.code == 200000
+    assert response.data.publication_id == 7
+    facade.upgrade_publication.assert_called_once_with(
+        "bot-1",
+        7,
+        actor_id="actor",
+        owner_id="owner",
+    )
 
 
 @pytest.mark.asyncio
@@ -255,6 +280,10 @@ def test_routes_follow_component_first_contract():
 
     assert "/openapi/v1/bots/{bot_id}/lifecycle" in lifecycle_paths
     assert "/openapi/v1/bots/{bot_id}/lifecycle/advance" in lifecycle_paths
+    assert (
+        "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade"
+        in lifecycle_paths
+    )
     assert "/openapi/v1/bots/{bot_id}/lifecycle/cancel-staging" in lifecycle_paths
     assert all(
         path.startswith("/openapi/v1/bots/{bot_id}/lifecycle")
