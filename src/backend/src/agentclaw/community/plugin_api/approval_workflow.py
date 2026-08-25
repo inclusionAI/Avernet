@@ -13,6 +13,14 @@ from agentclaw.community.plugin_api.base import Plugin
 
 DEFAULT_PROCESS_CODE = "agentclaw_bot_publish"
 
+# Marker prepended to ``error_msg`` by no-workflow impls (community
+# ``NoApprovalWorkflow``, local ``LocalAntProcessService``) so callers can tell
+# "this profile has no approval capability" apart from "the workflow service
+# rejected this request". The protocol's contract promises the former case is a
+# fall-through to direct publish, not a failure; ``BotPublicService.public_bcs_bot``
+# relies on matching this prefix to avoid raising 500 in the community build.
+NO_WORKFLOW_MARKER = "[no-approval-workflow] "
+
 
 @runtime_checkable
 class ApprovalWorkflowPlugin(Plugin, Protocol):
@@ -42,6 +50,10 @@ class ApprovalWorkflowPlugin(Plugin, Protocol):
                                        "approval_url": None, "error_msg": <reason>}``.
             - No workflow available: ``{"success": False, "puid": None,
                         "approval_url": None, "error_msg": <reason-unavailable>}``.
+                        Implementations with no workflow prepend
+                        ``NO_WORKFLOW_MARKER`` to ``error_msg`` so callers can
+                        treat "capability unavailable" as a fall-through, not
+                        a failure.
         """
         ...
 

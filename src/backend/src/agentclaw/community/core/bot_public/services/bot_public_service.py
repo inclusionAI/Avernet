@@ -12,7 +12,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
-from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlugin
+from agentclaw.community.plugin_api.approval_workflow import (
+    NO_WORKFLOW_MARKER,
+    ApprovalWorkflowPlugin,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
@@ -66,6 +69,14 @@ def _resolve_access_mode(public: str, friend_approval: str) -> str:
     if public == "1" and friend_approval == "0":
         return "OPEN"
     return "RESTRICTED"
+
+
+def _is_workflow_unavailable(result: Dict[str, Any]) -> bool:
+    """True when ``start_approval`` returned "no approval capability" rather
+    than a real rejection. No-workflow impls prepend ``NO_WORKFLOW_MARKER`` to
+    ``error_msg`` (see ``plugin_api/approval_workflow.py``); callers must treat
+    this as a fall-through to direct publish, not a failure."""
+    return (result.get("error_msg") or "").startswith(NO_WORKFLOW_MARKER)
 
 
 # BCS-publish destination label for the approval prompt, keyed by public_scope.
@@ -587,10 +598,35 @@ class BotPublicService:
             biz_type="botpublic",
             context=context,
         )
+        # The protocol promises no-workflow callers fall through to direct
+        # publish (NOT a failure). In the community build NoApprovalWorkflow
+        # (and local LocalAntProcessService) report "no approval capability" —
+        # distinguished from a real rejection by the NO_WORKFLOW_MARKER prefix
+        # on error_msg. We treat that as auto-approved (AGREE): synthesize a
+        # COMPLETED result so the persist + inline-callback path below drives
+        # the BCS friend_ext update (status AGREE + visibility flip) exactly
+        # like corp's auto-completed tenant, instead of raising (which the old
+        # code did for any success=False — turning every community publish into
+        # a 500). No real ticket was created, so puid stays None;
+        # _apply_callback_decision keys the BCS write off public_scope, not
+        # puid. The returned state is reported SKIPPED (the approval step was
+        # skipped) even though the BCS update did run — see the
+        # ``workflow_unavailable`` handling before the return.
+        workflow_unavailable = False
         if not approval_result.get("success"):
-            raise BotPublicServiceError(
-                f"创建审批失败: {approval_result.get('error_msg')}"
-            )
+            if not _is_workflow_unavailable(approval_result):
+                raise BotPublicServiceError(
+                    f"创建审批失败: {approval_result.get('error_msg')}"
+                )
+            workflow_unavailable = True
+            approval_result = {
+                "success": True,
+                "state": "COMPLETED",
+                "lastOperate": "AGREE",
+                "puid": None,
+                "approval_url": None,
+                "error_msg": approval_result.get("error_msg"),
+            }
         # 记录工单信息到 BCS friend_ext.public_user_approval (PROCESSING):
         # GET→merge→PATCH (Provider 管理 API, 同 BcnService 鉴权). 失败不中断已建工单.
         try:
@@ -624,6 +660,18 @@ class BotPublicService:
                 logger.warning(
                     "[public_bcs_bot] COMPLETED inline callback failed: %s", exc
                 )
+        # The no-workflow fall-through reused the persist + AGREE inline-callback
+        # path above to drive the BCS update; surface the *approval* outcome as
+        # SKIPPED (no approval step ran) rather than the synthesized COMPLETED.
+        if workflow_unavailable:
+            return {
+                "success": True,
+                "state": "SKIPPED",
+                "puid": None,
+                "approval_url": None,
+                "last_operate": "agree",
+                "error_msg": approval_result.get("error_msg"),
+            }
         return approval_result
 
     def _publish_callbacks(self) -> BotPublishCallbacks:
@@ -862,10 +910,16 @@ class BotPublicService:
         public/protected 仍走工单, 见 public_bcs_bot 主流程。
         """
         field = _BCS_VISIBILITY_FIELD_BY_SCOPE[public_scope]
-        self._bcn_service.patch_attributes(bot_uuid=bot_uid, body={field: "private"})
+        patched = self._bcn_service.patch_attributes(
+            bot_uuid=bot_uid, body={field: "private"}
+        )
+        # patch_attributes returns {"skipped": True} when community has no BCS
+        # provider creds (non prod/pre); report that truthfully as SKIPPED
+        # instead of faking COMPLETED.
+        skipped = isinstance(patched, dict) and bool(patched.get("skipped"))
         return {
             "success": True,
-            "state": "COMPLETED",
+            "state": "SKIPPED" if skipped else "COMPLETED",
             "puid": None,
             "approval_url": None,
             "visibility": "private",
