@@ -58,9 +58,6 @@ class SystemConfigKey(StrEnum):
     """
 
     # Add more system config keys here as needed
-    # Example:
-    # ARCA_DEFAULT_TIMEOUT = "arca.default_timeout"
-    # ARCA_BASE_URL = "arca.base_url"
 
     # Chunk cleanup configuration
     CHUNK_CLEANUP_ENABLED = "bot_run.chunk_cleanup_enabled"

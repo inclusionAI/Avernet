@@ -8,7 +8,17 @@ from secbaas.community.core.service.paas import DeviceCallbackHandler
 from secbaas.community.core.service.paas.desktop import ConnectionManager
 from secbaas.community.logger import get_logger
 
-from ._configs import ConfigError, ConfigKey, DatabaseConfig, _read_config
+# ── Enterprise-only optional imports ─────────────────────────────────────
+try:
+    from secbaas.enterprise.core.arca_ttl_renewal import (
+        TtlRenewalScheduleRepository,
+    )
+
+    _HAS_ENTERPRISE_RENEWAL = True
+except ImportError:
+    _HAS_ENTERPRISE_RENEWAL = False
+
+from ._configs import ConfigError, ConfigKey
 from ._core_repository import CoreRepositoryContainer
 from ._core_services import CoreServiceContainer
 from ._core_tasks import CoreTaskContainer
@@ -40,46 +50,6 @@ def _lazy_publish_service() -> PublishService:
 from .plugins import PluginContainer  # noqa: E402
 
 logger = get_logger("bootstrap")
-
-
-def _build_db_config(config) -> DatabaseConfig:
-    """Construct DatabaseConfig from the DI Configuration provider."""
-    from secbaas.community.spi.database import PluginDatabaseType
-
-    plugin_type = PluginDatabaseType(_read_config(config, ConfigKey.PLUGIN_DATABASE))
-    try:
-        db_url = _read_config(config, ConfigKey.DATABASE_URL)
-    except ConfigError:
-        if plugin_type == PluginDatabaseType.SQLITE_ORM:
-            raise
-        db_url = ""
-
-    def _opt(key: ConfigKey) -> str:
-        try:
-            return _read_config(config, key)
-        except ConfigError:
-            return ""
-
-    def _opt_bool_default_false(key: ConfigKey, default: bool = False) -> bool:
-        try:
-            val = _read_config(config, key)
-        except ConfigError:
-            return default
-        if isinstance(val, bool):
-            return val
-        return str(val).strip().lower() in {"1", "true", "yes", "on"}
-
-    return DatabaseConfig(
-        plugin_type=plugin_type,
-        db_url=db_url,
-        create_schema=_opt_bool_default_false(ConfigKey.CREATE_SCHEMA),
-        seed_data=_opt_bool_default_false(ConfigKey.SEED_DATA),
-        mariadb_host=_opt(ConfigKey.MARIADB_HOST) or "127.0.0.1",
-        mariadb_port=int(_opt(ConfigKey.MARIADB_PORT) or 3306),
-        mariadb_database=_opt(ConfigKey.MARIADB_DATABASE),
-        mariadb_user=_opt(ConfigKey.MARIADB_USER),
-        mariadb_password=_opt(ConfigKey.MARIADB_PASSWORD),
-    )
 
 
 def _provider_label(provider) -> str:
@@ -219,12 +189,18 @@ eval_binding_resolver=plugins.eval_binding_resolver,
         CoreTaskContainer,
         config=config,
         distributed_lock_service=services.distributed_lock_service,
+        device_repo=repository.device_repository,
         device_binding_repo=repository.device_binding_repository,
         sandbox_device_router=services.sandbox_device_router,
         bot_run_queue_repository=repository.bot_run_queue_repository,
         ticket_repository=repository.ticket_repository,
         paas_service_facade=services.paas_facade,
         file_transfer_backend=services.file_transfer_backend,
+        ttl_renewal_schedule_repository=ttl_renewal_schedule_repo,
+        device_service=services.device_service,
+        bot_manage_service=services.bot_management_service,
+        bot_repo=repository.bot_repository,
+        bot_device_rel_repo=repository.bot_device_rel_repository,
         arca_ttl_schedule_repository=repository.arca_ttl_schedule_repository,
     )
 
@@ -240,13 +216,8 @@ eval_binding_resolver=plugins.eval_binding_resolver,
             ),
             tasks.bot_run_recovery_task,
             tasks.file_transfer_poller_task,
+            tasks.expire_sandbox_timer_task,
         ),
-    )
-
-    # ── Database config (resolved lazily, used by DatabaseManagerLifecycle) ──
-    db_config = providers.Singleton(
-        _build_db_config,
-        config=config,
     )
 
     # ── Lifecycle-ordered component list ─────────────────────────────────────
@@ -254,7 +225,7 @@ eval_binding_resolver=plugins.eval_binding_resolver,
     #   WorkerRouter → CronLifecycle → BotRequestWorker → LocalProcessManager.
     # Stop order: reverse of above.
     lifecycle_components = providers.List(
-        providers.Singleton(DatabaseManagerLifecycle, db_config=db_config),
+        providers.Singleton(DatabaseManagerLifecycle),
         services.connection_management,
         services.instance_router,
         services.worker_router,

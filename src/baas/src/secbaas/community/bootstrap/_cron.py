@@ -34,11 +34,16 @@ class CronLifecycle:
     def _start_sync(self) -> None:
         """Register and start AppScheduler tasks.
 
-        All exceptions are caught and logged — this method never raises.
+        Tasks that report an ``enabled`` property of ``False`` are skipped
+        (fail-closed) so disabled features are not scheduled. All exceptions are
+        caught and logged — this method never raises.
         """
         try:
             log.info("Starting scheduled jobs")
             for task in self._tasks:
+                if not getattr(task, "enabled", True):
+                    log.info("Skipping disabled task: %s", task.name)
+                    continue
                 self._app_scheduler.add_task(task)
             self._app_scheduler.start()
             log.info("AppScheduler started")

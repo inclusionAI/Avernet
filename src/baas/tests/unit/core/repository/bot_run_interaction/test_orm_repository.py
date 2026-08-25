@@ -20,8 +20,7 @@ def repository() -> OrmBotRunInteractionRepository:
     plugin = SqliteOrmPlugin("sqlite:///:memory:")
     plugin.create_all()
     database = DatabaseManager()
-    database._sync_session_factory = plugin._sync_session_factory
-    database._sync_engine = plugin._sync_engine
+    database.init_plugin(plugin)
     return OrmBotRunInteractionRepository(database=database)
 
 

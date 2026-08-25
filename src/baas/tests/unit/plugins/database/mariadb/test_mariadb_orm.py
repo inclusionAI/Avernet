@@ -21,70 +21,17 @@ def plugin() -> MariaDbOrmPlugin:
     return MariaDbOrmPlugin()
 
 
-def _config(**overrides):
-    from secbaas.community.bootstrap import DatabaseConfig
-    from secbaas.community.spi.database import PluginDatabaseType
-
-    defaults = {
-        "plugin_type": PluginDatabaseType.MARIADB_ORM,
-        "create_schema": True,
-        "seed_data": True,
-        "mariadb_host": "127.0.0.1",
-        "mariadb_port": 3306,
-        "mariadb_database": "mydb",
-        "mariadb_user": "user",
-        "mariadb_password": "pass",
-    }
-    defaults.update(overrides)
-    return DatabaseConfig(**defaults)
-
-
 class TestConstructor:
-    def test_defaults_are_none(self, plugin: MariaDbOrmPlugin) -> None:
-        assert plugin._database_url is None
+    def test_defaults_are_empty(self, plugin: MariaDbOrmPlugin) -> None:
+        assert plugin._database_url == ""
         assert plugin._sync_engine is None
         assert plugin._sync_session_factory is None
         assert plugin._async_engine is None
         assert plugin._async_session_factory is None
 
-    def test_with_database_url(self) -> None:
-        p = MariaDbOrmPlugin("mysql+aiomysql://u:p@h:3306/db")
-        assert p._database_url == "mysql+aiomysql://u:p@h:3306/db"
-
-
-class TestResolveUrl:
-    def test_prefers_constructor_url(self, monkeypatch) -> None:
-        monkeypatch.delenv("MARIADB_DATABASE", raising=False)
-        p = MariaDbOrmPlugin("mysql+aiomysql://u:p@h:3306/db")
-        assert p._resolve_url(_config(mariadb_database="")) == (
-            "mysql+aiomysql://u:p@h:3306/db"
-        )
-
-    def test_uses_structured_fields(self) -> None:
-        p = MariaDbOrmPlugin()
-        url = p._resolve_url(_config(mariadb_host="db.internal", mariadb_port=3307))
-        assert url.startswith("mysql+aiomysql://")
-        assert "db.internal:3307/mydb" in url
-
-    def test_uses_non_sqlite_db_url(self) -> None:
-        p = MariaDbOrmPlugin()
-        url = p._resolve_url(
-            _config(
-                mariadb_database="",
-                db_url="mysql+aiomysql://u:p@h:3306/existing_db",
-            )
-        )
-        assert url == "mysql+aiomysql://u:p@h:3306/existing_db"
-
-    def test_ignores_sqlite_db_url_and_raises_when_no_database(self) -> None:
-        p = MariaDbOrmPlugin()
-        with pytest.raises(RuntimeError, match="requires a database"):
-            p._resolve_url(_config(mariadb_database="", db_url="sqlite:////tmp/x.db"))
-
-    def test_database_url_env_precedence(self, monkeypatch) -> None:
-        monkeypatch.setenv("DATABASE_URL", "mysql+aiomysql://u:p@h:3306/db")
-        p = MariaDbOrmPlugin()
-        assert p._resolve_url(_config()) == "mysql+aiomysql://u:p@h:3306/db"
+    def test_with_full_url(self) -> None:
+        p = MariaDbOrmPlugin("mysql+aiomysql://u:p@h:3306/db?charset=utf8mb4")
+        assert p._database_url == "mysql+aiomysql://u:p@h:3306/db?charset=utf8mb4"
 
     def test_ignores_sqlite_database_url_env(self, monkeypatch) -> None:
         """WR-04: a SQLite DATABASE_URL (the exact env var the SQLite plugin
@@ -235,9 +182,11 @@ class TestCreateAll:
 
 
 class TestInitDatabase:
-    def test_full_init(self, plugin: MariaDbOrmPlugin, monkeypatch) -> None:
-        monkeypatch.setattr(
-            plugin, "_resolve_url", lambda config: "mysql+aiomysql://u:p@h:3306/db"
+    def test_full_init(self, monkeypatch) -> None:
+        plugin = MariaDbOrmPlugin(
+            "mysql+aiomysql://u:p@h:3306/db",
+            create_schema=True,
+            seed_data=True,
         )
         monkeypatch.setattr(plugin, "_init_engines", lambda url: None)
         calls: dict = {}
@@ -258,16 +207,16 @@ class TestInitDatabase:
             _FakeDbManager(db_manager_records),
         )
 
-        plugin.init_database(_config())
+        plugin.init_database()
         assert calls["create_all"] is True
         assert "seed" in calls
         assert db_manager_records["plugin"] is plugin
 
-    def test_init_skips_schema_and_seed(
-        self, plugin: MariaDbOrmPlugin, monkeypatch
-    ) -> None:
-        monkeypatch.setattr(
-            plugin, "_resolve_url", lambda config: "mysql+aiomysql://u:p@h:3306/db"
+    def test_init_skips_schema_and_seed(self, monkeypatch) -> None:
+        plugin = MariaDbOrmPlugin(
+            "mysql+aiomysql://u:p@h:3306/db",
+            create_schema=False,
+            seed_data=False,
         )
         monkeypatch.setattr(plugin, "_init_engines", lambda url: None)
         calls: dict = {}
@@ -285,7 +234,7 @@ class TestInitDatabase:
             _FakeDbManager(calls),
         )
 
-        plugin.init_database(_config(create_schema=False, seed_data=False))
+        plugin.init_database()
         assert "boom" not in calls
         assert calls["plugin"] is plugin
 

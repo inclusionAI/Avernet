@@ -36,12 +36,6 @@ class AuthnPluginConfig(BaseSettings):
     tenant: str = Field(default="stub")
 
 
-class DatabasePluginConfig(BaseSettings):
-    model_config = SettingsConfigDict(extra="allow")
-    plugin_database: str = Field(default="SQLITE_ORM")
-    database_url: str = ""
-
-
 class SecretConfig(BaseModel):
     """SecretResolver configuration (mirrors backend ``CommunitySecretConfig``).
 
@@ -201,7 +195,8 @@ class PluginConfig(BaseSettings):
     auth: str = Field(default="stub", min_length=1)
     secret: str = Field(default="community", min_length=1)
     authn: AuthnPluginConfig = Field(default_factory=AuthnPluginConfig)
-    database: DatabasePluginConfig = Field(default_factory=DatabasePluginConfig)
+    database: str = Field(default="sqlite", min_length=1)
+    secret_aliyun_kms: dict[str, Any] = Field(default_factory=dict)
 
 
 class UserConfig(BaseModel):
