@@ -33,6 +33,9 @@ from agentclaw.community.core.bot_collaborator.services.member_management_capabi
 from agentclaw.community.core.bot_collaborator.services.editor_policy import (
     EditorPolicy,
 )
+from agentclaw.community.core.bot_collaborator.services.collaborator_query_mixin import (
+    CollaboratorQueryMixin,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.utils.env_utils import get_current_env
@@ -68,7 +71,7 @@ __all__ = [
 # ============================================================================
 # 服务实现
 # ============================================================================
-class CollaboratorService:
+class CollaboratorService(CollaboratorQueryMixin):
     """Bot 协作者管理服务。
 
     提供协作者的 CRUD 操作和权限检查功能。
@@ -541,62 +544,6 @@ class CollaboratorService:
             owner_id=owner_id,
             user_id=user_id,
             env=resolved_env,
-        )
-
-    # ========================================================================
-    # 获取协作者列表
-    # ========================================================================
-
-    def list_collaborators(
-        self,
-        bot_id: str,
-        owner_id: str,
-        user_id: str,
-        role: Optional[str] = None,
-        env: Optional[str] = None,
-    ) -> List[CollaboratorRecord]:
-        """获取 Bot 的协作者列表。
-
-        Args:
-            bot_id: Bot ID
-            owner_id: Bot 拥有者工号
-            user_id: 请求用户工号
-            role: 角色过滤（可选）
-            env: 环境标识
-
-        Returns:
-            CollaboratorRecord 列表
-
-        Raises:
-            BotNotFoundError: Bot 不存在
-            PermissionDeniedError: 用户无权限查看
-        """
-        if env is None:
-            env = get_current_env()
-
-        # 1. 查询 Bot 信息
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if not bot:
-            raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}")
-
-        bot_pk = bot["id"]
-        owner_id_from_bot = bot["owner_id"]
-
-        # 2. 检查用户权限（需要 MEMBER 或更高）
-        self.check_permission(
-            bot_pk=bot_pk,
-            user_id=user_id,
-            owner_id=owner_id_from_bot,
-            required_level=PermissionLevel.MEMBER,
-            env=env,
-        )
-
-        # 3. 获取协作者列表
-        return self._collaborator_repo.list_by_bot(
-            bot_id=bot_id,
-            owner_id=owner_id_from_bot,
-            env=env,
-            role=role,
         )
 
     # ========================================================================

@@ -35,6 +35,14 @@ class CollaboratorServiceProtocol(Protocol):
         env: Optional[str] = None,
     ) -> List[CollaboratorRecord]: ...
 
+    def batch_list_collaborators(
+        self,
+        bot_ids: list[str],
+        user_id: str,
+        role: Optional[str] = None,
+        env: Optional[str] = None,
+    ) -> List[CollaboratorRecord]: ...
+
     def update_collaborator(
         self,
         collaborator_id: int,
