@@ -844,9 +844,10 @@ class TestTtlWindowDerivation:
 
         assert result == "success"
         next_renew = mock_repo.update_after_success.call_args[0][3]
-        from datetime import UTC, datetime, timedelta
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
 
-        now_utc = datetime.now(UTC).replace(tzinfo=None)
+        now_utc = datetime.now(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
         expected_min = now_utc + timedelta(hours=24) - timedelta(seconds=5)
         expected_max = now_utc + timedelta(hours=24) + timedelta(seconds=5)
         assert expected_min <= next_renew <= expected_max
@@ -870,11 +871,12 @@ class TestTtlWindowDerivation:
 
         assert result == "skipped"
         next_renew = mock_repo.postpone_renewal.call_args[0][3]
-        from datetime import UTC, datetime, timedelta
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
 
-        expiration_utc = datetime.fromtimestamp(ttl_ms / 1000.0, tz=UTC).replace(
-            tzinfo=None
-        )
+        expiration_utc = datetime.fromtimestamp(
+            ttl_ms / 1000.0, tz=ZoneInfo("Asia/Shanghai")
+        ).replace(tzinfo=None)
         expected_min = expiration_utc - timedelta(hours=24) - timedelta(seconds=5)
         expected_max = expiration_utc - timedelta(hours=24) + timedelta(seconds=5)
         assert expected_min <= next_renew <= expected_max
@@ -956,9 +958,12 @@ class TestTtlWindowDerivation:
 
         mock_repo.register_if_missing.assert_called_once()
         next_renew_at = mock_repo.register_if_missing.call_args.kwargs["next_renew_at"]
-        from datetime import UTC, datetime, timedelta
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
 
-        ttl_utc = datetime.fromtimestamp(ttl_epoch_sec, tz=UTC).replace(tzinfo=None)
+        ttl_utc = datetime.fromtimestamp(
+            ttl_epoch_sec, tz=ZoneInfo("Asia/Shanghai")
+        ).replace(tzinfo=None)
         expected_min = ttl_utc - timedelta(hours=24) - timedelta(seconds=5)
         expected_max = ttl_utc - timedelta(hours=24) + timedelta(seconds=5)
         assert expected_min <= next_renew_at <= expected_max
@@ -1143,11 +1148,13 @@ class TestStep5ReportAndMetrics:
         next_renew = call_args[3]  # env, source_table, source_id, next_renew_at
         assert next_renew is not None
 
-        from datetime import UTC, datetime, timedelta
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
 
-        # CR-01: the scheduler writes naive-UTC pipeline timestamps, so the
-        # expected window is UTC wall clock, never the local wall clock.
-        now_utc = datetime.now(UTC).replace(tzinfo=None)
+        # CR-01: the scheduler writes fixed Asia/Shanghai (+08:00, no DST)
+        # pipeline timestamps, so the expected window is the +08:00 wall
+        # clock, never the host-local wall clock.
+        now_utc = datetime.now(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
         expected_min = now_utc + timedelta(hours=12) - timedelta(seconds=5)
         expected_max = now_utc + timedelta(hours=12) + timedelta(seconds=5)
         assert expected_min <= next_renew <= expected_max
@@ -1335,10 +1342,11 @@ class TestDiscoveryScanIsolation:
 
         mock_repo.register_if_missing.assert_called_once()
         next_renew_at = mock_repo.register_if_missing.call_args.kwargs["next_renew_at"]
-        # CR-01: discovery-scan fallback writes naive UTC, not local time.
-        from datetime import UTC
+        # CR-01: discovery-scan fallback writes the fixed Asia/Shanghai
+        # (+08:00, no DST) wall clock, not host-local time.
+        from zoneinfo import ZoneInfo
 
-        now_utc = datetime.now(UTC).replace(tzinfo=None)
+        now_utc = datetime.now(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
         expected_min = now_utc + timedelta(hours=12) - timedelta(seconds=5)
         expected_max = now_utc + timedelta(hours=12) + timedelta(seconds=5)
         assert expected_min <= next_renew_at <= expected_max

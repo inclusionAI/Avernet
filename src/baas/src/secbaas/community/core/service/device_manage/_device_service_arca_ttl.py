@@ -29,7 +29,7 @@ from __future__ import annotations
 from secbaas.community.core.repository.arca_ttl import TtlRenewalScheduleRepository
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.core.utils.time_utils import (
-    naive_utc_fromtimestamp,
+    naive_cst_fromtimestamp,
     renewal_window,
 )
 from secbaas.community.logger import get_logger
@@ -90,7 +90,7 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
                     device_uuid,
                 )
                 return
-            expiration_dt = naive_utc_fromtimestamp(ttl_ms / 1000)
+            expiration_dt = naive_cst_fromtimestamp(ttl_ms / 1000)
             self._schedule_repo.register(
                 get_current_env(),
                 sandbox_id=response.provider_device_id,
