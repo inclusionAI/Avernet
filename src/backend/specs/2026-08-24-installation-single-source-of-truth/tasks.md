@@ -202,7 +202,7 @@ lands in the same group as the migration of its last caller.
 ## Group 11 — Dead code sweep and docs
 
 - [x] 11.1 Delete `core/skill_center/installation_compatibility.py`.
-- [ ] 11.2 Delete `_ensure_default_set` / `_ensure_default_set_membership`
+- [x] 11.2 Delete `_ensure_default_set` / `_ensure_default_set_membership`
       from `local_skill_upload_service.py` (+ tests).
 - [ ] 11.3 Verify zero callers by search, then delete legacy
       `SkillSetService` methods: `add_skills_to_set`,

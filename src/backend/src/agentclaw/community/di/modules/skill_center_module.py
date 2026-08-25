@@ -431,7 +431,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
     def local_skill_upload_service(
         self,
         skill_repo: SkillRepository,
-        skill_set_repo: SkillSetRepository,
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
@@ -442,7 +441,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
     ) -> LocalSkillUploadServiceProtocol:
         return LocalSkillUploadService(
             skill_repo,
-            skill_set_repo,
             bot_repo,
             collaborator_service,
             skill_service_factory,

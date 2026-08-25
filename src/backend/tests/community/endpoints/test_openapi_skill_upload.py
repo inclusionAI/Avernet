@@ -204,7 +204,6 @@ def _seed_uploadable_bot(world) -> None:
         LocalSkillUploadServiceProtocol,
         to=LocalSkillUploadService(
             world.get(SkillRepository),
-            world.get(SkillSetRepository),
             world.get(BotRepository),
             world.get(CollaboratorServiceProtocol),
             storage_factory,
