@@ -112,7 +112,7 @@ lands in the same group as the migration of its last caller.
       private `_set_belongs_to_bot`, moved from
       `local_skill_state_service.skill_set_reaches_bot`;
       `require_can_join_set` raising with R2-before-R3 precedence).
-- [ ] 6.2 Collapse `_reject_skill_set_member` /
+- [x] 6.2 Collapse `_reject_skill_set_member` /
       `_require_no_normal_skill_set_membership` / `_set_governs` into thin
       wrappers over `is_set_managed` (each asset kind keeps its legacy error
       type); add the behavior-change test: an excluded Default-Set member is

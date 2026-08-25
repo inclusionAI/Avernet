@@ -1065,18 +1065,21 @@ def test_direct_state_is_refused_for_a_member_of_a_default_skill_set():
             "engine_type": "aicoding",
         }
     )
-    # Nor does a Default Set the owner excluded this Skill from: the listing
-    # drops it and takes its Installation away, so refusing direct activation
-    # on that Set's account would strand the Skill entirely.
-    _reject(
-        {
-            "is_default": True,
-            "bolt_id": "default",
-            "user_id": None,
-            "engine_type": "openclaw",
-        },
-        excluded=[1],
-    )
+    # An excluded Default-Set member stays Set-managed (R1, no carve-out):
+    # exclusion is the Default Set's per-Bot deactivation, and re-activating
+    # means removing the exclusion — never the Skill-level command. This
+    # supersedes the 2026-08-23 carve-out at the domain owner's direction
+    # (specs/2026-08-24-installation-single-source-of-truth).
+    with pytest.raises(SkillSetManagedResourceError):
+        _reject(
+            {
+                "is_default": True,
+                "bolt_id": "default",
+                "user_id": None,
+                "engine_type": "openclaw",
+            },
+            excluded=[1],
+        )
 
 
 def test_direct_state_on_a_repo_skill_is_refused_for_a_default_set_member():
@@ -1164,13 +1167,16 @@ def test_direct_state_on_a_repo_skill_is_refused_for_a_default_set_member():
             "engine_type": "aicoding",
         }
     )
-    # And one this Skill is excluded from — the Set no longer reaches it.
-    _require(
-        {
-            "is_default": True,
-            "bolt_id": "default",
-            "user_id": None,
-            "engine_type": "openclaw",
-        },
-        excluded=[1],
-    )
+    # An excluded Default-Set member stays Set-managed (R1, no carve-out):
+    # re-activating it means removing the exclusion, never the Skill-level
+    # command.
+    with pytest.raises(SkillManagedBySkillSetError):
+        _require(
+            {
+                "is_default": True,
+                "bolt_id": "default",
+                "user_id": None,
+                "engine_type": "openclaw",
+            },
+            excluded=[1],
+        )
