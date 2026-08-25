@@ -47,6 +47,8 @@ from agentclaw.community.api.bot_startup_script_service import (
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     ApplicationCodingUnavailableError,
     BotAccessRefusedError,
+    BotEditLockCheckError,
+    BotEditLockRequiredError,
     BotCombinationUnsupportedError,
     BotTemplateInvalidError,
     CallerIdentityConflictError,
@@ -422,6 +424,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # through to the raw ``{"detail": ...}`` shape — a *different* body from the
     # envelope a genuinely absent bot returns, which is the tell.
     BotAccessRefusedError: (404, "Not found"),
+    BotEditLockRequiredError: (423, "Edit lock required"),
+    BotEditLockCheckError: (500, "Internal error"),
     # Withdrawing an authorization that is not there. Shares the 404 shape with
     # an absent bot, and that is not a collision worth avoiding: an owner
     # reconciling their records needs "there was nothing to remove" to read

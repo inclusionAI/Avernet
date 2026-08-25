@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from types import SimpleNamespace
 
 import pytest
 from fastapi import Request
@@ -13,6 +12,7 @@ from pydantic import ValidationError
 from agentclaw.community.adapters.http.openapi_v1.authorization import (
     AUTHORIZATION,
     Check,
+    EDIT_LOCK,
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.adapters.http.openapi_v1.channels.router import (
@@ -81,30 +81,6 @@ class _Relay:
             bot_type="personal",
             active_engine="openclaw",
             owner_id=owner_id,
-        )
-
-
-class _Locks:
-    def __init__(
-        self,
-        *,
-        has_collaborators: bool = False,
-        holder_user_id: str | None = None,
-    ):
-        self.has_collaborators = has_collaborators
-        self.holder_user_id = holder_user_id
-        self.calls: list[dict] = []
-
-    def get_lock_info(self, **kwargs):
-        self.calls.append(kwargs)
-        lock = (
-            SimpleNamespace(holder_user_id=self.holder_user_id)
-            if self.holder_user_id is not None
-            else None
-        )
-        return SimpleNamespace(
-            has_collaborators=self.has_collaborators,
-            lock=lock,
         )
 
 
@@ -231,7 +207,6 @@ async def test_create_derives_scope_stores_secret_and_returns_safe_projection():
         owner_id="owner-1",
         relay=_Relay(),
         service=service,
-        locks=_Locks(),
         aix_config=AixConfig(preview_url="https://preview.example"),
     )
 
@@ -271,7 +246,6 @@ async def test_update_preserves_null_secret_clears_nullable_fields_and_syncs_act
         owner_id="owner-1",
         relay=_Relay(),
         service=service,
-        locks=_Locks(),
         aix_config=AixConfig(preview_url="https://preview.example"),
     )
 
@@ -298,7 +272,6 @@ async def test_status_maps_public_values_to_internal_values():
         owner_id="owner-1",
         relay=_Relay(),
         service=service,
-        locks=_Locks(),
     )
 
     assert ("status", "1") in service.calls
@@ -316,7 +289,6 @@ async def test_runtime_bot_lookup_failure_is_normalized_to_upstream_error():
         owner_id="owner-1",
         relay=_Relay(),
         service=_MissingBotChannels([_record()]),
-        locks=_Locks(),
     )
 
     assert response.status_code == 502
@@ -335,7 +307,6 @@ async def test_delete_deactivates_active_channel_before_deleting():
         owner_id="owner-1",
         relay=_Relay(),
         service=service,
-        locks=_Locks(),
     )
 
     assert service.calls[-2:] == [("status", "0"), ("delete", 1)]
@@ -391,55 +362,12 @@ def test_the_four_writes_still_require_bot_admin():
         assert rule.level is PermissionLevel.ADMIN, (
             f"{key[0]} {key[1]} moved off the ADMIN bar _require_admin enforced"
         )
+        assert rule.edit_lock is EDIT_LOCK
     for key in reads:
         rule = AUTHORIZATION[key]
         assert isinstance(rule, Check) and rule.level is PermissionLevel.MEMBER, (
             f"{key[0]} {key[1]} is not the member-level read it was"
         )
-
-
-@pytest.mark.asyncio
-async def test_write_requires_edit_lock_when_bot_has_collaborators():
-    service = _Channels([_record()])
-    locks = _Locks(has_collaborators=True)
-
-    response = await update_channel_status(
-        bot_id="bot-1",
-        channel_id=1,
-        body=ChannelStatusUpdate(status="active"),
-        request=_request(),
-        user_id="owner-1",
-        owner_id="owner-1",
-        relay=_Relay(),
-        service=service,
-        locks=locks,
-    )
-
-    assert response.status_code == 423
-    assert json.loads(response.body)["message"] == "Edit lock required"
-    assert locks.calls == [
-        {"bot_id": "bot-1", "owner_id": "owner-1", "user_id": "owner-1"}
-    ]
-    assert not any(name == "status" for name, _ in service.calls)
-
-
-@pytest.mark.asyncio
-async def test_write_succeeds_when_caller_holds_edit_lock():
-    service = _Channels([_record()])
-
-    result = await update_channel_status(
-        bot_id="bot-1",
-        channel_id=1,
-        body=ChannelStatusUpdate(status="active"),
-        request=_request(),
-        user_id="admin-1",
-        owner_id="owner-1",
-        relay=_Relay(),
-        service=service,
-        locks=_Locks(has_collaborators=True, holder_user_id="admin-1"),
-    )
-
-    assert result.data.status == "active"
 
 
 def test_write_contract_forbids_unknown_fields():

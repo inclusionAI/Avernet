@@ -71,6 +71,18 @@ from fastapi.routing import APIRoute
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
 
+class _EditLock:
+    """Require the caller to hold the Bot edit lock after authorization."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - diagnostics only
+        return "EDIT_LOCK"
+
+
+EDIT_LOCK = _EditLock()
+
+
 @dataclass(frozen=True)
 class Check:
     """**The seam enforces this**, at ``level`` or above; OWNER always passes.
@@ -81,6 +93,7 @@ class Check:
     """
 
     level: PermissionLevel
+    edit_lock: _EditLock | None = None
 
     def __post_init__(self) -> None:
         """Refuse ``NONE``, which would be a gate that never refuses.
@@ -98,6 +111,11 @@ class Check:
                 "Check(PermissionLevel.NONE) is not a bar — it admits every "
                 "caller the gate would otherwise refuse. Name the level the "
                 "operation actually requires."
+            )
+        if self.edit_lock not in (None, EDIT_LOCK):
+            raise ValueError(
+                "Check's second argument must be EDIT_LOCK when the operation "
+                "requires the Bot edit lock."
             )
 
 
@@ -177,7 +195,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("PUT", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/activate"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/modes"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/auth-status"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/authorized-apps"):
@@ -188,11 +206,11 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.authorized_apps.router"),
     ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.ADMIN),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN),
+    ("POST", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.MEMBER),
-    ("PATCH", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN),
-    ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"): Check(PermissionLevel.ADMIN),
+    ("PATCH", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
+    ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/chats"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.bot_chat.service"),
     ("GET", "/openapi/v1/bots/{bot_id}/chats/{trace_id}"):
@@ -200,11 +218,11 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/connection"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.engine_runtime.connection"),
     ("GET", "/openapi/v1/bots/{bot_id}/containers"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"): Check(PermissionLevel.OWNER),
+    ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"): Check(PermissionLevel.OWNER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/data-init"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/data-init"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/diagnostics/health"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
@@ -218,7 +236,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/engine/capabilities"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/status"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"):
         ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.harness.router"),
@@ -235,25 +253,25 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/identity"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): OWNER_SCOPED,
-    ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(PermissionLevel.OWNER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(PermissionLevel.OWNER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/lifecycle/approval"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/{bot_id}/lifecycle/approval"): Check(PermissionLevel.OWNER),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/cancel-staging"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/offline"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/restart"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/retry"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"): Check(PermissionLevel.OWNER),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade"): Check(PermissionLevel.ADMIN),
+    ("PUT", "/openapi/v1/bots/{bot_id}/lifecycle/approval"): Check(PermissionLevel.OWNER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/cancel-staging"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/offline"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/restart"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/retry"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"): Check(PermissionLevel.OWNER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/local"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local/auth-status"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/local/open-folder"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/local/restart"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/mcps"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/models"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/nodes"): Check(PermissionLevel.MEMBER),
@@ -261,9 +279,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/collaboration/bots/{bot_uuid}/public"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/render-screens"):
         NoCheck("share and group viewers must render panels without an Editor relation"),
-    ("POST", "/openapi/v1/bots/{bot_id}/render-screens"): Check(PermissionLevel.MEMBER),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(PermissionLevel.MEMBER),
-    ("PATCH", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/render-screens"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("PATCH", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/resources"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/resources"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/resources/download"): OWNER_SCOPED,
@@ -318,34 +336,34 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         ServiceChecked(PermissionLevel.MEMBER,
                        "…openapi_v1.engine_runtime.sessions.router"),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/resources"): Check(PermissionLevel.MEMBER),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/activate"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/deactivate"): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/activate"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/deactivate"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permission-requests"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permissions"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps"): Check(PermissionLevel.MEMBER),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills"): Check(PermissionLevel.MEMBER),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/skills"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.local_skill_query_service"),
     ("POST", "/openapi/v1/bots/{bot_id}/skills"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.local_skill_upload_service"),
     ("POST", "/openapi/v1/bots/{bot_id}/skills/upload-folder"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.local_skill_upload_service"),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("PUT", "/openapi/v1/bots/{bot_id}/space"): OWNER_SCOPED,
     ("DELETE", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
@@ -478,7 +496,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
 
     # ── Retiring addresses in ``deprecated/`` ─────────────────────────────
     ("GET", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/approvals/{bot_id}/modes"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/connection/{bot_id}"): INHERITED,
     ("GET", "/openapi/v1/bots/engine/{bot_id}/available"): Check(PermissionLevel.MEMBER),
@@ -561,6 +579,7 @@ __all__ = [
     "AUTHORIZATION",
     "Authorization",
     "Check",
+    "EDIT_LOCK",
     "INHERITED",
     "NoCheck",
     "OWNER_SCOPED",
@@ -607,6 +626,25 @@ class PublicAPIRoute(APIRoute):
                 *(kwargs.get("dependencies") or []),
                 Depends(require_check(rule)),
             ]
+            if rule.edit_lock is EDIT_LOCK:
+                from agentclaw.community.adapters.http.openapi_v1.contracts import (
+                    ErrorEnvelope,
+                    error_example,
+                )
+
+                responses = dict(kwargs.get("responses") or {})
+                responses.setdefault(
+                    423,
+                    {
+                        "model": ErrorEnvelope,
+                        "description": (
+                            "A Bot with collaborators requires the caller to "
+                            "hold its edit lock."
+                        ),
+                        **error_example(423, "Edit lock required"),
+                    },
+                )
+                kwargs["responses"] = responses
         super().__init__(path, endpoint, **kwargs)
 
 
