@@ -13,9 +13,9 @@ they were the only reason for.
 call it for the **resolved owner**, which every subsequent write is scoped by,
 and for the bot-type refusal the shared engine-runtime gate performs.
 
-``_require_edit_lock`` stays untouched, and its 423 with it. It is not a
-collaborator bar — it asks who currently holds the Bot's draft, which is a
-question about concurrent editing, not about permission.
+The edit-lock requirement is declared beside that bar as ``EDIT_LOCK``. The
+shared dependency enforces it after permission succeeds, so every Channel write
+uses the same lock semantics and 423 contract as the rest of the public API.
 """
 
 from __future__ import annotations
@@ -28,8 +28,6 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
     Deleted,
     Envelope,
-    ErrorEnvelope,
-    error_example,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
     resolve_operable_bot,
@@ -48,15 +46,11 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
 )
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
-from agentclaw.community.api.collaborator_lock_service import (
-    CollaboratorLockServiceProtocol,
-)
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
 from agentclaw.community.core.channel.errors import (
-    ChannelEditLockedError,
     ChannelNotFoundError,
     ChannelSyncError,
 )
@@ -94,16 +88,6 @@ ChannelIdPath = Annotated[
         description="Numeric Channel id returned by the collection or create operation.",
     ),
 ]
-
-CHANNEL_WRITE_RESPONSES = {
-    423: {
-        "model": ErrorEnvelope,
-        "description": (
-            "A Bot with collaborators requires the caller to hold its edit lock."
-        ),
-        **error_example(423, "Edit lock required"),
-    }
-}
 
 
 def _status(value: str) -> ChannelStatus:
@@ -164,25 +148,6 @@ async def _authorize(
         surface="channels",
     )
     return facts.owner_id
-
-
-def _require_edit_lock(
-    locks: CollaboratorLockServiceProtocol,
-    *,
-    bot_id: str,
-    owner_id: str,
-    user_id: str,
-) -> None:
-    """Match the internal mutation policy for Bots that have collaborators."""
-    info = locks.get_lock_info(
-        bot_id=bot_id,
-        owner_id=owner_id,
-        user_id=user_id,
-    )
-    if not info.has_collaborators:
-        return
-    if info.lock is None or info.lock.holder_user_id != user_id:
-        raise ChannelEditLockedError("Bot edit lock is not held by the caller")
 
 
 def _owned_channel(
@@ -270,7 +235,6 @@ async def list_channels(
     "",
     status_code=201,
     response_model=Envelope[Channel],
-    responses=CHANNEL_WRITE_RESPONSES,
     dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
@@ -282,7 +246,6 @@ async def create_channel(
     owner_id: OwnerIdDep,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
-    locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
     aix_config: cfg.AixConfig = Injected(cfg.AixConfig),
 ) -> Envelope[Channel]:
     """Create an inactive draft DingTalk Channel."""
@@ -291,12 +254,6 @@ async def create_channel(
         bot_id=bot_id,
         user_id=user_id,
         owner_id=owner_id,
-    )
-    _require_edit_lock(
-        locks,
-        bot_id=bot_id,
-        owner_id=resolved_owner,
-        user_id=user_id,
     )
     config = body.config.model_dump()
     config["aix_preview_url"] = aix_config.preview_url
@@ -356,7 +313,6 @@ async def get_channel(
 @router.patch(
     "/{channel_id}",
     response_model=Envelope[Channel],
-    responses=CHANNEL_WRITE_RESPONSES,
     dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
@@ -369,7 +325,6 @@ async def update_channel(
     owner_id: OwnerIdDep,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
-    locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
     aix_config: cfg.AixConfig = Injected(cfg.AixConfig),
 ) -> Envelope[Channel]:
     """Partially update a draft Channel, preserving an omitted secret."""
@@ -378,12 +333,6 @@ async def update_channel(
         bot_id=bot_id,
         user_id=user_id,
         owner_id=owner_id,
-    )
-    _require_edit_lock(
-        locks,
-        bot_id=bot_id,
-        owner_id=resolved_owner,
-        user_id=user_id,
     )
     record = _owned_channel(
         service,
@@ -427,7 +376,6 @@ async def update_channel(
 @router.put(
     "/{channel_id}/status",
     response_model=Envelope[Channel],
-    responses=CHANNEL_WRITE_RESPONSES,
     dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
@@ -440,7 +388,6 @@ async def update_channel_status(
     owner_id: OwnerIdDep,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
-    locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
 ) -> Envelope[Channel]:
     """Activate or deactivate a draft Channel and synchronize its runtime."""
     resolved_owner = await _authorize(
@@ -448,12 +395,6 @@ async def update_channel_status(
         bot_id=bot_id,
         user_id=user_id,
         owner_id=owner_id,
-    )
-    _require_edit_lock(
-        locks,
-        bot_id=bot_id,
-        owner_id=resolved_owner,
-        user_id=user_id,
     )
     _owned_channel(
         service,
@@ -474,7 +415,6 @@ async def update_channel_status(
 @router.delete(
     "/{channel_id}",
     response_model=Envelope[Deleted],
-    responses=CHANNEL_WRITE_RESPONSES,
     dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
@@ -486,7 +426,6 @@ async def delete_channel(
     owner_id: OwnerIdDep,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
-    locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
 ) -> Envelope[Deleted]:
     """Deactivate and remove a draft Channel."""
     resolved_owner = await _authorize(
@@ -494,12 +433,6 @@ async def delete_channel(
         bot_id=bot_id,
         user_id=user_id,
         owner_id=owner_id,
-    )
-    _require_edit_lock(
-        locks,
-        bot_id=bot_id,
-        owner_id=resolved_owner,
-        user_id=user_id,
     )
     record = _owned_channel(
         service,

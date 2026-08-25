@@ -52,7 +52,6 @@ from agentclaw.community.core.service_bot.errors import (
     ServiceContainerNotFoundError,
     ServiceContainerUpstreamError,
     ServicePublicationConflictError,
-    ServicePublicationLockedError,
     ServicePublicationNotFoundError,
     ServicePublicationUnsupportedError,
 )
@@ -621,13 +620,6 @@ class ServicePublicationFacade:
             raise ServicePublicationConflictError("no actionable publication")
         return bot, record
 
-    def _require_draft_lock(self, bot_id: str, owner_id: str, actor_id: str) -> None:
-        info = self._lock_service.get_lock_info(bot_id, owner_id, actor_id)
-        if not info.has_collaborators:
-            return
-        if info.lock is None or info.lock.holder_user_id != actor_id:
-            raise ServicePublicationLockedError("edit lock required")
-
     def _operation(
         self,
         record: BotPublishRecord,
@@ -669,13 +661,12 @@ class ServicePublicationFacade:
         owner_id: str,
     ) -> dict[str, Any]:
         if stage in {"staging", "prestable"}:
-            bot, record = self._resolve_action_record(
+            _, record = self._resolve_action_record(
                 bot_id,
                 PublishStatus.DRAFT,
                 actor_id=actor_id,
                 owner_id=owner_id,
             )
-            self._require_draft_lock(bot_id, bot["owner_id"], actor_id)
             result = await self._flow_service.process(record.id, actor_id)
             return self._operation(
                 record, action="publish_staging", result=result.model_dump()
@@ -791,35 +782,25 @@ class ServicePublicationFacade:
         info = self._lock_service.get_lock_info(
             bot["bot_id"], bot["owner_id"], actor_id
         )
-        records = self._publish_repo.list_by_source_bot(bot["id"], get_current_env())
-        has_draft = any(
-            record.status == PublishStatus.DRAFT.value for record in records
-        )
         return _ServiceEditLockInfo(
             lock=info.lock,
             holder_name=info.holder_name,
             has_collaborators=info.has_collaborators,
             is_owner=info.is_owner,
-            need_lock=info.has_collaborators and has_draft,
+            need_lock=info.has_collaborators,
         )
 
     def get_lock(self, bot_id: str, *, actor_id: str, owner_id: str) -> Any:
         bot, _ = self._resolve_bot(bot_id, actor_id=actor_id, owner_id=owner_id)
         return self._service_lock_info(bot, actor_id=actor_id)
 
-    def _lockable_draft(self, bot: dict[str, Any], *, actor_id: str) -> bool:
+    def _lockable_bot(self, bot: dict[str, Any], *, actor_id: str) -> bool:
         info = self._service_lock_info(bot, actor_id=actor_id)
-        if not info.has_collaborators:
-            return False
-        if not info.need_lock:
-            raise ServicePublicationConflictError(
-                "edit lock is only available for a service bot draft"
-            )
-        return True
+        return info.has_collaborators
 
     def acquire_lock(self, bot_id: str, *, actor_id: str, owner_id: str) -> Any:
         bot, _ = self._resolve_bot(bot_id, actor_id=actor_id, owner_id=owner_id)
-        if not self._lockable_draft(bot, actor_id=actor_id):
+        if not self._lockable_bot(bot, actor_id=actor_id):
             return None
         return self._lock_service.acquire_lock(bot_id, bot["owner_id"], actor_id)
 
@@ -842,6 +823,6 @@ class ServicePublicationFacade:
             # Service API contract promises to anyone else.
             required_level=PermissionLevel.MEMBER,
         )
-        if not self._lockable_draft(bot, actor_id=actor_id):
+        if not self._lockable_bot(bot, actor_id=actor_id):
             return None
         return self._lock_service.steal_lock(bot_id, bot["owner_id"], actor_id)

@@ -28,12 +28,19 @@ from agentclaw.community.adapters.http.openapi_v1.access_log import (
 )
 from agentclaw.community.adapters.http.openapi_v1.authorization import (
     Check,
+    EDIT_LOCK,
     PublicAPIRoute,
+)
+from agentclaw.community.api.collaborator_lock_service import (
+    CollaboratorLockServiceProtocol,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
+)
+from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
+    MemberManagementCapabilityService,
 )
 from agentclaw.community.core.bot_collaborator.errors import (
     BotNotFoundError as CollaboratorBotNotFoundError,
@@ -116,7 +123,49 @@ class _Audit:
         return data
 
 
-def _surface(*, level, bots=None, collaborators=None, audit=None, bar=None, write_raises=None):
+class _Locks:
+    def __init__(
+        self,
+        *,
+        has_collaborators: bool = False,
+        holder: str | None = None,
+        raises: bool = False,
+    ) -> None:
+        self.has_collaborators = has_collaborators
+        self.holder = holder
+        self.raises = raises
+        self.calls: list[dict] = []
+        self.threads: list[int] = []
+
+    def get_lock_info(self, **kwargs):
+        self.calls.append(kwargs)
+        self.threads.append(threading.get_ident())
+        if self.raises:
+            raise RuntimeError("lock table is unavailable")
+        lock = (
+            None
+            if self.holder is None
+            else type("Lock", (), {"holder_user_id": self.holder})()
+        )
+        return type(
+            "LockInfo",
+            (),
+            {"has_collaborators": self.has_collaborators, "lock": lock},
+        )()
+
+
+def _surface(
+    *,
+    level,
+    bots=None,
+    collaborators=None,
+    audit=None,
+    locks=None,
+    capabilities=None,
+    bar=None,
+    edit_lock=False,
+    write_raises=None,
+):
     """A one-operation app whose route really carries the seam.
 
     ``write_raises`` makes the mutation fail *before* a response exists, which
@@ -125,10 +174,15 @@ def _surface(*, level, bots=None, collaborators=None, audit=None, bar=None, writ
     bots = bots or _Bots()
     collaborators = collaborators or _Collaborators(level)
     audit = audit or _Audit()
+    locks = locks or _Locks()
+    capabilities = capabilities or MemberManagementCapabilityService()
 
     loop_thread: list[int] = []
     audit.loop_thread = loop_thread
-    row = Check(bar or PermissionLevel.MEMBER)
+    row = Check(
+        bar or PermissionLevel.MEMBER,
+        EDIT_LOCK if edit_lock else None,
+    )
     authz.AUTHORIZATION[("GET", PATH)] = row
     authz.AUTHORIZATION[("POST", PATH)] = row
     try:
@@ -156,6 +210,14 @@ def _surface(*, level, bots=None, collaborators=None, audit=None, bar=None, writ
                 )
                 binder.bind(
                     BotCollabLogRepositoryProtocol, to=InstanceProvider(audit)
+                )
+                binder.bind(
+                    CollaboratorLockServiceProtocol,
+                    to=InstanceProvider(locks),
+                )
+                binder.bind(
+                    MemberManagementCapabilityService,
+                    to=InstanceProvider(capabilities),
                 )
 
         app = FastAPI()
@@ -606,26 +668,96 @@ def test_unadjudicable_log_bounds_the_addressed_bot(caplog):
     assert "\n" not in line, "a caller-supplied newline reached the log verbatim"
 
 
-# ── what the seam is not ─────────────────────────────────────────────────────
+# ── optional edit lock ───────────────────────────────────────────────────────
 
 
-def test_the_seam_never_touches_the_lock_service():
-    """No edit lock in this iteration (``spec.md`` *Decisions* 1).
+def test_row_without_edit_lock_never_reads_the_lock_service():
+    locks = _Locks(raises=True)
+    client, _ = _surface(level=PermissionLevel.OWNER, locks=locks)
 
-    Asserted against the module's own imports rather than by observing a
-    request, because the claim is that the lock is *absent*, and absence is not
-    something one request can demonstrate.
-    """
-    import inspect
+    assert _post(client).status_code == 200
+    assert locks.calls == []
 
-    from agentclaw.community.adapters.http.openapi_v1 import bot_access
 
-    source = inspect.getsource(bot_access)
-    code = "\n".join(
-        line for line in source.splitlines() if line.startswith(("import ", "from "))
+def test_permission_refusal_happens_before_the_edit_lock_check():
+    locks = _Locks(raises=True)
+    client, _ = _surface(
+        level=PermissionLevel.MEMBER,
+        bar=PermissionLevel.ADMIN,
+        locks=locks,
+        edit_lock=True,
     )
 
-    assert "lock" not in code.lower()
+    assert _post(client).status_code == 404
+    assert locks.calls == []
+
+
+def test_edit_lock_is_not_required_without_collaborators():
+    locks = _Locks(has_collaborators=False)
+    client, _ = _surface(
+        level=PermissionLevel.OWNER,
+        locks=locks,
+        edit_lock=True,
+    )
+
+    assert _post(client).status_code == 200
+    assert locks.calls == [{"bot_id": BOT, "owner_id": OWNER, "user_id": CALLER}]
+
+
+def test_edit_lock_refuses_when_another_user_holds_it():
+    locks = _Locks(has_collaborators=True, holder="someone-else")
+    client, _ = _surface(
+        level=PermissionLevel.OWNER,
+        locks=locks,
+        edit_lock=True,
+    )
+
+    response = _post(client)
+
+    assert response.status_code == 423
+    assert response.json()["message"] == "Edit lock required"
+
+
+def test_edit_lock_passes_when_the_caller_holds_it():
+    locks = _Locks(has_collaborators=True, holder=CALLER)
+    client, _ = _surface(
+        level=PermissionLevel.OWNER,
+        locks=locks,
+        edit_lock=True,
+    )
+
+    assert _post(client).status_code == 200
+
+
+def test_member_management_bot_keeps_its_session_lock_model():
+    class _Capability:
+        def is_member_management_enabled(self, bot, bot_id=None):
+            return True
+
+    locks = _Locks(raises=True)
+    client, _ = _surface(
+        level=PermissionLevel.OWNER,
+        locks=locks,
+        capabilities=MemberManagementCapabilityService([_Capability()]),
+        edit_lock=True,
+    )
+
+    assert _post(client).status_code == 200
+    assert locks.calls == []
+
+
+def test_edit_lock_lookup_failure_refuses_with_500():
+    locks = _Locks(raises=True)
+    client, _ = _surface(
+        level=PermissionLevel.OWNER,
+        locks=locks,
+        edit_lock=True,
+    )
+
+    response = _post(client)
+
+    assert response.status_code == 500
+    assert response.json()["message"] == "Internal error"
 
 
 def test_failed_mutation_writes_no_audit_row():

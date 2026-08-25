@@ -34,6 +34,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import envelope_erro
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.adapters.http.openapi_v1.authorization import (
     AUTHORIZATION,
+    EDIT_LOCK,
     INHERITED,
     OWNER_SCOPED,
     SCAFFOLDING_MODES,
@@ -468,13 +469,8 @@ def test_only_the_deferred_operations_remain_service_checked():
     )
 
 
-def test_service_level_edit_locks_are_untouched():
-    """The seam carries no lock; that must not read as "the surface lost locks".
-
-    Channels and service publications enforce one today and keep doing so
-    (``spec.md`` *Decisions* 1). If these helpers are ever removed, the seam's
-    "no lock" decision silently becomes "no lock anywhere".
-    """
+def test_service_level_edit_locks_moved_to_the_authorization_seam():
+    """Channel and lifecycle writes declare one shared lock policy."""
     channels = importlib.import_module(
         "agentclaw.community.adapters.http.openapi_v1.channels.router"
     )
@@ -482,8 +478,80 @@ def test_service_level_edit_locks_are_untouched():
         "agentclaw.community.core.service_bot.services.service_publication_facade"
     )
 
-    assert hasattr(channels, "_require_edit_lock")
-    assert hasattr(publications.ServicePublicationFacade, "_require_draft_lock")
+    assert not hasattr(channels, "_require_edit_lock")
+    assert not hasattr(publications.ServicePublicationFacade, "_require_draft_lock")
+    assert (
+        AUTHORIZATION[("POST", "/openapi/v1/bots/{bot_id}/channels")].edit_lock
+        is EDIT_LOCK
+    )
+    assert (
+        AUTHORIZATION[("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance")].edit_lock
+        is EDIT_LOCK
+    )
+
+
+def test_edit_lock_operations_are_exactly_the_bot_mutation_surface():
+    expected = {
+        ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"),
+        ("POST", "/openapi/v1/bots/{bot_id}/channels"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
+        ("PATCH", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"),
+        ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"),
+        ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"),
+        ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/lifecycle/approval"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/cancel-staging"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/offline"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/restart"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/retry"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade"),
+        ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"),
+        ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"),
+        ("POST", "/openapi/v1/bots/{bot_id}/render-screens"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"),
+        ("PATCH", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skill-sets"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/activate"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/deactivate"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"),
+        ("PUT", "/openapi/v1/bots/approvals/{bot_id}/mode"),
+    }
+    actual = {
+        key
+        for key, rule in AUTHORIZATION.items()
+        if isinstance(rule, Check) and rule.edit_lock is EDIT_LOCK
+    }
+
+    assert actual == expected
+
+
+def test_every_edit_lock_operation_declares_423_in_openapi():
+    routes = {
+        key: original_route_of(ctx)
+        for key, ctx in operations(build_public_router())
+    }
+    edit_locked = {
+        key
+        for key, rule in AUTHORIZATION.items()
+        if isinstance(rule, Check) and rule.edit_lock is EDIT_LOCK
+    }
+
+    missing = sorted(key for key in edit_locked if 423 not in routes[key].responses)
+
+    assert missing == []
 
 
 def test_a_router_cannot_opt_out_of_the_route_class():
@@ -803,13 +871,16 @@ def test_a_retiring_twin_migrates_with_its_replacement():
         twin = AUTHORIZATION.get((method, legacy_path))
         if not isinstance(twin, Check):
             abandoned.append(f"{method} {legacy_path} -> {replacement_path}")
-        elif twin.level is not replacement.level:
+        elif (
+            twin.level is not replacement.level
+            or twin.edit_lock is not replacement.edit_lock
+        ):
             # Matching bars, not merely both being Check. Tasks 12 and 13 bring
             # ADMIN and OWNER rows, and a MEMBER twin of an ADMIN replacement is
             # a way around the bar rather than a copy of it.
             mismatched.append(
-                f"{method} {legacy_path} at {twin.level.name} "
-                f"but {replacement_path} at {replacement.level.name}"
+                f"{method} {legacy_path} at {twin!r} "
+                f"but {replacement_path} at {replacement!r}"
             )
 
     assert not abandoned, (
@@ -820,8 +891,8 @@ def test_a_retiring_twin_migrates_with_its_replacement():
     )
     assert not mismatched, (
         "these retiring addresses migrated with their replacement but at a "
-        "different bar, so the old address is a way around the new one: "
-        + ", ".join(sorted(mismatched))
+        "different bar or lock requirement, so the old address is a way around "
+        "the new one: " + ", ".join(sorted(mismatched))
     )
 
 
