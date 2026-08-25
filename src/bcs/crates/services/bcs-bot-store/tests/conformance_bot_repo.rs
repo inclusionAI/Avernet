@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use bcs_bot_store::{PersistentBotRepo, MemoryBotRepo};
 use bcs_cache_local::InMemoryCachePlugin;
-use bcs_db_api::{DbPlugin, DbStatement, DbValue as Value};
+use bcs_db_api::{
+    DbError, DbExecuteResult, DbHealth, DbPlugin, DbRow, DbStatement, DbTransactionStep,
+    DbTransactionStepResult, DbValue as Value,
+};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCapabilities, BotMetricsSnapshotPort, BotRepoPort,
@@ -95,6 +98,61 @@ async fn persistent_bot_repo_unregister_marks_is_deleted_and_filters_default_rea
 }
 
 #[tokio::test]
+async fn persistent_bot_repo_list_active_fails_closed_when_tombstone_query_fails() {
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    let inner_db = sqlite_db().await;
+    let db = Arc::new(FailActiveBotIdsQueryDb {
+        inner: inner_db.clone(),
+    });
+    let repo = PersistentBotRepo::with_plugins(cache, db);
+    repo.register_with_owner_and_token(
+        "soft-delete-bot".to_string(),
+        BotCapabilities {
+            name: Some("Soft Delete Bot".to_string()),
+            visibility: "public".to_string(),
+            ..Default::default()
+        },
+        "11111111",
+        "soft-delete-token",
+    )
+    .await
+    .expect("register bot");
+
+    assert!(repo.unregister("soft-delete-bot").await);
+
+    repo.register_with_owner_and_token(
+        "soft-delete-bot".to_string(),
+        BotCapabilities {
+            name: Some("Re-registered Soft Delete Bot".to_string()),
+            visibility: "public".to_string(),
+            ..Default::default()
+        },
+        "11111111",
+        "new-soft-delete-token",
+    )
+    .await
+    .expect("re-register bot into memory");
+
+    assert_eq!(
+        inner_db
+            .query(DbStatement::with_params(
+                "SELECT is_deleted FROM bcs_bots WHERE bot_uuid = ? AND env = ?",
+                vec![
+                    Value::from("soft-delete-bot"),
+                    Value::from(bcs_config::resolve_env_str()),
+                ],
+            ))
+            .await
+            .expect("query soft deleted row")[0]
+            .get("is_deleted")
+            .and_then(Value::as_i64),
+        Some(1)
+    );
+
+    assert!(repo.list_active().await.is_empty());
+}
+
+#[tokio::test]
 async fn persistent_bot_repo_register_after_soft_delete_does_not_clear_is_deleted_column() {
     let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
@@ -164,6 +222,39 @@ async fn memory_bot_repo_passes_bot_metrics_snapshot_contract() {
     seed_metrics_actors(&repo).await;
     bot_metrics_snapshot_port_contract_tests(&repo).await;
     assert_metrics_actors_counted(&repo).await;
+}
+
+
+struct FailActiveBotIdsQueryDb {
+    inner: Arc<dyn DbPlugin>,
+}
+
+#[async_trait::async_trait]
+impl DbPlugin for FailActiveBotIdsQueryDb {
+    async fn query(&self, statement: DbStatement) -> bcs_db_api::DbResult<Vec<DbRow>> {
+        if statement
+            .sql()
+            .starts_with("SELECT bot_uuid FROM bcs_bots WHERE env = ? AND COALESCE(is_deleted, 0) = 0")
+        {
+            return Err(DbError::Backend("injected active bot ids query failure".to_string()));
+        }
+        self.inner.query(statement).await
+    }
+
+    async fn execute(&self, statement: DbStatement) -> bcs_db_api::DbResult<DbExecuteResult> {
+        self.inner.execute(statement).await
+    }
+
+    async fn transaction(
+        &self,
+        steps: Vec<DbTransactionStep>,
+    ) -> bcs_db_api::DbResult<Vec<DbTransactionStepResult>> {
+        self.inner.transaction(steps).await
+    }
+
+    async fn health_check(&self) -> bcs_db_api::DbResult<DbHealth> {
+        self.inner.health_check().await
+    }
 }
 
 async fn seed_metrics_actors(repo: &dyn BotRepoPort) {

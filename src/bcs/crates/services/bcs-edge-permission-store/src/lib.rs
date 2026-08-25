@@ -9,7 +9,7 @@
 //! and [`PermissionProfileRepoPort`] (T8) for [`DbPermissionProfileStore`].
 //! `PermissionRequestRepoPort` (T9) will be added to this same crate later.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -93,15 +93,15 @@ impl DbEdgeGrantStore {
         match self.flavor {
             EdgeGrantSqlFlavor::Mysql => {
                 "INSERT IGNORE INTO edge_grants \
-                 (edge_id, env, from_id, to_id, grant_kind, grant_ref_id, rules, \
+                 (env, from_id, to_id, grant_kind, grant_ref_id, rules, \
                   status, originator_policy_type, originator_policy_data) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
             }
             EdgeGrantSqlFlavor::Sqlite => {
                 "INSERT INTO edge_grants \
-                 (edge_id, env, from_id, to_id, grant_kind, grant_ref_id, rules, \
+                 (env, from_id, to_id, grant_kind, grant_ref_id, rules, \
                   status, originator_policy_type, originator_policy_data) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) \
                  ON CONFLICT(from_id, to_id, env, grant_ref_id) DO NOTHING"
             }
         }
@@ -115,7 +115,7 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
             .query(
                 "list_active_grants",
                 DbStatement::with_params(
-                    "SELECT edge_id, env, from_id, to_id, grant_kind, grant_ref_id, \
+                    "SELECT id, env, from_id, to_id, grant_kind, grant_ref_id, \
                             rules, status, originator_policy_type, originator_policy_data \
                      FROM edge_grants \
                      WHERE from_id = ? AND to_id = ? AND env = ? AND status = 'approved'",
@@ -161,11 +161,15 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
         let dy = self.get_default_profile_id(y, env).await;
         let dx = self.get_default_profile_id(x, env).await;
 
-        if dy.is_some() && self.has_default_edge(x, y, env, dy.as_deref()).await {
-            return true;
+        if let Some(dy) = dy {
+            if self.has_default_edge(x, y, env, Some(dy)).await {
+                return true;
+            }
         }
-        if dx.is_some() && self.has_default_edge(y, x, env, dx.as_deref()).await {
-            return true;
+        if let Some(dx) = dx {
+            if self.has_default_edge(y, x, env, Some(dx)).await {
+                return true;
+            }
         }
         false
     }
@@ -175,8 +179,7 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
         // memory compare. Avoids a SQL join.
         let d_actor = self.get_default_profile_id(actor, env).await;
 
-        let mut cache: std::collections::HashMap<String, Option<String>> =
-            std::collections::HashMap::new();
+        let mut cache: HashMap<String, Option<u64>> = HashMap::new();
         let mut friends: HashSet<String> = HashSet::new();
 
         // Branch ① actor initiated: actor → to_id. Keep if grant_ref_id ==
@@ -201,7 +204,7 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
                         continue;
                     }
                 };
-                let grant_ref_id = match required_string(&row, "grant_ref_id") {
+                let grant_ref_id = match required_u64(&row, "grant_ref_id") {
                     Ok(v) => v,
                     Err(err) => {
                         warn!(error = %err, "list_friends_outbound: missing grant_ref_id");
@@ -209,10 +212,10 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
                     }
                 };
                 let d_y = match cache.get(&to_id) {
-                    Some(v) => v.clone(),
+                    Some(v) => *v,
                     None => {
                         let v = self.get_default_profile_id(&to_id, env).await;
-                        cache.insert(to_id.clone(), v.clone());
+                        cache.insert(to_id.clone(), v);
                         v
                     }
                 };
@@ -228,7 +231,7 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
 
         // Branch ② others initiated: from_id → actor. Only if actor has a
         // default profile (is a bot). Keep if grant_ref_id == actor's default.
-        if let Some(d_actor) = d_actor.as_deref() {
+        if let Some(d_actor) = d_actor {
             let inbound = self
                 .query(
                     "list_friends_inbound",
@@ -249,7 +252,7 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
                             continue;
                         }
                     };
-                    let grant_ref_id = match required_string(&row, "grant_ref_id") {
+                    let grant_ref_id = match required_u64(&row, "grant_ref_id") {
                         Ok(v) => v,
                         Err(err) => {
                             warn!(error = %err, "list_friends_inbound: missing grant_ref_id");
@@ -268,49 +271,84 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
         out
     }
 
-    async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<()> {
-        let rules_val = json_to_db_value(&grant.rules);
-        let policy_data_val = json_to_db_value(&grant.originator_policy_data);
-        self.execute(
-            "insert_grant",
+    async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<u64> {
+        let EdgeGrant {
+            edge_id: _,
+            env,
+            from_id,
+            to_id,
+            grant_kind,
+            grant_ref_id,
+            rules,
+            status,
+            originator_policy_type,
+            originator_policy_data,
+        } = grant;
+        let rules_val = json_to_db_value(&rules);
+        let policy_data_val = json_to_db_value(&originator_policy_data);
+        let result = self
+            .execute_result(
+                "insert_grant",
+                DbStatement::with_params(
+                    self.insert_grant_sql(),
+                    vec![
+                        DbValue::from(env.clone()),
+                        DbValue::from(from_id.clone()),
+                        DbValue::from(to_id.clone()),
+                        DbValue::from(grant_kind_str(grant_kind)),
+                        DbValue::from(grant_ref_id),
+                        rules_val,
+                        DbValue::from(edge_status_str(status)),
+                        DbValue::from(originator_policy_type_str(originator_policy_type)),
+                        policy_data_val,
+                    ],
+                ),
+            )
+            .await?;
+        if let Some(id) = result.last_insert_id {
+            if id != 0 {
+                return Ok(id);
+            }
+        }
+        self.query(
+            "insert_grant_lookup",
             DbStatement::with_params(
-                self.insert_grant_sql(),
+                "SELECT id FROM edge_grants WHERE from_id = ? AND to_id = ? AND env = ? AND grant_ref_id = ? LIMIT 1",
                 vec![
-                    DbValue::from(grant.edge_id),
-                    DbValue::from(grant.env),
-                    DbValue::from(grant.from_id),
-                    DbValue::from(grant.to_id),
-                    DbValue::from(grant_kind_str(grant.grant_kind)),
-                    DbValue::from(grant.grant_ref_id),
-                    rules_val,
-                    DbValue::from(edge_status_str(grant.status)),
-                    DbValue::from(originator_policy_type_str(grant.originator_policy_type)),
-                    policy_data_val,
+                    DbValue::from(from_id),
+                    DbValue::from(to_id),
+                    DbValue::from(env),
+                    DbValue::from(grant_ref_id),
                 ],
             ),
         )
-        .await
+        .await?
+        .into_iter()
+        .next()
+        .and_then(|row| row.get_i64("id").ok().flatten())
+        .and_then(|id| if id < 0 { None } else { Some(id as u64) })
+        .ok_or_else(|| ServiceError::InternalError("edge_grants insert did not return an id".to_string()))
     }
 
-    async fn revoke_grant(&self, edge_id: &str, env: &str) -> ServiceResult<()> {
+    async fn revoke_grant(&self, edge_id: u64, env: &str) -> ServiceResult<()> {
         self.execute(
             "revoke_grant",
             DbStatement::with_params(
                 "UPDATE edge_grants SET status = 'revoked', \
                      gmt_modified = CURRENT_TIMESTAMP \
-                 WHERE edge_id = ? AND env = ?",
+                 WHERE id = ? AND env = ?",
                 vec![DbValue::from(edge_id), DbValue::from(env)],
             ),
         )
         .await
     }
 
-    async fn get_default_profile_id(&self, bot_id: &str, env: &str) -> Option<String> {
+    async fn get_default_profile_id(&self, bot_id: &str, env: &str) -> Option<u64> {
         let rows = self
             .query(
                 "get_default_profile_id",
                 DbStatement::with_params(
-                    "SELECT permission_profile_id FROM permission_profiles \
+                    "SELECT id FROM permission_profiles \
                      WHERE bot_id = ? AND env = ? AND is_default = 1 \
                        AND status = 'active' LIMIT 1",
                     vec![DbValue::from(bot_id), DbValue::from(env)],
@@ -319,9 +357,7 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
             .await;
         match rows {
             Ok(rows) => rows.into_iter().next().and_then(|row| {
-                row.get_string("permission_profile_id")
-                    .ok()
-                    .flatten()
+                row.get_i64("id").ok().flatten().and_then(|value| if value < 0 { None } else { Some(value as u64) })
             }),
             Err(err) => {
                 warn!(error = %err, "db_edge_grant: get_default_profile_id failed");
@@ -339,7 +375,7 @@ impl DbEdgeGrantStore {
         from: &str,
         to: &str,
         env: &str,
-        default_ref: Option<&str>,
+        default_ref: Option<u64>,
     ) -> bool {
         let Some(default_ref) = default_ref else {
             return false;
@@ -411,6 +447,17 @@ impl DbPermissionProfileStore {
             })
     }
 
+    async fn execute_result(
+        &self,
+        operation: &'static str,
+        statement: DbStatement,
+    ) -> ServiceResult<DbExecuteResult> {
+        self.db.execute(statement).await.map_err(|err| {
+            warn!(operation, error = %err, "db_permission_profile: execute failed");
+            service_db_error(operation, err)
+        })
+    }
+
     async fn query(
         &self,
         operation: &'static str,
@@ -422,30 +469,29 @@ impl DbPermissionProfileStore {
         })
     }
 
-    /// Idempotent INSERT of the default profile on PK `permission_profile_id`.
-    /// SQLite `ON CONFLICT(permission_profile_id) DO NOTHING` vs MySQL
-    /// `INSERT IGNORE` — D12 rule 2: never overwrite or bump an existing default.
+    /// Idempotent INSERT of the default profile on PK `id`.
+    /// SQLite `INSERT OR IGNORE` vs MySQL `INSERT IGNORE` — D12 rule 2:
+    /// never overwrite or bump an existing default.
     fn insert_default_profile_sql(&self) -> &'static str {
         match self.flavor {
             EdgeGrantSqlFlavor::Mysql => {
                 "INSERT IGNORE INTO permission_profiles \
-                 (permission_profile_id, bot_id, env, name, description, rules_template, \
+                 (bot_id, env, name, description, rules_template, \
                   revision, digest, is_default, status, created_by, updated_by) \
-                 VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 1, 'active', 'system', NULL)"
+                 VALUES (?, ?, ?, NULL, ?, ?, ?, 1, 'active', 'system', NULL)"
             }
             EdgeGrantSqlFlavor::Sqlite => {
-                "INSERT INTO permission_profiles \
-                 (permission_profile_id, bot_id, env, name, description, rules_template, \
+                "INSERT OR IGNORE INTO permission_profiles \
+                 (bot_id, env, name, description, rules_template, \
                   revision, digest, is_default, status, created_by, updated_by) \
-                 VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 1, 'active', 'system', NULL) \
-                 ON CONFLICT(permission_profile_id) DO NOTHING"
+                 VALUES (?, ?, ?, NULL, ?, ?, ?, 1, 'active', 'system', NULL)"
             }
         }
     }
 
     /// SELECT all columns of a default, active profile for (bot_id, env).
     const SELECT_DEFAULT_SQL: &'static str =
-        "SELECT permission_profile_id, bot_id, env, name, description, rules_template, \
+        "SELECT id, bot_id, env, name, description, rules_template, \
                 revision, digest, is_default, status, created_by, updated_by \
          FROM permission_profiles \
          WHERE bot_id = ? AND env = ? AND is_default = 1 AND status = 'active' LIMIT 1";
@@ -453,28 +499,36 @@ impl DbPermissionProfileStore {
 
 #[async_trait]
 impl PermissionProfileRepoPort for DbPermissionProfileStore {
-    async fn ensure_default_profile(&self, bot_id: &str, env: &str) -> ServiceResult<()> {
-        let profile_id = format!("pp_{}_default", bot_id);
+    async fn ensure_default_profile(&self, bot_id: &str, env: &str) -> ServiceResult<u64> {
         let digest = sha256_hex(WILDCARD_ALLOW);
         // INSERT all cols (description/updated_by NULL; gmt_* default to now).
-        // Idempotent on PK: a pre-existing default is left untouched — its
+        // Idempotent on unique active default: a pre-existing default is left untouched — its
         // rules_template, revision, and digest are NOT overwritten (D12 rule 2).
-        self.execute(
-            "ensure_default_profile",
-            DbStatement::with_params(
-                self.insert_default_profile_sql(),
-                vec![
-                    DbValue::from(profile_id),
-                    DbValue::from(bot_id),
-                    DbValue::from(env),
-                    DbValue::from("default"),
-                    DbValue::from(WILDCARD_ALLOW),
-                    DbValue::from(1_i64), // revision
-                    DbValue::from(digest),
-                ],
-            ),
-        )
-        .await
+        let result = self
+            .execute_result(
+                "ensure_default_profile",
+                DbStatement::with_params(
+                    self.insert_default_profile_sql(),
+                    vec![
+                        DbValue::from(bot_id),
+                        DbValue::from(env),
+                        DbValue::from("default"),
+                        DbValue::from(WILDCARD_ALLOW),
+                        DbValue::from(1_i64), // revision
+                        DbValue::from(digest),
+                    ],
+                ),
+            )
+            .await?;
+        if let Some(id) = result.last_insert_id {
+            if id != 0 {
+                return Ok(id);
+            }
+        }
+        self.get_active_default(bot_id, env)
+            .await
+            .map(|profile| profile.permission_profile_id)
+            .ok_or_else(|| ServiceError::InternalError(format!("default profile for bot '{}' missing after ensure", bot_id)))
     }
 
     async fn get_active_default(&self, bot_id: &str, env: &str) -> Option<PermissionProfile> {
@@ -514,7 +568,7 @@ impl PermissionProfileRepoPort for DbPermissionProfileStore {
             DbStatement::with_params(
                 "UPDATE permission_profiles SET rules_template = ?, revision = ?, \
                      digest = ?, updated_by = ?, gmt_modified = CURRENT_TIMESTAMP \
-                 WHERE permission_profile_id = ?",
+                 WHERE id = ?",
                 vec![
                     rules_val,
                     DbValue::from(profile.revision as i64),
@@ -565,6 +619,17 @@ impl DbPermissionRequestStore {
             })
     }
 
+    async fn execute_result(
+        &self,
+        operation: &'static str,
+        statement: DbStatement,
+    ) -> ServiceResult<DbExecuteResult> {
+        self.db.execute(statement).await.map_err(|err| {
+            warn!(operation, error = %err, "db_permission_request: execute failed");
+            service_db_error(operation, err)
+        })
+    }
+
     async fn query(
         &self,
         operation: &'static str,
@@ -576,8 +641,7 @@ impl DbPermissionRequestStore {
         })
     }
 
-    /// Idempotent INSERT on PK `request_id`: SQLite
-    /// `ON CONFLICT(request_id) DO NOTHING` vs MySQL `INSERT IGNORE`.
+    /// Idempotent INSERT on auto-increment PK `id`.
     ///
     /// `decided_at` is a DB-managed timestamp: derived from `status` at insert
     /// time (`CURRENT_TIMESTAMP` for a decided status, else NULL) so that
@@ -586,7 +650,7 @@ impl DbPermissionRequestStore {
     fn insert_request_sql(&self) -> &'static str {
         match self.flavor {
             EdgeGrantSqlFlavor::Mysql => {
-                "INSERT IGNORE INTO permission_requests \
+                "INSERT INTO permission_requests \
                  (request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                   requested_rules, message, status, decision_reason, created_by, decided_by, \
                   decided_at) \
@@ -601,39 +665,38 @@ impl DbPermissionRequestStore {
                   decided_at) \
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
                          CASE WHEN ? IN ('approved','rejected','cancelled') \
-                              THEN CURRENT_TIMESTAMP ELSE NULL END) \
-                 ON CONFLICT(request_id) DO NOTHING"
+                              THEN CURRENT_TIMESTAMP ELSE NULL END)"
             }
         }
     }
 
     const SELECT_REQUEST_SQL: &'static str =
-        "SELECT request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+        "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
                 decided_at \
          FROM permission_requests WHERE request_id = ? AND env = ? LIMIT 1";
 
     const LIST_INBOX_ALL_SQL: &'static str =
-        "SELECT request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+        "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
                 decided_at \
          FROM permission_requests WHERE to_id = ? AND env = ? ORDER BY gmt_modified DESC";
 
     const LIST_INBOX_STATUS_SQL: &'static str =
-        "SELECT request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+        "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
                 decided_at \
          FROM permission_requests WHERE to_id = ? AND env = ? AND status = ? \
          ORDER BY gmt_modified DESC";
 
     const LIST_SENT_ALL_SQL: &'static str =
-        "SELECT request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+        "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
                 decided_at \
          FROM permission_requests WHERE from_id = ? AND env = ? ORDER BY gmt_modified DESC";
 
     const LIST_SENT_STATUS_SQL: &'static str =
-        "SELECT request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+        "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
                 decided_at \
          FROM permission_requests WHERE from_id = ? AND env = ? AND status = ? \
@@ -643,30 +706,54 @@ impl DbPermissionRequestStore {
 #[async_trait]
 impl PermissionRequestRepoPort for DbPermissionRequestStore {
     async fn insert(&self, request: PermissionRequest) -> ServiceResult<()> {
-        self.execute(
-            "insert_request",
-            DbStatement::with_params(
-                self.insert_request_sql(),
-                vec![
-                    DbValue::from(request.request_id),
-                    DbValue::from(request.edge_id),
-                    DbValue::from(request.env),
-                    DbValue::from(request.from_id),
-                    DbValue::from(request.to_id),
-                    DbValue::from(request_kind_str(request.request_kind)),
-                    DbValue::from(request.requested_ref_id),
-                    json_to_db_value(&request.requested_rules),
-                    DbValue::from(request.message),
-                    DbValue::from(request_status_str(request.status)),
-                    DbValue::from(request.decision_reason),
-                    DbValue::from(request.created_by),
-                    DbValue::from(request.decided_by),
-                    // The CASE in insert_request_sql keys decided_at off status.
-                    DbValue::from(request_status_str(request.status)),
-                ],
-            ),
-        )
-        .await
+        let PermissionRequest {
+            request_id,
+            edge_id,
+            env,
+            from_id,
+            to_id,
+            request_kind,
+            requested_ref_id,
+            requested_rules,
+            message,
+            status,
+            decision_reason,
+            created_by,
+            decided_by,
+            decided_at: _,
+        } = request;
+        self
+            .execute_result(
+                "insert_request",
+                DbStatement::with_params(
+                    self.insert_request_sql(),
+                    vec![
+                        DbValue::from(request_id),
+                        match edge_id {
+                            Some(id) => DbValue::from(id),
+                            None => DbValue::Null,
+                        },
+                        DbValue::from(env.clone()),
+                        DbValue::from(from_id.clone()),
+                        DbValue::from(to_id.clone()),
+                        DbValue::from(request_kind_str(request_kind)),
+                        match requested_ref_id {
+                            Some(id) => DbValue::from(id),
+                            None => DbValue::Null,
+                        },
+                        json_to_db_value(&requested_rules),
+                        DbValue::from(message.clone()),
+                        DbValue::from(request_status_str(status)),
+                        DbValue::from(decision_reason.clone()),
+                        DbValue::from(created_by.clone()),
+                        DbValue::from(decided_by.clone()),
+                        // The CASE in insert_request_sql keys decided_at off status.
+                        DbValue::from(request_status_str(status)),
+                    ],
+                ),
+            )
+            .await?;
+        Ok(())
     }
 
     async fn get(&self, request_id: &str, env: &str) -> Option<PermissionRequest> {
@@ -836,7 +923,7 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
         &self,
         request_id: &str,
         env: &str,
-        edge_id: &str,
+        edge_id: u64,
     ) -> ServiceResult<()> {
         self.execute(
             "backfill_edge_id",
@@ -951,12 +1038,12 @@ fn row_to_permission_request(row: &DbRow) -> ServiceResult<PermissionRequest> {
         .and_then(|s| parse_timestamp_epoch_ms(&s));
     Ok(PermissionRequest {
         request_id: required_string(row, "request_id")?,
-        edge_id: optional_string(row, "edge_id")?,
+        edge_id: optional_u64(row, "edge_id")?,
         env: required_string(row, "env")?,
         from_id: required_string(row, "from_id")?,
         to_id: required_string(row, "to_id")?,
         request_kind: parse_request_kind(&required_string(row, "request_kind")?)?,
-        requested_ref_id: optional_string(row, "requested_ref_id")?,
+        requested_ref_id: optional_u64(row, "requested_ref_id")?,
         requested_rules: parse_json_opt(&optional_string(row, "requested_rules")?)?,
         message: optional_string(row, "message")?,
         status: parse_request_status(&required_string(row, "status")?)?,
@@ -1029,7 +1116,7 @@ fn row_to_permission_profile(row: &DbRow) -> ServiceResult<PermissionProfile> {
         })?,
     };
     Ok(PermissionProfile {
-        permission_profile_id: required_string(row, "permission_profile_id")?,
+        permission_profile_id: required_u64(row, "id")?,
         bot_id: required_string(row, "bot_id")?,
         env: required_string(row, "env")?,
         name: required_string(row, "name")?,
@@ -1046,12 +1133,12 @@ fn row_to_permission_profile(row: &DbRow) -> ServiceResult<PermissionProfile> {
 
 fn row_to_edge_grant(row: &DbRow) -> ServiceResult<EdgeGrant> {
     Ok(EdgeGrant {
-        edge_id: required_string(row, "edge_id")?,
+        edge_id: required_u64(row, "id")?,
         env: required_string(row, "env")?,
         from_id: required_string(row, "from_id")?,
         to_id: required_string(row, "to_id")?,
         grant_kind: parse_grant_kind(&required_string(row, "grant_kind")?)?,
-        grant_ref_id: required_string(row, "grant_ref_id")?,
+        grant_ref_id: required_u64(row, "grant_ref_id")?,
         rules: parse_json_opt(&optional_string(row, "rules")?)?,
         status: parse_edge_status(&required_string(row, "status")?)?,
         originator_policy_type: parse_originator_policy_type(
@@ -1106,6 +1193,24 @@ fn required_string(row: &DbRow, column: &'static str) -> ServiceResult<String> {
 
 fn optional_string(row: &DbRow, column: &'static str) -> ServiceResult<Option<String>> {
     row.get_string(column).map_err(|err| service_db_error(column, err))
+}
+
+fn required_u64(row: &DbRow, column: &'static str) -> ServiceResult<u64> {
+    let value = row
+        .get_i64(column)
+        .map_err(|err| service_db_error(column, err))?
+        .ok_or_else(|| ServiceError::InternalError(format!("missing edge_permission column {}", column)))?;
+    if value < 0 {
+        return Err(ServiceError::InternalError(format!("negative edge_permission column {}", column)));
+    }
+    Ok(value as u64)
+}
+
+fn optional_u64(row: &DbRow, column: &'static str) -> ServiceResult<Option<u64>> {
+    Ok(row
+        .get_i64(column)
+        .map_err(|err| service_db_error(column, err))?
+        .and_then(|value| if value < 0 { None } else { Some(value as u64) }))
 }
 
 fn parse_json_opt(value: &Option<String>) -> ServiceResult<Option<serde_json::Value>> {
@@ -1289,70 +1394,61 @@ mod tests {
         // migrations/mysql/014_edge_permission.sql for SQLite).
         db.execute(DbStatement::new(
             "CREATE TABLE edge_grants (\
-                edge_id VARCHAR(128) NOT NULL, \
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
                 env VARCHAR(32) NOT NULL, \
                 from_id VARCHAR(128) NOT NULL, \
                 to_id VARCHAR(128) NOT NULL, \
                 grant_kind VARCHAR(32) NOT NULL, \
-                grant_ref_id VARCHAR(128) NOT NULL, \
+                grant_ref_id INTEGER NOT NULL, \
                 rules TEXT, \
                 status VARCHAR(16) NOT NULL DEFAULT 'approved', \
                 originator_policy_type VARCHAR(32) NOT NULL DEFAULT 'any', \
                 originator_policy_data TEXT, \
                 gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
                 gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-                PRIMARY KEY (edge_id), \
                 UNIQUE (from_id, to_id, env, grant_ref_id))",
         ))
         .await
         .expect("create edge_grants");
         db.execute(DbStatement::new(
             "CREATE TABLE permission_profiles (\
-                permission_profile_id VARCHAR(128) NOT NULL, \
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
                 bot_id VARCHAR(128) NOT NULL, \
                 env VARCHAR(32) NOT NULL, \
-                name VARCHAR(128) NOT NULL, \
+                name VARCHAR(128) NOT NULL DEFAULT 'default', \
+                description VARCHAR(512), \
                 rules_template TEXT NOT NULL, \
+                revision INTEGER NOT NULL DEFAULT 1, \
+                digest VARCHAR(128) NOT NULL, \
                 is_default INTEGER NOT NULL DEFAULT 0, \
                 status VARCHAR(16) NOT NULL DEFAULT 'active', \
                 created_by VARCHAR(128) NOT NULL, \
+                updated_by VARCHAR(128), \
                 gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
                 gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-                PRIMARY KEY (permission_profile_id))",
+                UNIQUE (bot_id, env, is_default, status))",
         ))
         .await
         .expect("create permission_profiles");
         DbEdgeGrantStore::sqlite(Arc::new(db))
     }
 
-    async fn seed_default(store: &DbEdgeGrantStore, bot_id: &str, env: &str, profile_id: &str) {
-        store
-            .execute(
-                "seed_profile",
-                DbStatement::with_params(
-                    "INSERT INTO permission_profiles \
-                     (permission_profile_id, bot_id, env, name, rules_template, \
-                      is_default, status, created_by) \
-                     VALUES (?, ?, ?, 'default', '{}', 1, 'active', 'test')",
-                    vec![
-                        DbValue::from(profile_id),
-                        DbValue::from(bot_id),
-                        DbValue::from(env),
-                    ],
-                ),
-            )
+    async fn seed_default(store: &DbEdgeGrantStore, bot_id: &str, env: &str) -> u64 {
+        let profile_store = DbPermissionProfileStore::sqlite(store.db.clone());
+        profile_store
+            .ensure_default_profile(bot_id, env)
             .await
-            .expect("seed profile");
+            .expect("seed profile")
     }
 
-    fn default_grant(from: &str, to: &str, env: &str, ref_id: &str) -> EdgeGrant {
+    fn default_grant(from: &str, to: &str, env: &str, ref_id: u64) -> EdgeGrant {
         EdgeGrant {
-            edge_id: format!("eg_{}_{}_{}", from, to, ref_id),
+            edge_id: 0,
             env: env.to_string(),
             from_id: from.to_string(),
             to_id: to.to_string(),
             grant_kind: GrantKind::PermissionProfile,
-            grant_ref_id: ref_id.to_string(),
+            grant_ref_id: ref_id,
             rules: None,
             status: EdgeStatus::Approved,
             originator_policy_type: OriginatorPolicyType::Any,
@@ -1363,21 +1459,20 @@ mod tests {
     #[tokio::test]
     async fn get_default_profile_id_roundtrip() {
         let store = sqlite_store().await;
-        seed_default(&store, "bot_a", "dev", "pp_a").await;
-        assert_eq!(
-            store.get_default_profile_id("bot_a", "dev").await,
-            Some("pp_a".to_string())
-        );
+        let profile_id = seed_default(&store, "bot_a", "dev").await;
+        assert_eq!(store.get_default_profile_id("bot_a", "dev").await, Some(profile_id));
         assert_eq!(store.get_default_profile_id("human_x", "dev").await, None);
     }
 
     #[tokio::test]
     async fn insert_and_list_active_grants() {
         let store = sqlite_store().await;
-        let g = default_grant("a", "b", "dev", "pp_b");
-        store.insert_grant(g.clone()).await.expect("insert");
+        let ref_id = seed_default(&store, "b", "dev").await;
+        let g = default_grant("a", "b", "dev", ref_id);
+        let edge_id = store.insert_grant(g.clone()).await.expect("insert");
         let listed = store.list_active_grants("a", "b", "dev").await;
         assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].edge_id, edge_id);
         assert_eq!(listed[0].from_id, "a");
         assert_eq!(listed[0].grant_kind, GrantKind::PermissionProfile);
     }
@@ -1385,23 +1480,26 @@ mod tests {
     #[tokio::test]
     async fn insert_idempotent_on_unique_key() {
         let store = sqlite_store().await;
-        let mut g = default_grant("a", "b", "dev", "pp_b");
-        store.insert_grant(g.clone()).await.expect("insert 1");
+        let ref_id = seed_default(&store, "b", "dev").await;
+        let mut g = default_grant("a", "b", "dev", ref_id);
+        let edge_id = store.insert_grant(g.clone()).await.expect("insert 1");
         // Re-insert with same (from,to,env,ref) but different edge_id: DO NOTHING.
-        g.edge_id = "different_id".to_string();
-        store.insert_grant(g).await.expect("insert 2");
+        g.edge_id = 9999;
+        let dup_id = store.insert_grant(g).await.expect("insert 2");
         let listed = store.list_active_grants("a", "b", "dev").await;
         assert_eq!(listed.len(), 1);
-        // The original edge_id survives (DO NOTHING kept the first row).
-        assert_eq!(listed[0].edge_id, "eg_a_b_pp_b");
+        // The original auto-generated edge_id survives.
+        assert_eq!(listed[0].edge_id, edge_id);
+        assert_eq!(dup_id, edge_id);
     }
 
     #[tokio::test]
     async fn revoke_removes_from_active() {
         let store = sqlite_store().await;
-        let g = default_grant("a", "b", "dev", "pp_b");
-        store.insert_grant(g.clone()).await.expect("insert");
-        store.revoke_grant(&g.edge_id, "dev").await.expect("revoke");
+        let ref_id = seed_default(&store, "b", "dev").await;
+        let g = default_grant("a", "b", "dev", ref_id);
+        let edge_id = store.insert_grant(g.clone()).await.expect("insert");
+        store.revoke_grant(edge_id, "dev").await.expect("revoke");
         let listed = store.list_active_grants("a", "b", "dev").await;
         assert!(listed.is_empty());
     }
@@ -1409,9 +1507,9 @@ mod tests {
     #[tokio::test]
     async fn has_friend_edge_any_direction() {
         let store = sqlite_store().await;
-        seed_default(&store, "bot_b", "dev", "pp_b").await;
+        let ref_id = seed_default(&store, "bot_b", "dev").await;
         // a (human) → b : friend edge (ref = b's default).
-        let g = default_grant("human_a", "bot_b", "dev", "pp_b");
+        let g = default_grant("human_a", "bot_b", "dev", ref_id);
         store.insert_grant(g).await.expect("insert");
         assert!(store.has_friend_edge("human_a", "bot_b", "dev").await);
         assert!(store.has_friend_edge("bot_b", "human_a", "dev").await);
@@ -1420,21 +1518,21 @@ mod tests {
     #[tokio::test]
     async fn list_friends_outbound_human_actor() {
         let store = sqlite_store().await;
-        seed_default(&store, "bot_b", "dev", "pp_b").await;
-        seed_default(&store, "bot_c", "dev", "pp_c").await;
+        let ref_b = seed_default(&store, "bot_b", "dev").await;
+        let ref_c = seed_default(&store, "bot_c", "dev").await;
         store
-            .insert_grant(default_grant("human_a", "bot_b", "dev", "pp_b"))
+            .insert_grant(default_grant("human_a", "bot_b", "dev", ref_b))
             .await
             .expect("insert b");
         store
-            .insert_grant(default_grant("human_a", "bot_c", "dev", "pp_c"))
+            .insert_grant(default_grant("human_a", "bot_c", "dev", ref_c))
             .await
             .expect("insert c");
         // non-friend (wrong ref) should not be listed
         store
-            .insert_grant(default_grant("human_a", "bot_c", "dev", "pp_b"))
+            .insert_grant(default_grant("human_a", "bot_c", "dev", ref_b))
             .await
-            .expect("insert wrong ref (idempotent vs pp_c? different ref)");
+            .expect("insert wrong ref (different ref)");
 
         let mut friends = store.list_friends("human_a", "dev").await;
         friends.sort();
@@ -1449,7 +1547,7 @@ mod tests {
         let db = LocalSqliteDbPlugin::new().expect("local sqlite");
         db.execute(DbStatement::new(
             "CREATE TABLE permission_profiles (\
-                permission_profile_id VARCHAR(128) NOT NULL, \
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
                 bot_id VARCHAR(128) NOT NULL, \
                 env VARCHAR(32) NOT NULL, \
                 name VARCHAR(128) NOT NULL DEFAULT 'default', \
@@ -1463,7 +1561,7 @@ mod tests {
                 updated_by VARCHAR(128), \
                 gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
                 gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-                PRIMARY KEY (permission_profile_id))",
+                UNIQUE (bot_id, env, is_default, status))",
         ))
         .await
         .expect("create permission_profiles");
@@ -1474,22 +1572,22 @@ mod tests {
     async fn ensure_default_profile_idempotent() {
         let store = profile_store().await;
         // First call seeds the default profile.
-        store
+        let profile_id = store
             .ensure_default_profile("bot_x", "dev")
             .await
             .expect("seed 1");
         // Second call must be a no-op (D12 rule 2): no overwrite, no revision bump.
-        store
+        let profile_id_2 = store
             .ensure_default_profile("bot_x", "dev")
             .await
             .expect("seed 2");
+        assert_eq!(profile_id, profile_id_2);
 
         let profile = store
             .get_active_default("bot_x", "dev")
             .await
             .expect("default exists");
-        // Deterministic profile_id.
-        assert_eq!(profile.permission_profile_id, "pp_bot_x_default");
+        assert_eq!(profile.permission_profile_id, profile_id);
         assert!(profile.is_default);
         assert_eq!(profile.status, ProfileStatus::Active);
         assert_eq!(profile.created_by, "system");
@@ -1574,13 +1672,14 @@ mod tests {
         let db = LocalSqliteDbPlugin::new().expect("local sqlite");
         db.execute(DbStatement::new(
             "CREATE TABLE permission_requests (\
-                request_id VARCHAR(128) NOT NULL, \
-                edge_id VARCHAR(128), \
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                request_id VARCHAR(64) NOT NULL, \
+                edge_id INTEGER, \
                 env VARCHAR(32) NOT NULL, \
                 from_id VARCHAR(128) NOT NULL, \
                 to_id VARCHAR(128) NOT NULL, \
                 request_kind VARCHAR(32) NOT NULL, \
-                requested_ref_id VARCHAR(128), \
+                requested_ref_id INTEGER, \
                 requested_rules TEXT, \
                 message TEXT, \
                 status VARCHAR(16) NOT NULL DEFAULT 'pending', \
@@ -1589,17 +1688,25 @@ mod tests {
                 decided_by VARCHAR(128), \
                 decided_at TEXT, \
                 gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-                PRIMARY KEY (request_id))",
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
         ))
         .await
         .expect("create permission_requests");
         DbPermissionRequestStore::sqlite(Arc::new(db))
     }
 
-    fn sample_request(id: &str, env: &str) -> PermissionRequest {
+    static REQUEST_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    fn next_test_request_id() -> String {
+        format!(
+            "test_{}",
+            REQUEST_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        )
+    }
+
+    fn sample_request(env: &str) -> PermissionRequest {
         PermissionRequest {
-            request_id: id.to_string(),
+            request_id: next_test_request_id(),
             edge_id: None,
             env: env.to_string(),
             from_id: "human_a".to_string(),
@@ -1619,31 +1726,29 @@ mod tests {
     #[tokio::test]
     async fn request_insert_and_get() {
         let store = request_store().await;
-        store
-            .insert(sample_request("req_1", "dev"))
-            .await
-            .expect("insert");
-        let got = store.get("req_1", "dev").await.expect("found");
+        let req = sample_request("dev");
+        let request_id = req.request_id.clone();
+        store.insert(req).await.expect("insert");
+        let got = store.get(&request_id, "dev").await.expect("found");
+        assert_eq!(got.request_id, request_id);
         assert_eq!(got.status, RequestStatus::Pending);
         assert!(got.edge_id.is_none(), "pending → no edge_id");
         assert_eq!(got.request_kind, RequestKind::Connect);
-        assert!(store.get("req_x", "dev").await.is_none(), "missing → None");
+        assert!(store.get("missing", "dev").await.is_none(), "missing → None");
     }
 
     #[tokio::test]
     async fn request_list_inbox_all_and_status_filter() {
         let store = request_store().await;
-        store
-            .insert(sample_request("r1", "dev"))
-            .await
-            .expect("insert r1");
-        store
-            .insert(sample_request("r2", "dev"))
-            .await
-            .expect("insert r2");
+        let r1 = sample_request("dev");
+        let r1_id = r1.request_id.clone();
+        store.insert(r1).await.expect("insert r1");
+        let r2 = sample_request("dev");
+        let r2_id = r2.request_id.clone();
+        store.insert(r2).await.expect("insert r2");
         // decide r2 → approved
         store
-            .decide("r2", "dev", RequestStatus::Approved, "85020", Some("ok"))
+            .decide(&r2_id, "dev", RequestStatus::Approved, "85020", Some("ok"))
             .await
             .expect("decide");
         let all = store.list_inbox("bot_b", "dev", None).await;
@@ -1652,12 +1757,12 @@ mod tests {
             .list_inbox("bot_b", "dev", Some(RequestStatus::Pending))
             .await;
         assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].request_id, "r1");
+        assert_eq!(pending[0].request_id, r1_id);
         let approved = store
             .list_inbox("bot_b", "dev", Some(RequestStatus::Approved))
             .await;
         assert_eq!(approved.len(), 1);
-        assert_eq!(approved[0].request_id, "r2");
+        assert_eq!(approved[0].request_id, r2_id);
         assert_eq!(approved[0].decided_by.as_deref(), Some("85020"));
         assert!(
             approved[0].decided_at.is_some(),
@@ -1668,16 +1773,15 @@ mod tests {
     #[tokio::test]
     async fn request_backfill_edge_id() {
         let store = request_store().await;
+        let req = sample_request("dev");
+        let request_id = req.request_id.clone();
+        store.insert(req).await.expect("insert");
         store
-            .insert(sample_request("r1", "dev"))
-            .await
-            .expect("insert");
-        store
-            .backfill_edge_id("r1", "dev", "eg_1")
+            .backfill_edge_id(&request_id, "dev", 1001)
             .await
             .expect("backfill");
-        let got = store.get("r1", "dev").await.expect("found");
-        assert_eq!(got.edge_id.as_deref(), Some("eg_1"));
+        let got = store.get(&request_id, "dev").await.expect("found");
+        assert_eq!(got.edge_id, Some(1001));
     }
 
     // ---- DbBotActorConfigStore (T12) ----

@@ -55,14 +55,14 @@ pub enum OriginatorPolicyType {
 /// `target`'s default profile id (D12).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EdgeGrant {
-    pub edge_id: String,
+    pub edge_id: u64,
     pub env: String,
     pub from_id: String,
     pub to_id: String,
     pub grant_kind: GrantKind,
     /// `PermissionProfile` -> target's default (or other) profile id;
     /// `Rules` -> opaque rules ref.
-    pub grant_ref_id: String,
+    pub grant_ref_id: u64,
     /// Inline rules; `None` unless `GrantKind::Rules`.
     #[serde(default)]
     pub rules: Option<Value>,
@@ -108,7 +108,7 @@ pub enum CapabilityStatus {
 /// default profile regardless of capabilities). See spec §3.1.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Capability {
-    pub capability_id: String,
+    pub capability_id: u64,
     pub bot_id: String,
     pub env: String,
     pub tool: String,
@@ -149,7 +149,7 @@ pub struct Rule {
 /// Every bot seeds exactly one `default` profile (wildcard-allow) at onboard.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PermissionProfile {
-    pub permission_profile_id: String,
+    pub permission_profile_id: u64,
     pub bot_id: String,
     pub env: String,
     pub name: String,
@@ -195,16 +195,19 @@ pub enum RequestStatus {
 /// A connect/apply/revoke request record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PermissionRequest {
+    /// External business id (a bare UUID v4, simple form); the internal bigint
+    /// PK (`id`) stays in the DB row for FK joins and is not exposed on this
+    /// struct.
     pub request_id: String,
     /// Back-filled after approval creates the edge; `None` while pending.
     #[serde(default)]
-    pub edge_id: Option<String>,
+    pub edge_id: Option<u64>,
     pub env: String,
     pub from_id: String,
     pub to_id: String,
     pub request_kind: RequestKind,
     #[serde(default)]
-    pub requested_ref_id: Option<String>,
+    pub requested_ref_id: Option<u64>,
     #[serde(default)]
     pub requested_rules: Option<Value>,
     #[serde(default)]
@@ -234,7 +237,7 @@ pub enum GrantSource {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthzGrantRef {
     pub kind: GrantKind,
-    pub ref_id: String,
+    pub ref_id: u64,
     #[serde(default)]
     pub revision: Option<u64>,
     #[serde(default)]
@@ -344,10 +347,10 @@ mod tests {
     #[test]
     fn edge_grant_roundtrip() {
         let g = EdgeGrant {
-            edge_id: "eg_1".into(), env: "prod".into(),
+            edge_id: 1, env: "prod".into(),
             from_id: "human_88001".into(), to_id: "20260421_x:85020".into(),
             grant_kind: GrantKind::PermissionProfile,
-            grant_ref_id: "pp_20260421_x:85020_default".into(),
+            grant_ref_id: 2,
             rules: None, status: EdgeStatus::Approved,
             originator_policy_type: OriginatorPolicyType::Any,
             originator_policy_data: None,
@@ -357,7 +360,7 @@ mod tests {
         assert_eq!(g, back);
         assert_eq!(back.status, EdgeStatus::Approved);
         let def: EdgeGrant = serde_json::from_str(
-            r#"{"edge_id":"e","env":"prod","from_id":"a","to_id":"b","grant_kind":"permission_profile","grant_ref_id":"r"}"#,
+            r#"{"edge_id":1,"env":"prod","from_id":"a","to_id":"b","grant_kind":"permission_profile","grant_ref_id":2}"#,
         ).unwrap();
         assert_eq!(def.status, EdgeStatus::Approved);
         assert_eq!(def.originator_policy_type, OriginatorPolicyType::Any);
@@ -366,7 +369,7 @@ mod tests {
     #[test]
     fn permission_request_pending_has_no_edge() {
         let r = PermissionRequest {
-            request_id: "req_1".into(), edge_id: None, env: "prod".into(),
+            request_id: "1".into(), edge_id: None, env: "prod".into(),
             from_id: "human_88001".into(), to_id: "b".into(),
             request_kind: RequestKind::Connect, requested_ref_id: None,
             requested_rules: None, message: None, status: RequestStatus::Pending,
