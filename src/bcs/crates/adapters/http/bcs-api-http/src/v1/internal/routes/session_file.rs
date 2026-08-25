@@ -280,16 +280,12 @@ async fn complete_file(
     authorize_identity(&caller, policy).map_err(|e| error(&request_id, e))?;
     let Path((session_id, file_id)) =
         path.map_err(|e| invalid_request(&request_id, e.body_text()))?;
-    let notification_content_url = projector(&state)
-        .map_err(|e| error(&request_id, e))?
-        .content_url(&session_id, &file_id);
     let result = service(&state)
         .map_err(|e| error(&request_id, e))?
         .complete(CompleteSessionFile {
             caller,
             session_id,
             file_id,
-            notification_content_url,
         })
         .await
         .map_err(|e| error(&request_id, e))?;

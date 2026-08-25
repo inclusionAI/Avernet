@@ -1545,13 +1545,6 @@ fn build_openapi_v1_state(
         system_message.clone(),
         SessionServiceConfig { relation_env },
     ));
-    let session_file_service = Arc::new(SessionFileApplicationServiceImpl::new(
-        session_files,
-        sessions.clone(),
-        groups.clone(),
-        registry.clone(),
-        system_message.clone(),
-    ));
     let session_file_url_projector = SessionFileUrlProjector::new(
         config
             .openapi_v1
@@ -1559,6 +1552,14 @@ fn build_openapi_v1_state(
             .expect("OpenAPI V1 public collaboration URL was validated at config load"),
     )
     .expect("validated OpenAPI V1 public collaboration URL");
+    let session_file_service = Arc::new(SessionFileApplicationServiceImpl::new(
+        session_files,
+        sessions.clone(),
+        groups.clone(),
+        registry.clone(),
+        system_message.clone(),
+        Arc::new(session_file_url_projector.clone()),
+    ));
     let invitation_groups = groups.clone();
     let invitation_sessions = sessions.clone();
     let invite: Arc<dyn InviteService> =
