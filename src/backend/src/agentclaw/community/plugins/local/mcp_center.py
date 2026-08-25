@@ -37,6 +37,7 @@ class NoopMCPCenterPlugin(MockSeam, MCPCenterPlugin):
         network_types: list[str] | None = None,
         categories: list[str] | None = None,
         tenants: list[str] | None = None,
+        tags: list[str] | None = None,
     ) -> dict[str, Any]:
         return {
             "success": True,

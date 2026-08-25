@@ -14,6 +14,8 @@ the consumer reached the plugin.
 from __future__ import annotations
 
 from agentclaw.community.core.mcp.services.auth_service import MCPAuthService
+from agentclaw.community.core.mcp.services.market_service import MCPMarketService
+from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugins.local.mcp_center import NoopMCPCenterPlugin
 
 
@@ -66,3 +68,16 @@ def test_local_mcp_center_detail_can_be_driven_by_mock_seam() -> None:
     assert detail["serverCode"] == server_code
     assert detail["endpoints"][0]["env"] == "PRE"
     assert detail["endpoints"][0]["transportProtocol"] == "STREAMABLE_HTTP"
+
+
+def test_market_consumer_forwards_tag_filter_to_plugin(world) -> None:
+    service = world.get(MCPMarketService)
+    plugin = world.get(MCPCenterPlugin)
+    plugin.reset_mock()
+
+    result = service.get_mcp_list(tags=["calendar"])
+
+    assert result["success"] is True
+    calls = plugin.calls_to("get_mcp_list")
+    assert len(calls) == 1
+    assert calls[0].kwargs["tags"] == ["calendar"]

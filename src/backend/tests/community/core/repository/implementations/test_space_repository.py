@@ -36,11 +36,11 @@ def db():
     reset_for_tests()
 
 
-def _team(spaces: SpaceRepository, name="Team", creator="owner-1"):
+def _team(spaces: SpaceRepository, name="Team", creator="owner-1", suffix=""):
     with spaces.create_team_transaction(
         name=name, creator_id=creator, creator_user_name=None, env="dev"
     ) as row:
-        row.sc_team_id = f"sc-{name}-{creator}"
+        row.sc_team_id = f"sc-{name}-{creator}{suffix}"
         return row
 
 
@@ -140,6 +140,45 @@ def test_space_creation_persists_creator_user_name_and_lists_it(db) -> None:
         user_id="team-owner", env="dev", keyword=None, space_type=None, offset=0, limit=20
     )
     assert next(item for item in summaries if item.space.id == team.id).creator_user_name == "Team Creator"
+
+
+def test_get_team_space_by_name_filters_creator_environment_type_and_deleted_rows(db) -> None:
+    repository = SpaceRepository(db)
+    matching = _team(repository, name="Same", creator="owner-1")
+    _team(repository, name="Same", creator="owner-2")
+    _team(repository, name="Same", creator="owner-1", suffix="-duplicate")
+
+    with repository.create_personal_transaction(
+        user_id="owner-1", creator_user_name=None, env="dev"
+    ) as personal:
+        personal.sc_team_id = "sc-personal"
+
+    with repository.create_team_transaction(
+        name="Same", creator_id="owner-1", creator_user_name=None, env="pre"
+    ) as other_env:
+        other_env.sc_team_id = "sc-pre"
+
+    with db.transactional_orm_session() as session:
+        session.query(SpaceModel).filter(SpaceModel.id == matching.id).update(
+            {SpaceModel.deleted_at: datetime(2026, 8, 25, 12, 0, 0)}
+        )
+
+    result = repository.get_team_space_by_name(
+        creator_id="owner-1", name="Same", env="dev"
+    )
+    assert result is not None
+    assert result.created_by == "owner-1"
+    assert result.name == "Same"
+    assert result.space_type is SpaceType.TEAM
+    assert repository.get_team_space_by_name(
+        creator_id="owner-1", name="Same", env="pre"
+    ).id == other_env.id
+    assert repository.get_team_space_by_name(
+        creator_id="missing", name="Same", env="dev"
+    ) is None
+    assert repository.get_team_space_by_name(
+        creator_id="owner-1", name="个人空间", env="dev"
+    ) is None
 
 
 def test_space_repository_full_member_lifecycle(db) -> None:

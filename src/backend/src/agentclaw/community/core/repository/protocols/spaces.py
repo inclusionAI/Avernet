@@ -37,6 +37,11 @@ class SpaceRepositoryProtocol(Protocol):
     ) -> ContextManager[SpaceRecord]: ...
 
     @abstractmethod
+    def get_team_space_by_name(
+        self, *, creator_id: str, name: str, env: str
+    ) -> SpaceRecord | None: ...
+
+    @abstractmethod
     def create_team_transaction(
         self, *,
         name: str,

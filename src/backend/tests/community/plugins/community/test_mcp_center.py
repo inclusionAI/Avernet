@@ -99,6 +99,26 @@ def test_list_filters_by_server_codes(tmp_path):
     assert result["data"][0]["serverCode"] == "mcp.beta"
 
 
+def test_list_filters_by_tags(tmp_path):
+    path = _write_registry(
+        tmp_path,
+        [
+            {"serverCode": "mcp.alpha", "name": "Alpha", "tags": ["search"]},
+            {
+                "serverCode": "mcp.beta",
+                "name": "Beta",
+                "tags": ["calendar", "productivity"],
+            },
+        ],
+    )
+    center = CommunityMCPCenter(registry_config_path=path)
+
+    result = center.get_mcp_list(tags=["calendar"])
+
+    assert result["total"] == 1
+    assert result["data"][0]["serverCode"] == "mcp.beta"
+
+
 def test_list_paginates(tmp_path):
     path = _write_registry(
         tmp_path,
