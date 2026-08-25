@@ -360,8 +360,8 @@ Skill 权限模块从当前 Grant 中确定。同一申请人对同一 Skill 同
 | 非 Space Member | 不可 | 不可 | 不可 | 不可 |
 
 Space Administrator 不会因管理 Space 自动获得 Skill 编辑、发布或授权权限。
-Owner 转移与旧 Lease 失效必须原子完成；原 Owner 是否保留为 Manager 以
-`retain_previous_owner_as_manager` 为准。
+Owner 转移与旧 Lease 失效必须原子完成；原 Owner 的 Grant 被撤销，不自动保留为
+Manager。
 
 Team Skill 编辑需要 Lease；Personal 返回 `required=false`。本期没有 TTL/心跳续租。
 关闭编辑抽屉主动释放；Owner/Manager 可 Takeover。每次新获取/抢占都会生成新的
