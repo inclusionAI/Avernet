@@ -75,10 +75,19 @@ copies the complete values into the automatically created initial Session.
 Every later Session creation also seeds its participant snapshot from the
 tagged Group participants.
 
-Phase one supports setting tags only during group creation. Adding a member to
-an existing group assigns an empty list, and participant update does not expose
-a tag mutation operation. DM creation remains unchanged because callers do not
-supply its participants directly.
+Tags may be supplied during group creation through either the HTTP contract or
+`bcs-cli create-group`. Adding a member to an existing group assigns an empty
+list, and participant update does not expose a tag mutation operation. DM
+creation remains unchanged because callers do not supply its participants
+directly.
+
+The CLI exposes a repeatable `--participant-tag <bot_uuid>=<tag>` option. The
+same option addresses drivers, manager-worker managers, and ordinary
+participants. The CLI builds the complete roster first, including the manager
+that it already inserts implicitly, and then attaches tags by exact Bot UUID.
+Malformed assignments, empty Bot UUIDs, empty tags, and assignments for Bots
+outside the resulting roster fail locally instead of sending an ambiguous
+request. Repeated assignments preserve their command-line order.
 
 ## Persistence
 
@@ -151,6 +160,9 @@ separate change when needed.
 - Protocol coverage verifies the shared `chat.send` builder preserves non-empty
   tags; the existing Provider transport contract covers projection from
   `params.tags` to `to_bot.tags`.
+- CLI request tests verify repeated `--participant-tag` options attach tags to
+  regular-group drivers, manager-worker managers, and workers, while parser
+  tests reject malformed or out-of-roster assignments.
 - SQLite migration tests cover version 12 planning, application, and
   idempotency. MySQL migration 011 is additive and uses `IF NOT EXISTS` so it
   is safe with the updated baseline schema.
