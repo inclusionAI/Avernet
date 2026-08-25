@@ -349,8 +349,7 @@ Owner 转移 body：
 ```json
 {
   "target_user_id": "u-manager",
-  "reason": "项目交接",
-  "retain_previous_owner_as_manager": true
+  "reason": "项目交接"
 }
 ```
 
@@ -661,7 +660,8 @@ Work Order 列表、详情和审批接口从认证 principal 确定当前用户�
 | --- | --- | --- | --- | --- |
 | `target_user_id` | string | 是 | - | 必须是当前 Space Member 的接收人 |
 | `reason` | string | 是 | - | 审计原因，1～1000 字符 |
-| `retain_previous_owner_as_manager` | boolean | 否 | `true` | 原 Owner 是否保留为 Manager |
+
+Owner 转移后原 Owner 的 Grant 被撤销，不自动保留为 Manager。
 
 #### `CreateSkillEditorRequest` — 申请 Skill 编辑权限
 
