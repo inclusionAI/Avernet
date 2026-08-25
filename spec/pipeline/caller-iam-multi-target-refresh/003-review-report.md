@@ -30,3 +30,11 @@ No blocking findings. The implementation covers:
 
 PASS, subject to the recorded local regression results in
 `003b-regression-report.md`.
+
+## Follow-up review correction
+
+The initial multi-target loop exchanged a Caller Token once per target. It now
+exchanges the opaque token once before the loop and passes that same token to
+each target update. Focused regression coverage proves that both binding
+updates receive the same token object and that the token provider is called
+once.

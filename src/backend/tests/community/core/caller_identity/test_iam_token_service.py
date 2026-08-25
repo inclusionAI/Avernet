@@ -1,3 +1,4 @@
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -14,6 +15,7 @@ from agentclaw.community.core.caller_identity.credential import (
     CALLER_CREDENTIAL_REQUEST_INVALID,
     CALLER_OUTBOUND_UPDATE_FAILED,
     CallerCredentialError,
+    CallerToken,
 )
 from agentclaw.community.core.caller_identity.iam_token_service import (
     CallerIamTokenService,
@@ -40,6 +42,15 @@ def _context(*, exchange: bool = True, owner_id: str | None = "owner-1") -> Call
     )
 
 
+def _caller_token() -> CallerToken:
+    return CallerToken(
+        access_token="caller-token",
+        subject_user_id="caller-1",
+        expires_at=datetime.now(),
+        fingerprint="fingerprint",
+    )
+
+
 def _service(
     *,
     context: CallerIamTokenContext | None = None,
@@ -49,6 +60,8 @@ def _service(
 ):
     identity = MagicMock()
     identity.get_iam_token_context.return_value = context or _context()
+    identity.exchange_caller_identity.return_value = _caller_token()
+    identity.exchange_caller_token.return_value = _caller_token()
     auth = MagicMock()
     auth.resolve_user_from_request = AsyncMock(
         return_value=SimpleNamespace(staffId="caller-1")
@@ -133,9 +146,13 @@ async def test_service_refresh_updates_service_and_caller_instance_targets():
 
     assert result.error is None
     assert runtime_bindings.resolve.call_count == 2
-    assert [
-        call.kwargs["binding_id"] for call in identity.exchange_caller_identity.call_args_list
-    ] == [31, 41]
+    assert identity.exchange_caller_identity.call_count == 2
+    identity.exchange_caller_token.assert_called_once()
+    first_call, second_call = identity.exchange_caller_identity.call_args_list
+    assert first_call.kwargs["binding_id"] == 31
+    assert first_call.kwargs["caller_token"] is identity.exchange_caller_token.return_value
+    assert second_call.kwargs["binding_id"] == 41
+    assert second_call.kwargs["caller_token"] is identity.exchange_caller_token.return_value
 
 
 @pytest.mark.asyncio

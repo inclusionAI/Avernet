@@ -67,6 +67,16 @@ class CallerRuntimeUpdaterProtocol(Protocol):
 class CallerIdentityTokenExchangeProtocol(Protocol):
     """Core port for the Caller IAM-token exchange use case."""
 
+    def exchange_caller_token(
+        self,
+        *,
+        iam_token: str,
+        caller_user_id: str,
+        bot_id: str,
+        owner_user_id: str,
+        token_provider: CallerTokenProviderProtocol,
+    ) -> CallerToken: ...
+
     def get_iam_token_context(
         self,
         bot_id: str,
@@ -98,7 +108,8 @@ class CallerIdentityTokenExchangeProtocol(Protocol):
         entity_id: str | None = None,
         binding_id: int | None = None,
         is_test_exchange: bool = False,
-    ) -> None: ...
+        caller_token: CallerToken | None = None,
+    ) -> CallerToken: ...
 
 
 __all__ = [

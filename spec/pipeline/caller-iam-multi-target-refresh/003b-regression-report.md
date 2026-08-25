@@ -35,7 +35,7 @@ git diff --check
 
 ## Results
 
-- Pytest: `78 passed`
+- Pytest: `79 passed`
 - Ruff: passed
 - Compileall: passed
 - Git diff check: passed
