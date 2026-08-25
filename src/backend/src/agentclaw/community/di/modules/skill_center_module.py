@@ -14,14 +14,8 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 from agentclaw.community.api.bot_runtime_projector import (
     BotRuntimeProjectorProtocol as ApiBotRuntimeProjectorProtocol,
 )
-from agentclaw.community.api.bot_skill_asset_service import (
-    BotSkillAssetServiceProtocol,
-)
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
-)
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
 )
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
@@ -125,18 +119,12 @@ from agentclaw.community.core.skill_center.services.bot_capability_state_reader 
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
 )
-from agentclaw.community.core.skill_center.services.bot_skill_asset_service import (
-    BotSkillAssetService,
-)
 from agentclaw.community.core.skill_center.services.git_sync import (
     GitSyncConfig,
     GitSyncService,
 )
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
-)
-from agentclaw.community.core.skill_center.services.local_skill_query_service import (
-    LocalSkillQueryService,
 )
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
@@ -440,24 +428,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
     @singleton
     @provider
     @inject
-    def local_skill_query_service(
-        self,
-        skill_repo: SkillRepository,
-        bot_repo: BotRepository,
-        collaborator_service: CollaboratorServiceProtocol,
-        skill_sets: CapabilityDesiredStateRepositoryProtocol,
-    ) -> LocalSkillQueryServiceProtocol:
-        """Bind the public Bot-Skill desired-state query service."""
-        return LocalSkillQueryService(
-            skill_repo=skill_repo,
-            bot_repo=bot_repo,
-            collaborator_service=collaborator_service,
-            skill_sets=skill_sets,
-        )
-
-    @singleton
-    @provider
-    @inject
     def local_skill_upload_service(
         self,
         skill_repo: SkillRepository,
@@ -503,29 +473,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             skill_service_factory,
             edit_guard,
             lambda: injector.get(DeviceContextResolver),
-        )
-
-    @singleton
-    @provider
-    @inject
-    def bot_skill_asset_service(
-        self,
-        skill_repo: SkillRepository,
-        bot_repo: BotRepository,
-        collaborator_service: CollaboratorServiceProtocol,
-        skill_service_factory: SkillServiceFactory,
-        parameter_service_factory: SkillParameterServiceFactoryProtocol,
-        direct_activation: DirectActivationServiceProtocol,
-        injector: Injector,
-    ) -> BotSkillAssetServiceProtocol:
-        return BotSkillAssetService(
-            skill_repo,
-            bot_repo,
-            collaborator_service,
-            skill_service_factory,
-            parameter_service_factory,
-            lambda: injector.get(DeviceContextResolver),
-            direct_activation,
         )
 
     @singleton

@@ -94,7 +94,7 @@ class SkillSetManagementService:
         # says: for the ``/openapi/v1`` operations ``bot_access`` is the declared
         # authority and adjudicates first, at this same MEMBER bar. Here that
         # makes this a redundant second gate; at ``/api/skillsets`` it is the
-        # only one. See ``bot_skill_asset_service._resolve_local`` for the same
+        # only one. See ``skill_query_service._resolve_local`` for the same
         # shape, and ``test_the_control_plane_check_the_legacy_surface_relies_on
         # _still_exists``, which pins it.
         if not self._authorization.can_manage_bot(

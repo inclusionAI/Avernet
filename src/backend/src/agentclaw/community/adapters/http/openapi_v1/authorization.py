@@ -333,7 +333,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skills"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.local_skill_query_service"),
+        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.skill_query_service"),
     ("POST", "/openapi/v1/bots/{bot_id}/skills"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.local_skill_upload_service"),
     ("POST", "/openapi/v1/bots/{bot_id}/skills/upload-folder"):

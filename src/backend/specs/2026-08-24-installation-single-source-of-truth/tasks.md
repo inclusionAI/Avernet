@@ -194,7 +194,7 @@ lands in the same group as the migration of its last caller.
       `SkillQueryService`; activate/deactivate → `DirectActivationService`),
       internal legacy activate/deactivate routes, `deprecated/skills.py`,
       `service_publication_facade.py`.
-- [ ] 10.3 Delete `BotSkillAssetService` + `api/bot_skill_asset_service.py`
+- [x] 10.3 Delete `BotSkillAssetService` + `api/bot_skill_asset_service.py`
       + `LocalSkillQueryService` + `api/local_skill_query_service.py`; port
       tests; add the case: bridged skill shows `active=true` in detail
       before any listing ran.

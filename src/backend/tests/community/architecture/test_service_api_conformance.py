@@ -53,7 +53,6 @@ from agentclaw.community.api.bot_dormant_service import (
 from agentclaw.community.api.bot_runtime_projector import (
     BotRuntimeProjectorProtocol,
 )
-from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
@@ -74,8 +73,8 @@ from agentclaw.community.api.health_diagnosis_service import (
 from agentclaw.community.api.local_bot_workflow_service import (
     LocalBotWorkflowServiceProtocol,
 )
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
+from agentclaw.community.api.skill_query_service import (
+    SkillQueryServiceProtocol,
 )
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
@@ -133,11 +132,8 @@ from agentclaw.community.core.harness.services.health_diagnosis_service import (
     HealthDiagnosisService,
 )
 from agentclaw.community.core.services.engine_config import EngineConfigService
-from agentclaw.community.core.skill_center.services.local_skill_query_service import (
-    LocalSkillQueryService,
-)
-from agentclaw.community.core.skill_center.services.bot_skill_asset_service import (
-    BotSkillAssetService,
+from agentclaw.community.core.skill_center.services.skill_query_service import (
+    SkillQueryService,
 )
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
@@ -184,9 +180,8 @@ _PAIRS = [
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
     (EngineConnectionServiceProtocol, EngineConnectionService),
     (HealthDiagnosisServiceProtocol, HealthDiagnosisService),
-    (BotSkillAssetServiceProtocol, BotSkillAssetService),
     (BotRuntimeProjectorProtocol, BotRuntimeProjector),
-    (LocalSkillQueryServiceProtocol, LocalSkillQueryService),
+    (SkillQueryServiceProtocol, SkillQueryService),
     (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
     (DirectActivationServiceProtocol, DirectActivationService),
     (LocalSkillDeleteServiceProtocol, LocalSkillDeleteService),

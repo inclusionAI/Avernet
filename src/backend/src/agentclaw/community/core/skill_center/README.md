@@ -55,9 +55,7 @@ internal_dependencies:
   - agentclaw.community.api.skill_parameter_service_factory
   - agentclaw.community.api.skill_market_service
   - agentclaw.community.api.space_skill_query_service
-  - agentclaw.community.api.local_skill_query_service # Protocol LocalSkillQueryService inherits
   - agentclaw.community.api.skill_query_service # Protocol SkillQueryService inherits
-  - agentclaw.community.api.bot_skill_asset_service # Protocol BotSkillAssetService inherits
   - agentclaw.community.api.bot_capability_state_reader # Protocol BotCapabilityStateReader implements
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
