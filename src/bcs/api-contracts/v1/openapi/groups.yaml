@@ -181,6 +181,69 @@ GroupsPath:
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
 
+PublicGroupsPath:
+  get:
+    operationId: list_public_groups
+    tags: ["Collaboration / Groups"]
+    summary: List all public groups for the plaza surface.
+    x-avernet-security:
+      user: required
+    parameters:
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      - name: q
+        in: query
+        schema:
+          type: string
+      - name: strategy
+        in: query
+        schema:
+          type: string
+          enum:
+            - chat
+            - manager_worker
+            - state_machine
+    responses:
+      "200":
+        description: >-
+          All public Groups ordered by updated_at descending, filtered by
+          strategy and label substring query, then paginated with offset/limit.
+          Items carry membership=none because the catalog is caller-agnostic;
+          participation is evaluated when a session is instantiated.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/GroupPageEnvelope
+      "400":
+        description: Invalid filter or pagination.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
 GroupPath:
   get:
     operationId: get_group

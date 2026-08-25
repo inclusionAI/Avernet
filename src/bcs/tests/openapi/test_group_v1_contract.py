@@ -417,3 +417,35 @@ def test_update_group_does_not_accept_context() -> None:
 
     assert "context" not in schema["properties"]
     assert set(schema["properties"]) == {"name", "visibility", "delivery_policy"}
+
+
+PUBLIC_GROUPS_PATH = "/openapi/v1/collaboration/groups/public"
+
+
+def test_list_public_groups_endpoint_exists() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][PUBLIC_GROUPS_PATH]["get"]
+
+    assert operation["operationId"] == "list_public_groups"
+    query_names = {
+        parameter["name"]
+        for parameter in operation["parameters"]
+        if parameter["in"] == "query"
+    }
+    assert query_names == {"offset", "limit", "q", "strategy"}
+    assert operation["x-avernet-security"] == {"user": "required"}
+    # load_contract 会递归解析并内联所有 $ref（validate_openapi_contract.py:68-99），
+    # 解析后 200 响应 schema 是完整的 GroupPageEnvelope 对象，无 "$ref" 键。
+    # 按解析后的形状断言，仿既有测试风格。
+    schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert schema["properties"]["code"]["const"] == 20_000
+    assert "items" in schema["properties"]["data"]["properties"]
+
+
+def test_public_groups_path_is_registered_before_group_id_path() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    paths = list(contract["paths"].keys())
+
+    public_idx = paths.index(PUBLIC_GROUPS_PATH)
+    group_id_idx = paths.index("/openapi/v1/collaboration/groups/{group_id}")
+    assert public_idx < group_id_idx
