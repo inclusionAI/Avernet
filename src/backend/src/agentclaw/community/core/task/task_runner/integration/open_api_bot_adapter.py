@@ -80,12 +80,26 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
     async def _aclose(self) -> None:
         await self._client.aclose()
 
+    def _headers(self) -> dict[str, str]:
+        """请求头:Bearer + 可选 Cookie/Referer。
+
+        真实 ACE 网关后的 host(``agentclaw-*`` / ``secbaas-*``)除 Bearer 外还需登录 Cookie(+ Referer)
+        才能过 ACE;否则 ACE 回 HTTP 200 的 USER_NOT_LOGIN 登录门(无业务 data),被误当成功而 run_id=None。
+        本地 singlebox 与 service-to-service(``CorpApiKeyProvider`` cookie/referer 空)不加 → 行为不变。
+        """
+        h: dict[str, str] = {"Authorization": f"Bearer {self._k.api_key}"}
+        if self._k.cookie:
+            h["Cookie"] = self._k.cookie
+        if self._k.referer:
+            h["Referer"] = self._k.referer
+        return h
+
     async def ensure_grant(self, bot_id: str) -> None:
         prefix = self._k.api_key_prefix or self._k.api_key[:_DEFAULT_KEY_PREFIX_LEN]
         logger.info("[task][openapi_bot] >>> ensure_grant GET /api/v1/api-keys/%s/allowed-bots bot_id=%s base_url=%s",
                     prefix, bot_id, self._k.base_url)
         r = await self._client.get(f"/api/v1/api-keys/{prefix}/allowed-bots",
-                                   headers={"Authorization": f"Bearer {self._k.api_key}"})
+                                   headers=self._headers())
         logger.info("[task][openapi_bot] <<< ensure_grant GET allowed-bots status=%s body=%s",
                     r.status_code, _resp_summary(r))
         _map_status(r)
@@ -109,23 +123,35 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
                     bot_id, self._k.base_url, len(message or ""))
         r = await self._client.post("/openapi/v1/messages",
                                     json={"bot_id": bot_id, "message": message},
-                                    headers={"Authorization": f"Bearer {self._k.api_key}"})
+                                    headers=self._headers())
         logger.info("[task][openapi_bot] <<< send_message status=%s body=%s",
                     r.status_code, _resp_summary(r))
         _map_status(r)
-        data = r.json().get("data") or {}
-        # message_id 即 run_id;session_id 前向兼容——当前 BaaS 回包未提供时为 None,将来 BaaS 补字段自动落库。
+        payload = r.json()
+        data = payload.get("data") or {}
+        message_id = data.get("message_id")
+        code = payload.get("code")
+        # 业务信封校验:HTTP 200 但 code!=0 或无 message_id(如 ACE 登录门/未授权),若不拦截会 run_id=None,
+        # 后续 get_run(None) 报误导 404 "Message not found: None"。校验后直抛,带 code/payload 便于定位。
+        if (code is not None and code != 0) or not message_id:
+            raise OpenApiError(
+                f"send_message 业务失败 code={code} message_id={message_id!r} payload={payload}"
+            )
         logger.info("[task][openapi_bot] send_message 结果 message_id(run_id)=%s session_id=%s",
-                    data.get("message_id"), data.get("session_id"))
-        return BotSendResult(run_id=data.get("message_id"), session_id=data.get("session_id"))
+                    message_id, data.get("session_id"))
+        return BotSendResult(run_id=message_id, session_id=data.get("session_id"))
 
     async def get_run(self, run_id: str) -> dict[str, Any]:
         logger.info("[task][openapi_bot] >>> get_run GET /openapi/v1/messages/%s base_url=%s", run_id, self._k.base_url)
         r = await self._client.get(f"/openapi/v1/messages/{run_id}",
-                                   headers={"Authorization": f"Bearer {self._k.api_key}"})
+                                   headers=self._headers())
         logger.info("[task][openapi_bot] <<< get_run status=%s body=%s", r.status_code, _resp_summary(r))
         _map_status(r)
-        return r.json().get("data") or {}
+        payload = r.json()
+        code = payload.get("code")
+        if code is not None and code != 0:
+            raise OpenApiError(f"get_run 业务失败 code={code} payload={payload}")
+        return payload.get("data") or {}
 
     async def cancel_run(self, run_id: str) -> None:
         """Best-effort stop tracking hook.
