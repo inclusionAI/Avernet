@@ -203,6 +203,10 @@ RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET
 - 安装、加入 SkillSet、激活前执行服务端权限校验。
 - MCP Catalog、用户配置、调用身份仍是独立事实。
 
+Engine/Template Default MCP Policy 与 Active Skill MCP dependency 的统一深模块边界仍为
+**TBD**。本次 Phase 2 合同收口不修改现有 MCP Effective/Runtime 语义，也不得在
+Asset、Draft、Grant、Lease、Publication 或 Version 实现中复制另一套 MCP Union。
+
 #### 3.5 持久化合同
 
 Phase 1 新增两张 Desired State 表：
@@ -348,7 +352,7 @@ Idempotency-Key: required
 POST 返回 `202 Accepted` 与持久 `reference_id`；前端通过 GET 查询
 `PENDING/RUNNING/SUCCEEDED/FAILED`。Reference 首次受理时解析并冻结精确
 `sc_version_number`，内部完成 SC PUBLIC 授权、`ac_skill/ac_skill_version` 幂等创建、
-Canonical OSS 物化和最终 ACL/SkillSet 状态复验；只有 Version=`PUBLISHED` 后才调用
+TeamClaw Canonical Store Ready 和最终 ACL/SkillSet 状态复验；只有 Version=`PUBLISHED` 后才调用
 `SkillSetManagementService` 写 Membership，active Set 再维护 Installation 与 Runtime
 Projection。已物化但最终 Membership 失败时保留共享只读 Asset/Version，不写悬空
 Membership。当前阶段只冻结合同；没有真实 Backend 实现前不得加入 Gateway 正式 OpenAPI artifact。
