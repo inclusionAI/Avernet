@@ -79,6 +79,7 @@ def test_no_direct_logging_getlogger_outside_legacy_layers():
 ALLOWED_LOGGER_NAMES = frozenset(
     {
         "core-service",
+        "bcn-converter",  # core/service/sse/**
         "orm",
         "router",
         "router-open-api",
