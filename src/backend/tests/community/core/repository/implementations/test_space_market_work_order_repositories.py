@@ -200,6 +200,101 @@ def test_skill_editor_review_atomically_controls_manager_grant(
     assert (manager is not None) is manager_expected
 
 
+def test_skill_editor_request_rejects_personal_space(db) -> None:
+    spaces = SpaceRepository(db)
+    with spaces.create_personal_transaction(
+        user_id="owner-1", creator_user_name=None, env="dev"
+    ) as personal:
+        created = SpaceSkillRepository(db).create_space_skill(
+            skill_data={"name": "personal-skill", "env": "dev"},
+            ownership_data={
+                "space_id": personal.id,
+                "created_by": "owner-1",
+                "env": "dev",
+            },
+            owner_grant_data={
+                "user_id": "owner-1",
+                "role": "OWNER",
+                "granted_by": "owner-1",
+                "env": "dev",
+            },
+        )
+
+    with pytest.raises(WorkOrderSkillEditorRequestNotAllowedError):
+        WorkOrderRepository(db).create_skill_editor_request(
+            space_id=personal.id,
+            skill_id=created["skill"]["id"],
+            applicant_user_id="owner-1",
+            applicant_name="Owner",
+            apply_reason="not supported",
+            env="dev",
+        )
+
+
+def test_skill_editor_request_rejects_non_member(db) -> None:
+    spaces = SpaceRepository(db)
+    team, skill_id = _space_skill(db, spaces)
+
+    with pytest.raises(WorkOrderAccessDeniedError):
+        WorkOrderRepository(db).create_skill_editor_request(
+            space_id=team.id,
+            skill_id=skill_id,
+            applicant_user_id="outsider-1",
+            applicant_name="Outsider",
+            apply_reason="not a member",
+            env="dev",
+        )
+
+
+def test_skill_editor_approval_is_idempotent_when_manager_grant_already_exists(
+    db,
+) -> None:
+    spaces = SpaceRepository(db)
+    team, skill_id = _space_skill(db, spaces)
+    work_orders = WorkOrderRepository(db)
+    order = work_orders.create_skill_editor_request(
+        space_id=team.id,
+        skill_id=skill_id,
+        applicant_user_id="applicant-1",
+        applicant_name="Applicant",
+        apply_reason="maintain together",
+        env="dev",
+    )
+    SpaceSkillRepository(db).add_manager(
+        space_id=team.id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        manager_user_id="applicant-1",
+        env="dev",
+    )
+
+    result = work_orders.review_skill_editor_request(
+        work_order_id=order.id,
+        reviewer_user_id="owner-1",
+        review_remark=None,
+        target_status=WorkOrderStatus.APPROVED,
+        notification=_skill_review_notification(
+            applicant_user_id="applicant-1", skill_id=skill_id, approved=True
+        ),
+        env="dev",
+    )
+
+    assert result.status is WorkOrderStatus.APPROVED
+    with db.orm_session() as session:
+        managers = (
+            session.query(SkillGrant)
+            .filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.user_id == "applicant-1",
+                SkillGrant.role == "MANAGER",
+                SkillGrant.status == "ACTIVE",
+                SkillGrant.env == "dev",
+            )
+            .all()
+        )
+    assert len(managers) == 1
+
+
 def test_skill_editor_pending_reviewer_follows_current_owner(db) -> None:
     spaces = SpaceRepository(db)
     team, skill_id = _space_skill(db, spaces)

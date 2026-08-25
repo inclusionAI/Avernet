@@ -13,7 +13,13 @@ from agentclaw.community.core.models.space_skill import (
     SkillGrant,
     SkillSpaceBinding,
 )
-from agentclaw.community.core.spaces.repository.models import SpaceMemberModel, SpaceModel
+from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
+    SkillEditorRequestRepository,
+)
+from agentclaw.community.core.spaces.repository.models import (
+    SpaceMemberModel,
+    SpaceModel,
+)
 from agentclaw.community.core.repository.protocols.skill_center import (
     SpaceSkillRepository as SpaceSkillRepositoryProtocol,
 )
@@ -38,17 +44,6 @@ from agentclaw.community.core.skill_center.errors import (
     SpaceSkillGrantMemberRequiredError,
     SpaceSkillGrantNotFoundError,
     SpaceSkillGrantReasonRequiredError,
-)
-from agentclaw.community.core.work_orders.models import (
-    NotificationCategory,
-    WorkOrderApproverStatus,
-    WorkOrderBizType,
-    WorkOrderStatus,
-)
-from agentclaw.community.core.work_orders.repository.models import (
-    WorkOrderApproverModel,
-    WorkOrderModel,
-    WorkOrderNotificationModel,
 )
 
 
@@ -222,8 +217,10 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
     def list_grants(
         self, *, space_id: int, skill_id: int, actor_id: str, env: str
     ) -> SpaceSkillGrantSetRecord:
-        with self._db.orm_session() as session:
-            self._require_binding(session, space_id=space_id, skill_id=skill_id, env=env)
+        with self._db.transactional_orm_session() as session:
+            self._require_binding(
+                session, space_id=space_id, skill_id=skill_id, env=env
+            )
             return self._active_grant_set(
                 session, skill_id=skill_id, actor_id=actor_id, env=env
             )
@@ -232,7 +229,9 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
         self, *, space_id: int, skill_id: int, actor_id: str, env: str
     ) -> str | None:
         with self._db.orm_session() as session:
-            self._require_binding(session, space_id=space_id, skill_id=skill_id, env=env)
+            self._require_binding(
+                session, space_id=space_id, skill_id=skill_id, env=env
+            )
             grant = (
                 session.query(SkillGrant)
                 .filter(
@@ -382,9 +381,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             if actor_id != current_owner.user_id and not is_admin:
                 raise SpaceSkillGrantForbiddenError("owner or space admin required")
             if actor_id != current_owner.user_id and not reason:
-                raise SpaceSkillGrantReasonRequiredError(
-                    "space admin reason required"
-                )
+                raise SpaceSkillGrantReasonRequiredError("space admin reason required")
             self._require_active_member(
                 session, space_id=space_id, user_id=new_owner_user_id, env=env
             )
@@ -430,7 +427,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                 target.revoked_at = None
                 target.revoked_by = None
             session.flush()
-            self._reroute_pending_skill_editor_requests(
+            SkillEditorRequestRepository.reroute_pending_reviewer(
                 session,
                 skill_id=skill_id,
                 previous_owner_user_id=current_owner.user_id,
@@ -442,76 +439,9 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             )
 
     @staticmethod
-    def _reroute_pending_skill_editor_requests(
-        session,
-        *,
-        skill_id: int,
-        previous_owner_user_id: str,
-        new_owner_user_id: str,
-        env: str,
-    ) -> None:
-        """Move pending Skill reviews with the authoritative Owner Grant."""
-        pending_ids = [
-            work_order_id
-            for (work_order_id,) in session.query(WorkOrderModel.id)
-            .filter(
-                WorkOrderModel.biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value,
-                WorkOrderModel.biz_id == str(skill_id),
-                WorkOrderModel.status == WorkOrderStatus.PENDING.value,
-                WorkOrderModel.env == env,
-            )
-            .with_for_update()
-            .all()
-        ]
-        if not pending_ids:
-            return
-        session.query(WorkOrderApproverModel).filter(
-            WorkOrderApproverModel.work_order_id.in_(pending_ids),
-            WorkOrderApproverModel.approver_user_id == previous_owner_user_id,
-            WorkOrderApproverModel.status == WorkOrderApproverStatus.PENDING.value,
-            WorkOrderApproverModel.env == env,
-        ).update(
-            {WorkOrderApproverModel.status: WorkOrderApproverStatus.CANCELLED.value},
-            synchronize_session=False,
-        )
-        for work_order_id in pending_ids:
-            new_approver = (
-                session.query(WorkOrderApproverModel)
-                .filter(
-                    WorkOrderApproverModel.work_order_id == work_order_id,
-                    WorkOrderApproverModel.approver_user_id == new_owner_user_id,
-                    WorkOrderApproverModel.env == env,
-                )
-                .with_for_update()
-                .one_or_none()
-            )
-            if new_approver is None:
-                session.add(
-                    WorkOrderApproverModel(
-                        work_order_id=work_order_id,
-                        approver_user_id=new_owner_user_id,
-                        status=WorkOrderApproverStatus.PENDING.value,
-                        env=env,
-                    )
-                )
-            else:
-                new_approver.status = WorkOrderApproverStatus.PENDING.value
-                new_approver.review_remark = None
-                new_approver.reviewed_at = None
-            session.query(WorkOrderNotificationModel).filter(
-                WorkOrderNotificationModel.work_order_id == work_order_id,
-                WorkOrderNotificationModel.recipient_user_id == previous_owner_user_id,
-                WorkOrderNotificationModel.notification_category
-                == NotificationCategory.APPROVAL.value,
-                WorkOrderNotificationModel.env == env,
-            ).update(
-                {WorkOrderNotificationModel.recipient_user_id: new_owner_user_id},
-                synchronize_session=False,
-            )
-        session.flush()
-
-    @staticmethod
-    def _require_binding(session, *, space_id: int, skill_id: int, env: str, lock=False):
+    def _require_binding(
+        session, *, space_id: int, skill_id: int, env: str, lock=False
+    ):
         query = session.query(SkillSpaceBinding).filter(
             SkillSpaceBinding.space_id == space_id,
             SkillSpaceBinding.skill_id == skill_id,

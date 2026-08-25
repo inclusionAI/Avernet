@@ -97,6 +97,7 @@ provides:
   - UserMCPConfigRepository
   - CapabilityDesiredStateRepositoryProtocol
   - CapabilityDesiredStateRepository
+  - SkillEditorRequestRepositoryProtocol
   # spaces / market_favorites
   - SpaceRepositoryProtocol
   - MarketFavoriteRepositoryProtocol
@@ -150,6 +151,7 @@ provides:
   - SkillPropagationLogRepository
   - SkillRepository
   - SpaceSkillRepository
+  - SkillEditorRequestRepository
   - SkillSetRepository
   # skills_pool
   - QuarantineRepositoryProtocol
