@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import (
-    OpenApiAuthError, OpenApiBotAdapter, OpenApiServerError, OpenApiTimeoutError, parse_bot_id,
+    OpenApiAuthError, OpenApiBotAdapter, OpenApiError, OpenApiServerError, OpenApiTimeoutError, parse_bot_id,
 )
 
 
@@ -182,3 +182,69 @@ def test_send_and_wait_failed_returns_run():
     run = a.send_and_wait(bot_id="bot9:ent1", message="hi", timeout=2.0, poll_interval=0.001)
     assert run["status"] == "FAILED"
     assert run["error"] == "boom"
+
+
+# ===== ACE 网关后的真实 host 需在 Bearer 之外带 Cookie/Referer;adapter 各请求须透传 key 的 cookie/referer =====
+def test_send_message_forwards_cookie_and_referer():
+    seen: dict = {}
+
+    def h(req):
+        if req.url.path == "/openapi/v1/messages":
+            seen["cookie"] = req.headers.get("cookie")
+            seen["referer"] = req.headers.get("referer")
+            return httpx.Response(200, json={"data": {"message_id": "mid_ck"}})
+        return httpx.Response(404)
+
+    rid = _run(_adapter(h).send_message(bot_id="bot9:ent1", message="hi", metadata={}))
+    assert rid.run_id == "mid_ck"
+    assert seen["cookie"] == "sess=1"
+    assert seen["referer"] == "http://b/"
+
+
+def test_get_run_forwards_cookie_and_referer():
+    seen: dict = {}
+
+    def h(req):
+        if req.url.path == "/openapi/v1/messages/mid_77":
+            seen["cookie"] = req.headers.get("cookie")
+            seen["referer"] = req.headers.get("referer")
+            return httpx.Response(200, json={"data": {"status": "COMPLETED"}})
+        return httpx.Response(404)
+
+    _run(_adapter(h).get_run("mid_77"))
+    assert seen["cookie"] == "sess=1"
+    assert seen["referer"] == "http://b/"
+
+
+def test_ensure_grant_get_forwards_cookie_and_referer():
+    seen: dict = {}
+
+    def h(req):
+        if req.method == "GET" and req.url.path.endswith("/allowed-bots"):
+            seen["cookie"] = req.headers.get("cookie")
+            seen["referer"] = req.headers.get("referer")
+            return httpx.Response(200, json={"data": {"allowed_bots": ["bot9:ent1"]}})
+        return httpx.Response(404)
+
+    _run(_adapter(h).ensure_grant("bot9:ent1"))
+    assert seen["cookie"] == "sess=1"
+    assert seen["referer"] == "http://b/"
+
+
+# ===== 业务信封校验:HTTP 200 但 code!=0 / 无 message_id 不可当成功吞成 run_id=None(否则 get_run(None) 报误导 404) =====
+def test_send_message_raises_when_no_message_id():
+    def h(req):
+        # HTTP 200 但无 message_id(模拟 ACE 登录门回 USER_NOT_LOGIN、或未授权回空 data)
+        return httpx.Response(200, json={"code": 0, "data": {}})
+
+    with pytest.raises(OpenApiError):
+        _run(_adapter(h).send_message(bot_id="bot9:ent1", message="hi", metadata={}))
+
+
+def test_send_message_raises_on_nonzero_business_code():
+    def h(req):
+        # HTTP 200 但业务 code 非 0(如 bot 未在 allowed_bots → 403 业务信封)
+        return httpx.Response(200, json={"code": 40301, "message": "bot not in allowed_bots", "data": None})
+
+    with pytest.raises(OpenApiError):
+        _run(_adapter(h).send_message(bot_id="bot9:ent1", message="hi", metadata={}))
