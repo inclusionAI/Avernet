@@ -68,6 +68,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.drm
   - agentclaw.community.plugin_api.engine_ext_client
+  - agentclaw.community.plugin_api.eval_env
   - agentclaw.community.plugin_api.health_probe
   - agentclaw.community.plugin_api.http_client
   - agentclaw.community.plugin_api.impl_registry

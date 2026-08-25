@@ -70,6 +70,7 @@ from agentclaw.community.core.bot_management.create_flow import (
     BotCreateContext,
     BotCreateDeploymentMode,
     BotCreateSpec,
+    BotCreateTemplateValidationMode,
     complete_bot_authorization,
     create_bot_with_authorization,
 )
@@ -433,6 +434,7 @@ async def create_bot(
                 "applicationCoding" if template_properties is not None else None
             ),
             template_config=template_properties,
+            template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
         ),
         context=BotCreateContext(
             deployment_mode=BotCreateDeploymentMode.CLOUD,
@@ -681,6 +683,15 @@ async def list_inventory(
         DeployMode | None,
         Query(description="Filter inventory items by cloud or local deployment."),
     ] = None,
+    is_service: Annotated[
+        bool | None,
+        Query(
+            description=(
+                "Filter by service classification: true returns service Bots, "
+                "false returns non-service Bots, and omission returns both."
+            )
+        ),
+    ] = None,
     service: BotInventoryServiceProtocol = Injected(BotInventoryServiceProtocol),
     space_context: BusinessSpaceContextProtocol = Injected(
         BusinessSpaceContextProtocol
@@ -700,6 +711,7 @@ async def list_inventory(
         keyword=keyword,
         engine=engine,
         deploy_mode=CoreDeployMode(deploy_mode) if deploy_mode is not None else None,
+        is_service=is_service,
         bot_ids=sorted(granted) if granted is not None else None,
         page=page_params.page,
         page_size=page_params.page_size,
@@ -1025,6 +1037,7 @@ def _complete_auth_status(
                 space_id=current_space.numeric_id,
                 template_type=template_type,
                 template_config=template_config,
+                template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
             ),
             context=BotCreateContext(
                 deployment_mode=BotCreateDeploymentMode.CLOUD,

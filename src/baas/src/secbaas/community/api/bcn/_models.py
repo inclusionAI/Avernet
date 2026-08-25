@@ -194,6 +194,7 @@ class BcnInteractionAnswer:
     values: tuple[str, ...]
     question: str
     header: str
+    custom_values: tuple[str, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)

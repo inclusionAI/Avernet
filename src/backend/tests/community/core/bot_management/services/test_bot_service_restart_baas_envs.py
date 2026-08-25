@@ -304,6 +304,28 @@ class TestRestartBaasImagePolicy:
 
 
 class TestRestartBaasEnvInjection:
+    def test_openclaw_personal_restart_registers_plugin_mode(self):
+        """BaaS restart must preserve the OpenClaw personal plugin selection."""
+        svc, _, _ = _make_service(
+            active_engine="openclaw",
+            template_config=None,
+        )
+        svc._drm_reader.read.return_value = "true"
+        svc._bcn_service.register_provider_bot.return_value = {"bot_uuid": "u1"}
+        bot = _make_bot(active_engine="openclaw", template_type="")
+
+        svc._restart_bot_baas(
+            bot_id="bot001", user_id="user001", binding_id=42, bot=bot
+        )
+
+        svc._bcn_service.register_provider_bot.assert_called_once_with(
+            teamclaw_bot_uuid="bot001",
+            owner_workno="user001",
+            name="TestBot",
+            summary="",
+            connection_mode="plugin",
+        )
+
     def test_restart_records_current_publish_id_and_clears_stale_baas_failure(self):
         """BaaS 原地重启进入新 publish 轮次时，持久化当前 publish_id，
         并清理上一轮 BaaS publish 失败 marker。"""

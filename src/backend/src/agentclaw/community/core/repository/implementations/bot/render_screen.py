@@ -85,16 +85,23 @@ class RenderScreenRepository(
             logger.info("[RenderScreen] insert id=%s", row.id)
             return row.id
 
-    def list_by_bot_id(self, *, bot_id: str, owner_id: str) -> list[RenderScreenRecord]:
+    def list_by_bot_id(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str | None = None,
+    ) -> list[RenderScreenRecord]:
         with self._db.orm_session() as db:
+            filters = [
+                self._Model.bot_id == bot_id,
+                self._Model.is_delete == 0,
+                self._Model.env == get_current_env(),
+            ]
+            if owner_id is not None:
+                filters.insert(1, self._Model.owner_id == owner_id)
             rows = (
                 db.query(self._Model)
-                .filter(
-                    self._Model.bot_id == bot_id,
-                    self._Model.owner_id == owner_id,
-                    self._Model.is_delete == 0,
-                    self._Model.env == get_current_env(),
-                )
+                .filter(*filters)
                 .order_by(self._Model.gmt_create.desc())
                 .all()
             )

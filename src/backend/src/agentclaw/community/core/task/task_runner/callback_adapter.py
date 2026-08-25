@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import contextvars
+import hashlib
 import json
 import logging
 from typing import TYPE_CHECKING, Any
@@ -33,9 +35,63 @@ def _split_loop_task_id(loop_task_id: Any) -> tuple[str, str]:
     return parts[0], (parts[1] if len(parts) == 2 else "")
 
 
-def _to_callback_record(payload: dict[str, Any]) -> TaskCallbackRecord:
+# Pending callback audit shared with the graph service so it can persist the
+# inbound callback audit row in the SAME database transaction as the graph
+# mutation it drives (spec §12). The callback boundary sets it; the graph
+# service consumes it on the first successful graph mutation. Per-call scope:
+# cleared in the ``finally`` of the callback handler.
+_PENDING_CALLBACK_AUDIT: contextvars.ContextVar[TaskCallbackRecord | None] = contextvars.ContextVar(
+    "task_pending_callback_audit", default=None
+)
+
+
+def _derive_event_id(payload: dict[str, Any], disposition: str) -> str | None:
+    """Best-effort stable callback event id for replay idempotency.
+
+    A payload-provided explicit id (``event_id`` / ``result._ext_info.event_id``)
+    wins. Otherwise a deterministic digest over the routing key + disposition +
+    canonical result is produced, so replays of the *same* inbound event collapse
+    to one id while distinct events differ. Returns ``None`` only when there is
+    no usable routing key (an ``ingest``-only event without loop_task_id).
+    """
+    run_id, node_id = _split_loop_task_id(payload.get("loop_task_id"))
+    if not run_id:
+        return None
+    ext = payload.get("result", {}).get("_ext_info") if isinstance(payload.get("result"), dict) else None
+    # Only a true per-event identifier may short-circuit the digest:
+    # ``event_id`` on the payload, or the executor-supplied ``_ext_info.event_id``
+    # (e.g. a BCN CloudEvent id). ``workflow_instance_id`` is per-workflow, not
+    # per-event (start and result of one run share it), so it must NOT be used —
+    # otherwise a result would be mistaken for its own start replay.
+    explicit = (
+        payload.get("event_id")
+        or (ext.get("event_id") if isinstance(ext, dict) else None)
+    )
+    if explicit:
+        return str(explicit)
+    identity = json.dumps(
+        {
+            "run_id": run_id,
+            "node_id": node_id,
+            "disposition": disposition,
+            "source": payload.get("workflow_source"),
+            "status": payload.get("status"),
+            "result": payload.get("result"),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    digest = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:32]
+    return f"{run_id}:{node_id}:{disposition}:{digest}"
+
+
+def _to_callback_record(payload: dict[str, Any], *, event_id: str | None = None,
+                            process_status: str | None = None) -> TaskCallbackRecord:
     """由回投 ``data`` dict 组装回投记录:run_id/node_id 取自 loop_task_id 拆分;
     NOT NULL 的 invoker/main_session_id 缺省 ``""``;可空列缺省 ``None``(空保持空)。
+    ``event_id`` 由调用方按 disposition 生成并传入(回放幂等键);``process_status`` 由调用方
+    按同事务落库语义传入(callback 驱动路径=``PROCESSED``,``ingest`` 审计路径=``None``)。
     """
     run_id, node_id = _split_loop_task_id(payload.get("loop_task_id"))
     result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
@@ -57,6 +113,9 @@ def _to_callback_record(payload: dict[str, Any]) -> TaskCallbackRecord:
         result_success=success if isinstance(success, bool) else None,
         exec_error=(result.get("exec_error") or None),
         extend_props=(ext_info if isinstance(ext_info, dict) else None),
+        event_id=event_id,
+        process_status=process_status,
+        processed_at=None,
         gmt_create=None,
         gmt_modified=None,
     )
@@ -165,34 +224,108 @@ class TaskLoopCallback:
         self._engine = engine
         self._callback_repo = callback_repo
 
+    def _is_already_processed(self, event_id: str | None) -> bool:
+        """event-idempotency guard (spec §12): a callback whose ``event_id`` is
+        already recorded with ``process_status='PROCESSED'`` is acknowledged
+        without replaying the graph mutation. Defensive against lightweight
+        callback-repo fakes that do not implement ``find_by_event_id``."""
+        if not event_id or self._callback_repo is None:
+            return False
+        finder = getattr(self._callback_repo, "find_by_event_id", None)
+        if finder is None:
+            return False
+        try:
+            prior = finder(event_id)
+        except Exception as exc:  # noqa: BLE001 查幂等键失败不阻断回投(落库/推进仍进行)
+            logger.warning("[task][task-callback] idempotency check failed event_id=%s: %s", event_id, exc)
+            return False
+        return prior is not None and prior.process_status == "PROCESSED"
+
+    def _set_pending_audit(self, record: TaskCallbackRecord | None) -> None:
+        _PENDING_CALLBACK_AUDIT.set(record)
+
+    def _consume_pending_audit(self) -> TaskCallbackRecord | None:
+        record = _PENDING_CALLBACK_AUDIT.get()
+        if record is not None:
+            _PENDING_CALLBACK_AUDIT.set(None)
+        return record
+
     async def start_run(self, data: TaskCallbackData) -> None:
         """任务开始执行:适配层 adapt_start → 编排核 on_start(await)→ PENDING→RUNNING(幂等)。
-        协程化:on_start async,await 不阻塞回投调用方。"""
-        self._persist(data)
+        回放幂等:``event_id`` 已 PROCESSED → 直接 ack;否则把回调审计挂到图变同事务落库。"""
+        payload = data.data if isinstance(data.data, dict) else None
+        record = None
+        if payload is not None:
+            event_id = _derive_event_id(payload, "start")
+            if self._is_already_processed(event_id):
+                logger.info("[task][task-callback] idempotent start event_id=%s", event_id)
+                return
+            record = _to_callback_record(payload, event_id=event_id, process_status="PROCESSED")
         patch = self._adapter.adapt_start(data)
-        await self._engine.on_start(patch)
+        if record is not None:
+            self._set_pending_audit(record)
+        try:
+            await self._engine.on_start(patch)
+        finally:
+            if record is not None:
+                self._fallback_persist_audit()
+            else:
+                self._set_pending_audit(None)
 
     async def report_result(self, data: TaskCallbackData) -> None:
         """任务完成或失败:适配层组装 TaskNodePatch → 编排核 on_report(await) → graph.update_task_node_info → 翻态/传播/补救。
-        协程化:on_report 是 async,await 不阻塞回投调用方。"""
-        self._persist(data)
+        回放幂等:``event_id`` 已 PROCESSED → 直接 ack;否则把回调审计挂到图变同事务落库。"""
+        payload = data.data if isinstance(data.data, dict) else None
+        record = None
+        if payload is not None:
+            event_id = _derive_event_id(payload, "result")
+            if self._is_already_processed(event_id):
+                logger.info("[task][task-callback] idempotent result event_id=%s", event_id)
+                return
+            record = _to_callback_record(payload, event_id=event_id, process_status="PROCESSED")
         patch = self._adapter.adapt(data)
-        await self._engine.on_report(patch)
+        if record is not None:
+            self._set_pending_audit(record)
+        try:
+            await self._engine.on_report(patch)
+        finally:
+            if record is not None:
+                self._fallback_persist_audit()
+            else:
+                self._set_pending_audit(None)
 
     async def ingest(self, data: TaskCallbackData) -> None:
         """仅落回投审计(``task_callback``),不推进编排核。供 ClawMind/BCN 等事件/工作流级回投用:
         其 run_id/workflow_id 不对应框架节点,``start_run``/``report_result`` 推进会 NodeNotFoundError。"""
-        self._persist(data)
+        self._persist(data, disposition="ingest")
 
-    def _persist(self, data: TaskCallbackData) -> None:
+    def _fallback_persist_audit(self) -> None:
+        """After a callback-driven graph mutation, if the graph service did not
+        consume the pending audit (no shared repository, or an idempotent
+        no-persist path like an already-RUNNING start), record it best-effort
+        via the callback repository so the audit + idempotency key still land."""
+        record = _PENDING_CALLBACK_AUDIT.get()
+        self._set_pending_audit(None)
+        if record is None or self._callback_repo is None:
+            return
+        try:
+            self._callback_repo.upsert(record)
+        except Exception as exc:  # noqa: BLE001 审计落库失败不阻断回投推进
+            logger.warning("[task][task-callback] fallback persist task_callback failed: %s", exc)
+
+    def _persist(self, data: TaskCallbackData, *, disposition: str = "ingest") -> None:
         """``data`` 为 dict → 解析回调记录字段,落 ``task_callback``(按 (run_id,node_id) upsert);
-        非 dict 或无 repo → 不落库。best-effort:落库异常仅记日志,不阻断回投→编排核推进。"""
+        非 dict 或无 repo → 不落库。best-effort:落库异常仅记日志,不阻断回投→编排核推进。
+
+        仅 ``ingest`` 路径(事件/工作流级,不进编排核)用此直接落库;``start_run``/``report_result``
+        经同事务审计路径(``_fallback_persist_audit`` / 图仓储 same-tx)。"""
         if self._callback_repo is None:
             return
         payload = data.data
         if not isinstance(payload, dict):
             return
+        event_id = _derive_event_id(payload, disposition)
         try:
-            self._callback_repo.upsert(_to_callback_record(payload))
+            self._callback_repo.upsert(_to_callback_record(payload, event_id=event_id))
         except Exception as exc:  # noqa: BLE001 落库失败不影响编排核推进
-            logger.warning("[task-callback] persist task_callback failed: %s", exc)
+            logger.warning("[task][task-callback] persist task_callback failed: %s", exc)

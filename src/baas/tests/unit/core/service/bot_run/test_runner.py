@@ -2282,3 +2282,355 @@ class TestAttachmentPassthrough:
         runner._dispatchers[0].dispatch_send.assert_called_once()
         kw = runner._dispatchers[0].dispatch_send.call_args.kwargs
         assert kw.get("attachments") is None
+
+
+# ==================== Tests: eval session log ====================
+
+
+def _make_runner_with_eval_session_log(
+    mock_selector,
+    mock_run_repo,
+    mock_bot_service_plugin,
+    eval_session_log=None,
+    dispatcher=None,
+):
+    """创建带 eval_session_log 参数的 BotRunner。"""
+    if dispatcher is None:
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_send = AsyncMock()
+        dispatcher.dispatch_inject = AsyncMock()
+    return BotRunner(
+        bot_service_selector=mock_selector,
+        run_repository=mock_run_repo,
+        bot_service_plugin=mock_bot_service_plugin,
+        dispatchers=[dispatcher],
+        eval_session_log=eval_session_log,
+    )
+
+
+class TestEvalSessionLog:
+    """deliver_message / deliver_message_stream 中的 eval session log 路径。"""
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_with_eval_id_calls_log_eval_session(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """metadata 包含 eval_id 时应调用 eval_session_log.log_eval_session。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        eval_log = MagicMock()
+        eval_log.log_eval_session = MagicMock()
+
+        runner = _make_runner_with_eval_session_log(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            eval_session_log=eval_log,
+        )
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={"eval_id": "eval-001", "session_id": "sess-001"},
+            message_id="msg-001",
+        )
+
+        eval_log.log_eval_session.assert_called_once_with(
+            eval_id="eval-001",
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            session_id="sess-001",
+            method="deliver_message",
+        )
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_eval_id_no_session_id_logs_warning(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """metadata 包含 eval_id 但无 session_id 时记录退化警告。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        eval_log = MagicMock()
+
+        runner = _make_runner_with_eval_session_log(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            eval_session_log=eval_log,
+        )
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={"eval_id": "eval-002"},
+            message_id="msg-002",
+        )
+
+        # 应依然调用 log_eval_session（session_id 为空字符串）
+        eval_log.log_eval_session.assert_called_once_with(
+            eval_id="eval-002",
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            session_id="",
+            method="deliver_message",
+        )
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_no_eval_id_skips_log(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """metadata 不含 eval_id 时不调用 eval_session_log。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        eval_log = MagicMock()
+
+        runner = _make_runner_with_eval_session_log(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            eval_session_log=eval_log,
+        )
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={},
+            message_id="msg-003",
+        )
+
+        eval_log.log_eval_session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_eval_id_no_plugin_no_error(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """metadata 含 eval_id 但 eval_session_log=None 时正常执行不报错。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        runner = _make_runner_with_eval_session_log(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            eval_session_log=None,
+        )
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={"eval_id": "eval-003", "session_id": "sess-003"},
+            message_id="msg-004",
+        )
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_eval_session_id_regression_warning(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """eval 流量下 session_id 退化时记录 warning。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        # 让 _create_session 返回与 raw_session_id 不同的值
+        mock_bot_service.create_session = AsyncMock(
+            return_value=MagicMock(session_id="agent:main:different-session")
+        )
+        eval_log = MagicMock()
+
+        runner = _make_runner_with_eval_session_log(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            eval_session_log=eval_log,
+        )
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={"eval_id": "eval-004", "session_id": "original-sess"},
+            message_id="msg-005",
+        )
+
+
+class TestEvalSessionLogStream:
+    """deliver_message_stream 中的 eval session log 路径。"""
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_stream_with_eval_id_calls_log(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """deliver_message_stream 中 metadata 包含 eval_id 时调用 log_eval_session。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        eval_log = MagicMock()
+
+        runner = _make_runner_with_eval_session_log(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            eval_session_log=eval_log,
+        )
+
+        message_id, session_id, _ = await runner.deliver_message_stream(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={"eval_id": "eval-str-1", "session_id": "sess-str-1"},
+        )
+
+        eval_log.log_eval_session.assert_called_once_with(
+            eval_id="eval-str-1",
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            session_id="sess-str-1",
+            method="deliver_message_stream",
+        )
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_stream_eval_no_session_id_warning(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """deliver_message_stream 中 eval_id 存在但无 session_id 记录退化警告。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        eval_log = MagicMock()
+
+        runner = _make_runner_with_eval_session_log(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            eval_session_log=eval_log,
+        )
+
+        await runner.deliver_message_stream(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={"eval_id": "eval-str-2"},
+        )
+
+        # 应调用 log_eval_session（session_id 为空字符串）
+        eval_log.log_eval_session.assert_called_once_with(
+            eval_id="eval-str-2",
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            session_id="",
+            method="deliver_message_stream",
+        )
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_stream_no_eval_id_no_log(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """deliver_message_stream 中不含 eval_id 时不调用 eval_session_log。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        eval_log = MagicMock()
+
+        runner = _make_runner_with_eval_session_log(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            eval_session_log=eval_log,
+        )
+
+        await runner.deliver_message_stream(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={},
+        )
+
+        eval_log.log_eval_session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_stream_eval_no_plugin_no_error(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """deliver_message_stream 中 eval_id 存在但 eval_session_log=None 时正常执行。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        runner = _make_runner_with_eval_session_log(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            eval_session_log=None,
+        )
+
+        await runner.deliver_message_stream(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={"eval_id": "eval-str-3", "session_id": "sess-str-3"},
+        )
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_stream_eval_session_id_regression(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """deliver_message_stream 中 eval session_id 退化时记录 warning。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        mock_bot_service.create_session = AsyncMock(
+            return_value=MagicMock(session_id="agent:main:regressed-id")
+        )
+        eval_log = MagicMock()
+
+        runner = _make_runner_with_eval_session_log(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            eval_session_log=eval_log,
+        )
+
+        await runner.deliver_message_stream(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={"eval_id": "eval-str-4", "session_id": "original-sess"},
+        )

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import Status
     from agentclaw.community.core.task.repository.types import (
+        TaskActionLogRecord,
         TaskCallbackRecord,
         TaskInfoRecord,
         TaskNodeRecord,
@@ -232,4 +233,135 @@ class TaskCallbackRepositoryProtocol(Protocol):
         """Latest callback for ``main_session_id`` (``gmt_modified``/``id`` desc); ``None`` if absent.
 
         dashboard 按 root 节点的 BCS ``session_id`` 反查 ``task_callback.execution_graph`` 挂图级用。"""
+        ...
+
+    @abstractmethod
+    def find_by_event_id(self, event_id: str) -> Optional["TaskCallbackRecord"]:
+        """Return the callback row for ``event_id`` or ``None``.
+
+        Backs event-idempotent callback handling: a non-``None`` row with
+        ``process_status == "PROCESSED"`` means the event was already applied
+        and must be acknowledged without replaying the graph mutation."""
+        ...
+
+@runtime_checkable
+class TaskGraphRepositoryProtocol(Protocol):
+    """Aggregate persistence contract for a complete task graph."""
+
+    @abstractmethod
+    def load_graph(self, task_id: str):
+        """Hydrate a complete ``TaskExecutionGraph`` or return ``None``."""
+        ...
+
+    @abstractmethod
+    def create_graph(self, graph, *, runtime_status: "Status"):
+        """Persist initial graph state and return its version."""
+        ...
+
+    @abstractmethod
+    def save_graph(
+        self,
+        graph,
+        *,
+        expected_version: int,
+        runtime_status: "Status",
+        action_events: list,
+        instance_id: str | None = None,
+        callback_audit: "TaskCallbackRecord | None" = None,
+    ) -> int:
+        """Persist graph state and action events with optimistic concurrency.
+
+        When ``callback_audit`` is supplied, the inbound callback audit row is
+        written (``process_status='PROCESSED'``) in the **same** transaction as
+        the graph mutation, so the audit and the graph effect commit atomically
+        and an already-processed ``event_id`` is never re-applied."""
+        ...
+
+    @abstractmethod
+    def get_version(self, task_id: str) -> int | None:
+        """Return the current graph version for a task."""
+        ...
+
+    @abstractmethod
+    def next_action_seq(self, task_id: str, node_id: str) -> int:
+        """Return the next append-only action sequence for a node."""
+        ...
+
+    @abstractmethod
+    def load_action_logs(
+        self,
+        task_id: str,
+        *,
+        node_id: str | None = None,
+        limit: int = 200,
+    ) -> dict[str, list]:
+        """Load bounded action history grouped by node for diagnostics."""
+        ...
+
+    @abstractmethod
+    def list_recoverable(self, *, limit: int = 100) -> list[str]:
+        """Return non-terminal tasks whose recovery lease is expired."""
+        ...
+
+    @abstractmethod
+    def acquire_lease(
+        self,
+        task_id: str,
+        *,
+        instance_id: str,
+        lease_seconds: int,
+    ) -> bool:
+        """Claim a recovery lease for one task."""
+        ...
+
+    @abstractmethod
+    def heartbeat(
+        self,
+        task_id: str,
+        *,
+        instance_id: str,
+        lease_seconds: int,
+    ) -> bool:
+        """Extend a lease owned by this instance."""
+        ...
+
+    @abstractmethod
+    def release_lease(self, task_id: str, *, instance_id: str) -> bool:
+        """Release a lease owned by this instance."""
+        ...
+
+    @abstractmethod
+    def claim_bbs_owner(self, task_id: str, bot_id: str) -> bool:
+        """Atomically claim the BBS relay root owner across instances.
+
+        Returns ``True`` if ``bot_id`` now holds the claim (first claimer or
+        idempotent re-claim), ``False`` if another bot already holds it.
+        """
+        ...
+
+    @abstractmethod
+    def release_bbs_owner(self, task_id: str, bot_id: str) -> bool:
+        """Release a BBS relay claim held by ``bot_id``."""
+        ...
+
+
+@runtime_checkable
+class TaskActionLogRepositoryProtocol(Protocol):
+    """Append-only persistence contract for high-volume task actions."""
+
+    @abstractmethod
+    def append_many(self, events: list["TaskActionLogRecord"]) -> int:
+        """Append action records atomically and return the inserted count."""
+        ...
+
+    @abstractmethod
+    def list_by_task(
+        self,
+        task_id: str,
+        *,
+        node_id: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list["TaskActionLogRecord"]:
+        """Return bounded diagnostic action history."""
         ...

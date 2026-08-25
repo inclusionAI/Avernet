@@ -76,7 +76,10 @@ class BcsBotCatalogMetadataService:
             for item in payload["items"]:
                 if not isinstance(item, Mapping) or item.get("actor_kind") != "bot":
                     raise BotCatalogMetadataUnavailableError()
-                address = self._address_from_bot_uuid(item.get("bot_uuid"))
+                bot_uuid = item.get("bot_uuid")
+                if not isinstance(bot_uuid, str):
+                    raise BotCatalogMetadataUnavailableError()
+                address = self._address_from_bot_uuid(bot_uuid)
                 if address is None or address in seen:
                     raise BotCatalogMetadataUnavailableError()
                 is_friend = item.get("is_friend")
@@ -89,6 +92,7 @@ class BcsBotCatalogMetadataService:
                     BotCatalogMetadata(
                         address=address,
                         kind="bot",
+                        bot_uuid=bot_uuid,
                         is_friend=is_friend,
                         visibility=item.get("visibility"),
                         is_online=item.get("is_online"),

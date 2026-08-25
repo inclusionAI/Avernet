@@ -1408,6 +1408,18 @@ story_provider_operator_publishes_agent() {
     assert_json_eq "provider agent keeps provider ref" "$RESPONSE" "provider_bot_ref" "$provider_bot_ref"
     [[ -n "$provider_bot_uuid" && -n "$runtime_token" ]] || return
 
+    # PATCH /providers/{provider_id}/bots/{provider_bot_ref} updates the bot's
+    # capabilities in place without rotating bot_uuid or the runtime token.
+    api_request_headers PATCH "/providers/${provider_id}/bots/${provider_bot_ref}" \
+        '{"name":"Provider Review Agent (Senior)","domains":["release","audit"],"scopes":[]}' \
+        "Authorization: Bearer ${admin_token}"
+    require_status "operator patches provider bot capabilities" "200" || return
+    assert_json_eq "patch keeps provider bot id stable" "$RESPONSE" "bot_uuid" "$provider_bot_uuid"
+    assert_json_eq "patch keeps provider ref stable" "$RESPONSE" "provider_bot_ref" "$provider_bot_ref"
+    assert_json_eq "patch updates bot name" "$RESPONSE" "name" "Provider Review Agent (Senior)"
+    assert_json_eq "patch appends domain" "$RESPONSE" "domains" "[\"release\",\"audit\"]"
+    assert_json_eq "patch clears scopes" "$RESPONSE" "scopes" "[]"
+
     # This fixture Provider is intentionally not in the backend-only allowlist.
     # Exercise both endpoints and freeze the fail-closed boundary before any
     # attribute write can reach the shared control-plane service.

@@ -237,7 +237,7 @@ class TestPersist:
         assert engine.reports == [] and engine.starts == []         # ingest 不推进编排核
         rec = repo.calls[0]
         assert rec.invoker == "claw_mind"
-        assert rec.run_id == "wf-1" and rec.node_id == ""          # workflow 级回投
+        assert rec.run_id == "fl-1" and rec.node_id == ""          # loop_task_id = flow_id(run 实例,对齐 BCN)
         assert rec.main_session_id == "S-9"                        # origin_session_id
         assert rec.status == "succeeded"                           # 底层 flow_runs.status
         assert rec.result_success is True

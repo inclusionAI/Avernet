@@ -93,7 +93,7 @@ class TaskExecutorResultPoller:
     async def _poll_one(self, handle) -> None:
         now = self._clock()
         if now - handle.registered_at > self._sla_for(handle):
-            logger.warning("[poller] %s SLA 超时(%.0fs>%.0fs)→exec_error sla_timeout",
+            logger.warning("[task][poller] %s SLA 超时(%.0fs>%.0fs)→exec_error sla_timeout",
                            handle.loop_task_id, now - handle.registered_at, self._sla_for(handle))
             await self._cancel_handle(handle)
             await self._report(self._exec_error(handle, "sla_timeout"), handle)
@@ -109,7 +109,7 @@ class TaskExecutorResultPoller:
         if data is not None:
             handle.fails = 0
             _result = (data.data.get("result") if isinstance(data.data, dict) else None) or {}
-            logger.info("[poller] %s 收终态 success=%s data=%s",
+            logger.info("[task][poller] %s 收终态 success=%s data=%s",
                         handle.loop_task_id, _result.get("success"),
                         str(_result.get("data"))[:80])
             await self._report(data, handle)
@@ -144,7 +144,7 @@ class TaskExecutorResultPoller:
         try:
             await cancel(handle.run_id)
         except Exception as exc:  # noqa: BLE001 取消是 best-effort,不能吞掉主回投
-            logger.warning("[poller] %s cancel_run failed: %s", handle.loop_task_id, exc)
+            logger.warning("[task][poller] %s cancel_run failed: %s", handle.loop_task_id, exc)
 
     def _exec_error(self, handle, reason: str) -> TaskCallbackData:
         return TaskCallbackData(data={

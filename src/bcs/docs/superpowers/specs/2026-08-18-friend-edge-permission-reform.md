@@ -174,7 +174,7 @@ erDiagram
     BOT ||--o{ PERMISSION_PROFILE : owns
     BOT ||--o{ CAPABILITY : exposes
     PERMISSION_PROFILE ||--o{ EDGE_GRANT : "referenced_by(target.default)"
-    EDGE_GRANT ||--o{ PERMISSION_REQUEST : "request.edge_id -> edge.edge_id"
+    EDGE_GRANT ||--o{ PERMISSION_REQUEST : "request.edge_id -> edge.id"
 
     EDGE_GRANT {
         string edge_id PK
@@ -469,14 +469,32 @@ ensure_default_profile(bot_uuid, env):
 
 ### 8.4 Phase 2：全量 ETL（一次性，幂等可重放）
 
-> 按 env 分批（singlebox→pre→prod）。脚本顺序 0→5。全 `ON CONFLICT DO NOTHING` + 确定性 MD5 id。全程只读旧表。
+> 按 env 分批（singlebox→pre→prod）。脚本顺序 0→5。全 `ON CONFLICT DO NOTHING`/`INSERT IGNORE` + 确定性 MD5 id。全程只读旧表。`ac_bot_friend` 与 `bcs_friend_requests` 必须先按关系维度取 latest-status（`ROW_NUMBER() ... ORDER BY gmt_create DESC, id DESC`），全量迁移只消费最新行，避免历史流水旧状态污染。
 
-**映射视图**（D11）：
+**映射与 latest-status 视图**（D11）：
 ```sql
 CREATE VIEW v_ac_bot_map AS
-SELECT CONCAT(bot_id,':',owner_id) AS bot_uuid, public,
+SELECT CONCAT(bot_id,':',owner_id) AS bot_uuid, bot_id, owner_id, public,
        JSON_EXTRACT(ext,'$.friend_approval') AS friend_approval
 FROM ac_bots WHERE is_delete=0;
+
+CREATE VIEW v_ac_bot_friend_latest AS
+SELECT * FROM (
+  SELECT f.*, ROW_NUMBER() OVER (
+    PARTITION BY requester_entity_id, target_bot_id, target_entity_id, env
+    ORDER BY gmt_create DESC, id DESC
+  ) AS rn
+  FROM ac_bot_friend f
+) ranked WHERE rn=1;
+
+CREATE VIEW v_bcs_friend_requests_latest AS
+SELECT * FROM (
+  SELECT fr.*, ROW_NUMBER() OVER (
+    PARTITION BY from_bot, to_bot, env
+    ORDER BY gmt_create DESC, id DESC
+  ) AS rn
+  FROM bcs_friend_requests fr
+) ranked WHERE rn=1;
 ```
 
 **脚本 0 — default profile 批量 seed**（每 bot 一条）：
@@ -509,7 +527,7 @@ SELECT
   CONCAT('eg_',MD5(CONCAT('human_',f.requester_entity_id,'|',m.bot_uuid,'|',f.env,'|pp_',m.bot_uuid,'_default'))),
   f.env, CONCAT('human_',f.requester_entity_id), m.bot_uuid,
   'permission_profile', CONCAT('pp_',m.bot_uuid,'_default'), NULL, 'approved', 'any', NULL
-FROM ac_bot_friend f
+FROM v_ac_bot_friend_latest f
 JOIN v_ac_bot_map m ON m.bot_id=f.target_bot_id AND m.owner_id=f.target_entity_id
 WHERE f.status='ACCEPTED'
 ON CONFLICT (from_id,to_id,env,grant_ref_id) DO NOTHING;
@@ -524,25 +542,28 @@ SELECT
   COALESCE(JSON_EXTRACT(f.ext,'$.approvals[0].approver'), f.target_entity_id),
   JSON_EXTRACT(f.ext,'$.approvals[0].approval_time'),
   f.requester_entity_id, f.gmt_create, f.gmt_modified
-FROM ac_bot_friend f JOIN v_ac_bot_map m ON m.bot_id=f.target_bot_id AND m.owner_id=f.target_entity_id
+FROM v_ac_bot_friend_latest f JOIN v_ac_bot_map m ON m.bot_id=f.target_bot_id AND m.owner_id=f.target_entity_id
 WHERE f.status='ACCEPTED'
 ON CONFLICT (request_id) DO NOTHING;
 ```
 > 自动批（`ext.approvals[].type=AUTO`）→ `decided_by='auto'`。
 
-**脚本 3 — System A PENDING/REJECTED/CANCELLED → permission_requests（无 edge）**：同源 `migration-plan` 脚本 4，`CASE status WHEN 'PENDING' THEN 'pending' ...`，`ON CONFLICT (request_id) DO NOTHING`。
+**脚本 3 — System A latest PENDING/REJECTED/CANCELLED → permission_requests（无 edge）**：同源 `migration-plan` 脚本 4，但输入必须是 `v_ac_bot_friend_latest`，`CASE status WHEN 'PENDING' THEN 'pending' ...`，`ON CONFLICT (request_id) DO NOTHING`。
 
 **脚本 4 — System B `bcs_friendships` → Bot↔Bot 双向 2 边 + 2 approved requests**：同源 `actor-info` §2.2 脚本 4（=`migration-plan` 脚本 5），`A→B ref=B.default`、`B→A ref=A.default`，`UNION ALL`，`ON CONFLICT DO NOTHING`。`bcs_actor_relations` 友谊边（is_creator=0）**不单独迁**（双写镜像，仅对账校验 pair 集）。
 
-**脚本 5 — System B `bcs_friend_requests` pending/rejected → permission_requests**：同源脚本 6，`WHERE status<>'accepted'`（accepted 已被脚本 4 覆盖）。
+**脚本 5 — System B latest `bcs_friend_requests` pending/rejected → permission_requests**：同源脚本 6，但输入必须是 `v_bcs_friend_requests_latest`，`WHERE status<>'accepted'`（accepted 已被脚本 4 覆盖）。
 
 **actor 配置 ETL**（与好友同批，`actor-info` §1.5）：ETL1 `human_addable←ac_bots.public`、ETL2 `friend_approval←ext.friend_approval`（取严融合）、ETL3 `visibility` 修正（`public=0` 的 bot 改 private）。
 
 **验证门 2→3**：
 ```sql
 -- 计数对账
-SELECT (SELECT COUNT(*) FROM ac_bot_friend WHERE status='ACCEPTED' AND env=?) AS old_h,
-       (SELECT COUNT(*) FROM edge_grants WHERE from_id LIKE 'human_%' AND env=?) AS new_h;  -- 等
+SELECT f.env, COUNT(*) AS old_h
+FROM v_ac_bot_friend_latest f
+WHERE f.status='ACCEPTED'
+GROUP BY f.env;
+-- 与 edge_grants human_* approved 按 env 对齐；同时检查 orphan、actor_relation mirror drift、request/edge 一致性。
 SELECT (SELECT COUNT(*)*2 FROM bcs_friendships WHERE env=?) AS old_b,
        (SELECT COUNT(*) FROM edge_grants WHERE from_id NOT LIKE 'human_%' AND to_id NOT LIKE 'human_%' AND env=?) AS new_b;  -- 等
 SELECT (SELECT COUNT(*) FROM bcs_bots WHERE env=?) AS bots,
@@ -2188,69 +2209,69 @@ Plan complete and saved to `docs/superpowers/plans/2026-08-18-friend-edge-permis
 -- Spec: docs/superpowers/specs/2026-08-18-friend-edge-permission-reform.md §3.1.
 
 CREATE TABLE IF NOT EXISTS `edge_grants` (
-  `edge_id`                  VARCHAR(48)  NOT NULL,
-  `env`                      VARCHAR(16)  NOT NULL,
-  `from_id`                  VARCHAR(256) NOT NULL,
-  `to_id`                    VARCHAR(256) NOT NULL,
-  `grant_kind`               VARCHAR(16)  NOT NULL,           -- permission_profile | rules
-  `grant_ref_id`             VARCHAR(128) NOT NULL,
-  `rules`                    JSON         DEFAULT NULL,
-  `status`                   VARCHAR(16)  NOT NULL DEFAULT 'approved',
-  `originator_policy_type`   VARCHAR(16)  NOT NULL DEFAULT 'any',
-  `originator_policy_data`   JSON         DEFAULT NULL,
-  `created_at`               BIGINT       NOT NULL,
-  `updated_at`               BIGINT       NOT NULL,
-  PRIMARY KEY (`edge_id`),
+  `id`                    BIGINT       NOT NULL AUTO_INCREMENT,
+  `env`                   VARCHAR(16)  NOT NULL,
+  `from_id`               VARCHAR(256) NOT NULL,
+  `to_id`                 VARCHAR(256) NOT NULL,
+  `grant_kind`            VARCHAR(16)  NOT NULL,           -- permission_profile | rules
+  `grant_ref_id`          BIGINT       NOT NULL,
+  `rules`                 JSON         DEFAULT NULL,
+  `status`                VARCHAR(16)  NOT NULL DEFAULT 'approved',
+  `originator_policy_type` VARCHAR(16)  NOT NULL DEFAULT 'any',
+  `originator_policy_data` JSON         DEFAULT NULL,
+  `gmt_create`            timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `gmt_modified`          timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
   UNIQUE KEY `ux_edge_from_to_env_ref` (`from_id`, `to_id`, `env`, `grant_ref_id`),
   KEY `idx_edge_from_env_status` (`from_id`, `env`, `status`),
   KEY `idx_edge_to_env_status`   (`to_id`, `env`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `permission_profiles` (
-  `permission_profile_id`    VARCHAR(48)  NOT NULL,
-  `bot_id`                   VARCHAR(256) NOT NULL,
-  `env`                      VARCHAR(16)  NOT NULL,
-  `name`                     VARCHAR(64)  NOT NULL DEFAULT 'default',
-  `description`              VARCHAR(512) DEFAULT NULL,
-  `rules_template`           JSON         NOT NULL,
-  `revision`                 BIGINT       NOT NULL DEFAULT 1,
-  `digest`                   VARCHAR(128) NOT NULL,
-  `is_default`               TINYINT(1)   NOT NULL DEFAULT 0,
-  `status`                   VARCHAR(16)  NOT NULL DEFAULT 'active',
-  `created_by`               VARCHAR(64)  NOT NULL,
-  `updated_by`               VARCHAR(64)  DEFAULT NULL,
-  `created_at`               BIGINT       NOT NULL,
-  `updated_at`               BIGINT       NOT NULL,
-  PRIMARY KEY (`permission_profile_id`),
+  `id`                    BIGINT       NOT NULL AUTO_INCREMENT,
+  `bot_id`                VARCHAR(256) NOT NULL,
+  `env`                   VARCHAR(16)  NOT NULL,
+  `name`                  VARCHAR(64)  NOT NULL DEFAULT 'default',
+  `description`           VARCHAR(512) DEFAULT NULL,
+  `rules_template`        JSON         NOT NULL,
+  `revision`              BIGINT       NOT NULL DEFAULT 1,
+  `digest`                VARCHAR(128) NOT NULL,
+  `is_default`            TINYINT(1)   NOT NULL DEFAULT 0,
+  `status`                VARCHAR(16)  NOT NULL DEFAULT 'active',
+  `created_by`            VARCHAR(64)  NOT NULL,
+  `updated_by`            VARCHAR(64)  DEFAULT NULL,
+  `gmt_create`            timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `gmt_modified`          timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
   UNIQUE KEY `ux_profile_bot_env_default` (`bot_id`, `env`, `is_default`, `status`),
   KEY `idx_profile_bot_env` (`bot_id`, `env`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `permission_requests` (
-  `request_id`        VARCHAR(48)  NOT NULL,
-  `edge_id`           VARCHAR(48)  DEFAULT NULL,
+  `id`                BIGINT       NOT NULL AUTO_INCREMENT,
+  `edge_id`           BIGINT       DEFAULT NULL,
   `env`               VARCHAR(16)  NOT NULL,
   `from_id`           VARCHAR(256) NOT NULL,
   `to_id`             VARCHAR(256) NOT NULL,
   `request_kind`      VARCHAR(16)  NOT NULL,                  -- connect | permission_profile | rules | revoke
-  `requested_ref_id`  VARCHAR(128) DEFAULT NULL,
+  `requested_ref_id`  BIGINT       DEFAULT NULL,
   `requested_rules`   JSON         DEFAULT NULL,
   `message`           TEXT         DEFAULT NULL,
   `status`            VARCHAR(16)  NOT NULL DEFAULT 'pending',
   `decision_reason`   TEXT         DEFAULT NULL,
   `created_by`        VARCHAR(64)  NOT NULL,
   `decided_by`        VARCHAR(64)  DEFAULT NULL,
-  `created_at`        BIGINT       NOT NULL,
-  `updated_at`        BIGINT       NOT NULL,
-  `decided_at`        BIGINT       DEFAULT NULL,
-  PRIMARY KEY (`request_id`),
+  `gmt_create`        timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `gmt_modified`      timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `decided_at`        timestamp    DEFAULT NULL,
+  PRIMARY KEY (`id`),
   KEY `idx_req_to_env_status` (`to_id`, `env`, `status`),
   KEY `idx_req_from_env_status` (`from_id`, `env`, `status`),
   KEY `idx_req_edge` (`edge_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `capabilities` (
-  `capability_id`     VARCHAR(48)  NOT NULL,
+  `id`                BIGINT       NOT NULL AUTO_INCREMENT,
   `bot_id`            VARCHAR(256) NOT NULL,
   `env`               VARCHAR(16)  NOT NULL,
   `tool`              VARCHAR(64)  NOT NULL,
@@ -2261,12 +2282,12 @@ CREATE TABLE IF NOT EXISTS `capabilities` (
   `raw_metadata`      JSON         DEFAULT NULL,
   `created_at`        BIGINT       NOT NULL,
   `updated_at`        BIGINT       NOT NULL,
-  PRIMARY KEY (`capability_id`),
+  PRIMARY KEY (`id`),
   KEY `idx_cap_bot_env` (`bot_id`, `env`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `authz_decision_logs` (
-  `decision_id`   VARCHAR(48)  NOT NULL,
+  `id`            BIGINT       NOT NULL AUTO_INCREMENT,
   `env`           VARCHAR(16)  NOT NULL,
   `task_id`       VARCHAR(128) DEFAULT NULL,
   `run_id`        VARCHAR(128) DEFAULT NULL,
@@ -2279,7 +2300,7 @@ CREATE TABLE IF NOT EXISTS `authz_decision_logs` (
   `grant_refs`    JSON         NOT NULL,
   `context_json`  JSON         DEFAULT NULL,
   `created_at`    BIGINT       NOT NULL,
-  PRIMARY KEY (`decision_id`),
+  PRIMARY KEY (`id`),
   KEY `idx_adl_env_from_to` (`env`, `from_id`, `to_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -2323,12 +2344,12 @@ SqliteMigration {
     name: "edge_permission",
     sql: r#"
 CREATE TABLE IF NOT EXISTS edge_grants (
-  edge_id TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   env TEXT NOT NULL,
   from_id TEXT NOT NULL,
   to_id TEXT NOT NULL,
   grant_kind TEXT NOT NULL,
-  grant_ref_id TEXT NOT NULL,
+  grant_ref_id INTEGER NOT NULL,
   rules TEXT,
   status TEXT NOT NULL DEFAULT 'approved',
   originator_policy_type TEXT NOT NULL DEFAULT 'any',
@@ -2341,7 +2362,7 @@ CREATE INDEX IF NOT EXISTS idx_edge_from_env_status ON edge_grants(from_id, env,
 CREATE INDEX IF NOT EXISTS idx_edge_to_env_status   ON edge_grants(to_id, env, status);
 
 CREATE TABLE IF NOT EXISTS permission_profiles (
-  permission_profile_id TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   bot_id TEXT NOT NULL,
   env TEXT NOT NULL,
   name TEXT NOT NULL DEFAULT 'default',
@@ -2361,13 +2382,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_profile_bot_env_default
 CREATE INDEX IF NOT EXISTS idx_profile_bot_env ON permission_profiles(bot_id, env, status);
 
 CREATE TABLE IF NOT EXISTS permission_requests (
-  request_id TEXT PRIMARY KEY,
-  edge_id TEXT,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  edge_id INTEGER,
   env TEXT NOT NULL,
   from_id TEXT NOT NULL,
   to_id TEXT NOT NULL,
   request_kind TEXT NOT NULL,
-  requested_ref_id TEXT,
+  requested_ref_id INTEGER,
   requested_rules TEXT,
   message TEXT,
   status TEXT NOT NULL DEFAULT 'pending',
@@ -2383,7 +2404,7 @@ CREATE INDEX IF NOT EXISTS idx_req_from_env_status ON permission_requests(from_i
 CREATE INDEX IF NOT EXISTS idx_req_edge            ON permission_requests(edge_id);
 
 CREATE TABLE IF NOT EXISTS capabilities (
-  capability_id TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   bot_id TEXT NOT NULL,
   env TEXT NOT NULL,
   tool TEXT NOT NULL,
@@ -2398,7 +2419,7 @@ CREATE TABLE IF NOT EXISTS capabilities (
 CREATE INDEX IF NOT EXISTS idx_cap_bot_env ON capabilities(bot_id, env, status);
 
 CREATE TABLE IF NOT EXISTS authz_decision_logs (
-  decision_id TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   env TEXT NOT NULL,
   task_id TEXT,
   run_id TEXT,

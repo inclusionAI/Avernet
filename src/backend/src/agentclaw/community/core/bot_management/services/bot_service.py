@@ -14,7 +14,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional, Dict, Any, List, Tuple, TYPE_CHECKING
+from typing import Callable, Optional, Dict, Any, List, Literal, Tuple, TYPE_CHECKING
 
 from agentclaw.community.core.bot_management.capabilities import (
     can_join_bcn_as_provider,
@@ -1468,6 +1468,48 @@ class BotService:
                 )
                 return bot_record
 
+            # Bot 已落库并完成名称/简介解析后，在设备分配前注册 BCN Provider。
+            # 这样创建路径与 start_bot 对齐；BCN 注册为 best-effort，不影响后续分配。
+            should_register_bcn = self._should_register_bcn_provider(
+                active_engine=resolved_active_engine,
+                bot_type=resolved_bot_type,
+                template_type=template_type,
+                template_config=template_config,
+            )
+            connection_mode = self._resolve_bcn_provider_connection_mode(
+                active_engine=resolved_active_engine,
+                bot_type=resolved_bot_type,
+            )
+            if should_register_bcn:
+                logger.info(
+                    f"[bot_service.create_bot] register bot to BCN as provider: "
+                    f"bot_id={bot_id} active_engine={resolved_active_engine} "
+                    f"bot_type={resolved_bot_type} template_type={template_type} "
+                    f"connection_mode={connection_mode}"
+                )
+                try:
+                    self._register_bot_to_bcn_as_provider(
+                        bot_id=bot_id,
+                        user_id=user_id,
+                        owner_workno=user_id,
+                        bot_name=resolved_bot_name or bot_id,
+                        bot_summary=bot_desc or "",
+                        connection_mode=connection_mode,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[bot_service.create_bot] BCN provider registration failed for bot {bot_id}, "
+                        f"connection_mode={connection_mode}, "
+                        f"error_type={type(e).__name__}, will retry on next start"
+                    )
+            else:
+                logger.info(
+                    f"[bot_service.create_bot] skip BCN provider registration: "
+                    f"bot_id={bot_id} active_engine={resolved_active_engine} "
+                    f"bot_type={resolved_bot_type} template_type={template_type} "
+                    f"connection_mode={connection_mode}"
+                )
+
             # Step 2: 设备分配（错误立即透出给前端）。teclaw bot 走 BaaS 即时备容器
             # (create + approve)，不经 DeviceService.apply_device()；其余引擎走 apply_device。
             # 两条路径汇合到下方共享尾部（更新 bot_record + 注册 BCN + service 发布单创建）。
@@ -1585,46 +1627,6 @@ class BotService:
                 bot_record["device_id"] = device_id
                 bot_record["status"] = final_status
                 bot_record["engine_types"] = resolved_engine_types
-
-                # 创建时注册 BCN Provider（与 start_bot 条件一致）
-                # 触发条件:
-                #   - active_engine == "claude_code" 且 template_type == "normalCC"
-                #   - active_engine == "claude_code" 且 template_type == "personalCoding"
-                #   - active_engine == "aicoding" 且 template_type == "personalCoding"
-                #   - active_engine == "teclaw" (所有 bot_type)
-                #   - active_engine == "openclaw" 且 bot_type == "service"
-                # 排查日志关键字: [bot_service.create_bot] register bot to BCN as provider
-                should_register_bcn = self._should_register_bcn_provider(
-                    active_engine=resolved_active_engine,
-                    bot_type=resolved_bot_type,
-                    template_type=template_type,
-                    template_config=template_config,
-                )
-                if should_register_bcn:
-                    logger.info(
-                        f"[bot_service.create_bot] register bot to BCN as provider: "
-                        f"bot_id={bot_id} active_engine={resolved_active_engine} "
-                        f"bot_type={resolved_bot_type} template_type={template_type}"
-                    )
-                    try:
-                        self._register_bot_to_bcn_as_provider(
-                            bot_id=bot_id,
-                            user_id=user_id,
-                            owner_workno=user_id,
-                            bot_name=resolved_bot_name or bot_id,
-                            bot_summary=bot_desc or "",
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"[bot_service.create_bot] BCN provider registration failed for bot {bot_id}, "
-                            f"will retry on next start: {e}"
-                        )
-                else:
-                    logger.info(
-                        f"[bot_service.create_bot] skip BCN provider registration: "
-                        f"bot_id={bot_id} active_engine={resolved_active_engine} "
-                        f"bot_type={resolved_bot_type} template_type={template_type}"
-                    )
 
                 # 如果是服务型 bot，创建发布单
                 if resolved_bot_type == "service":
@@ -3136,8 +3138,18 @@ class BotService:
                 and template_type == "normalCC"
             )
             or active_engine == "teclaw"
-            or (active_engine == "openclaw" and bot_type == "service")
+            or (active_engine == "openclaw" and bot_type in ("service", "personal"))
         )
+
+    @staticmethod
+    def _resolve_bcn_provider_connection_mode(
+        active_engine: Optional[str],
+        bot_type: Optional[str],
+    ) -> Optional[Literal["plugin"]]:
+        """Return the BCN connection mode selected by the Bot lifecycle."""
+        if active_engine == "openclaw" and bot_type == "personal":
+            return "plugin"
+        return None
 
     def _register_bot_to_bcn_as_provider(
         self,
@@ -3146,6 +3158,7 @@ class BotService:
         owner_workno: str,
         bot_name: str,
         bot_summary: str,
+        connection_mode: Optional[Literal["plugin"]] = None,
     ) -> None:
         """Bot 创建/启动时把自己注册到 BCN 为 Provider (下行链路).
 
@@ -3154,7 +3167,7 @@ class BotService:
           - active_engine == "claude_code" 且 template_type == "personalCoding"
           - active_engine == "aicoding" 且 template_type == "personalCoding"
           - active_engine == "teclaw"
-          - active_engine == "openclaw" 且 bot_type == "service"
+          - active_engine == "openclaw" 且 bot_type 为 service 或 personal
 
         受 DRM 开关 ``ClaudeCodeBcnRegister.enabled`` 控制 (默认关),
         失败仅记 warning, 不阻塞 start 主流程 (与 _sync_bot_to_bcn 风格一致).
@@ -3172,24 +3185,29 @@ class BotService:
         if not self._is_claude_code_bcn_register_enabled():
             logger.info(
                 f"[bot_service._register_bot_to_bcn_as_provider] disabled by DRM, "
-                f"skip bot_id={bot_id} owner={owner_workno}"
+                f"skip bot_id={bot_id} owner={owner_workno} connection_mode={connection_mode}"
             )
             return
 
         try:
             from agentclaw.community.core.bot_management.services.bcn_service import BcnServiceError
 
+            register_kwargs: Dict[str, Any] = {
+                "teamclaw_bot_uuid": bot_id,
+                "owner_workno": owner_workno,
+                "name": bot_name,
+                "summary": bot_summary,
+            }
+            if connection_mode is not None:
+                register_kwargs["connection_mode"] = connection_mode
             result = self._bcn_service.register_provider_bot(
-                teamclaw_bot_uuid=bot_id,
-                owner_workno=owner_workno,
-                name=bot_name,
-                summary=bot_summary,
+                **register_kwargs,
             )
 
             if result.get("skipped"):
                 logger.info(
                     f"[bot_service._register_bot_to_bcn_as_provider] env-skipped, "
-                    f"bot_id={bot_id} owner={owner_workno}"
+                    f"bot_id={bot_id} owner={owner_workno} connection_mode={connection_mode}"
                 )
                 return
 
@@ -3203,7 +3221,7 @@ class BotService:
                 f"[bot_service._register_bot_to_bcn_as_provider] registered "
                 f"bot_id={bot_id} owner={owner_workno} "
                 f"bot_uuid={bot_uuid} idempotent={idempotent} "
-                f"runtime_token_present={has_token}"
+                f"runtime_token_present={has_token} connection_mode={connection_mode}"
             )
 
             try:
@@ -3221,12 +3239,14 @@ class BotService:
         except BcnServiceError as e:
             logger.warning(
                 f"[bot_service._register_bot_to_bcn_as_provider] BCN register failed: "
-                f"bot_id={bot_id} owner={owner_workno} error={e}"
+                f"bot_id={bot_id} owner={owner_workno} connection_mode={connection_mode} "
+                f"error_type={type(e).__name__}"
             )
         except Exception as e:
             logger.warning(
                 f"[bot_service._register_bot_to_bcn_as_provider] Unexpected error: "
-                f"bot_id={bot_id} owner={owner_workno} error={e}"
+                f"bot_id={bot_id} owner={owner_workno} connection_mode={connection_mode} "
+                f"error_type={type(e).__name__}"
             )
 
     # DRM 控制开关: claude_code 启动时是否往 BCN 注册 Provider bot.
@@ -4077,7 +4097,7 @@ class BotService:
         #   - active_engine == "claude_code" 且 template_type == "personalCoding"
         #   - active_engine == "aicoding" 且 template_type == "personalCoding"
         #   - active_engine == "teclaw" (所有 bot_type)
-        #   - active_engine == "openclaw" 且 bot_type == "service"
+        #   - active_engine == "openclaw" 且 bot_type 为 "service" 或 "personal"
         # 失败不阻塞主流程, 与 _sync_bot_to_bcn 一致.
         # 排查日志关键字: [bot_service._register_bot_to_bcn_as_provider]
         should_register_bcn = self._should_register_bcn_provider(
@@ -4086,11 +4106,16 @@ class BotService:
             template_type=template_type,
             template_config=resolved_template_config,
         )
+        connection_mode = self._resolve_bcn_provider_connection_mode(
+            active_engine=active_engine,
+            bot_type=bot_type,
+        )
         if should_register_bcn:
             logger.info(
                 f"[bot_service.start_bot] register bot to BCN as provider: "
                 f"bot_id={bot_id} active_engine={active_engine} "
-                f"bot_type={bot_type} template_type={template_type}"
+                f"bot_type={bot_type} template_type={template_type} "
+                f"connection_mode={connection_mode}"
             )
             self._register_bot_to_bcn_as_provider(
                 bot_id=bot_id,
@@ -4098,12 +4123,14 @@ class BotService:
                 owner_workno=bot_owner_id,
                 bot_name=bot.get("bot_name") or bot_id,
                 bot_summary=bot.get("bot_desc") or "",
+                connection_mode=connection_mode,
             )
         else:
             logger.info(
                 f"[bot_service.start_bot] skip BCN provider registration: "
                 f"bot_id={bot_id} active_engine={active_engine} "
-                f"bot_type={bot_type} template_type={template_type}"
+                f"bot_type={bot_type} template_type={template_type} "
+                f"connection_mode={connection_mode}"
             )
 
         logger.info(
@@ -4552,19 +4579,25 @@ class BotService:
 
         # BaaS 原地重启不会经过 start_bot，这里补齐启动链路的 BCN Provider 注册。
         # 注册接口幂等：已注册时直接返回，也能重试创建阶段失败的注册。
-        if self._should_register_bcn_provider(
+        should_register_bcn = self._should_register_bcn_provider(
             active_engine=active_engine,
             bot_type=bot_type,
             template_type=bot_template_type,
             template_config=resolved_template_config,
-        ):
+        )
+        connection_mode = self._resolve_bcn_provider_connection_mode(
+            active_engine=active_engine,
+            bot_type=bot_type,
+        )
+        if should_register_bcn:
             logger.info(
                 "[bot_service._restart_bot_baas] register bot to BCN as provider: "
-                "bot_id=%s active_engine=%s bot_type=%s template_type=%s",
+                "bot_id=%s active_engine=%s bot_type=%s template_type=%s connection_mode=%s",
                 bot_id,
                 active_engine,
                 bot_type,
                 bot_template_type,
+                connection_mode,
             )
             self._register_bot_to_bcn_as_provider(
                 bot_id=bot_id,
@@ -4572,6 +4605,7 @@ class BotService:
                 owner_workno=bot.get("owner_id") or user_id,
                 bot_name=bot.get("bot_name") or bot_id,
                 bot_summary=bot.get("bot_desc") or "",
+                connection_mode=connection_mode,
             )
 
         # 普通 restart 入口只重启当前 bot，不使用发布态 build 产物目录。

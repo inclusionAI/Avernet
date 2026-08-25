@@ -58,7 +58,7 @@ def test_bcs_catalog_search_maps_current_page_and_parses_exact_address() -> None
                 "total": 21,
                 "items": [
                     {
-                        "bot_uuid": "bot-1:owner-1",
+                        "bot_uuid": " bot-1 : owner-1 ",
                         "actor_kind": "bot",
                         "name": "ignored-by-backend",
                     }
@@ -73,7 +73,10 @@ def test_bcs_catalog_search_maps_current_page_and_parses_exact_address() -> None
 
     assert result == [
         BotCatalogMetadata(
-            BotCatalogAddress("bot-1", "owner-1"), "bot", actor_kind="bot"
+            BotCatalogAddress("bot-1", "owner-1"),
+            "bot",
+            bot_uuid=" bot-1 : owner-1 ",
+            actor_kind="bot",
         )
     ]
     call = http.calls_to("get")[0]
@@ -152,6 +155,7 @@ def test_bcs_catalog_search_preserves_requested_optional_metadata_fields() -> No
         BotCatalogMetadata(
             BotCatalogAddress("bot-1", "owner-1"),
             "bot",
+            bot_uuid="bot-1:owner-1",
             is_friend=False,
             visibility="protected",
             is_online=False,

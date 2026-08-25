@@ -36,6 +36,7 @@ from agentclaw.community.core.devices.services.device_instance_service import (
     BindingNotFoundError,
     BotPublishNotFoundError,
     DeviceInstanceService,
+    EvalBindingNotFoundError,
     InstanceHealthStatus,
 )
 from agentclaw.community.core.devices.services.device_service import (
@@ -60,6 +61,7 @@ __all__ = [
     "InstanceHealthStatus",
     "BindingNotFoundError",
     "BotPublishNotFoundError",
+    "EvalBindingNotFoundError",
 ]
 
 
@@ -887,6 +889,7 @@ class DeviceServiceRouter(DeviceService):
         ttl: int | None = None,
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
+        default_tag: str | None = None,
     ):
         """通过 bot_id 获取设备连接信息（对话页主入口，§3）。
 
@@ -895,10 +898,21 @@ class DeviceServiceRouter(DeviceService):
         入口同一解析），再复用 ``get_device_connection``。``device_uuid`` 透传
         锁定多实例中的特定实例；不传则由 provider 自动选活跃实例。
 
+        When ``default_tag`` is provided, the method resolves the
+        eval/default-env sandbox binding (by matching ``device_props``
+        ``AGENTCLAW_DEFAULT_TAG`` + ``bot_id``) instead of the production
+        runtime binding.
+
         Raises:
             BotPublishNotFoundError: bot_id 无 success 发布单 / ext.binding.online 缺失
+            EvalBindingNotFoundError: default_tag 指定但找不到匹配的评测沙箱 binding
         """
-        binding_id = self._instance_service()._resolve_binding_id_by_bot_id(bot_id)
+        if default_tag:
+            binding_id = self._instance_service()._resolve_eval_binding_id(
+                bot_id=bot_id, default_tag=default_tag,
+            )
+        else:
+            binding_id = self._instance_service()._resolve_binding_id_by_bot_id(bot_id)
         return self.get_device_connection(
             binding_id=binding_id,
             operator=operator,

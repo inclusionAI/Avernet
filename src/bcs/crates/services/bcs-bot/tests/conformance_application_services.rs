@@ -511,3 +511,26 @@ async fn human_actor_passes_application_contract() {
 
     bcs_test_support::contract::application::human_actor_service_contract_tests(&svc).await;
 }
+
+/// `BotRepoPort::update_capabilities` has a trait default that delegates to
+/// `register` for repositories that do not override wholesale replacement.
+/// `NoConnectBotRepo` inherits that default, so exercising it here covers the
+/// default-body lines (real store impls override `update_capabilities`).
+#[tokio::test]
+async fn bot_repo_port_update_capabilities_default_delegates_to_register() {
+    let repo = NoConnectBotRepo::new();
+    repo.update_capabilities(
+        "default-delegating-bot",
+        BotCapabilities {
+            name: Some("Default Delegating Bot".to_string()),
+            visibility: "public".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("default update_capabilities delegates to register");
+
+    let stored = repo.get("default-delegating-bot").await.expect("bot registered");
+    assert_eq!(stored.bot_uuid, "default-delegating-bot");
+    assert_eq!(stored.capabilities.name.as_deref(), Some("Default Delegating Bot"));
+}

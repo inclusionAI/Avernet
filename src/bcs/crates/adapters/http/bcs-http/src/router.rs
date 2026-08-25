@@ -149,7 +149,8 @@ fn build_api_routes() -> Router<HttpAppState> {
         )
         .route(
             "/providers/{provider_id}/bots/{bot_uuid}",
-            delete(routes::providers::delete_provider_bot),
+            delete(routes::providers::delete_provider_bot)
+                .patch(routes::providers::patch_provider_bot),
         )
         .route(
             "/providers/{provider_id}/bots/{bot_uuid}/attributes",
