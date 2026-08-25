@@ -97,13 +97,13 @@ async def _bid_one(bot, rost_entry, execution_graph) -> dict | None:
     """一发一收:发给 bot 评估 prompt,取回复 content JSON {completion_rate}。"""
     task_id = execution_graph.task_id
     bot_id = rost_entry["bot_id"]
-    prompt = _bid_prompt(execution_graph, rost_entry.bot_id)
+    prompt = _bid_prompt(execution_graph, bot_id)
     try:
         run = await bot.send_and_wait_async(
             bot_id=bot_id, message=prompt,
             metadata={"biz_task_id": task_id}, timeout=_BID_TIMEOUT,
         )
-        logger.info("[bbs-runner] bid send_and_wait 成功 bot=%s，%s", rost_entry.bot_id, run)
+        logger.info("[bbs-runner] bid send_and_wait 成功 bot=%s，%s", bot_id, run)
     except Exception as exc:
         logger.warning("[task][bbs-runner] bid send_and_wait 失败 bot=%s:%s", bot_id, exc)
         return None
