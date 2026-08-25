@@ -62,7 +62,7 @@ lands in the same group as the migration of its last caller.
 
 ## Group 3 — The reader
 
-- [ ] 3.1 Add `api/bot_capability_state_reader.py`
+- [x] 3.1 Add `api/bot_capability_state_reader.py`
       (`BotCapabilityStateReaderProtocol`: `flush`, `active_skill_assets`,
       `active_mcp_server_codes`) and
       `core/skill_center/services/bot_capability_state_reader.py`; DI

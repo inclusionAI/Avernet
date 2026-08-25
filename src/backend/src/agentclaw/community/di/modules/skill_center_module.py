@@ -36,6 +36,9 @@ from agentclaw.community.api.skill_market_service import SkillMarketServiceProto
 from agentclaw.community.api.skill_parameter_service_factory import (
     SkillParameterServiceFactoryProtocol,
 )
+from agentclaw.community.api.bot_capability_state_reader import (
+    BotCapabilityStateReaderProtocol,
+)
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
 )
@@ -118,6 +121,9 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
+)
+from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
+    BotCapabilityStateReader,
 )
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
@@ -324,6 +330,11 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         binder.bind(
             SkillSetManagementServiceProtocol,
             to=SkillSetManagementService,
+            scope=singleton,
+        )
+        binder.bind(
+            BotCapabilityStateReaderProtocol,
+            to=BotCapabilityStateReader,
             scope=singleton,
         )
         binder.bind(
