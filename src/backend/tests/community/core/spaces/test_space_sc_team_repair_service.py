@@ -54,7 +54,7 @@ def test_repair_sc_team_binding_fills_mapping_found_by_external_reference() -> N
         team_id="sc-team-7"
     )
 
-    result = SpaceService(repository, skill_center).repair_sc_team_binding(space_id=7)
+    result = SpaceService(repository, skill_center, MagicMock()).repair_sc_team_binding(space_id=7)
 
     assert result.space_id == 7
     assert result.status is SpaceScTeamRepairStatus.REPAIRED
@@ -74,7 +74,7 @@ def test_repair_sc_team_binding_is_idempotent_for_existing_binding() -> None:
     repository.get_space.return_value = _space(sc_team_id="existing-team")
     skill_center = MagicMock()
 
-    result = SpaceService(repository, skill_center).repair_sc_team_binding(space_id=7)
+    result = SpaceService(repository, skill_center, MagicMock()).repair_sc_team_binding(space_id=7)
 
     assert result.status is SpaceScTeamRepairStatus.ALREADY_BOUND
     assert result.sc_team_id == "existing-team"
@@ -89,7 +89,7 @@ def test_repair_sc_team_binding_rejects_missing_space_before_sc_lookup() -> None
     skill_center = MagicMock()
 
     with pytest.raises(SpaceNotFoundError, match="space 7 not found"):
-        SpaceService(repository, skill_center).repair_sc_team_binding(space_id=7)
+        SpaceService(repository, skill_center, MagicMock()).repair_sc_team_binding(space_id=7)
 
     skill_center.get_team_by_ref_source.assert_not_called()
     repository.backfill_sc_team_id.assert_not_called()
@@ -101,7 +101,7 @@ def test_repair_sc_team_binding_rejects_personal_space_before_sc_lookup() -> Non
     skill_center = MagicMock()
 
     with pytest.raises(SpaceScTeamRepairNotApplicableError, match="TEAM spaces"):
-        SpaceService(repository, skill_center).repair_sc_team_binding(space_id=7)
+        SpaceService(repository, skill_center, MagicMock()).repair_sc_team_binding(space_id=7)
 
     skill_center.get_team_by_ref_source.assert_not_called()
     skill_center.create_team.assert_not_called()
@@ -115,7 +115,7 @@ def test_repair_sc_team_binding_never_creates_when_sc_mapping_is_missing() -> No
     skill_center.get_team_by_ref_source.return_value = None
 
     with pytest.raises(SpaceScTeamBindingNotFoundError, match="was not found"):
-        SpaceService(repository, skill_center).repair_sc_team_binding(space_id=7)
+        SpaceService(repository, skill_center, MagicMock()).repair_sc_team_binding(space_id=7)
 
     skill_center.create_team.assert_not_called()
     repository.backfill_sc_team_id.assert_not_called()
@@ -130,7 +130,7 @@ def test_repair_sc_team_binding_propagates_sc_query_failure() -> None:
     )
 
     with pytest.raises(SkillCenterTeamQueryError, match="SC unavailable"):
-        SpaceService(repository, skill_center).repair_sc_team_binding(space_id=7)
+        SpaceService(repository, skill_center, MagicMock()).repair_sc_team_binding(space_id=7)
 
     repository.backfill_sc_team_id.assert_not_called()
 
@@ -147,7 +147,7 @@ def test_repair_sc_team_binding_returns_concurrent_winner_without_overwrite() ->
         team_id="resolved-team"
     )
 
-    result = SpaceService(repository, skill_center).repair_sc_team_binding(space_id=7)
+    result = SpaceService(repository, skill_center, MagicMock()).repair_sc_team_binding(space_id=7)
 
     assert result.status is SpaceScTeamRepairStatus.ALREADY_BOUND
     assert result.sc_team_id == "concurrent-team"
@@ -168,4 +168,4 @@ def test_repair_sc_team_binding_reports_unresolved_conditional_update(current) -
     )
 
     with pytest.raises(SpaceScTeamRepairConflictError, match="while repair"):
-        SpaceService(repository, skill_center).repair_sc_team_binding(space_id=7)
+        SpaceService(repository, skill_center, MagicMock()).repair_sc_team_binding(space_id=7)

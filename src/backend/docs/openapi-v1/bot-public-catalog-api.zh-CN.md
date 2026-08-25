@@ -1,6 +1,6 @@
 # Bot Catalog OpenAPI（前端接入文档）
 
-> 版本：2026-08-21
+> 版本：2026-08-24
 >
 > 机器可读权威契约为 `src/gateway/configs/schemas/bots.openapi.json`。
 
@@ -24,7 +24,9 @@ GET /openapi/v1/bots/catalog/search
 ```
 
 Backend 将 `search`、`page` 和 `page_size` 映射到 BCS `/bots/search` 的 `q`、`offset` 和
-`limit`，并固定传 `tc_bot=true`，只读取当前 BCS 页。该标识仅保留由 TeamClaw Backend onboard 的
+`limit`，并固定传 `tc_bot=true`，只读取当前 BCS 页。前端选择性传入的 `visibility`、
+`user_visibility`、`status`、`viewer_actor_type`、`viewer_actor_id` 与 `friendship` 经过本地
+校验后才映射到同名 BCS query；未传的字段不会产生默认过滤。该标识仅保留由 TeamClaw Backend onboard 的
 Bot。BCS 的 `bot_uuid` 按 `<bot_id>:<entity_id>` 解析后，Backend 在当前租户、当前环境内以精确二元组查询未删除的 live
 Bot 并内连接；Catalog Search 不再以 Backend `public="1"` 作为过滤条件，Backend 是全部对外字段的唯一权威来源。
 
@@ -33,20 +35,31 @@ BCS 的排序和分页边界保持不变。`tc_bot=true` 使正常数据下 BCS 
 返回实际 join 的记录。BCS 不可用或返回非法记录时固定返回 `502000 / Catalog service unavailable`，
 不会回退为 Backend-only 搜索。
 
-若 BCS 当前目录项提供 `visibility`、`is_online`、`actor_kind`、`is_friend`、`friend_ext`、
+每个成功 join 的 Search item 还会返回 `bot_uuid`：优先使用通过 BCS `<bot_id>:<entity_id>` 解析和精确 join
+校验后的 BCS 返回值；元信息端口未提供时，才以 Backend 的 `bot_id:entity_id` 兜底。若 BCS 当前目录项提供 `visibility`、`is_online`、`actor_kind`、`is_friend`、`friend_ext`、
 `friend_check_in_strategy` 或 `user_visibility`，Backend 在精确 `(bot_id, entity_id)` join 后原样返回；字段缺失或为
-`null` 时响应中省略。`friend_ext` 不删除内部键，前端可按需使用。Backend 不重新查询、推导或覆盖这些 BCS 值。
+`null` 时响应中省略。`is_friend` 仅在前端成对传入 `viewer_actor_type` 与 `viewer_actor_id` 且 BCS 返回该字段时出现；未传 viewer 不会以 `false` 代替。`friend_ext` 不删除内部键，前端可按需使用。Backend 不重新查询、推导或覆盖这些 BCS 值。
 
 | 参数 | 必填 | 规则 |
 |---|---:|---|
 | `search` | 否 | Bot 名称或 owner 名称关键词 |
 | `page` | 否 | 默认 1，最小 1 |
 | `page_size` | 否 | 默认 20，范围 1–100 |
+| `visibility` | 否 | BCS Bot 可见性；支持 `public`、`protected`、`private`，可重复传入或逗号分隔多值 |
+| `user_visibility` | 否 | BCS 用户侧可见性；取值和多值格式同 `visibility` |
+| `status` | 否 | 仅在传入时过滤 BCS 状态：`online` 或 `hidden` |
+| `viewer_actor_type` | 否 | BCS 关系视角 actor 类型：`human` 或 `bot`；必须与 `viewer_actor_id` 成对传入 |
+| `viewer_actor_id` | 否 | BCS 关系视角 actor ID；必须与 `viewer_actor_type` 成对传入 |
+| `friendship` | 否 | BCS 关系过滤：`all`、`friends`、`non_friends`；`friends`/`non_friends` 必须传 viewer pair |
 
 示例：
 
 ```text
 GET /openapi/v1/bots/catalog/search?search=marketing&page=1&page_size=20
+```
+
+```text
+GET /openapi/v1/bots/catalog/search?visibility=public,protected&user_visibility=public&status=online&viewer_actor_type=human&viewer_actor_id=330429&friendship=non_friends
 ```
 
 ## 3. 发现推荐 Bot
@@ -73,6 +86,7 @@ GET /openapi/v1/bots/catalog/discover?keyword=contract&top_k=10
 ```ts
 type PublicBot = {
   bot_id: string;
+  bot_uuid?: string; // 优先 BCS 返回值，缺失时为 Backend <bot_id>:<entity_id>
   entity_id: string;
   bot_type: unknown;
   name: string;

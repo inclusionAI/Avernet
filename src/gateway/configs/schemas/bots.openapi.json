@@ -680,6 +680,17 @@
             ],
             "description": "Echo of the business space the bot was requested with; omitted resolves the caller's current space, exactly as on create.",
             "title": "Space Id"
+          },
+          "engine_properties": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotCreateEngineProperties"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo of the engine-specific properties the bot was requested with."
           }
         },
         "title": "BotAuthStatusPoll",
@@ -740,6 +751,17 @@
             ],
             "description": "Business space to associate with the bot, when applicable.",
             "title": "Space Id"
+          },
+          "engine_properties": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotCreateEngineProperties"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional engine-specific properties. Omit for a plain bot; provide template for an application-coding bot."
           }
         },
         "required": [
@@ -750,6 +772,23 @@
           "bot_type"
         ],
         "title": "BotCreate",
+        "type": "object"
+      },
+      "BotCreateEngineProperties": {
+        "additionalProperties": false,
+        "description": "Engine-specific properties used while creating a bot.",
+        "properties": {
+          "template": {
+            "additionalProperties": true,
+            "description": "Application-coding template properties. Passed through unchanged to the template validator; platform-managed identity and lifecycle fields are not accepted.",
+            "title": "Template",
+            "type": "object"
+          }
+        },
+        "required": [
+          "template"
+        ],
+        "title": "BotCreateEngineProperties",
         "type": "object"
       },
       "BotEditorRequestCreated": {
@@ -3612,6 +3651,18 @@
             "description": "Stable public Bot identifier.",
             "title": "Bot Id",
             "type": "string"
+          },
+          "bot_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Catalog Search Bot UUID, preferring BCS with a Backend address fallback.",
+            "title": "Bot Uuid"
           },
           "bot_type": {
             "description": "Published kind of Bot.",
@@ -13032,6 +13083,18 @@
             "title": "Bot Id",
             "type": "string"
           },
+          "bot_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Catalog Search Bot UUID, preferring BCS with a Backend address fallback.",
+            "title": "Bot Uuid"
+          },
           "bot_type": {
             "description": "Published kind of Bot.",
             "title": "Bot Type"
@@ -15880,6 +15943,19 @@
             "description": "Identifier of the user who created the Space.",
             "title": "Creator User Id",
             "type": "string"
+          },
+          "creator_user_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Snapshot of the creator's user name, when available.",
+            "title": "Creator User Name"
           },
           "current_user_role": {
             "anyOf": [
@@ -19139,6 +19215,120 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Optional BCS visibility filter; repeat or comma-separate public, protected, private.",
+            "in": "query",
+            "name": "visibility",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional BCS visibility filter; repeat or comma-separate public, protected, private.",
+              "title": "Visibility"
+            }
+          },
+          {
+            "description": "Optional BCS user visibility filter; repeat or comma-separate public, protected, private.",
+            "in": "query",
+            "name": "user_visibility",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional BCS user visibility filter; repeat or comma-separate public, protected, private.",
+              "title": "User Visibility"
+            }
+          },
+          {
+            "description": "Optional BCS status filter: online or hidden.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional BCS status filter: online or hidden.",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Explicit BCS viewer actor type: human or bot.",
+            "in": "query",
+            "name": "viewer_actor_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Explicit BCS viewer actor type: human or bot.",
+              "title": "Viewer Actor Type"
+            }
+          },
+          {
+            "description": "Explicit BCS viewer actor id; requires viewer_actor_type.",
+            "in": "query",
+            "name": "viewer_actor_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Explicit BCS viewer actor id; requires viewer_actor_type.",
+              "title": "Viewer Actor Id"
+            }
+          },
+          {
+            "description": "Optional BCS friendship filter: all, friends, or non_friends.",
+            "in": "query",
+            "name": "friendship",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional BCS friendship filter: all, friends, or non_friends.",
+              "title": "Friendship"
             }
           }
         ],

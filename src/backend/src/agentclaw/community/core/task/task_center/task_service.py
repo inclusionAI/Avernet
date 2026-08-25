@@ -23,12 +23,13 @@ from agentclaw.community.core.repository.protocols.task import (
 )
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult, NodeOpResult, Status, TaskCallbackData, TaskExecutionGraph, TaskNode, TaskNodePatch,
-    TaskOpResult, TaskSpec, TaskSummary, TaskType,
+    TaskOpResult, TaskSpec, TaskType,
 )
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 from agentclaw.community.core.task.repository.types import (
     TaskInfoRecord, TaskNodeRecord, TaskNodeRunInfoRecord,
 )
+from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_runner.callback_adapter import (
     CallbackAdapter,
@@ -47,7 +48,7 @@ class TaskService:
     验收 100% 走回调回投;engine 不主动验,无 verify/bbs port。engine 对调用方不可见(无 property)。
     """
 
-    def __init__(self, graph, harness=None, *, bot=None, bcs=None, discover=None, bot_public=None,
+    def __init__(self, graph, harness=None, *, bot=None, bcs=None, discover=None, bcn: BcnService | None = None,
                  bcs_identity=None, task_info_repo: TaskInfoRepositoryProtocol | None = None,
                  callback_repo: TaskCallbackRepositoryProtocol | None = None,
                  task_id_provider: Callable[[], str] | None = None,
@@ -57,8 +58,7 @@ class TaskService:
                  api_base_url: str | None = None) -> None:
         """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
         bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。
-        bot_public: BotPublicServiceProtocol|None(TEMP e2e)供 bbs_runner 按关键字取 dream bot roster。
-        任务模式 roster 圈定的 provider 取自 bcs.provider_id(端口自带凭据),不再单独透传。
+        BBS 候选通过注入的 BcnService.list_bots_by_task_modes(复用统一 provider 身份)查询。
 
         ``task_info_repo``(可选):task_info 持久化协议(DI 在 prod 注入真实实现;``None``
         时 execute 跳过持久化,纯内核/单测路径用)。``callback_repo``(可选):回投落库协议(同上,
@@ -68,6 +68,7 @@ class TaskService:
         start_time)用;``None`` 时跳过持久化(纯内核/单测路径用,与 ``task_info_repo`` 同语义)。"""
         self._graph = graph
         self._harness = harness
+        self._bcn = bcn
         self._bcs_identity = bcs_identity
         self._task_info_repo = task_info_repo
         self._task_id_provider = task_id_provider or (lambda: str(uuid.uuid4()))
@@ -76,13 +77,7 @@ class TaskService:
         self._callback_repo = callback_repo
         self._bot_service = bot_service
         self._api_base_url = api_base_url
-        engine_kwargs = {"bot": bot, "bcs": bcs, "discover": discover}
-        # ``_build_engine`` is an intentional test seam. Preserve existing
-        # overrides that implement the original three-port signature when no
-        # optional public catalog is supplied.
-        if bot_public is not None:
-            engine_kwargs["bot_public"] = bot_public
-        self._engine = self._build_engine(**engine_kwargs)
+        self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
         # fire-and-forget 后台推进任务跟踪(防 GC + 异常可见 + drain seam)
         self._bg_tasks: set[asyncio.Task] = set()
         # 回投适配层:执行实体 PUSH → 适配 → 编排核 on_report
@@ -92,13 +87,13 @@ class TaskService:
             self._harness.set_on_harness(self._engine.on_harness)
             import threading as _t
             _t.Thread(target=self._harness.run_poll_loop, daemon=True, name="task-harness").start()
-            logger.info("[task-service] harness 旁路巡检线程已启动(SLA 超时/FAILED 重派/PENDING 派发超时重搜推)")
+            logger.info("[task][task-service] harness 旁路巡检线程已启动(SLA 超时/FAILED 重派/PENDING 派发超时重搜推)")
 
-    def _build_engine(self, *, bot=None, bcs=None, discover=None, bot_public=None) -> ExecutionEngine:
-        """构造编排核:ExecutionEngine(graph, bot=, bcs=, discover=, bot_public=)。引擎内部 ``_build_*`` new 自带策略 +
+    def _build_engine(self, *, bot=None, bcs=None, discover=None) -> ExecutionEngine:
+        """构造编排核:ExecutionEngine(graph, bot=, bcs=, discover=)。引擎内部 ``_build_*`` new 自带策略 +
         接线 TaskExecutor。测试可经 facade/engine 子类覆写本方法注入 stub 策略/投递的引擎(测试 seam)。"""
         return ExecutionEngine(
-            self._graph, bot=bot, bcs=bcs, discover=discover, bot_public=bot_public,
+            self._graph, bot=bot, bcs=bcs, discover=discover, bcn=self._bcn,
             bcs_identity=self._bcs_identity,
             api_base_url=self._api_base_url,
         )
@@ -136,7 +131,7 @@ class TaskService:
             except IntegrityError as exc:
                 return TaskOpResult(task_id=task_id, success=False, error=f"persist failed: {exc}")
         graph = self._graph.initialize_graph(task_info)
-        logger.info("[execute] task=%s source=%s title=%s → initialize(run_id=%s)+on_execute(后台推进)",
+        logger.info("[task][execute] task=%s source=%s title=%s → initialize(run_id=%s)+on_execute(后台推进)",
                     task_id, task_info.owner_bot_id,
                     task_info.task_spec.metadata.title, graph.run_id)
         task_type = request.execution_config.get("task_type")
@@ -219,6 +214,12 @@ class TaskService:
 
     def _persist_node_run(self, task_id, task_info, *, run_mode, assignee, session_id,
                           extend_props=None):
+        # The aggregate graph repository already persists the node and runtime
+        # snapshot from the preceding graph mutation. Avoid duplicate inserts
+        # when the shared persistence path is enabled; retain the legacy direct
+        # repositories for lightweight/in-memory fixtures.
+        if self._graph.has_repository:
+            return
         if self._task_node_repo is not None:
             self._task_node_repo.insert(TaskNodeRecord(
                 id=0, task_id=task_id, node_id=task_id,
@@ -242,7 +243,7 @@ class TaskService:
             return False
         rec = self._run_info_repo.get_by_session_id(session_id)
         if rec is None:
-            logger.warning("[converge] session_id=%s 在 task_node_run_info 中未找到", session_id)
+            logger.warning("[task][converge] session_id=%s 在 task_node_run_info 中未找到", session_id)
             return False
         loop_task_id = f"{rec.task_id}::{rec.node_id}"
         result: dict[str, Any] = {"success": success}
@@ -260,11 +261,11 @@ class TaskService:
         })
         try:
             await self._callback.report_result(data)
-            logger.info("[converge] session_id=%s → loop_task_id=%s success=%s → on_report 收敛已触发",
+            logger.info("[task][converge] session_id=%s → loop_task_id=%s success=%s → on_report 收敛已触发",
                         session_id, loop_task_id, success)
             return True
         except Exception as exc:  # noqa: BLE001 收敛失败不阻断落库(回调查询/落库已完成)
-            logger.warning("[converge] session_id=%s → on_report 失败: %s", session_id, exc)
+            logger.warning("[task][converge] session_id=%s → on_report 失败: %s", session_id, exc)
             return False
 
     async def apply_manager_worker_event(self, raw: dict) -> None:
@@ -303,13 +304,13 @@ class TaskService:
                 )
                 self._callback_repo.upsert(rec)
             except Exception as exc:  # noqa: BLE001 落库失败不阻断收敛
-                logger.warning("[manager_worker] upsert task_callback 失败 session_id=%s: %s", sid, exc)
+                logger.warning("[task][manager_worker] upsert task_callback 失败 session_id=%s: %s", sid, exc)
         if et == "session.completed" and sid:
             try:
                 success = (data.get("reason") == "completed")
                 await self.converge_by_session(sid, success=success, output=data.get("summary"))
             except Exception as exc:  # noqa: BLE001 收敛失败不阻断落库
-                logger.warning("[manager_worker] session.completed 收敛失败 session_id=%s: %s", sid, exc)
+                logger.warning("[task][manager_worker] session.completed 收敛失败 session_id=%s: %s", sid, exc)
 
     def _on_bg_done(self, bg: "asyncio.Task") -> None:
         """后台 on_execute 完成:脱离跟踪集 + 异常可见(记 log,不抛)。"""
@@ -318,7 +319,17 @@ class TaskService:
             return
         exc = bg.exception()
         if exc is not None:
-            logger.error("[execute] 后台 on_execute 异常: %s", exc, exc_info=exc)
+            logger.error("[task][execute] 后台 on_execute 异常: %s", exc, exc_info=exc)
+
+    async def redrive_task(self, task_id: str) -> None:
+        """Recovery resume:重投一个已 hydrate 的非终态任务(实例重启 / 滚动发布后)。
+
+        走 ``ExecutionEngine.redrive`` 重派 PENDING 叶节点;终态图冻结。幂等:派发飞行态/
+        状态机卫重复。recovery worker 在取得租约后调此方法。"""
+        bg = asyncio.create_task(self._engine.redrive(task_id))
+        self._bg_tasks.add(bg)
+        bg.add_done_callback(self._on_bg_done)
+        logger.info("[task][redrive] task=%s 后台 redrive 已调度", task_id)
 
     async def drain_background(self) -> None:
         """await 所有在途后台 on_execute 推进完成。
@@ -330,7 +341,11 @@ class TaskService:
         await asyncio.gather(*self._bg_tasks, return_exceptions=True)
 
     def get_task_dashboard(
-        self, task_id: str, node_id: str | None = None
+        self,
+        task_id: str,
+        node_id: str | None = None,
+        *,
+        include_action_log: bool = False,
     ) -> TaskExecutionGraph:
         """任务执行详情可视化(整图或按 node_id 子树投影),只读。
 
@@ -338,13 +353,15 @@ class TaskService:
         把回调审计的 ``execution_graph``(BCN/ClawMind DAG 快照)挂在图级,便于 dashboard 可见;无 session_id /
         无 callback / 未配 ``callback_repo`` → 留 ``None``。子树投影(node_id 入参)不挂(root 不在投影内)。"""
         graph = self._graph.query_task_dashboard(task_id, node_id)
+        if include_action_log:
+            self._graph.load_action_logs(graph)
         root = next((n for n in graph.tasks if n.node_id == task_id), None)
         sid = (root.run_info.extend_props.get("session_id") if root else None)
         if sid and self._callback_repo is not None:
             try:
                 rec = self._callback_repo.get_latest_by_session(sid)
             except Exception as exc:  # noqa: BLE001 反查失败不阻断只读 dashboard
-                logger.warning("[dashboard] execution_graph 反查失败 session_id=%s: %s", sid, exc)
+                logger.warning("[task][dashboard] execution_graph 反查失败 session_id=%s: %s", sid, exc)
                 rec = None
             if rec is not None and rec.execution_graph is not None:
                 graph.execution_graph = rec.execution_graph
@@ -369,7 +386,7 @@ class TaskService:
                 try:
                     cache[bot_id] = self._bot_service.get_bot_by_id(bot_id)
                 except Exception as exc:  # noqa: BLE001 查 bot 失败不阻断只读 dashboard
-                    logger.warning("[dashboard] get_bot_by_id 失败 bot_id=%s: %s", bot_id, exc)
+                    logger.warning("[task][dashboard] get_bot_by_id 失败 bot_id=%s: %s", bot_id, exc)
                     cache[bot_id] = None
             info = cache.get(bot_id)
             if isinstance(info, dict):

@@ -8,6 +8,7 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Iterable
 from typing import List, Optional, Protocol, runtime_checkable
 
 from .skill_center_types import (
@@ -113,17 +114,22 @@ class SkillRepository(Protocol):
         ...
 
     @abstractmethod
-    def list_bot_local_skills(
+    def list_bot_skills(
         self,
         *,
         bot_id: str,
         user_id: str,
+        skill_set_member_ids: Iterable[int],
         page: int,
         page_size: int,
         active: bool | None,
         keyword: str | None,
     ) -> tuple[int, list[dict]]:
-        """Page exact Bot-owned ``local://`` desired-state Skill metadata."""
+        """Page desired-state metadata for every Skill one Bot reaches.
+
+        ``skill_set_member_ids`` are the Skills a SkillSet bridges to the Bot,
+        resolved by the SkillSet control plane; Bot-owned rows are found here.
+        """
         ...
 
     @abstractmethod
@@ -311,6 +317,27 @@ class SkillSetRepository(Protocol):
     def add_default_skill_exclusion(
         self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
     ) -> bool:
+        ...
+
+    @abstractmethod
+    def exclude_default_set_skill(
+        self,
+        *,
+        owner_id: str,
+        bot_id: str,
+        skill_set_id: int,
+        skill_id: int,
+        env: str,
+    ) -> tuple[bool, bool]:
+        """Exclude a Skill from a Default Set and retire its Installation.
+
+        ``owner_id`` is the Bot owner, not the acting caller: both the
+        exclusion and the Installation row are the Bot's persisted state, and
+        every reader of either keys it that way.
+
+        Returns ``(created, uninstalled)``: whether this call is the one that
+        recorded the exclusion, and whether it removed an Installation row.
+        """
         ...
 
     @abstractmethod

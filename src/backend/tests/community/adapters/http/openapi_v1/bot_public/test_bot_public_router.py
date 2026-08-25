@@ -17,6 +17,7 @@ from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProto
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogCaller,
+    BotCatalogSearchFilters,
     BotCatalogSearchUnavailableError,
 )
 from agentclaw.community.core.gateway_principal.models import (
@@ -36,6 +37,7 @@ def _bot() -> dict[str, Any]:
     return {
         "id": 91,
         "bot_id": "catalog-bot",
+        "bot_uuid": "catalog-bot:owner-1",
         "entity_id": "owner-1",
         "bot_type": "service",
         "bot_name": "Catalog Bot",
@@ -138,6 +140,7 @@ def test_search_projects_only_catalog_fields(
         "items": [
             {
                 "bot_id": "catalog-bot",
+                "bot_uuid": "catalog-bot:owner-1",
                 "entity_id": "owner-1",
                 "bot_type": "service",
                 "name": "Catalog Bot",
@@ -162,12 +165,74 @@ def test_search_projects_only_catalog_fields(
             "search": "catalog",
             "page": 2,
             "page_size": 5,
+            "filters": BotCatalogSearchFilters(),
             "caller": BotCatalogCaller(
                 tenant_id="teamclaw", user_id="caller-1", app_id=None
             ),
             "request_id": "",
         }
     ]
+
+
+def test_search_selectively_projects_frontend_bcs_filters(
+    client: TestClient, services: tuple[_PublicService, _DiscoverService]
+) -> None:
+    response = client.get(
+        _SEARCH_PATH,
+        params=[
+            ("visibility", "public,protected"),
+            ("visibility", "private"),
+            ("user_visibility", "protected"),
+            ("user_visibility", "public,protected"),
+            ("status", "online"),
+            ("viewer_actor_type", "human"),
+            ("viewer_actor_id", "caller-1"),
+            ("friendship", "friends"),
+        ],
+    )
+
+    assert response.status_code == 200, response.text
+    assert services[0].calls[0]["filters"] == BotCatalogSearchFilters(
+        visibility=("public", "protected", "private"),
+        user_visibility=("protected", "public"),
+        status="online",
+        viewer_actor_type="human",
+        viewer_actor_id="caller-1",
+        friendship="friends",
+    )
+
+
+def test_search_all_friendship_does_not_require_a_viewer(
+    client: TestClient, services: tuple[_PublicService, _DiscoverService]
+) -> None:
+    response = client.get(_SEARCH_PATH, params={"friendship": "all"})
+
+    assert response.status_code == 200, response.text
+    assert services[0].calls[0]["filters"] == BotCatalogSearchFilters(
+        friendship="all"
+    )
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"viewer_actor_type": "human"},
+        {"viewer_actor_id": "caller-1"},
+        {"friendship": "friends"},
+        {"visibility": "public,unknown"},
+        {"status": "busy"},
+    ],
+)
+def test_search_rejects_invalid_bcs_filter_combinations(
+    client: TestClient,
+    services: tuple[_PublicService, _DiscoverService],
+    params: dict[str, str],
+) -> None:
+    response = client.get(_SEARCH_PATH, params=params)
+
+    assert response.status_code == 422, response.text
+    assert response.json()["code"] == 422000
+    assert services[0].calls == []
 
 
 def test_search_projects_bcs_is_friend_when_present(
@@ -242,12 +307,47 @@ def test_search_openapi_declares_the_fixed_catalog_unavailable_envelope(
     }
 
 
+def test_search_openapi_declares_optional_bcs_filter_parameters(app: FastAPI) -> None:
+    parameters = {
+        parameter["name"]: parameter
+        for parameter in app.openapi()["paths"][_SEARCH_PATH]["get"]["parameters"]
+    }
+
+    assert {
+        "visibility",
+        "user_visibility",
+        "status",
+        "viewer_actor_type",
+        "viewer_actor_id",
+        "friendship",
+    } <= parameters.keys()
+    assert parameters["visibility"]["required"] is False
+    assert parameters["user_visibility"]["required"] is False
+    assert "comma-separate" in parameters["visibility"]["description"]
+    assert "requires viewer_actor_type" in parameters["viewer_actor_id"][
+        "description"
+    ]
+
+
 def test_search_openapi_declares_optional_bcs_is_friend(app: FastAPI) -> None:
     is_friend = app.openapi()["components"]["schemas"]["PublicBot"]["properties"][
         "is_friend"
     ]
 
     assert is_friend["anyOf"] == [{"type": "boolean"}, {"type": "null"}]
+
+
+def test_search_openapi_declares_optional_bcs_preferred_bot_uuid(
+    app: FastAPI,
+) -> None:
+    bot_uuid = app.openapi()["components"]["schemas"]["PublicBot"]["properties"][
+        "bot_uuid"
+    ]
+
+    assert bot_uuid["anyOf"] == [{"type": "string"}, {"type": "null"}]
+    assert bot_uuid["description"] == (
+        "Catalog Search Bot UUID, preferring BCS with a Backend address fallback."
+    )
 
 
 def test_search_openapi_declares_optional_bcs_metadata_fields(app: FastAPI) -> None:

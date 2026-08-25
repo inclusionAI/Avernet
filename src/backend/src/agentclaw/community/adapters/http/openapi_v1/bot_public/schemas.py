@@ -11,6 +11,10 @@ class PublicBot(BaseModel):
     """The allowlisted public projection of a catalog Bot."""
 
     bot_id: str = Field(description="Stable public Bot identifier.")
+    bot_uuid: str | None = Field(
+        default=None,
+        description="Catalog Search Bot UUID, preferring BCS with a Backend address fallback.",
+    )
     entity_id: str = Field(description="Public entity identifier for the Bot owner.")
     bot_type: Any = Field(description="Published kind of Bot.")
     name: str = Field(description="Public Bot display name.")

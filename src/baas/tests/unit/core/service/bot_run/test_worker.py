@@ -637,7 +637,9 @@ async def test_timeout_scan_force_done_remote_running_with_no_heartbeat(repo, qu
     )
     ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
     worker = _worker(queue, repo, ex)
-    with patch.object(worker._queue, "scan_timeout", MagicMock(return_value=[stale_record])):
+    with patch.object(
+        worker._queue, "scan_timeout", MagicMock(return_value=[stale_record])
+    ):
         await worker._timeout_scan_once()
 
     assert queue.get_by_run_id(run_id).status == "DONE"
@@ -670,7 +672,9 @@ async def test_timeout_scan_cancels_local_running_task(repo, queue):
     worker._running_tasks[run_id] = task
 
     local_record = queue.get_by_run_id(run_id)
-    with patch.object(worker._queue, "scan_timeout", MagicMock(return_value=[local_record])):
+    with patch.object(
+        worker._queue, "scan_timeout", MagicMock(return_value=[local_record])
+    ):
         await worker._timeout_scan_once()
 
     # 让出事件循环，让被 cancel 的 task 执行 except CancelledError
@@ -697,7 +701,9 @@ async def test_timeout_scan_skips_cancel_when_task_already_done(repo, queue):
     worker._running_tasks[run_id] = task
 
     local_record = queue.get_by_run_id(run_id)
-    with patch.object(worker._queue, "scan_timeout", MagicMock(return_value=[local_record])):
+    with patch.object(
+        worker._queue, "scan_timeout", MagicMock(return_value=[local_record])
+    ):
         await worker._timeout_scan_once()
 
     assert queue.get_by_run_id(run_id).status == "DONE"
@@ -757,7 +763,9 @@ async def test_timeout_scan_stale_heartbeat_with_callback(repo, queue):
         ex,
         post_run_callback_factories={"test_cb": test_callback},
     )
-    with patch.object(worker._queue, "scan_timeout", MagicMock(return_value=[stale_record])):
+    with patch.object(
+        worker._queue, "scan_timeout", MagicMock(return_value=[stale_record])
+    ):
         await worker._timeout_scan_once()
 
     assert callback_called.is_set()
@@ -796,7 +804,9 @@ async def test_timeout_scan_stale_heartbeat_callback_error_is_logged(repo, queue
         ex,
         post_run_callback_factories={"bad_cb": bad_callback},
     )
-    with patch.object(worker._queue, "scan_timeout", MagicMock(return_value=[stale_record])):
+    with patch.object(
+        worker._queue, "scan_timeout", MagicMock(return_value=[stale_record])
+    ):
         await worker._timeout_scan_once()
 
     # callback 失败不影响 force_done

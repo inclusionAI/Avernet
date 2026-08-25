@@ -1,10 +1,23 @@
 use async_trait::async_trait;
 use bcs_domain::{
-    ProviderAuthMode, ProviderBotBinding, ProviderBotConnectionMode, ProviderCoordinationConfig,
-    ProviderCredential, ProviderOrganizationManagementConfig, ProviderRecord, Skill,
+    BotCapabilities, ProviderAuthMode, ProviderBotBinding, ProviderBotConnectionMode,
+    ProviderCoordinationConfig, ProviderCredential, ProviderOrganizationManagementConfig,
+    ProviderRecord, Skill,
 };
 
 use crate::{ServiceError, ServiceResult};
+
+/// Outcome of updating a provider-managed bot's capabilities in place.
+///
+/// Carries the (unchanged) binding alongside the merged `BotCapabilities` so
+/// callers can surface the post-update bot info without a second lookup. The
+/// binding identity (`bot_uuid`, `provider_id`, `provider_bot_ref`) is never
+/// mutated by an update.
+#[derive(Debug, Clone)]
+pub struct UpdateProviderBotCoreResult {
+    pub binding: ProviderBotBinding,
+    pub capabilities: BotCapabilities,
+}
 
 #[derive(Debug, Clone)]
 pub struct RuntimeBotIdentity {
@@ -170,4 +183,41 @@ pub trait ProviderBotCoreService: Send + Sync {
         provider_admin_token: &str,
         disabled: bool,
     ) -> ServiceResult<ProviderBotBinding>;
+
+    /// Update a provider-managed bot's capabilities in place.
+    ///
+    /// Each `Option` field is a PATCH: `Some` replaces the value (an empty
+    /// `Vec` clears the array), `None` leaves it unchanged. The binding
+    /// identity (`provider_bot_ref`, `bot_uuid`) is never changed. The
+    /// `agent_code` is reconstructed from the provider's auth mode so an
+    /// AgentPass bot's routing identifier survives a reload — callers must not
+    /// pass it through from `registry.get()`, which strips it.
+    async fn update_provider_bot(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+        provider_bot_ref: &str,
+        name: Option<String>,
+        summary: Option<String>,
+        domains: Option<Vec<String>>,
+        skills: Option<Vec<Skill>>,
+        scopes: Option<Vec<String>>,
+        visibility: Option<String>,
+    ) -> ServiceResult<UpdateProviderBotCoreResult> {
+        let _ = (
+            provider_id,
+            provider_admin_token,
+            provider_bot_ref,
+            name,
+            summary,
+            domains,
+            skills,
+            scopes,
+            visibility,
+        );
+        Err(ServiceError::InvalidOperation {
+            message: "provider bot updates are not configured".to_string(),
+            request_id: None,
+        })
+    }
 }

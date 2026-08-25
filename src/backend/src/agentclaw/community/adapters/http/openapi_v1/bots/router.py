@@ -67,6 +67,8 @@ from agentclaw.community.core.bot_management.create_flow import (
     AuthPending,
     AuthStatus,
     AuthStatusUnavailableError,
+    BotCreateContext,
+    BotCreateDeploymentMode,
     BotCreateSpec,
     complete_bot_authorization,
     create_bot_with_authorization,
@@ -391,13 +393,12 @@ async def create_bot(
 
     On a 202, have the user complete authorization at one of the returned
     URLs, then poll the auth-status endpoint — the bot is only created there,
-    on ISSUED. Engine-specific options are not accepted here; engine
-    configuration is managed through the engine-config endpoints after
+    on ISSUED. Template-specific creation properties belong under "template";
+    engine configuration is managed through the engine-config endpoints after
     creation.
     """
-    # Engine-specific inputs belong in BotCreateSpec.extra_properties, but
-    # nothing downstream reads that bag yet, so the request model does not
-    # expose an `engine_options` field for it — see BotCreate.
+    # Template-specific public input is unpacked by this HTTP adapter below;
+    # core creation keeps its established template_type/template_config contract.
     # Validate the engine against the configured registry FIRST: the cluster rule
     # below treats every non-teclaw value as ACRA, so an unknown engine would
     # otherwise sail through, allocate an id, apply for a Passport, and only fail
@@ -411,7 +412,11 @@ async def create_bot(
         owner_id=owner_id,
         header_space_id=body.space_id,
     )
-
+    template_properties = (
+        body.engine_properties.template
+        if body.engine_properties is not None
+        else None
+    )
     bot_id = generate_bot_id(owner_id, bot_repo)
     outcome = create_bot_with_authorization(
         user_id=owner_id,
@@ -424,6 +429,14 @@ async def create_bot(
             bot_name=body.bot_name,
             bot_desc=body.bot_desc,
             space_id=current_space.numeric_id,
+            template_type=(
+                "applicationCoding" if template_properties is not None else None
+            ),
+            template_config=template_properties,
+        ),
+        context=BotCreateContext(
+            deployment_mode=BotCreateDeploymentMode.CLOUD,
+            space_kind=current_space.kind,
         ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,
@@ -668,6 +681,15 @@ async def list_inventory(
         DeployMode | None,
         Query(description="Filter inventory items by cloud or local deployment."),
     ] = None,
+    is_service: Annotated[
+        bool | None,
+        Query(
+            description=(
+                "Filter by service classification: true returns service Bots, "
+                "false returns non-service Bots, and omission returns both."
+            )
+        ),
+    ] = None,
     service: BotInventoryServiceProtocol = Injected(BotInventoryServiceProtocol),
     space_context: BusinessSpaceContextProtocol = Injected(
         BusinessSpaceContextProtocol
@@ -687,6 +709,7 @@ async def list_inventory(
         keyword=keyword,
         engine=engine,
         deploy_mode=CoreDeployMode(deploy_mode) if deploy_mode is not None else None,
+        is_service=is_service,
         bot_ids=sorted(granted) if granted is not None else None,
         page=page_params.page,
         page_size=page_params.page_size,
@@ -962,6 +985,8 @@ def _complete_auth_status(
     bot_desc: str | None,
     bot_type: BotType | None,
     space_id: str | None,
+    template_type: str | None = None,
+    template_config: dict[str, Any] | None = None,
     bot_service: BotServiceProtocol,
     passport_plugin: PassportPlugin,
     auth_rel_plugin: AuthRelationshipPlugin,
@@ -1008,11 +1033,17 @@ def _complete_auth_status(
                 bot_name=bot_name,
                 bot_desc=bot_desc,
                 space_id=current_space.numeric_id,
+                template_type=template_type,
+                template_config=template_config,
+            ),
+            context=BotCreateContext(
+                deployment_mode=BotCreateDeploymentMode.CLOUD,
+                space_kind=current_space.kind,
             ),
             bot_service=bot_service,
             passport_plugin=passport_plugin,
             auth_rel_plugin=auth_rel_plugin,
-        )
+            )
     except AuthStatusUnavailableError:
         # The passport service answered with no status at all — typically the
         # apply is still propagating and the Passport is not ready yet. On this
@@ -1090,6 +1121,14 @@ async def poll_bot_auth_status(
         bot_desc=body.bot_desc,
         bot_type=body.bot_type,
         space_id=body.space_id,
+        template_type=(
+            "applicationCoding" if body.engine_properties is not None else None
+        ),
+        template_config=(
+            body.engine_properties.template
+            if body.engine_properties is not None
+            else None
+        ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,
         auth_rel_plugin=auth_rel_plugin,

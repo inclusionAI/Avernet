@@ -228,10 +228,7 @@ def _install_default_mcp_catalog(world) -> None:
     to what these cases assert.
 
     Derived from ``_DEFAULT_MCP_SERVERS_BY_ENGINE`` rather than a hardcoded
-    list: adding a server to the roster must not silently skip it here. teclaw's
-    roster is empty today, so the override currently answers ``None`` for every
-    code — same as ``NoopMCPCenterPlugin`` — and the seam is kept so a roster
-    that regains entries stays resolvable without touching this suite.
+    list: adding a server to the roster must not silently skip it here.
     Servers the local-MCP registry owns (``hitl``) are left unresolved on
     purpose — they are stdio, and the collector resolves their launch
     instruction from that registry, so answering REMOTE here would misclassify

@@ -308,6 +308,34 @@ def test_projection_status_and_actions(
     assert result["available_actions"] == actions
 
 
+@pytest.mark.parametrize(
+    "historical_status",
+    [PublishStatus.UPGRADED, PublishStatus.RELEASED],
+)
+def test_draft_delete_remains_available_after_inactive_publish_history(
+    deps, historical_status
+):
+    draft = record(2, PublishStatus.DRAFT, version=2)
+    historical = record(1, historical_status, version=1)
+
+    assert deps.facade._actions(
+        draft,
+        level=PermissionLevel.OWNER,
+        all_records=[draft, historical],
+    ) == ["publish_staging", "delete"]
+
+
+def test_draft_delete_is_blocked_while_an_online_version_exists(deps):
+    draft = record(2, PublishStatus.DRAFT, version=2)
+    online = record(1, PublishStatus.SUCCESS, version=1)
+
+    assert deps.facade._actions(
+        draft,
+        level=PermissionLevel.OWNER,
+        all_records=[draft, online],
+    ) == ["publish_staging"]
+
+
 def test_failed_projection_sanitizes_error_and_uses_source_status(deps, monkeypatch):
     monkeypatch.setattr(
         "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",

@@ -11,7 +11,7 @@ use bcs_service_api::{
     ProviderBotCoreService, ProviderCoordinationConfig, ProviderCoreService, ProviderCredential,
     ProviderCredentialRepoPort, ProviderOrganizationManagementConfig, ProviderRecord,
     ProviderRepoPort, RegisterProviderBotParams, RegisteredProvider, RuntimeBotIdentity,
-    ServiceError, ServiceResult, mock_token,
+    ServiceError, ServiceResult, Skill, UpdateProviderBotCoreResult, mock_token,
 };
 
 use super::ids::{new_bot_uuid, new_provider_id, new_session_token};
@@ -1115,5 +1115,104 @@ impl ProviderBotCoreService for ProviderCore {
                 message: format!("provider bot '{}' not found", bot_uuid),
                 request_id: None,
             })
+    }
+
+    async fn update_provider_bot(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+        provider_bot_ref: &str,
+        name: Option<String>,
+        summary: Option<String>,
+        domains: Option<Vec<String>>,
+        skills: Option<Vec<Skill>>,
+        scopes: Option<Vec<String>>,
+        visibility: Option<String>,
+    ) -> ServiceResult<UpdateProviderBotCoreResult> {
+        let provider = self
+            .authenticated_provider(provider_id, provider_admin_token)
+            .await?;
+        validate_external_id("provider_bot_ref", provider_bot_ref)?;
+        let binding = self
+            .bindings
+            .get_binding_by_provider_ref(&provider.provider_id, provider_bot_ref)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::BotNotFound(format!("provider bot '{}' not found", provider_bot_ref))
+            })?;
+        if binding.provider_id != provider.provider_id {
+            return Err(ServiceError::Forbidden("provider_id_mismatch".to_string()));
+        }
+        if binding.disabled {
+            return Err(ServiceError::InvalidOperation {
+                message: format!("provider bot '{}' is disabled", binding.bot_uuid),
+                request_id: None,
+            });
+        }
+        let existing = self
+            .registry
+            .get(&binding.bot_uuid)
+            .await
+            .ok_or_else(|| ServiceError::BotNotFound(binding.bot_uuid.clone()))?;
+
+        // `registry.get()` strips `agent_code` (routing identifier, not a general
+        // capability). Reconstruct it exactly as the register path does so an
+        // AgentPass bot's `agent_code` (== its `provider_bot_ref`) is not wiped
+        // from the DB column on the subsequent `register` save.
+        let auth_mode = parse_downlink_config(&provider.config)?.auth_mode;
+        let agent_code = (auth_mode == ProviderAuthMode::AgentPass)
+            .then(|| provider_bot_ref.to_string());
+
+        // PATCH-merge: each `Some` replaces (empty Vec clears), `None` keeps.
+        // `agent_token` is left `None` (managed in-memory only, never via caps).
+        if let Some(visibility) = visibility.as_deref() {
+            let trimmed = visibility.trim();
+            if !matches!(trimmed, "public" | "protected" | "private") {
+                return Err(ServiceError::InvalidOperation {
+                    message: "visibility must be 'public', 'protected', or 'private'"
+                        .to_string(),
+                    request_id: None,
+                });
+            }
+        }
+
+        let mut merged = existing.capabilities.clone();
+        if let Some(name) = name {
+            merged.name = Some(name);
+        }
+        if let Some(summary) = summary {
+            merged.summary = Some(summary);
+        }
+        if let Some(domains) = domains {
+            merged.domains = domains;
+        }
+        if let Some(skills) = skills {
+            merged.skills = skills;
+        }
+        if let Some(scopes) = scopes {
+            merged.scopes = scopes;
+        }
+        if let Some(visibility) = visibility {
+            merged.visibility = visibility.trim().to_string();
+        }
+        merged.agent_code = agent_code;
+
+        // Use `update_capabilities` (wholesale replacement) rather than
+        // `register`, whose existing-bot merge skips empty capability arrays
+        // — a PATCH that clears domains/skills/scopes must take effect in the
+        // live registry and runtime discovery, not only in the response.
+        self.registry
+            .update_capabilities(&binding.bot_uuid, merged.clone())
+            .await?;
+        info!(
+            provider_id = %provider.provider_id,
+            bot_uuid = %binding.bot_uuid,
+            provider_bot_ref = %provider_bot_ref,
+            "update_provider_bot: capabilities updated in place"
+        );
+        Ok(UpdateProviderBotCoreResult {
+            binding,
+            capabilities: merged,
+        })
     }
 }

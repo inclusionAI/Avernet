@@ -54,16 +54,30 @@ class _FakeBot:
         return BotSendResult(run_id=f"r_{bot_id}", session_id=None)
 
 
-class _FakeBotPublic:
-    """假 BotPublicServiceProtocol:模拟 singlebox DB LIKE 关键字命中,回配置的 dream bot items。"""
+class _FakeBcn:
+    """Fake BcnService.list_bots_by_task_modes: sync (bbs_runner 经 asyncio.to_thread 调)，记录断言。"""
 
     def __init__(self, roster):
-        # roster: list[{"bot_id":..., "bot_name":...}]
-        self._items = roster
+        self._roster = roster
 
-    def search_public_bots_by_keyword(self, *, search=None, user_id=None, page=1, page_size=20):
-        # TEMP e2e:忽略 keyword(bbs_runner 用 e2e-bbs-bid-dream 命中这里配置的 dream bot)
-        return {"total": len(self._items), "items": list(self._items)}
+    def list_bots_by_task_modes(self, *, claim=None, dream=None, match="any"):
+        assert claim is True
+        assert dream is True
+        assert match == "all"
+        return list(self._roster)
+
+
+def _roster(*bot_ids: str) -> list[dict]:
+    return [
+        {
+            "bot_id": bot_id,
+            "name": bot_id,
+            "env": "local",
+            "task_claim_mode": True,
+            "task_dream_mode": True,
+        }
+        for bot_id in bot_ids
+    ]
 
 
 class _FakeGraph:
@@ -85,17 +99,13 @@ _GOAL = "整理基础架构方向架构师名册"
 
 def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     """bid→select→claim→send: picks highest completion_rate, claims root, sends task message."""
-    roster = [
-        {"bot_id": "A", "bot_name": "BotA"},
-        {"bot_id": "B", "bot_name": "BotB"},
-        {"bot_id": "C", "bot_name": "BotC"},
-    ]
+    roster = _roster("A", "B", "C")
     bot = _FakeBot(rates={"A": 50, "B": 90, "C": 70})
-    bot_public = _FakeBotPublic(roster)
+    bcn = _FakeBcn(roster)
     graph = _FakeGraph()
     g = _execution_graph("t1", _GOAL)
 
-    _run(notify(g, bot_public=bot_public, bot=bot, graph=graph, backend_url="http://localhost:8888", skill_name="bbs-relay-single-task"))
+    _run(notify(g, bcn=bcn, bot=bot, graph=graph, backend_url="http://localhost:8888", skill_name="bbs-relay-single-task"))
 
     assert graph.claimed == "B"  # highest completion_rate
     assert len(bot.sent_messages) == 1
@@ -113,14 +123,12 @@ def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     assert _GOAL in msg_text, "dispatch msg 未内联 snapshot"
 
 
-# Append to test_bbs_runner.py
-
 def test_notify_empty_roster_returns_silently():
     """空 roster → 静默返回(不 claim、不 send)。"""
     bot = _FakeBot(rates={})
-    bot_public = _FakeBotPublic([])
+    bcn = _FakeBcn([])
     graph = _FakeGraph()
-    _run(notify(_execution_graph("t2"), bot_public=bot_public, bot=bot, graph=graph, backend_url="http://x", skill_name="s"))
+    _run(notify(_execution_graph("t2"), bcn=bcn, bot=bot, graph=graph, backend_url="http://x", skill_name="s"))
     assert graph.claimed is None
     assert bot.sent_messages == []
     assert bot.bid_prompts == []
@@ -128,28 +136,30 @@ def test_notify_empty_roster_returns_silently():
 
 def test_notify_all_bids_failed_returns_silently():
     """全 bid 失败/超时 → 静默返回。"""
-    roster = [{"bot_id": "A", "bot_name": "A"}]
+    roster = _roster("A")
     bot = _FakeBot(rates={"A": None})  # None → raises
-    bot_public = _FakeBotPublic(roster)
+    bcn = _FakeBcn(roster)
     graph = _FakeGraph()
-    _run(notify(_execution_graph("t3"), bot_public=bot_public, bot=bot, graph=graph, backend_url="http://x", skill_name="s"))
+    _run(notify(_execution_graph("t3"), bcn=bcn, bot=bot, graph=graph, backend_url="http://x", skill_name="s"))
     assert graph.claimed is None
 
 
 def test_notify_send_message_failure_rolls_back_claim():
     """send_message 失败 → clear bbs_owner(回收 claim)。"""
-    roster = [{"bot_id": "W", "bot_name": "W"}]
+    roster = _roster("W")
+
     class _BotSendFails(_FakeBot):
         async def send_message(self, *, bot_id, message, metadata):
             raise RuntimeError("send failed")
+
     bot = _BotSendFails(rates={"W": 80})
-    bot_public = _FakeBotPublic(roster)
+    bcn = _FakeBcn(roster)
     graph = _FakeGraph()
-    _run(notify(_execution_graph("t4"), bot_public=bot_public, bot=bot, graph=graph, backend_url="http://x", skill_name="s"))
+    _run(notify(_execution_graph("t4"), bcn=bcn, bot=bot, graph=graph, backend_url="http://x", skill_name="s"))
     assert graph.claimed == "W"
     assert graph.cleared  # bbs_owner cleared
 
 
-def test_notify_bot_public_none_returns_silently():
-    _run(notify(_execution_graph("t5"), bot_public=None, bot=_FakeBot({}), graph=_FakeGraph(), backend_url="http://x"))
+def test_notify_bcn_none_returns_silently():
+    _run(notify(_execution_graph("t5"), bcn=None, bot=_FakeBot({}), graph=_FakeGraph(), backend_url="http://x"))
     # no exception, no claim

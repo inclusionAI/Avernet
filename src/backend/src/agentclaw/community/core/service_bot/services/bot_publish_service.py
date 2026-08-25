@@ -985,18 +985,13 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             env=self._env,
         )
 
-        # 4. Any formal-publish history makes the service Bot permanent.  An
-        # offline operation creates a fresh DRAFT, so checking SUCCESS alone
-        # would let that new row delete a Bot whose prior version is RELEASED
-        # (or UPGRADED).  FAILED is intentionally not included: a never-live
-        # initial draft may fail and still be discarded.
-        published_history = {
-            PublishStatus.SUCCESS.value,
-            PublishStatus.UPGRADED.value,
-            PublishStatus.RELEASED.value,
-        }
+        # 4. 仅当存在另一条「发布成功(SUCCESS)」记录时禁止删除当前草稿。
+        # 产品确认规则(8e3b6da27):历史版本已升级(UPGRADED)或已下线(RELEASED)时,
+        # 离线操作会新建一条 DRAFT,此时仍允许 Owner 删除草稿;仅 SUCCESS 表示线上仍有该 Bot,
+        # 须保留。FAILED 不视作「已上线」,可丢弃。与 service_publication_facade._actions
+        # 的删除可见性判定保持一致(改其一须同步)。
         for p in all_publishes:
-            if p.id != publish_id and p.status in published_history:
+            if p.id != publish_id and p.status == PublishStatus.SUCCESS:
                 return False
 
         return True

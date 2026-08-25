@@ -26,7 +26,11 @@ class TaskServiceProtocol(Protocol):
         ...
 
     def get_task_dashboard(
-        self, task_id: str, node_id: str | None = None
+        self,
+        task_id: str,
+        node_id: str | None = None,
+        *,
+        include_action_log: bool = False,
     ) -> TaskExecutionGraph:
         """任务执行详情可视化(整图或按 node_id 子树投影),只读。"""
         ...
@@ -82,4 +86,10 @@ class TaskServiceProtocol(Protocol):
         ``execution_graph`` 并 upsert ``task_callback`` 单 session 行;``session.completed`` →
         ``converge_by_session`` 收敛整协作(ManagerWorker 无整协作级 run,终态由 session.completed 表征)。
         非 manager_worker 事件 → no-op。"""
+        ...
+
+    async def redrive_task(self, task_id: str) -> None:
+        """Recovery resume entrypoint: re-dispatch a hydrated non-terminal task
+        after an instance restart / rolling deploy. Idempotent; non-terminal
+        runtime status only. Drives ``ExecutionEngine.redrive``."""
         ...

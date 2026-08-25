@@ -76,7 +76,6 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     SkillMetadataResponse,
     SkillParametersResponse,
     SkillReadmeResponse,
-    SwitchSkillSetRequest,
     SwitchSkillSetResponse,
     SyncSkillSetRequest,
     SyncSkillsRequest,
@@ -1109,68 +1108,6 @@ async def get_current_skill_set(
     current = switcher.get_current_skill_set()
 
     return CurrentSkillSetResponse(success=True, data=current)
-
-
-@router.post("/skillset/switch", response_model=SwitchSkillSetResponse, deprecated=True)
-async def switch_skill_set(
-    request: SwitchSkillSetRequest,
-    entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(
-        None, description="Entity type (staff/proj/team, default: staff)"
-    ),
-    bot_id: str | None = Query(None, description="Bot ID (default: default)"),
-    engine_type: str | None = Query(
-        None, description="Engine type override; defaults to bot's active_engine"
-    ),
-    ctx: RequestContext = Depends(get_request_context),
-    bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
-    ),
-) -> SwitchSkillSetResponse:
-    """[DEPRECATED] Switch to a new skill set (batch deactivate current, activate new).
-
-    请使用 POST /skillset/activate 和 POST /skillset/deactivate 替代。
-    此接口将在未来版本中移除。
-
-    Args:
-        proxy_token: agentclawproxy token for syncing symlinks to remote device.
-    """
-    # Get effective path parameters
-    (
-        effective_entity_id,
-        effective_bot_id,
-        effective_engine,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop,
-    ) = _get_skill_set_path_params(
-        ctx,
-        set_id=request.skill_set_id,
-        entity_id=entity_id,
-        entity_type=entity_type,
-        bot_id=bot_id,
-        engine_type=engine_type,
-        bot_repo=bot_repo,
-        control_plane=control_plane,
-    )
-
-    result = await control_plane.switch(
-        bot_id=effective_bot_id,
-        owner_id=effective_entity_id,
-        actor_id=ctx.user_id,
-        set_id=request.skill_set_id,
-    )
-
-    return SwitchSkillSetResponse(
-        success=True,
-        message="Successfully switched skill set",
-        data={
-            "activated": result.get("activated", []),
-            "deactivated": result.get("deactivated", []),
-            "failed": [],
-        },
-    )
 
 
 @router.post("/skillset/sync", response_model=SwitchSkillSetResponse)

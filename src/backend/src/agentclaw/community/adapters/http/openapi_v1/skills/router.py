@@ -264,12 +264,13 @@ async def list_skills(
         LocalSkillQueryServiceProtocol
     ),
 ) -> Envelope[Page[Skill]]:
-    """List a bot's skills from stored desired state (paginated).
+    """List every skill the bot has, from stored desired state (paginated).
 
-    Answers even while the bot is offline: active reflects the desired
-    state, not the live runtime.
+    Covers both ways a bot reaches a skill: skills uploaded to this bot, and
+    skills a capability set of the bot's brings to it. Answers even while the
+    bot is offline — active is the desired state, not the live runtime.
     """
-    total, records = query_service.list_local_skills(
+    total, records = query_service.list_bot_skills(
         bot_id=bot_id,
         owner_id=owner_id,
         actor_id=user_id,

@@ -8,7 +8,7 @@ import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlugin
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -27,6 +27,7 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogMetadata,
     BotCatalogMetadataServiceProtocol,
     BotCatalogMetadataUnavailableError,
+    BotCatalogSearchFilters,
     BotCatalogSearchUnavailableError,
 )
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
@@ -77,10 +78,10 @@ _BCS_VISIBILITY_FIELD_BY_SCOPE: dict[str, str] = {
 }
 
 # 慢连路径(走工单)在 BCS friend_ext 下记录工单的 sub-key 随 public_scope 联动:
-# user → public_user_approval; agent → public_public_approval。内层 block 形状一致。
+# user → public_user_approval; agent → public_agent_approval。内层 block 形状一致。
 _BCS_APPROVAL_KEY_BY_SCOPE: dict[str, str] = {
     "user": "public_user_approval",
-    "agent": "public_public_approval",
+    "agent": "public_agent_approval",
 }
 
 # AGREE 回调时把 public_*_approval 子块里的 view_friend_deps 提到 friend_ext 顶层,
@@ -132,7 +133,7 @@ class BotPublicService:
         auth_relationship_plugin: AuthRelationshipPlugin,
         publish_approval_plugin: BotPublishApprovalPlugin,
         skill_set_service_factory: "SkillSetServiceFactory",
-        device_context_resolver: DeviceContextResolver,
+        device_context_resolver_factory: "Callable[[], DeviceContextResolver]",
         device_sync_dispatcher: "DeviceSyncDispatcher",
         catalog_metadata_service: BotCatalogMetadataServiceProtocol,
     ) -> None:
@@ -147,7 +148,10 @@ class BotPublicService:
         self._skill_set_service_factory = skill_set_service_factory
         # Task 2.1: resolver + dispatcher 替代 device_sync_supplier 在
         # sync_bot_config_to_device 路径上的角色。Task 6 收口后 supplier 已删。
-        self._resolver = device_context_resolver
+        # Lazy: DeviceContextResolver's conn-info builders transitively reach
+        # DeviceService, which (corp) depends on BotPublicService itself —
+        # eager injection here would cycle. Resolved at call time instead.
+        self._resolver_factory = device_context_resolver_factory
         self._device_sync_dispatcher = device_sync_dispatcher
         self._catalog_metadata_service = catalog_metadata_service
         self._sync_lock = threading.Lock()
@@ -808,7 +812,7 @@ class BotPublicService:
 
         public_scope 非空即新版发布回调 (caller 保证 bot_id == bot_uid):
         - 把 (_BCS_APPROVAL_KEY_BY_SCOPE) 对应的 friend_ext 子块
-          (public_user_approval/public_public_approval) 的 status 写成 last_operate
+          (public_user_approval/public_agent_approval) 的 status 写成 last_operate
           (AGREE/DISAGREE/CANCEL)。
         - AGREE 时同时翻 BCS 可见性字段 (_BCS_VISIBILITY_FIELD_BY_SCOPE):
             - public_scope=user → user_visibility = block.visibility (block 存的请求值,
@@ -882,7 +886,7 @@ class BotPublicService:
         if public_scope:
             # New-version callback (public_scope 非空 → bot_id 即 bot_uid):
             # GET friend_ext → 按 public_scope 子块 (public_user_approval/
-            # public_public_approval) 写 status = last_operate → PATCH 回。
+            # public_agent_approval) 写 status = last_operate → PATCH 回。
             try:
                 return self._apply_callback_decision(
                     bot_uid=bot_id, public_scope=public_scope, last_operate=last_operate
@@ -1028,7 +1032,7 @@ class BotPublicService:
             UnknownProviderError,
         )
         try:
-            ctx = self._resolver.resolve_for_bot(bot_id, user_id)
+            ctx = self._resolver_factory().resolve_for_bot(bot_id, user_id)
         except (DeviceNotBoundError, UnknownProviderError) as e:
             logger.warning(
                 "[bot_service.sync_bot_config_to_device] bot=%s no syncable device: %s",
@@ -1444,15 +1448,21 @@ class BotPublicService:
         *,
         caller: BotCatalogCaller,
         request_id: str,
+        filters: BotCatalogSearchFilters | None = None,
     ) -> Dict[str, Any]:
         """Return the current BCS catalog page joined to public Backend Bots."""
         try:
+            metadata_kwargs: dict[str, Any] = {
+                "search": search,
+                "page": page,
+                "page_size": page_size,
+                "caller": caller,
+                "request_id": request_id,
+            }
+            if filters is not None:
+                metadata_kwargs["filters"] = filters
             metadata = self._catalog_metadata_service.search_public_bot_metadata(
-                search=search,
-                page=page,
-                page_size=page_size,
-                caller=caller,
-                request_id=request_id,
+                **metadata_kwargs
             )
             addresses = self._validated_catalog_addresses(metadata)
             metadata_by_address = {item.address: item for item in metadata}
@@ -1485,6 +1495,11 @@ class BotPublicService:
             if bot is None:
                 continue
             metadata_item = metadata_by_address[address]
+            # COSEC: The BCS value reached this service only after the adapter
+            # validated its composite address; fall back only to the exact joined Backend address.
+            bot["bot_uuid"] = metadata_item.bot_uuid or (
+                f"{address.bot_id}:{address.entity_id}"
+            )
             for field_name in (
                 "is_friend",
                 "visibility",

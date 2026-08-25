@@ -62,6 +62,7 @@ def _make_service(
     plugin=None,
     mcp_provider=None,
     bot_repository=None,
+    caller_identity_repository=None,
     passport_update=None,
 ):
     """Construct MCPSyncService bypassing __init__, wiring resolver + dispatcher."""
@@ -79,6 +80,8 @@ def _make_service(
         None, {}, "PROD", None
     )
     service.bot_repository = bot_repository or MagicMock()
+    service.caller_identity_repository = caller_identity_repository or MagicMock()
+    service.caller_identity_repository.list_draft_call_types.return_value = {}
 
     # New resolver/dispatcher wiring — provider thunks (Task 1 style)
     actual_resolver = resolver or MagicMock()

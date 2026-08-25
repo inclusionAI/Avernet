@@ -80,9 +80,9 @@ def test_backend_artifact_serves_spaces_through_its_own_domain() -> None:
 
     space_skills_path = "/openapi/v1/bots/spaces/{space_id}/skills"
     assert space_skills_path in document["paths"]
-    assert document["paths"][space_skills_path]["get"][
-        "x-avernet-security"
-    ] == {"user": "required"}
+    assert document["paths"][space_skills_path]["get"]["x-avernet-security"] == {
+        "user": "required"
+    }
 
 
 def test_every_served_operation_carries_security() -> None:
@@ -345,10 +345,7 @@ def test_bcsfuse_paths_served_with_user_security() -> None:
 
 
 _BOTS_ARTIFACT = (
-    Path(__file__).resolve().parents[4]
-    / "configs"
-    / "schemas"
-    / "bots.openapi.json"
+    Path(__file__).resolve().parents[4] / "configs" / "schemas" / "bots.openapi.json"
 )
 
 

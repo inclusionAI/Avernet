@@ -9,8 +9,10 @@ from ._device_service import (
     device_record_to_response,
     get_current_env,
 )
+from ._device_service_arca_ttl import ArcaScheduleAwareDeviceService
 
 __all__ = [
+    "ArcaScheduleAwareDeviceService",
     "DefaultDeviceService",
     "common_sm4_decrypt",
     "common_sm4_encrypt",

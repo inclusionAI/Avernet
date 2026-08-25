@@ -112,6 +112,11 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
             gmt_created=notification.gmt_created,
             gmt_modified=notification.gmt_modified,
         )
+    created = (
+        notification.gmt_created
+        if notification is not None
+        else work_order.gmt_created
+    )
     modified = (
         notification.gmt_modified
         if notification is not None
@@ -158,7 +163,7 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
         read_at=notification.read_at if notification is not None else None,
         env=work_order.env,
         can_approve=item.can_approve,
-        gmt_created=work_order.gmt_created,
+        gmt_created=created,
         gmt_modified=modified,
     )
 

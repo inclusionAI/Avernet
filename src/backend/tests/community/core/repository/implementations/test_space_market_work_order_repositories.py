@@ -64,7 +64,7 @@ def db():
 
 def _team(spaces: SpaceRepository, name="Team", creator="owner-1"):
     with spaces.create_team_transaction(
-        name=name, creator_id=creator, env="dev"
+        name=name, creator_id=creator, creator_user_name=None, env="dev"
     ) as row:
         row.sc_team_id = f"sc-{name}-{creator}"
         return row

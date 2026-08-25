@@ -297,12 +297,14 @@ def test_list_work_orders_maps_plain_and_notification_items(client, work_order_s
     assert items[0]["notification_id"] is None
     assert items[0]["title"] == "空间加入申请待审批"
     assert items[0]["content"] is None
+    assert items[0]["gmt_created"] == "2026-08-18T01:02:03Z"
     assert items[0]["gmt_modified"] == "2026-08-18T02:03:04Z"
     assert items[1]["item_id"] == "NOTIFICATION_21"
     assert items[1]["item_type"] == "NOTICE"
     assert items[1]["notification_id"] == 21
     assert items[1]["title"] == "空间加入申请已通过"
     assert items[1]["content"] == {"message": "approved"}
+    assert items[1]["gmt_created"] == "2026-08-18T01:02:03Z"
     assert items[1]["gmt_modified"] == "2026-08-18T03:04:05Z"
     work_order_service.list_items.assert_called_once()
     assert work_order_service.list_items.call_args.kwargs == {

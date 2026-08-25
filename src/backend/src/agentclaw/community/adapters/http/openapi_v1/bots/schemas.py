@@ -8,7 +8,7 @@ internal names belong in ``#`` comments.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -148,6 +148,20 @@ class BotMetadata(BaseModel):
     status: str = Field(description="Current lifecycle status.")
 
 
+class BotCreateEngineProperties(BaseModel):
+    """Engine-specific properties used while creating a bot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    template: dict[str, Any] = Field(
+        description=(
+            "Application-coding template properties. Passed through unchanged to "
+            "the template validator; platform-managed identity and lifecycle "
+            "fields are not accepted."
+        ),
+    )
+
+
 class BotCreate(BaseModel):
     """Create-a-bot request body."""
 
@@ -176,6 +190,13 @@ class BotCreate(BaseModel):
     space_id: str | None = Field(
         default=None,
         description="Business space to associate with the bot, when applicable.",
+    )
+    engine_properties: BotCreateEngineProperties | None = Field(
+        default=None,
+        description=(
+            "Optional engine-specific properties. Omit for a plain bot; provide "
+            "template for an application-coding bot."
+        ),
     )
     # ``engine_options`` is deliberately absent. Nothing downstream consumes
     # ``BotCreateSpec.extra_properties`` yet, so declaring the field would
@@ -341,6 +362,12 @@ class BotAuthStatusPoll(BaseModel):
         default=None,
         description="Echo of the business space the bot was requested with; "
         "omitted resolves the caller's current space, exactly as on create.",
+    )
+    engine_properties: BotCreateEngineProperties | None = Field(
+        default=None,
+        description=(
+            "Echo of the engine-specific properties the bot was requested with."
+        ),
     )
 
 

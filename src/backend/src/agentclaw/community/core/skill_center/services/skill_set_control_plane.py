@@ -36,11 +36,13 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectionReconcilerProtocol,
 )
+from agentclaw.community.core.workspace.skill_layout import (
+    runtime_layout_engine_for_bot,
+)
 from agentclaw.community.core.skills_pool.mapping_intent import (
     retired_logical_skill_mappings,
 )
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
-from agentclaw.community.core.workspace.skill_layout import runtime_layout_engine_for_bot
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
@@ -546,27 +548,6 @@ class SkillSetControlPlaneService:
             ),
         )
 
-    async def switch(
-        self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
-    ) -> dict:
-        """Compatibility command for the deprecated single-select switch API."""
-        bot = self._legacy_bot(
-            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
-        )
-        return await self._mutate(
-            bot=bot,
-            bot_id=bot_id,
-            actor_id=actor_id,
-            action="skill_set_switch",
-            mutation=lambda: self._repository.replace_active_set(
-                bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
-                set_id=set_id,
-                engine_type=self._engine(bot),
-                default_engine_types=self._default_engine_types(bot),
-            ),
-        )
-
     async def sync(
         self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
     ) -> dict:
@@ -775,6 +756,11 @@ class SkillSetControlPlaneService:
 
     @staticmethod
     def _engine(bot: dict) -> str:
+        # Deliberately not ``bot_engine_scope.bot_engine_type``. That helper
+        # maps a missing engine to ``None`` — "do not filter by engine" — which
+        # is right for a listing and wrong here: these are writes, and an
+        # unfiltered scope would reach every Set the Bot has across every
+        # engine. Widening it is its own change, with its own tests.
         return str(bot["active_engine"])
 
     @classmethod

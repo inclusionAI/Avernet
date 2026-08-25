@@ -19,9 +19,9 @@ through the injector.
 """
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Callable
 
-from injector import Binder, Module, inject, provider, singleton
+from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
@@ -102,6 +102,18 @@ class BotPublicModule(Module):
 
     @singleton
     @provider
+    @inject
+    def device_context_resolver_factory(
+        self, injector: Injector
+    ) -> Callable[[], DeviceContextResolver]:
+        # Lazy (cycle-safe): DeviceContextResolver's conn-info builders reach
+        # DeviceService, which in some profiles depends on BotPublicService
+        # itself (BotPublicService -> DeviceContextResolver -> ... ->
+        # DeviceService -> BotPublicService). Eager injection would cycle.
+        return lambda: injector.get(DeviceContextResolver)
+
+    @singleton
+    @provider
     def bot_public_service(
         self,
         bot_friend_repo: BotFriendRepositoryProtocol,
@@ -113,7 +125,7 @@ class BotPublicModule(Module):
         auth_relationship_plugin: AuthRelationshipPlugin,
         publish_approval_plugin: BotPublishApprovalPlugin,
         skill_set_service_factory: SkillSetServiceFactory,
-        device_context_resolver: DeviceContextResolver,
+        device_context_resolver_factory: Callable[[], DeviceContextResolver],
         device_sync_dispatcher: DeviceSyncDispatcher,
         catalog_metadata_service: BotCatalogMetadataServiceProtocol,
     ) -> BotPublicService:
@@ -131,7 +143,7 @@ class BotPublicModule(Module):
             auth_relationship_plugin=auth_relationship_plugin,
             publish_approval_plugin=publish_approval_plugin,
             skill_set_service_factory=skill_set_service_factory,
-            device_context_resolver=device_context_resolver,
+            device_context_resolver_factory=device_context_resolver_factory,
             device_sync_dispatcher=device_sync_dispatcher,
             catalog_metadata_service=catalog_metadata_service,
         )

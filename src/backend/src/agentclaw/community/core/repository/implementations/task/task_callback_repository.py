@@ -40,6 +40,9 @@ class TaskCallbackRepository(TaskCallbackRepositoryProtocol):
             result_success=record.result_success,
             exec_error=record.exec_error,
             extend_props=_dumps(record.extend_props),
+            event_id=record.event_id,
+            process_status=record.process_status,
+            processed_at=record.processed_at,
         )
 
     def insert(self, rec: TaskCallbackRecord) -> TaskCallbackRecord:
@@ -70,6 +73,9 @@ class TaskCallbackRepository(TaskCallbackRepositoryProtocol):
                 existing.result_success = rec.result_success
                 existing.exec_error = rec.exec_error
                 existing.extend_props = _dumps(rec.extend_props)
+                existing.event_id = rec.event_id
+                existing.process_status = rec.process_status
+                existing.processed_at = rec.processed_at
                 db.flush()
                 return existing.to_record()
             row = self._to_row(rec)
@@ -106,6 +112,15 @@ class TaskCallbackRepository(TaskCallbackRepositoryProtocol):
                 db.query(self._model)
                 .filter(self._model.main_session_id == main_session_id)
                 .order_by(self._model.gmt_modified.desc(), self._model.id.desc())
+                .first()
+            )
+            return row.to_record() if row else None
+
+    def find_by_event_id(self, event_id: str) -> Optional[TaskCallbackRecord]:
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self._model)
+                .filter(self._model.event_id == event_id)
                 .first()
             )
             return row.to_record() if row else None

@@ -90,6 +90,28 @@ pub trait BotRegistryCoreService: Send + Sync {
         self.save_token(&bot_id_for_followup, token).await
     }
 
+    /// Replace a bot's capabilities wholesale, including cleared (empty)
+    /// `domains`/`skills`/`scopes` arrays.
+    ///
+    /// Unlike [`register`](Self::register) — whose existing-bot merge skips
+    /// empty capability arrays — this method assigns the given capabilities
+    /// verbatim, so a PATCH that clears a field actually takes effect in the
+    /// live registry and runtime discovery, not only in the database and the
+    /// response. Use this for partial updates; `register` remains the
+    /// registration/reconnect path whose skip-empty semantics onboard relies
+    /// on. Identity (`created_by`, session token) and runtime state are
+    /// preserved exactly as `register` preserves them.
+    async fn update_capabilities(
+        &self,
+        _bot_id: &str,
+        _capabilities: BotCapabilities,
+    ) -> ServiceResult<()> {
+        Err(ServiceError::InvalidOperation {
+            message: "capability replacement is not configured".to_string(),
+            request_id: None,
+        })
+    }
+
     /// Update a bot's dynamic status.
     async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool;
 

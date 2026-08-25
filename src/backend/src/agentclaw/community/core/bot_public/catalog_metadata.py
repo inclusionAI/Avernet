@@ -24,11 +24,24 @@ class BotCatalogCaller:
 
 
 @dataclass(frozen=True)
+class BotCatalogSearchFilters:
+    """Validated optional BCS Catalog Search filters."""
+
+    visibility: tuple[str, ...] = ()
+    user_visibility: tuple[str, ...] = ()
+    status: str | None = None
+    viewer_actor_type: str | None = None
+    viewer_actor_id: str | None = None
+    friendship: str | None = None
+
+
+@dataclass(frozen=True)
 class BotCatalogMetadata:
     """BCS metadata retained for one catalog Bot after transport validation."""
 
     address: BotCatalogAddress
     kind: str
+    bot_uuid: str | None = None
     is_friend: bool | None = None
     visibility: Any = None
     is_online: Any = None
@@ -52,6 +65,7 @@ class BotCatalogMetadataServiceProtocol(Protocol):
         search: str | None,
         page: int,
         page_size: int,
+        filters: BotCatalogSearchFilters | None,
         caller: BotCatalogCaller,
         request_id: str,
     ) -> Sequence[BotCatalogMetadata]: ...
