@@ -332,6 +332,9 @@ class BaasConfig:
     teclaw_template_uuid: str = ""
     # Personal bot via BaaS (poolab template) — deploy supplies it.
     personal_bot_template_uuid: str = ""
+    # 评测沙箱模板 UUID（BaaS 侧）— 用于 DefaultEnvBotService 创建评测容器。
+    # 旧 key ``arca_template_id`` 已重命名以消除"Arca 平台模板"歧义。
+    eval_template_uuid: str = ""
 
 
 @dataclass(frozen=True)
