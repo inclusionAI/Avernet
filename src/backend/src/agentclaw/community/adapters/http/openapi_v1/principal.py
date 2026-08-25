@@ -9,16 +9,12 @@ Two things live here, and the split is the point:
 - :func:`caller_owner_id` — who the *credential* says is calling. Read off the
   verified principal.
 - :func:`require_user_id` — who the *request* says it acts for. Read off the
-  ``user_id`` query parameter, which every user-scoped route now requires.
+  ``user_id`` query parameter used by delegable user-scoped routes.
 
-Handlers take the second one. They used to derive the owner from the principal
-directly, which worked only because the two can't currently differ: the gateway
-resolves an end user from ``x-one-id`` and signs it into the principal, so a
-public request always named a person implicitly. That stops being true once an
-**App calls on behalf of a user** — the app presents its own credential and the
-end user is not in it — and an operation whose contract never mentioned a user
-has nowhere to put one. Naming the user in the request makes the contract say
-out loud what it always meant, before the identity set stops saying it.
+Delegable handlers take the second one. An explicitly non-delegable self-service
+operation instead takes the first and declares ``refuse_app_only_caller``. That
+shape is used when the operation is meaningful only for the human currently
+authenticated, so neither an App nor a request parameter may select its actor.
 
 Why the query string, and only the query string
 -----------------------------------------------
@@ -32,17 +28,14 @@ resource — ``/bots/{bot_id}/users/{user_id}`` would claim to address a user
 beneath a bot, inverting the ownership and describing something the operation
 does not return.
 
-So: always the query string, whatever the method, whatever the body. There is no
-second placement and no exception table. ``bot_id`` is untouched by this rule —
-it stays in the path where it addresses a bot, and in the query string where it
-is a parameter.
+So, where an operation allows the acting user to be named: always the query
+string, whatever the method and whatever the body. A non-delegable self-service
+operation names no user on the wire; it derives the human from the verified
+principal instead. ``bot_id`` is untouched by this rule.
 
-Four operations take no ``user_id`` at all, because they have no user dimension
-to scope by: ``check_bot_name`` answers a tenant-wide uniqueness question, and
-``list_mcp_servers`` / ``list_mcp_tenants`` / ``get_mcp_server`` read a
-marketplace catalogue identical for every caller in the tenant. They still
-require an authenticated caller — that is ``require_principal``'s job, not this
-parameter's.
+Operations also take no ``user_id`` when they have no user dimension at all.
+Both kinds still require an authenticated caller; non-delegable self-service
+operations additionally require that the principal actually names a human.
 
 How the parameter is *authorized*, and why it splits
 ----------------------------------------------------
@@ -113,8 +106,8 @@ logger = get_logger()
 #: The query parameter naming the end user a request acts for.
 USER_ID_QUERY = "user_id"
 
-#: What every user-scoped operation publishes for it. Defined once so the
-#: parameter reads identically across all 56 of them.
+#: What every delegable user-scoped operation publishes for it. Defined once so
+#: the parameter reads identically everywhere it is exposed.
 USER_ID_DESCRIPTION = (
     "The end user this request acts for. Every read and write is scoped to it. "
     "A caller authenticated as a person must name themselves; naming another "
@@ -214,8 +207,8 @@ async def require_user_id(
 ) -> str:
     """Return the end user this request acts for, or raise.
 
-    The one seam every user-scoped handler takes its id from. Three failures are
-    answered here, and they are deliberately different answers:
+    The seam every delegable user-scoped handler takes its id from. Three
+    failures are answered here, and they are deliberately different answers:
 
     - no verified caller → ``401``, from :func:`require_principal` as before;
     - no ``user_id`` parameter (or an empty one) → ``422``, FastAPI's own

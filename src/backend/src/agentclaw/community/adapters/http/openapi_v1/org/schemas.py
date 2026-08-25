@@ -36,7 +36,9 @@ class OrgUserIdentity(BaseModel):
 
     user_id: str = Field(
         description="The caller's end-user id — the exact value to pass as the "
-        "`user_id` query parameter on every user-scoped operation of this API."
+        "`user_id` query parameter on delegable user-scoped operations of this "
+        "API. Non-delegable self-service operations derive it from this "
+        "verified identity instead."
     )
     username: str = Field(
         description="The login name the identity provider resolved for the "
