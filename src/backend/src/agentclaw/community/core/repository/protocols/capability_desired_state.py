@@ -221,7 +221,6 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         bot_id: str,
         owner_id: str,
         engine_type: str | None = None,
-        default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
         """Ordinary Sets inactive; skill Installation rows and Set-claimed
         MCP rows retired, one transaction (spec C.6): the Bot converges to

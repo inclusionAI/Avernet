@@ -568,20 +568,32 @@ class SkillSetManagementService:
     async def deactivate_all(
         self, *, bot_id: str, owner_id: str, user_id: str
     ) -> dict:
-        """The legacy "deactivate everything" wire, through desired state."""
+        """The legacy "deactivate everything" wire, through desired state.
+
+        Deliberately not ``_mutate``: "all" crosses engines. The legacy wire
+        cleared every engine's ordinary Sets and the row retirement is
+        engine-blind, so the set-state clear, the snapshot and a
+        compensation must widen with it (``engine_type=None``) — unlike
+        every single-Set command, whose writes fail closed by engine.
+        """
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        return await self._mutate(
+        result = await self._flow.apply(
             bot=bot,
             bot_id=bot_id,
-            actor_id=user_id,
-            action="skill_set_deactivate_all",
+            engine_type=None,
             mutation=lambda: self._repository.deactivate_all_sets(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
-                engine_type=self._engine(bot),
-                default_engine_types=self._default_engine_types(bot),
+                engine_type=None,
             ),
         )
+        self._audit(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            actor_id=user_id,
+            action="skill_set_deactivate_all",
+        )
+        return result
 
     async def legacy_activate(
         self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str

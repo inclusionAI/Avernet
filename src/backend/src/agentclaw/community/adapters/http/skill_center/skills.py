@@ -1110,6 +1110,10 @@ async def get_current_skill_set(
         ),
         None,
     )
+    if current is not None:
+        # The historical payload named the id ``skill_set_id``; keep the
+        # alias so deprecated-wire readers survive the re-sourcing.
+        current = {**current, "skill_set_id": current.get("id")}
     return CurrentSkillSetResponse(success=True, data=current)
 
 

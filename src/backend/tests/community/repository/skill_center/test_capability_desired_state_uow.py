@@ -2477,9 +2477,16 @@ def test_deactivate_all_sets_converges_to_default_capabilities_only():
             name="tools", user_id="owner", bolt_id="bot",
             engine_type="openclaw", is_active=True, env="dev",
         )
+        # A Set left active on an engine the Bot no longer runs: "all"
+        # crosses engines, or that Set resurrects its rows on that engine's
+        # next read.
+        stale_engine = SkillSet(
+            name="stale", user_id="owner", bolt_id="bot",
+            engine_type="aicoding", is_active=True, env="dev",
+        )
         set_skill = Skill(name="tool", git_path="git://tool", env="dev")
         direct_skill = Skill(name="mine", git_path="git://mine", env="dev")
-        session.add_all([ordinary, set_skill, direct_skill])
+        session.add_all([ordinary, stale_engine, set_skill, direct_skill])
         session.flush()
         session.add_all(
             [
@@ -2509,23 +2516,19 @@ def test_deactivate_all_sets_converges_to_default_capabilities_only():
             ]
         )
 
-    result = repository.deactivate_all_sets(
-        bot_id="bot", owner_id="owner", engine_type="openclaw",
-        default_engine_types=("openclaw",),
-    )
+    result = repository.deactivate_all_sets(bot_id="bot", owner_id="owner")
 
     assert result.changed is True
     assert set(result.details["deactivated"]) == {
         str(default_skill.id), str(set_skill.id), str(direct_skill.id)
     }
     with db.orm_session() as session:
-        assert (
-            session.query(SkillSet)
-            .filter(SkillSet.name == "tools")
-            .one()
-            .is_active
-            is False
-        )
+        assert [
+            row.name
+            for row in session.query(SkillSet)
+            .filter(SkillSet.is_active.is_(True), SkillSet.is_default.is_(False))
+            .all()
+        ] == []
         assert session.query(BotSkillInstallation).count() == 0
         # A directly installed MCP is not a skill activation, and the
         # Default Set's claim is a Default capability: both survive.

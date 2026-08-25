@@ -2235,12 +2235,13 @@ async def test_deactivate_all_runs_the_uow_command_and_reconciles():
 
     assert result["changed"] is True
     assert result["deactivated"] == ["7"]
+    # "All" crosses engines: the whole chain (clear, snapshot, restore)
+    # runs unscoped, unlike the fail-closed single-Set commands.
     assert repository.deactivate_all_calls == [
         {
             "bot_id": "bot-1",
             "owner_id": "true-owner",
-            "engine_type": "openclaw",
-            "default_engine_types": ("openclaw",),
+            "engine_type": None,
         }
     ]
     assert runtime.projections == 1

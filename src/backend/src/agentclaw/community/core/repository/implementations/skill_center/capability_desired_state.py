@@ -538,7 +538,6 @@ class CapabilityDesiredStateRepository(
         bot_id: str,
         owner_id: str,
         engine_type: str | None = None,
-        default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
         """Converge the Bot to Default-Set capabilities only (spec C.6).
 
@@ -548,6 +547,12 @@ class CapabilityDesiredStateRepository(
         spec names. MCP rows are retired only where a Set claimed them: a
         directly installed MCP is not a skill activation and survives this
         wire. One transaction.
+
+        The caller passes ``engine_type=None`` to cross engines: the legacy
+        wire cleared every engine's ordinary Sets, and the row retirement is
+        engine-blind — a narrower set-state clear would leave another
+        engine's active Set to resurrect its rows on that engine's next
+        read.
         """
         with self._db.transactional_orm_session() as session:
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)

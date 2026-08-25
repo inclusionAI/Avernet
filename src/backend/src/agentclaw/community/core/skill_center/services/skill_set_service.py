@@ -444,21 +444,6 @@ class SkillSetService:
             )
         return None
 
-    def _get_current_active_skill_set_id(self) -> str | None:
-        """Get currently active skill set ID from database (is_active=1)."""
-        try:
-            # 优先从数据库查询
-            active_set = self.skill_set_repo.get_active_skill_set(
-                user_id=self.user_id or self.entity_id,
-                bolt_id=self.bot_id,
-                engine_type=self.engine_type
-            )
-            if active_set:
-                return str(active_set.get('id'))
-        except Exception as e:
-            logger.warning(f"Error getting current active skill set: {e}")
-        return None
-
     def _sync_symlinks_to_device_if_needed(
         self, user_id: str | None = None, desired_skills: list[dict] | None = None
     ) -> bool:

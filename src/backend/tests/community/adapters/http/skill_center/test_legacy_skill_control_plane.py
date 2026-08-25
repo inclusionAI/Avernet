@@ -650,3 +650,35 @@ async def test_legacy_remove_reaches_the_default_set_exclusion_wire() -> None:
         "set_id": "set-1",
         "skill_id": "7",
     }) in control_plane.calls
+
+
+@pytest.mark.asyncio
+async def test_legacy_current_read_keeps_the_historical_id_key() -> None:
+    """The deprecated wire's readers parse ``data.skill_set_id``; the
+    re-sourced answer (first ordinary active Set) must keep the alias."""
+    from agentclaw.community.adapters.http.skill_center.skills import (
+        get_current_skill_set,
+    )
+
+    class _ControlPlane:
+        def list_sets(self, **kwargs):
+            assert kwargs["bot_id"] == "bot"
+            return [
+                {"id": "9", "name": "Default", "is_default": True, "is_active": True},
+                {"id": "3", "name": "tools", "is_default": False, "is_active": True},
+            ]
+
+    response = await get_current_skill_set(
+        entity_id="owner",
+        entity_type=None,
+        bot_id="bot",
+        engine_type=None,
+        ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
+        bot_repo=_Bots(),
+        control_plane=_ControlPlane(),
+    )
+
+    assert response.success is True
+    assert response.data["skill_set_id"] == "3"
+    assert response.data["id"] == "3"
+    assert response.data["name"] == "tools"

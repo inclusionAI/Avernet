@@ -196,3 +196,33 @@ def test_lock_unavailable_logs_why_the_fence_was_unavailable(
     assert response.status_code == 409
     assert "mutation fence unavailable" in caplog.text
     assert "cache lock backend unreachable" in caplog.text
+
+
+def test_not_ready_bot_maps_to_conflict_not_a_500():
+    """The activation family's readiness refusal is a 409 on the /api wire.
+
+    ``LocalSkillNotReadyError`` is a plain Exception (not a DomainError), so
+    it needs its own app-level handler; without one, deactivate-all on a
+    not-ready Bot answered an unhandled 500.
+    """
+    from agentclaw.community.adapters.http.app import (
+        _local_skill_not_ready_handler,
+        _unhandled_exception_handler,
+    )
+    from agentclaw.community.core.skill_center.errors import (
+        LocalSkillNotReadyError,
+    )
+
+    app = FastAPI()
+    app.add_exception_handler(LocalSkillNotReadyError, _local_skill_not_ready_handler)
+    app.add_exception_handler(Exception, _unhandled_exception_handler)
+
+    @app.post("/api/skills/deactivate-all")
+    async def raiser():
+        raise LocalSkillNotReadyError()
+
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.post("/api/skills/deactivate-all")
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Bot is not ready"}
