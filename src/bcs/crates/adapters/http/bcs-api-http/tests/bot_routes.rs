@@ -406,7 +406,10 @@ async fn all_six_bot_routes_forward_verified_human_and_contract_inputs() {
                 "name": "Renamed",
                 "visibility": "protected",
                 "status": "hidden",
-                "descriptor": {"domains": [], "skills": [{"name": "plan"}]}
+                "descriptor": {"domains": [], "skills": [{"name": "plan"}]},
+                "user_visibility": "private",
+                "friend_ext": {"no_check_scope_friend_deps": ["dep-1"]},
+                "friend_check_in_strategy": "DEPT_FREE"
             }),
         ))
         .await
@@ -422,9 +425,13 @@ async fn all_six_bot_routes_forward_verified_human_and_contract_inputs() {
         .await
         .expect("mine response");
     assert_eq!(mine.status(), StatusCode::OK);
+    let mine_body = response_json(mine).await;
+    assert_eq!(mine_body["data"]["items"][0]["kind"], "human");
+    assert_eq!(mine_body["data"]["items"][0]["user_visibility"], "protected");
+    assert_eq!(mine_body["data"]["items"][0]["friend_ext"], json!({}));
     assert_eq!(
-        response_json(mine).await["data"]["items"][0]["kind"],
-        "human"
+        mine_body["data"]["items"][0]["friend_check_in_strategy"],
+        "APPROVAL"
     );
 
     let candidates = service.candidates.lock().expect("candidates lock");
@@ -464,6 +471,15 @@ async fn all_six_bot_routes_forward_verified_human_and_contract_inputs() {
     let update = update.as_ref().expect("update command");
     assert_eq!(update.patch.visibility, Some(BotVisibility::Protected));
     assert_eq!(update.patch.status, Some(BotStatus::Hidden));
+    assert_eq!(update.patch.user_visibility, Some(UserVisibility::Private));
+    assert_eq!(
+        update.patch.friend_check_in_strategy,
+        Some(FriendCheckInStrategy::DeptFree)
+    );
+    assert_eq!(
+        update.patch.friend_ext.as_ref().expect("friend ext")["no_check_scope_friend_deps"],
+        json!(["dep-1"])
+    );
     assert_eq!(
         update
             .patch
@@ -637,6 +653,9 @@ fn physical_bot() -> PhysicalBot {
         agent_code: Some("agent-code".to_string()),
         task_claim_mode: false,
         task_dream_mode: false,
+        user_visibility: UserVisibility::Protected,
+        friend_ext: Default::default(),
+        friend_check_in_strategy: FriendCheckInStrategy::Approval,
         created_at: 1,
         updated_at: 2,
     }
@@ -651,6 +670,9 @@ fn human_bot() -> HumanBot {
         status: BotStatus::Online,
         env: "dev".to_string(),
         created_by: Some("staff-1".to_string()),
+        user_visibility: UserVisibility::Protected,
+        friend_ext: Default::default(),
+        friend_check_in_strategy: FriendCheckInStrategy::Approval,
         created_at: 1,
         updated_at: 2,
     }

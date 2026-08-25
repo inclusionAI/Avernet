@@ -134,7 +134,7 @@ class TestClawMind:
         tc = translate_claw_mind(self._BODY, "result")
         assert tc.disposition == "result"
         d = tc.data.data
-        assert d["loop_task_id"] == "risk-review-pipeline"  # loop_task_id = workflow_id;node_id 空
+        assert d["loop_task_id"] == "flow-abc-123"  # loop_task_id = flow_id(run 实例,对齐 BCN);node_id 空
         assert d["workflow_source"] == "claw_mind"
         assert d["workflow_instance_id"] == "S-9"        # session_id = origin_session_id
         assert d["status"] == "succeeded"                # 从底层 flow_runs.status 推(非顶层 node_succeeded)
@@ -155,6 +155,7 @@ class TestClawMind:
             },
         }
         d = translate_claw_mind(body, "result").data.data
+        assert d["loop_task_id"] == "f"  # loop_task_id = flow_id(run 实例,对齐 BCN)
         assert d["status"] == "failed"
         assert d["workflow_instance_id"] == "S-1"
         assert d["result"]["success"] is False

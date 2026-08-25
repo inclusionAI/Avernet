@@ -51,7 +51,7 @@ pub enum FriendConnectionCreateStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FriendConnectionCreateResult {
     pub request_ids: Vec<String>,
-    pub edge_ids: Vec<String>,
+    pub edge_ids: Vec<u64>,
     pub status: FriendConnectionCreateStatus,
     pub auto_accepted: bool,
 }
@@ -60,7 +60,7 @@ pub struct FriendConnectionCreateResult {
 pub struct FriendConnectionRequestView {
     pub request_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub edge_id: Option<String>,
+    pub edge_id: Option<u64>,
     pub from_actor: FriendConnectionActor,
     pub to_actor: FriendConnectionActor,
     #[serde(default, skip_serializing_if = "Option::is_none")]

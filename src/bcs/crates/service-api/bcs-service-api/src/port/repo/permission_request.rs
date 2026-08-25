@@ -38,5 +38,5 @@ pub trait PermissionRequestRepoPort: Send + Sync {
     ) -> ServiceResult<()>;
 
     /// Back-fill `edge_id` after approval creates the edge.
-    async fn backfill_edge_id(&self, request_id: &str, env: &str, edge_id: &str) -> ServiceResult<()>;
+    async fn backfill_edge_id(&self, request_id: &str, env: &str, edge_id: u64) -> ServiceResult<()>;
 }

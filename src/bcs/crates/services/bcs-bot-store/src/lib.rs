@@ -1670,10 +1670,32 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn list_active(&self) -> Vec<RegisteredBot> {
-        // Master has all active connections in memory
+        // Master has active connections in memory, while soft-delete state is
+        // authoritative in the DB. Re-registering a retained soft-deleted row
+        // intentionally does not clear `is_deleted`, so default active reads
+        // must cross-check the DB before exposing memory entries.
+        let env = resolve_env();
+        let active_bot_ids = match self
+            .db_query(
+                "SELECT bot_uuid FROM bcs_bots WHERE env = ? AND COALESCE(is_deleted, 0) = 0",
+                vec![Value::from(env.as_str())],
+            )
+            .await
+        {
+            Ok(rows) => rows
+                .into_iter()
+                .filter_map(|row| db_get_column::<String>(&row, "bot_uuid").ok())
+                .collect::<std::collections::HashSet<_>>(),
+            Err(error) => {
+                warn!(env = %env, error = %error, "list_active: failed to load active bot ids from DB; returning empty result to preserve DB tombstone authority");
+                return Vec::new();
+            }
+        };
+
         let bots = self.bots.read().await;
         bots.values()
             .filter(|b| !b.is_expired())
+            .filter(|b| active_bot_ids.contains(&b.bot_uuid))
             .map(|b| b.to_registered_bot())
             .collect()
     }

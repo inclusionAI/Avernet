@@ -76,6 +76,13 @@ class BotCreateDeploymentMode(StrEnum):
     LOCAL = "local"
 
 
+class BotCreateTemplateValidationMode(StrEnum):
+    """Template validation contract selected by the caller's API surface."""
+
+    LEGACY = "legacy"
+    PUBLIC = "public"
+
+
 @dataclass(frozen=True)
 class BotCreateContext:
     """Caller-resolved business context required by creation policy."""
@@ -94,15 +101,23 @@ class PreparedBotCreate:
 
 def to_internal_template_config(
     value: dict[str, Any] | None,
+    *,
+    reject_server_managed_fields: bool = True,
 ) -> dict[str, Any] | None:
-    """Reject platform-managed template keys and detach caller-owned input."""
+    """Validate public ownership rules and detach caller-owned input.
+
+    The default keeps this helper's public-input behavior. Legacy internal
+    callers use the explicit opt-out because their template config is an
+    established internal snapshot that may contain platform-managed fields.
+    """
     if value is None:
         return None
-    reserved = sorted(_TEMPLATE_SERVER_RESERVED_FIELDS.intersection(value))
-    if reserved:
-        raise BotTemplateInvalidError(
-            f"template_config contains server-managed fields: {reserved}"
-        )
+    if reject_server_managed_fields:
+        reserved = sorted(_TEMPLATE_SERVER_RESERVED_FIELDS.intersection(value))
+        if reserved:
+            raise BotTemplateInvalidError(
+                f"template_config contains server-managed fields: {reserved}"
+            )
     return deepcopy(value)
 
 
@@ -147,6 +162,9 @@ def prepare_bot_create(
     bot_type: str,
     engine_type: str,
     context: BotCreateContext,
+    template_validation_mode: BotCreateTemplateValidationMode = (
+        BotCreateTemplateValidationMode.LEGACY
+    ),
 ) -> PreparedBotCreate:
     """Validate template-related creation inputs without transport dependencies."""
     if template_type is None:
@@ -158,7 +176,12 @@ def prepare_bot_create(
     # adapters/services retain their field semantics.
     if template_type != "applicationCoding":
         return PreparedBotCreate(
-            template_config=to_internal_template_config(template_config)
+            template_config=to_internal_template_config(
+                template_config,
+                reject_server_managed_fields=(
+                    template_validation_mode is BotCreateTemplateValidationMode.PUBLIC
+                ),
+            )
         )
 
     if context.deployment_mode is not BotCreateDeploymentMode.CLOUD:
@@ -176,7 +199,12 @@ def prepare_bot_create(
             "application coding is personal-space only"
         )
 
-    sanitized = to_internal_template_config(template_config)
+    sanitized = to_internal_template_config(
+        template_config,
+        reject_server_managed_fields=(
+            template_validation_mode is BotCreateTemplateValidationMode.PUBLIC
+        ),
+    )
     return PreparedBotCreate(
         template_config=_validate_application_coding_config(sanitized),
         requires_workspace_hosting=True,
@@ -284,6 +312,9 @@ class BotCreateSpec:
     share_policy: dict[str, Any] | None = None
     template_type: str | None = None
     template_config: dict[str, Any] | None = None
+    template_validation_mode: BotCreateTemplateValidationMode = (
+        BotCreateTemplateValidationMode.LEGACY
+    )
     space_id: int | None = None
     # Engine/vendor-specific inputs belong here, NOT as new named fields. The
     # spec is the contract shared by every surface, so it stays engine-agnostic
@@ -305,6 +336,7 @@ def _prepare_create(
         bot_type=spec.bot_type,
         engine_type=spec.engine_type,
         context=context,
+        template_validation_mode=spec.template_validation_mode,
     )
     if (
         prepared.requires_workspace_hosting

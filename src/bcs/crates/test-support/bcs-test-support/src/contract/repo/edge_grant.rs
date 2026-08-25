@@ -43,18 +43,18 @@ pub async fn run_edge_grant_repo_contract<T: EdgeGrantRepoPort + ?Sized>(
 
     // 3. Insert a friend edge (human → target, grant_ref = target's default).
     let edge = EdgeGrant {
-        edge_id: "eg_c1".into(),
+        edge_id: 0,
         env: env.into(),
         from_id: human.into(),
         to_id: target_bot.into(),
         grant_kind: GrantKind::PermissionProfile,
-        grant_ref_id: default_id.clone(),
+        grant_ref_id: default_id,
         rules: None,
         status: EdgeStatus::Approved,
         originator_policy_type: OriginatorPolicyType::Any,
         originator_policy_data: None,
     };
-    repo.insert_grant(edge.clone()).await.unwrap();
+    let edge_id = repo.insert_grant(edge.clone()).await.unwrap();
 
     // 4. has_friend_edge both directions (D12 symmetric).
     assert!(
@@ -69,7 +69,7 @@ pub async fn run_edge_grant_repo_contract<T: EdgeGrantRepoPort + ?Sized>(
     // 5. list_active_grants has exactly the friend edge.
     let grants = repo.list_active_grants(human, target_bot, env).await;
     assert_eq!(grants.len(), 1, "one active grant after friend insert");
-    assert_eq!(grants[0].edge_id, "eg_c1");
+    assert_eq!(grants[0].edge_id, edge_id);
 
     // 6. list_friends(human) contains target.
     assert!(
@@ -84,8 +84,8 @@ pub async fn run_edge_grant_repo_contract<T: EdgeGrantRepoPort + ?Sized>(
     //    but is NOT a friend edge (D12 discrimination: only the default-ref
     //    edge counts as a friend).
     let wrong = EdgeGrant {
-        edge_id: "eg_c_wrong".into(),
-        grant_ref_id: "wrong_id".into(),
+        edge_id: 0,
+        grant_ref_id: default_id + 1,
         ..edge.clone()
     };
     repo.insert_grant(wrong).await.unwrap();
@@ -110,12 +110,13 @@ pub async fn run_edge_grant_repo_contract<T: EdgeGrantRepoPort + ?Sized>(
     //    with the same key — even under a different `edge_id` — does NOT add a
     //    new active grant.
     let dup = EdgeGrant {
-        edge_id: "eg_c_dup".into(),
+        edge_id: 1234,
         ..edge.clone()
     };
-    repo.insert_grant(dup)
+    let dup_id = repo.insert_grant(dup)
         .await
         .expect("dup insert must not error (ON CONFLICT)");
+    assert_eq!(dup_id, edge_id, "duplicate insert returns existing id");
     assert_eq!(
         repo.list_active_grants(human, target_bot, env).await.len(),
         2,
@@ -124,7 +125,7 @@ pub async fn run_edge_grant_repo_contract<T: EdgeGrantRepoPort + ?Sized>(
 
     // 9. Revoke the friend edge → has_friend_edge false (default revoked, the
     //    wrong-ref edge cannot substitute for a friend edge).
-    repo.revoke_grant("eg_c1", env).await.unwrap();
+    repo.revoke_grant(edge_id, env).await.unwrap();
     assert!(
         !repo.has_friend_edge(human, target_bot, env).await,
         "revoked friend edge → not friends (wrong-ref does not count)"

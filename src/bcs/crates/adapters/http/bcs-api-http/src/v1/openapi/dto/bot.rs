@@ -1,8 +1,9 @@
 use bcs_service_api::application::v1::{
     BotCandidatePurpose, BotDescriptorPatch, BotKind, BotPatch, BotReachability, BotSkill,
-    BotStatus, BotVisibility,
+    BotStatus, BotVisibility, FriendCheckInStrategy, UserVisibility,
 };
 use serde::Deserialize;
+use serde_json::{Map, Value};
 
 fn default_limit() -> u64 {
     20
@@ -92,6 +93,12 @@ pub struct UpdateBotRequest {
     pub task_claim_mode: Option<bool>,
     #[serde(default)]
     pub task_dream_mode: Option<bool>,
+    #[serde(default)]
+    pub user_visibility: Option<UserVisibility>,
+    #[serde(default)]
+    pub friend_ext: Option<Map<String, Value>>,
+    #[serde(default)]
+    pub friend_check_in_strategy: Option<FriendCheckInStrategy>,
 }
 
 impl From<UpdateBotRequest> for BotPatch {
@@ -103,6 +110,9 @@ impl From<UpdateBotRequest> for BotPatch {
             descriptor: value.descriptor.map(BotDescriptorPatch::from),
             task_claim_mode: value.task_claim_mode,
             task_dream_mode: value.task_dream_mode,
+            user_visibility: value.user_visibility,
+            friend_ext: value.friend_ext,
+            friend_check_in_strategy: value.friend_check_in_strategy,
         }
     }
 }

@@ -1,5 +1,9 @@
 # Permissive Ask-User Answers Implementation Plan
 
+> **Superseded (2026-08-24):** Do not execute this plan. The approved
+> values-classification and `allowOther` behavior is documented in
+> [BCN Ask-User Custom Values Implementation Plan](../../../baas/docs/2026-08-24-bcn-ask-user-custom-values-implementation.md).
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Let BCS accept custom and skipped ask-user answers while preserving structural validation and exact Provider forwarding.

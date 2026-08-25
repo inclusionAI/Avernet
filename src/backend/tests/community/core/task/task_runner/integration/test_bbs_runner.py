@@ -3,6 +3,10 @@ import asyncio
 import json
 from unittest.mock import MagicMock
 
+from agentclaw.community.core.task.domain.models import (
+    AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status,
+    TaskExecutionGraph, TaskNode, TaskSpec,
+)
 from agentclaw.community.core.task.task_runner.integration.bbs_runner import notify
 
 
@@ -10,11 +14,23 @@ def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
-def _execution_graph(task_id="t1"):
-    g = MagicMock()
-    g.task_id = task_id
-    g.tasks = []
-    return g
+def _execution_graph(task_id="t1", objective="整理基础架构方向架构师名册"):
+    """真实最小 TaskExecutionGraph:一个根 TaskNode(BBS 升态)。
+
+    bid prompt 现内联 task snapshot,需真实图(MagicMock 会让 json.dumps 失败);根 node_id == task_id。
+    """
+    root = TaskNode(
+        node_id=task_id, task_id=task_id, status=Status.HUNG,
+        task_spec=TaskSpec(
+            metadata=Metadata(task_id=task_id, title="架构师名册", instruction="整理3位架构师"),
+            context=Context(background="基础架构方向"),
+            goal=Goal(objective=objective,
+                      acceptances=[AcceptanceCriteria("ac_arch", "给出3位架构师姓名/角色+职责")]),
+        ),
+        run_info=RuntimeInfo(),
+        node_run_graph=None,  # type: ignore[arg-type]
+    )
+    return TaskExecutionGraph(run_id=1, loop_round=2, status=Status.HUNG, tasks=[root], task_id=task_id)
 
 
 class _FakeBot:
@@ -22,8 +38,10 @@ class _FakeBot:
         """rates: {bot_id: completion_rate or None (None=simulate error)}"""
         self._rates = rates
         self.sent_messages: list[tuple] = []
+        self.bid_prompts: list[str] = []
 
     async def send_and_wait_async(self, *, bot_id, message, metadata=None, timeout=180.0, poll_interval=2.0):
+        self.bid_prompts.append(message)
         rate = self._rates.get(bot_id)
         if rate is None:
             raise RuntimeError("bot error")
@@ -76,13 +94,16 @@ class _FakeGraph:
             self.cleared = True
 
 
+_GOAL = "整理基础架构方向架构师名册"
+
+
 def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     """bid→select→claim→send: picks highest completion_rate, claims root, sends task message."""
     roster = _roster("A", "B", "C")
     bot = _FakeBot(rates={"A": 50, "B": 90, "C": 70})
     bcn = _FakeBcn(roster)
     graph = _FakeGraph()
-    g = _execution_graph()
+    g = _execution_graph("t1", _GOAL)
 
     _run(notify(g, bcn=bcn, bot=bot, graph=graph, backend_url="http://localhost:8888", skill_name="bbs-relay-single-task"))
 
@@ -95,6 +116,11 @@ def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     assert "http://localhost:8888" in msg_text
     assert "B" in msg_text  # winner's own bot_id
     assert not graph.cleared  # send succeeded, claim not rolled back
+    # bid prompt 内联了 task snapshot(goal objective 嵌入),而非只发 task_id
+    assert bot.bid_prompts, "bid 未发出(空 bid_prompts)"
+    assert any(_GOAL in p for p in bot.bid_prompts), "bid prompt 未内联 goal snapshot"
+    # dispatch 消息也内联了 task snapshot(skill 据快照归纳剩余事项,免读 dashboard)
+    assert _GOAL in msg_text, "dispatch msg 未内联 snapshot"
 
 
 def test_notify_empty_roster_returns_silently():
@@ -105,6 +131,7 @@ def test_notify_empty_roster_returns_silently():
     _run(notify(_execution_graph("t2"), bcn=bcn, bot=bot, graph=graph, backend_url="http://x", skill_name="s"))
     assert graph.claimed is None
     assert bot.sent_messages == []
+    assert bot.bid_prompts == []
 
 
 def test_notify_all_bids_failed_returns_silently():
