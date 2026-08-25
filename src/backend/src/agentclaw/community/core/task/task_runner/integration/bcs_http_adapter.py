@@ -138,19 +138,21 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
             headers["Idempotency-Key"] = idempotency_key
         if extra_headers:
             headers.update(extra_headers)
+        _t0 = time.monotonic()
         logger.info(
-            "[task][bcs_http] request method=%s path=%s json_keys=%s idempotency=%s",
-            method, path, sorted((json or {}).keys()), bool(idempotency_key),
+            "[task][bcs_http] >>> request method=%s path=%s base_url=%s json_keys=%s idempotency=%s",
+            method, path, self._t.base_url, sorted((json or {}).keys()), bool(idempotency_key),
         )
         try:
             async with self._client_for_current_loop() as client:
                 r = await client.request(method, path, json=json, headers=headers)
         except Exception:
-            logger.exception("[task][bcs_http] request transport failed method=%s path=%s", method, path)
+            logger.exception("[task][bcs_http] <<< request transport failed method=%s path=%s elapsed_ms=%s",
+                             method, path, int((time.monotonic() - _t0) * 1000))
             raise
         logger.info(
-            "[task][bcs_http] response method=%s path=%s status=%s body=%s",
-            method, path, r.status_code, _response_summary(r),
+            "[task][bcs_http] <<< response method=%s path=%s status=%s elapsed_ms=%s body=%s",
+            method, path, r.status_code, int((time.monotonic() - _t0) * 1000), _response_summary(r),
         )
         try:
             _map_status(r)
@@ -213,8 +215,13 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         params: dict[str, Any] = {"limit": limit}
         if since_msg_id:
             params["since_msg_id"] = since_msg_id
+        logger.info("[task][bcs_http] >>> get_session_messages GET path=%s base_url=%s limit=%s since=%s",
+                    path, self._t.base_url, limit, since_msg_id)
+        _t0 = time.monotonic()
         async with self._client_for_current_loop() as client:
             r = await client.request("GET", path, params=params, headers=headers)
+        logger.info("[task][bcs_http] <<< get_session_messages GET path=%s status=%s elapsed_ms=%s body=%s",
+                    path, r.status_code, int((time.monotonic() - _t0) * 1000), _response_summary(r))
         _map_status(r)
         return r.json()
 

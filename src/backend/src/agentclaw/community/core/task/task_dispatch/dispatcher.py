@@ -50,11 +50,13 @@ class TaskDispatcher:
             toDoTaskList[0].task_id if toDoTaskList else ""
         ) if toDoTaskList else None
         import asyncio as _aio
+        logger.info("[task][dispatch] dispatch 入口 nodes=%s", [n.node_id for n in toDoTaskList])
         # v4:并发搜推(gather,无并发限流;catalog IO 耗时,串行是瓶颈)。BBS 节点跳过策略直接维持。
         async def _one(node: "TaskNode"):
             # 容错:搜推异常(无响应/推理失败/端口错)不崩整批,留 PENDING 标 dispatch_error 交 harness 重试搜推
             try:
                 if node.run_info.run_mode == "bbs":
+                    logger.info("[task][dispatch] node=%s run_mode=bbs 退化维持", node.node_id)
                     return node  # BBS 节点退化维持
                 result = await self._select_and_apply(node, graph)
                 if result.outcome == SearchOutcome.HIT_SINGLE:
@@ -68,6 +70,9 @@ class TaskDispatcher:
                     node.run_info.extend_props["pending_group_formation"] = result.group_formation
                 else:  # MISS
                     node.run_info.extend_props["miss_events"] = [result.miss_reason or "no_bot"]
+                logger.info("[task][dispatch] node=%s outcome=%s run_mode=%s assignee=%s",
+                            node.node_id, result.outcome, node.run_info.run_mode,
+                            node.run_info.assignee or "<group pending/miss>")
                 return node
             except Exception as ex:  # noqa: BLE001  搜推异常→吞掉,留 PENDING 交 harness 按超时重试
                 logger.warning("[task][dispatch] node=%s 搜推异常→留 PENDING 交 harness: %s", node.node_id, ex)

@@ -93,6 +93,14 @@ class ExecutionEngine:
         self._planner = self._build_planner()
         self._dispatcher = self._build_dispatcher()
         self._runner = self._build_runner()
+        logger.info(
+            "[task][engine] 构造完成 bot=%s bcs=%s discover=%s bcn=%s executor=%s",
+            type(bot).__name__ if bot is not None else "None",
+            type(bcs).__name__ if bcs is not None else "None",
+            type(discover).__name__ if discover is not None else "None",
+            "BcnService" if bcn is not None else "None",
+            type(self._executor).__name__ if self._executor is not None else "None(退桩)",
+        )
 
     # ===== 任务类型分流 seams(委托 self._runner;TaskService.execute 调用)=====
     async def trigger_single_bot_workflow(self, *, task_id: str, bot_id: str,
@@ -110,6 +118,13 @@ class ExecutionEngine:
     # ===== protected 工厂方法(测试子类可覆写注入 stub 策略/投递;引擎自带默认接真实端口)=====
     def _build_executor(self):
         if self._bot is None or self._bcs is None:
+            logger.warning(
+                "[task][engine] execution_backend 不装配(bot=%s bcs=%s)→ form_coop_group/start_run/"
+                "trigger_workflow/run_bbs 全退 Avernet 桩(grp_<8hex>/stub_<8hex>/无 poller,任务卡 RUNNING 不收敛)。"
+                "corp 排查: 确认 DEPLOY_PROFILE=corp + grep [task][corp-task] not configured 看哪个端口空。",
+                "None" if self._bot is None else type(self._bot).__name__,
+                "None" if self._bcs is None else type(self._bcs).__name__,
+            )
             return None
         from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
         from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
@@ -128,6 +143,8 @@ class ExecutionEngine:
         import threading as _t
         self._poller_thread = _t.Thread(target=poller.run_poll_loop, daemon=True, name="task-exec-poller")
         self._poller_thread.start()
+        logger.info("[task][engine] execution_backend 已装配 TaskExecutor + poller 启动 bot=%s bcs=%s",
+                    type(self._bot).__name__, type(self._bcs).__name__)
         return exe
 
     def _build_planner(self):
