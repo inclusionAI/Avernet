@@ -1,5 +1,3 @@
-from functools import partial
-
 from dependency_injector import containers, providers
 
 from secbaas.community.api.health_check.bot import BotHealthCheckerConfig
@@ -662,12 +660,6 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         converter_factories=providers.Dict(
             {
                 "default": providers.Object(DefaultStreamConverter),
-                "bcn": providers.Object(
-                    partial(
-                        DefaultStreamConverter,
-                        conversion_logging_enabled=True,
-                    )
-                ),
             }
         ),
     )

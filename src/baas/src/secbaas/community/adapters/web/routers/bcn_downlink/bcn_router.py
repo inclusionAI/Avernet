@@ -315,7 +315,7 @@ async def _dispatch_chat_send_stream(
     except ValueError as exc:
         raise BcnInvalidRequestError(str(exc)) from exc
 
-    converter = converter_factory.create("bcn")
+    converter = converter_factory.create("default")
 
     def on_error(e: Exception) -> str:
         logger.exception("[chat.send.stream] Unexpected error: run_id=%s", req.id)

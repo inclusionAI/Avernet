@@ -5,13 +5,11 @@ config.from_dict.  Services requiring repo/infra deps are verified
 structurally — they exist and accept overrides.
 """
 
-import logging
 from unittest.mock import MagicMock
 
 import pytest
 
 from secbaas.community.api.health_check.bot import BotHealthCheckerConfig
-from secbaas.community.api.sse import StreamChunk
 from secbaas.community.bootstrap._core_services import CoreServiceContainer
 
 
@@ -66,39 +64,13 @@ class TestCoreServiceContainerStandalone:
         for attr in expected:
             assert hasattr(container, attr), f"Missing provider: {attr}"
 
-    def test_stream_converter_factory_enables_message_logging_only_for_bcn(
-        self,
-        monkeypatch,
-        caplog,
-    ):
-        conversion_logger = logging.getLogger("test.assembled-converter")
-        conversion_logger.handlers.clear()
-        conversion_logger.propagate = True
-        monkeypatch.setattr(
-            "secbaas.community.core.service.sse._default_converter.logger",
-            conversion_logger,
-        )
-        caplog.set_level(logging.INFO, logger=conversion_logger.name)
+    def test_stream_converter_factory_only_registers_default(self):
         factory = CoreServiceContainer().stream_converter_factory()
 
-        factory.create("default").convert(
-            StreamChunk(type="delta", content="default"),
-            run_id="run-default",
-        )
-        factory.create("bcn").convert(
-            StreamChunk(type="delta", content="bcn"),
-            run_id="run-bcn",
-        )
+        assert factory.create("default").name() == "default"
 
-        messages = [
-            record.getMessage()
-            for record in caplog.records
-            if record.name == conversion_logger.name
-            and record.getMessage().startswith("[convert]")
-        ]
-        assert len(messages) == 1
-        assert "run_id=run-bcn" in messages[0]
-        assert "run-default" not in messages[0]
+        with pytest.raises(KeyError, match="SSE converter not registered: bcn"):
+            factory.create("bcn")
 
     def test_bot_health_checker_config_resolves_with_config(self):
         """bot_health_checker_config resolves when config is set."""

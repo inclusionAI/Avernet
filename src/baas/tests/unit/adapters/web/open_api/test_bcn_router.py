@@ -308,7 +308,7 @@ def _chat_send_request() -> ChatSendRequest:
 
 
 @pytest.mark.asyncio
-async def test_stream_dispatch_selects_bcn_converter():
+async def test_stream_dispatch_selects_default_converter():
     converter_factory = _ConverterFactory()
 
     response = await _dispatch_chat_send_stream(
@@ -319,7 +319,7 @@ async def test_stream_dispatch_selects_bcn_converter():
     async for _ in response.body_iterator:
         pass
 
-    assert converter_factory.requested_names == ["bcn"]
+    assert converter_factory.requested_names == ["default"]
 
 
 @pytest.mark.asyncio
