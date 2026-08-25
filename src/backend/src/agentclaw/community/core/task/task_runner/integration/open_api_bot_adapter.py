@@ -152,8 +152,8 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
             loop.close()
 
     async def send_and_wait_async(self, *, bot_id: str, message: str,
-                                   metadata: dict[str, Any] | None, timeout: float,
-                                   poll_interval: float) -> dict[str, Any]:
+                                   metadata: dict[str, Any] | None = None, timeout: float = 180.0,
+                                   poll_interval: float = 2.0) -> dict[str, Any]:
         await self.ensure_grant(bot_id)
         sent = await self.send_message(bot_id=bot_id, message=message, metadata=metadata or {})
         run_id = sent.run_id
