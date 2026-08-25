@@ -46,9 +46,7 @@ from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
     MountPointEntry,
     Storage,
 )
-
-#: Config value that selects this composer.
-ACK_DEPLOY_RUNTIME = "ack"
+from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 
 _UNIMPLEMENTED = (
     "AckDeployConfigComposer.{method} is not implemented yet — the ACK/ECI "
@@ -61,8 +59,8 @@ class AckDeployConfigComposer(DeployConfigComposer):
     """Compose the create-bot payload for the open-source image on ACK/ECI."""
 
     @property
-    def name(self) -> str:
-        return ACK_DEPLOY_RUNTIME
+    def name(self) -> DeployRuntime:
+        return DeployRuntime.ACK
 
     def build_start_command(self, ctx: BotDeployContext) -> str:
         raise NotImplementedError(

@@ -15,7 +15,6 @@ import pytest
 
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.deploy.ack_composer import (
-    ACK_DEPLOY_RUNTIME,
     AckDeployConfigComposer,
 )
 from agentclaw.community.core.service_bot.services.deploy.deploy_config_composer import (
@@ -23,13 +22,15 @@ from agentclaw.community.core.service_bot.services.deploy.deploy_config_composer
     DeployConfigComposer,
 )
 from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
+    MountPermission,
     MountPointEntry,
     Storage,
+    StorageType,
 )
 from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
-    MANAGED_DEPLOY_RUNTIME,
     ManagedDeployConfigComposer,
 )
+from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 from agentclaw.community.plugins.local.outbound_rules import NoopOutboundRuleProvider
 
@@ -55,8 +56,8 @@ class _StubComposer(DeployConfigComposer):
         self.contexts: list[BotDeployContext] = []
 
     @property
-    def name(self) -> str:
-        return "stub"
+    def name(self) -> DeployRuntime:
+        return DeployRuntime.MANAGED
 
     def build_start_command(self, ctx: BotDeployContext) -> str:
         self.contexts.append(ctx)
@@ -66,7 +67,9 @@ class _StubComposer(DeployConfigComposer):
         self.contexts.append(ctx)
         return [
             MountPointEntry(
-                remote_dir="/stub", local_dir="/mnt/stub", permission="READ_ONLY"
+                remote_dir="/stub",
+                local_dir="/mnt/stub",
+                permission=MountPermission.READ_ONLY,
             )
         ]
 
@@ -142,18 +145,18 @@ class TestTheContract:
         with pytest.raises(TypeError, match="build_mount_points|build_storage"):
             Partial()
 
-    def test_names_match_the_config_values_that_select_them(self):
+    def test_names_are_the_runtime_they_build_for(self):
         """The name is what the boot log prints and what ``deploy_runtime``
-        matches; a drift between them makes the log lie about the payload."""
+        selects; typing it as the enum is what stops the two from drifting."""
         assert (
             ManagedDeployConfigComposer(
                 storage_path=MagicMock(),
                 sandbox_registry=MagicMock(),
                 bot_repo=MagicMock(),
             ).name
-            == MANAGED_DEPLOY_RUNTIME
+            is DeployRuntime.MANAGED
         )
-        assert AckDeployConfigComposer().name == ACK_DEPLOY_RUNTIME
+        assert AckDeployConfigComposer().name is DeployRuntime.ACK
 
 
 @pytest.mark.unit
@@ -161,7 +164,7 @@ class TestBaasServiceDelegates:
     def test_the_payload_carries_what_the_composer_returned(self):
         composer = _StubComposer(
             storage=Storage(
-                type="nas",
+                type=StorageType.NAS,
                 path="/stub/home",
                 storage_id="stub-storage",
                 quota="1Gi",

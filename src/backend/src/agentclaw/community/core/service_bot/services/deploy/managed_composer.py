@@ -38,8 +38,10 @@ from agentclaw.community.core.service_bot.services.deploy.deploy_config_composer
     DeployConfigComposer,
 )
 from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
+    MountPermission,
     MountPointEntry,
     Storage,
+    StorageType,
 )
 from agentclaw.community.core.service_bot.types import PublishStage, is_editable_bot
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
@@ -47,15 +49,13 @@ from agentclaw.community.core.workspace.engine_sandbox import (
     EngineSandboxProvider,
     EngineSandboxRegistry,
 )
+from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
     from agentclaw.community.core.repository.protocols.bot import BotRepository
 
 logger = get_logger()
-
-#: Config value that selects this composer.
-MANAGED_DEPLOY_RUNTIME = "managed"
 
 
 class ManagedDeployConfigComposer(DeployConfigComposer):
@@ -75,8 +75,8 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         self._bot_repo = bot_repo
 
     @property
-    def name(self) -> str:
-        return MANAGED_DEPLOY_RUNTIME
+    def name(self) -> DeployRuntime:
+        return DeployRuntime.MANAGED
 
     # ── DeployConfigComposer ────────────────────────────────────────────
 
@@ -409,7 +409,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
             MountPointEntry(
                 remote_dir="/agentclaw-sys",
                 local_dir="/mnt/sys",
-                permission="READ_ONLY",
+                permission=MountPermission.READ_ONLY,
             ),
         ]
 
@@ -420,7 +420,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
                 MountPointEntry(
                     remote_dir=f"/{bolt_data}",
                     local_dir="/opt/nfs/bot-data",
-                    permission="READ_WRITE",
+                    permission=MountPermission.READ_WRITE,
                 ),
             )
         else:
@@ -429,12 +429,12 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
                     MountPointEntry(
                         remote_dir=f"/{bolt_data}",
                         local_dir="/home/admin/nfs/bot-data",
-                        permission="READ_WRITE",
+                        permission=MountPermission.READ_WRITE,
                     ),
                     MountPointEntry(
                         remote_dir=f"/{skill_repo}",
                         local_dir=skills_local_dir,
-                        permission="READ_ONLY",
+                        permission=MountPermission.READ_ONLY,
                     ),
                 ]
             )
@@ -445,7 +445,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
                 MountPointEntry(
                     remote_dir=mount_path,
                     local_dir=mount_path,
-                    permission="READ_WRITE",
+                    permission=MountPermission.READ_WRITE,
                 ),
             )
             logger.info(
@@ -521,7 +521,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         sessions_dir = provider.get_sessions_dir()
 
         storage = Storage(
-            type="nas",
+            type=StorageType.NAS,
             storage_id=sessions_storage_id,
             quota="1Gi",
             permission="0777",
@@ -549,7 +549,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
             nas_storage_id = f"{nas_storage_id}_{{device_uuid}}"
 
         storage = Storage(
-            type="nas",
+            type=StorageType.NAS,
             storage_id=nas_storage_id,
             quota="1Gi",
             permission="0777",

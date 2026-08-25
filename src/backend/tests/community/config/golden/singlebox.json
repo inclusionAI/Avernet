@@ -231,7 +231,6 @@
       "api_base_url": "http://localhost:8890",
       "api_base_url_pre": "http://localhost:8888",
       "default_ttl_minutes": 1440,
-      "deploy_runtime": "managed",
       "desktop_template_uuid": "TEMPLATE-f996ecc77d224ef7bd80757d8d2bcd0d",
       "desktop_ttl_minutes": 0,
       "personal_bot_template_uuid": "TEMPLATE-54942a40aa794eaaae2be166f94890ed",
@@ -272,6 +271,9 @@
         "http://localhost:8080",
         "http://localhost:8888"
       ]
+    },
+    "deploy_runtime": {
+      "runtime": "managed"
     },
     "desktop_bot_periodic_scan": {
       "apply_owner_whitelist": [],

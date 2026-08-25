@@ -680,26 +680,26 @@ class BaasService:  # pragma: no cover
         # 根据白名单选择挂载本地 session 目录或 home 目录到远端 NAS。
         # 整条 payload 链路只查询一次白名单，start_cmd 与 storage 共用同一结果；
         # 未命中或读取异常时默认沿用 session 目录，保证灰度切换安全。
-        if migration_path:
+        # Resolved once, before anything reads it: the migration path is
+        # rewritten according to it, and the composer is handed the decision
+        # rather than the whitelist. The mount and storage builders used to
+        # each re-ask on a ``None``, so one payload could make three reads.
+        #
+        # A caller that states the answer keeps it. That is a change only in
+        # theory: this used to re-resolve whenever ``migration_path`` was set,
+        # overriding the caller — but every caller that passes the flag
+        # (bot_service restart, baas_device_service allocate) passes an empty
+        # migration path, so the override never fired.
+        if mount_home_dir_storage is None:
             mount_home_dir_storage = self._should_mount_home_dir_storage(
                 owner_id=owner_id,
                 bot_id=bot_id,
             )
+
+        if migration_path:
             migration_path = self._normalize_migration_path_for_mount(
                 migration_path=migration_path,
                 mount_home_dir_storage=mount_home_dir_storage,
-            )
-        elif mount_home_dir_storage is None:
-            # Resolved here rather than inside the mount and storage builders,
-            # which used to each re-ask on a ``None``. One read per payload, and
-            # the composer is handed a decision instead of a whitelist.
-            #
-            # The ``owner_id`` guard is the mount builder's: the whitelist keys
-            # on the owner, so with no owner there is no membership to look up
-            # and the answer is the fail-closed default (sessions directory).
-            mount_home_dir_storage = bool(owner_id) and self._should_mount_home_dir_storage(
-                owner_id=owner_id,
-                bot_id=bot_id,
             )
 
         # Per-bot startup script. No production caller passes one — create,
@@ -721,7 +721,7 @@ class BaasService:  # pragma: no cover
             bot_type=bot_type,
             engine=engine,
             migration_path=migration_path,
-            mount_home_dir_storage=bool(mount_home_dir_storage),
+            mount_home_dir_storage=mount_home_dir_storage,
             stage=stage,
             version=version,
             mount_path=mount_path,

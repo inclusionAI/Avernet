@@ -26,60 +26,71 @@ from agentclaw.community.di import config as cfg
 from agentclaw.community.di.modules import config_module
 from agentclaw.community.di.modules.config_module import ConfigModule
 from agentclaw.community.di.modules.service_bot_module import ServiceBotModule
+from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 
 
-def _composer(deploy_runtime: str):
+def _composer(runtime: DeployRuntime):
     return ServiceBotModule().deploy_config_composer(
-        baas=cfg.BaasConfig(deploy_runtime=deploy_runtime),
+        deploy_runtime=cfg.DeployRuntimeConfig(runtime),
         bot_repo=MagicMock(),
         sandbox_registry=MagicMock(),
     )
 
 
-def _baas_config(monkeypatch, user_config: dict) -> cfg.BaasConfig:
+def _deploy_runtime(monkeypatch, user_config: dict) -> cfg.DeployRuntimeConfig:
     monkeypatch.setattr(config_module, "_user_config", lambda: dict(user_config))
-    return ConfigModule().baas()
+    return ConfigModule().deploy_runtime()
 
 
 class TestSelection:
     def test_managed_is_the_default(self):
-        assert cfg.BaasConfig().deploy_runtime == "managed"
-        assert isinstance(_composer("managed"), ManagedDeployConfigComposer)
+        assert cfg.DeployRuntimeConfig().runtime is DeployRuntime.MANAGED
+        assert isinstance(
+            _composer(DeployRuntime.MANAGED), ManagedDeployConfigComposer
+        )
 
     def test_ack_selects_the_ack_composer(self):
-        assert isinstance(_composer("ack"), AckDeployConfigComposer)
+        assert isinstance(_composer(DeployRuntime.ACK), AckDeployConfigComposer)
 
-    @pytest.mark.parametrize("value", ["", "Managed", "k8s", "arca"])
-    def test_an_unknown_runtime_fails_the_boot(self, value):
-        with pytest.raises(ValueError, match="unknown baas.deploy_runtime"):
-            _composer(value)
-
-    def test_the_error_names_the_values_that_would_have_worked(self):
-        with pytest.raises(ValueError) as exc:
-            _composer("aliyun")
-
-        message = str(exc.value)
-        assert "'managed'" in message
-        assert "'ack'" in message
+    @pytest.mark.parametrize("runtime", list(DeployRuntime))
+    def test_every_runtime_has_a_composer(self, runtime):
+        """The mapping is total over the enum: adding a member without wiring a
+        composer fails here rather than at some deployment's first create."""
+        assert _composer(runtime).name is runtime
 
 
 class TestConfigBlock:
     def test_absent_block_keeps_the_managed_image(self, monkeypatch):
-        assert _baas_config(monkeypatch, {}).deploy_runtime == "managed"
+        assert _deploy_runtime(monkeypatch, {}).runtime is DeployRuntime.MANAGED
 
     def test_absent_key_keeps_the_managed_image(self, monkeypatch):
-        config = _baas_config(monkeypatch, {"baas": {"tenant": "community"}})
+        config = _deploy_runtime(monkeypatch, {"baas": {"tenant": "community"}})
 
-        assert config.deploy_runtime == "managed"
+        assert config.runtime is DeployRuntime.MANAGED
 
     def test_the_yaml_value_wins(self, monkeypatch):
-        config = _baas_config(monkeypatch, {"baas": {"deploy_runtime": "ack"}})
+        config = _deploy_runtime(monkeypatch, {"baas": {"deploy_runtime": "ack"}})
 
-        assert config.deploy_runtime == "ack"
+        assert config.runtime is DeployRuntime.ACK
 
     def test_surrounding_whitespace_is_not_a_different_runtime(self, monkeypatch):
         """A trailing space in a yaml overlay would otherwise fail the boot with
         an error that looks identical to the value that works."""
-        config = _baas_config(monkeypatch, {"baas": {"deploy_runtime": "  ack "}})
+        config = _deploy_runtime(
+            monkeypatch, {"baas": {"deploy_runtime": "  ack "}}
+        )
 
-        assert config.deploy_runtime == "ack"
+        assert config.runtime is DeployRuntime.ACK
+
+    @pytest.mark.parametrize("value", ["", "Managed", "k8s", "arca"])
+    def test_an_unknown_runtime_fails_at_config_load(self, monkeypatch, value):
+        with pytest.raises(ValueError, match="unknown baas.deploy_runtime"):
+            _deploy_runtime(monkeypatch, {"baas": {"deploy_runtime": value}})
+
+    def test_the_error_names_the_values_that_would_have_worked(self, monkeypatch):
+        with pytest.raises(ValueError) as exc:
+            _deploy_runtime(monkeypatch, {"baas": {"deploy_runtime": "aliyun"}})
+
+        message = str(exc.value)
+        assert "'managed'" in message
+        assert "'ack'" in message

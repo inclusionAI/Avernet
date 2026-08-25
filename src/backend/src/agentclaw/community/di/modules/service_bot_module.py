@@ -99,16 +99,15 @@ from agentclaw.community.core.service_bot.services.deploy.external_compose_produ
     ExternalComposeProducer,
 )
 from agentclaw.community.core.service_bot.services.deploy.ack_composer import (
-    ACK_DEPLOY_RUNTIME,
     AckDeployConfigComposer,
 )
 from agentclaw.community.core.service_bot.services.deploy.deploy_config_composer import (
     DeployConfigComposer,
 )
 from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
-    MANAGED_DEPLOY_RUNTIME,
     ManagedDeployConfigComposer,
 )
+from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.core.service_bot.services.deploy.producer import (
     DeployArtifactProducerRouter,
 )
@@ -198,34 +197,35 @@ class ServiceBotModule(Module):
     @inject
     def deploy_config_composer(
         self,
-        baas: cfg.BaasConfig,
+        deploy_runtime: cfg.DeployRuntimeConfig,
         bot_repo: BotRepository,
         sandbox_registry: EngineSandboxRegistry,
     ) -> DeployConfigComposer:
         """Select the composer for the container this deployment runs.
 
         Rule 14: the choice is config, made once here, never branched on
-        downstream. An unrecognized value raises instead of defaulting to
-        ``managed`` — a typo that silently composed the managed image's boot
-        chain for an ACK deployment would produce bots that start and do not
-        work, which costs far more than a failed boot.
+        downstream. The value is already validated against
+        :class:`DeployRuntime` by ``ConfigModule.deploy_runtime``, so this is a
+        total mapping over the enum — a member added there without a composer
+        here is a ``ValueError`` at wiring time rather than a silent default.
         """
         from agentclaw.community.core.storage import path as storage_path
 
-        if baas.deploy_runtime == ACK_DEPLOY_RUNTIME:
-            composer: DeployConfigComposer = AckDeployConfigComposer()
-        elif baas.deploy_runtime == MANAGED_DEPLOY_RUNTIME:
-            composer = ManagedDeployConfigComposer(
-                storage_path=storage_path,
-                sandbox_registry=sandbox_registry,
-                bot_repo=bot_repo,
-            )
-        else:
-            raise ValueError(
-                f"unknown baas.deploy_runtime {baas.deploy_runtime!r}; "
-                f"expected one of "
-                f"{MANAGED_DEPLOY_RUNTIME!r}, {ACK_DEPLOY_RUNTIME!r}"
-            )
+        composer: DeployConfigComposer
+        match deploy_runtime.runtime:
+            case DeployRuntime.MANAGED:
+                composer = ManagedDeployConfigComposer(
+                    storage_path=storage_path,
+                    sandbox_registry=sandbox_registry,
+                    bot_repo=bot_repo,
+                )
+            case DeployRuntime.ACK:
+                composer = AckDeployConfigComposer()
+            case unhandled:
+                raise ValueError(
+                    f"no DeployConfigComposer wired for deploy runtime "
+                    f"{unhandled!r}"
+                )
 
         logger.info(
             "[NEW-ARCH] DeployConfigComposer selected: %s", composer.name

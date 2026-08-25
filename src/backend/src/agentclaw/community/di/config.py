@@ -16,6 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentclaw.community.kernel.deploy_runtime import DeployRuntime
+
 
 # ── Access policy ────────────────────────────────────────────────────────
 #
@@ -332,14 +334,26 @@ class BaasConfig:
     teclaw_template_uuid: str = ""
     # Personal bot via BaaS (poolab template) — deploy supplies it.
     personal_bot_template_uuid: str = ""
-    # Which container this deployment runs, and therefore which
-    # ``DeployConfigComposer`` shapes its create-bot payload:
-    # ``managed`` (the managed bot image) or ``ack`` (the open-source engine
-    # image on Aliyun ACK/ECI). Selected in ``ServiceBotModule.baas_service``;
-    # an unknown value fails at boot rather than falling back, because a
-    # deployment that silently composed the wrong image's payload would create
-    # bots that start and do not work.
-    deploy_runtime: str = "managed"
+
+
+@dataclass(frozen=True)
+class DeployRuntimeConfig:
+    """Which container this deployment runs its bots in.
+
+    Its own type rather than a field on ``BaasConfig`` because it selects a
+    component: ``ServiceBotModule`` injects this to pick a
+    ``DeployConfigComposer``, and it has no business receiving the BaaS
+    endpoint and template uuids to read one enum out of them.
+
+    Sourced from ``baas.deploy_runtime`` — it stays in the ``baas`` yaml block
+    because it shapes exactly one thing, the payload posted to the BaaS
+    create-bot API. The default keeps every existing deployment on the managed
+    bot image; an unrecognized value fails at config load rather than falling
+    back, because a deployment that silently composed the wrong image's payload
+    would create bots that start and do not work.
+    """
+
+    runtime: DeployRuntime = DeployRuntime.MANAGED
 
 
 @dataclass(frozen=True)

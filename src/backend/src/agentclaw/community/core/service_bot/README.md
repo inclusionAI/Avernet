@@ -45,6 +45,7 @@ internal_dependencies:
   - agentclaw.community.di
   - agentclaw.community.kernel.bot_config
   - agentclaw.community.kernel.device_dto    # neutral OutBound / ResourceSpecification DTOs (B6)
+  - agentclaw.community.kernel.deploy_runtime    # DeployRuntime — names which composer shapes the create-bot payload
   - agentclaw.community.kernel.lifecycle    # PublishTaskLifecycle registers durable task handlers
   - agentclaw.community.log
   - agentclaw.community.plugin_api.approval_workflow           # antprocess approval workflow for publish approval

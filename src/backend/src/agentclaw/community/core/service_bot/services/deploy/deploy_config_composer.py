@@ -40,6 +40,7 @@ from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
     MountPointEntry,
     Storage,
 )
+from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 
 __all__ = [
     "BotDeployContext",
@@ -87,8 +88,9 @@ class DeployConfigComposer(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def name(self) -> str:
-        """Stable identifier, matching the config value that selects it."""
+    def name(self) -> DeployRuntime:
+        """Which runtime this composer builds for — the same value that selects
+        it in config, so the boot log and ``baas.deploy_runtime`` cannot drift."""
 
     @abc.abstractmethod
     def build_start_command(self, ctx: BotDeployContext) -> str:
