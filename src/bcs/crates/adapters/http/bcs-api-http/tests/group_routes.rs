@@ -1132,14 +1132,14 @@ async fn create_group_threads_explicit_originator() {
 }
 
 #[tokio::test]
-async fn list_public_groups_parses_query_and_routes_before_group_id() {
+async fn list_public_groups_parses_query() {
     let service = Arc::new(FakeGroupService::default());
     let app = test_router(service.clone());
 
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/collaboration/groups/public?offset=0&limit=20&strategy=state_machine&q=plan",
+            "/openapi/v1/collaboration/public-groups?offset=0&limit=20&strategy=state_machine&q=plan",
             Value::Null,
         ))
         .await
@@ -1169,7 +1169,7 @@ async fn list_public_groups_applies_default_limit_and_rejects_unknown_fields() {
         .clone()
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/collaboration/groups/public",
+            "/openapi/v1/collaboration/public-groups",
             Value::Null,
         ))
         .await
@@ -1189,7 +1189,7 @@ async fn list_public_groups_applies_default_limit_and_rejects_unknown_fields() {
     let unknown = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/collaboration/groups/public?kind=normal",
+            "/openapi/v1/collaboration/public-groups?kind=normal",
             Value::Null,
         ))
         .await
