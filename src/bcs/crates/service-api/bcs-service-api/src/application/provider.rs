@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use bcs_domain::{
-    ProviderAuthMode, ProviderBotBinding, ProviderBotConnectionMode, ProviderCoordinationConfig,
-    ProviderOrganizationManagementConfig, ProviderRecord, Skill,
+    ActorStatus, ProviderAuthMode, ProviderBotBinding, ProviderBotConnectionMode,
+    ProviderCoordinationConfig, ProviderOrganizationManagementConfig, ProviderRecord, Skill,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -9,6 +9,7 @@ use serde_json::{Map, Value};
 use crate::{ServiceResult, TaskModeMatch};
 
 use super::message_flow::{BotEventOutcome, ChatEventState, ProviderEventIngestCommand};
+use super::v1::UserVisibility;
 
 /// Default lifetime for an HTTP Provider `chat.send` callback correlation.
 pub const DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS: u64 = 3 * 60 * 60 * 1_000;
@@ -226,6 +227,11 @@ pub enum ProviderBotEventError {
 /// Provider-scoped roster item projected from the bot control-plane by the two
 /// task-mode toggles. Returned by the internal (non-OpenAPI) provider roster
 /// route consumed by backend task discovery/dispatch.
+///
+/// Identity + task-mode toggles come from the control-plane `record`; the
+/// lifecycle/access attributes (`updated_at`, `visibility`, `created_by`,
+/// `status`, `user_visibility`) are projected from the same record so backend
+/// task discovery/dispatch can select bots without a second lookup.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderBotRosterItem {
     pub bot_id: String,
@@ -233,6 +239,11 @@ pub struct ProviderBotRosterItem {
     pub env: String,
     pub task_claim_mode: bool,
     pub task_dream_mode: bool,
+    pub updated_at: u64,
+    pub visibility: String,
+    pub created_by: Option<String>,
+    pub status: ActorStatus,
+    pub user_visibility: UserVisibility,
 }
 
 /// Task-mode filter for the provider roster. `None` toggles mean "do not filter

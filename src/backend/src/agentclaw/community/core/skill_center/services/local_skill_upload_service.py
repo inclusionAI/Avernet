@@ -635,6 +635,13 @@ class LocalSkillUploadService:
             normalized_path = "/".join(
                 part for part in path.split("/") if part not in ("", ".")
             )
+            # Preserve the retiring BFF upload behavior for common platform
+            # metadata. These files are not Skill content and must not create
+            # a second wrapper root for a valid macOS ZIP archive.
+            if LocalSkillUploadService._is_legacy_ignored_upload_path(
+                normalized_path
+            ):
+                continue
             if normalized_path in seen:
                 raise LocalSkillInvalidPackageError("duplicate_file_path")
             if info.file_size > _MAX_FILE:
@@ -689,6 +696,18 @@ class LocalSkillUploadService:
             raise LocalSkillInvalidPackageError("invalid_wrapper")
         normalized = [(p[len(wrapper) + 1 :] if wrapper else p, c) for p, c in files]
         return name, description, normalized
+
+    @staticmethod
+    def _is_legacy_ignored_upload_path(relative_path: str) -> bool:
+        """Match the retiring BFF parser's platform-metadata exclusions."""
+        parts = relative_path.split("/")
+        name = parts[-1]
+        return (
+            name == ".DS_Store"
+            or parts[0] == "__MACOSX"
+            or "__pycache__" in parts
+            or name.endswith((".pyc", ".pyo"))
+        )
 
     @staticmethod
     def _pack_directory(files: Sequence[tuple[str, bytes]]) -> bytes:

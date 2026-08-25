@@ -900,6 +900,11 @@ fn roster_item_to_json(item: ProviderBotRosterItem) -> Value {
         "env": item.env,
         "task_claim_mode": item.task_claim_mode,
         "task_dream_mode": item.task_dream_mode,
+        "updated_at": item.updated_at,
+        "visibility": item.visibility,
+        "created_by": item.created_by,
+        "status": item.status,
+        "user_visibility": item.user_visibility,
     })
 }
 

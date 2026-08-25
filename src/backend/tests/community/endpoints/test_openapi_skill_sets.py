@@ -27,10 +27,16 @@ from agentclaw.community.core.repository.protocols.skill_set_control_plane impor
     SkillSetControlPlaneRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+from agentclaw.community.core.models.skill import SkillSet, SkillSetSkill
+from agentclaw.community.core.skill_center.orm import (
+    DefaultSkillsetMcpExclusion,
+    DefaultSkillsetSkillExclusion,
+)
 from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
     SkillSetControlPlaneService,
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
@@ -183,6 +189,66 @@ def _seed_active(world) -> None:
             active=True,
             engine_type="openclaw",
         )
+
+
+def _seed_default(world) -> None:
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    with avernet_tenant_scope(_TENANT):
+        world.get(BotRepository).insert({
+            "bot_id": _BOT_ID, "bot_name": "Default SkillSet endpoint Bot",
+            "owner_id": _OWNER, "owner_name": _OWNER, "entity_id": _OWNER,
+            "entity_type": "staff", "creator_id": _OWNER, "status": "ACTIVE",
+            "active_engine": "openclaw",
+        })
+        with world.get(DatabasePlugin).transactional_orm_session() as session:
+            default = SkillSet(
+                name="System Default", user_id="", bolt_id="",
+                engine_type="openclaw", is_default=True, is_active=True,
+                env="dev", avernet_tenant=_TENANT,
+            )
+            session.add(default)
+            session.flush()
+            skill = world.get(SkillRepository).create({
+                "name": "default-endpoint-skill",
+                "description": "Default exclusion endpoint coverage",
+                "git_path": "git://default-endpoint-skill", "category": "general",
+                "tags": "[]", "is_public": True, "source_type": "git",
+            })
+            session.add(SkillSetSkill(
+                skill_set_id=default.id, skill_id=int(skill["id"]), env="dev",
+                avernet_tenant=_TENANT,
+            ))
+    runtime = _Runtime()
+    control_plane = SkillSetControlPlaneService(
+        repository=world.get(SkillSetControlPlaneRepositoryProtocol),
+        bot_repo=world.get(BotRepository), runtime=runtime,
+        legacy_factory=world.get(SkillSetServiceFactory),
+        passport=world.get(PassportPlugin),
+        authorization=world.get(BotCapabilityAuthorizationHookProtocol),
+        audit_log_repo=world.get(BotCollabLogRepositoryProtocol),
+        mcp_center=world.get(MCPCenterPlugin), mcp_auth=world.get(MCPAuthPlugin),
+    )
+    world.injector.binder.bind(
+        SkillSetControlPlaneServiceProtocol, to=control_plane, scope=None
+    )
+
+
+def _assert_default_skill_excluded(_response, world) -> None:
+    with avernet_tenant_scope(_TENANT):
+        with world.get(DatabasePlugin).orm_session() as session:
+            row = session.query(DefaultSkillsetSkillExclusion).one()
+            assert (row.user_id, row.bot_id, row.skill_set_id, row.skill_id) == (
+                _OWNER, _BOT_ID, 1, 1,
+            )
+
+
+def _assert_default_mcp_excluded(_response, world) -> None:
+    with avernet_tenant_scope(_TENANT):
+        with world.get(DatabasePlugin).orm_session() as session:
+            row = session.query(DefaultSkillsetMcpExclusion).one()
+            assert (row.user_id, row.bot_id, row.skill_set_id, row.server_code) == (
+                _OWNER, _BOT_ID, 1, "mcp.dynamic-default",
+            )
 
 
 def _assert_reconciled(_response, world) -> None:
@@ -415,6 +481,17 @@ def remove_member_happy():
 
 
 @_case(
+    "DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}",
+    "excludes_default_skill",
+    ExpectSuccess(status=200, json_contains={"data": {"changed": True}}),
+    seed=_seed_default,
+    extra=(_assert_default_skill_excluded, _assert_reconciled),
+)
+def remove_default_member_happy():
+    pass
+
+
+@_case(
     "DELETE",
     "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}",
     "missing_set",
@@ -505,6 +582,21 @@ def add_mcp_error():
 
 @_case("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}", "removes_mcp", ExpectSuccess(status=200, json_contains={"data": {"changed": True}}), seed=_seed_mcp_member)
 def remove_mcp_happy():
+    pass
+
+
+@_case(
+    "DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}",
+    "excludes_dynamic_default_mcp",
+    ExpectSuccess(status=200, json_contains={"data": {"changed": True}}),
+    seed=_seed_default,
+    extra=(_assert_default_mcp_excluded, _assert_reconciled),
+    path_params={
+        "bot_id": _BOT_ID, "set_id": "1",
+        "server_code": "mcp.dynamic-default",
+    },
+)
+def remove_default_mcp_happy():
     pass
 
 

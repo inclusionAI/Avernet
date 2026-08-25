@@ -156,7 +156,7 @@ tags: [task, loop, orchestrate, task-recognition, task-planning, task-search, ta
 
 | 触发 / 上下文 | 命中段 | 执行要点 |
 |---|---|---|
-| 用户消息以 `/task` 开头;或上下文含 `[RESUME_TASK]`;或消息仅 `<AixUI type="panel" component="task-loop" ...>` 副屏标签 | 段1 任务识别 | 出 AixUI 卡片(cardId 固定 card_3e31e1f1),到 task_ready 为止;执行由平台层调 POST /api/v1/collaboration/tasks/execute |
+| 用户消息以 `/task` 开头;或上下文含 `[RESUME_TASK]`;或消息仅 `<AixUI type="panel" component="taskPanel.TaskLoopView" ...>` 副屏标签 | 段1 任务识别 | 出 AixUI 卡片(cardId 固定 card_3e31e1f1),到 task_ready 为止;执行由平台层调 POST /api/v1/collaboration/tasks/execute |
 | prompt 头部标记 `[planning]`,含目标节点 node_id 与任务态快照,**且 prompt 不含「某某某公司」**(非 arch 场景) | 段2 任务规划 | 返回 JSON 对象 {tasks: List[TaskSpec], has_gap, gap_detail};tasks 为空即 gap 闭=验收通过 |
 | prompt 头部标记 `[planning]`,**且 prompt 含「某某某公司」**(arch 场景;交付物含架构师名册/技术栈概览/双视角分析等) | 段7 任务规划·arch 场景 | 同段2 输出契约;按根验收交付物集合 + done_children 确定式查表产 N_tech_stack / N_dual_view / N_architects |
 | prompt 头部标记 `[search]`,含子任务需求与候选集 catalog | 段3 任务派发搜推 | 返回 4 态 JSON(HIT_SINGLE / HIT_GROUP / HIT_MULTI_BOTS / MISS) |

@@ -151,6 +151,10 @@ class BotInventoryService:
                 engine=engine,
                 status=None,
                 bot_ids=bot_ids,
+                # Inventory cards carry no template_config (verified: neither
+                # BotInventoryItem nor the router mapping reads it), so skip
+                # the batched template read on every pulled page.
+                attach_templates=False,
                 page=page,
                 page_size=fetch_size,
             )
@@ -361,10 +365,20 @@ class BotInventoryService:
                     BotAction.DELETE.value, "Bot Owner permission required"
                 )
             return allowed, disabled
+        # MEMBER is defined as "edit content only": editing (skills/skill-sets,
+        # whose endpoints gate on PermissionLevel.MEMBER) stays available to
+        # collaborators on every card kind, while the owner-scoped actions
+        # (restart/delete/update...) remain disabled. NONE keeps view-only.
+        kept = [
+            action
+            for action in actions
+            if action is BotAction.EDIT and level >= PermissionLevel.MEMBER
+        ]
         for action in actions:
-            if action is not BotAction.VIEW:
-                disabled.setdefault(action.value, "Bot editor permission required")
-        return (BotAction.VIEW,), disabled
+            if action is BotAction.VIEW or action in kept:
+                continue
+            disabled.setdefault(action.value, "Bot editor permission required")
+        return (BotAction.VIEW, *kept), disabled
 
 
 def _as_mapping(value: Any) -> Mapping[str, Any]:

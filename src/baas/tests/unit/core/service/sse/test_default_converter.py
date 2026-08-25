@@ -9,10 +9,17 @@ delta with empty content, final with empty content.
 
 import json
 import logging
+import sys
 from copy import deepcopy
 
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.service.sse import DefaultStreamConverter
+
+
+def test_converter_uses_dedicated_logger():
+    converter_module = sys.modules[DefaultStreamConverter.__module__]
+
+    assert converter_module.logger.name == "bcn-converter"
 
 
 def _data(event) -> dict:
@@ -1135,12 +1142,9 @@ class TestInteractionStreamInvariants:
 
 
 class TestAskUserInteraction:
-    def test_secret_question_aliases_drop_entire_interaction_without_seq(
+    def test_secret_question_aliases_are_ignored_and_interaction_is_delivered(
         self,
-        monkeypatch,
-        caplog,
     ):
-        _capture_interaction_logs(monkeypatch, caplog)
         for secret_key, secret_value in (
             ("secret", True),
             ("secret", False),
@@ -1174,17 +1178,23 @@ class TestAskUserInteraction:
                 run_id="run-log",
             )
 
-            assert interaction is None
+            assert interaction is not None
+            assert _data(interaction)["questions"] == [
+                {
+                    "questionId": "question_1",
+                    "header": "safe",
+                    "question": "Safe-looking question",
+                },
+                {
+                    "questionId": "question_2",
+                    "header": "secret",
+                    "question": "Sensitive secret question body",
+                },
+            ]
             assert chat is not None
-            assert chat.id == "1"
-            assert _data(chat)["seq"] == 1
-
-        assert "field_path=payload.questions[1].secret" in caplog.text
-        assert "field_path=payload.questions[1].isSecret" in caplog.text
-        assert caplog.text.count("error_type=secret_question_unsupported") == 3
-        assert "Sensitive description" not in caplog.text
-        assert "Sensitive secret question body" not in caplog.text
-        assert "Safe-looking question" not in caplog.text
+            assert interaction.id == "1"
+            assert chat.id == "2"
+            assert _data(chat)["seq"] == 2
 
     def test_maps_complete_questions_and_options(self):
         converter = DefaultStreamConverter()

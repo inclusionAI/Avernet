@@ -24,6 +24,7 @@ from agentclaw.community.core.bot_inventory.services.lifecycle_view import (
 )
 from agentclaw.community.core.bot_inventory.types import (
     BotAction,
+    BotInventoryKind,
     BusinessSpaceRef,
     DeployMode,
     DisplayState,
@@ -95,6 +96,29 @@ def test_list_items_combines_filters_and_paginates(service) -> None:
 
     assert total == 2
     assert {item.bot_id for item in items} == {"c1", "l1"}
+
+
+@pytest.mark.unit
+def test_cloud_pull_opts_out_of_template_attach(service) -> None:
+    # Inventory cards never surface template_config, so every pulled page must
+    # skip the batched template read — one fewer DB round trip per page on the
+    # /bots/all path.
+    inventory, bot, _ = service
+
+    inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.CLOUD,
+        is_service=None,
+        page=1,
+        page_size=10,
+    )
+
+    assert bot.list_bots_by_conditions.call_args.kwargs["attach_templates"] is False
 
 
 @pytest.mark.unit
@@ -418,6 +442,7 @@ def test_team_space_lists_all_owners_and_scopes_actions_by_bot_permission() -> N
         engine=None,
         status=None,
         bot_ids=None,
+        attach_templates=False,
         page=1,
         page_size=200,
     )
@@ -441,3 +466,46 @@ def test_team_space_lists_all_owners_and_scopes_actions_by_bot_permission() -> N
         "delete": "Bot editor permission required",
     }
     assert all(item.space == team_space for item in items)
+
+
+def test_actions_for_level_keeps_edit_for_non_service_editors() -> None:
+    """Non-service cards: collaborators (MEMBER/ADMIN) keep the edit action —
+    the skills/skill-sets endpoints gate on PermissionLevel.MEMBER — while
+    owner-scoped actions stay disabled; NONE is view-only; OWNER is unchanged.
+    """
+    actions = (BotAction.VIEW, BotAction.EDIT, BotAction.RESTART, BotAction.DELETE)
+
+    owner_actions, owner_disabled = BotInventoryService._actions_for_level(
+        kind=BotInventoryKind.PERSONAL_CLOUD,
+        actions=actions,
+        disabled={},
+        level=PermissionLevel.OWNER,
+    )
+    assert owner_actions == actions
+    assert owner_disabled == {}
+
+    for level in (PermissionLevel.MEMBER, PermissionLevel.ADMIN):
+        kept_actions, disabled = BotInventoryService._actions_for_level(
+            kind=BotInventoryKind.PERSONAL_CLOUD,
+            actions=actions,
+            disabled={},
+            level=level,
+        )
+        assert kept_actions == (BotAction.VIEW, BotAction.EDIT)
+        assert disabled == {
+            "restart": "Bot editor permission required",
+            "delete": "Bot editor permission required",
+        }
+
+    none_actions, none_disabled = BotInventoryService._actions_for_level(
+        kind=BotInventoryKind.PERSONAL_CLOUD,
+        actions=actions,
+        disabled={},
+        level=PermissionLevel.NONE,
+    )
+    assert none_actions == (BotAction.VIEW,)
+    assert none_disabled == {
+        "edit": "Bot editor permission required",
+        "restart": "Bot editor permission required",
+        "delete": "Bot editor permission required",
+    }
