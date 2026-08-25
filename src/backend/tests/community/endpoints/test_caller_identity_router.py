@@ -7,12 +7,22 @@ transaction, lock, and Agent Principal synchronization branches.
 
 from __future__ import annotations
 
+import time
+
+import jwt
+
+from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
     CollaboratorLockService,
 )
-from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillSetRepository,
+)
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.utils.gateway_principal_config import (
+    init_principal_verifier_config,
+)
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot
 from tests.community.framework import (
@@ -26,6 +36,47 @@ from tests.community.framework import (
 _OWNER_ID = "caller_identity_owner"
 _BOT_ID = "caller_identity_bot"
 _SERVER_CODE = "mcp.caller.identity"
+_PRINCIPAL_KEY = "caller-identity-openapi-signing-key-32b"
+
+
+class _Secret:
+    secret_user = "test"
+    secret_value = _PRINCIPAL_KEY
+
+
+class _Resolver:
+    def get_secret(self, _secret_name: str) -> _Secret:
+        return _Secret()
+
+
+def _principal() -> str:
+    now = int(time.time())
+    return jwt.encode(
+        {
+            "iss": "gateway",
+            "aud": "backend",
+            "iat": now,
+            "exp": now + 3600,
+            "principals": [
+                {
+                    "type": "user",
+                    "subject": {
+                        "id": _OWNER_ID,
+                        "username": "caller-identity@example.test",
+                    },
+                }
+            ],
+        },
+        _PRINCIPAL_KEY,
+        algorithm="HS256",
+    )
+
+
+_OPENAPI_HEADERS = {PRINCIPAL_HEADER: _principal()}
+
+
+def _enable_openapi_principal() -> None:
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
 
 
 def _seed_owner(world) -> None:
@@ -51,6 +102,11 @@ def _seed_service_bot(world, *, acquire_lock: bool) -> None:
 
 def _seed_editable_service_bot(world) -> None:
     _seed_service_bot(world, acquire_lock=True)
+
+
+def _seed_openapi_editable_service_bot(world) -> None:
+    _enable_openapi_principal()
+    _seed_editable_service_bot(world)
 
 
 def _seed_mutable_caller_identity(world, *, acquire_lock: bool = True) -> None:
@@ -82,6 +138,16 @@ def _seed_mutable_caller_identity(world, *, acquire_lock: bool = True) -> None:
 
 def _seed_unlocked_mutable_caller_identity(world) -> None:
     _seed_mutable_caller_identity(world, acquire_lock=False)
+
+
+def _seed_openapi_unlocked_mutable_caller_identity(world) -> None:
+    _enable_openapi_principal()
+    _seed_unlocked_mutable_caller_identity(world)
+
+
+def _seed_openapi_owner(world) -> None:
+    _enable_openapi_principal()
+    _seed_owner(world)
 
 
 def _seed_ambiguous_default_bots(world) -> None:
@@ -306,3 +372,99 @@ def update_mcp_call_type_rejects_unknown_query_parameter():
 )
 def update_mcp_call_type_forbidden():
     """Only an owner of an existing service bot can change MCP call type."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/caller-context",
+    scenario="happy",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _OWNER_ID, "stage": "draft"},
+        headers=_OPENAPI_HEADERS,
+    ),
+    seed=_seed_openapi_editable_service_bot,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "capability": "caller_identity.v1",
+                "stage": "draft",
+                "bot_call_type": "owner",
+                "editable": True,
+            },
+        },
+    ),
+)
+def get_openapi_caller_context_happy():
+    """The public endpoint wraps an authorized draft context in an Envelope."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/caller-context",
+    scenario="error",
+    input=CaseInput(
+        path_params={"bot_id": "missing_caller_identity_bot"},
+        query_params={"user_id": _OWNER_ID, "stage": "draft"},
+        headers=_OPENAPI_HEADERS,
+    ),
+    seed=_seed_openapi_owner,
+    expect=ExpectError(
+        status=404,
+        json_contains={"code": 404000, "message": "Not found", "data": None},
+    ),
+)
+def get_openapi_caller_context_not_found():
+    """An absent addressed Bot is returned as the public masked 404."""
+
+
+@endpoint_test(
+    method="PATCH",
+    path="/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type",
+    scenario="happy",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "server_code": _SERVER_CODE},
+        query_params={"user_id": _OWNER_ID},
+        headers=_OPENAPI_HEADERS,
+        json_body={"call_type": "caller"},
+    ),
+    seed=_seed_openapi_unlocked_mutable_caller_identity,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "server_code": _SERVER_CODE,
+                "call_type": "caller",
+                "bot_call_type": "caller",
+            },
+        },
+    ),
+)
+def update_openapi_mcp_call_type_happy():
+    """A sole owner updates an active MCP without a client-supplied lock epoch."""
+
+
+@endpoint_test(
+    method="PATCH",
+    path="/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type",
+    scenario="error",
+    input=CaseInput(
+        path_params={
+            "bot_id": "missing_caller_identity_bot",
+            "server_code": _SERVER_CODE,
+        },
+        query_params={"user_id": _OWNER_ID},
+        headers=_OPENAPI_HEADERS,
+        json_body={"call_type": "caller"},
+    ),
+    seed=_seed_openapi_owner,
+    expect=ExpectError(
+        status=404,
+        json_contains={"code": 404000, "message": "Not found", "data": None},
+    ),
+)
+def update_openapi_mcp_call_type_not_found():
+    """The owner-only mutation masks an absent Bot behind the standard 404."""
