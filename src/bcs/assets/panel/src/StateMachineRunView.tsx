@@ -182,6 +182,25 @@ interface GraphLayout {
 
 const DEFAULT_BASE_URL = '/bcnproxy';
 const DEFAULT_POLLING_INTERVAL = 3000;
+
+/**
+ * Accept either the raw legacy BCS payload or the v1 gateway envelope
+ * `{ code, message, data, request_id }` and return the payload. The
+ * envelope-marker guard (`code`/`request_id`) prevents misinterpreting a raw
+ * payload that happens to carry a `data` field.
+ */
+function unwrapEnvelope<T>(body: any): T {
+  if (
+    body &&
+    typeof body === 'object' &&
+    !Array.isArray(body) &&
+    ('code' in body || 'request_id' in body) &&
+    'data' in body
+  ) {
+    return body.data as T;
+  }
+  return body as T;
+}
 const MAX_TRANSIENT_RETRIES = 3;
 const MAX_HUMAN_RESPONSE_BYTES = 64 * 1024;
 const NODE_WIDTH = 188;
@@ -2624,7 +2643,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
           throw await createRequestError(response);
         }
 
-        const data = (await response.json()) as PendingHumanNode[];
+        const data = unwrapEnvelope<PendingHumanNode[]>(await response.json());
 
         if (pendingHumanAbortRef.current !== abortController) {
           return;
@@ -2706,7 +2725,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
           throw await createRequestError(response);
         }
 
-        const data = (await response.json()) as StateMachineRunGraph;
+        const data = unwrapEnvelope<StateMachineRunGraph>(await response.json());
         transientRetryCountRef.current = 0;
         setTransientRetrySignal(0);
         setGraph(data);
@@ -2804,7 +2823,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
           throw await createRequestError(response);
         }
 
-        const data = (await response.json()) as StateMachineNodeDetailResponse;
+        const data = unwrapEnvelope<StateMachineNodeDetailResponse>(await response.json());
 
         if (nodeDetailAbortRef.current === abortController) {
           setNodeDetail(data);

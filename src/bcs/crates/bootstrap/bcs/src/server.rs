@@ -1612,7 +1612,12 @@ let invitation_service = Arc::new(
         .with_session_file_service(session_file_service, session_file_url_projector)
         .with_event_subscription_service(event_subscription_service)
         .with_collaboration_template_service(collaboration_template_service)
-        .with_collaboration_definition_service(collaboration_definition_service),
+        .with_collaboration_definition_service(collaboration_definition_service)
+        .with_collaboration_runtime_service(collaboration_runtime.clone())
+        .with_manifest_config(
+            crate::config_loader::Environment::resolve().as_str().to_string(),
+            config.manifest.clone(),
+        ),
         internal_bot_attributes_service,
     )
 }
