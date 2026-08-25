@@ -97,62 +97,87 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
 
 私有源的鉴权走**引用**，secret 永不出现在 manifest 里（设计论证与安全
 规则见 design §4.5）。凭证是租户级命名对象，一次性写入。**名字
-（URL 中的 `{name}`，下例 `cms-token`）是自由标识符**，`auth` 按它做
-字典查找取出凭证对象；名字与 `allowed_origins` 里的域名之间不存在任何
-字符串匹配或推导关系——URL 的匹配只发生在「source 的 origin ∈ 该凭证的
-`allowed_origins`」这一步：
+（URL 中的 `{name}`）是自由标识符**，`auth` 按它做字典查找取出凭证对象；
+名字与 `allowed_prefixes` 里的域名之间不存在任何字符串匹配或推导关系。
 
-```text
-PUT /openapi/v1/provisioning/credentials/cms-token
-{
-  "header_name": "Authorization",
-  "secret": "Bearer eyJhbGciOi…",
-  "allowed_origins": ["https://cms.example.com"]
-}
-```
-
-manifest 条目引用它：
-
-```yaml
-resources:
-  - path: data/faq.csv
-    source: https://cms.example.com/kb/faq.csv
-    auth: cms-token
-```
-
-校验与行为：
-
-- `auth` 引用的凭证不存在 → PUT manifest 时警告、apply 时该条目 `failed`
-  （「credential cms-token 不存在」）；
-- fetch 目标 URL 的 origin 不在该凭证的 `allowed_origins` 内 → 条目
-  `failed`（防凭证被 `source` 改指处套取）；跨 origin 重定向直接失败；
-- GET 凭证只返回掩码元数据（`has_secret` / `header_name` /
-  `allowed_origins` / `updated_at`）；
-- 轮换 = 重 PUT 同名凭证，下一个 apply 点生效，不触发 apply；
-- apply report 只记凭证名，永不记值。
-
-v1 仅支持请求头注入；query 参数型、mTLS 见开放问题 O8。
-
-**git 型凭证**（用于 §2.2 的 git 源）在上述之外**强制**声明仓库白名单：
+**一个端点、一种形状**——凭证不区分 git / URL / OSS：它的全部职责是「往
+请求头注入一个值」，而 git 源我们调托管服务的 HTTP API、URL 源发普通
+GET，注入动作完全相同。**git-ness 属于 `source`，不属于凭证。**
 
 ```text
 PUT /openapi/v1/provisioning/credentials/corp-git-content
 {
-  "type": "git",
-  "header_name": "PRIVATE-TOKEN",        # 或 Authorization，按托管服务定（O11）
-  "secret": "…",
-  "allowed_origins": ["https://code.example-corp.com"],
-  "allowed_repos": ["team/content", "team/skills-release"]
+  "header_name": "PRIVATE-TOKEN",                                  # 按托管服务定（O11）
+  "secret": "…",                                                   # 仓库级只读 token / 机器人账号 token
+  "allowed_prefixes": ["https://code.example-corp.com/team/content"]
+}
+
+PUT /openapi/v1/provisioning/credentials/oss-artifacts
+{
+  "header_name": "Authorization",
+  "secret": "Bearer …",
+  "allowed_prefixes": ["https://artifacts.example-corp.com/tools/"]
 }
 ```
 
-动机：git 托管服务是**单 origin 托管全公司仓库**，仅按 origin 放行时，
-manifest 编辑者把 `source.git` 改指同 origin 下任意其他仓库即可套用凭证
-（若 token 权限宽，即横向越权）。`allowed_repos` 把反套取属性从 origin
-粒度恢复到**仓库粒度**：声明的仓库不在名单内 → 条目 `failed`。此校验由
-平台执行，**不依赖托管服务具备任何能力**。
+manifest 条目按名字引用（`auth:`），或声明在命名源上（§2.3）。
 
-token 选型（防越权的另外两层，与 `allowed_repos` 叠加）：**首选仓库级
+#### `allowed_prefixes`：凭证可被出示给谁
+
+**必填，至少一项**，每项是绝对 https URL 前缀。fetch 前校验目标 URL 落在
+某个前缀之下，否则该条目 `failed`——**不降级为「不带凭证继续请求」**
+（静默降级会把配置错误或攻击企图伪装成 401，或在源站恰好允许匿名时掩盖
+过去）。跨前缀重定向同样直接失败，凭证不会被重定向带走。
+
+动机：git 托管服务与对象存储都是**单 origin 承载大量互不相关的内容**。
+只按 origin 放行时，manifest 编辑者把 `source` 改指同 origin 下别人的
+仓库/桶即可套用凭证——若 token 权限宽，即横向越权。前缀把授权粒度收到
+「仓库」「桶前缀」这一层，且**由平台校验，不依赖托管服务具备任何能力**。
+
+匹配规则（必须按**路径段边界**比较，否则前缀匹配本身就是漏洞）：目标
+URL 规范化后，须等于前缀、或以「前缀 + `/`」开头——前缀
+`…/team/content` **不得**匹配 `…/team/content-secret`。git 源比较仓库
+URL（忽略可选的 `.git` 后缀），URL 源比较完整目标 URL。
+
+想覆盖整个 origin 就显式写 `https://host/`——这是一个明确选择，不是默认。
+
+#### secret 的存储与主密钥托管
+
+**必须可逆加密，不是哈希**：密码存储用哈希（单向、只需验证），而这里的
+用途是**代表用户去出示 token**，必须能还原明文。
+
+复用仓库既有实现，不新建加密方案：
+
+| 需要什么 | 复用什么 |
+| --- | --- |
+| 加解密原语 | `utils/secret_utils.py` 的 `symmetric_encrypt/decrypt`（AES-GCM，SHA-256 派生 key，随机 nonce） |
+| 落库封装 | `core/bot_management/token_vault.py` 的 `TokenVault`——既有用途正是「外部平台 token 落库前加密」，注释明说与具体平台无关 |
+| 主密钥托管 | `SecretResolver`：企业环境从密钥库（Mist registry）解析；singlebox/CI 用 `LocalSecretResolver` |
+
+落库形态 `enc:v1:<AES-GCM 密文>`——`TokenVault` 的既有前缀设计，读端可
+区分新密文与存量明文（零迁移），将来换算法可升 `v2`。
+
+**一条本场景必须新增的守卫**：`TokenVault` 在 master_key 为空时明文直落
+（为本地联调，与 `outbound_rules` 单 box 同形）。这对 provisioning 凭证
+在**生产环境绝不可接受**——生产 profile 下解析不到主密钥必须**拒绝写入
+凭证**（fail closed），而不是静默明文存。否则一次密钥库配置疏忽，全租户
+的 git token 就明文躺在 DB 里。
+
+其余边界：**写后不可读回**（GET 只返回掩码元数据 `has_secret` /
+`header_name` / `allowed_prefixes` / `updated_at`）；日志、apply report、
+错误信息只出现凭证**名**，永不出现值；解密只发生在 fetch 前的内存中，
+用完即弃。
+
+#### 校验与行为
+
+- `auth` 引用的凭证不存在 → PUT manifest 时警告、apply 时该条目 `failed`；
+- 目标 URL 不落在 `allowed_prefixes` 内 → 条目 `failed`；跨前缀重定向直接失败；
+- 轮换 = 重 PUT 同名凭证，下一个 apply 点生效，不触发 apply；
+- 删除仍被引用的凭证 → 引用条目在下次 apply `failed`（「credential X 不存在」）。
+
+v1 仅支持请求头注入；query 参数型、mTLS 见开放问题 O8。
+
+token 选型（与 `allowed_prefixes` 叠加的纵深防御）：**首选仓库级/桶级
 只读 token**（类 GitLab 的 Project/Deploy Token，天生单仓库有效）；托管
 服务不支持时，**用机器人账号的 token**（账号只授予内容仓库的只读成员
 权限，以成员关系收权）；**不使用个人 PAT**——权限面是个人全量可见仓库，
@@ -170,7 +195,7 @@ resources:
       git: https://code.example-corp.com/team/content.git
       ref: v1.2.0                         # tag / branch / commit SHA
       subpath: kb/                        # 源内路径：仓库内子目录或文件，缺省 = 仓库根
-    auth: corp-git-content                # git 型凭证（§2.1）
+    auth: corp-git-content                # 凭证引用（§2.1）
 
 identity:
   - type: SOUL.md

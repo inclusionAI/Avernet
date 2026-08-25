@@ -216,34 +216,55 @@ fetch 是平台发出的普通 HTTPS GET，所以私有源鉴权的问题是「�
 里**——manifest 会被 GET 原样读回、出现在变更审计里；script 的下发链路
 日志可见（#935「体内无密」结论维持不变）。鉴权通过**引用**完成：
 
-1. **凭证是租户级命名对象**，独立于任何一个 bot 存储（同一个 CMS token
-   服务整批 bot，正是要消灭按 bot 重复配置）。经独立 API 写入
-   （见 §6），字段：`header_name`（如 `Authorization`）、`secret`（完整
-   头值，如 `Bearer eyJ…`）、`allowed_origins`（见下）。**写后不可读回**：
-   GET 只返回掩码元数据（`has_secret`、`header_name`、`allowed_origins`、
+1. **凭证是租户级命名对象**，独立于任何一个 bot 存储（同一个 token 服务
+   整批 bot，正是要消灭按 bot 重复配置）。经独立 API 写入（见 §6），
+   字段：`header_name`（如 `Authorization`）、`secret`（完整头值，如
+   `Bearer eyJ…`）、`allowed_prefixes`（见 3）。**写后不可读回**：GET 只
+   返回掩码元数据（`has_secret`、`header_name`、`allowed_prefixes`、
    `updated_at`），与现有 MCP 统一配置「`api_key` 存储、读时掩码、用时
    注入」是同一生命周期模式（`openapi_v1/mcp/router.py` 现状）——不是
    平台新增的能力类别。
-2. **manifest 条目以名字引用**：带 `source` 的条目加可选字段
-   `auth: <credential-name>`，fetch 时平台把该凭证注入为请求头。
-3. **凭证绑定 origin**：`allowed_origins` 在凭证创建时声明（scheme +
-   host + port 精确匹配）。fetch 目标不在名单内 → 该条目直接 `failed`
-   （配置错误，明确报出，不是静默不带凭证）。这一条防的是持凭证引用权的
-   manifest 编辑者把 `source` 指向自己的服务器套取 token。同理，**跨
-   origin 重定向直接失败**——不是剥离凭证后继续，失败更不易被误用。
+2. **manifest 条目以名字引用**：`auth: <credential-name>`（或声明在命名源
+   上），fetch 时平台把该凭证注入为请求头。
+3. **凭证绑定 URL 前缀**：`allowed_prefixes` 在创建时声明、**必填**，
+   fetch 目标不在名单内 → 该条目直接 `failed`（配置错误，明确报出，不是
+   静默不带凭证）。这防的是持 manifest 编辑权的人把 `source` 指向别处
+   套取 token。**跨前缀重定向直接失败**——不是剥离凭证后继续，失败更不易
+   被误用。前缀按**路径段边界**匹配（`…/team/content` 不得匹配
+   `…/team/content-secret`）。
+
+   **一个端点、一种形状**：凭证不区分 git / URL / OSS——它的职责只是
+   「注入一个请求头」，而 git 源调托管服务 HTTP API、URL 源发普通 GET，
+   注入动作相同，**git-ness 属于 `source` 而非凭证**。前缀这一个字段同时
+   覆盖两种收敛：git 的仓库白名单与对象存储的桶前缀，本质都是「某 origin
+   下的路径前缀」。二者都是单 origin 承载大量互不相关内容，故前缀必填、
+   不设「整 origin」默认；要覆盖整个 origin 需显式写 `https://host/`。
 4. **生命周期**：轮换 = 重新 PUT 同名凭证，下一个 apply 点自然用新值
    （不触发 apply，惰性口径一致）；删除仍被引用的凭证 → 引用条目 apply
    时 `failed`（「credential X 不存在」）。apply report 只记凭证**名**，
-   永不记值。存储侧按平台 secret 规格加密落库。
-5. **引擎面为零**：fetch 全在平台侧完成，凭证不下发容器、不进 artifact
+   永不记值。
+5. **存储与主密钥托管**：**必须可逆加密而非哈希**——密码存储用哈希（单向、
+   只需验证），这里的用途是代表用户**出示** token，必须能还原明文。复用
+   仓库既有实现，不新建加密方案：`utils/secret_utils.py` 的
+   `symmetric_encrypt/decrypt`（AES-GCM）作原语，
+   `core/bot_management/token_vault.py` 的 `TokenVault` 作落库封装（其既有
+   用途正是「外部平台 token 落库前加密」，与具体平台无关），主密钥经
+   `SecretResolver` 从密钥库（企业环境的 Mist registry）解析。落库形态
+   `enc:v1:<密文>`（既有前缀设计，读端可区分存量明文，零迁移；换算法可升
+   `v2`）。解密只发生在 fetch 前的内存中，用完即弃。
+
+   **本场景必须新增一道守卫**：`TokenVault` 在 master_key 为空时明文直落
+   （为本地联调，与 `outbound_rules` 单 box 同形）——这对 provisioning 凭证
+   在生产环境不可接受。生产 profile 下解析不到主密钥必须**拒绝写入凭证**
+   （fail closed），否则一次密钥库配置疏忽就会让全租户 token 明文躺在 DB 里。
+6. **引擎面为零**：fetch 全在平台侧完成，凭证不下发容器、不进 artifact
    （`StoreRef` 契约本就是 "location only — never credentials"）。MCP
    凭证的 compose 时内联是既有契约、与本机制无关，照现状不变。
 
-**git 源的凭证要更紧一档**：git 托管服务是单 origin 托管全公司仓库，仅按
-origin 放行不足以反套取——git 型凭证强制声明 `allowed_repos`（仓库白名单，
-平台侧校验、不依赖托管服务能力），token 选型按「仓库级只读 token → 机器人
-账号 token → 不用个人 PAT」的次序收窄。细则见 manifest-schema §2.1，托管
-服务能力确认见 O11。
+token 选型（与 `allowed_prefixes` 叠加的纵深防御）：**首选仓库级/桶级只读
+token**（类 GitLab 的 Project/Deploy Token，天生单仓库有效）；托管服务不
+支持时用**机器人账号 token**（以成员关系收权）；**不用个人 PAT**——权限面
+是个人全量可见仓库，且生命周期绑定个人。托管服务能力确认见 O11。
 
 无鉴权基线仍然成立：公开源、网络 ACL 自保护的源、签名 URL（有过期问题，
 只适合一次性场景）都不需要凭证引用。v1 注入方式仅支持请求头；query 参数
@@ -285,7 +306,7 @@ origin 放行不足以反套取——git 型凭证强制声明 `allowed_repos`�
 | `GET /openapi/v1/bots/{bot_id}/provisioning/capabilities` | 该 bot 的逐类别支持表 |
 | `POST /openapi/v1/bots/{bot_id}/provisioning/apply` | 显式 apply（可带 `dry_run=true` 返回计划不执行） |
 | `GET /openapi/v1/bots/{bot_id}/provisioning/last-apply` | 最近一次 apply report |
-| `PUT /openapi/v1/provisioning/credentials/{name}` | 写入/轮换租户级命名凭证（`header_name` / `secret` / `allowed_origins`，§4.5）。租户级路径——凭证不属于单个 bot |
+| `PUT /openapi/v1/provisioning/credentials/{name}` | 写入/轮换租户级命名凭证（`header_name` / `secret` / `allowed_prefixes`，§4.5）。**一个端点覆盖 git / URL / OSS**——凭证不区分源类型。租户级路径：凭证不属于单个 bot |
 | `GET /openapi/v1/provisioning/credentials[/{name}]` | 列表 / 单个，仅掩码元数据，**永不返回 secret** |
 | `DELETE /openapi/v1/provisioning/credentials/{name}` | 删除；仍被引用时引用条目在下次 apply 记 `failed` |
 
@@ -332,7 +353,7 @@ planning 决定；模块边界按 `context-boundary-format.md` 出 README。
 
 | 期 | 内容 |
 | --- | --- |
-| **v1** | manifest 五类（mcp / resources / skills / engine_config / identity；resources 含**目录条目**——归档 + `strip_components` 展开，schema §3.2）+ script 归编到置备文档；source 支持 URL 与 **git 引用**两种形态（tag/branch/SHA 版本化，schema §2.2；git 型凭证强制 `allowed_repos`），**命名源 `sources`/`from`** 让一次 `ref` 变更原子地升级整套配置（schema §2.3）；平台侧 apply + guarded fetcher；租户级凭证引用（§4.5，仅请求头注入）；能力表；apply report；teclaw 经 artifact 组装生效 |
+| **v1** | manifest 五类（mcp / resources / skills / engine_config / identity；resources 含**目录条目**——归档 + `strip_components` 展开，schema §3.2）+ script 归编到置备文档；source 支持 URL 与 **git 引用**两种形态（tag/branch/SHA 版本化，schema §2.2；凭证统一形状，`allowed_prefixes` 必填），**命名源 `sources`/`from`** 让一次 `ref` 变更原子地升级整套配置（schema §2.3）；平台侧 apply + guarded fetcher；租户级凭证引用（§4.5，仅请求头注入；AES-GCM 落库 + 密钥库主密钥）；能力表；apply report；teclaw 经 artifact 组装生效 |
 | **cli_tools（schema 已定稿，排期后置）** | 给模型调用的命令行工具（schema §3.7）：静态二进制/压缩包、digest 强制、平台工具目录 + PATH 注入；ARCA 系先行（A2），teclaw 待确认（T4）。按业务优先级排期 |
 | **v2 候选** | 条目级结果上报（teclaw 唯一可能的契约增量）；strict 就绪门控；`apply_once`；skill-center 引用源（`center://uuid@version`）；目录源的更多传输形态（索引文件 / 对象存储前缀——「文件夹语义」需要带目录枚举能力的协议；git 与归档已进 v1）；engine plugin 类目（**注册表引用**模式，照 MCP 模子而非任意 URL——插件在引擎进程内自动执行，供应链敏感度最高；前置确认见 O10）；容器内 op CLI（服务 script 用户体验：`install-skill` 等意图层命令，ARCA 系实现）；凭证注入的扩展形态（query 参数 / mTLS，O8）；模板级 manifest（一份声明应用于多个 bot）；**manifest 自身托管于 git**（§9.1） |
 

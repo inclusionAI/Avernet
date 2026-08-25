@@ -34,29 +34,34 @@ open API；容器重建后 bot 立即可用但内容可能滞后；scale-out 出
 携带凭证访问业务方的源站**（平台 → 业务方）——这是平台对业务方唯一的
 出向调用。secret 写后不可读回（schema §2.1）。
 
-git 型凭证**强制**声明仓库白名单：
+**一个端点、一种形状**——凭证不区分 git / OSS：它的职责只是「往请求头
+注入一个值」，git-ness 属于 `source` 而非凭证。两个源各注册一次：
 
 ```text
 PUT /openapi/v1/provisioning/credentials/corp-git-content
 {
-  "type": "git",
   "header_name": "PRIVATE-TOKEN",
-  "secret": "…",                                    # 仓库级只读 token 或机器人账号 token，不用个人 PAT
-  "allowed_origins": ["https://code.example-corp.com"],
-  "allowed_repos": ["team/content"]                 # 越出此名单的仓库不出示凭证
+  "secret": "…",                                                   # 仓库级只读 token 或机器人账号 token，不用个人 PAT
+  "allowed_prefixes": ["https://code.example-corp.com/team/content"]
 }
-```
 
-OSS 制品桶的凭证按 URL 型注册：
-
-```text
 PUT /openapi/v1/provisioning/credentials/oss-artifacts
 {
   "header_name": "Authorization",
   "secret": "Bearer …",
-  "allowed_origins": ["https://artifacts.example-corp.com"]
+  "allowed_prefixes": ["https://artifacts.example-corp.com/tools/"]
 }
 ```
+
+`allowed_prefixes` **必填**：git 服务和对象存储都是单 origin 承载大量
+互不相关的内容，只按域名放行的话，把 `source` 改指同域名下别人的仓库/桶
+就能套用这个凭证。前缀把授权粒度收到「这个仓库」「这个桶前缀」，且由
+平台校验、不依赖托管服务具备任何能力（schema §2.1）。
+
+secret 落库前用 AES-GCM 加密（复用既有 `TokenVault`，形态
+`enc:v1:<密文>`），主密钥存密钥库（Mist）、由 `SecretResolver` 解析；
+fetch 前在内存中解密出示、用完即弃。生产环境解析不到主密钥则**拒绝写入
+凭证**，绝不明文落库。
 
 ### 1.2 置备文档
 
