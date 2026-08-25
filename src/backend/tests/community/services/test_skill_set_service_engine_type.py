@@ -31,6 +31,7 @@ class TestSkillSetServiceEngineTypeThreading:
             bot_repo=MagicMock(),
 
             path_factory=MagicMock(),
+            reader=MagicMock(**{"active_mcp_server_codes.return_value": frozenset()}),
         )
         return service
 

@@ -472,6 +472,9 @@ class TestCollectBotActiveMcps:
             bot_repo=MagicMock(),
 
             path_factory=MagicMock(),
+            reader=MagicMock(
+                **{"active_mcp_server_codes.return_value": frozenset()}
+            ),
         )
         svc.skill_set_repo = mock_repo
         svc.bot_id = "default"

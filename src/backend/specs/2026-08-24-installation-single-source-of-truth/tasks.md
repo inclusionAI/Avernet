@@ -96,7 +96,7 @@ lands in the same group as the migration of its last caller.
 
 ## Group 5 — MCP union in one place
 
-- [ ] 5.1 Reimplement `collect_bot_active_mcps` per plan component 8
+- [x] 5.1 Reimplement `collect_bot_active_mcps` per plan component 8
       (default policy ∪ installed; metadata from membership rows; stops
       iterating active ordinary Sets). `collect_bot_mcps` unchanged.
 - [ ] 5.2 Union tests: ordinary-set MCP appears via Installation; excluded
