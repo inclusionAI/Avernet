@@ -469,6 +469,13 @@ impl UserDirectoryPlugin for RecordingUserDirectoryPlugin {
             nick_name: Some(self.nick_name.clone()),
         }))
     }
+
+    async fn lookup_department_by_staff_no(
+        &self,
+        _staff_no: &str,
+    ) -> Result<Option<String>, bcs_user_directory_api::UserDirectoryError> {
+        Ok(None)
+    }
 }
 
 struct NoUserIdentity;

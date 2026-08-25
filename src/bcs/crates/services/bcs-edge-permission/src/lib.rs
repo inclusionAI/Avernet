@@ -46,6 +46,7 @@ use bcs_service_api::port::repo::{
     PermissionRequestRepoPort,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
+use bcs_user_directory_api::UserDirectoryPlugin;
 
 /// Generate a fresh external request id (a bare UUID v4, simple form — no
 /// prefix). The internal bigint PK (`permission_requests.id`) is assigned by
@@ -66,6 +67,7 @@ pub struct DbConnectService {
     profiles: Arc<dyn PermissionProfileRepoPort>,
     requests: Arc<dyn PermissionRequestRepoPort>,
     bot_config: Arc<dyn BotActorConfigRepoPort>,
+    user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     friend_connect_notification: Arc<dyn FriendConnectNotificationPort>,
     env: String,
 }
@@ -76,6 +78,7 @@ impl DbConnectService {
         profiles: Arc<dyn PermissionProfileRepoPort>,
         requests: Arc<dyn PermissionRequestRepoPort>,
         bot_config: Arc<dyn BotActorConfigRepoPort>,
+        user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
         friend_connect_notification: Arc<dyn FriendConnectNotificationPort>,
         env: String,
     ) -> Self {
@@ -84,6 +87,7 @@ impl DbConnectService {
             profiles,
             requests,
             bot_config,
+            user_directory,
             friend_connect_notification,
             env,
         }
@@ -113,17 +117,12 @@ fn normalize_policy_value(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
 
-fn is_private_visibility(value: &str) -> bool {
-    matches!(normalize_policy_value(value).as_str(), "private")
+fn department_matches_allowlist_entry(actual: &str, allowed: &str) -> bool {
+    actual == allowed || actual.starts_with(&format!("{allowed}-"))
 }
 
-fn bot_friend_ext_department_code(friend_ext: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
-    friend_ext
-        .get("department_code")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
+fn is_private_visibility(value: &str) -> bool {
+    matches!(normalize_policy_value(value).as_str(), "private")
 }
 
 fn bot_friend_ext_no_check_scope_friend_deps(
@@ -639,18 +638,20 @@ impl DbConnectService {
         }
     }
 
-    async fn resolve_actor_department_code(&self, actor_id: &str) -> Option<String> {
-        let cfg = match self.bot_config.get(actor_id, &self.env).await {
-            Some(cfg) => cfg,
-            None => return None,
+    async fn resolve_user_department_code(&self, actor_id: &str) -> Option<String> {
+        let user_directory = self.user_directory.as_ref()?;
+        let staff_no = match actor_kind_of(actor_id) {
+            ActorKind::Human => actor_id.strip_prefix("human_")?.to_string(),
+            ActorKind::Bot => {
+                let cfg = self.bot_config.get(actor_id, &self.env).await?;
+                cfg.created_by?
+            }
         };
-        if let Some(code) = bot_friend_ext_department_code(&cfg.friend_ext) {
-            return Some(code);
-        }
-        let owner_id = cfg.created_by.as_deref()?;
-        let owner_actor_id = format!("human_{owner_id}");
-        let owner_cfg = self.bot_config.get(&owner_actor_id, &self.env).await?;
-        bot_friend_ext_department_code(&owner_cfg.friend_ext)
+        user_directory
+            .lookup_department_by_staff_no(&staff_no)
+            .await
+            .ok()
+            .flatten()
     }
 
     async fn caller_department_matches_friend_allowlist(
@@ -662,10 +663,12 @@ impl DbConnectService {
         if allowlist.is_empty() {
             return false;
         }
-        let Some(caller_department) = self.resolve_actor_department_code(caller).await else {
+        let Some(caller_department) = self.resolve_user_department_code(caller).await else {
             return false;
         };
-        allowlist.contains(&caller_department)
+        allowlist
+            .iter()
+            .any(|allowed| department_matches_allowlist_entry(&caller_department, allowed))
     }
 
     fn target_notification_recipients(
@@ -1329,6 +1332,50 @@ mod tests {
             profiles.clone(),
             requests.clone(),
             bot_config.clone(),
+            None,
+            Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
+            "dev".to_string(),
+        )
+    }
+
+    #[derive(Clone, Default)]
+    struct StaticUserDirectoryPlugin {
+        departments: Arc<std::collections::HashMap<String, String>>,
+    }
+
+    #[async_trait]
+    impl UserDirectoryPlugin for StaticUserDirectoryPlugin {
+        async fn lookup_by_staff_no(
+            &self,
+            staff_no: &str,
+        ) -> Result<Option<bcs_user_directory_api::UserDirectoryProfile>, bcs_user_directory_api::UserDirectoryError> {
+            Ok(Some(bcs_user_directory_api::UserDirectoryProfile {
+                staff_no: staff_no.to_string(),
+                nick_name: None,
+            }))
+        }
+
+        async fn lookup_department_by_staff_no(
+            &self,
+            staff_no: &str,
+        ) -> Result<Option<String>, bcs_user_directory_api::UserDirectoryError> {
+            Ok(self.departments.get(staff_no).cloned())
+        }
+    }
+
+    fn service_with_departments(
+        edge_grants: &Arc<dyn EdgeGrantRepoPort>,
+        profiles: &Arc<dyn PermissionProfileRepoPort>,
+        requests: &Arc<dyn PermissionRequestRepoPort>,
+        bot_config: &Arc<dyn BotActorConfigRepoPort>,
+        departments: Arc<dyn UserDirectoryPlugin>,
+    ) -> DbConnectService {
+        DbConnectService::new(
+            edge_grants.clone(),
+            profiles.clone(),
+            requests.clone(),
+            bot_config.clone(),
+            Some(departments),
             Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
             "dev".to_string(),
         )
@@ -1359,6 +1406,7 @@ mod tests {
             profiles.clone(),
             requests.clone(),
             bot_config.clone(),
+            None,
             notification,
             "dev".to_string(),
         )
@@ -1545,14 +1593,53 @@ mod tests {
 
 
     #[tokio::test]
-    async fn dept_free_allowlist_auto_approves_when_human_department_matches() {
+    async fn dept_free_allowlist_stays_pending_with_noop_department_port() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        let mut human_friend_ext = serde_json::Map::new();
-        human_friend_ext.insert(
-            "department_code".to_string(),
-            serde_json::Value::String("TECH".to_string()),
+        seed_bot(
+            &db,
+            "human_1",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("owner_1"),
+        )
+        .await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "no_check_scope_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::Value::String(
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施".to_string(),
+            )]),
         );
         seed_bot_with_friend_ext(
+            &db,
+            "x:dept_noop",
+            "protected",
+            "protected",
+            "DEPT_FREE",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let svc = service(&eg, &pp, &rq, &bc);
+        let res = svc
+            .create_connect("human_1", "x:dept_noop", None)
+            .await
+            .expect("noop department port should not auto-approve");
+        assert_eq!(res.status, ConnectStatus::Pending);
+        assert!(!res.auto_accepted);
+        assert_eq!(res.request_ids.len(), 1);
+        assert!(res.edge_ids.is_empty());
+        let req = rq.get(&res.request_ids[0], "dev").await.expect("pending req");
+        assert_eq!(req.status, RequestStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn dept_free_allowlist_auto_approves_when_human_department_matches() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(
             &db,
             "human_1",
             "protected",
@@ -1560,13 +1647,14 @@ mod tests {
             "APPROVAL",
             "online",
             Some("85020"),
-            human_friend_ext,
         )
         .await;
         let mut target_friend_ext = serde_json::Map::new();
         target_friend_ext.insert(
             "no_check_scope_friend_deps".to_string(),
-            serde_json::Value::Array(vec![serde_json::Value::String("TECH".to_string())]),
+            serde_json::Value::Array(vec![serde_json::Value::String(
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施".to_string(),
+            )]),
         );
         seed_bot_with_friend_ext(
             &db,
@@ -1579,11 +1667,17 @@ mod tests {
             target_friend_ext,
         )
         .await;
-        let svc = service(&eg, &pp, &rq, &bc);
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "1".to_string(),
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施-系统智能".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
         let res = svc
             .create_connect("human_1", "x:dept", None)
             .await
-            .expect("dept_free hit → Approved");
+            .expect("dept_free ancestor hit → Approved");
         assert_eq!(res.status, ConnectStatus::Approved);
         assert!(res.auto_accepted);
         assert_eq!(res.edge_ids.len(), 1);
@@ -1593,14 +1687,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dept_free_allowlist_miss_keeps_pending() {
+    async fn dept_free_allowlist_auto_approves_when_department_port_matches() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        let mut human_friend_ext = serde_json::Map::new();
-        human_friend_ext.insert(
-            "department_code".to_string(),
-            serde_json::Value::String("SALES".to_string()),
-        );
-        seed_bot_with_friend_ext(
+        seed_bot(
             &db,
             "human_1",
             "protected",
@@ -1608,13 +1697,110 @@ mod tests {
             "APPROVAL",
             "online",
             Some("85020"),
-            human_friend_ext,
         )
         .await;
         let mut target_friend_ext = serde_json::Map::new();
         target_friend_ext.insert(
             "no_check_scope_friend_deps".to_string(),
-            serde_json::Value::Array(vec![serde_json::Value::String("TECH".to_string())]),
+            serde_json::Value::Array(vec![serde_json::Value::String(
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施-系统智能".to_string(),
+            )]),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "x:dept_from_port",
+            "protected",
+            "protected",
+            "DEPT_FREE",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "1".to_string(),
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施-系统智能".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+
+        let res = svc
+            .create_connect("human_1", "x:dept_from_port", None)
+            .await
+            .expect("dept_free exact match from department port → Approved");
+
+        assert_eq!(res.status, ConnectStatus::Approved);
+        assert!(res.auto_accepted);
+    }
+
+    #[tokio::test]
+    async fn dept_free_bot_applicant_falls_back_to_owner_department_port() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(
+            &db,
+            "x:applicant",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("owner_1"),
+        )
+        .await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "no_check_scope_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::Value::String(
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施".to_string(),
+            )]),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "x:target",
+            "protected",
+            "protected",
+            "DEPT_FREE",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "owner_1".to_string(),
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施-系统智能".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+
+        let res = svc
+            .create_connect("x:applicant", "x:target", None)
+            .await
+            .expect("bot applicant owner ancestor dept from department port → Approved");
+
+        assert_eq!(res.status, ConnectStatus::Approved);
+        assert!(res.auto_accepted);
+    }
+
+    #[tokio::test]
+    async fn dept_free_allowlist_miss_keeps_pending() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(
+            &db,
+            "human_1",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("85020"),
+        )
+        .await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "no_check_scope_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::Value::String(
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施".to_string(),
+            )]),
         );
         seed_bot_with_friend_ext(
             &db,
@@ -1627,7 +1813,13 @@ mod tests {
             target_friend_ext,
         )
         .await;
-        let svc = service(&eg, &pp, &rq, &bc);
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "1".to_string(),
+                "蚂蚁集团-其他事业群-销售部".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
         let res = svc
             .create_connect("human_1", "x:dept_miss", None)
             .await
@@ -1641,6 +1833,7 @@ mod tests {
 
     #[tokio::test]
     async fn pending_friend_request_emits_notification_to_target_owner() {
+
         let (eg, pp, rq, bc, db) = assemble().await;
         seed_bot(&db, "x:pending_notify", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let recorder = RecordingFriendConnectNotificationPort::default();

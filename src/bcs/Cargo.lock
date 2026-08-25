@@ -978,6 +978,7 @@ dependencies = [
  "bcs-edge-permission-store",
  "bcs-service-api",
  "bcs-test-support",
+ "bcs-user-directory-api",
  "serde_json",
  "tokio",
  "uuid",
