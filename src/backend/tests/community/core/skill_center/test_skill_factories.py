@@ -49,7 +49,7 @@ def test_default_capabilities_ext_info_provider_uses_unwrapped_template_config(
     }
 
     class FakeTemplateService:
-        def get_template_config(self, bot_id):
+        def get_template_config_strict(self, bot_id):
             assert bot_id == "bot-1"
             return template_config
 

@@ -212,9 +212,12 @@ def _template_service_cls():
 
 def _build__ext_info_provider(injector: Injector):
     def provider(bot_id: str) -> dict | None:
-        template_config = injector.get(_template_service_cls()).get_template_config(
-            bot_id
-        )
+        # The strict lookup: "no template" is None, a repository failure
+        # raises. Read-side consumers catch and degrade; the Default-MCP
+        # exclusion gate must not mistake a failed lookup for "no presets".
+        template_config = injector.get(
+            _template_service_cls()
+        ).get_template_config_strict(bot_id)
         if not isinstance(template_config, dict):
             return None
         return {"template_config": template_config}
