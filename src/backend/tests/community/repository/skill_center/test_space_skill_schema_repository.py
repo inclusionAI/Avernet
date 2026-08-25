@@ -772,3 +772,29 @@ def test_space_admin_owner_transfer_persists_the_audit_reason(db):
         assert owner.user_id == "member-2"
         assert owner.granted_by == "space-admin"
         assert owner.grant_reason == "handover approved by the space administrator"
+
+
+def test_grant_write_rechecks_owner_membership_inside_the_transaction(db):
+    from agentclaw.community.core.skill_center.errors import (
+        SpaceSkillGrantForbiddenError,
+    )
+
+    repo, space_id, skill_id = _grant_fixture(db)
+    with db.orm_session() as session:
+        owner_member = session.query(SpaceMember).filter_by(
+            space_id=space_id, user_id="owner-1", env="dev"
+        ).one()
+        owner_member.status = "INACTIVE"
+
+    with pytest.raises(SpaceSkillGrantForbiddenError):
+        repo.add_manager(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id="owner-1",
+            manager_user_id="manager-1",
+            env="dev",
+        )
+
+    assert repo.list_grants(
+        space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
+    )["managers"] == []

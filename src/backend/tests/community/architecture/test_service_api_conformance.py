@@ -105,6 +105,9 @@ from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
 )
+from agentclaw.community.api.space_skill_grant_service import (
+    SpaceSkillGrantServiceProtocol,
+)
 from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
     CollaboratorService,
@@ -158,6 +161,9 @@ from agentclaw.community.core.skill_center.services.repository_catalog_service i
 from agentclaw.community.core.skill_center.services.skill_set_management_service import (
     SkillSetManagementService,
 )
+from agentclaw.community.core.skill_center.services.space_skill_grant_service import (
+    SpaceSkillGrantService,
+)
 from agentclaw.community.core.market_favorites.services import MarketFavoriteService
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
     ServicePublicationFacade,
@@ -187,6 +193,7 @@ _PAIRS = [
     (BotRuntimeProjectorProtocol, BotRuntimeProjector),
     (SkillQueryServiceProtocol, SkillQueryService),
     (SkillMetadataParserProtocol, SkillParser),
+    (SpaceSkillGrantServiceProtocol, SpaceSkillGrantService),
     (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
     (DirectActivationServiceProtocol, DirectActivationService),
     (LocalSkillDeleteServiceProtocol, LocalSkillDeleteService),

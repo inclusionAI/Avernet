@@ -95,6 +95,29 @@ class SpaceSkillGrantSetRecord(TypedDict):
     actor_role: Literal["OWNER", "MANAGER"] | None
 
 
+class SpaceSkillActorPermissions(TypedDict):
+    edit_draft: bool
+    publish_draft: bool
+    delete_draft: bool
+    create_upgrade_draft: bool
+    retire_skill: bool
+    manage_grants: bool
+    transfer_owner: bool
+    request_edit_access: bool
+    takeover_lease: bool
+
+
+class SpaceSkillGrantActorRecord(TypedDict):
+    skill_role: Literal["OWNER", "MANAGER"] | None
+    permissions: SpaceSkillActorPermissions
+
+
+class SpaceSkillGrantViewRecord(TypedDict):
+    owner: SpaceSkillGrantItem
+    managers: list[SpaceSkillGrantItem]
+    actor: SpaceSkillGrantActorRecord
+
+
 class SpaceSkillCreationRecord(TypedDict):
     skill: SpaceSkillIdentityRecord
     ownership: SpaceSkillOwnershipRecord

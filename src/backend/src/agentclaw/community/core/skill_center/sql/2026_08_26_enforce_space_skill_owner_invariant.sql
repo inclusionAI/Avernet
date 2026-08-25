@@ -16,10 +16,7 @@ WHERE (
 GROUP BY skill_id;
 
 ALTER TABLE ac_skill_grant
-  DROP CHECK ck_skill_active_owner_slot;
-
-ALTER TABLE ac_skill_grant
-  ADD CONSTRAINT ck_skill_active_owner_slot CHECK (
+  ADD CONSTRAINT IF NOT EXISTS ck_skill_active_owner_required CHECK (
     (role = 'OWNER' AND status = 'ACTIVE' AND owner_slot IS NOT NULL AND owner_slot = 1)
     OR ((role <> 'OWNER' OR status <> 'ACTIVE') AND owner_slot IS NULL)
   );

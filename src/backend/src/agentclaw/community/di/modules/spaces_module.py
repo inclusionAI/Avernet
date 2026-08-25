@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from injector import Binder, Module, singleton
+from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
@@ -30,6 +30,9 @@ from agentclaw.community.core.repository.protocols.market_favorites import (
     MarketFavoriteRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SpaceSkillRepository,
+)
 from agentclaw.community.core.spaces.services import (
     SpaceAccessService,
     SpaceMemberService,
@@ -44,6 +47,7 @@ from agentclaw.community.core.skill_center.services.space_skill_grant_service im
 from agentclaw.community.core.spaces.protocols import (
     SpaceAccessServiceProtocol as CoreSpaceAccessServiceProtocol,
 )
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 class SpacesModule(Module):
@@ -78,12 +82,18 @@ class SpacesModule(Module):
             scope=singleton,
         )
         binder.bind(
-            SpaceSkillGrantServiceProtocol,
-            to=SpaceSkillGrantService,
-            scope=singleton,
-        )
-        binder.bind(
             MarketFavoriteServiceProtocol,
             to=MarketFavoriteService,
             scope=singleton,
         )
+
+    @singleton
+    @provider
+    @inject
+    def space_skill_grant_service(
+        self,
+        access: CoreSpaceAccessServiceProtocol,
+        repository: SpaceSkillRepository,
+    ) -> SpaceSkillGrantServiceProtocol:
+        """Assemble Grant policy with environment resolution at the DI boundary."""
+        return SpaceSkillGrantService(access, repository, get_current_env)

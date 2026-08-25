@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from injector import inject
 
-from agentclaw.community.core.skill_center.services.space_skill_grant_protocol import (
-    SpaceSkillGrantServiceProtocol,
-)
 from agentclaw.community.core.repository.protocols.skill_center import (
     SpaceSkillRepository,
 )
 from agentclaw.community.core.repository.protocols.skill_center_types import (
     SpaceSkillGrantItem,
     SpaceSkillGrantSetRecord,
+    SpaceSkillGrantViewRecord,
 )
 from agentclaw.community.core.skill_center.errors import (
     SpaceSkillGrantForbiddenError,
@@ -20,10 +20,9 @@ from agentclaw.community.core.skill_center.errors import (
 )
 from agentclaw.community.core.spaces.models import SpaceRole, SpaceType
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
-from agentclaw.community.utils.env_utils import get_current_env
 
 
-class SpaceSkillGrantService(SpaceSkillGrantServiceProtocol):
+class SpaceSkillGrantService:
     """Authorize Grant commands and delegate atomic facts to the repository."""
 
     @inject
@@ -31,11 +30,15 @@ class SpaceSkillGrantService(SpaceSkillGrantServiceProtocol):
         self,
         access: SpaceAccessServiceProtocol,
         repository: SpaceSkillRepository,
+        env_provider: Callable[[], str],
     ) -> None:
         self._access = access
         self._repository = repository
+        self._env_provider = env_provider
 
-    def list_grants(self, *, space_id: int, skill_id: int, actor_id: str) -> dict:
+    def list_grants(
+        self, *, space_id: int, skill_id: int, actor_id: str
+    ) -> SpaceSkillGrantViewRecord:
         space, member = self._access.require_space_member(
             space_id=space_id, user_id=actor_id
         )
@@ -43,7 +46,7 @@ class SpaceSkillGrantService(SpaceSkillGrantServiceProtocol):
             space_id=space_id,
             skill_id=skill_id,
             actor_id=actor_id,
-            env=get_current_env(),
+            env=self._env_provider(),
         )
         return self._present(
             record,
@@ -60,7 +63,7 @@ class SpaceSkillGrantService(SpaceSkillGrantServiceProtocol):
         manager_user_id: str,
     ) -> SpaceSkillGrantItem:
         self._access.require_space_member(space_id=space_id, user_id=actor_id)
-        env = get_current_env()
+        env = self._env_provider()
         self._require_owner(space_id, skill_id, actor_id, env)
         return self._repository.add_manager(
             space_id=space_id,
@@ -79,7 +82,7 @@ class SpaceSkillGrantService(SpaceSkillGrantServiceProtocol):
         manager_user_id: str,
     ) -> SpaceSkillGrantItem:
         self._access.require_space_member(space_id=space_id, user_id=actor_id)
-        env = get_current_env()
+        env = self._env_provider()
         self._require_owner(space_id, skill_id, actor_id, env)
         return self._repository.remove_manager(
             space_id=space_id,
@@ -97,11 +100,11 @@ class SpaceSkillGrantService(SpaceSkillGrantServiceProtocol):
         actor_id: str,
         new_owner_user_id: str,
         reason: str | None,
-    ) -> dict:
+    ) -> SpaceSkillGrantViewRecord:
         space, member = self._access.require_space_member(
             space_id=space_id, user_id=actor_id
         )
-        env = get_current_env()
+        env = self._env_provider()
         skill_role = self._repository.get_active_role(
             space_id=space_id, skill_id=skill_id, actor_id=actor_id, env=env
         )
@@ -170,7 +173,7 @@ class SpaceSkillGrantService(SpaceSkillGrantServiceProtocol):
         *,
         space_type,
         space_role,
-    ) -> dict:
+    ) -> SpaceSkillGrantViewRecord:
         return {
             "owner": record["owner"],
             "managers": record["managers"],
