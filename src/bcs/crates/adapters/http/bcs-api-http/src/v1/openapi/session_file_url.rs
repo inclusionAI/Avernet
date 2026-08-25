@@ -72,3 +72,11 @@ impl SessionFileUrlProjector {
         target
     }
 }
+
+impl bcs_service_api::application::v1::SessionFileSharedContentUrlProjector
+    for SessionFileUrlProjector
+{
+    fn shared_content_url(&self, token: &str) -> String {
+        SessionFileUrlProjector::shared_content_url(self, token)
+    }
+}

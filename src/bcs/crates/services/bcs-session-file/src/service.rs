@@ -43,9 +43,10 @@ const PROXY_PART_SIZE: u64 = 10 * 1024 * 1024;
 const MAX_PART_COUNT: u64 = 65535;
 
 /// TTL bounds for share-token expiry (seconds). Clamped on mint so a single
-/// misconfigured request cannot mint a 1-second or 10-year link.
+/// misconfigured request cannot mint a 1-second or 10-year link. The upper
+/// bound covers the 15-day upload-completion share link.
 const SHARE_TTL_MIN: u64 = 60;
-const SHARE_TTL_MAX: u64 = 604_800;
+const SHARE_TTL_MAX: u64 = 15 * 86_400;
 
 /// Configuration for [`SessionFileServiceImpl`]. Built by bootstrap; the
 /// service clones fields it needs from this struct in [`SessionFileServiceImpl::new`].
