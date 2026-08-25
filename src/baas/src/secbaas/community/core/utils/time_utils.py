@@ -1,29 +1,50 @@
-"""Naive-UTC clock helpers for the ARCA TTL renewal pipeline.
+"""Fixed Asia/Shanghai clock helpers for the ARCA TTL renewal pipeline.
 
 Clock-domain convention (CR-01): every DB-facing timestamp the renewal
 pipeline writes — ``next_renew_at`` in register/update/postpone paths and
-their comparisons — MUST be a *naive UTC* wall clock. The due gate
-depends on it: SQLite's ``CURRENT_TIMESTAMP`` is always UTC, and the
-scheduler passes an explicit naive-UTC ``now`` bound parameter to
-``list_due_for_renewal`` so the comparison stays time-zone independent
-for MySQL (whose ``NOW()`` follows the server time zone) as well.
+their comparisons — MUST be a naive *Asia/Shanghai (+08:00, no DST)* wall
+clock. The original defect was mixing multiple clock domains (naive UTC
+vs host-local time), which desynced the due gate; the pipeline therefore
+converges on ONE fixed zone so that every write and every comparison
+share a single clock. The scheduler passes an explicit naive-Asia/Shanghai
+``now`` bound parameter to ``list_due_for_renewal`` so the comparison
+stays time-zone independent of the DB server clock as well (company
+MySQL runs its session on +08:00, matching the stored wall clock).
 
 Do NOT call unqualified ``datetime.now()`` / ``datetime.fromtimestamp()``
-for pipeline timestamps: on non-UTC hosts they produce the local wall
-clock and desync the due gate by the time-zone offset (empirically
-reproduced on a CST host, where a row "due 1 minute ago" written in
-local time was judged NOT due by SQLite's UTC clock).
+for pipeline timestamps: on hosts outside the fixed zone they produce
+the host-local wall clock and desync the due gate by the time-zone
+offset. ``naive_cst_now`` / ``naive_cst_fromtimestamp`` are the ONLY
+clock entry points for pipeline timestamps.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # Fixed pipeline clock domain (CR-01): Asia/Shanghai is +08:00 with no DST,
 # so every wall-clock value derived from this zone is host-timezone
 # independent.
 CST = ZoneInfo("Asia/Shanghai")
+
+
+def naive_cst_now() -> datetime:
+    """Current time as a naive Asia/Shanghai (+08:00) datetime.
+
+    Safe to compare/persist — always renders the fixed +08:00 wall clock,
+    never the host-local one.
+    """
+    return datetime.now(CST).replace(tzinfo=None)
+
+
+def naive_cst_fromtimestamp(ts: float) -> datetime:
+    """Epoch seconds (or millis) → naive Asia/Shanghai (+08:00) wall clock.
+
+    ``datetime.fromtimestamp`` interprets the epoch in the fixed zone, so
+    the result is host-timezone independent (Asia/Shanghai has no DST).
+    """
+    return datetime.fromtimestamp(ts, tz=CST).replace(tzinfo=None)
 
 
 def format_ttl_expiration_time(ts_ms: float) -> str:
@@ -33,21 +54,7 @@ def format_ttl_expiration_time(ts_ms: float) -> str:
     byte-identical to the values the health_check scanners write
     (_sandbox_device_router.py / _service_device_provider.py).
     """
-    return (
-        datetime.fromtimestamp(ts_ms / 1000, tz=CST)
-        .replace(tzinfo=None)
-        .strftime("%Y-%m-%d %H:%M:%S")
-    )
-
-
-def naive_utc_now() -> datetime:
-    """Current time as a naive UTC datetime (safe to compare/persist)."""
-    return datetime.now(UTC).replace(tzinfo=None)
-
-
-def naive_utc_fromtimestamp(ts: float) -> datetime:
-    """Epoch seconds (or millis) → naive UTC wall-clock datetime."""
-    return datetime.fromtimestamp(ts, tz=UTC).replace(tzinfo=None)
+    return naive_cst_fromtimestamp(ts_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def renewal_window(default_ttl_minutes: int) -> timedelta:
