@@ -137,12 +137,14 @@ def _status_task(task_id: str) -> dict:
         "bot_id": "status-bot",
         "owner_id": "status-owner",
         "dt": "2026-08-20",
-        "project_name": task_id,
-        "description": "status coverage",
-        "business_scenario": "testing",
+        "title": task_id,
+        "instruction": "status coverage",
+        "background": "testing",
         "discovery_basis": "changed-line coverage",
         "priority": "medium",
         "status": "pending_confirmation",
+        "objective": f"目标:{task_id}",
+        "acceptances": [{"id": "c1", "description": "验收-1"}],
     }
 
 
@@ -156,7 +158,21 @@ def _seed_status_with_discovered_and_pending_tasks(world) -> None:
     )
     os.environ["TASK_DISCOVERY_DATA_FILE"] = str(_STATUS_COVERAGE_DB)
     service = world.get(DiscoveryService)
-    task = DiscoveredTask(**_status_task(_STATUS_DISCOVERED_TASK_ID))
+    _task_dto = _status_task(_STATUS_DISCOVERED_TASK_ID)
+    task = DiscoveredTask(
+        task_id=_task_dto["task_id"],
+        bot_id=_task_dto["bot_id"],
+        owner_id=_task_dto["owner_id"],
+        dt=_task_dto["dt"],
+        title=_task_dto["title"],
+        instruction=_task_dto["instruction"],
+        background=_task_dto["background"],
+        discovery_basis=_task_dto["discovery_basis"],
+        priority=_task_dto["priority"],
+        status=_task_dto["status"],
+        objective=_task_dto.get("objective", ""),
+        acceptances=list(_task_dto.get("acceptances", [])),
+    )
     service._discoveries[_STATUS_DISCOVERED_TASK_ID] = DiscoveryResult(
         task=task,
         session=DiscoverySession(

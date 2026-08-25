@@ -25,10 +25,17 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
+from agentclaw.community.core.repository.protocols.task import (
+    TaskDiscoveryLockRepositoryProtocol,
+)
+from agentclaw.community.core.task.task_discovery.lock_models import (
+    TaskDiscoveryLockRecord,
+)
 from agentclaw.community.core.task.task_discovery.models import (
     DiscoveredTask,
     DiscoverySession,
@@ -43,13 +50,28 @@ from agentclaw.community.core.task.task_discovery.task_reader import (
     TaskReader,
     SqliteTaskReader,
 )
+from agentclaw.community.core.work_orders.models import (
+    NotificationCategory,
+    WorkOrderEventType,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.notify_sender import (
     NotifyMessage,
     NotifySenderPlugin,
 )
+from agentclaw.community.utils.env_utils import get_current_env
+
+if TYPE_CHECKING:
+    # 仅作 __init__ 的类型注解；运行期按鸭子类型调用 create_work_order_event。
+    from agentclaw.community.api.work_order_service import (
+        WorkOrderServiceProtocol,
+    )
 
 logger = get_logger()
+
+#: discover() 单次调用（session 创建 + WebSocket + 通知）的预估耗时上限。
+#: per-bot 锁 TTL 应略大于该值，使崩机时 stale reaper 能在当前 cron 周期内恢复。
+DISCOVERY_LOCK_TTL_SECONDS = 600
 
 
 @dataclass
@@ -80,14 +102,61 @@ class DiscoveryService:
         session_initiator: SessionInitiator,
         notify_sender: NotifySenderPlugin,
         bot_service: BotServiceProtocol | None = None,
+        discovery_lock_repo: TaskDiscoveryLockRepositoryProtocol | None = None,
+        work_order_service: WorkOrderServiceProtocol | None = None,
     ):
         self._reader = reader
         self._session_initiator = session_initiator
         self._notify_sender = notify_sender
         self._bot_service = bot_service
+        self._lock_repo = discovery_lock_repo
+        #: 工单通知投递（直接领域调用 WorkOrderService）。注入时在发现流程里额外
+        #: 把"待确认任务"写成一条 NOTICE 工单事件，落 ac_work_order_notification。
+        self._work_order_service = work_order_service
 
         #: 最近的发现结果 (task_id → DiscoveryResult)，供外部查询
         self._discoveries: dict[str, DiscoveryResult] = {}
+
+    def _try_acquire_lock(
+        self, bot_id: str
+    ) -> Optional[TaskDiscoveryLockRecord]:
+        """尝试获取该 bot 当日的发现锁（与 _try_acquire_restart_lock 逻辑同构）。
+
+        多机器 cron 同时 fire 时，所有机器都进入 ``discover_all_bots()``，
+        在 per-bot 循环里竞争 ``acquire()``：
+        恰好一台机器的 INSERT 成功 -> 调用 discover()
+        其余机器拿到 None -> 跳过该 bot
+
+        1. ``INSERT`` — 成功即持锁
+        2. 冲突 -> 检查 stale -> stale 则 reap 并重新 INSERT
+        3. 仍冲突 -> None（其他机器正在处理，或当日锁仍有效）
+
+        Lock key: ``(env, bot_id, discovery_date)`` 每日唯一。
+        Holder: ``HOSTNAME`` 环境变量或 ``socket.gethostname()``。
+        TTL: ``DISCOVERY_LOCK_TTL_SECONDS`` (600s) — 崩机后 stale reaper 恢复。
+        """
+        env = get_current_env()
+        today = datetime.now().strftime("%Y-%m-%d")
+        holder = os.environ.get("HOSTNAME", socket.gethostname())
+
+        rec = self._lock_repo.acquire(env, bot_id, today, holder)
+        if rec is not None:
+            return rec
+
+        # acquire/check/acquire 不是事务性的，分层处理 stale 和已释放的锁。
+        stale = self._lock_repo.get_if_stale(
+            env, bot_id, today, DISCOVERY_LOCK_TTL_SECONDS
+        )
+        if stale is not None:
+            logger.warning(
+                "[task_discovery] Reaping stale discovery lock: env=%s, bot=%s, "
+                "date=%s, created=%s",
+                env, bot_id, today, stale.gmt_create,
+            )
+            # compare-and-delete：token 不匹配说明已被其他机器 reap+reacquire
+            self._lock_repo.release(env, bot_id, today, stale.lock_token)
+
+        return self._lock_repo.acquire(env, bot_id, today, holder)
 
     async def discover_all_bots(self) -> list[DiscoveryResult]:
         """遍历 db 中有待确认任务的 bot，为每个 bot 执行发现流程。
@@ -149,6 +218,21 @@ class DiscoveryService:
 
         all_results: list[DiscoveryResult] = []
         for bot_id, owner_id in bots_to_discover:
+            # ---- Per-bot 分布式锁（多机器竞争占有）----
+            # 多机器 cron 同时 fire，各自逐 bot 遍历。每个 bot 的 INSERT
+            # 由 DB UNIQUE 约束原子仲裁：恰好一台机器成功 -> discover()
+            # 其余 None -> 跳过该 bot。discover 完成后 finally 释放锁。
+            lock: Optional[TaskDiscoveryLockRecord] = None
+            if self._lock_repo is not None:
+                lock = self._try_acquire_lock(bot_id)
+                if lock is None:
+                    logger.info(
+                        "[task_discovery] bot=%s already being discovered by "
+                        "another instance, skipping",
+                        bot_id,
+                    )
+                    continue
+
             try:
                 results = await self.discover(
                     bot_id=bot_id,
@@ -161,6 +245,14 @@ class DiscoveryService:
                     "[task_discovery] bot=%s failed: %s",
                     bot_id, exc, exc_info=True,
                 )
+            finally:
+                if lock is not None:
+                    self._lock_repo.release(
+                        lock.env,
+                        lock.bot_id,
+                        lock.discovery_date,
+                        lock.lock_token,
+                    )
 
         logger.info(
             "[task_discovery] discovery complete: %d task(s) discovered across %d bot(s)",
@@ -233,14 +325,20 @@ class DiscoveryService:
                 model=model,
             )
 
-            notification_sent = self._send_notification(
-                task, owner_id, session.session_url, len(all_tasks),
+            # 通知走两个通道：外发卡片（NotifySender）+ 工单通知（WorkOrderService）。
+            card_sent = self._send_notification(
+                task, owner_id, session, len(all_tasks),
             )
+            work_order_sent = self._send_work_order_event(task, owner_id, session)
+            notification_sent = card_sent or work_order_sent
 
             logger.info(
-                "[task_discovery] task %s → session %s (notified=%s)",
+                "[task_discovery] task %s → session %s "
+                "(card_sent=%s, work_order_sent=%s, notified=%s)",
                 task.task_id,
                 session.session_id,
+                card_sent,
+                work_order_sent,
                 notification_sent,
             )
 
@@ -260,7 +358,7 @@ class DiscoveryService:
         self,
         task: DiscoveredTask,
         user_id: str,
-        session_url: str,
+        session: DiscoverySession,
         task_count: int,
     ) -> bool:
         """通过 NotifySenderPlugin 投递通知，返回是否发送成功。
@@ -271,6 +369,7 @@ class DiscoveryService:
         deep_link 指向 session，用户点击后进入 session 确认。
         extra 携带通用交互卡片参数（不绑定具体服务商）。
         """
+        session_url = session.session_url
         message = NotifyMessage(
             title="发现待确认任务",
             body=task.to_notification_body(task_count),
@@ -282,7 +381,9 @@ class DiscoveryService:
                     "TASK_DISCOVERY_CARD_TEMPLATE_ID", ""
                 ),
                 "card_biz_id": f"discover_things_{task.task_id}",
-                "card_data": json.dumps(task.to_card_data()),
+                "card_data": json.dumps(
+                    {"click": "", **task.to_card_data(), "session_url": session_url}
+                ),
                 "session_url": session_url,
             },
         )
@@ -298,6 +399,64 @@ class DiscoveryService:
             logger.warning(
                 "[task_discovery] notification send returned None for task %s",
                 task.task_id,
+            )
+            return False
+
+    def _send_work_order_event(
+        self,
+        task: DiscoveredTask,
+        user_id: str,
+        session: DiscoverySession,
+    ) -> bool:
+        """通过 WorkOrderService 投递一条 NOTICE 工单事件，落工单通知收件箱。
+
+        与 ``_send_notification``（外发卡片）并存：把"发现到的待确认任务"作为一条
+        NOTICE 通知写入 ``ac_work_order_notification``，供工单/通知中心展示。
+        ``work_order_service`` 未注入时直接返回 False（no-op，保持向后兼容）。
+        失败不抛异常 — 仅记 warning 并返回 False，不影响发现主流程。
+        """
+        svc = self._work_order_service
+        if svc is None:
+            return False
+        try:
+            result = svc.create_work_order_event(
+                event_category=NotificationCategory.NOTICE,
+                biz_type="task_discovery",
+                biz_id=task.task_id,
+                event_type=WorkOrderEventType.TASK_DISCOVERED.value,
+                # NOTICE 约束：applicant 必须为 None，否则 400201
+                applicant_user_id=None,
+                approver_user_ids=[],
+                recipient_user_ids=[user_id],
+                title=task.title,
+                content={
+                    **task.to_card_data(),
+                    "session_url": session.session_url,
+                    "task_id": task.task_id,
+                },
+                apply_reason=None,
+                biz_data={
+                    "task_id": task.task_id,
+                    "bot_id": task.bot_id,
+                    "owner_id": task.owner_id,
+                    "session_id": session.session_id,
+                    "session_url": session.session_url,
+                },
+                actor_id=user_id,
+            )
+            logger.info(
+                "[task_discovery] work-order event created for task %s "
+                "(notification_ids=%s, work_order_id=%s)",
+                task.task_id,
+                getattr(result, "notification_ids", None),
+                getattr(result, "work_order_id", None),
+            )
+            return True
+        except Exception as exc:
+            logger.warning(
+                "[task_discovery] work-order event failed for task %s: %s",
+                task.task_id,
+                exc,
             )
             return False
 

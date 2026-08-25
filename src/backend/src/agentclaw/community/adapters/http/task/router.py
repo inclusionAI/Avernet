@@ -272,7 +272,7 @@ async def discover_tasks(
             "tasks": [
                 {
                     "task_id": r.task.task_id,
-                    "project_name": r.task.project_name,
+                    "project_name": r.task.title,
                     "success": r.success,
                     "session_id": r.session.session_id if r.session else None,
                     "notification_sent": r.notification_sent,
@@ -311,7 +311,7 @@ async def get_discovery_status(
             "bot_id": t.bot_id,
             "owner_id": t.owner_id,
             "dt": t.dt,
-            "project_name": t.project_name,
+            "project_name": t.title,
             "status": t.status,
             "priority": t.priority,
         }
@@ -407,6 +407,41 @@ async def run_scheduled_trigger(
         "success": True,
         "total_discovered": len(payload),
         "results": payload,
+    }
+
+
+@router.post("/discovery/reschedule")
+async def reschedule_cron(
+    cron: str = Query(..., description="新的 5 字段 cron 表达式, e.g. '30 14 * * *'"),
+    timezone: str | None = Query(None, description="时区, 默认沿用当前时区"),
+    scheduler: TaskDiscoveryScheduler = Injected(TaskDiscoveryScheduler),  # noqa: B008
+) -> dict[str, Any]:
+    """运行时修改 cron 触发时间 — 无需重启 backend。
+
+    使用 APScheduler ``reschedule_job()`` 原地替换 job 的 trigger，
+    新 cron 立即生效，旧的下一次执行计划被丢弃。
+
+    扁平 JSON 响应（与 scheduler-status / scheduled-trigger 一致）。
+    """
+    logger.info("[task_discovery] reschedule received: cron='%s' tz='%s'", cron, timezone)
+    try:
+        ok = scheduler.reschedule(cron, timezone=timezone)
+    except Exception as exc:
+        logger.error(
+            "[task_discovery] reschedule failed: %s", exc, exc_info=True,
+        )
+        return {"success": False, "message": str(exc)}
+    if not ok:
+        return {"success": False, "message": "scheduler not running"}
+
+    status = scheduler.get_status()
+    jobs = status.get("jobs") or []
+    next_run = jobs[0].get("next_run_time") if jobs else None
+    return {
+        "success": True,
+        "cron": cron,
+        "timezone": status.get("timezone"),
+        "next_run_time": next_run,
     }
 
 

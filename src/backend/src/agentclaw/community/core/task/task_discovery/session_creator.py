@@ -153,7 +153,7 @@ class HttpSessionCreator:
         target = await self._resolve_engine_target(bot_id, owner_id, user_id)
 
         body: dict[str, Any] = {
-            "title": task.project_name,
+            "title": task.title,
             "user_id": user_id,
             "agent_id": agent_id,
             "extInfo": task.to_session_ext_info(),

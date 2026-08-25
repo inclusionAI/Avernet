@@ -3,6 +3,7 @@
 参考 ``CronModule`` 和 ``BotDormantModule`` 的模式：
 - 绑定 ``TaskDiscoveryScheduler`` 为 singleton（Lifecycle 参与者自动发现）
 - 绑定 ``DiscoveryService`` 为 singleton
+- 绑定 ``TaskDiscoveryLockRepository`` 为 singleton（per-bot 分布式锁）
 - 提供 ``SessionInitiator``（注入 CronRelayServiceProtocol）
 - 提供 ``TaskReader``（注入 SQLite path）
 - 桥接 API 层的 BotServiceProtocol 和 CronRelayServiceProtocol
@@ -25,6 +26,15 @@ from agentclaw.community.api.bot_service import (
 )
 from agentclaw.community.api.cron_relay_service import (
     CronRelayServiceProtocol as _ApiCronRelayServiceProtocol,
+)
+from agentclaw.community.api.work_order_service import (
+    WorkOrderServiceProtocol,
+)
+from agentclaw.community.core.repository.implementations.task.discovery_lock import (
+    TaskDiscoveryLockRepository,
+)
+from agentclaw.community.core.repository.protocols.task import (
+    TaskDiscoveryLockRepositoryProtocol,
 )
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
@@ -70,6 +80,14 @@ class TaskDiscoveryModule(Module):
         # 的 @provider @singleton 已处理绑定，binder.bind 会遮盖 provider 导致
         # injector 直接调 __init__() 但无法注入 reader/initiator/notify_sender。
         binder.bind(TaskDiscoveryScheduler, to=TaskDiscoveryScheduler, scope=singleton)
+        # Per-bot 分布式锁：单一 ORM 实现，同时运行于 OceanBase (prod) 和
+        # SQLite (local)，差异仅在注入的 DatabasePlugin。UNIQUE(env, bot_id,
+        # discovery_date) 即锁本体——多机器并发 INSERT 由 DB 原子仲裁。
+        binder.bind(
+            TaskDiscoveryLockRepositoryProtocol,
+            to=TaskDiscoveryLockRepository,
+            scope=singleton,
+        )
 
     @singleton
     @provider
@@ -80,13 +98,17 @@ class TaskDiscoveryModule(Module):
         session_initiator: SessionInitiator,
         notify_sender: NotifySenderPlugin,
         bot_service: _TaskDiscoveryBotServiceProtocol,
+        discovery_lock_repo: TaskDiscoveryLockRepositoryProtocol,
+        work_order_service: WorkOrderServiceProtocol,
     ) -> DiscoveryService:
-        """构建 DiscoveryService（注入 reader + initiator + notify + bot_service）。"""
+        """构建 DiscoveryService（注入 reader + initiator + notify + bot_service + lock + work_order）。"""
         return DiscoveryService(
             reader=reader,
             session_initiator=session_initiator,
             notify_sender=notify_sender,
             bot_service=bot_service,
+            discovery_lock_repo=discovery_lock_repo,
+            work_order_service=work_order_service,
         )
 
     @singleton

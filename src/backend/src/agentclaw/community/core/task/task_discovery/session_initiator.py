@@ -28,17 +28,54 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-#: 默认 backend 地址（用于查 bot connection 解析 engine target）
+#: fallback 地址 — 仅在环境变量和 singlebox 探测都失败时使用
 _DEFAULT_BACKEND_URL = "http://localhost:8888"
+_DEFAULT_FRONTEND_URL = "http://localhost:8000"
 
-#: 默认前端 workbench 端口
-_DEFAULT_FRONTEND_PORT = "8000"
+#: singlebox 本地域名（/etc/hosts 已配 127.0.0.1）
+_SINGLEBOX_HOST = "agentclaw-local.stable.alipay.net"
 
 #: WebSocket 协议常量
 _WS_PROTOCOL = 3
 _WS_HANDSHAKE_TIMEOUT = 10.0
 _WS_SEND_TIMEOUT = 10.0
 _WS_REPLY_TIMEOUT = 60.0  # 仅 wait_for_reply=True 时使用
+
+
+def _resolve_frontend_url() -> str:
+    """环境感知地解析前端 workbench URL。
+
+    优先级：
+      1. ``FRONTEND_URL`` 环境变量（pre/prod 由部署平台注入）
+      2. singlebox 模式（``DEPLOY_PROFILE=singlebox``）→ 固定本地域名
+      3. fallback ``localhost:8000``
+    """
+    url = os.environ.get("FRONTEND_URL")
+    if url:
+        return url
+    if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == "singlebox":
+        return f"http://{_SINGLEBOX_HOST}:8000"
+    return _DEFAULT_FRONTEND_URL
+
+
+def _resolve_backend_url() -> str:
+    """环境感知地解析 backend 自身 URL。
+
+    优先级：
+      1. ``BACKEND_URL`` 环境变量（pre/prod 由部署平台注入）
+      2. ``SINGLEBOX_BACKEND_URL`` 环境变量（singlebox 模式）
+      3. singlebox 模式 → 固定本地域名
+      4. fallback ``localhost:8888``
+    """
+    url = os.environ.get("BACKEND_URL")
+    if url:
+        return url
+    if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == "singlebox":
+        return os.environ.get(
+            "SINGLEBOX_BACKEND_URL",
+            f"http://{_SINGLEBOX_HOST}:8888",
+        )
+    return _DEFAULT_BACKEND_URL
 
 
 class SessionInitiator(Protocol):
@@ -79,13 +116,8 @@ class CronRelaySessionInitiator:
         wait_for_reply: bool = False,
     ):
         self._cron_relay = cron_relay
-        self._frontend_url = frontend_url or os.environ.get(
-            "FRONTEND_URL",
-            f"http://localhost:{_DEFAULT_FRONTEND_PORT}",
-        )
-        self._backend_url = os.environ.get(
-            "BACKEND_URL", _DEFAULT_BACKEND_URL,
-        )
+        self._frontend_url = frontend_url or _resolve_frontend_url()
+        self._backend_url = _resolve_backend_url()
         self._wait_for_reply = wait_for_reply
 
     async def initiate_session(
@@ -108,9 +140,9 @@ class CronRelaySessionInitiator:
         first_task = tasks[0]
         task_count = len(tasks)
         title = (
-            f"[DreamMode] 发现 {task_count} 件可能有意义的事情"
+            f"[DreamMode-任务发现] 发现 {task_count} 件可能有意义的事情"
             if task_count > 1
-            else f"[DreamMode] {first_task.project_name}"
+            else f"[DreamMode-任务发现] {first_task.title}"
         )
 
         # ── Step 1: 创建 session ──────────────────────────────
@@ -347,14 +379,28 @@ class CronRelaySessionInitiator:
     # ── 辅助方法 ──────────────────────────────────────────────
 
     def _build_discovery_prompt(self, tasks: list[DiscoveredTask]) -> str:
-        """构造发现提示消息 — 作为 chat.send 的 message 发送给 bot。"""
+        """构造发现提示消息 — 作为 chat.send 的 message 发送给 bot。
+
+        直接按 4 个维度组织（对齐执行层 TaskSpec 语义）：
+          目标       ← task.objective（缺省回退 title）
+          预期交付物 ← task.instruction
+          验收标准   ← task.acceptances（为空则提示确认时补充）
+          约束       ← task.background
+        """
         lines = ["/task 我为您发现了以下可能有意义的事情，请确认是否执行：\n"]
         for i, task in enumerate(tasks, 1):
-            lines.append(f"{i}. 【{task.project_name}】")
-            lines.append(f"   简介：{task.description}")
-            lines.append(f"   业务场景：{task.business_scenario}")
-            if task.work_item_url:
-                lines.append(f"   关联需求：{task.work_item_url}")
+            lines.append(f"{i}. 【{task.title}】")
+            lines.append(f"   目标：{task.objective or task.title}")
+            lines.append(f"   预期交付物：{task.instruction}")
+            if task.acceptances:
+                lines.append("   验收标准：")
+                for a in task.acceptances:
+                    lines.append(
+                        f"     - [{a.get('id', '')}] {a.get('description', '')}"
+                    )
+            else:
+                lines.append("   验收标准：（确认时可由你补充）")
+            lines.append(f"   约束：{task.background}")
             lines.append("")
         lines.append("请向用户展示以上任务，并询问是否确认执行。")
         return "\n".join(lines)
@@ -363,12 +409,17 @@ class CronRelaySessionInitiator:
         """构建前端 workbench session URL。
 
         前端路由格式: ``/assistant?botId={bot_id}&sessionId={session_id}``
-        sessionId 需 URL encode（如 ``agent:main:main`` 含冒号）。
+        sessionId 需 URL encode（如 ``agent:main:xxx`` 含冒号）。
+
+        engine 返回的 raw session_id 需要加 ``agent:main:`` 前缀构成
+        前端所需的完整 session key，这样 session_url 可直接被钉钉卡片 /
+        通知 / 测试脚本消费，无需外部拼装。
         """
         from urllib.parse import quote
 
         base = self._frontend_url.rstrip("/")
-        encoded_sid = quote(session_id, safe="")
+        full_session_key = f"agent:main:{session_id}"
+        encoded_sid = quote(full_session_key, safe="")
         return f"{base}/assistant?botId={agent_id}&sessionId={encoded_sid}"
 
 
