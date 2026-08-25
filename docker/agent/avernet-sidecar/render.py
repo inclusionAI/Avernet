@@ -172,7 +172,6 @@ def render_lua_filter_config(lua_code: str) -> str:
         f'{indent}  typed_config:\n'
         f'{indent}    "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua\n'
         f'{indent}    inline_code: {code_json}\n'
-        f'{indent}'
     )
 
 
