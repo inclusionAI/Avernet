@@ -102,7 +102,7 @@ lands in the same group as the migration of its last caller.
 - [x] 5.2 Union tests: ordinary-set MCP appears via Installation; excluded
       default MCP absent; direct-installed MCP appears with minimal
       metadata.
-- [ ] 5.3 Projector contract test: `installed ∪ effective_default` inputs
+- [x] 5.3 Projector contract test: `installed ∪ effective_default` inputs
       consistent.
 
 ## Group 6 — CapabilityOwnershipPolicy

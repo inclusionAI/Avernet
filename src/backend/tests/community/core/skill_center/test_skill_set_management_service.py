@@ -479,6 +479,24 @@ class _RuntimeFactory:
         return self.service
 
 
+class _OverlappingCollectService(_RuntimeFactoryService):
+    """collect_bot_active_mcps is itself default ∪ installed after Group 5,
+    so its answer overlaps the projector's installed input."""
+
+    def collect_bot_active_mcps(self, **kwargs) -> list[dict]:
+        self.collect_calls.append(kwargs)
+        return [
+            {"server_code": "mcp.weather"},
+            {"server_code": "mcp.template-preset"},
+        ]
+
+
+class _OverlappingCollectFactory(_RuntimeFactory):
+    def __init__(self) -> None:
+        super().__init__()
+        self.service = _OverlappingCollectService()
+
+
 class _RuntimeBots:
     def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
         assert (bot_id, owner_id) == ("bot-1", "true-owner")
@@ -1780,6 +1798,32 @@ async def test_runtime_projection_fails_before_engine_writes_when_flush_fails():
 
     with pytest.raises(RuntimeError, match="installation persistence unavailable"):
         await runtime.project(bot_id="bot-1", owner_id="true-owner")
+
+
+@pytest.mark.asyncio
+async def test_runtime_projection_mcp_inputs_agree_when_the_union_overlaps():
+    """installed ∪ effective_default: a code arriving through both inputs —
+    the repo's installed listing and the collect union that now contains
+    installed codes too — is delivered exactly once and drops nothing."""
+    factory = _OverlappingCollectFactory()
+    passport = _RuntimePassport()
+    runtime = BotRuntimeProjector(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=passport,
+    )
+
+    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+
+    assert factory.service.mcp_codes == {"mcp.weather", "mcp.template-preset"}
+    assert passport.calls[0]["resource_scope"]["mcp_codes"] == [
+        "mcp.template-preset",
+        "mcp.weather",
+    ]
 
 
 @pytest.mark.asyncio
