@@ -19,14 +19,20 @@ ownership of id allocation.
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from agentclaw.community.core.bot_management.engines.provisioning import (
+    BotCreateTemplateValidationMode,
+    PreparedBotCreate,
+    to_internal_template_config,
+)
+from agentclaw.community.core.bot_management.engines.registry import (
+    get_engine_provisioning_registry,
+)
 from agentclaw.community.core.bot_management.errors import (
     ApplicationCodingUnavailableError,
-    BotCombinationUnsupportedError,
     BotTemplateInvalidError,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
@@ -54,33 +60,11 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 
-APPLICATION_CODING_ENGINES = frozenset({"claude_code"})
-
-# Public template input must not set platform-owned identity or lifecycle data.
-_TEMPLATE_SERVER_RESERVED_FIELDS = frozenset(
-    {
-        "workspace_id",
-        "template_uid",
-        "bot_id",
-        "workspace_status",
-        "workspace_state",
-        "start_status",
-    }
-)
-
-
 class BotCreateDeploymentMode(StrEnum):
     """Deployment boundary relevant to Bot creation policy."""
 
     CLOUD = "cloud"
     LOCAL = "local"
-
-
-class BotCreateTemplateValidationMode(StrEnum):
-    """Template validation contract selected by the caller's API surface."""
-
-    LEGACY = "legacy"
-    PUBLIC = "public"
 
 
 @dataclass(frozen=True)
@@ -91,123 +75,57 @@ class BotCreateContext:
     space_kind: str
 
 
-@dataclass(frozen=True)
-class PreparedBotCreate:
-    """Sanitized creation attributes plus required platform capabilities."""
+def _reject_mixed_create_sources(spec: BotCreateSpec) -> None:
+    """Reject requests combining the new and the legacy template inputs.
 
-    template_config: dict[str, Any] | None
-    requires_workspace_hosting: bool = False
-
-
-def to_internal_template_config(
-    value: dict[str, Any] | None,
-    *,
-    reject_server_managed_fields: bool = True,
-) -> dict[str, Any] | None:
-    """Validate public ownership rules and detach caller-owned input.
-
-    The default keeps this helper's public-input behavior. Legacy internal
-    callers use the explicit opt-out because their template config is an
-    established internal snapshot that may contain platform-managed fields.
+    A Core-level invariant, not only a schema rule: two sources would leave the
+    override order ambiguous, so internal callers cannot bypass the check.
     """
-    if value is None:
-        return None
-    if reject_server_managed_fields:
-        reserved = sorted(_TEMPLATE_SERVER_RESERVED_FIELDS.intersection(value))
-        if reserved:
-            raise BotTemplateInvalidError(
-                f"template_config contains server-managed fields: {reserved}"
-            )
-    return deepcopy(value)
-
-
-def _validate_application_coding_config(
-    value: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Validate the stable outer contract while preserving extensions."""
-    # Legacy internal callers may intentionally omit the config. When a config
-    # is supplied, reject malformed input before external or persistence effects.
-    if value is None:
-        return None
-    if not value:
-        raise BotTemplateInvalidError(
-            "applicationCoding template_config must not be empty"
-        )
-    expected_types: dict[str, type | tuple[type, ...]] = {
-        "devflow_workflow": (str, dict),
-        "yuque_kb_repos": list,
-        "code_repos": list,
-        "bot_template_config": dict,
-        "token": str,
-    }
-    for key, expected in expected_types.items():
-        if key not in value:
-            continue
-        field_value = value[key]
-        if not isinstance(field_value, expected):
-            raise BotTemplateInvalidError(
-                f"applicationCoding template_config.{key} has invalid type"
-            )
-        if key == "token" and not field_value.strip():
-            raise BotTemplateInvalidError(
-                "applicationCoding template_config.token cannot be empty"
-            )
-    return value
-
-
-def prepare_bot_create(
-    *,
-    template_type: str | None,
-    template_config: dict[str, Any] | None,
-    bot_type: str,
-    engine_type: str,
-    context: BotCreateContext,
-    template_validation_mode: BotCreateTemplateValidationMode = (
-        BotCreateTemplateValidationMode.LEGACY
-    ),
-) -> PreparedBotCreate:
-    """Validate template-related creation inputs without transport dependencies."""
-    if template_type is None:
-        if template_config is not None:
-            raise BotTemplateInvalidError("template_config requires template_type")
-        return PreparedBotCreate(template_config=None)
-
-    # Other template types are established internal inputs. Their owning
-    # adapters/services retain their field semantics.
-    if template_type != "applicationCoding":
-        return PreparedBotCreate(
-            template_config=to_internal_template_config(
-                template_config,
-                reject_server_managed_fields=(
-                    template_validation_mode is BotCreateTemplateValidationMode.PUBLIC
-                ),
-            )
-        )
-
-    if context.deployment_mode is not BotCreateDeploymentMode.CLOUD:
-        raise BotCombinationUnsupportedError("application coding is cloud-only")
-    if engine_type not in APPLICATION_CODING_ENGINES:
-        raise BotCombinationUnsupportedError(
-            f"application coding does not support engine: {engine_type}"
-        )
-    if bot_type != "personal":
-        raise BotCombinationUnsupportedError(
-            "application coding bot must be personal"
-        )
-    if context.space_kind != "personal":
-        raise BotCombinationUnsupportedError(
-            "application coding is personal-space only"
-        )
-
-    sanitized = to_internal_template_config(
-        template_config,
-        reject_server_managed_fields=(
-            template_validation_mode is BotCreateTemplateValidationMode.PUBLIC
-        ),
+    has_legacy_template = (
+        spec.template_type is not None or spec.template_config is not None
     )
+    if spec.engine_properties and has_legacy_template:
+        raise BotTemplateInvalidError(
+            "engine_properties cannot be combined with legacy template fields"
+        )
+
+
+def _prepare_with_engine_strategy(
+    spec: BotCreateSpec, context: BotCreateContext
+) -> PreparedBotCreate:
+    """Run the engine-selected strategy's create prevalidation."""
+    strategy = get_engine_provisioning_registry().resolve(spec.engine_type)
+    return strategy.prepare_create(
+        engine_properties=spec.engine_properties,
+        bot_type=spec.bot_type,
+        deployment_mode=context.deployment_mode,
+        space_kind=context.space_kind,
+        template_validation_mode=spec.template_validation_mode,
+    )
+
+
+def _prepare_legacy_non_application_template(
+    spec: BotCreateSpec,
+) -> PreparedBotCreate:
+    """Sanitize established internal template inputs, keeping their type.
+
+    Server-managed-field rejection honors the caller's validation mode: public
+    inputs get the strict ownership rules, legacy internal snapshots may carry
+    platform-managed fields.
+    """
+    if spec.template_type is None:
+        if spec.template_config is not None:
+            raise BotTemplateInvalidError("template_config requires template_type")
+        return PreparedBotCreate()
     return PreparedBotCreate(
-        template_config=_validate_application_coding_config(sanitized),
-        requires_workspace_hosting=True,
+        template_type=spec.template_type,
+        template_config=to_internal_template_config(
+            spec.template_config,
+            reject_server_managed_fields=(
+                spec.template_validation_mode
+                is BotCreateTemplateValidationMode.PUBLIC
+            ),
+        ),
     )
 
 
@@ -312,15 +230,18 @@ class BotCreateSpec:
     share_policy: dict[str, Any] | None = None
     template_type: str | None = None
     template_config: dict[str, Any] | None = None
+    # How strictly template ownership rules apply: PUBLIC for OpenAPI inputs,
+    # LEGACY for established internal snapshots (may carry ``template_uid``).
     template_validation_mode: BotCreateTemplateValidationMode = (
         BotCreateTemplateValidationMode.LEGACY
     )
     space_id: int | None = None
-    # Engine/vendor-specific inputs belong here, NOT as new named fields. The
-    # spec is the contract shared by every surface, so it stays engine-agnostic
-    # rather than growing an attribute per engine; anything meaningful to only
-    # one engine goes in this bag.
-    extra_properties: dict[str, Any] = field(default_factory=dict)
+    # Engine-owned creation properties (the public ``engine_properties``
+    # contract), kept opaque here: only the engine-selected
+    # ``EngineProvisioningStrategy`` may interpret its keys. The legacy
+    # template_type/template_config pair above serves established internal
+    # callers and is mutually exclusive with this bag.
+    engine_properties: dict[str, Any] = field(default_factory=dict)
 
 
 def _prepare_create(
@@ -330,20 +251,33 @@ def _prepare_create(
     bot_service: BotService,
 ) -> BotCreateSpec:
     """Apply shared creation policy before any external or persistence effects."""
-    prepared = prepare_bot_create(
-        template_type=spec.template_type,
-        template_config=spec.template_config,
-        bot_type=spec.bot_type,
-        engine_type=spec.engine_type,
-        context=context,
-        template_validation_mode=spec.template_validation_mode,
-    )
+    _reject_mixed_create_sources(spec)
+
+    if spec.engine_properties:
+        prepared = _prepare_with_engine_strategy(spec, context)
+    elif spec.template_type == "applicationCoding":
+        # Core-only compatibility representation: the "template" key's presence
+        # preserves the legacy intent even when the caller intentionally
+        # omitted the config, so both input shapes share the Strategy's gate.
+        prepared = _prepare_with_engine_strategy(
+            replace(spec, engine_properties={"template": spec.template_config}),
+            context,
+        )
+    else:
+        # Plain bots and other established template types keep the generic path;
+        # the returned value must carry template_type through unchanged.
+        prepared = _prepare_legacy_non_application_template(spec)
+
     if (
         prepared.requires_workspace_hosting
         and not bot_service.is_workspace_hosting_available()
     ):
         raise ApplicationCodingUnavailableError()
-    return replace(spec, template_config=prepared.template_config)
+    return replace(
+        spec,
+        template_type=prepared.template_type,
+        template_config=prepared.template_config,
+    )
 
 
 def _get_bot_mcp_codes(

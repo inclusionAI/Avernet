@@ -14,6 +14,10 @@ from typing import Any, Dict
 from agentclaw.community.core.bot_management.capabilities import (
     is_template_factory_config,
 )
+from agentclaw.community.core.bot_management.errors import (
+    BotCombinationUnsupportedError,
+    BotTemplateInvalidError,
+)
 from agentclaw.community.core.workspace.runtime_identity import (
     claude_code_uses_aicoding_runtime,
 )
@@ -22,7 +26,13 @@ from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.utils import secret_utils
 from agentclaw.community.log import get_logger
 
-from ..provisioning import BotProvisioningContext, EngineProvisioningStrategy
+from ..provisioning import (
+    BotCreateTemplateValidationMode,
+    BotProvisioningContext,
+    EngineProvisioningStrategy,
+    PreparedBotCreate,
+    to_internal_template_config,
+)
 
 
 # Legacy coding template types.  This is only used for old call sites that
@@ -44,6 +54,42 @@ _THETA_KEY_PATH = ("bot_template_config", "ext_config", "thetaKey")
 _ENCRYPTED_VALUE_PREFIX = "enc:v1:"
 
 logger = get_logger()
+
+
+def _validate_application_coding_config(
+    value: Dict[str, Any] | None,
+) -> Dict[str, Any] | None:
+    """Validate the stable outer contract while preserving extensions.
+
+    Input must already be detached by ``to_internal_template_config``. An empty
+    config is rejected; unknown keys survive as engine-owned extensions.
+    """
+    if value is None:
+        return None
+    if not value:
+        raise BotTemplateInvalidError(
+            "applicationCoding template_config must not be empty"
+        )
+    expected_types: dict[str, type | tuple[type, ...]] = {
+        "devflow_workflow": (str, dict),
+        "yuque_kb_repos": list,
+        "code_repos": list,
+        "bot_template_config": dict,
+        "token": str,
+    }
+    for key, expected in expected_types.items():
+        if key not in value:
+            continue
+        field_value = value[key]
+        if not isinstance(field_value, expected):
+            raise BotTemplateInvalidError(
+                f"applicationCoding template_config.{key} has invalid type"
+            )
+        if key == "token" and not field_value.strip():
+            raise BotTemplateInvalidError(
+                "applicationCoding template_config.token cannot be empty"
+            )
+    return value
 
 
 class AicodingBaasEngineBucketResolver:
@@ -81,6 +127,83 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
     @property
     def engine_type(self) -> str:
         return self._engine_type
+
+    def prepare_create(
+        self,
+        *,
+        engine_properties: Dict[str, Any],
+        bot_type: str,
+        deployment_mode: str,
+        space_kind: str,
+        template_validation_mode: BotCreateTemplateValidationMode = (
+            BotCreateTemplateValidationMode.LEGACY
+        ),
+    ) -> PreparedBotCreate:
+        """Parse and validate application-coding create input (single owner).
+
+        The one implementation behind both input shapes: the public
+        ``engine_properties.template`` contract and the legacy
+        ``template_type="applicationCoding"`` normalized by the create flow.
+        Combination gates keep their historical order, error types and messages
+        so the HTTP mappings answer identically; server-managed-field rejection
+        follows the caller's validation mode.
+        """
+        if not engine_properties:
+            return PreparedBotCreate()
+
+        # Envelope integrity for keys this engine owns. The public schema's
+        # ``extra="forbid"`` cannot guard direct Core-level spec construction,
+        # so unknown keys fail here instead of being silently ignored.
+        unknown_keys = set(engine_properties) - {"template"}
+        if unknown_keys:
+            raise BotTemplateInvalidError(
+                f"unsupported engine_properties fields: {sorted(unknown_keys)}"
+            )
+        if "template" not in engine_properties:
+            raise BotTemplateInvalidError("engine_properties.template is required")
+
+        # Historical combination gates, in their historical order.
+        if deployment_mode != "cloud":
+            raise BotCombinationUnsupportedError("application coding is cloud-only")
+        if self.engine_type != CLAUDE_CODE_ENGINE_TYPE:
+            raise BotCombinationUnsupportedError(
+                f"application coding does not support engine: {self.engine_type}"
+            )
+        if bot_type != "personal":
+            raise BotCombinationUnsupportedError(
+                "application coding bot must be personal"
+            )
+        if space_kind != "personal":
+            raise BotCombinationUnsupportedError(
+                "application coding is personal-space only"
+            )
+
+        template = engine_properties["template"]
+        if template is None:
+            # Core-only legacy compatibility shape: the key's presence is the
+            # application-coding intent, ``None`` the intentionally-omitted
+            # config. The public schema requires a non-empty dict, so callers
+            # cannot express this through HTTP.
+            return PreparedBotCreate(
+                template_type="applicationCoding",
+                template_config=None,
+                requires_workspace_hosting=True,
+            )
+        if not isinstance(template, dict) or not template:
+            raise BotTemplateInvalidError(
+                "applicationCoding template_config must not be empty"
+            )
+        sanitized = to_internal_template_config(
+            template,
+            reject_server_managed_fields=(
+                template_validation_mode is BotCreateTemplateValidationMode.PUBLIC
+            ),
+        )
+        return PreparedBotCreate(
+            template_type="applicationCoding",
+            template_config=_validate_application_coding_config(sanitized),
+            requires_workspace_hosting=True,
+        )
 
     def resolve_bot_engine(self, bot: dict[str, Any]) -> str | None:
         active_engine = bot.get("active_engine")
@@ -476,18 +599,23 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         truthy — a plain restart must never silently rewrite the Passport
         authorization scope. Anything falsy (missing key, None, false) no-ops.
         """
-        if not (isinstance(extra_configs, dict) and extra_configs.get("confirmed_template_update")):
+        if not (
+            isinstance(extra_configs, dict)
+            and extra_configs.get("confirmed_template_update")
+        ):
             logger.info(
-                "[aicoding.restart] skip passport refresh: confirmed_template_update is not set "
-                "for bot_id=%s",
+                "[aicoding.restart] skip passport refresh: "
+                "confirmed_template_update is not set for bot_id=%s",
                 ctx.bot_id,
             )
             return
+        # Imported lazily: create_flow imports this module's registry, so a
+        # module-level import would cycle.
         from agentclaw.community.core.bot_management.create_flow import (
             _get_bot_mcp_codes,
         )
         from agentclaw.community.core.mcp.services._defaults import (
-            get_default_cli_items
+            get_default_cli_items,
         )
 
         stored_config: Dict[str, Any] = (

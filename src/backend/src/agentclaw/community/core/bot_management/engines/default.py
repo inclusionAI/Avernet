@@ -1,9 +1,20 @@
 """Default no-op provisioning strategy."""
 from __future__ import annotations
 
+from typing import Any
+
+from agentclaw.community.core.bot_management.errors import (
+    BotCombinationUnsupportedError,
+    BotTemplateInvalidError,
+)
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
-from .provisioning import BotProvisioningContext, EngineProvisioningStrategy
+from .provisioning import (
+    BotCreateTemplateValidationMode,
+    BotProvisioningContext,
+    EngineProvisioningStrategy,
+    PreparedBotCreate,
+)
 
 
 class DefaultProvisioningStrategy(EngineProvisioningStrategy):
@@ -15,6 +26,35 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
     @property
     def engine_type(self) -> str:
         return self._engine_type
+
+    def prepare_create(
+        self,
+        *,
+        engine_properties: dict[str, Any],
+        bot_type: str,
+        deployment_mode: str,
+        space_kind: str,
+        template_validation_mode: BotCreateTemplateValidationMode = (
+            BotCreateTemplateValidationMode.LEGACY
+        ),
+    ) -> PreparedBotCreate:
+        """Reject create-time engine properties this engine does not own.
+
+        A ``template`` key means application-coding intent (new public contract
+        or legacy normalization); the combination error keeps the historical
+        409 mapping for the legacy shape instead of turning it into a 422.
+        """
+        if not engine_properties:
+            return PreparedBotCreate()
+        if "template" in engine_properties:
+            raise BotCombinationUnsupportedError(
+                f"application coding does not support engine: {self.engine_type}"
+            )
+        raise BotTemplateInvalidError(
+            "engine {} does not support engine_properties: {}".format(
+                self.engine_type, sorted(engine_properties)
+            )
+        )
 
     def resolve_bot_engine(self, bot: dict[str, object]) -> str | None:
         engine = bot.get("active_engine")

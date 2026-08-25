@@ -1,4 +1,12 @@
-"""Application Coding creation policy and failure-path coverage."""
+"""Application Coding creation policy and failure-path coverage.
+
+The policy's single implementation is
+``AicodingProvisioningStrategy.prepare_create``. ``create_flow._prepare_create``
+routes both input shapes into it — the public ``engine_properties`` bag and the
+legacy ``template_type="applicationCoding"`` pair normalized to
+``{"template": config}`` — so the tests below cover the strategy directly plus
+the flow's routing on top.
+"""
 
 from __future__ import annotations
 
@@ -7,20 +15,27 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.core.bot_management.create_flow import (
+    BotCreateContext,
+    BotCreateDeploymentMode,
+    BotCreateSpec,
+    _prepare_create,
+    complete_bot_authorization,
+    create_bot_with_authorization,
+)
+from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
+    AicodingProvisioningStrategy,
+)
+from agentclaw.community.core.bot_management.engines.default import (
+    DefaultProvisioningStrategy,
+)
+from agentclaw.community.core.bot_management.engines.provisioning import (
+    BotCreateTemplateValidationMode,
+)
 from agentclaw.community.core.bot_management.errors import (
     ApplicationCodingUnavailableError,
     BotCombinationUnsupportedError,
     BotTemplateInvalidError,
-)
-from agentclaw.community.core.bot_management.create_flow import (
-    APPLICATION_CODING_ENGINES,
-    BotCreateContext,
-    BotCreateDeploymentMode,
-    BotCreateSpec,
-    BotCreateTemplateValidationMode,
-    complete_bot_authorization,
-    create_bot_with_authorization,
-    prepare_bot_create,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotService,
@@ -35,16 +50,33 @@ _CLOUD_PERSONAL = BotCreateContext(
 )
 
 
-def _prepare(**overrides):
-    params = dict(
-        template_type=None,
-        template_config=None,
-        bot_type="personal",
-        engine_type="claude_code",
-        context=_CLOUD_PERSONAL,
+def _strategy_prepare(
+    engine_type: str = "claude_code",
+    engine_properties: dict | None = None,
+    bot_type: str = "personal",
+    deployment_mode: str = "cloud",
+    space_kind: str = "personal",
+    template_validation_mode: BotCreateTemplateValidationMode = (
+        BotCreateTemplateValidationMode.LEGACY
+    ),
+):
+    return AicodingProvisioningStrategy(engine_type).prepare_create(
+        engine_properties=engine_properties or {},
+        bot_type=bot_type,
+        deployment_mode=deployment_mode,
+        space_kind=space_kind,
+        template_validation_mode=template_validation_mode,
     )
-    params.update(overrides)
-    return prepare_bot_create(**params)
+
+
+def _prepare_spec(
+    spec: BotCreateSpec,
+    context: BotCreateContext = _CLOUD_PERSONAL,
+    hosting_available: bool = True,
+) -> BotCreateSpec:
+    bot_service = MagicMock(spec=BotServiceProtocol)
+    bot_service.is_workspace_hosting_available.return_value = hosting_available
+    return _prepare_create(spec=spec, context=context, bot_service=bot_service)
 
 
 def _application_coding_spec(**overrides) -> BotCreateSpec:
@@ -60,128 +92,200 @@ def _application_coding_spec(**overrides) -> BotCreateSpec:
     return BotCreateSpec(**params)
 
 
-def test_application_coding_engine_matrix() -> None:
-    assert APPLICATION_CODING_ENGINES == frozenset({"claude_code"})
+# ── engine gate ────────────────────────────────────────────────────────────
+
+
+def test_application_coding_engine_gate_reads_the_strategy_instance() -> None:
+    # The aicoding strategy class is registered for both engine types, but
+    # application-coding creation stays claude_code-only.
+    prepared = _strategy_prepare(
+        "claude_code", {"template": {"devflow_workflow": "x"}}
+    )
+    assert prepared.template_type == "applicationCoding"
+    with pytest.raises(BotCombinationUnsupportedError):
+        _strategy_prepare("aicoding", {"template": {"devflow_workflow": "x"}})
+
+
+def test_default_engine_rejects_application_coding_as_combination_error() -> None:
+    # openclaw/teclaw/hermes + applicationCoding historically answered 409
+    # (BotCombinationUnsupportedError); routing by engine must keep that
+    # mapping instead of turning it into a template-invalid 422.
+    with pytest.raises(BotCombinationUnsupportedError):
+        DefaultProvisioningStrategy("openclaw").prepare_create(
+            engine_properties={"template": {"devflow_workflow": "x"}},
+            bot_type="personal",
+            deployment_mode="cloud",
+            space_kind="personal",
+        )
+
+
+def test_default_engine_rejects_other_engine_properties_keys() -> None:
+    with pytest.raises(BotTemplateInvalidError):
+        DefaultProvisioningStrategy("openclaw").prepare_create(
+            engine_properties={"surprise": 1},
+            bot_type="personal",
+            deployment_mode="cloud",
+            space_kind="personal",
+        )
+
+
+def test_unknown_engine_properties_keys_are_rejected_by_the_strategy() -> None:
+    # Core-level invariant: the HTTP schema's extra="forbid" cannot guard
+    # direct spec construction by internal callers.
+    with pytest.raises(BotTemplateInvalidError, match="unsupported"):
+        _strategy_prepare("claude_code", {"template": {"a": 1}, "other": 2})
+
+
+# ── strategy policy ────────────────────────────────────────────────────────
 
 
 def test_prepare_plain_bot_has_no_hosting_requirement() -> None:
-    prepared = _prepare()
+    prepared = _strategy_prepare()
+    assert prepared.template_type is None
     assert prepared.template_config is None
-    assert prepared.requires_workspace_hosting is False
-
-
-def test_prepare_preserves_existing_non_application_template() -> None:
-    payload = {"legacy": {"enabled": True}}
-    prepared = _prepare(
-        template_type="personalCoding",
-        template_config=payload,
-    )
-    assert prepared.template_config == payload
-    assert prepared.template_config is not payload
     assert prepared.requires_workspace_hosting is False
 
 
 @pytest.mark.parametrize(
     ("overrides", "error"),
     [
-        ({"template_config": {}}, BotTemplateInvalidError),
-        (
-            {
-                "template_type": "applicationCoding",
-                "template_config": {},
-                "engine_type": "aicoding",
-            },
-            BotCombinationUnsupportedError,
-        ),
-        (
-            {
-                "template_type": "applicationCoding",
-                "template_config": {},
-                "bot_type": "service",
-            },
-            BotCombinationUnsupportedError,
-        ),
-        (
-            {
-                "template_type": "applicationCoding",
-                "template_config": {},
-                "context": BotCreateContext(
-                    deployment_mode=BotCreateDeploymentMode.CLOUD,
-                    space_kind="team",
-                ),
-            },
-            BotCombinationUnsupportedError,
-        ),
-        (
-            {
-                "template_type": "applicationCoding",
-                "template_config": {},
-                "context": BotCreateContext(
-                    deployment_mode=BotCreateDeploymentMode.LOCAL,
-                    space_kind="personal",
-                ),
-            },
-            BotCombinationUnsupportedError,
-        ),
+        ({"engine_properties": {"template": {}}}, BotTemplateInvalidError),
+        ({"engine_type": "aicoding"}, BotCombinationUnsupportedError),
+        ({"bot_type": "service"}, BotCombinationUnsupportedError),
+        ({"space_kind": "team"}, BotCombinationUnsupportedError),
+        ({"deployment_mode": "local"}, BotCombinationUnsupportedError),
     ],
 )
 def test_prepare_rejects_invalid_application_coding_combinations(
     overrides, error
 ) -> None:
+    params = dict(
+        engine_type="claude_code",
+        engine_properties={"template": {"devflow_workflow": "x"}},
+        bot_type="personal",
+        deployment_mode="cloud",
+        space_kind="personal",
+    )
+    params.update(overrides)
     with pytest.raises(error):
-        _prepare(**overrides)
+        _strategy_prepare(**params)
 
 
 def test_prepare_application_coding_without_config_preserves_legacy_default() -> None:
-    prepared = _prepare(template_type="applicationCoding")
+    # ``{"template": None}`` is the Core-only legacy compatibility shape: key
+    # presence is the intent, None the intentionally-omitted config.
+    prepared = _strategy_prepare("claude_code", {"template": None})
+    assert prepared.template_type == "applicationCoding"
     assert prepared.template_config is None
     assert prepared.requires_workspace_hosting is True
 
 
 def test_prepare_application_coding_rejects_supplied_empty_config() -> None:
     with pytest.raises(BotTemplateInvalidError, match="must not be empty"):
-        _prepare(template_type="applicationCoding", template_config={})
+        _strategy_prepare("claude_code", {"template": {}})
 
 
 def test_prepare_application_coding_rejects_known_field_with_wrong_type() -> None:
     with pytest.raises(BotTemplateInvalidError, match="code_repos"):
-        _prepare(
-            template_type="applicationCoding",
-            template_config={"code_repos": "not-a-list"},
-        )
+        _strategy_prepare("claude_code", {"template": {"code_repos": "not-a-list"}})
 
 
 def test_prepare_valid_application_coding_returns_detached_config() -> None:
     payload = {"devflow_workflow": "x"}
-    prepared = _prepare(
-        template_type="applicationCoding",
-        template_config=payload,
-    )
+    prepared = _strategy_prepare("claude_code", {"template": payload})
     assert prepared.template_config == payload
     assert prepared.template_config is not payload
     assert prepared.requires_workspace_hosting is True
 
 
-def test_prepare_legacy_application_coding_preserves_template_uid() -> None:
+def test_legacy_application_coding_preserves_template_uid() -> None:
+    # Internal snapshots may carry platform-managed fields; the LEGACY mode
+    # (the internal callers' default) must keep accepting them (#1442).
     payload = {"template_uid": "legacy-template", "devflow_workflow": "x"}
-    prepared = _prepare(
-        template_type="applicationCoding",
-        template_config=payload,
-    )
+    prepared = _strategy_prepare("claude_code", {"template": payload})
     assert prepared.template_config == payload
     assert prepared.template_config is not payload
     assert prepared.requires_workspace_hosting is True
 
 
-def test_prepare_public_application_coding_rejects_template_uid() -> None:
+def test_public_application_coding_rejects_template_uid() -> None:
     with pytest.raises(
         BotTemplateInvalidError,
         match="server-managed fields.*template_uid",
     ):
-        _prepare(
-            template_type="applicationCoding",
-            template_config={"template_uid": "caller-value"},
+        _strategy_prepare(
+            "claude_code",
+            {"template": {"template_uid": "caller-value"}},
             template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
+        )
+
+
+def test_flow_preserves_legacy_template_uid_through_the_strategy() -> None:
+    payload = {"template_uid": "legacy-template", "devflow_workflow": "x"}
+    prepared = _prepare_spec(_application_coding_spec(template_config=payload))
+    assert prepared.template_type == "applicationCoding"
+    assert prepared.template_config == payload
+    assert prepared.template_config is not payload
+
+
+# ── create-flow source routing ─────────────────────────────────────────────
+
+
+def test_flow_routes_both_input_shapes_through_the_same_strategy() -> None:
+    legacy = _prepare_spec(_application_coding_spec())
+    modern = _prepare_spec(
+        BotCreateSpec(
+            entity_id="u1",
+            engine_type="claude_code",
+            bot_type="personal",
+            bot_name="Coding Bot",
+            engine_properties={"template": {"devflow_workflow": "x"}},
+        )
+    )
+    assert legacy.template_type == modern.template_type == "applicationCoding"
+    assert legacy.template_config == modern.template_config
+    # The legacy spec's bag stays untouched: normalization happens on the copy
+    # handed to the strategy, never on the caller's spec.
+    assert legacy.engine_properties == {}
+
+
+def test_flow_preserves_legacy_non_application_template() -> None:
+    payload = {"legacy": {"enabled": True}}
+    prepared = _prepare_spec(
+        BotCreateSpec(
+            entity_id="u1",
+            engine_type="openclaw",
+            bot_type="personal",
+            bot_name="Bot",
+            template_type="personalCoding",
+            template_config=payload,
+        )
+    )
+    assert prepared.template_type == "personalCoding"
+    assert prepared.template_config == payload
+    assert prepared.template_config is not payload
+
+
+def test_flow_preserves_legacy_application_coding_without_config() -> None:
+    prepared = _prepare_spec(
+        _application_coding_spec(template_config=None),
+    )
+    assert prepared.template_type == "applicationCoding"
+    assert prepared.template_config is None
+
+
+def test_flow_rejects_mixed_template_sources() -> None:
+    with pytest.raises(BotTemplateInvalidError):
+        _prepare_spec(
+            BotCreateSpec(
+                entity_id="u1",
+                engine_type="claude_code",
+                bot_type="personal",
+                bot_name="Coding Bot",
+                template_type="applicationCoding",
+                template_config={"devflow_workflow": "x"},
+                engine_properties={"template": {"devflow_workflow": "x"}},
+            )
         )
 
 
