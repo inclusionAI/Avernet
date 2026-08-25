@@ -129,3 +129,12 @@ fail otherwise. Removing or renaming a method is a breaking change for
 every consumer (adapter / CLI / RPC) — coordinate with downstream.
 Field shape in adapter-owned types (e.g. `AuthenticatedUser`) lives
 under `adapters/http/`, not here.
+
+`SkillMetadataParserProtocol` is additive. Its current concrete implementation
+is `SkillParser`; `LocalSkillUploadService` consumes the core-owned form of the
+same contract, while folder import, Git import and Draft/publication validation
+can adopt it without changing the parser wire. It adds no deployment config.
+The 100-character name and 65,535-byte description limits match the current
+`ac_skill` persistence columns. Legacy no-frontmatter upload remains a
+compatibility fallback outside the canonical Protocol; removing that fallback
+would require a separate migration and compatibility review.

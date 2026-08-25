@@ -25,7 +25,7 @@ from agentclaw.community.core.skill_center.skill_metadata import (
 
 logger = get_logger()
 
-_MAX_SKILL_NAME_LENGTH = 256
+_MAX_SKILL_NAME_LENGTH = 100
 _MAX_SKILL_DESCRIPTION_UTF8_BYTES = 65_535
 
 
@@ -189,6 +189,17 @@ def _validate_manifest(data: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _parse_manifest(
+    content: str | bytes, *, path: str = "SKILL.md"
+) -> tuple[dict[str, Any], str]:
+    """Decode, parse and validate one manifest exactly once."""
+    _validate_manifest_path(path)
+    if isinstance(content, bytes):
+        content = SkillParser.decode_content(content)
+    frontmatter, body = _extract_frontmatter(content)
+    return _validate_manifest(frontmatter), body
+
+
 def _to_skill_info(data: dict[str, Any]) -> dict[str, Any]:
     """Project validated frontmatter into the existing SkillInfo dictionary."""
     skill_info: dict[str, Any] = {
@@ -225,11 +236,7 @@ class SkillParser:
         content: str | bytes, *, path: str = "SKILL.md"
     ) -> SkillMetadata:
         """Return authoritative metadata through the reusable parser seam."""
-        _validate_manifest_path(path)
-        if isinstance(content, bytes):
-            content = SkillParser.decode_content(content)
-        frontmatter, _body = _extract_frontmatter(content)
-        validated = _validate_manifest(frontmatter)
+        validated, _body = _parse_manifest(content, path=path)
         return SkillMetadata(
             name=validated["name"], description=validated["description"]
         )
@@ -244,7 +251,7 @@ class SkillParser:
         except SkillManifestError as exc:
             return SkillManifestValidationResult(
                 metadata=None,
-                errors=(SkillManifestValidationIssue(code=exc.code, field=exc.field),),
+                error=SkillManifestValidationIssue(code=exc.code, field=exc.field),
             )
         return SkillManifestValidationResult(metadata=metadata)
 
@@ -354,10 +361,8 @@ class SkillParser:
         """Parse strict UTF-8-decoded ``SKILL.md`` content."""
         if not content:
             return None
-        frontmatter, _body = _extract_frontmatter(content)
-        metadata = SkillParser.parse_skill_markdown(content)
-        projection = dict(frontmatter)
-        projection.update(metadata.to_dict())
+        validated, _body = _parse_manifest(content)
+        projection = dict(validated)
         return _to_skill_info(projection)
 
     @staticmethod

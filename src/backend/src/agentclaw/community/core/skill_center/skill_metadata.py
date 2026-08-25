@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Protocol, runtime_checkable
 
 
 class SkillManifestErrorCode(str, Enum):
@@ -65,8 +66,23 @@ class SkillManifestValidationResult:
     """Non-throwing result for callers that need to render validation."""
 
     metadata: SkillMetadata | None
-    errors: tuple[SkillManifestValidationIssue, ...] = ()
+    error: SkillManifestValidationIssue | None = None
 
     @property
     def is_valid(self) -> bool:
-        return self.metadata is not None and not self.errors
+        return self.metadata is not None and self.error is None
+
+
+@runtime_checkable
+class SkillMetadataParserProtocol(Protocol):
+    """Core-owned reusable contract for canonical manifest metadata."""
+
+    @staticmethod
+    def parse_skill_markdown(
+        content: str | bytes, *, path: str = "SKILL.md"
+    ) -> SkillMetadata: ...
+
+    @staticmethod
+    def validate_skill_markdown(
+        content: str | bytes, *, path: str = "SKILL.md"
+    ) -> SkillManifestValidationResult: ...

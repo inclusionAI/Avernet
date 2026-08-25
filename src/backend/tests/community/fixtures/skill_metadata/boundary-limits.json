@@ -1,4 +1,4 @@
 {
-  "name_max_length": 256,
+  "name_max_length": 100,
   "description_max_utf8_bytes": 65535
 }

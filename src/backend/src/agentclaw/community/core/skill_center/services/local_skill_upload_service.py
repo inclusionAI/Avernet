@@ -45,8 +45,11 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import (
-    SkillManifestError,
     SkillParser,
+)
+from agentclaw.community.core.skill_center.skill_metadata import (
+    SkillManifestError,
+    SkillMetadataParserProtocol,
 )
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditBusyError,
@@ -84,6 +87,7 @@ class LocalSkillUploadService:
         edit_guard: SkillsPoolEditGuard,
         device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
         runtime_reconciler: BotRuntimeProjectorProtocol,
+        metadata_parser: SkillMetadataParserProtocol,
     ) -> None:
         self._skill_repo = skill_repo
         self._bot_repo = bot_repo
@@ -93,6 +97,7 @@ class LocalSkillUploadService:
         self._edit_guard = edit_guard
         self._device_context_resolver_provider = device_context_resolver_provider
         self._runtime_reconciler = runtime_reconciler
+        self._metadata_parser = metadata_parser
 
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
@@ -121,7 +126,7 @@ class LocalSkillUploadService:
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
                 raise LocalSkillNotReadyError()
-            name, description, files = self._unpack(package)
+            name, description, files = self._unpack(package, self._metadata_parser)
             is_teclaw = self._is_teclaw(bot_id=bot_id, owner_id=owner_id)
             # Re-read same-name candidates, owner, readiness and default state
             # under the edit lock.  Uploader identity is intentionally absent.
@@ -562,7 +567,10 @@ class LocalSkillUploadService:
         return bot
 
     @staticmethod
-    def _unpack(package: bytes) -> tuple[str, str, list[tuple[str, bytes]]]:
+    def _unpack(
+        package: bytes,
+        metadata_parser: SkillMetadataParserProtocol = SkillParser(),
+    ) -> tuple[str, str, list[tuple[str, bytes]]]:
         if len(package) > _MAX_COMPRESSED:
             raise LocalSkillTooLargeError()
         try:
@@ -612,14 +620,15 @@ class LocalSkillUploadService:
         if wrapper is not None and len(roots) != 1:
             raise LocalSkillInvalidPackageError("invalid_wrapper")
         try:
-            text = SkillParser.decode_content(markdown)
             try:
-                metadata = SkillParser.parse_content(text) or {}
+                canonical = metadata_parser.parse_skill_markdown(markdown, path=skill_path)
+                metadata = canonical.to_dict()
             except SkillManifestError as exc:
-                if exc.code != "MISSING_FRONTMATTER":
+                if exc.code.value != "MISSING_FRONTMATTER":
                     raise
                 # Keep packages accepted by the historical upload endpoints
                 # working while new frontmatter manifests remain strict.
+                text = SkillParser.decode_content(markdown)
                 metadata = SkillParser.parse_legacy_upload_content(text) or {}
         except SkillManifestError as exc:
             raise LocalSkillInvalidPackageError() from exc

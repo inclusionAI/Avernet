@@ -44,8 +44,8 @@ def test_protocol_validation_reports_a_stable_missing_name_error() -> None:
     )
 
     assert result.metadata is None
-    assert result.errors[0].code is SkillManifestErrorCode.MISSING_NAME
-    assert result.errors[0].field == "name"
+    assert result.error.code is SkillManifestErrorCode.MISSING_NAME
+    assert result.error.field == "name"
 
 
 def test_protocol_accepts_nested_skill_path_and_rejects_noncanonical_paths() -> None:
@@ -58,8 +58,8 @@ def test_protocol_accepts_nested_skill_path_and_rejects_noncanonical_paths() -> 
 
     for path in ("README.md", "../SKILL.md", "/release-notes/SKILL.md"):
         result = parser.validate_skill_markdown(content, path=path)
-        assert result.errors[0].code is SkillManifestErrorCode.INVALID_PATH
-        assert result.errors[0].field == "path"
+        assert result.error.code is SkillManifestErrorCode.INVALID_PATH
+        assert result.error.field == "path"
 
 
 def test_protocol_enforces_persistence_safe_metadata_boundaries() -> None:
@@ -81,10 +81,8 @@ def test_protocol_enforces_persistence_safe_metadata_boundaries() -> None:
     description_error = parser.validate_skill_markdown(
         f"---\nname: valid\ndescription: {'字' * (description_limit // 3 + 1)}\n---\n"
     )
-    assert name_error.errors[0].code is SkillManifestErrorCode.NAME_TOO_LONG
-    assert description_error.errors[0].code is (
-        SkillManifestErrorCode.DESCRIPTION_TOO_LONG
-    )
+    assert name_error.error.code is SkillManifestErrorCode.NAME_TOO_LONG
+    assert description_error.error.code is SkillManifestErrorCode.DESCRIPTION_TOO_LONG
 
 
 @pytest.mark.parametrize(
@@ -92,6 +90,14 @@ def test_protocol_enforces_persistence_safe_metadata_boundaries() -> None:
     [
         ("missing-frontmatter", SkillManifestErrorCode.MISSING_FRONTMATTER),
         ("missing-name", SkillManifestErrorCode.MISSING_NAME),
+        ("missing-description", SkillManifestErrorCode.MISSING_DESCRIPTION),
+        ("empty-name", SkillManifestErrorCode.EMPTY_NAME),
+        ("empty-description", SkillManifestErrorCode.EMPTY_DESCRIPTION),
+        ("invalid-name-type", SkillManifestErrorCode.INVALID_NAME_TYPE),
+        (
+            "invalid-description-type",
+            SkillManifestErrorCode.INVALID_DESCRIPTION_TYPE,
+        ),
         ("invalid-frontmatter", SkillManifestErrorCode.INVALID_FRONTMATTER),
     ],
 )
@@ -104,7 +110,7 @@ def test_shared_fixtures_pin_stable_errors(
         (_FIXTURES / fixture / "SKILL.md").read_bytes()
     )
 
-    assert result.errors[0].code is expected_code
+    assert result.error.code is expected_code
 
 
 def test_shared_valid_fixture_uses_only_frontmatter_metadata() -> None:
@@ -130,7 +136,7 @@ def test_shared_encoding_and_path_fixtures_pin_stable_errors() -> None:
         (_FIXTURES / "valid" / "SKILL.md").read_bytes(), path=invalid_path
     )
 
-    assert encoding_result.errors[0].code is SkillManifestErrorCode.INVALID_ENCODING
-    assert encoding_result.errors[0].field is None
-    assert path_result.errors[0].code is SkillManifestErrorCode.INVALID_PATH
-    assert path_result.errors[0].field == "path"
+    assert encoding_result.error.code is SkillManifestErrorCode.INVALID_ENCODING
+    assert encoding_result.error.field is None
+    assert path_result.error.code is SkillManifestErrorCode.INVALID_PATH
+    assert path_result.error.field == "path"
