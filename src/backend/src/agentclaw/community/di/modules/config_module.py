@@ -402,11 +402,6 @@ class ConfigModule(Module):
             personal_bot_template_uuid=block.get(
                 "personal_bot_template_uuid", defaults.personal_bot_template_uuid
             ),
-            # 旧 key arca_template_id 已重命名为 eval_template_uuid
-            eval_template_uuid=block.get(
-                "eval_template_uuid",
-                block.get("arca_template_id", defaults.eval_template_uuid),
-            ),
             default_ttl_minutes=int(ttl),
         )
 
