@@ -30,3 +30,25 @@
 /src/backend/tests/community/core/task/ @totalfrank @regrecall @msjbear @jiangj0627
 /src/backend/tests/community/adapters/http/task @totalfrank @regrecall @msjbear @jiangj0627
 /src/backend/tests/community/api/task  @totalfrank @regrecall @msjbear @jiangj0627
+# Task goal-driven framework — supplementary backend paths NOT already covered by the
+# core/task, api/task, adapters/http/task directory rules above (DI assembly modules,
+# task queue service + persistence, collaboration-task repositories/protocols, and
+# backend spec/plan design docs). Same dedicated task owners; these lines only append
+# coverage and do not alter the existing task rules above.
+# NOTE: a blanket `**/task_*.py` glob is intentionally NOT used here — it would also
+# sweep quality/services/task_processor.py, governance/task_record*.py and
+# api/task_processor_service.py, which belong to the quality / governance /
+# quality-processor modules, NOT the goal-driven task framework.
+/src/backend/src/agentclaw/community/di/modules/task_*.py                      @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/src/agentclaw/community/core/task_queue/                         @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/src/agentclaw/community/core/repository/protocols/task.py        @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/src/agentclaw/community/core/repository/implementations/task/    @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/src/agentclaw/community/core/repository/implementations/platform/task_queue.py  @totalfrank @regrecall @msjbear @jiangj0627
+# Task-related spec/plan design docs under backend/specs (directory name contains "task").
+/src/backend/specs/*task*/                                                    @totalfrank @regrecall @msjbear @jiangj0627
+# Tests for the supplementary task paths.
+/src/backend/tests/community/core/task_queue/                                @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/tests/community/repository/task/                                @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/tests/community/repository/platform/test_task_queue_repository.py  @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/tests/community/di/test_task_module.py                          @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/tests/community/endpoints/test_task_*.py                        @totalfrank @regrecall @msjbear @jiangj0627
