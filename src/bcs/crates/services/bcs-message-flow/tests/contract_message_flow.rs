@@ -2196,6 +2196,12 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
         .find(|participant| participant.bot_uuid == "bot-driver")
         .expect("driver participant")
         .tags = vec!["group-tag".to_string()];
+    group
+        .participants
+        .iter_mut()
+        .find(|participant| participant.bot_uuid == "bot-observer")
+        .expect("observer participant")
+        .tags = vec!["stale-observer-tag".to_string()];
     support.group.upsert(group).await.expect("update group tags");
     support
         .registry
@@ -2204,13 +2210,23 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
             support::FakeRegistryService::provider_target("bot-driver"),
         )
         .await;
+    support
+        .registry
+        .set_delivery_target(
+            "bot-observer",
+            support::FakeRegistryService::provider_target("bot-observer"),
+        )
+        .await;
     let mut provider = Participant::bot("bot-driver", ParticipantRole::Driver);
     provider.tags = vec!["session-tag".to_string(), "tenant-a".to_string()];
+    let mut observer = Participant::bot("bot-observer", ParticipantRole::Observer);
+    observer.tags = vec!["online".to_string(), "tenant-b".to_string()];
     let session = test_session(
         session_id,
         "group-1",
         vec![
             provider,
+            observer,
             {
                 let mut human = Participant::human("human_1", ParticipantRole::Observer);
                 human.mode = Some(ParticipantMode::Present);
@@ -2249,16 +2265,36 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
     .unwrap();
 
     let frames = support.bot_delivery.frames().await;
-    assert_eq!(frames.len(), 1);
-    assert!(support.bot_delivery.targets().await[0].is_http_provider());
-    let BcsFrame::Request(req) = &frames[0] else {
-        panic!("expected request frame");
+    assert_eq!(frames.len(), 2);
+    assert!(support
+        .bot_delivery
+        .targets()
+        .await
+        .iter()
+        .all(BotDeliveryTarget::is_http_provider));
+    let send = frames
+        .iter()
+        .find(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.send"))
+        .expect("provider chat.send frame");
+    let send_params = match send {
+        BcsFrame::Request(req) => req.params.as_ref().expect("send params"),
+        _ => unreachable!(),
     };
-    let params = req.params.as_ref().expect("params");
-    assert_eq!(params["bcs_group_id"], "group-1");
-    assert_eq!(params["bcs_session_id"], session_id);
-    assert_eq!(params["session_key"], session_id);
-    assert_eq!(params["tags"], json!(["session-tag", "tenant-a"]));
+    assert_eq!(send_params["bcs_group_id"], "group-1");
+    assert_eq!(send_params["bcs_session_id"], session_id);
+    assert_eq!(send_params["session_key"], session_id);
+    assert_eq!(send_params["tags"], json!(["session-tag", "tenant-a"]));
+
+    let inject = frames
+        .iter()
+        .find(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.inject"))
+        .expect("provider chat.inject frame");
+    let inject_params = match inject {
+        BcsFrame::Request(req) => req.params.as_ref().expect("inject params"),
+        _ => unreachable!(),
+    };
+    assert_eq!(inject_params["bcs_session_id"], session_id);
+    assert_eq!(inject_params["tags"], json!(["online", "tenant-b"]));
 }
 
 #[tokio::test]

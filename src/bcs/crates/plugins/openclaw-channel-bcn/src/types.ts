@@ -200,6 +200,7 @@ export interface ChatSendParams {
   session_context: GroupContext;
   timeout_ms?: number;
   idempotency_key?: string;
+  tags?: string[];
   attachments?: Attachment[];
 }
 
@@ -215,6 +216,7 @@ export interface ChatInjectParams {
   message: MessageContent;
   channel: ChannelInfo;
   session_context: GroupContext;
+  tags?: string[];
   attachments?: Attachment[];
 }
 
