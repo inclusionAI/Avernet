@@ -185,7 +185,7 @@ lands in the same group as the migration of its last caller.
 
 ## Group 10 — SkillQueryService (one query seam, one fewer layer)
 
-- [ ] 10.1 Merge `LocalSkillQueryService` + `BotSkillAssetService` reads into
+- [x] 10.1 Merge `LocalSkillQueryService` + `BotSkillAssetService` reads into
       `core/skill_center/services/skill_query_service.py` +
       `api/skill_query_service.py` (listing, detail, content, parameters
       incl. `replace_parameters` delegation, legacy reference resolution);

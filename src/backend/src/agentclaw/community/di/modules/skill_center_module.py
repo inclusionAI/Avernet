@@ -39,6 +39,9 @@ from agentclaw.community.api.bot_capability_state_reader import (
 from agentclaw.community.api.direct_activation_service import (
     DirectActivationServiceProtocol,
 )
+from agentclaw.community.api.skill_query_service import (
+    SkillQueryServiceProtocol,
+)
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
 )
@@ -163,6 +166,9 @@ from agentclaw.community.core.skill_center.services.skill_propagation_service im
 )
 from agentclaw.community.core.skill_center.services.skill_publish_service import (
     SkillPublishService,
+)
+from agentclaw.community.core.skill_center.services.skill_query_service import (
+    SkillQueryService,
 )
 from agentclaw.community.core.skill_center.services.skill_scan import SkillScanService
 from agentclaw.community.core.skill_center.services.direct_activation_service import (
@@ -406,6 +412,30 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         )
 
         return UnifiedSkillSetRepository(db)
+
+    @singleton
+    @provider
+    @inject
+    def skill_query_service(
+        self,
+        skill_repo: SkillRepository,
+        bot_repo: BotRepository,
+        collaborator_service: CollaboratorServiceProtocol,
+        reader: CoreBotCapabilityStateReaderProtocol,
+        skill_service_factory: SkillServiceFactory,
+        parameter_service_factory: SkillParameterServiceFactoryProtocol,
+        injector: Injector,
+    ) -> SkillQueryServiceProtocol:
+        """Bind the one Bot-Skill query seam (listing/detail/content/params)."""
+        return SkillQueryService(
+            skill_repo,
+            bot_repo,
+            collaborator_service,
+            reader,
+            skill_service_factory,
+            parameter_service_factory,
+            lambda: injector.get(DeviceContextResolver),
+        )
 
     @singleton
     @provider
