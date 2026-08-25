@@ -49,14 +49,6 @@ def _dynamic_shared_bot(**overrides):
     return defaults
 
 
-def _dynamic_shared_template_config():
-    return {
-        "capabilities": {
-            "member_management": True,
-        },
-    }
-
-
 @pytest.fixture
 def mock_repo():
     repo = MagicMock()
@@ -78,19 +70,11 @@ def mock_collaborator_repo():
 
 
 @pytest.fixture
-def mock_template_service():
-    service = MagicMock()
-    service.get_template_config.return_value = None
-    return service
-
-
-@pytest.fixture
-def service(mock_repo, mock_bot_repo, mock_collaborator_repo, mock_template_service):
+def service(mock_repo, mock_bot_repo, mock_collaborator_repo):
     return RenderScreenService(
         repository=mock_repo,
         bot_repository=mock_bot_repo,
         collaborator_repository=mock_collaborator_repo,
-        template_service=mock_template_service,
     )
 
 
@@ -123,9 +107,8 @@ class TestListRenderScreens:
         assert len(result) == 1
         mock_repo.list_by_bot_id.assert_called_once_with(bot_id="bot_001", owner_id=None)
 
-    def test_shared_dynamic_template_bot_lists_without_owner_filter(self, service, mock_repo, mock_bot_repo, mock_collaborator_repo, mock_template_service):
+    def test_shared_dynamic_template_bot_lists_without_owner_filter(self, service, mock_repo, mock_bot_repo, mock_collaborator_repo):
         mock_bot_repo.get_by_id.return_value = _dynamic_shared_bot()
-        mock_template_service.get_template_config.return_value = _dynamic_shared_template_config()
         mock_collaborator_repo.get_by_bot_and_user.return_value = _record(id=9)
         mock_repo.list_by_bot_id.return_value = [_record(id=1, owner_id="collab_001")]
 
@@ -218,9 +201,8 @@ class TestCreateRenderScreen:
             creator_id="collab_001",
         )
 
-    def test_create_dynamic_shared_bot_uses_sharing_scope(self, service, mock_repo, mock_bot_repo, mock_collaborator_repo, mock_template_service):
+    def test_create_dynamic_shared_bot_uses_sharing_scope(self, service, mock_repo, mock_bot_repo, mock_collaborator_repo):
         mock_bot_repo.get_by_id.return_value = _dynamic_shared_bot()
-        mock_template_service.get_template_config.return_value = _dynamic_shared_template_config()
         mock_collaborator_repo.get_by_bot_and_user.return_value = _record(id=9)
         mock_repo.list_by_bot_id.return_value = []
         mock_repo.insert.return_value = 44
@@ -298,10 +280,9 @@ class TestAuthorizeRenderScreenRecord:
         record = service.authorize_render_screen_record(record_id=1, user_id="collab_001")
         assert record.id == 1
 
-    def test_authorize_record_dynamic_shared_bot_allows_collaborator(self, service, mock_repo, mock_bot_repo, mock_collaborator_repo, mock_template_service):
+    def test_authorize_record_dynamic_shared_bot_allows_collaborator(self, service, mock_repo, mock_bot_repo, mock_collaborator_repo):
         mock_repo.get_by_id.return_value = _record(id=1, owner_id="owner_001")
         mock_bot_repo.get_by_id.return_value = _dynamic_shared_bot(template_type="architect")
-        mock_template_service.get_template_config.return_value = _dynamic_shared_template_config()
         mock_collaborator_repo.get_by_bot_and_user.return_value = _record(id=9)
 
         record = service.authorize_render_screen_record(record_id=1, user_id="collab_002")
