@@ -126,9 +126,7 @@ class SkillDraftEditLease(_ScopedDomainFact, Base):
     skill_id = Column(UnsignedBigInteger, nullable=False)
     holder_user_id = Column(String(128), nullable=True)
     fencing_token = Column(UnsignedBigInteger, nullable=False, server_default="0")
-    expires_at = Column(DateTime, nullable=True)
     acquired_at = Column(DateTime, nullable=True)
-    renewed_at = Column(DateTime, nullable=True)
     last_takeover_by = Column(String(128), nullable=True)
 
 

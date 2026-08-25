@@ -33,6 +33,9 @@ from agentclaw.community.api.space_skill_editor_request_service import (
     SpaceSkillEditorRequestServiceProtocol,
 )
 from agentclaw.community.core.work_orders.models import WorkOrderRecord, WorkOrderStatus
+from agentclaw.community.api.draft_edit_lease_service import (
+    DraftEditLeaseServiceProtocol,
+)
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
     MarketFavoriteRecord,
@@ -58,6 +61,10 @@ from agentclaw.community.core.skill_center.errors import (
     SpaceSkillGrantMemberRequiredError,
     SpaceSkillGrantNotFoundError,
     SpaceSkillGrantReasonRequiredError,
+    DraftEditLeaseConflictError,
+    DraftEditLeaseForbiddenError,
+    DraftEditLeaseNotFoundError,
+    DraftEditLeaseTokenRejectedError,
 )
 from tests.community.adapters.http.openapi_v1.conftest import (
     mount_public_error_handlers,
@@ -108,6 +115,11 @@ def skill_editor_request_service():
 
 
 @pytest.fixture
+def draft_edit_lease_service():
+    return MagicMock()
+
+
+@pytest.fixture
 def client(
     member_service,
     space_service,
@@ -115,6 +127,7 @@ def client(
     skill_query_service,
     skill_grant_service,
     skill_editor_request_service,
+    draft_edit_lease_service,
 ):
     class _Bindings(Module):
         def configure(self, binder):
@@ -127,6 +140,7 @@ def client(
                 SpaceSkillEditorRequestServiceProtocol,
                 to=skill_editor_request_service,
             )
+            binder.bind(DraftEditLeaseServiceProtocol, to=draft_edit_lease_service)
 
     app = FastAPI()
     app.include_router(router)
@@ -173,6 +187,81 @@ def test_skill_editor_request_publishes_stable_wire_and_uses_current_user(
         applicant_user_id="owner-1",
         reason="共同维护",
     )
+
+
+def test_draft_edit_lease_endpoints_publish_fenced_resource_contract(
+    client, draft_edit_lease_service
+):
+    draft_edit_lease_service.get_lease.return_value = {
+        "required": True,
+        "state": "HELD_BY_OTHER",
+        "holder_user_id": "manager-1",
+        "fencing_token": None,
+    }
+    draft_edit_lease_service.acquire.return_value = {
+        "required": True,
+        "state": "HELD_BY_SELF",
+        "holder_user_id": "owner-1",
+        "fencing_token": 41,
+    }
+    draft_edit_lease_service.release.return_value = {
+        "required": True,
+        "state": "AVAILABLE",
+        "holder_user_id": None,
+        "fencing_token": None,
+    }
+    draft_edit_lease_service.takeover.return_value = {
+        "required": True,
+        "state": "HELD_BY_SELF",
+        "holder_user_id": "owner-1",
+        "fencing_token": 42,
+    }
+
+    read = client.get("/openapi/v1/bots/spaces/7/skills/9/draft/lease")
+    acquired = client.put("/openapi/v1/bots/spaces/7/skills/9/draft/lease")
+    released = client.delete(
+        "/openapi/v1/bots/spaces/7/skills/9/draft/lease?fencing_token=41"
+    )
+    taken = client.post("/openapi/v1/bots/spaces/7/skills/9/draft/lease/takeover")
+
+    assert read.json()["data"]["fencing_token"] is None
+    assert acquired.json()["data"]["fencing_token"] == 41
+    assert released.json()["data"]["state"] == "AVAILABLE"
+    assert taken.json()["data"]["fencing_token"] == 42
+    draft_edit_lease_service.release.assert_called_once_with(
+        space_id=7, skill_id=9, actor_id="owner-1", fencing_token=41
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "code", "message"),
+    [
+        (DraftEditLeaseForbiddenError(), 403, 403204, "Forbidden"),
+        (DraftEditLeaseNotFoundError(), 404, 404202, "Not found"),
+        (
+            DraftEditLeaseConflictError(),
+            409,
+            409303,
+            "Draft edit Lease is already held",
+        ),
+        (
+            DraftEditLeaseTokenRejectedError(),
+            409,
+            409304,
+            "Draft edit Lease fencing token was rejected",
+        ),
+    ],
+)
+def test_draft_edit_lease_returns_stable_error_codes(
+    client, draft_edit_lease_service, error, status, code, message
+):
+    draft_edit_lease_service.acquire.side_effect = error
+
+    response = client.put("/openapi/v1/bots/spaces/7/skills/9/draft/lease")
+
+    assert response.status_code == status
+    assert response.json()["code"] == code
+    assert response.json()["message"] == message
 
 
 def test_grant_endpoints_publish_stable_wire_and_delegate_actor(
@@ -460,6 +549,11 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
                 "can_edit": False,
                 "can_grant": False,
                 "can_apply_edit": True,
+                "lease_summary": {
+                    "required": True,
+                    "state": "AVAILABLE",
+                    "holder_user_id": None,
+                },
                 "gmt_created": timestamp,
                 "gmt_modified": timestamp,
             }
@@ -487,6 +581,11 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
                 "can_edit": False,
                 "can_grant": False,
                 "can_apply_edit": True,
+                "lease_summary": {
+                    "required": True,
+                    "state": "AVAILABLE",
+                    "holder_user_id": None,
+                },
                 "gmt_created": "2026-08-20T03:40:00Z",
                 "gmt_modified": "2026-08-20T03:40:00Z",
             }

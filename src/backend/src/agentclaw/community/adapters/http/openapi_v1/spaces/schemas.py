@@ -113,6 +113,40 @@ class SpaceSkillGrants(BaseModel):
     actor: SkillGrantActor = Field(description="Current caller role and permissions.")
 
 
+class DraftEditLeaseState(_DocumentedEnum):
+    """Actor-relative state of a Space Skill Draft's permanent edit Lease."""
+
+    NOT_REQUIRED = "NOT_REQUIRED"
+    AVAILABLE = "AVAILABLE"
+    HELD_BY_SELF = "HELD_BY_SELF"
+    HELD_BY_OTHER = "HELD_BY_OTHER"
+
+    __descriptions__ = {
+        "NOT_REQUIRED": "Personal Space Drafts do not use an edit Lease.",
+        "AVAILABLE": "No editor currently holds the Team Draft Lease.",
+        "HELD_BY_SELF": "The current actor holds the Team Draft Lease.",
+        "HELD_BY_OTHER": "Another OWNER or MANAGER holds the Team Draft Lease.",
+    }
+
+
+class DraftEditLeaseResource(BaseModel):
+    """Live Lease resource; only its current holder receives the fencing token."""
+
+    required: bool = Field(description="Whether this Space Draft requires a Lease.")
+    state: DraftEditLeaseState = Field(description="Actor-relative Lease state.")
+    holder_user_id: str | None = Field(
+        default=None, description="Current holder identifier, or null when unheld."
+    )
+    fencing_token: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Current fencing token only when the caller holds the Lease; list "
+            "summaries and other actors never receive it."
+        ),
+    )
+
+
 class TransferSkillOwnerRequest(BaseModel):
     """Atomically move the unique OWNER slot to an active Space Member."""
 
@@ -294,6 +328,16 @@ class SpaceMemberItem(_UtcResponseModel):
     )
 
 
+class DraftEditLeaseSummary(BaseModel):
+    """List-card Lease state; fencing tokens only exist on the live resource."""
+
+    required: bool = Field(description="Whether this Space Draft requires a Lease.")
+    state: DraftEditLeaseState = Field(description="Actor-relative Lease state.")
+    holder_user_id: str | None = Field(
+        default=None, description="Current holder identifier, or null when unheld."
+    )
+
+
 class SpaceSkillItem(_UtcResponseModel):
     """Skill card data owned by one Space."""
 
@@ -325,6 +369,10 @@ class SpaceSkillItem(_UtcResponseModel):
             "Whether the current user is eligible to apply for team Skill edit "
             "access; this does not represent a pending application state."
         )
+    )
+    lease_summary: DraftEditLeaseSummary | None = Field(
+        default=None,
+        description="List-only Lease state without a fencing token; null when no Draft exists.",
     )
     gmt_created: datetime = Field(
         description="UTC time when the Skill was created.",

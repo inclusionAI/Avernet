@@ -50,6 +50,7 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     TransferSkillOwnerRequest,
     CreateSkillEditorRequest,
     SkillEditorRequestCreated,
+    DraftEditLeaseResource,
     UpdateSpaceMemberRoleRequest,
 )
 from agentclaw.community.api.market_favorite_service import (
@@ -67,6 +68,9 @@ from agentclaw.community.api.space_skill_grant_service import (
 )
 from agentclaw.community.api.space_skill_editor_request_service import (
     SpaceSkillEditorRequestServiceProtocol,
+)
+from agentclaw.community.api.draft_edit_lease_service import (
+    DraftEditLeaseServiceProtocol,
 )
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType as DomainFavoriteTargetType,
@@ -98,6 +102,13 @@ GrantUserIdPath = Annotated[
 PageNoQuery = Annotated[int, Query(ge=1, description="One-based page number.")]
 PageSizeQuery = Annotated[
     int, Query(ge=1, le=100, description="Maximum items returned per page.")
+]
+LeaseFencingTokenQuery = Annotated[
+    int,
+    Query(
+        ge=1,
+        description="Exact fencing token returned when this actor acquired the Lease.",
+    ),
 ]
 _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
@@ -176,6 +187,7 @@ def _space_skill_item(record: SpaceSkillSummaryRecord) -> SpaceSkillItem:
         can_edit=record["can_edit"],
         can_grant=record["can_grant"],
         can_apply_edit=record["can_apply_edit"],
+        lease_summary=record["lease_summary"],
         gmt_created=record["gmt_created"],
         gmt_modified=record["gmt_modified"],
     )
@@ -316,16 +328,12 @@ async def list_space_skill_grants(
     skill_id: SkillIdPath,
     request: Request,
     caller: ActingCallerDep,
-    service: SpaceSkillGrantServiceProtocol = Injected(
-        SpaceSkillGrantServiceProtocol
-    ),
+    service: SpaceSkillGrantServiceProtocol = Injected(SpaceSkillGrantServiceProtocol),
 ) -> Envelope[SpaceSkillGrants]:
     actor_id = _require_user_delegation(caller)
     return envelope(
         SpaceSkillGrants.model_validate(
-            service.list_grants(
-                space_id=space_id, skill_id=skill_id, actor_id=actor_id
-            )
+            service.list_grants(space_id=space_id, skill_id=skill_id, actor_id=actor_id)
         ),
         request,
     )
@@ -343,9 +351,7 @@ async def add_space_skill_manager(
     manager_user_id: GrantUserIdPath,
     request: Request,
     user_id: UserIdDep,
-    service: SpaceSkillGrantServiceProtocol = Injected(
-        SpaceSkillGrantServiceProtocol
-    ),
+    service: SpaceSkillGrantServiceProtocol = Injected(SpaceSkillGrantServiceProtocol),
 ) -> Envelope[SkillGrantItem]:
     result = service.add_manager(
         space_id=space_id,
@@ -368,9 +374,7 @@ async def remove_space_skill_manager(
     manager_user_id: GrantUserIdPath,
     request: Request,
     user_id: UserIdDep,
-    service: SpaceSkillGrantServiceProtocol = Injected(
-        SpaceSkillGrantServiceProtocol
-    ),
+    service: SpaceSkillGrantServiceProtocol = Injected(SpaceSkillGrantServiceProtocol),
 ) -> Envelope[SkillGrantItem]:
     result = service.remove_manager(
         space_id=space_id,
@@ -393,9 +397,7 @@ async def transfer_space_skill_owner(
     skill_id: SkillIdPath,
     request: Request,
     user_id: UserIdDep,
-    service: SpaceSkillGrantServiceProtocol = Injected(
-        SpaceSkillGrantServiceProtocol
-    ),
+    service: SpaceSkillGrantServiceProtocol = Injected(SpaceSkillGrantServiceProtocol),
 ) -> Envelope[SpaceSkillGrants]:
     result = service.transfer_owner(
         space_id=space_id,
@@ -405,6 +407,80 @@ async def transfer_space_skill_owner(
         reason=body.reason,
     )
     return envelope(SpaceSkillGrants.model_validate(result), request)
+
+
+@router.get(
+    "/{space_id}/skills/{skill_id}/draft/lease",
+    response_model=Envelope[DraftEditLeaseResource],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def get_draft_edit_lease(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: DraftEditLeaseServiceProtocol = Injected(DraftEditLeaseServiceProtocol),
+) -> Envelope[DraftEditLeaseResource]:
+    result = service.get_lease(space_id=space_id, skill_id=skill_id, actor_id=user_id)
+    return envelope(DraftEditLeaseResource.model_validate(result), request)
+
+
+@router.put(
+    "/{space_id}/skills/{skill_id}/draft/lease",
+    response_model=Envelope[DraftEditLeaseResource],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def acquire_draft_edit_lease(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: DraftEditLeaseServiceProtocol = Injected(DraftEditLeaseServiceProtocol),
+) -> Envelope[DraftEditLeaseResource]:
+    result = service.acquire(space_id=space_id, skill_id=skill_id, actor_id=user_id)
+    return envelope(DraftEditLeaseResource.model_validate(result), request)
+
+
+@router.delete(
+    "/{space_id}/skills/{skill_id}/draft/lease",
+    response_model=Envelope[DraftEditLeaseResource],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def release_draft_edit_lease(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    fencing_token: LeaseFencingTokenQuery,
+    request: Request,
+    user_id: UserIdDep,
+    service: DraftEditLeaseServiceProtocol = Injected(DraftEditLeaseServiceProtocol),
+) -> Envelope[DraftEditLeaseResource]:
+    result = service.release(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=user_id,
+        fencing_token=fencing_token,
+    )
+    return envelope(DraftEditLeaseResource.model_validate(result), request)
+
+
+@router.post(
+    "/{space_id}/skills/{skill_id}/draft/lease/takeover",
+    response_model=Envelope[DraftEditLeaseResource],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def takeover_draft_edit_lease(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: DraftEditLeaseServiceProtocol = Injected(DraftEditLeaseServiceProtocol),
+) -> Envelope[DraftEditLeaseResource]:
+    result = service.takeover(space_id=space_id, skill_id=skill_id, actor_id=user_id)
+    return envelope(DraftEditLeaseResource.model_validate(result), request)
 
 
 @router.post(

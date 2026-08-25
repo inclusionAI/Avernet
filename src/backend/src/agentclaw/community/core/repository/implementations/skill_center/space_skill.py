@@ -10,6 +10,7 @@ from sqlalchemy import and_, func, or_
 
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import (
+    SkillDraftEditLease,
     SkillGrant,
     SkillSpaceBinding,
 )
@@ -29,6 +30,7 @@ from agentclaw.community.core.repository.protocols.skill_center_types import (
     SpaceSkillGrantRecord,
     SpaceSkillGrantItem,
     SpaceSkillGrantSetRecord,
+    DraftEditLeaseRecord,
     SpaceSkillIdentityRecord,
     SpaceSkillOwnerGrantData,
     SpaceSkillOwnershipData,
@@ -42,6 +44,10 @@ from agentclaw.community.core.skill_center.errors import (
     SpaceSkillGrantMemberRequiredError,
     SpaceSkillGrantNotFoundError,
     SpaceSkillGrantReasonRequiredError,
+    DraftEditLeaseConflictError,
+    DraftEditLeaseForbiddenError,
+    DraftEditLeaseNotFoundError,
+    DraftEditLeaseTokenRejectedError,
 )
 
 
@@ -167,7 +173,12 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
     ) -> tuple[int, list[SpaceSkillQueryRecord]]:
         with self._db.orm_session() as session:
             query = (
-                session.query(Skill, SpaceModel.space_type, SkillGrant.role)
+                session.query(
+                    Skill,
+                    SpaceModel.space_type,
+                    SkillGrant.role,
+                    SkillDraftEditLease.holder_user_id,
+                )
                 .join(
                     SkillSpaceBinding,
                     and_(
@@ -189,6 +200,13 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                         SkillGrant.user_id == actor_id,
                         SkillGrant.status == "ACTIVE",
                         SkillGrant.env == env,
+                    ),
+                )
+                .outerjoin(
+                    SkillDraftEditLease,
+                    and_(
+                        SkillDraftEditLease.skill_id == Skill.id,
+                        SkillDraftEditLease.env == env,
                     ),
                 )
                 .filter(
@@ -333,6 +351,12 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                 grant.status = "REVOKED"
                 grant.revoked_at = datetime.now(UTC).replace(tzinfo=None)
                 grant.revoked_by = actor_id
+                self._invalidate_lease(
+                    session,
+                    skill_id=skill_id,
+                    holder_user_id=manager_user_id,
+                    env=env,
+                )
                 session.flush()
             return {"user_id": manager_user_id, "role": "MANAGER"}
 
@@ -429,6 +453,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                 target.grant_reason = reason
                 target.revoked_at = None
                 target.revoked_by = None
+            self._invalidate_lease(session, skill_id=skill_id, env=env)
             session.flush()
             self._skill_editor_requests.reroute_pending_reviewer(
                 session,
@@ -440,6 +465,216 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             return self._active_grant_set(
                 session, skill_id=skill_id, actor_id=actor_id, env=env
             )
+
+    def get_lease(
+        self, *, space_id: int, skill_id: int, env: str
+    ) -> DraftEditLeaseRecord | None:
+        with self._db.orm_session() as session:
+            self._require_editable_draft(
+                session,
+                space_id=space_id,
+                skill_id=skill_id,
+                env=env,
+                lock=False,
+            )
+            lease = (
+                session.query(SkillDraftEditLease)
+                .filter(
+                    SkillDraftEditLease.skill_id == skill_id,
+                    SkillDraftEditLease.env == env,
+                )
+                .one_or_none()
+            )
+            return self._lease_to_dict(lease) if lease is not None else None
+
+    def acquire(
+        self, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> DraftEditLeaseRecord:
+        with self._db.orm_session() as session:
+            self._require_editable_draft(
+                session, space_id=space_id, skill_id=skill_id, env=env, lock=True
+            )
+            self._require_active_editor(
+                session,
+                space_id=space_id,
+                skill_id=skill_id,
+                actor_id=actor_id,
+                env=env,
+            )
+            lease = self._locked_lease(session, skill_id=skill_id, env=env)
+            if lease is None:
+                lease = SkillDraftEditLease(
+                    skill_id=skill_id,
+                    holder_user_id=actor_id,
+                    fencing_token=1,
+                    acquired_at=datetime.now(UTC).replace(tzinfo=None),
+                    env=env,
+                )
+                session.add(lease)
+            elif lease.holder_user_id not in {None, actor_id}:
+                raise DraftEditLeaseConflictError("draft lease is already held")
+            else:
+                lease.holder_user_id = actor_id
+                lease.fencing_token += 1
+                lease.acquired_at = datetime.now(UTC).replace(tzinfo=None)
+            session.flush()
+            return self._lease_to_dict(lease)
+
+    def release(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        fencing_token: int,
+        env: str,
+    ) -> DraftEditLeaseRecord:
+        with self._db.orm_session() as session:
+            self._require_binding(
+                session, space_id=space_id, skill_id=skill_id, env=env, lock=True
+            )
+            self._require_active_editor(
+                session,
+                space_id=space_id,
+                skill_id=skill_id,
+                actor_id=actor_id,
+                env=env,
+            )
+            lease = self._locked_lease(session, skill_id=skill_id, env=env)
+            self._require_current_token(
+                lease, actor_id=actor_id, fencing_token=fencing_token
+            )
+            lease.holder_user_id = None
+            lease.fencing_token += 1
+            session.flush()
+            return self._lease_to_dict(lease)
+
+    def takeover(
+        self, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> DraftEditLeaseRecord:
+        with self._db.orm_session() as session:
+            self._require_editable_draft(
+                session, space_id=space_id, skill_id=skill_id, env=env, lock=True
+            )
+            self._require_active_editor(
+                session,
+                space_id=space_id,
+                skill_id=skill_id,
+                actor_id=actor_id,
+                env=env,
+            )
+            lease = self._locked_lease(session, skill_id=skill_id, env=env)
+            if lease is None:
+                lease = SkillDraftEditLease(
+                    skill_id=skill_id,
+                    holder_user_id=actor_id,
+                    fencing_token=1,
+                    acquired_at=datetime.now(UTC).replace(tzinfo=None),
+                    last_takeover_by=actor_id,
+                    env=env,
+                )
+                session.add(lease)
+            else:
+                lease.holder_user_id = actor_id
+                lease.fencing_token += 1
+                lease.acquired_at = datetime.now(UTC).replace(tzinfo=None)
+                lease.last_takeover_by = actor_id
+            session.flush()
+            return self._lease_to_dict(lease)
+
+    def _require_editable_draft(
+        self,
+        session,
+        *,
+        space_id: int,
+        skill_id: int,
+        env: str,
+        lock: bool,
+    ) -> None:
+        self._require_binding(
+            session, space_id=space_id, skill_id=skill_id, env=env, lock=lock
+        )
+        query = session.query(Skill).filter(
+            Skill.id == skill_id,
+            Skill.env == env,
+            Skill.draft_status == "EDITING",
+            Skill.retired_at.is_(None),
+        )
+        if lock:
+            query = query.with_for_update()
+        skill = query.one_or_none()
+        if skill is None:
+            raise DraftEditLeaseNotFoundError("editable draft not found")
+
+    @staticmethod
+    def _require_active_editor(
+        session, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> None:
+        membership = (
+            session.query(SpaceMemberModel)
+            .filter(
+                SpaceMemberModel.space_id == space_id,
+                SpaceMemberModel.user_id == actor_id,
+                SpaceMemberModel.env == env,
+                SpaceMemberModel.status == "ACTIVE",
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        grant = (
+            session.query(SkillGrant)
+            .filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.user_id == actor_id,
+                SkillGrant.env == env,
+                SkillGrant.status == "ACTIVE",
+                SkillGrant.role.in_(("OWNER", "MANAGER")),
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if membership is None or grant is None:
+            raise DraftEditLeaseForbiddenError("active owner or manager required")
+
+    @staticmethod
+    def _locked_lease(session, *, skill_id: int, env: str):
+        return (
+            session.query(SkillDraftEditLease)
+            .filter(
+                SkillDraftEditLease.skill_id == skill_id,
+                SkillDraftEditLease.env == env,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+
+    @staticmethod
+    def _require_current_token(lease, *, actor_id: str, fencing_token: int) -> None:
+        if (
+            lease is None
+            or lease.holder_user_id != actor_id
+            or lease.fencing_token != fencing_token
+        ):
+            raise DraftEditLeaseTokenRejectedError("stale draft lease fencing token")
+
+    @staticmethod
+    def _invalidate_lease(
+        session, *, skill_id: int, env: str, holder_user_id: str | None = None
+    ) -> None:
+        lease = SpaceSkillRepository._locked_lease(session, skill_id=skill_id, env=env)
+        if lease is None or lease.holder_user_id is None:
+            return
+        if holder_user_id is not None and lease.holder_user_id != holder_user_id:
+            return
+        lease.holder_user_id = None
+        lease.fencing_token += 1
+
+    @staticmethod
+    def _lease_to_dict(lease: SkillDraftEditLease) -> DraftEditLeaseRecord:
+        return {
+            "holder_user_id": lease.holder_user_id,
+            "fencing_token": lease.fencing_token,
+        }
 
     @staticmethod
     def _require_binding(
@@ -569,6 +804,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
         skill: Skill,
         space_type: str,
         current_user_skill_role: str | None,
+        lease_holder_user_id: str | None,
     ) -> SpaceSkillQueryRecord:
         return {
             "id": skill.id,
@@ -579,6 +815,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             "draft_status": skill.draft_status,
             "space_type": space_type,
             "current_user_skill_role": current_user_skill_role,
+            "lease_holder_user_id": lease_holder_user_id,
             "gmt_created": skill.gmt_created,
             "gmt_modified": skill.gmt_modified,
         }

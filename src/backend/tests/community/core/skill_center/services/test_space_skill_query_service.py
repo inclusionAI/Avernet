@@ -44,9 +44,7 @@ def test_list_space_skills_authorizes_normalizes_and_paginates(
     )
 
     assert result == (0, [])
-    access.require_space_member.assert_called_once_with(
-        space_id=7, user_id="member-1"
-    )
+    access.require_space_member.assert_called_once_with(space_id=7, user_id="member-1")
     repository.list_space_skills.assert_called_once_with(
         space_id=7,
         actor_id="member-1",
@@ -103,6 +101,7 @@ def test_list_space_skills_derives_explicit_ui_permissions(
                 "draft_status": "EDITING",
                 "space_type": space_type,
                 "current_user_skill_role": role,
+                "lease_holder_user_id": "manager-2" if space_type == "TEAM" else None,
                 "gmt_created": timestamp,
                 "gmt_modified": timestamp,
             }
@@ -125,3 +124,10 @@ def test_list_space_skills_derives_explicit_ui_permissions(
     assert records[0]["can_edit"] is can_edit
     assert records[0]["can_grant"] is can_grant
     assert records[0]["can_apply_edit"] is can_apply_edit
+    expected_state = "HELD_BY_OTHER" if space_type == "TEAM" else "NOT_REQUIRED"
+    assert records[0]["lease_summary"] == {
+        "required": space_type == "TEAM",
+        "state": expected_state,
+        "holder_user_id": "manager-2" if space_type == "TEAM" else None,
+    }
+    assert "fencing_token" not in records[0]["lease_summary"]

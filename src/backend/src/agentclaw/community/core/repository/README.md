@@ -153,6 +153,7 @@ provides:
   - SkillRepository
   - SpaceSkillRepository
   - SkillEditorRequestRepository
+  - DraftEditLeaseRepository
   - SkillSetRepository
   # skills_pool
   - QuarantineRepositoryProtocol

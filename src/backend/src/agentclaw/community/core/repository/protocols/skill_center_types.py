@@ -135,6 +135,7 @@ class SpaceSkillQueryRecord(TypedDict):
     draft_status: str | None
     space_type: Literal["PERSONAL", "TEAM"]
     current_user_skill_role: Literal["OWNER", "MANAGER"] | None
+    lease_holder_user_id: str | None
     gmt_created: datetime
     gmt_modified: datetime
 
@@ -155,3 +156,28 @@ class SpaceSkillSummaryRecord(TypedDict):
     can_edit: bool
     can_grant: bool
     can_apply_edit: bool
+    lease_summary: DraftEditLeaseSummaryRecord | None
+
+
+class DraftEditLeaseRecord(TypedDict):
+    """Current durable lease row; its token monotonically increases forever."""
+
+    holder_user_id: str | None
+    fencing_token: int
+
+
+class DraftEditLeaseViewRecord(TypedDict):
+    """Actor-relative Lease resource returned by the Service API."""
+
+    required: bool
+    state: Literal["NOT_REQUIRED", "AVAILABLE", "HELD_BY_SELF", "HELD_BY_OTHER"]
+    holder_user_id: str | None
+    fencing_token: int | None
+
+
+class DraftEditLeaseSummaryRecord(TypedDict):
+    """List-card Lease projection that deliberately excludes fencing tokens."""
+
+    required: bool
+    state: Literal["NOT_REQUIRED", "AVAILABLE", "HELD_BY_SELF", "HELD_BY_OTHER"]
+    holder_user_id: str | None

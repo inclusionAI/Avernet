@@ -95,6 +95,7 @@ from agentclaw.community.core.repository.protocols.skill_center import (
     SkillSetRepository,
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
+    DraftEditLeaseRepository,
     SpaceSkillRepository,
 )
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
@@ -309,6 +310,11 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         binder.bind(
             SkillEditorRequestRepositoryProtocol,
             to=SkillEditorRequestRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            DraftEditLeaseRepository,
+            to=UnifiedSpaceSkillRepository,
             scope=singleton,
         )
         binder.bind(
