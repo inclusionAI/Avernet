@@ -29,6 +29,7 @@ from agentclaw.community.core.caller_identity.service import CallerIdentityServi
 from agentclaw.community.core.caller_identity.iam_token_service import (
     CallerIamTokenService,
 )
+from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
 from agentclaw.community.core.repository.implementations.identity.caller_identity import CallerIdentityRepository
@@ -130,10 +131,14 @@ class CallerIdentityModule(Module):
         auth_plugin: AuthPlugin,
         token_provider: CallerTokenProvider,
         runtime_updater: CallerRuntimeUpdater,
+        runtime_bindings: RuntimeBindingResolutionService,
+        lock_repository: BotCollabLockRepositoryProtocol,
     ) -> CallerIamTokenServiceProtocol:
         return CallerIamTokenService(
             caller_identity=caller_identity,
             auth_plugin=auth_plugin,
             token_provider=token_provider,
             runtime_updater=runtime_updater,
+            runtime_bindings=runtime_bindings,
+            lock_repository=lock_repository,
         )
