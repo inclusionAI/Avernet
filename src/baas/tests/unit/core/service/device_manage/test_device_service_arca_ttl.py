@@ -23,9 +23,10 @@ Pins the exact INTG-01/INTG-02 semantics replicated by the wrapper:
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -61,9 +62,12 @@ def _mock_env(monkeypatch):
 
 
 def _expiration_dt() -> datetime:
-    # CR-01: the wrapper computes the register margin in naive UTC — the
-    # test expectation must share the UTC wall clock, not the local one.
-    return datetime.fromtimestamp(_TTL_MS / 1000, tz=UTC).replace(tzinfo=None)
+    # CR-01: the wrapper computes the register margin in fixed
+    # Asia/Shanghai (+08:00) — the test expectation must share the +08:00
+    # wall clock, not the host-local one.
+    return datetime.fromtimestamp(
+        _TTL_MS / 1000, tz=ZoneInfo("Asia/Shanghai")
+    ).replace(tzinfo=None)
 
 
 def _make_service(
