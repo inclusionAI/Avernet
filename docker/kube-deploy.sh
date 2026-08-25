@@ -62,10 +62,10 @@ ENV_FILE=""
 
 # Service-specific defaults
 declare -A DEFAULT_PORT=(
-    [baas]=80
-    [gateway]=80
-    [bcs]=80
-    [backend]=80
+    [baas]=8080
+    [gateway]=8080
+    [bcs]=8080
+    [backend]=8080
 )
 
 # All services default to 4 CPU / 8Gi spec, 2 replicas.
