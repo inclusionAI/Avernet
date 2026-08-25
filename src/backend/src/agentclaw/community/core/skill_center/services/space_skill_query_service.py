@@ -56,15 +56,41 @@ class SpaceSkillQueryService(SpaceSkillQueryServiceProtocol):
             offset=(page_no - 1) * page_size,
             limit=page_size,
         )
-        return total, [self._to_summary(record) for record in records]
+        return total, [
+            self._to_summary(record, actor_id=actor_id) for record in records
+        ]
 
     @staticmethod
-    def _to_summary(record: SpaceSkillQueryRecord) -> SpaceSkillSummaryRecord:
+    def _to_summary(
+        record: SpaceSkillQueryRecord, *, actor_id: str
+    ) -> SpaceSkillSummaryRecord:
         role = record["current_user_skill_role"]
         is_team = record["space_type"] == "TEAM"
+        holder = record["lease_holder_user_id"]
+        if record["draft_status"] is None:
+            lease_summary = None
+        elif not is_team:
+            lease_summary = {
+                "required": False,
+                "state": "NOT_REQUIRED",
+                "holder_user_id": None,
+            }
+        elif holder is None:
+            lease_summary = {
+                "required": True,
+                "state": "AVAILABLE",
+                "holder_user_id": None,
+            }
+        else:
+            lease_summary = {
+                "required": True,
+                "state": "HELD_BY_SELF" if holder == actor_id else "HELD_BY_OTHER",
+                "holder_user_id": holder,
+            }
         return {
             **record,
             "can_edit": role in {"OWNER", "MANAGER"},
             "can_grant": is_team and role == "OWNER",
             "can_apply_edit": is_team and role is None,
+            "lease_summary": lease_summary,
         }

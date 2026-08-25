@@ -21,6 +21,7 @@ provides:
   - "BotCapabilityAuthorizationHookProtocol"
   - "SkillSetManagementService"
   - "SpaceSkillGrantService"
+  - "DraftEditLeaseService"
   - "RuntimeProjectionResolver"
   - "BotCapabilityStateReader"
   - "BotRuntimeProjector"
@@ -54,6 +55,7 @@ consumes:
   - "BotRuntimeProjectorProtocol"
   - "SpaceAccessServiceProtocol"
   - "SpaceSkillRepository"
+  - "DraftEditLeaseRepository"
 internal_dependencies:
   - agentclaw.community.api.skill_parameter_service_factory
   - agentclaw.community.api.skill_market_service
@@ -79,6 +81,7 @@ internal_dependencies:
   - agentclaw.community.core.mcp
   - agentclaw.community.core.models
   - agentclaw.community.core.spaces.services
+  - agentclaw.community.core.spaces.errors
   - agentclaw.community.core.spaces.models
   - agentclaw.community.core.spaces.protocols
   - agentclaw.community.core.skills_pool

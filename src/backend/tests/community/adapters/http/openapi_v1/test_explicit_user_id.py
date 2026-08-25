@@ -386,7 +386,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: publish-to-users route moved from /bots/{bot_id}/public-bcs to the external
 #: /collaboration/bots/{bot_uuid}/public, so one path-addressed {bot_id}
 #: operation became a {bot_uuid}-named one: path -1, none +1.
-_BOT_ID_PLACEMENT = {"path": 141, "query": 1, "none": 66}
+_BOT_ID_PLACEMENT = {"path": 141, "query": 1, "none": 70}
 
 
 def _schema() -> dict:
@@ -490,8 +490,9 @@ def test_the_pinned_number_of_operations_take_it():
     # The task public surface adds one more: GET .../collaboration/tasks/list
     # (execute/dashboard have no user dimension — see _NO_USER_DIMENSION).
     # Service publication version upgrade adds one Bot-addressed operation.
-    # Space Skill Grant management adds four Space-addressed operations.
-    assert len(taking) == 186
+    # Space Skill Grant management adds four Space-addressed operations, and
+    # permanent Draft Edit Lease management adds another four.
+    assert len(taking) == 190
 
 
 def test_the_exempt_operations_take_none():

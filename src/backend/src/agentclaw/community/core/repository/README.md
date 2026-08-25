@@ -150,6 +150,7 @@ provides:
   - SkillPropagationLogRepository
   - SkillRepository
   - SpaceSkillRepository
+  - DraftEditLeaseRepository
   - SkillSetRepository
   # skills_pool
   - QuarantineRepositoryProtocol

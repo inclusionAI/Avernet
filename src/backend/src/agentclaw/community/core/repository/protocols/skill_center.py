@@ -21,6 +21,7 @@ from .skill_center_types import (
     SpaceSkillQueryRecord,
     SpaceSkillGrantItem,
     SpaceSkillGrantSetRecord,
+    DraftEditLeaseRecord,
 )
 
 
@@ -105,6 +106,42 @@ class SpaceSkillRepository(Protocol):
         env: str,
     ) -> SpaceSkillGrantSetRecord: ...
 
+
+@runtime_checkable
+class DraftEditLeaseRepository(Protocol):
+    """Persistence Plugin API for a permanent, fenced Team Draft Lease.
+
+    A future Draft-content write must add one aggregate command here that checks
+    the holder/token and writes content metadata in the same transaction.  This
+    contract deliberately exposes no validate-then-write operation: a takeover
+    between those two calls would defeat fencing.
+    """
+
+    @abstractmethod
+    def get_lease(
+        self, *, space_id: int, skill_id: int, env: str
+    ) -> DraftEditLeaseRecord | None: ...
+
+    @abstractmethod
+    def acquire(
+        self, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> DraftEditLeaseRecord: ...
+
+    @abstractmethod
+    def release(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        fencing_token: int,
+        env: str,
+    ) -> DraftEditLeaseRecord: ...
+
+    @abstractmethod
+    def takeover(
+        self, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> DraftEditLeaseRecord: ...
 
 @runtime_checkable
 class SkillRepository(Protocol):

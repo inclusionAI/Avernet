@@ -451,6 +451,14 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("Skill Owner Grant, adjudicated by the Grant service"),
     ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/owner-transfer"):
         NoCheck("Skill Owner or Space administrator, adjudicated by the Grant service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease"):
+        NoCheck("Space membership and Skill Grants, adjudicated by the Lease service"),
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease"):
+        NoCheck("Skill Owner or Manager Grant, adjudicated by the Lease service"),
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease"):
+        NoCheck("Lease holder and fencing token, adjudicated by the Lease service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover"):
+        NoCheck("Skill Owner or Manager Grant, adjudicated by the Lease service"),
     ("POST", "/openapi/v1/bots/work-order-notifications/read-all"):
         NoCheck("the named user's own work orders and notifications"),
     ("GET", "/openapi/v1/bots/work-order-notifications/unread-count"):

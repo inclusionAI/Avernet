@@ -24,6 +24,9 @@ from agentclaw.community.api.space_skill_query_service import (
 from agentclaw.community.api.space_skill_grant_service import (
     SpaceSkillGrantServiceProtocol,
 )
+from agentclaw.community.api.draft_edit_lease_service import (
+    DraftEditLeaseServiceProtocol,
+)
 from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
@@ -141,6 +144,11 @@ def _seed_space_skills(world) -> None:
                 "can_edit": True,
                 "can_grant": True,
                 "can_apply_edit": False,
+                "lease_summary": {
+                    "required": True,
+                    "state": "AVAILABLE",
+                    "holder_user_id": None,
+                },
                 "gmt_created": datetime(2026, 8, 20, 3, 30),
                 "gmt_modified": datetime(2026, 8, 20, 3, 40),
             }
@@ -206,6 +214,34 @@ def _seed_space_skill_grants(world) -> None:
     )
 
 
+def _seed_draft_edit_lease(world) -> None:
+    _enable_public_auth(world)
+
+    def _held(token: int):
+        return {
+            "required": True,
+            "state": "HELD_BY_SELF",
+            "holder_user_id": _USER_ID,
+            "fencing_token": token,
+        }
+
+    bind_overrides(
+        world,
+        DraftEditLeaseServiceProtocol,
+        {
+            "get_lease": lambda _self, **_kwargs: _held(7),
+            "acquire": lambda _self, **_kwargs: _held(8),
+            "release": lambda _self, **_kwargs: {
+                "required": True,
+                "state": "AVAILABLE",
+                "holder_user_id": None,
+                "fencing_token": None,
+            },
+            "takeover": lambda _self, **_kwargs: _held(9),
+        },
+    )
+
+
 def _mismatched_user(path_params: dict | None = None, json_body: dict | None = None):
     """The uniform error case: naming someone other than the caller is a 403."""
     return CaseInput(
@@ -217,6 +253,136 @@ def _mismatched_user(path_params: dict | None = None, json_body: dict | None = N
 
 
 # ── Space Skill Grant management ─────────────────────────────────────────────
+
+
+# ── Draft Edit Lease management ──────────────────────────────────────────────
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    scenario="happy",
+    seed=_seed_draft_edit_lease,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"state": "HELD_BY_SELF", "fencing_token": 7}},
+    ),
+)
+def get_draft_edit_lease_happy():
+    """The current holder can re-read the live fencing token."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user({"space_id": 1, "skill_id": 9}),
+    expect=ExpectError(status=403),
+)
+def get_draft_edit_lease_wrong_user():
+    """A mismatched explicit actor is refused."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    scenario="happy",
+    seed=_seed_draft_edit_lease,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"state": "HELD_BY_SELF", "fencing_token": 8}},
+    ),
+)
+def acquire_draft_edit_lease_happy():
+    """Acquire returns the newly generated token."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user({"space_id": 1, "skill_id": 9}),
+    expect=ExpectError(status=403),
+)
+def acquire_draft_edit_lease_wrong_user():
+    """A mismatched actor cannot acquire."""
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    scenario="happy",
+    seed=_seed_draft_edit_lease,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID, "fencing_token": 7},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200, json_contains={"data": {"state": "AVAILABLE"}}
+    ),
+)
+def release_draft_edit_lease_happy():
+    """Release consumes the exact current fencing token."""
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": "someone-else", "fencing_token": 7},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectError(status=403),
+)
+def release_draft_edit_lease_wrong_user():
+    """A mismatched actor is refused before token validation."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover",
+    scenario="happy",
+    seed=_seed_draft_edit_lease,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"state": "HELD_BY_SELF", "fencing_token": 9}},
+    ),
+)
+def takeover_draft_edit_lease_happy():
+    """Takeover returns a new fencing token."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user({"space_id": 1, "skill_id": 9}),
+    expect=ExpectError(status=403),
+)
+def takeover_draft_edit_lease_wrong_user():
+    """A mismatched actor cannot take over."""
 
 
 @endpoint_test(

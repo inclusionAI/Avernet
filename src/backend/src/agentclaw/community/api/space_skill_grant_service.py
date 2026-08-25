@@ -21,6 +21,10 @@ class SpaceSkillGrantServiceProtocol(Protocol):
         """Return active Grants and the actor's ACL/Grant qualifications."""
         ...
 
+    def require_editor(self, *, space_id: int, skill_id: int, actor_id: str) -> str:
+        """Return OWNER/MANAGER or reject; shared by Draft command modules."""
+        ...
+
     def add_manager(
         self,
         *,

@@ -54,6 +54,19 @@ class SpaceSkillGrantService:
             space_role=member.role,
         )
 
+    def require_editor(self, *, space_id: int, skill_id: int, actor_id: str) -> str:
+        """Authorize Draft editing through the canonical Grant seam."""
+        self._access.require_space_member(space_id=space_id, user_id=actor_id)
+        role = self._repository.get_active_role(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id=actor_id,
+            env=self._env_provider(),
+        )
+        if role not in {"OWNER", "MANAGER"}:
+            raise SpaceSkillGrantForbiddenError("owner or manager required")
+        return role
+
     def add_manager(
         self,
         *,
