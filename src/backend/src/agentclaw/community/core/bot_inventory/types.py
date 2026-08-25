@@ -53,6 +53,7 @@ class BotAction(StrEnum):
     PUBLISH_STAGING = "publish_staging"
     PUBLISH_ONLINE = "publish_online"
     CANCEL_STAGING = "cancel_staging"
+    UPGRADE = "upgrade"
     OFFLINE = "offline"
     RETRY = "retry"
 

@@ -70,6 +70,9 @@ from agentclaw.community.core.service_bot.services.publish_approval_service impo
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
 )
+from agentclaw.community.core.service_bot.types import (
+    can_upgrade_publication_from_records,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -286,7 +289,7 @@ class ServicePublicationFacade:
         elif record.status == PublishStatus.VALIDATING.value:
             actions.extend(("publish_online", "restart_publish", "cancel_staging"))
         elif record.status == PublishStatus.SUCCESS.value:
-            if level >= PermissionLevel.ADMIN and self._can_upgrade_from_records(
+            if level >= PermissionLevel.ADMIN and can_upgrade_publication_from_records(
                 record, all_records
             ):
                 actions.append("upgrade")
@@ -294,19 +297,6 @@ class ServicePublicationFacade:
         elif record.status == PublishStatus.FAILED.value:
             actions.append("retry")
         return actions
-
-    @staticmethod
-    def _can_upgrade_from_records(
-        record: BotPublishRecord,
-        all_records: Iterable[BotPublishRecord],
-    ) -> bool:
-        """Project the legacy can-upgrade rule without per-card repository reads."""
-        if record.status != PublishStatus.SUCCESS.value:
-            return False
-        successors = [item for item in all_records if item.last_pub_id == record.id]
-        return not successors or all(
-            item.status == PublishStatus.FAILED.value for item in successors
-        )
 
     def _project(
         self,

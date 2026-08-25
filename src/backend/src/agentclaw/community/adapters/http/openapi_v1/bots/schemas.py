@@ -632,6 +632,7 @@ BotAction = Literal[
     "publish_staging",
     "publish_online",
     "cancel_staging",
+    "upgrade",
     "offline",
     "retry",
 ]

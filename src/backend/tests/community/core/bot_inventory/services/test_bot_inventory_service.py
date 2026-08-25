@@ -485,3 +485,28 @@ def test_actions_for_level_keeps_edit_for_non_service_editors() -> None:
         "restart": "Bot editor permission required",
         "delete": "Bot editor permission required",
     }
+
+
+def test_service_upgrade_action_requires_admin() -> None:
+    actions = (BotAction.VIEW, BotAction.UPGRADE, BotAction.DELETE)
+
+    member_actions, member_disabled = BotInventoryService._actions_for_level(
+        kind=BotInventoryKind.SERVICE,
+        actions=actions,
+        disabled={},
+        level=PermissionLevel.MEMBER,
+    )
+    assert member_actions == (BotAction.VIEW,)
+    assert member_disabled == {
+        "delete": "Bot Owner permission required",
+        "upgrade": "Bot Admin permission required",
+    }
+
+    admin_actions, admin_disabled = BotInventoryService._actions_for_level(
+        kind=BotInventoryKind.SERVICE,
+        actions=actions,
+        disabled={},
+        level=PermissionLevel.ADMIN,
+    )
+    assert admin_actions == (BotAction.VIEW, BotAction.UPGRADE)
+    assert admin_disabled == {"delete": "Bot Owner permission required"}
