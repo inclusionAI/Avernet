@@ -83,6 +83,7 @@ class ServicePublication(BaseModel):
             "publish_online",
             "restart_publish",
             "cancel_staging",
+            "upgrade",
             "offline",
             "retry",
             "delete",

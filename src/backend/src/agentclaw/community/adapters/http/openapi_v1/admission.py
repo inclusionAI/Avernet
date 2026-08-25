@@ -447,6 +447,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/{bot_id}/lifecycle/upgrade",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
         "GET",
         "/openapi/v1/bots/{bot_id}/lifecycle",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
