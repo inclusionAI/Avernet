@@ -15,7 +15,7 @@ from injector import inject
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
-from agentclaw.community.plugin_api.impl_registry import Mode, plugin_impl
+from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context import DeviceContext
@@ -24,8 +24,9 @@ logger = get_logger()
 
 
 @plugin_impl(
-    mode=Mode.PROD,
-    rationale="community BaaS DeviceSync dispatcher",
+    mode=Mode.LOCAL,
+    flavor=Flavor.FAKE,
+    rationale="singlebox reuses the community BaaS DeviceSync dispatcher",
 )
 class CommunityDeviceSyncDispatcher(DeviceSyncDispatcher):
     """BaaS ``DeviceSyncDispatcher`` for community.
