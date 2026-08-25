@@ -131,6 +131,7 @@ class EngineProvisioningStrategy(ABC):
     def prepare_create(
         self,
         *,
+        engine_type: str,
         engine_properties: Dict[str, Any],
         bot_type: str,
         deployment_mode: str,
@@ -140,6 +141,11 @@ class EngineProvisioningStrategy(ABC):
         ),
     ) -> PreparedBotCreate:
         """Validate engine-owned create input before side effects.
+
+        ``engine_type`` is the engine the request asked for. It equals this
+        instance's registration key, except for the shared default fallback
+        instance, which serves *every* unregistered engine — so error messages
+        must name this parameter's value, never ``self.engine_type``.
 
         ``engine_properties`` is the opaque bag routed by engine type; only this
         strategy may interpret its keys. Called before Passport apply and any

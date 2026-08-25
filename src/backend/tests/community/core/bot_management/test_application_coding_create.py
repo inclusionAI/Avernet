@@ -61,6 +61,7 @@ def _strategy_prepare(
     ),
 ):
     return AicodingProvisioningStrategy(engine_type).prepare_create(
+        engine_type=engine_type,
         engine_properties=engine_properties or {},
         bot_type=bot_type,
         deployment_mode=deployment_mode,
@@ -112,6 +113,7 @@ def test_default_engine_rejects_application_coding_as_combination_error() -> Non
     # mapping instead of turning it into a template-invalid 422.
     with pytest.raises(BotCombinationUnsupportedError):
         DefaultProvisioningStrategy("openclaw").prepare_create(
+            engine_type="openclaw",
             engine_properties={"template": {"devflow_workflow": "x"}},
             bot_type="personal",
             deployment_mode="cloud",
@@ -119,13 +121,47 @@ def test_default_engine_rejects_application_coding_as_combination_error() -> Non
         )
 
 
+def test_default_engine_answers_cloud_only_before_the_engine_gate() -> None:
+    # Historical gate order: the deleted prepare_bot_create checked the
+    # deployment mode first, so a local deployment reports "cloud-only" even
+    # when the engine gate would also reject.
+    with pytest.raises(BotCombinationUnsupportedError, match="cloud-only"):
+        DefaultProvisioningStrategy("openclaw").prepare_create(
+            engine_type="openclaw",
+            engine_properties={"template": {"devflow_workflow": "x"}},
+            bot_type="personal",
+            deployment_mode="local",
+            space_kind="personal",
+        )
+
+
 def test_default_engine_rejects_other_engine_properties_keys() -> None:
     with pytest.raises(BotTemplateInvalidError):
         DefaultProvisioningStrategy("openclaw").prepare_create(
+            engine_type="openclaw",
             engine_properties={"surprise": 1},
             bot_type="personal",
             deployment_mode="cloud",
             space_kind="personal",
+        )
+
+
+def test_unregistered_engine_is_named_in_the_combination_error() -> None:
+    # Engines that pass the router's engine gate but have no registered
+    # strategy (e.g. "moltis" in SUPPORTED_ENGINE_TYPES, or any free-form
+    # engine_type on the untyped internal surface) resolve to the shared
+    # default fallback. The error used to name "default"; it must name the
+    # engine the caller actually asked for.
+    with pytest.raises(BotCombinationUnsupportedError, match="moltis"):
+        _prepare_spec(
+            BotCreateSpec(
+                entity_id="u1",
+                engine_type="moltis",
+                bot_type="personal",
+                bot_name="Coding Bot",
+                template_type="applicationCoding",
+                template_config={"devflow_workflow": "x"},
+            )
         )
 
 
@@ -208,6 +244,17 @@ def test_legacy_application_coding_preserves_template_uid() -> None:
     assert prepared.requires_workspace_hosting is True
 
 
+def test_legacy_non_dict_template_config_keeps_historical_passthrough() -> None:
+    # The internal /api/bots surface forwards template_config untyped; the
+    # pre-strategy ladder let truthy non-dict values through (only genuinely
+    # empty payloads were rejected). The strategy keeps that contract instead
+    # of tightening it into a rejection.
+    prepared = _strategy_prepare("claude_code", {"template": "legacy-ref"})
+    assert prepared.template_type == "applicationCoding"
+    assert prepared.template_config == "legacy-ref"
+    assert prepared.requires_workspace_hosting is True
+
+
 def test_public_application_coding_rejects_template_uid() -> None:
     with pytest.raises(
         BotTemplateInvalidError,
@@ -247,6 +294,28 @@ def test_flow_routes_both_input_shapes_through_the_same_strategy() -> None:
     # The legacy spec's bag stays untouched: normalization happens on the copy
     # handed to the strategy, never on the caller's spec.
     assert legacy.engine_properties == {}
+
+
+def test_flow_output_satisfies_its_own_mixed_source_invariant() -> None:
+    # The translated spec is what a retry (or the deferred pending-intent
+    # replay) would re-feed into _prepare_create: it may carry the translated
+    # template fields, so the consumed engine_properties bag must be cleared
+    # rather than travelling alongside them as a second source.
+    prepared = _prepare_spec(
+        BotCreateSpec(
+            entity_id="u1",
+            engine_type="claude_code",
+            bot_type="personal",
+            bot_name="Coding Bot",
+            engine_properties={"template": {"devflow_workflow": "x"}},
+        )
+    )
+    assert prepared.template_type == "applicationCoding"
+    assert prepared.engine_properties == {}
+    # Re-prepare must not hit the mixed-source guard.
+    roundtrip = _prepare_spec(prepared)
+    assert roundtrip.template_type == "applicationCoding"
+    assert roundtrip.template_config == {"devflow_workflow": "x"}
 
 
 def test_flow_preserves_legacy_non_application_template() -> None:

@@ -56,6 +56,13 @@ def assert_application_coding_create(
     the calling endpoint, so the rule is self-contained and unit-testable.
     ``claude_code`` is the only external engine value: the runtime routing to the
     ``aicoding`` adapter is an internal concern, not an alternative engine.
+
+    The production implementation of this gate is
+    ``bot_management/engines/aicoding/strategy.py``
+    ``AicodingProvisioningStrategy.prepare_create`` (same order, same
+    messages). This copy has no production caller today — keep the two in
+    sync, or single-source them once bot_inventory may depend on
+    bot_management.
     """
     if deployment_mode is not DeployMode.CLOUD:
         return ComboDecision(False, "application coding is cloud-only")

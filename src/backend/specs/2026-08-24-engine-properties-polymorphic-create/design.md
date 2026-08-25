@@ -35,6 +35,37 @@
 
 其余各节描述的目标架构（Strategy 契约、三路路由、测试计划）按原文落地。
 
+### 0.1 评审修复（2026-08-25，合并前）
+
+PR 评审以 origin/dev 为基线逐项对比存量行为，发现四处偏差；实现按下述修正，
+与 §6.1/§6.2/§7 代码示意冲突之处以本节为准：
+
+1. **`prepare_create` 契约增加 `engine_type` 参数**（镜像被删除的 `prepare_bot_create`
+   的同名参数）。策略实例的 `engine_type` 是注册键，但共享的 Default 回退实例
+   服务于所有未注册引擎（如 `SUPPORTED_ENGINE_TYPES` 中的 `moltis`、内部
+   `/api/bots` 的任意字符串）：报错必须取请求的 `engine_type` 才能复现历史消息
+   （`application coding does not support engine: moltis`，而非 `... : default`）。
+2. **Default Strategy 恢复历史门禁顺序**：含 `template` 键的输入先做 cloud-only
+   检查、再报引擎错误——与被删除的 `prepare_bot_create` 一致（local +
+   applicationCoding 历史上报 "application coding is cloud-only"）。§6.1 的示意
+   缺少这一顺序。
+3. **模板值仅按 falsy 拒绝，去掉 `isinstance(template, dict)` 收紧**：内部
+   `/api/bots` 无类型透传 `template_config`，truthy 非 dict 值（str/list）在
+   dev 的校验链中经鸭子类型语义被放行并存原值；策略保持该契约（§6.2 示意中的
+   isinstance 分支已删除）。falsy 非 dict（如 `0`）从历史上的未处理
+   `TypeError` 变为干净的 `BotTemplateInvalidError`，属可接受的体验修正。
+4. **`_prepare_create` 返回的 spec 清空 `engine_properties`**（§7 示意补上
+   `engine_properties={}`）：策略翻译后的 spec 只携带 template_type/
+   template_config；保留非空 bag 会使返回值违反入口的 mixed-source 不变量，
+   阻塞将来 §8.3 deferred 的 pending-intent 重放（重放会喂回已 prepare 的 spec）。
+5. 门禁与 `bot_inventory/policies/combo_policy.py` 的
+   `assert_application_coding_create`（生产无人调用）互为镜像；两侧已加交叉引用
+   注释。bot_management 目前零依赖 bot_inventory，引入跨域 import 需先过
+   module boundary 测试与 Context Boundary 声明，留待单独决策。
+
+随附修整：Context Boundary `provides` 移除已删除的 `prepare_bot_create`；
+`schemas.py` 中引用 `BotCreateSpec.extra_properties` 的过期注释更新为现状。
+
 ---
 
 ## 1. 仓库现状（事实基线）

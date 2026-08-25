@@ -131,6 +131,7 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
     def prepare_create(
         self,
         *,
+        engine_type: str,
         engine_properties: Dict[str, Any],
         bot_type: str,
         deployment_mode: str,
@@ -162,12 +163,18 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         if "template" not in engine_properties:
             raise BotTemplateInvalidError("engine_properties.template is required")
 
-        # Historical combination gates, in their historical order.
+        # Historical combination gates, in their historical order. The gate set
+        # and messages are mirrored (production-dead) in
+        # ``bot_inventory/policies/combo_policy.py``
+        # ``assert_application_coding_create`` — keep the two in sync, or
+        # single-source them once bot_management may depend on bot_inventory.
         if deployment_mode != "cloud":
             raise BotCombinationUnsupportedError("application coding is cloud-only")
-        if self.engine_type != CLAUDE_CODE_ENGINE_TYPE:
+        if engine_type != CLAUDE_CODE_ENGINE_TYPE:
+            # The strategy class is registered for both engine types, but
+            # application-coding creation stays claude_code-only.
             raise BotCombinationUnsupportedError(
-                f"application coding does not support engine: {self.engine_type}"
+                f"application coding does not support engine: {engine_type}"
             )
         if bot_type != "personal":
             raise BotCombinationUnsupportedError(
@@ -189,7 +196,12 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                 template_config=None,
                 requires_workspace_hosting=True,
             )
-        if not isinstance(template, dict) or not template:
+        if not template:
+            # Byte-identical to the historical ladder: only genuinely empty
+            # payloads are rejected. Truthy non-dict values (legacy internal
+            # callers forwarding raw JSON ``template_config``) keep the
+            # historical pass-through — the expected-type checks and
+            # reserved-field scan below treat them exactly as before.
             raise BotTemplateInvalidError(
                 "applicationCoding template_config must not be empty"
             )

@@ -96,6 +96,7 @@ def _prepare_with_engine_strategy(
     """Run the engine-selected strategy's create prevalidation."""
     strategy = get_engine_provisioning_registry().resolve(spec.engine_type)
     return strategy.prepare_create(
+        engine_type=spec.engine_type,
         engine_properties=spec.engine_properties,
         bot_type=spec.bot_type,
         deployment_mode=context.deployment_mode,
@@ -273,10 +274,16 @@ def _prepare_create(
         and not bot_service.is_workspace_hosting_available()
     ):
         raise ApplicationCodingUnavailableError()
+    # The translated form carries only the Core-internal template fields: the
+    # bag has been consumed by the strategy, and leaving it set would make the
+    # returned spec violate the mixed-source invariant enforced at entry —
+    # a retry or future pending-intent replay that re-feeds the prepared
+    # spec would be rejected as a mixed source.
     return replace(
         spec,
         template_type=prepared.template_type,
         template_config=prepared.template_config,
+        engine_properties={},
     )
 
 
