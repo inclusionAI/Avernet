@@ -109,9 +109,11 @@ class RenderScreenService:
 
         scope = resolve_render_screen_scope(bot)
         if scope == "bot":
-            user_id = current_user_id or owner_id or ""
-            if not user_id or not self._bot_has_collaborative_access(bot_id, user_id):
-                raise PermissionError(f"无权查看此 Bot 的 CDN 配置: {bot_id}")
+            # 读放开：副屏 CDN 配置（库名 → CDN URL 映射）是非敏感渲染资源。
+            # 群聊/分享页/协作场景的查看者并非 Bot 归属者或协作者，但都需要
+            # 这份映射来渲染副屏面板，否则前端会报「组件库不存在」。
+            # 写操作（create/update/delete）仍走 authorize_* 严格校验，
+            # 读放开不影响写权限。
             return self._repo.list_by_bot_id(bot_id=bot_id, owner_id=None)
 
         effective_owner_id = owner_id or current_user_id or ""
