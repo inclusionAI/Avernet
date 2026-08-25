@@ -106,7 +106,7 @@ def translate_claw_mind(raw: dict, disposition: Literal["start", "result"]) -> T
     """ClawMind HttpCallbackPayload → TaskCallbackData.data dict(对齐语雀 §八)。
 
     字段映射:
-    - ``loop_task_id`` = ``workflow_id``(ClawMind 每次回投上报整 workflow → workflow 级回投,``node_id`` 空);
+    - ``loop_task_id`` = ``flow_id``(run 实例 id,对齐 BCN 的 ``scope.run_id`` 回投键 → ``task_callback.run_id`` 列存 run 实例);工作流级回投,``node_id`` 空;
     - ``workflow_instance_id`` = ``ext_info.flow_runs.origin_session_id``(session_id → 落 task_callback.main_session_id);
     - ``status`` 从底层 status 推:``ext_info.flow_runs.status`` > ``node_executions[0].status``(顶层 status 仅粗粒度事件类型);
     - ``result.success`` 由底层 status 语义推(succeeded/completed→True;failed/cancelled/aborted→False;未知→不设 success);
@@ -141,7 +141,7 @@ def translate_claw_mind(raw: dict, disposition: Literal["start", "result"]) -> T
     return TranslatedCallback(
         disposition=disposition,
         data=TaskCallbackData(data={
-            "loop_task_id": (raw.get("workflow_id") or ""),
+            "loop_task_id": (raw.get("flow_id") or ""),
             "workflow_type": "single_bot",
             "workflow_id": 0,
             "instance_id": 0,

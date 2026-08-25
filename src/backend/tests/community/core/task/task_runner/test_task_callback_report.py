@@ -336,7 +336,7 @@ class TestClawMind:
         rec = repo.calls[0]
         # 转换后落库字段(对齐 task_callback 列 + 语雀 §八)
         assert rec.invoker == "claw_mind"
-        assert rec.run_id == "risk-review-pipeline"  # loop_task_id = workflow_id
+        assert rec.run_id == "flow-abc-123"  # loop_task_id = flow_id(run 实例,对齐 BCN)
         assert rec.node_id == ""                      # workflow 级回投,node_id 空
         assert rec.main_session_id == "S-9"           # origin_session_id → main_session_id
         assert rec.status == "succeeded"              # 底层 flow_runs.status(非顶层 node_succeeded)
@@ -360,6 +360,7 @@ class TestClawMind:
         _run(_dispatch_call(_req(body), svc, NoopCallbackAuthenticator(),
                             InMemoryCallbackCorrelationRegistry()))
         rec = repo.calls[0]
+        assert rec.run_id == "f"  # loop_task_id = flow_id(run 实例,对齐 BCN)
         assert rec.status == "failed"
         assert rec.main_session_id == "S-1"
         assert rec.result_success is False
