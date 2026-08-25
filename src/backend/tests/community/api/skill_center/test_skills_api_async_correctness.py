@@ -37,7 +37,10 @@ from agentclaw.community.adapters.http.skill_center.skills import (
 from agentclaw.community.api.runtime_layout_probe_service import (
     RuntimeLayoutProbeServiceProtocol,
 )
-from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
+from agentclaw.community.api.skill_query_service import SkillQueryServiceProtocol
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
+)
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     LocalSkillRuntimeSyncError,
@@ -100,20 +103,24 @@ def _skill_service_di_app(
         )
 
     mock_asset_service.resolve_legacy_skill_id.side_effect = _resolve_legacy
-    mock_asset_service.set_active = AsyncMock(
-        side_effect=(
-            LocalSkillRuntimeSyncError()
-            if runtime_uses_pool_paths
-            and device_sync_result
-            and not device_sync_result.get("success")
-            else None
-        ),
-        return_value={
-            "id": "1",
-            "name": "a",
-            "link_name": "a",
-            "git_path": "git://path/a",
-        },
+    _command_error = (
+        LocalSkillRuntimeSyncError()
+        if runtime_uses_pool_paths
+        and device_sync_result
+        and not device_sync_result.get("success")
+        else None
+    )
+    _command_result = {
+        "id": "1",
+        "name": "a",
+        "link_name": "a",
+        "git_path": "git://path/a",
+    }
+    mock_asset_service.activate_skill = AsyncMock(
+        side_effect=_command_error, return_value=_command_result
+    )
+    mock_asset_service.deactivate_skill = AsyncMock(
+        side_effect=_command_error, return_value=_command_result
     )
     mock_skill_service.asset_service = mock_asset_service
 
@@ -236,7 +243,8 @@ def _skill_service_di_app(
                 RuntimeLayoutProbeServiceProtocol,
                 to=mock_runtime_layout_probe,
             )
-            binder.bind(BotSkillAssetServiceProtocol, to=mock_asset_service)
+            binder.bind(SkillQueryServiceProtocol, to=mock_asset_service)
+            binder.bind(DirectActivationServiceProtocol, to=mock_asset_service)
 
     injector = Injector([_TestModule()])
     attach_injector(app, injector)
@@ -937,7 +945,7 @@ class TestActivateSkillAsyncAwait:
                 "/api/skills/my-skill-id/activate",
                 json={"source_path": "git://some/path"},
             )
-            assert mock_svc.asset_service.set_active.await_count == 1
+            assert mock_svc.asset_service.activate_skill.await_count == 1
             assert mock_svc.activate_skill.await_count == 0
 
     def test_activate_skill_passes_correct_args(self, mock_ctx):
@@ -955,12 +963,11 @@ class TestActivateSkillAsyncAwait:
                 "/api/skills/my-skill-id/activate",
                 json={"source_path": "git://some/path"},
             )
-            mock_svc.asset_service.set_active.assert_awaited_once_with(
+            mock_svc.asset_service.activate_skill.assert_awaited_once_with(
                 skill_id="1",
                 bot_id=mock_ctx.bot_id,
                 owner_id=mock_ctx.user_id,
-                user_id=mock_ctx.user_id,
-                active=True,
+                actor_id=mock_ctx.user_id,
             )
 
     def test_pool_activate_merges_requested_locator_into_mapping_publish(
@@ -1010,7 +1017,7 @@ class TestActivateSkillAsyncAwait:
             assert response.json()["detail"] == (
                 "Failed to synchronize activated skills to runtime"
             )
-            mock_svc.asset_service.set_active.assert_awaited_once()
+            mock_svc.asset_service.activate_skill.assert_awaited_once()
 
 
 # ── deactivate_skill ─────────────────────────────────────────────────────────
@@ -1029,19 +1036,18 @@ class TestDeactivateSkillAsyncAwait:
     def test_deactivate_skill_awaits_service_method(self, mock_ctx):
         with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
             client.post("/api/skills/my-skill-id/deactivate")
-            assert mock_svc.asset_service.set_active.await_count == 1
+            assert mock_svc.asset_service.deactivate_skill.await_count == 1
             assert mock_svc.deactivate_skill.await_count == 0
 
     def test_deactivate_skill_passes_correct_skill_id(self, mock_ctx):
         """user_id/bolt_id must be passed as kwargs (not positional)."""
         with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
             client.post("/api/skills/my-skill-id/deactivate")
-            mock_svc.asset_service.set_active.assert_awaited_once_with(
+            mock_svc.asset_service.deactivate_skill.assert_awaited_once_with(
                 skill_id="1",
                 bot_id=mock_ctx.bot_id,
                 owner_id=mock_ctx.user_id,
-                user_id=mock_ctx.user_id,
-                active=False,
+                actor_id=mock_ctx.user_id,
             )
 
     def test_deactivate_skill_fails_when_runtime_mapping_sync_fails(self, mock_ctx):
@@ -1056,7 +1062,7 @@ class TestDeactivateSkillAsyncAwait:
             assert response.json()["detail"] == (
                 "Failed to synchronize deactivated skills to runtime"
             )
-            mock_svc.asset_service.set_active.assert_awaited_once()
+            mock_svc.asset_service.deactivate_skill.assert_awaited_once()
 
 
 # ── activate_skills_batch ─────────────────────────────────────────────────────
@@ -1071,7 +1077,7 @@ class TestActivateSkillsBatchAsyncAwait:
                 "/api/skills/market/activate-batch",
                 json={"skill_paths": ["git://path/a", "git://path/b"]},
             )
-            assert mock_svc.asset_service.set_active.await_count == 2
+            assert mock_svc.asset_service.activate_skill.await_count == 2
             assert mock_svc.activate_skills_batch.await_count == 0
 
     def test_activate_skills_batch_passes_correct_skill_paths(self, mock_ctx):
@@ -1097,20 +1103,18 @@ class TestActivateSkillsBatchAsyncAwait:
                     user_id=mock_ctx.user_id,
                 ),
             ]
-            assert mock_svc.asset_service.set_active.await_args_list == [
+            assert mock_svc.asset_service.activate_skill.await_args_list == [
                 call(
                     skill_id="1",
                     bot_id="default",
                     owner_id=mock_ctx.user_id,
-                    user_id=mock_ctx.user_id,
-                    active=True,
+                    actor_id=mock_ctx.user_id,
                 ),
                 call(
                     skill_id="2",
                     bot_id="default",
                     owner_id=mock_ctx.user_id,
-                    user_id=mock_ctx.user_id,
-                    active=True,
+                    actor_id=mock_ctx.user_id,
                 ),
             ]
 
@@ -1132,7 +1136,7 @@ class TestActivateSkillsBatchAsyncAwait:
             assert response.status_code == 200, response.text
             assert len(response.json()["data"]["success"]) == 1
             assert response.json()["data"]["failed"][0]["path"] == "git://path/b"
-            mock_svc.asset_service.set_active.assert_awaited_once()
+            mock_svc.asset_service.activate_skill.assert_awaited_once()
 
     def test_batch_keeps_refused_items_as_partial_success(self, mock_ctx):
         """R1 refusals and the one-name invariant fail one item, never the batch.
@@ -1146,7 +1150,7 @@ class TestActivateSkillsBatchAsyncAwait:
                 lambda **kwargs: ids[kwargs["skill_reference"]]
             )
 
-            async def _set_active(**kwargs):
+            async def _activate(**kwargs):
                 if kwargs["skill_id"] == "2":
                     raise SkillSetControlPlaneConflictError(
                         "RESOURCE_MANAGED_BY_SKILL_SET"
@@ -1159,7 +1163,7 @@ class TestActivateSkillsBatchAsyncAwait:
                     "git_path": "git://path/a",
                 }
 
-            mock_svc.asset_service.set_active.side_effect = _set_active
+            mock_svc.asset_service.activate_skill.side_effect = _activate
 
             response = client.post(
                 "/api/skills/market/activate-batch",
@@ -1198,4 +1202,4 @@ class TestActivateSkillsBatchAsyncAwait:
             assert response.json()["detail"] == (
                 "Failed to synchronize activated skills to runtime"
             )
-            mock_svc.asset_service.set_active.assert_awaited_once()
+            mock_svc.asset_service.activate_skill.assert_awaited_once()

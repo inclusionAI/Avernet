@@ -172,6 +172,13 @@ _IMPORT_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset({
         "core/skill_center/services/bot_skill_asset_service.py",
         "agentclaw.community.api.bot_skill_asset_service",
     ),
+    # SkillQueryService implements the Service API Protocol defined in
+    # api/skill_query_service.py — the merged read seam that replaces the two
+    # entries above; same shape and same reason.
+    (
+        "core/skill_center/services/skill_query_service.py",
+        "agentclaw.community.api.skill_query_service",
+    ),
 })
 
 

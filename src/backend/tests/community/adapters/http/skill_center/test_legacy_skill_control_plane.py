@@ -43,6 +43,13 @@ class _Bots:
 
 
 class _Assets:
+    """One recorder standing in for both halves the legacy routes inject.
+
+    The routes take the query service and the direct-activation service as a
+    pair; a single object recording into one ``calls`` list keeps the ordering
+    pin (`get` before `set`) observable across the two seams.
+    """
+
     def __init__(self) -> None:
         self.calls: list[tuple[str, bool | None]] = []
 
@@ -66,11 +73,18 @@ class _Assets:
         }
         return "7"
 
-    async def set_active(
-        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str, active: bool
+    async def activate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
     ):
-        assert (skill_id, bot_id, owner_id, user_id) == ("7", "bot", "owner", "owner")
-        self.calls.append(("set", active))
+        assert (skill_id, bot_id, owner_id, actor_id) == ("7", "bot", "owner", "owner")
+        self.calls.append(("set", True))
+        return {"name": "local-seven"}
+
+    async def deactivate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+    ):
+        assert (skill_id, bot_id, owner_id, actor_id) == ("7", "bot", "owner", "owner")
+        self.calls.append(("set", False))
         return {"name": "local-seven"}
 
 
@@ -253,7 +267,8 @@ async def test_legacy_activate_keeps_wire_but_uses_bot_skill_asset_control_plane
         skill_set_service_factory=object(),
         resolver=object(),
         device_sync_dispatcher=object(),
-        asset_service=assets,
+        query_service=assets,
+        direct_activation=assets,
     )
 
     assert response.model_dump() == {
@@ -278,7 +293,8 @@ async def test_legacy_activate_with_relative_path_still_uses_control_plane() -> 
         skill_set_service_factory=object(),
         resolver=object(),
         device_sync_dispatcher=object(),
-        asset_service=assets,
+        query_service=assets,
+        direct_activation=assets,
     )
     assert assets.calls == [("get", None), ("set", True)]
 
@@ -299,7 +315,8 @@ async def test_legacy_activate_with_link_name_resolves_decimal_id_before_control
         skill_set_service_factory=object(),
         resolver=object(),
         device_sync_dispatcher=object(),
-        asset_service=assets,
+        query_service=assets,
+        direct_activation=assets,
     )
     assert assets.calls == [("get", None), ("set", True)]
 
@@ -313,6 +330,7 @@ async def test_bound_control_plane_not_found_never_falls_back_to_legacy_mutation
             raise LocalSkillNotFoundError()
 
     legacy_service_factory = MagicMock()
+    missing = _MissingAssets()
     with pytest.raises(LocalSkillNotFoundError):
         await activate_skill(
             "missing-link",
@@ -325,7 +343,8 @@ async def test_bound_control_plane_not_found_never_falls_back_to_legacy_mutation
             skill_set_service_factory=object(),
             resolver=object(),
             device_sync_dispatcher=object(),
-            asset_service=_MissingAssets(),
+            query_service=missing,
+            direct_activation=missing,
         )
 
     legacy_service_factory.create.assert_not_called()
@@ -346,7 +365,8 @@ async def test_legacy_deactivate_keeps_wire_but_uses_bot_skill_asset_control_pla
         skill_set_service_factory=object(),
         resolver=object(),
         device_sync_dispatcher=object(),
-        asset_service=assets,
+        query_service=assets,
+        direct_activation=assets,
     )
 
     assert response.model_dump() == {

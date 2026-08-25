@@ -190,7 +190,7 @@ lands in the same group as the migration of its last caller.
       `api/skill_query_service.py` (listing, detail, content, parameters
       incl. `replace_parameters` delegation, legacy reference resolution);
       detail and listing use `reader.flush`.
-- [ ] 10.2 Re-point callers: OpenAPI skills router (reads →
+- [x] 10.2 Re-point callers: OpenAPI skills router (reads →
       `SkillQueryService`; activate/deactivate → `DirectActivationService`),
       internal legacy activate/deactivate routes, `deprecated/skills.py`,
       `service_publication_facade.py`.

@@ -134,7 +134,10 @@ from agentclaw.community.api.skill_service_factory import SkillServiceFactoryPro
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
 )
-from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
+)
+from agentclaw.community.api.skill_query_service import SkillQueryServiceProtocol
 from agentclaw.community.api.repository_catalog_service import (
     RepositoryCatalogServiceProtocol,
 )
@@ -472,7 +475,8 @@ def _require_pool_runtime_sync_success(
 
 async def _set_legacy_asset_active_if_resolved(
     *,
-    asset_service: BotSkillAssetServiceProtocol,
+    query_service: SkillQueryServiceProtocol,
+    direct_activation: DirectActivationServiceProtocol,
     skill_reference: str,
     source_path: str,
     bot_id: str,
@@ -482,7 +486,7 @@ async def _set_legacy_asset_active_if_resolved(
 ) -> dict[str, Any] | None:
     """Adapt historical path/link references to the one Installation command."""
     control_plane_bound = callable(
-        getattr(asset_service, "resolve_legacy_skill_id", None)
+        getattr(query_service, "resolve_legacy_skill_id", None)
     )
     if not skill_reference.isdecimal() and not control_plane_bound:
         # Transitional compatibility fixtures and deployments that have not
@@ -494,7 +498,7 @@ async def _set_legacy_asset_active_if_resolved(
         skill_id = (
             skill_reference
             if skill_reference.isdecimal()
-            else asset_service.resolve_legacy_skill_id(
+            else query_service.resolve_legacy_skill_id(
                 skill_reference=skill_reference,
                 source_path=source_path,
                 bot_id=bot_id,
@@ -502,18 +506,22 @@ async def _set_legacy_asset_active_if_resolved(
                 user_id=actor_id,
             )
         )
-        asset_service.get_skill(
+        query_service.get_skill(
             skill_id=skill_id,
             bot_id=bot_id,
             owner_id=owner_id,
             user_id=actor_id,
         )
-        return await asset_service.set_active(
+        command = (
+            direct_activation.activate_skill
+            if active
+            else direct_activation.deactivate_skill
+        )
+        return await command(
             skill_id=skill_id,
             bot_id=bot_id,
             owner_id=owner_id,
-            user_id=actor_id,
-            active=active,
+            actor_id=actor_id,
         )
     except LocalSkillNotFoundError:
         if control_plane_bound:
@@ -1372,8 +1380,11 @@ async def activate_skill(
     ),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
     device_sync_dispatcher: DeviceSyncDispatcher = Injected(DeviceSyncDispatcher),
-    asset_service: BotSkillAssetServiceProtocol = Injected(
-        BotSkillAssetServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
+    ),
+    direct_activation: DirectActivationServiceProtocol = Injected(
+        DirectActivationServiceProtocol
     ),
 ) -> ActivateResponse:
     """Activate a skill by creating symlink."""
@@ -1399,7 +1410,8 @@ async def activate_skill(
     # not a second activation model.
     try:
         result = await _set_legacy_asset_active_if_resolved(
-            asset_service=asset_service,
+            query_service=query_service,
+            direct_activation=direct_activation,
             skill_reference=request.relative_path or skill_id,
             source_path=request.source_path,
             bot_id=effective_bot_id,
@@ -1535,8 +1547,11 @@ async def deactivate_skill(
     ),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
     device_sync_dispatcher: DeviceSyncDispatcher = Injected(DeviceSyncDispatcher),
-    asset_service: BotSkillAssetServiceProtocol = Injected(
-        BotSkillAssetServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
+    ),
+    direct_activation: DirectActivationServiceProtocol = Injected(
+        DirectActivationServiceProtocol
     ),
 ) -> DeactivateResponse:
     """Deactivate a skill by removing symlink."""
@@ -1558,7 +1573,8 @@ async def deactivate_skill(
 
     try:
         result = await _set_legacy_asset_active_if_resolved(
-            asset_service=asset_service,
+            query_service=query_service,
+            direct_activation=direct_activation,
             skill_reference=skill_id,
             source_path="",
             bot_id=effective_bot_id,
@@ -2111,8 +2127,11 @@ async def activate_skills_batch(
     engine_type: Optional[str] = Query(
         None, description="Engine type override; defaults to bot's active_engine"
     ),
-    asset_service: BotSkillAssetServiceProtocol = Injected(
-        BotSkillAssetServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
+    ),
+    direct_activation: DirectActivationServiceProtocol = Injected(
+        DirectActivationServiceProtocol
     ),
 ) -> ActivateSkillsResponse:
     """Compatibility batch adapter over the canonical Direct control plane."""
@@ -2127,19 +2146,18 @@ async def activate_skills_batch(
     results: dict[str, list[dict[str, str]]] = {"success": [], "failed": []}
     for path in request.skill_paths:
         try:
-            skill_id = asset_service.resolve_legacy_skill_id(
+            skill_id = query_service.resolve_legacy_skill_id(
                 skill_reference=path,
                 source_path=path,
                 bot_id=effective_bot_id,
                 owner_id=effective_owner_id,
                 user_id=ctx.user_id,
             )
-            item = await asset_service.set_active(
+            item = await direct_activation.activate_skill(
                 skill_id=skill_id,
                 bot_id=effective_bot_id,
                 owner_id=effective_owner_id,
-                user_id=ctx.user_id,
-                active=True,
+                actor_id=ctx.user_id,
             )
             results["success"].append(
                 {
