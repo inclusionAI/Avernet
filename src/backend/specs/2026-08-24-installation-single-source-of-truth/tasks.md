@@ -172,7 +172,7 @@ lands in the same group as the migration of its last caller.
       update `tests/community/_flows/skill_center/api_lifecycle.py`.
 - [x] 9.2 Reimplement deprecated `/api/skills/skillset/current` from
       `list_sets` (first ordinary active Set, else `None`).
-- [ ] 9.3 Delete the dead data-init activation step mechanically
+- [x] 9.3 Delete the dead data-init activation step mechanically
       (`_activate_and_sync_skill_sets` call site + method + activator ctor
       param + DI arg in `bot_management_module.py`) — no migration, dead
       feature.
