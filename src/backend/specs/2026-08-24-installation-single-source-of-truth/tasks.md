@@ -210,7 +210,7 @@ lands in the same group as the migration of its last caller.
       `remove_mcp_from_skill_set` (keep any still reached; record in PR).
 - [x] 11.4 Update `core/skill_center/README.md` context boundary + narrative
       (one writer, one flush, one reader, one rule book; new names).
-- [ ] 11.5 Update `adapters/http/skill_center/CLAUDE.md` key-file index.
+- [x] 11.5 Update `adapters/http/skill_center/CLAUDE.md` key-file index.
 
 ## Group 12 — Full validation
 
