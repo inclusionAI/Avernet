@@ -121,7 +121,7 @@ lands in the same group as the migration of its last caller.
       `require_can_join_set`; R3 now covers ANY Set — add the test: a
       Default-Set member (excluded or not) is refused when added to an
       ordinary Set; R2-before-R3 precedence pinned by a test.
-- [ ] 6.4 Policy unit tests
+- [x] 6.4 Policy unit tests
       (`tests/community/core/skill_center/test_capability_ownership.py`).
 
 ## Group 7 — DirectActivationService (one direct write path, skills ≡ MCPs)
