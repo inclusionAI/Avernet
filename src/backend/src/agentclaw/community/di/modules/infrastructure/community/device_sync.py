@@ -7,14 +7,13 @@ from __future__ import annotations
 
 from typing import Callable
 
-from injector import Binder, Module, inject, provider, singleton
+from injector import Module, inject, provider, singleton
 
 from agentclaw.community.core.devices.services.baas_device_sync import BaasDeviceSyncService
 from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
 from agentclaw.community.core.devices.services.device_context import DeviceContext
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
-from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
 from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 
 
@@ -26,17 +25,6 @@ class CommunityDeviceSyncModule(Module):
         device_sync_wrapper: Callable[[DeviceSync], DeviceSync] | None = None,
     ) -> None:
         self._device_sync_wrapper = device_sync_wrapper
-
-    def configure(self, binder: Binder) -> None:
-        from agentclaw.community.plugins.community.device_adapter_transport import (
-            CommunityDeviceAdapterTransport,
-        )
-
-        binder.bind(
-            DeviceAdapterTransport,
-            to=CommunityDeviceAdapterTransport,
-            scope=singleton,
-        )
 
     @singleton
     @provider

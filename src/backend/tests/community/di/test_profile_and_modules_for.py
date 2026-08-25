@@ -43,6 +43,9 @@ from agentclaw.community.di.profile import DeployProfile, validate_deploy_enviro
 from agentclaw.community.di.profile_modules import modules_for
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.kernel.lifecycle import discover_lifecycle_participants
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterTransport,
+)
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_BAAS,
     QUALIFIER_BCN,
@@ -53,6 +56,9 @@ from agentclaw.community.plugin_api.http_client import (
 from agentclaw.community.plugin_api.auth import AuthRequestContext
 from agentclaw.community.core.caller_identity.contracts import CallerIdentityStage
 from agentclaw.community.plugins.http_client import HttpxClient
+from agentclaw.community.plugins.local.device_adapter_transport import (
+    InMemoryDeviceAdapterTransport,
+)
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 from agentclaw.community.plugins.local.policy_service import LocalPolicyService
 
@@ -230,6 +236,15 @@ def test_singlebox_profile_resolves_local_policy_and_real_http_clients():
     assert isinstance(injector.get(PolicyServiceProtocol), LocalPolicyService)
     assert all(
         isinstance(client, HttpxClient) for client in _resolve_http_clients(injector)
+    )
+
+
+def test_singlebox_profile_keeps_local_device_adapter_transport():
+    injector = build_injector(profile=DeployProfile.SINGLEBOX)
+
+    assert isinstance(
+        injector.get(DeviceAdapterTransport),
+        InMemoryDeviceAdapterTransport,
     )
 
 
