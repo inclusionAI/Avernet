@@ -214,10 +214,10 @@ lands in the same group as the migration of its last caller.
 
 ## Group 12 — Full validation
 
-- [~] 12.1 `uv run pytest tests/community`.
-- [~] 12.2 SAST/lint gate (`scripts/ci/python_sast_local.sh`); report
+- [x] 12.1 `uv run pytest tests/community`.
+- [x] 12.2 SAST/lint gate (`scripts/ci/python_sast_local.sh`); report
       anything not runnable in the environment.
-- [ ] 12.3 Adversarial re-read of the final diff: no reader bypasses the
+- [x] 12.3 Adversarial re-read of the final diff: no reader bypasses the
       reader; no writer bypasses the UoW except the documented dead admin
       endpoint (spec C.7); no ownership decision outside the policy; every
       MCP operation's test has a skill twin.
