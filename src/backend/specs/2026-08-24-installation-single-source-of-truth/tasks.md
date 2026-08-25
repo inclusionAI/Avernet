@@ -82,7 +82,7 @@ lands in the same group as the migration of its last caller.
       `build_stage.py` (flush via reader); wiring updates.
 - [x] 3.5 Guard: no caller of `list_bot_installed_assets` outside the
       reader; no reference to `list_bot_active_assets` remains.
-- [ ] 3.6 Projector test pinning `bot_default_engine_types` Default-Set
+- [x] 3.6 Projector test pinning `bot_default_engine_types` Default-Set
       precedence; run the projector contract + skills_pool tests.
 
 ## Group 4 — Symlink/compose projection converges

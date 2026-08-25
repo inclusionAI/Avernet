@@ -1737,6 +1737,35 @@ async def test_runtime_projection_flushes_installations_first():
 
 
 @pytest.mark.asyncio
+async def test_projection_flush_prefers_the_layout_engine_for_default_sets():
+    """A coding template runs in an AICoding image while staying claude_code
+    logically, so the Default-Set scope tries the filesystem identity first."""
+    repository = _McpInstallations()
+    bots = _AicodingImageRuntimeBots()
+    runtime = BotRuntimeProjector(
+        factory=_RuntimeFactory(),
+        bot_repo=bots,
+        repository=repository,
+        reader=_reader(_RuntimeSkills(), repository=repository, bots=bots),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+
+    assert repository.flush_calls == [
+        {
+            "bot_id": "bot-1",
+            "owner_id": "true-owner",
+            "env": "pre",
+            "engine_type": "claude_code",
+            "default_engine_types": ("aicoding", "claude_code"),
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_runtime_projection_fails_before_engine_writes_when_flush_fails():
     repository = _FailingFlushRepository()
     runtime = BotRuntimeProjector(
