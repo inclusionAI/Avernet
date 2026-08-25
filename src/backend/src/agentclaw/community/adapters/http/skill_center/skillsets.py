@@ -2082,8 +2082,9 @@ async def sync_skills_to_device(
         )
 
         # 获取当前 bot 所有 active 能力集的合并 symlink mappings
+        # (Installation-keyed on the Bot's OWNER, not the acting user)
         symlinks = service.get_symlink_mappings(
-            user_id=user_id,
+            user_id=effective_entity_id,
             bolt_id=effective_bot_id,
         )
         symlinks_dict = [sm.to_dict() for sm in symlinks]

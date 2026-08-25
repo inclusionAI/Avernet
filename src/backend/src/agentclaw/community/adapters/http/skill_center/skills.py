@@ -1477,8 +1477,11 @@ async def activate_skill(
             engine_type=effective_engine,
             entity_type=effective_entity_type,
         )
+        # The mapping read is Installation-keyed on the Bot's OWNER; the actor
+        # may be a collaborator, whose id would resolve to no Bot and sync an
+        # empty projection.
         mapping_kwargs: dict[str, Any] = {
-            "user_id": ctx.user_id,
+            "user_id": effective_entity_id,
             "bolt_id": effective_bot_id,
         }
         if service.runtime_uses_pool_paths:
@@ -1626,8 +1629,9 @@ async def deactivate_skill(
             engine_type=effective_engine,
             entity_type=effective_entity_type,
         )
+        # Owner-keyed for the same reason as the activate leg above.
         symlinks = skill_set_service.get_symlink_mappings(
-            user_id=ctx.user_id,
+            user_id=effective_entity_id,
             bolt_id=effective_bot_id,
         )
         symlinks_dict = [sm.to_dict() for sm in symlinks]
