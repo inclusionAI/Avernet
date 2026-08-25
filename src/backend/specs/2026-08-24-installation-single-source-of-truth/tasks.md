@@ -67,7 +67,7 @@ lands in the same group as the migration of its last caller.
       `active_mcp_server_codes`) and
       `core/skill_center/services/bot_capability_state_reader.py`; DI
       bindings.
-- [ ] 3.2 New `tests/community/core/skill_center/
+- [x] 3.2 New `tests/community/core/skill_center/
       test_bot_capability_state_reader.py`: flush-then-read for skills and
       MCPs, missing-Bot error, `bot` passed vs looked up.
 - [ ] 3.3 Repurpose `SkillRepository.list_bot_active_assets` → pure
