@@ -490,7 +490,8 @@ class TestCreateDevice:
         assert result.sandbox_id == "sb-001"
         assert result.template_id == "tpl-001"
         assert result.ttl_in_minutes == 1440.0
-        assert result.ttl_expiration_time == 1750000000000
+        assert result.ttl_expiration_time == "2025-06-15 23:06:40"
+        assert result.ttl_expiration_timestamp == 1750000000000
         assert result.envs == {"KEY": "VALUE"}
         assert result.snapshot_id == "snap-001"
         assert result.metadata == {"meta": "data"}
@@ -505,11 +506,12 @@ class TestCreateDevice:
     def test_create_device_sync_missing_ttl_timestamp_yields_none(
         self, service, mock_sandbox, mock_plugin
     ):
-        """CR-01: info without a numeric ttl_timestamp yields ttl_expiration_time=None.
+        """CR-01: info without a numeric ttl_timestamp yields both TTL fields None.
 
         Deleting the attribute from the MagicMock simulates an upstream info
         object that never populated ttl_timestamp; re-access via getattr then
-        yields a MagicMock child, which the numeric guard filters to None.
+        yields a MagicMock child, which the numeric guard filters to None
+        (both-or-None field-pair contract).
         """
         info = _make_sandbox_info()
         del info.ttl_timestamp
@@ -521,6 +523,7 @@ class TestCreateDevice:
 
         assert isinstance(result, ArcaCreationResult)
         assert result.ttl_expiration_time is None
+        assert result.ttl_expiration_timestamp is None
 
     def test_create_device_sync_uses_creds_template_id(
         self, service, mock_sandbox, mock_plugin
