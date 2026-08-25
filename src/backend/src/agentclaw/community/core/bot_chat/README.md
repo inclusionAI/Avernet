@@ -46,7 +46,10 @@ window for backward compatibility. Optional product-query capabilities are:
 - `biz_scene` and `biz_task_id`: merge direct trace fields with relations
   recorded by `POST /api/bot-chat/log-relations`;
 - `group_id`: resolve all BCS sessions for the group and normalize missing
-  `agent:main:` prefixes before querying traces;
+  `agent:main:` prefixes before querying traces. Group queries are open across
+  Bots and Owners, but retain the default 72-hour window unless the caller
+  explicitly passes `time_scope=all`; the latter is the opt-in used by the
+  Group aggregation view to query the complete group history;
 - `match_mode=contains`: fuzzy ID/business matching, limited to a 90-day range;
 - `include_output_match=true`: include trace output in keyword matching;
 - `time_scope=all`: allowed only for an exact identifier lookup.
