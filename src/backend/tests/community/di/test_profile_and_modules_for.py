@@ -194,8 +194,8 @@ def test_test_and_singlebox_have_explicit_access_and_http_bindings():
     assert "SingleboxAccessModule" in singlebox_names
     assert "TestHttpClientModule" not in singlebox_names
     assert "SingleboxDevicesModule" in singlebox_names
-    assert "SingleboxDeviceSyncModule" in singlebox_names
-    assert "CommunityDeviceSyncModule" not in singlebox_names
+    assert "CommunityDeviceSyncModule" in singlebox_names
+    assert "SingleboxDeviceSyncModule" not in singlebox_names
     assert "TestDevicesModule" not in singlebox_names
     assert legacy_access_module not in singlebox_names
 
@@ -209,7 +209,7 @@ def test_test_and_singlebox_have_explicit_access_and_http_bindings():
             "SingleboxAccessModule",
             "SingleboxCallerIdentityModule",
             "SingleboxDevicesModule",
-            "SingleboxDeviceSyncModule",
+            "CommunityDeviceSyncModule",
         }
     )
 

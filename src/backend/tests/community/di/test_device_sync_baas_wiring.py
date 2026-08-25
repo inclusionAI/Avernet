@@ -5,9 +5,7 @@ from agentclaw.community.core.devices.services.baas_device_sync import BaasDevic
 from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
 from agentclaw.community.core.devices.services.singlebox_device_sync import SingleboxDeviceSyncService
 from agentclaw.community.di.modules.infrastructure.community.device_sync import CommunityDeviceSyncModule
-from agentclaw.community.di.modules.infrastructure.singlebox.device_sync import SingleboxDeviceSyncModule
 from agentclaw.community.plugins.community.device_sync_dispatcher import CommunityDeviceSyncDispatcher
-from agentclaw.community.plugins.local.device_sync_dispatcher import LocalDeviceSyncDispatcher
 
 
 def _ctx():
@@ -25,10 +23,12 @@ def test_community_dispatcher_factory_builds_shared_baas_service():
     assert isinstance(service._transport, BaasInvokeTransport)
 
 
-def test_singlebox_dispatcher_factory_builds_shared_baas_service():
-    dispatcher = SingleboxDeviceSyncModule().device_sync_dispatcher(MagicMock())
+def test_singlebox_dispatcher_factory_wraps_shared_baas_service():
+    dispatcher = CommunityDeviceSyncModule(
+        device_sync_wrapper=SingleboxDeviceSyncService,
+    ).device_sync_dispatcher(MagicMock())
     service = dispatcher.dispatch(_ctx())
-    assert isinstance(dispatcher, LocalDeviceSyncDispatcher)
+    assert isinstance(dispatcher, CommunityDeviceSyncDispatcher)
     assert isinstance(service, SingleboxDeviceSyncService)
     assert isinstance(service._delegate, BaasDeviceSyncService)
     assert isinstance(service._delegate._transport, BaasInvokeTransport)

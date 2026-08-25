@@ -170,13 +170,15 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             from agentclaw.community.di.modules.infrastructure.singlebox.devices import (
                 SingleboxDevicesModule,
             )
-            from agentclaw.community.di.modules.infrastructure.singlebox.device_sync import (
-                SingleboxDeviceSyncModule,
+            from agentclaw.community.core.devices.services.singlebox_device_sync import (
+                SingleboxDeviceSyncService,
             )
 
             column.extend([
                 SingleboxDevicesModule(),
-                SingleboxDeviceSyncModule(),
+                CommunityDeviceSyncModule(
+                    device_sync_wrapper=SingleboxDeviceSyncService,
+                ),
                 SingleboxAccessModule(),
                 SingleboxCallerIdentityModule(),
             ])

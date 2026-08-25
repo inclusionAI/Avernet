@@ -38,9 +38,19 @@ class CommunityDeviceSyncDispatcher(DeviceSyncDispatcher):
         self._device_sync_factory = device_sync_factory
 
     def dispatch(self, ctx: DeviceContext) -> DeviceSync:
+        from agentclaw.community.core.devices.services.device_context import (
+            UnknownProviderError,
+        )
+
+        if ctx.provider != "baas":
+            raise UnknownProviderError(
+                f"CommunityDeviceSyncDispatcher: unsupported provider={ctx.provider!r} "
+                f"(bot={ctx.bot_id})"
+            )
+
         logger.info(
             "[CommunityDeviceSyncDispatcher] route (bot=%s, provider=%s)",
             getattr(ctx, "bot_id", "?"),
-            getattr(ctx, "provider", "?"),
+            ctx.provider,
         )
         return self._device_sync_factory(ctx)

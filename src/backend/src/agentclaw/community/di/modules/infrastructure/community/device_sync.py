@@ -5,6 +5,8 @@ and injects a factory for the shared Core ``BaasDeviceSyncService``.
 """
 from __future__ import annotations
 
+from typing import Callable
+
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.core.devices.services.baas_device_sync import BaasDeviceSyncService
@@ -17,7 +19,13 @@ from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDisp
 
 
 class CommunityDeviceSyncModule(Module):
-    """Bind the community dispatcher and shared BaaS DeviceSync factory."""
+    """Bind the shared BaaS dispatcher, optionally adapting its Core service."""
+
+    def __init__(
+        self,
+        device_sync_wrapper: Callable[[DeviceSync], DeviceSync] | None = None,
+    ) -> None:
+        self._device_sync_wrapper = device_sync_wrapper
 
     def configure(self, binder: Binder) -> None:
         from agentclaw.community.plugins.community.device_adapter_transport import (
@@ -50,6 +58,12 @@ class CommunityDeviceSyncModule(Module):
                 baas_service=baas_service,
                 device_uuid=conn_info.get("device_uuid"),
             )
-            return BaasDeviceSyncService(transport=transport, conn_info=conn_info)
+            service: DeviceSync = BaasDeviceSyncService(
+                transport=transport,
+                conn_info=conn_info,
+            )
+            if self._device_sync_wrapper is not None:
+                service = self._device_sync_wrapper(service)
+            return service
 
         return CommunityDeviceSyncDispatcher(device_sync_factory=baas_device_sync)
