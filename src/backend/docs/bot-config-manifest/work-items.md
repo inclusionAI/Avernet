@@ -9,7 +9,7 @@
 
 ## 1. How to use this document
 
-Each work item **W1–W9** is scoped to be picked up on its own, by one person or
+Each work item **W1–W11** is scoped to be picked up on its own, by one person or
 one session, with no need to re-derive the design from the Chinese docs. An item
 states what it delivers, what it deliberately leaves alone, what must land
 first, and criteria concrete enough to review against.
@@ -18,13 +18,14 @@ Three kinds of entry gate the work and are tracked separately from it:
 
 | Prefix | Meaning |
 | --- | --- |
-| `W1`–`W9` | Implementation work items — one PR each |
-| `D1`–`D3` | **Blocking design questions**, found while checking the design against the code. Each gates a specific work item and must be resolved before it starts |
-| `X1`–`X4` | **External confirmations** owed by other teams. None blocks W1–W6; they gate W7, W8 and W9 |
+| `W1`–`W11` | Implementation work items — one PR each |
+| `D1`–`D4` | **Design questions**, found while checking the design against the code. Each gates a specific work item. D1–D3 are now **resolved**; **D4 is open and is the largest unanswered question in the feature** |
+| `X1`–`X4` | **External confirmations** owed by other teams. None blocks W1–W4; they gate W7, W8 and W9 |
 
-Nothing in the design docs is amended here. Where this document disagrees with
-them (D1), it says so and leaves the resolution to that question's own
-discussion.
+Where this document diverges from the merged design docs — §2.5 (capability
+scope), §2.6 (PUT triggers a restart), §2.7 (first-boot readiness gate) — it
+says so explicitly. Those docs are not edited here; amending them is a separate
+change.
 
 ### Trackers
 
@@ -34,12 +35,14 @@ together.
 
 | | Issue | | Issue |
 | --- | --- | --- | --- |
-| **D1** capability model | #1466 | **W4** apply engine | #1472 |
-| **D2** `keep_last` storage | #1467 | **W5** skills + identity | #1473 |
-| **D3** reconcile verification | #1468 | **W6** resources | #1474 |
-| **W1** manifest document | #1469 | **W7** named + git sources | #1475 |
-| **W2** guarded fetcher | #1470 | **W8** lifecycle apply points | #1476 |
-| **W3** source credentials | #1471 | **W9** `cli_tools` (deferred) | #1477 |
+| **D1** capability model — *resolved* | #1466 | **W4** apply engine | #1472 |
+| **D2** manifest-upgrade diff policy — *open* | #1467 | **W5** skills + identity | #1473 |
+| **D3** reconcile verification — *resolved* | #1468 | **W6** resources | #1474 |
+| **D4** pre-boot delivery — **open, blocking** | *(to file)* | **W7** named + git sources | #1475 |
+| **W1** manifest document | #1469 | **W8** lifecycle apply points | #1476 |
+| **W2** guarded fetcher | #1470 | **W9** `cli_tools` (deferred) | #1477 |
+| **W3** source credentials | #1471 | **W10** service-layer seam | *(to file)* |
+| | | **W11** platform-side materialisation | *(to file)* |
 
 Planning PR: #1465.
 
@@ -52,9 +55,9 @@ because the design docs predate them.
 
 The manifest document sits **above** the existing per-category APIs, services
 and tables. Apply materialises **downward**: it writes real platform entities
-through the same core services the TC Open API already uses, and never writes a
-device or filesystem directly. This is design §2.3's "route B", stated as an
-ownership rule rather than an implementation note.
+through the same core services the TC Open API already uses. This is design
+§2.3's "route B", stated as an ownership rule rather than an implementation
+note.
 
 ```text
          config-manifest document          ← the source of truth users write
@@ -63,10 +66,14 @@ ownership rule rather than an implementation note.
                     ▼
    skills · identity · resources · mcp · engine_config · script
                     │                        ← existing entities, existing services
-                    │  existing delivery, unchanged
+                    │  delivery
                     ▼
         BotConfigArtifact (teclaw)  ·  push / NAS (ARCA family)
 ```
+
+The one place this rule cannot be followed as written is delivery **before a
+container exists**, because the existing services require a live device. That is
+**D4**, and it is unresolved.
 
 ### 2.2 `script` is not a special case
 
@@ -81,97 +88,248 @@ apply materialises it into the existing `ac_bot_startup_script` store through
   endpoints keep working unchanged, because their table is still the
   materialisation target.
 - Whether to later collapse `ac_bot_startup_script` into the manifest module is
-  a reversible decision, deferred. Nothing above that table depends on the
-  answer. This resolves design §8's open choice.
+  a reversible decision, deferred. This resolves design §8's open choice.
 
-### 2.3 The manifest owns its own record of what it materialised
+### 2.3 A manifest-materialised entity is indistinguishable from a manual one
 
-The "managed by manifest" marker (design §3.2) is **a record held by the
-manifest module**, keyed by `(tenant, bot, category, entity key)` — not a column
-added to the five entity stores. The manifest populates those entities; it does
-not modify their schemas.
+Because the manifest sits one layer above the existing services, an entity it
+creates is stored **exactly** as the same entity created by hand: same service,
+same table, same shape. Nothing downstream — reconcile, compose, the UI, the
+engine — can tell them apart, and nothing downstream needs to.
 
-The cost is stated rather than discovered: the owning services do not see the
-marker in their own queries, so anything that needs to know "is this entity
-manifest-managed" must ask the manifest module. Two consequences are tracked as
-work: the UI/API join (W4) and the skills-pool reconcile interaction (**D3**).
+The manifest therefore does **not** stamp a marker on the entities themselves.
+It keeps its own record of *what the last apply materialised*, which exists for
+two jobs and no others:
+
+1. **Un-marking.** `skills: []` or `DELETE` means "stop managing what you used
+   to manage", and the current document alone cannot say what that was.
+2. **`keep_last` and audit** (§2.8), which need the last successfully
+   materialised content anyway.
+
+This is deliberately smaller than design §3.2's "`managed by manifest` marker
+visible in UI/API". That marker is a **v2 product nicety**, not a mechanism: no
+component in v1 needs to ask "is this entity manifest-managed". The user-facing
+question — *what is my current configuration, and what did the last apply do* —
+is answered by `GET .../config-manifest` and `GET .../last-apply`, not by a
+per-entity flag.
 
 ### 2.4 `skills` and `identity` lead the fetch-backed categories
 
-They are the driving business scenario ("fetch content → install it"). `resources`
-follows in W6 with the directory work rather than riding along in W5.
+They are the driving business scenario ("fetch content → install it").
+`resources` follows in W6 with the directory work rather than riding along in
+W5.
 
-## 3. Blocking design questions
+### 2.5 Capability is a two-value question — scope is new bots only
 
-### D1 — The capability model contradicts the shipped code · gates W1 · #1466
+**This feature targets new bots.** In production a new bot resolves to exactly
+two device providers: `baas` and `teclaw`. `arca`, `daas` and `local` are not
+reachable for a bot created after this ships.
 
-**The contradiction.** design §5.1 requires two things that cannot both hold
-today:
+That collapses the capability model to questions the bot record answers on its
+own, with no live lookup and no third "we could not find out" state:
 
-1. support must be answered **from the bot record alone**, never by reading the
-   live container — because a lookup failure would otherwise become a third
-   "we could not find out" state and make an unrelated blip look like a verdict
-   about the bot;
-2. `ARCA-direct` legacy bots and `LOCAL`/singlebox deployments must be
-   **refused at write time** rather than silently not executing
-   (`engine-requirements.zh-CN.md` §2, and design §5.1's "堵上 #935 已知的静默坑").
+- `is_teclaw(active_engine)` — the canonical engine test, which is also what
+  `provider_resolver.resolve` itself keys on (`teclaw` or else the `baas`
+  default);
+- `bot_type == "desktop"` — a separate axis, and a bot-record field.
 
-**Why they conflict.** Neither discriminator is on the bot record:
+**Divergence from `engine-requirements.zh-CN.md` §2:** its matrix says
+ARCA-direct and LOCAL/singlebox are refused at write time. Under new-bots-only
+scope there are no such bots to refuse, so v1 keeps #935's verdict surface
+(teclaw and desktop refused for `script`) and the matrix rows for those forms
+are out of scope rather than newly enforced. Singlebox remains a dev/test
+concern only: `script` there reports supported and is not dispatched — #935's
+existing behaviour, not something this feature introduces.
 
-- `device_provider` lives on `EntityDeviceBinding` — the live binding, which is
-  exactly what (1) forbids reading;
-- `LOCAL` is derived from the BaaS *template's* configured type, which is
-  deployment data; `ac_bots` carries no field distinguishing a LOCAL-templated
-  install from any other baas-backed one.
+### 2.6 A manifest `PUT` triggers a restart
 
-This is not an oversight in #935 — `core/bot_startup_script/services/_support.py`
-documents both cases at length as the reason it refuses **only** teclaw and
-desktop, and records dropping the provider check as a deliberate trade.
+**Divergence from design §3.1**, which makes `PUT` lazy (no apply; effective at
+the next restart for unrelated reasons). Instead: writing a new manifest version
+explicitly restarts the bot, so the running bot always reflects the manifest that
+was last accepted.
 
-**Options.**
+This is the better semantics and it removes a hazard the lazy model carries — an
+operator restarting a bot to clear a hang would otherwise silently pick up a
+manifest edit made weeks earlier. With `PUT`-triggers-restart, a restart is not
+a reconfiguration event; it is a replay of the configuration already in force.
 
-| | Approach | Cost |
+One residual case survives and belongs to **D2**: a manifest whose source is a
+**moving ref** (a branch rather than a tag or SHA) can resolve to different
+content on a restart nobody associated with a configuration change.
+
+### 2.7 Fetch failure: report, never disturb a running bot, gate the first boot
+
+Sources are git or object storage — highly available, and an outage is a
+fetch-time event rather than a configuration error. The policy:
+
+| Situation | Behaviour |
+| --- | --- |
+| Bot already running, fetch fails | **Do nothing to it.** It keeps running its current configuration. Record the failure and surface it |
+| First boot, fetch fails | The bot **does not become active**. There is no previous configuration to fall back to, and a bot running with configuration its manifest does not describe is worse than a bot that visibly failed to start |
+| Either case | The user must be told — an apply report, and a surfaced notification |
+
+`keep_last` follows from this rather than needing its own mechanism: "reuse what
+we materialised last time" is what "do nothing to a running bot" already means.
+The storage it needs is the same store §2.8 requires.
+
+**Divergence from design §4.3**, which puts apply failure outside the readiness
+gate in v1 and defers strict mode to v2. The first-boot arm above *is* a
+readiness gate. It needs a landing point in both engine families — the start
+command's exit status for the BaaS family, publish-poll for teclaw — and that is
+part of W8.
+
+### 2.8 The platform materialises and persists manifest content itself
+
+**A hard requirement, from audit and reconciliation.** When content is fetched,
+the platform stores its own copy rather than only passing it through to a
+delivery channel. Later steps read from that copy.
+
+Two properties beyond audit make this load-bearing:
+
+- **It decouples the pipeline.** Fetch and delivery stop being one operation, so
+  a delivery retry does not re-fetch and a source outage cannot corrupt a
+  delivery already in flight.
+- **It is where `keep_last` lives** (§2.7), so the two requirements are one
+  store, not two.
+
+Tracked as **W11**.
+
+### 2.9 Validation and authorisation move to a reusable seam
+
+Apply calls the service layer, but a good deal of validation and authorisation
+currently lives in the `openapi_v1` routers — ownership and grant checks,
+package validation, path-list validation. Apply must enforce the same rules, and
+duplicating them by hand guarantees drift.
+
+They are therefore re-expressed as a declared dependency/interceptor that both
+the router and apply consume, following the precedent already set for
+collaborator permissions (`CollaboratorPermissionInterceptor` internally, and the
+`specs/2026-08-21-openapi-v1-collaborator-authorization-seam` table-driven gate
+on the public surface). Reimplementing the checks is acceptable; reimplementing
+them *twice, independently* is not.
+
+Tracked as **W10**, sequenced before W4.
+
+## 3. Design questions
+
+### 3.1 D1 — capability model · #1466 · **RESOLVED**
+
+**Was:** design §5.1 requires support to be answered from the bot record alone,
+*and* requires ARCA-direct and LOCAL/singlebox to be refused — but neither
+discriminator is on the bot record (`device_provider` lives on
+`EntityDeviceBinding`; the LOCAL discriminator comes from the BaaS template).
+
+**Resolved by scope.** New bots reach only `baas` and `teclaw` in production, so
+there is no third case to detect and no ambiguous state to represent. See §2.5.
+`engine-requirements.zh-CN.md` §2's matrix rows for ARCA-direct and
+LOCAL/singlebox are out of scope rather than enforced; amending that matrix is a
+separate docs change.
+
+### 3.2 D2 — manifest-upgrade diff policy · #1467 · **OPEN**
+
+The failure half of this question is settled (§2.7) and `keep_last` no longer
+needs a mechanism of its own. What remains open is the part that was always the
+harder half:
+
+> **When a manifest moves from version N to N+1, what exactly happens to what is
+> already there — and is the answer deterministic and published?**
+
+"Declaration wins, drift is corrected" (design §3.2) is well defined for
+whole-file replacement and undefined for everything else. The policy must answer,
+per category:
+
+1. **What is the convergence unit?** A file, a directory tree, a top-level config
+   key, a whole archive.
+2. **What happens to in-place modifications** made by the agent or the user
+   between applies? Declaration-wins means they are discarded. That is defensible
+   and must be *stated*, because it is destructive and currently unstated.
+3. **What happens to entries that disappear** between N and N+1 — removed, or
+   left behind un-managed?
+4. **Agent-written files.** `MEMORY.md` is the clear case: an engine-generated
+   file that the design merely warns against declaring. A warning is a
+   documentation answer to a data-loss question.
+5. **Agent-created files inside a declared directory.** design §3.2 replaces the
+   tree wholesale, so they are deleted. Same requirement: state it.
+6. **Moving refs** (§2.6's residual case). A branch can resolve to new content on
+   a restart nobody associated with a configuration change. Options: refuse
+   moving refs; or record the resolved SHA and reuse it for any restart not
+   triggered by a manifest `PUT`, so only a `PUT` can change content.
+
+**Done when** a written, per-category policy exists that a user could predict
+behaviour from without reading the implementation, and W4's spec encodes it.
+
+### 3.3 D3 — reconcile vs manifest-installed skills · #1468 · **RESOLVED**
+
+**Correction to the original finding.** It read `skills_pool`'s "quarantine
+cleanup" as a drift reaper that might delete unrecognised skills. It is not:
+quarantine is a **migration** mechanism — during pool cutover the bot's legacy
+skill directory is renamed aside and retained for 7 days before cleanup. No
+component deletes skills for being unrecognised, so there was never a risk of
+manifest-installed skills being reaped as drift.
+
+**Resolved by §2.3.** A manifest-installed skill goes through the same upload and
+activate path as a manual one and is stored identically, so `skills_pool` cannot
+distinguish them and does not need to. Two facts worth carrying into W5 as
+acceptance criteria rather than as a question:
+
+- The skill must be **registered** (service call, DB row) — activation
+  enumerates unregistered filesystem content into the pool without creating
+  records, so dropping files on disk is the failure mode to avoid.
+- teclaw does not participate in `skills_pool` at all, so this is a BaaS-family
+  concern only.
+
+### 3.4 D4 — delivery before a container exists · **OPEN — the blocking question**
+
+*No issue filed yet; nothing downstream of W4 can be specified until this has an
+answer.*
+
+**The problem.** design §3.1 promises that the first configuration a bot receives
+already contains the manifest result — apply runs *before* the container. But the
+services apply must call cannot run before a container:
+
+- `IdentityService._device_write` resolves a `DeviceFileSystem` through the
+  device binding and **raises if unbound**;
+- `EngineConfigService.write_bot_config` does the same, and raises
+  `EngineStageNotLiveError` when the named stage has nothing up.
+
+This is deliberate, not accidental. `identity.py` states it: *"a bot with no
+resolvable device context is a bug and surfaces as the resolver's error (fail
+early, never silently touch a dead local path)."*
+
+**teclaw is the easy half.** The artifact *is* the delivery vehicle, so
+materialised content becomes `{store, path}` refs in `BotConfigArtifact` and the
+first artifact carries them. One backend change is required and should be named
+rather than discovered: `ConfigComposerInputCollector.identity_files()` currently
+returns `[]` for teclaw by design —
+
+```python
+if req.engine_type == "teclaw":
+    return []   # teclaw owns its identity files in the running container;
+                # gathered from the engine at promotion, like resources
+```
+
+— so that branch must learn about manifest-materialised identity. The teclaw
+*team* still does zero work; the "delivery layer: zero additions" claim in
+`engine-requirements.zh-CN.md` §1 does not survive, but only on the backend side.
+
+**The BaaS family is the open part.** Content must reach the bot's workspace
+before the container starts. The path is computable without a device —
+`get_bot_file_path` is a pure `path_factory` computation, and the composer
+already calls `.exists()` on those paths, so the backend can see the bot-data
+root. But *writing* there is exactly what the existing service refuses to do
+without a device context, and bypassing it is the one thing §2.1 forbids.
+
+So the answer is a **new, explicitly sanctioned delivery protocol** for the
+pre-container case — not a bypass of the existing one. Options to work through:
+
+| | Approach | Question it raises |
 | --- | --- | --- |
-| **a** | v1 keeps #935's verdict surface: teclaw and desktop refused, ARCA-direct and LOCAL left optimistic. Amend the matrix in `engine-requirements.zh-CN.md` | The silent gap #935 documented stays open for `script` |
-| **b** | Stamp the provisioning provider / template type onto the bot record at create time, making the question statically answerable | New column, `create_flow` change, and a backfill story for every existing bot — none of it scoped |
+| a | A device-less writer that shares path resolution with `DeviceFileSystem` and is only reachable before first boot | What guarantees it is *only* used pre-boot, so "never touch a dead local path" still holds afterwards? |
+| b | Deliver during the start sequence — the container pulls materialised content on boot | Reintroduces an in-container step; interacts with #935's start-command contract |
+| c | Extend the device abstraction with a pre-binding mode the dispatcher can resolve | Largest change, cleanest boundary |
 
-**Recommendation: (a) for v1**, with (b) filed as its own work item if the silent
-gap matters to the business. (b) is a change to how bots are created, and pulling
-it into the manifest's critical path buys nothing the manifest itself needs —
-`manifest` is applied platform-side and is unaffected by either discriminator.
-Only `script` capability turns on this.
-
-### D2 — `keep_last` has no designed storage · gates W4 · #1467
-
-`keep_last` is the **default** `on_fetch_failure` policy (design §4.3): "reuse
-the last successfully materialised version; if there has never been one, record
-`skipped`". Nothing in the design gives that state a home — the apply report
-(§7) is a record of one apply, not a durable per-entry pointer.
-
-Resolve before W4, because it decides the shape of the ownership record:
-
-- fold it into the ownership record of §2.3, so one row per managed entity
-  carries both "the manifest owns this" and "the last source resolution that
-  succeeded"; or
-- a separate table, if the lifetimes turn out to differ.
-
-One subtlety either way: an entry whose **first** apply fails has no last-good
-version, and must record `skipped` rather than fail — so "no previous success"
-has to be representable, not merely absent.
-
-### D3 — skills-pool reconcile vs manifest-populated skills · gates W5 · #1468
-
-design §10.2 asks the implementer to "confirm quarantine cleanup has test
-coverage for managed entities". That is an assumption, not a verified fact, and
-§2.3 sharpens it: because the marker is held by the manifest module,
-`skills_pool`'s own reconcile and quarantine queries cannot see it.
-
-Verify against `core/skills_pool/reconcile_service.py` and `quarantine.py`
-whether a skill installed by apply — which enters through the same
-`LocalSkillUploadService` path a manual upload uses — is indistinguishable from
-a manually uploaded one. If it is, there is no problem and the finding closes
-with a test. If reconcile keys on something apply does not set, the manifest
-must either set it or be taught to reconcile alongside.
+**Blocks:** the delivery half of W5, W6 and W8. W1–W4 and W10/W11 are unaffected
+and can proceed while this is settled.
 
 ## 4. External confirmations
 
@@ -191,7 +349,75 @@ a capability is compatible where narrowing one is not.
 
 ## 5. Work items
 
-### Wave 1 — foundations (W1, W2, W3 are mutually independent)
+### Wave 1 — foundations (W1, W2, W3, W10, W11 are mutually independent)
+
+---
+
+#### W10 — A service-layer seam apply and the API can share
+
+**Goal.** The validation and authorisation the public API enforces becomes
+callable by something that is not an HTTP request, so apply enforces the same
+rules without a second copy of them.
+
+**In scope.** For the categories apply touches (skills, identity, resources,
+mcp, engine_config): identify the checks that currently live in the
+`openapi_v1` routers — ownership and grant adjudication, package and payload
+validation, path-list validation — and re-express them as a declared
+dependency/interceptor both entry points consume.
+
+**Out of scope.** Changing *what* any check decides. This is inert on arrival:
+the same callers get the same answers.
+
+**Depends on.** — · **Blocked by.** —
+
+**Done when.**
+
+- [ ] Apply can obtain the same verdict the router would, through one declared
+      seam, for every category in scope.
+- [ ] No check that gates a public-API write is reachable only from a router
+      function body.
+- [ ] Existing public-API behaviour is unchanged — same status codes, same
+      messages, same permission bar — with the existing tests unmodified.
+- [ ] The pattern matches the collaborator precedent rather than inventing a
+      third shape (`CollaboratorPermissionInterceptor`;
+      `specs/2026-08-21-openapi-v1-collaborator-authorization-seam`).
+
+**Notes.** Sequenced before W4 because W4's materialisers are its first consumer.
+Doing it after means writing the checks twice and deleting one copy later.
+
+**Size.** Medium; spread across five router groups.
+
+---
+
+#### W11 — Platform-side materialisation and persistence
+
+**Goal.** Fetched content is stored by the platform as its own durable copy, and
+later steps read from that copy rather than re-fetching.
+
+**In scope.** The content store, its addressing (content hash), retention, and
+the read path that delivery and audit both use.
+
+**Depends on.** W2 (the fetcher whose output it stores) · **Blocked by.** —
+
+**Done when.**
+
+- [ ] Every fetched object is persisted with enough provenance to answer, later,
+      *what exactly did this bot receive, and where did it come from* — source,
+      resolved ref/SHA or digest, fetch time, and the bytes.
+- [ ] Delivery reads from the store, so a delivery retry never re-fetches and a
+      source outage cannot corrupt a delivery already in flight.
+- [ ] The store is what `keep_last` reads (§2.7) — one mechanism, not two.
+- [ ] Retention is explicit, and stated against the audit requirement rather
+      than chosen incidentally.
+- [ ] Credentials are never persisted alongside content; provenance records the
+      credential **name** only.
+
+**Notes.** A hard requirement (§2.8), and it also decouples fetch from delivery,
+which is why W4 depends on it rather than treating it as an add-on.
+
+**Size.** Medium.
+
+---
 
 ---
 
@@ -227,7 +453,8 @@ is applied.
 existing `/startup-script` endpoints. Any change to `BaasService`.
 
 **Depends on.** —
-**Blocked by.** **D1** (capability model), **X4** (desktop).
+**Blocked by.** — (D1 is resolved; see §2.5). **X4** (desktop) affects one row of
+the capability table and has a fail-closed default.
 
 **Done when.**
 
@@ -254,11 +481,12 @@ existing `/startup-script` endpoints. Any change to `BaasService`.
 - [ ] The capability resolver is **one function** used by both the read and the
       write path, so `GET .../capabilities` can never claim support that `PUT`
       then refuses. Unknown engine ⇒ unsupported.
-- [ ] Capability is computed without reading the live container or any device
-      binding (subject to D1's resolution).
+- [ ] Capability is computed from the bot record alone — `is_teclaw(active_engine)`
+      and `bot_type == "desktop"` — with no device-binding lookup and no third
+      "unknown" state (§2.5).
 - [ ] `DELETE` removes the document. Entities previously materialised from it
-      are untouched — this item has none to un-mark yet; the un-marking lands
-      with the ownership record in W4.
+      are untouched — this item has none to forget yet; dropping them from the
+      apply record lands with that record in W4.
 - [ ] Tenancy: two bots sharing a `bot_id` across tenants cannot read or
       overwrite each other's document; the tenant guard is registered.
 - [ ] The stored document round-trips byte-exact, including a `script` body
@@ -378,7 +606,7 @@ binding W2's injection port.
 
 ---
 
-#### W4 — Apply engine, ownership record, and the no-fetch materialisers · #1472
+#### W4 — Apply engine, apply record, and the no-fetch materialisers · #1472
 
 **Goal.** A manifest can be applied on demand, converging the bot's entities
 toward the document, with a report of what happened — proven on the three
@@ -388,8 +616,9 @@ categories that need no fetching.
 
 - The apply orchestrator: bot-level serialisation, category ordering, per-entry
   outcome classification, `on_fetch_failure` policy handling.
-- The **ownership record** of §2.3 — the managed-by-manifest marker — plus
-  whatever D2 decides about `keep_last` state.
+- The **apply record** — the manifest module's own note of what the last apply
+  materialised (§2.3), which exists for un-marking and for `keep_last`/audit and
+  stamps no marker on the entities themselves.
 - Apply report storage and `GET .../config-manifest/last-apply`, in the shape of
   design §7.
 - `POST .../config-manifest/apply`, including `dry_run=true` returning the plan
@@ -402,8 +631,10 @@ categories that need no fetching.
 **Out of scope.** Fetching. Lifecycle triggers (W8) — explicit apply is the only
 entry point in this item.
 
-**Depends on.** W1.
-**Blocked by.** **D2**. X2/T3 affects the teclaw behaviour of the
+**Depends on.** W1, W10 (the seam apply calls through), W11 (the store
+materialised content lands in).
+**Blocked by.** **D2** — the upgrade diff policy must be written before the
+convergence logic can be specified. X2/T3 affects the teclaw behaviour of the
 `engine_config` materialiser but does not block the item.
 
 **Done when.**
@@ -417,20 +648,23 @@ entry point in this item.
       skills → mcp`, with `script` materialised last.
 - [ ] Two applies against the same bot serialise; the lock follows the existing
       `BotRestartLockRepository` pattern rather than a new mechanism.
-- [ ] `on_fetch_failure` is honoured: `keep_last` (default) reuses the last good
-      version or records `skipped` when there is none; `skip` continues;
-      `fail` aborts the apply and records the remainder `skipped`.
+- [ ] The §2.7 failure policy holds: a fetch failure against an already-running
+      bot changes nothing about it and is reported; a fetch failure on a first
+      boot leaves the bot inactive rather than active-and-misconfigured.
+- [ ] Apply enforces the same validation and authorisation the public API does
+      by calling W10's seam — not a second, hand-written copy of the checks.
 - [ ] `engine_config` merges by **top-level key** — declared keys win,
       undeclared keys are untouched, and `engine_ext` is unreachable from the
       manifest on every path.
 - [ ] `mcp` refuses a `server_code` the tenant has no permission for, reusing the
       existing permission check rather than a copy.
-- [ ] A category present but **empty** (`skills: []`) un-marks previously managed
-      entities of that category without deleting the assets.
-- [ ] `DELETE` of the manifest un-marks every managed entity and deletes no
+- [ ] A category present but **empty** (`skills: []`) drops those entries from
+      the manifest's record without deleting the assets; they become ordinary
+      manual entities.
+- [ ] `DELETE` of the manifest does the same for every category and deletes no
       asset — "removing the declaration is not removing the thing".
-- [ ] A failure part-way through leaves the ownership record consistent: no
-      entity is marked managed that was not actually materialised.
+- [ ] A failure part-way through leaves the record consistent: nothing recorded
+      as materialised that was not.
 - [ ] `dry_run` performs no write of any kind, including to the report store.
 - [ ] The apply report records credential **names** only, never values.
 
@@ -449,13 +683,13 @@ involved.
 service is fetched at apply time and installed as real skills and identity
 files.
 
-**In scope.** The two materialisers, `${OCB_*}` substitution in source URLs, and
-the D3 verification.
+**In scope.** The two materialisers and `${OCB_*}` substitution in source URLs.
 
 **Out of scope.** Named sources and git (W7). `resources` (W6).
 
 **Depends on.** W2, W3, W4.
-**Blocked by.** **D3**.
+**Blocked by.** **D4** for the pre-boot delivery half on the BaaS family;
+materialisation and entity creation are unaffected. D3 is resolved (§3.3).
 
 **Done when.**
 
@@ -475,8 +709,11 @@ the D3 verification.
 - [ ] `${OCB_*}` substitution happens before fetch and before prefix
       authorisation, so a substituted URL cannot escape its credential's
       `allowed_prefixes`.
-- [ ] **D3 closed with a test**, not an assumption: a manifest-installed skill
-      survives a skills-pool reconcile and is not quarantined as drift.
+- [ ] A manifest-installed skill is **registered** through the service (DB row +
+      files), never dropped on disk — activation enumerates unregistered
+      filesystem content into the pool without creating records (§3.3).
+- [ ] A test shows a manifest-installed skill is indistinguishable from the same
+      skill uploaded by hand, and survives a skills-pool reconcile.
 - [ ] Fetch failure of one entry does not abort the others under the default
       policy, and the bot still starts.
 
@@ -497,7 +734,7 @@ archives.
 directory-level ownership semantics; teclaw per-file expansion.
 
 **Depends on.** W5 (the fetch-to-entity pattern it follows).
-**Blocked by.** —
+**Blocked by.** **D4** for the pre-boot delivery half on the BaaS family.
 
 **Done when.**
 
@@ -566,7 +803,9 @@ composed; teclaw before the first artifact is assembled), at publish/republish,
 and at rebuild-style restart.
 
 **Depends on.** W4, W5, W6.
-**Blocked by.** **X2** for the teclaw arm. The ARCA arm can proceed alone.
+**Blocked by.** **D4** — without a pre-boot delivery answer, "the first config
+already contains the manifest result" cannot be implemented for the BaaS family
+at all. **X2** additionally gates the teclaw arm (T1–T3).
 
 **Done when.**
 
@@ -574,11 +813,16 @@ and at rebuild-style restart.
       result — there is no "start, then patch it in" window.
 - [ ] Scale-out does **not** re-apply; instances stay identical because they
       share one platform state. This is #926's actual requirement.
-- [ ] A manifest `PUT` does **not** apply — lazily effective, matching #935.
-- [ ] Apply failure does **not** block bot readiness in v1, matching #935's
-      semantics, and the failure is fully recorded in the report. Source-site
-      flakiness must not become a compose failure — the `keep_last` default is
-      the insurance and is tested as such.
+- [ ] A manifest `PUT` **triggers a restart** (§2.6), so the running bot always
+      reflects the manifest last accepted and an unrelated restart is a replay
+      rather than a reconfiguration.
+- [ ] The §2.7 readiness policy holds, and is the divergence from design §4.3
+      most in need of testing on both engine families: a fetch failure on a
+      **first** boot leaves the bot **inactive**; the same failure against an
+      already-running bot changes nothing about it. Landing points are the start
+      command's exit status (BaaS family) and publish-poll (teclaw).
+- [ ] Whatever D2 decides about moving refs is enforced here — this is where
+      restarts nobody associated with a config change actually happen.
 - [ ] `script` runs **after** manifest entities are delivered, so a script may
       assume its declared skills and identity are in place (design §3.4).
 - [ ] The no-script start command remains byte-identical to today (design §10.4),
@@ -612,31 +856,35 @@ on the agent process's PATH; teclaw refused at write if X3 comes back negative.
 ## 6. Sequencing
 
 ```text
-wave 1   W1 ─┐        W2 ─┐   W3 ─┐        (mutually independent)
-             │            │       │
-wave 2       └─► W4 ◄─────┴───────┘
-                  │
-                  └─► W5
-                       │
-wave 3                 ├─► W6 ──┐
-                       │        ├─► W8   (teclaw arm needs X2)
-                       └─► W7 ──┘        (needs X1)
-                                          │
-deferred                                  └─► W9  (needs X3)
+wave 1   W1 ─┐   W2 ─┬─► W11 ─┐   W3 ─┐   W10 ─┐     (mutually independent)
+             │       │        │       │        │
+wave 2       └───────┴────────┴───────┴────────┴─► W4
+                                                    │
+                                                    └─► W5
+                                                         │
+wave 3                                                   ├─► W6 ──┐
+                                                         │        ├─► W8
+                                                         └─► W7 ──┘
+                                                                   │
+deferred                                                           └─► W9
 ```
 
 **Critical path:** W1 → W4 → W5 → W6 → W8.
 
-**Available parallelism:** W2 and W3 can run alongside W1 with no coordination.
-W7 can run alongside W6 once X1 lands.
+**Available parallelism:** W2, W3, W10 and W11 all run alongside W1 with no
+coordination — W11 needs only W2's output shape. That is five independent
+starting points, which is the most this plan will ever offer at once.
+
+**Gating.** D2 must be answered before W4 is specified. **D4 must be answered
+before the delivery half of W5, W6 or W8 can be specified at all** — and it is
+the largest open question in the feature. X1 gates W7; X2 gates W8's teclaw arm;
+X3 gates W9.
 
 **Why lifecycle wiring is last.** Explicit `POST .../apply` exercises the whole
 engine from W4 onward, so W8 touches the create and publish flows only after the
-thing it triggers is already proven. The trade is stated plainly: **nothing
-before W8 delivers the business ask.** W4's explicit apply is a validation
-vehicle, not the product. If the schedule needs the real behaviour sooner, the
-teclaw arm of W8 can be pulled forward to directly after W5 — but only once X2
-has come back.
+thing it triggers is proven. The trade is stated plainly: **nothing before W8
+delivers the business ask.** W4's explicit apply is a validation vehicle, not the
+product.
 
 ## 7. Conventions for each work item
 
@@ -671,8 +919,18 @@ has come back.
 | W7 | design §4.2, §10.5; schema §2.2, §2.3 |
 | W8 | design §3.1, §3.4, §4.3, §10.1, §10.4 |
 | W9 | schema §3.7; engine-requirements T4, A2, O9 |
+| W10 | no design section — arises from §2.9, an implementation constraint the design does not cover |
+| W11 | no design section — arises from §2.8, a requirement added after #1031 |
 
 Design decisions this document does **not** re-open: the manifest/script split
 (design §2.1), route B (design §2.3), the four rejected alternatives (design
-§2.4), GitOps declaration-wins semantics (design §3.2), platform-side fetch
-(design §4.1), and the untouched `BotConfigArtifact` contract (design §5.2).
+§2.4), platform-side fetch (design §4.1), and the `BotConfigArtifact` schema
+(design §5.2 — unchanged, though D4 notes that the backend's teclaw compose
+branch is not).
+
+Points where this document **diverges** from the merged design, each argued in
+place: §2.3 (the managed marker shrinks to an internal record), §2.5 (capability
+scope), §2.6 (`PUT` triggers a restart rather than being lazy — design §3.1),
+§2.7 (a first-boot readiness gate, which design §4.3 defers to v2), and §2.8
+(platform-side materialisation, which the design does not have). Amending the
+Chinese docs to match is a separate change, deliberately not made here.
