@@ -15,21 +15,7 @@ from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 
 @pytest.fixture
 def plugin() -> SqliteOrmPlugin:
-    return SqliteOrmPlugin()
-
-
-def _config(db_url="sqlite:///:memory:", **overrides):
-    from secbaas.community.bootstrap import DatabaseConfig
-    from secbaas.community.spi.database import PluginDatabaseType
-
-    defaults = {
-        "plugin_type": PluginDatabaseType.SQLITE_ORM,
-        "db_url": db_url,
-        "create_schema": True,
-        "seed_data": True,
-    }
-    defaults.update(overrides)
-    return DatabaseConfig(**defaults)
+    return SqliteOrmPlugin(create_schema=True, seed_data=True)
 
 
 class TestInitDatabase:
@@ -51,14 +37,13 @@ class TestInitDatabase:
             _FakeDbManager(calls),
         )
 
-        plugin.init_database(_config())
+        plugin.init_database()
         assert calls["create_all"] is True
         assert "seed" in calls
         assert calls["plugin"] is plugin
 
-    def test_init_skips_schema_and_seed(
-        self, plugin: SqliteOrmPlugin, monkeypatch
-    ) -> None:
+    def test_init_skips_schema_and_seed(self, monkeypatch) -> None:
+        plugin = SqliteOrmPlugin(create_schema=False, seed_data=False)
         calls: dict = {}
 
         def boom(*a, **k):
@@ -74,14 +59,13 @@ class TestInitDatabase:
             _FakeDbManager(calls),
         )
 
-        plugin.init_database(_config(create_schema=False, seed_data=False))
+        plugin.init_database()
         assert "boom" not in calls
         assert calls["plugin"] is plugin
 
-    def test_reads_database_url_from_env(
-        self, plugin: SqliteOrmPlugin, monkeypatch
-    ) -> None:
+    def test_reads_database_url_from_env(self, monkeypatch) -> None:
         monkeypatch.setenv("DATABASE_URL", "sqlite:////tmp/env.db")
+        plugin = SqliteOrmPlugin(create_schema=True, seed_data=True)
         calls: dict = {}
 
         @contextmanager
@@ -98,7 +82,7 @@ class TestInitDatabase:
             _FakeDbManager(calls),
         )
 
-        plugin.init_database(_config(db_url="sqlite:///cfg.db"))
+        plugin.init_database()
         assert calls["create_all"] is True
 
 

@@ -146,7 +146,12 @@ class DeviceRepository(Protocol):
         ...
 
     def update_status_by_device_uuid(
-        self, device_uuid: str, tenant: str, env: str, status: str
+        self,
+        device_uuid: str,
+        tenant: str,
+        env: str,
+        status: str,
+        modifier: str | None = None,
     ) -> int:
         """Update device status by device_uuid with tenant+env isolation. Returns affected row count."""
         ...
@@ -173,6 +178,24 @@ class DeviceRepository(Protocol):
         page_size: int = 20,
     ) -> tuple[int, list[DeviceRecord]]:
         """List devices with tenant+env isolation and optional status filtering."""
+        ...
+
+    def list_expired_paginated(
+        self,
+        *,
+        last_id: int = 0,
+        limit: int = 100,
+        grace_seconds: int = 0,
+        default_ttl_minutes: int = 10080,
+    ) -> list[dict[str, Any]]:
+        """查询 baas_device 中已到期的 ACK pod 设备，按 id ASC keyset 分页。
+
+        用于 ExpireSandboxTimer 定时任务：选择 provider_type='ARCA'、status='ACTIVE'、
+        含非空 sandbox_id 的记录。到期以续期路径维护的
+        provider_device_props.ttl_expiration_timestamp（毫秒 epoch）为准；缺失时回退到
+        派生 deadline = gmt_create + effective lifetime（其中 lifetime 优先取
+        extra_config.deploy_config.ttl_in_minutes，缺失回退 default_ttl_minutes）。
+        """
         ...
 
     def list_by_bot_id(

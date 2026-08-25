@@ -56,6 +56,30 @@ def _seed_collaborator(world):
     )
 
 
+def _seed_batch_collaborators(world):
+    """Seed two Bots owned by the caller, each with one collaborator."""
+    make_staff_user(world, user_id="u_owner")
+    for bot_id, collaborator_id in [
+        ("bot_batch_a", "u_collab_a"),
+        ("bot_batch_b", "u_collab_b"),
+    ]:
+        make_bot(
+            world,
+            bot_id=bot_id,
+            owner_id="u_owner",
+            bot_type="service",
+            status="ACTIVE",
+        )
+        make_collaborator(
+            world,
+            bot_id=bot_id,
+            owner_id="u_owner",
+            user_id=collaborator_id,
+            role="admin",
+            operator_id="u_owner",
+        )
+
+
 def _seed_bot_with_collab_for_lock(world):
     """Seed bot with collaborator for lock tests (lock requires collaborator to work)."""
     make_staff_user(world, user_id="u_owner")
@@ -179,8 +203,11 @@ def _assert_collaborator_for_others_operator(response, world):
 
 
 def _assert_collaborator_list_fields(response, world):
-    """Assert that collaborator list items have all required fields."""
-    data = response.json()["data"]
+    """Assert that the legacy response envelope and collaborator fields stay unchanged."""
+    body = response.json()
+    assert set(body) == {"success", "message", "error_code", "data"}
+    assert set(body["data"]) == {"collaborators"}
+    data = body["data"]
     collaborators = data.get("collaborators", [])
     if len(collaborators) > 0:
         c = collaborators[0]
@@ -205,6 +232,18 @@ def _assert_list_contains_collaborator(response, world):
     assert len(collaborators) >= 1, "Expected at least one collaborator"
     found = any(c["user_id"] == "u_collab" for c in collaborators)
     assert found, "Expected to find collaborator with user_id=u_collab"
+
+
+def _assert_batch_list_contains_both_bots(response, world):
+    collaborators = response.json()["data"]["collaborators"]
+    assert {item["bot_id"] for item in collaborators} == {
+        "bot_batch_a",
+        "bot_batch_b",
+    }
+    assert {item["user_id"] for item in collaborators} == {
+        "u_collab_a",
+        "u_collab_b",
+    }
 
 
 def _assert_permission_level(expected_level, expected_has_permission):
@@ -541,6 +580,46 @@ def add_collaborator_for_others_forbidden():
 )
 def list_collaborators_ok():
     """List collaborators returns success with correct collaborator data and all required fields."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/bot/collaborator/batch-list",
+    scenario="batch_bot_ids",
+    input=CaseInput(
+        headers={"x-user-id": "u_owner"},
+        json_body={"bot_ids": ["bot_batch_a", "bot_batch_b", "bot_batch_a"]},
+    ),
+    seed=_seed_batch_collaborators,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True},
+    ),
+    extra_assertions=(
+        _assert_batch_list_contains_both_bots,
+        _assert_collaborator_list_fields,
+    ),
+)
+def batch_list_collaborators_ok():
+    """Dedicated batch endpoint returns one flat, unchanged collaborators list."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/bot/collaborator/batch-list",
+    scenario="empty_bot_ids",
+    input=CaseInput(
+        headers={"x-user-id": "u_owner"},
+        json_body={"bot_ids": []},
+    ),
+    seed=lambda world: make_staff_user(world, user_id="u_owner"),
+    expect=ExpectError(
+        status=200,
+        json_contains={"success": False, "error_code": 400},
+    ),
+)
+def batch_list_collaborators_rejects_empty_ids():
+    """Dedicated batch endpoint rejects an empty candidate list."""
 
 
 @endpoint_test(

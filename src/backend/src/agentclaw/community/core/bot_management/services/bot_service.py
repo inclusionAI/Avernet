@@ -213,9 +213,9 @@ class DefaultBotTeclawNotAllowedError(BotServiceError):
         super().__init__(DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE)
 
 
-# 仅允许中英文、数字、下划线、中划线、空格；禁止 @ # / 等特殊字符。
+# 仅允许中英文、数字、下划线、中划线、空格，以及产品名/版本说明所需的 +、(、) ；禁止 @ # / 等特殊字符。
 _BOT_NAME_MAX_LEN = 32
-_BOT_NAME_ALLOWED_RE = re.compile(r"^[\w一-鿿 \-]+$", re.UNICODE)
+_BOT_NAME_ALLOWED_RE = re.compile(r"^[\w一-鿿 \-()+]+$", re.UNICODE)
 
 
 def validate_bot_name(bot_name: Optional[str]) -> str:
@@ -224,7 +224,7 @@ def validate_bot_name(bot_name: Optional[str]) -> str:
     Rules:
     - must be non-empty after strip
     - length <= 32 characters
-    - only Chinese/letters/digits/underscore/hyphen/space allowed
+    - only Chinese/letters/digits/underscore/hyphen/space and + ( ) allowed
     """
     if bot_name is None:
         raise BotNameInvalidError("Bot 名称不能为空")
@@ -237,7 +237,8 @@ def validate_bot_name(bot_name: Optional[str]) -> str:
         )
     if not _BOT_NAME_ALLOWED_RE.match(trimmed):
         raise BotNameInvalidError(
-            "Bot 名称只能包含中英文、数字、下划线、中划线和空格，不允许 @、# 等特殊字符"
+            "Bot 名称只能包含中英文、数字、下划线、中划线、空格以及 +、(、) ，"
+            "不允许 @、# 等特殊字符"
         )
     return trimmed
 
@@ -2258,6 +2259,24 @@ class BotService:
         page = self.list_bots_by_conditions(bot_id=bot_id, page=1, page_size=1)
         items = (page or {}).get("items") or []
         return items[0] if items else None
+
+    def get_bot_classification(self, bot_id: str) -> Optional[Dict[str, str]]:
+        """Return the minimal authenticated-public classification for a Bot.
+
+        The repository's unique lookup fails closed when a tenant contains
+        multiple live records for the same external ``bot_id``.
+        """
+        bot = self._repository.get_unique_by_id(bot_id)
+        if bot is None:
+            return None
+
+        # COSEC: Keep this as an explicit allowlist. Returning the repository
+        # record would expose owner, runtime, template, and credential metadata
+        # to callers who intentionally do not need owner permission.
+        return {
+            "bot_id": str(bot["bot_id"]),
+            "bot_type": str(bot.get("bot_type") or "personal"),
+        }
 
     def list_bots_by_owner_bot_pairs(
         self,

@@ -1,7 +1,7 @@
-from secbaas.community.plugins.secret.kms import AliyunKmsSecretStorePlugin
+from secbaas.community.plugins.secret.env import EnvSecretStorePlugin
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
 
 __all__ = [
-    "AliyunKmsSecretStorePlugin",
+    "EnvSecretStorePlugin",
     "StubSecretStorePlugin",
 ]

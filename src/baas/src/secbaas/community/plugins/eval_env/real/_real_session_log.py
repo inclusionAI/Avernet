@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from secbaas.community.spi.eval_env import EvalSessionLogProtocol
 from secbaas.community.logger import get_logger
+from secbaas.community.spi.eval_env import EvalSessionLogProtocol
 
 logger = get_logger("core-bot-run")
 

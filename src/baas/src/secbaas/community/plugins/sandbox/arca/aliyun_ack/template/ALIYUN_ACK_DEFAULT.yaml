@@ -1,0 +1,97 @@
+# ===== 1. Header rules ConfigMap (from outbound_operation_rule) =====
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-header-rules-${UID}
+  namespace: ${NAMESPACE}
+data:
+  header-rules.yaml: |
+${HEADER_RULES_YAML}
+---
+# ===== 2. Deployment (openclaw + envoy-sidecar) =====
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: avernet-agent-${UID}
+  namespace: ${NAMESPACE}
+  labels:
+    app: avernet-agent
+    biz-id: "${UID}"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: avernet-agent
+      biz-id: "${UID}"
+  template:
+    metadata:
+      labels:
+        app: avernet-agent
+        biz-id: "${UID}"
+    spec:
+      initContainers:
+      - name: init-dir
+        image: ${INIT_IMAGE}
+        command: ["sh", "-c", "test -d /mnt/data/${STORAGE_ID} || (mkdir -p /mnt/data/${STORAGE_ID} && chown 10001:10001 /mnt/data/${STORAGE_ID})"]
+        volumeMounts:
+        - name: data
+          mountPath: /mnt/data
+      containers:
+      - name: avernet-agent
+        image: ${AGENT_IMAGE}
+        ports:
+        - containerPort: 20003
+        volumeMounts:
+        - name: data
+          mountPath: ${MOUNT_PATH}
+          subPath: ${STORAGE_ID}
+        resources:
+          requests:
+            cpu: "${CPU}"
+            memory: "${MEMORY}"
+          limits:
+            cpu: "${CPU}"
+            memory: "${MEMORY}"
+      - name: envoy-sidecar
+        image: ${SIDECAR_IMAGE}
+        ports:
+        - containerPort: 38080
+        - containerPort: 38081
+        volumeMounts:
+        - name: header-rules
+          mountPath: /etc/sidecar/header-rules.yaml
+          subPath: header-rules.yaml
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+      volumes:
+      - name: data
+        nfs:
+          server: ${NAS_SERVER}
+          path: /
+      - name: header-rules
+        configMap:
+          name: envoy-header-rules-${UID}
+---
+# ===== 3. NetworkPolicy (deny all ingress) =====
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: avernet-agent-netpol-${UID}
+  namespace: ${NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app: avernet-agent
+      biz-id: "${UID}"
+  policyTypes:
+  - Ingress
+  ingress: []

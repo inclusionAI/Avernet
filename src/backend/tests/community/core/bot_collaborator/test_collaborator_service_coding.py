@@ -17,6 +17,7 @@ from agentclaw.community.core.bot_collaborator.services.collaborator_service imp
 from agentclaw.community.core.bot_collaborator.models import (
     CollaboratorRecord,
     CollaboratorRole,
+    PermissionLevel,
 )
 from agentclaw.community.core.bot_collaborator.services.aicoding.member_management_capability import (
     AICodingMemberManagementCapability,
@@ -377,3 +378,140 @@ def test_leave_collaboration_owner_is_not_collaborator_record(
 
     collaborator_repo.get_by_bot_and_user.assert_not_called()
     collaborator_repo.delete.assert_not_called()
+
+
+
+def test_batch_list_collaborators_accepts_multiple_bot_ids(
+    service, bot_repo, collaborator_repo
+):
+    """Batch list resolves each Bot owner and returns one flat collaborator list."""
+    bot_repo.get_by_id.side_effect = lambda bot_id: {
+        "bot-a": {"id": 11, "owner_id": "owner-a"},
+        "bot-b": {"id": 22, "owner_id": "owner-b"},
+    }.get(bot_id)
+    record_a = Mock(bot_id="bot-a")
+    record_b = Mock(bot_id="bot-b")
+    collaborator_repo.list_by_bot.side_effect = [[record_a], [record_b]]
+    service.check_permission = Mock()
+
+    records = service.batch_list_collaborators(
+        bot_ids=["bot-a", "bot-b", "bot-a"],
+        user_id="user-1",
+        role="admin",
+        env="dev",
+    )
+
+    assert records == [record_a, record_b]
+    assert bot_repo.get_by_id.call_count == 2
+    service.check_permission.assert_any_call(
+        bot_pk=11,
+        user_id="user-1",
+        owner_id="owner-a",
+        required_level=PermissionLevel.MEMBER,
+        env="dev",
+    )
+    assert collaborator_repo.list_by_bot.call_count == 2
+
+
+def test_batch_list_collaborators_skips_missing_candidate(
+    service, bot_repo, collaborator_repo
+):
+    """Batch mode omits missing Bots instead of failing the whole candidate set."""
+    bot_repo.get_by_id.side_effect = lambda bot_id: (
+        {"id": 11, "owner_id": "owner-a"} if bot_id == "bot-a" else None
+    )
+    record = Mock(bot_id="bot-a")
+    collaborator_repo.list_by_bot.return_value = [record]
+    service.check_permission = Mock()
+
+    records = service.batch_list_collaborators(
+        bot_ids=["bot-a", "bot-missing"],
+        user_id="user-1",
+        env="dev",
+    )
+
+    assert records == [record]
+
+
+def test_list_collaborators_single_keeps_strict_not_found(service, bot_repo):
+    """The legacy single-Bot request keeps its existing strict error semantics."""
+    bot_repo.get_by_id_and_owner.return_value = None
+
+    with pytest.raises(BotNotFoundError):
+        service.list_collaborators(
+            bot_id="bot-missing",
+            owner_id=OWNER,
+            user_id="user-1",
+            env="dev",
+        )
+
+
+def test_list_collaborators_single_with_owner_keeps_legacy_behavior(
+    service, bot_repo, collaborator_repo
+):
+    """Legacy bot_id + owner_id calls keep the original repository and result path."""
+    bot = {"id": 11, "owner_id": OWNER}
+    record = Mock(bot_id="bot-123", owner_id=OWNER)
+    bot_repo.get_by_id_and_owner.return_value = bot
+    collaborator_repo.list_by_bot.return_value = [record]
+    service.check_permission = Mock()
+
+    records = service.list_collaborators(
+        bot_id="bot-123",
+        owner_id=OWNER,
+        user_id=MEMBER,
+        role="admin",
+        env="dev",
+    )
+
+    assert records == [record]
+    bot_repo.get_by_id_and_owner.assert_called_once_with("bot-123", OWNER)
+    bot_repo.get_by_id.assert_not_called()
+    service.check_permission.assert_called_once_with(
+        bot_pk=11,
+        user_id=MEMBER,
+        owner_id=OWNER,
+        required_level=PermissionLevel.MEMBER,
+        env="dev",
+    )
+    collaborator_repo.list_by_bot.assert_called_once_with(
+        bot_id="bot-123",
+        owner_id=OWNER,
+        env="dev",
+        role="admin",
+    )
+
+
+def test_batch_list_collaborators_skips_permission_denied_candidate(
+    service, bot_repo, collaborator_repo
+):
+    """One inaccessible Bot must not fail a batch containing an accessible Bot."""
+    bot_repo.get_by_id.side_effect = lambda bot_id: {
+        "bot-a": {"id": 11, "owner_id": "owner-a"},
+        "bot-b": {"id": 22, "owner_id": "owner-b"},
+    }[bot_id]
+    record = Mock(bot_id="bot-a")
+    collaborator_repo.list_by_bot.return_value = [record]
+
+    def check_permission(**kwargs):
+        if kwargs["bot_pk"] == 22:
+            from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
+                PermissionDeniedError,
+            )
+            raise PermissionDeniedError("no access")
+
+    service.check_permission = Mock(side_effect=check_permission)
+
+    records = service.batch_list_collaborators(
+        bot_ids=["bot-a", "bot-b"],
+        user_id=MEMBER,
+        env="dev",
+    )
+
+    assert records == [record]
+    collaborator_repo.list_by_bot.assert_called_once_with(
+        bot_id="bot-a",
+        owner_id="owner-a",
+        env="dev",
+        role=None,
+    )

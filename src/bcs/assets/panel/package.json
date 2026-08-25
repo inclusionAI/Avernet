@@ -1,20 +1,33 @@
 {
-  "name": "bcs-panel-asset",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Open-source BCS side-panel components bundled as a UMD asset.",
-  "type": "module",
-  "main": "dist/index.umd.js",
+  "name": "@avernet-assets/bcs-panel",
+  "version": "1.2.0",
+  "description": "Prebuilt BCS side-panel components distributed as a UMD asset.",
+  "main": "./dist/index.umd.js",
+  "browser": "./dist/index.umd.js",
+  "unpkg": "./dist/index.umd.js",
+  "jsdelivr": "./dist/index.umd.js",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inclusionAI/Avernet.git",
+    "directory": "src/bcs/assets/panel"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "files": [
     "dist/index.umd.js",
-    "src",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "vite build",
     "test:umd": "node test/umd-contract.mjs",
     "typecheck": "tsc --noEmit",
-    "scan:public": "node scripts/public-scan.mjs"
+    "scan:public": "node scripts/public-scan.mjs",
+    "verify": "npm run typecheck && npm run build && npm run test:umd && npm run scan:public",
+    "prepack": "npm run verify"
   },
   "dependencies": {
     "styled-components": "^6.0.7"

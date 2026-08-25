@@ -198,13 +198,15 @@ class BotCreate(BaseModel):
             "template for an application-coding bot."
         ),
     )
-    # ``engine_options`` is deliberately absent. Nothing downstream consumes
-    # ``BotCreateSpec.extra_properties`` yet, so declaring the field would
-    # publish a contract slot the server rejects on every non-empty value —
+    # ``engine_options`` is deliberately absent. The engine-owned bag the
+    # server actually consumes is ``engine_properties`` above (routed to the
+    # engine-selected ``EngineProvisioningStrategy.prepare_create``); an
+    # additional options slot would publish a contract nothing reads, so
+    # every non-empty value would be a request the server always rejects —
     # generated clients would compile a request that always fails. It returns
-    # here, unchanged in shape, once ``create_bot`` reads the bag; until then
-    # ``extra="forbid"`` names it in the error rather than the schema promising
-    # something untrue.
+    # here, unchanged in shape, once ``create_bot`` reads such a bag; until
+    # then ``extra="forbid"`` names it in the error rather than the schema
+    # promising something untrue.
 
 
 class BotSpaceUpdate(BaseModel):

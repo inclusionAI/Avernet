@@ -17,17 +17,19 @@ user_config:
       # local proc
       arca: local_proc
       desktop: stub
-      teclaw: stub
       k8s: stub
       docker: stub
       poolab: stub
-    database:
-      plugin_database: "SQLITE_ORM"    # ZDAS_SQL (Production RAW SQL, migrating to orm) | ZDAS_ORM (production ORM) | SQLITE_ORM (test only)
-      database_url: "sqlite:////tmp/secbaas_singlebox.db"
+    bot:
+      teclaw: stub
+    database: "sqlite"
     secret: "stub"
     cache: "stub"
     bot_service: "local"
     engine_adapter: "stub"  # stub | real (singlebox 默认不连真实 engine)
+
+  database:
+    database_url: "sqlite:////tmp/secbaas_singlebox.db"
 
   bot_service:
     adapter_port: 20003
@@ -65,11 +67,3 @@ user_config:
       host:
         dev: "https://secbaas-dev.example.com"
 
-  # Arca 沙箱配置（开发环境）
-  arca:
-    enabled: true
-    base_url: "http://arca.sandbox.dev:8080"
-    template_id: "ARCA-TEMPLATE-00000000"
-    oss_mount_id: "oss_mount_id"
-    api_key: "@api_key"
-    default_ttl_minutes: 1440 # 分钟 => 1 天

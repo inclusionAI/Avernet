@@ -19,7 +19,7 @@ Usage in FastAPI routes:
 
 from dependency_injector.wiring import Provide
 
-from ._configs import DatabaseConfig, init_container_config, load_container_config
+from ._configs import init_container_config, load_container_config
 from ._container import (
     ApplicationContainer,
     initialize_services,
@@ -54,7 +54,6 @@ def set_container(container: ApplicationContainer) -> None:
 
 __all__ = [
     "ApplicationContainer",
-    "DatabaseConfig",
     "get_container",
     "init_container_config",
     "initialize_services",

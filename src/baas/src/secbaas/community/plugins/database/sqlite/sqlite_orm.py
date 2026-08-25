@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session, sessionmaker
 
 from secbaas.community.logger import get_logger
-from secbaas.community.spi.database import DatabasePluginConfig, DataSourcePlugin
+from secbaas.community.spi.database import DataSourcePlugin
 
 logger = get_logger("database")
 
@@ -39,11 +39,25 @@ def _register_sqlite_json_functions(dbapi_connection, connection_record):
 
 
 class SqliteOrmPlugin(DataSourcePlugin):
-    def __init__(self, database_url: str = "sqlite:///:memory:") -> None:
-        logger.info(f"SqliteOrmPlugin initializing, database_url={database_url}")
+    def __init__(
+        self,
+        database_url: str = "sqlite:///:memory:",
+        *,
+        create_schema: bool = True,
+        seed_data: bool = True,
+    ) -> None:
+        import os
+
+        resolved_url = (
+            os.environ.get("DATABASE_URL") or database_url or "sqlite:///:memory:"
+        )
+        logger.info(f"SqliteOrmPlugin initializing, database_url={resolved_url}")
+
+        self._create_schema = create_schema
+        self._seed_data = seed_data
 
         self._sync_engine: Engine = create_engine(
-            database_url,
+            resolved_url,
             echo=False,
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
@@ -59,7 +73,7 @@ class SqliteOrmPlugin(DataSourcePlugin):
         self._async_engine = None
         self._async_session_factory = None
         try:
-            async_url = database_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+            async_url = resolved_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
             self._async_engine = create_async_engine(
                 async_url,
                 echo=False,
@@ -170,28 +184,21 @@ class SqliteOrmPlugin(DataSourcePlugin):
 
         seed_database(session)
 
-    def init_database(self, config: DatabasePluginConfig) -> None:
-        """Configure schema, seed data, and register with the db_manager.
+    def init_database(self) -> None:
+        """Create schema, seed data, and register with the db_manager.
 
-        Resolves the database URL from ``DATABASE_URL`` env var, ``config.db_url``,
-        or falls back to ``sqlite:///:memory:``.  Calls ``create_all()`` and
-        ``seed()``, then registers this plugin with the global ``db_manager``.
+        Uses the ``create_schema`` / ``seed_data`` flags set at construction
+        time. Called by ``DatabaseManagerLifecycle.start()`` after the plugin
+        is resolved from the DI container.
         """
-        import os
-
-        resolved_url = (
-            os.environ.get("DATABASE_URL") or config.db_url or "sqlite:///:memory:"
-        )
-        logger.info("init_database: database_url=%s", resolved_url)
-
-        if getattr(config, "create_schema", True):
+        if self._create_schema:
             self.create_all()
         else:
             logger.info(
                 "SqliteOrmPlugin: schema creation disabled (create_schema=false)"
             )
 
-        if getattr(config, "seed_data", True):
+        if self._seed_data:
             with self.orm_session() as session:
                 self.seed(session)
         else:

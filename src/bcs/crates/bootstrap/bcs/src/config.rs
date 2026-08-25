@@ -16,10 +16,11 @@ pub use bcs_config_api::{
 // data-contract crate so downstream modules can depend on them without
 // pulling in the rest of the `bcs` binary.
 pub use bcs_config_api::{
-    AuthChainConfig, AuthSdkConfig, ChannelConfigSection, DingTalkAccountConfig, EventingConfig,
-    FusionProviderConfig, LeaderElectionConfig, LlmConfig, LlmProviderType, LogOutputConfig,
-    LogOutputFormat, LoggingConfig, ManifestConfig, SecretConfig, SecurityConfig,
-    StructuredOutputMode, UserDirectoryConfig, UserDirectoryProviderConfig,
+    AuthChainConfig, AuthSdkConfig,
+    ChannelConfigSection, DingTalkAccountConfig, EventingConfig, FusionProviderConfig,
+    LeaderElectionConfig, LlmConfig, LlmProviderType, LogOutputConfig, LogOutputFormat,
+    LoggingConfig, ManifestConfig, SecretConfig, SecurityConfig, StructuredOutputMode,
+    UserDirectoryConfig, UserDirectoryProviderConfig,
     deserialize_optional_secret, serialize_optional_secret,
 };
 #[allow(unused_imports)]

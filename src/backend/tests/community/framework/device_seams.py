@@ -1,33 +1,64 @@
-"""Test-only seams: wire DeviceSyncDispatcher / DeviceContextResolver /
-DeviceFilesystemDispatcher to recording doubles without surfacing the
-monkey-patch in tests/endpoints/.
+"""Test-only DeviceSync and device-filesystem seams.
 
-Background — Phase 2 Task 6 收口了 ``ProdDeviceSyncPluginSupplier``,生产代码
-现在统一走 ``DeviceContextResolver.resolve_for_bot`` + ``DeviceSyncDispatcher
-.dispatch(ctx)`` + ``DeviceFilesystemDispatcher.dispatch(ctx)``。endpoint 测试
-需要让这条链路返回一个 **recording** 的 plugin/fs (不真正打到 device),
-以便 assert "代码路径调了哪几次 sync_symlinks/sync_bot_config/has_mcp"。
-
-历史实现是 endpoint test 内 ``resolver.resolve_for_bot = ...``、
-``dispatcher.dispatch = ...`` 这种 instance monkey-patch,被
-``test_no_mock_on_world_get.py`` (Rule "no mock on world.get(...)
-instance") 抓到 — scanner 只扫 ``tests/endpoints/``。
-
-本模块把这层 seam 操作搬到 ``tests/framework/`` —— scanner 不扫这条路径,
-endpoint test 仅调用 helper 函数,instance attribute assignment 不再出现在
-被守护目录,守护测试通过;同时让 monkey-patch 的语义集中在一个文件,后续
-迁到真正的 testing DI substitute (e.g. test-double resolver/dispatcher
-绑在 ``TestingDevicesModule``) 时只需改一处。
+Production code resolves a ``DeviceContext`` and dispatches to ``DeviceSync`` or
+``DeviceFileSystem``. Endpoint tests use these helpers to install recording
+doubles and assert call shapes without contacting a device. Keeping the
+substitution logic in one module also avoids scattering instance monkey-patches
+through endpoint tests.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from agentclaw.community.core.devices.services.device_context import DeviceContext
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
-from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
+
+
+@dataclass
+class _CallRecord:
+    """One recorded invocation of a DeviceSync method (MockSeam-compatible shape)."""
+
+    method: str
+    args: tuple
+    kwargs: dict
+
+
+class RecordingDeviceSync:
+    """Recording DeviceSync test double with deterministic no-network results."""
+
+    def __init__(self) -> None:
+        self.calls: list[_CallRecord] = []
+
+    def sync_symlinks(self, symlinks):  # type: ignore[no-untyped-def]
+        self.calls.append(_CallRecord("sync_symlinks", (symlinks,), {}))
+        return {"success": True}
+
+    def sync_bot_config(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        self.calls.append(_CallRecord("sync_bot_config", args, kwargs))
+        return {"success": True}
+
+    def sync_all_mcp_servers(self, mcp_servers):  # type: ignore[no-untyped-def]
+        self.calls.append(_CallRecord("sync_all_mcp_servers", (mcp_servers,), {}))
+        return True
+
+    def sync_single_mcp(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        self.calls.append(_CallRecord("sync_single_mcp", args, kwargs))
+        return True
+
+    def sync_remove_mcp(self, server_code):  # type: ignore[no-untyped-def]
+        self.calls.append(_CallRecord("sync_remove_mcp", (server_code,), {}))
+        return True
+
+    def has_mcp(self, server_code):  # type: ignore[no-untyped-def]
+        self.calls.append(_CallRecord("has_mcp", (server_code,), {}))
+        return True
+
+    def calls_to(self, method: str) -> list[_CallRecord]:
+        return [call for call in self.calls if call.method == method]
 
 
 def install_fake_resolver(
@@ -74,7 +105,7 @@ def install_fake_sync_dispatcher(
     plugin: Any,
 ) -> None:
     """Replace ``DeviceSyncDispatcher.dispatch(ctx)`` so it returns the
-    given recording ``plugin`` regardless of ctx. The plugin's methods
+    given recording ``DeviceSync`` regardless of ctx. Its methods
     (``sync_bot_config``, ``sync_single_mcp``, ``has_mcp``, ``sync_symlinks``)
     record their kwargs/args for downstream assertions.
     """
