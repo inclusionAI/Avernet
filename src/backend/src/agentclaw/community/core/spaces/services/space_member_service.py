@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from injector import inject
 
-from agentclaw.community.api.work_order_service import WorkOrderServiceProtocol
+from agentclaw.community.core.work_orders.protocols import WorkOrderEventServiceProtocol
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
 from agentclaw.community.core.spaces.errors import (
     PersonalSpaceInvariantError,
@@ -53,7 +53,7 @@ class SpaceMemberService:
         repository: SpaceRepositoryProtocol,
         access: SpaceAccessService,
         staff_dept: StaffDeptPlugin,
-        work_orders: WorkOrderServiceProtocol,
+        work_orders: WorkOrderEventServiceProtocol,
     ) -> None:
         self._repository = repository
         self._access = access

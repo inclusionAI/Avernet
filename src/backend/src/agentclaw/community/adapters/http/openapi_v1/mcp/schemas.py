@@ -184,18 +184,18 @@ class McpServerDetail(McpServer):
     transport_protocol: Any | None = Field(
         default=None, description=_TRANSPORT_RESPONSE_DESC
     )
-    source: Any | None = None
-    icon: Any | None = None
-    status: Any | None = None
-    run_mode: Any | None = None
-    host_platform: Any | None = None
-    platform_server_code: Any | None = None
-    host_app_name: Any | None = None
-    site: Any | None = None
-    tenant: Any | None = None
-    category: Any | None = None
-    access_level: Any | None = None
-    docs: McpDocs | str | list[Any] | int | float | bool | None = None
+    source: Any | None = Field(default=None, description="The marketplace source of the server.")
+    icon: Any | None = Field(default=None, description="The server icon or icon reference.")
+    status: Any | None = Field(default=None, description="The publication or availability status.")
+    run_mode: Any | None = Field(default=None, description="The execution mode published by the marketplace.")
+    host_platform: Any | None = Field(default=None, description="The host platform for the server.")
+    platform_server_code: Any | None = Field(default=None, description="The platform-specific server identifier.")
+    host_app_name: Any | None = Field(default=None, description="The host application name.")
+    site: Any | None = Field(default=None, description="The marketplace site associated with the server.")
+    tenant: Any | None = Field(default=None, description="The marketplace tenant associated with the server.")
+    category: Any | None = Field(default=None, description="The marketplace category of the server.")
+    access_level: Any | None = Field(default=None, description="The access level published by the marketplace.")
+    docs: McpDocs | str | list[Any] | int | float | bool | None = Field(default=None, description="The server documentation published by the marketplace.")
     endpoints: (
         list[McpEndpoint | str | int | float | bool | None]
         | dict[str, Any]
@@ -204,22 +204,22 @@ class McpServerDetail(McpServer):
         | float
         | bool
         | None
-    ) = Field(default_factory=list)
-    stdio_configs: Any | None = None
-    bu_code: Any | None = None
-    product_code: Any | None = None
-    arch_domain_code: Any | None = None
-    creator: McpPerson | str | list[Any] | int | float | bool | None = None
-    owner: McpPerson | str | list[Any] | int | float | bool | None = None
-    owners_info: Any | None = None
+    ) = Field(default_factory=list, description="The server endpoints published by the marketplace.")
+    stdio_configs: Any | None = Field(default=None, description="Local stdio launch configuration, when supplied.")
+    bu_code: Any | None = Field(default=None, description="The business unit code.")
+    product_code: Any | None = Field(default=None, description="The product code.")
+    arch_domain_code: Any | None = Field(default=None, description="The architecture domain code.")
+    creator: McpPerson | str | list[Any] | int | float | bool | None = Field(default=None, description="The creator identity published by the marketplace.")
+    owner: McpPerson | str | list[Any] | int | float | bool | None = Field(default=None, description="The owner identity published by the marketplace.")
+    owners_info: Any | None = Field(default=None, description="Additional owner information published by the marketplace.")
     tools: Any = Field(
         default_factory=list,
         description="Legacy tool declarations with internal extInfo removed.",
     )
-    tags: Any = Field(default_factory=list)
-    code_repo_url: Any | None = None
-    launch_channels: Any = Field(default_factory=list)
-    vendor: McpVendor | str | list[Any] | int | float | bool | None = None
+    tags: Any = Field(default_factory=list, description="The marketplace tags assigned to the server.")
+    code_repo_url: Any | None = Field(default=None, description="The source repository URL, when supplied.")
+    launch_channels: Any = Field(default_factory=list, description="The channels through which the server can be launched.")
+    vendor: McpVendor | str | list[Any] | int | float | bool | None = Field(default=None, description="The vendor information published by the marketplace.")
 
 
 class McpPermission(BaseModel):
