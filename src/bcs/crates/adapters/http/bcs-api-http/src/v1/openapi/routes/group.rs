@@ -21,7 +21,7 @@ use crate::v1::openapi::dto::group::{
 pub fn router() -> Router<ApiState> {
     Router::new()
         .route("/groups", get(list_groups).post(create_group))
-        .route("/groups/public", get(list_public_groups))
+        .route("/public-groups", get(list_public_groups))
         .route(
             "/groups/{group_id}",
             get(get_group).patch(update_group).delete(delete_group),

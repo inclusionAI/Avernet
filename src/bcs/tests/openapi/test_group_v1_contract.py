@@ -419,7 +419,7 @@ def test_update_group_does_not_accept_context() -> None:
     assert set(schema["properties"]) == {"name", "visibility", "delivery_policy"}
 
 
-PUBLIC_GROUPS_PATH = "/openapi/v1/collaboration/groups/public"
+PUBLIC_GROUPS_PATH = "/openapi/v1/collaboration/public-groups"
 
 
 def test_list_public_groups_endpoint_exists() -> None:
@@ -442,10 +442,10 @@ def test_list_public_groups_endpoint_exists() -> None:
     assert "items" in schema["properties"]["data"]["properties"]
 
 
-def test_public_groups_path_is_registered_before_group_id_path() -> None:
+def test_public_groups_path_does_not_collide_with_group_id_path() -> None:
     contract = load_contract(CONTRACT_ROOT)
-    paths = list(contract["paths"].keys())
 
-    public_idx = paths.index(PUBLIC_GROUPS_PATH)
-    group_id_idx = paths.index("/openapi/v1/collaboration/groups/{group_id}")
-    assert public_idx < group_id_idx
+    # The plaza catalog lives at a distinct top-level path so the
+    # {group_id} parameter on /groups/{group_id} cannot shadow it.
+    assert PUBLIC_GROUPS_PATH in contract["paths"]
+    assert "/openapi/v1/collaboration/groups/public" not in contract["paths"]
