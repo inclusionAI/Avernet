@@ -262,59 +262,6 @@ def _skillsets_router_app(mock_ctx, tmp_path):
 
 
 class TestSkillsEndpointsUseResolver:
-    def test_activate_skill_endpoint_uses_resolver(self, mock_request_ctx, tmp_path):
-        with _skills_router_app(mock_request_ctx, tmp_path) as (
-            client,
-            resolver,
-            dispatcher,
-            _sync_plugin,
-        ):
-            resp = client.post(
-                "/api/skills/sk-x/activate",
-                json={"source_path": "sk-x"},
-                params={
-                    "entity_id": "user-1",
-                    "entity_type": "staff",
-                    "bot_id": "bot-1",
-                    "engine_type": "openclaw",
-                },
-            )
-            assert resp.status_code == 200, resp.text
-            resolver.resolve_for_bot.assert_not_called()
-            dispatcher.dispatch.assert_not_called()
-            resolver.direct_activation.activate_skill.assert_awaited_once_with(
-                skill_id="1",
-                bot_id="bot-1",
-                owner_id="user-1",
-                actor_id="user-1",
-            )
-
-    def test_deactivate_skill_endpoint_uses_resolver(self, mock_request_ctx, tmp_path):
-        with _skills_router_app(mock_request_ctx, tmp_path) as (
-            client,
-            resolver,
-            dispatcher,
-            _sync_plugin,
-        ):
-            resp = client.post(
-                "/api/skills/sk-x/deactivate",
-                params={
-                    "entity_id": "user-1",
-                    "entity_type": "staff",
-                    "bot_id": "bot-1",
-                    "engine_type": "openclaw",
-                },
-            )
-            assert resp.status_code == 200, resp.text
-            resolver.resolve_for_bot.assert_not_called()
-            dispatcher.dispatch.assert_not_called()
-            resolver.direct_activation.deactivate_skill.assert_awaited_once_with(
-                skill_id="1",
-                bot_id="bot-1",
-                owner_id="user-1",
-                actor_id="user-1",
-            )
-
     def test_activate_skills_batch_endpoint_uses_resolver(
         self, mock_request_ctx, tmp_path
     ):

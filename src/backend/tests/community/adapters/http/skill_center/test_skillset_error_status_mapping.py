@@ -202,7 +202,7 @@ def test_not_ready_bot_maps_to_conflict_not_a_500():
     """The activation family's readiness refusal is a 409 on the /api wire.
 
     ``LocalSkillNotReadyError`` is a plain Exception (not a DomainError), so
-    it needs its own app-level handler; without one, deactivate-all on a
+    it needs its own app-level handler; without one, activating a Set on a
     not-ready Bot answered an unhandled 500.
     """
     from agentclaw.community.adapters.http.app import (
@@ -217,12 +217,12 @@ def test_not_ready_bot_maps_to_conflict_not_a_500():
     app.add_exception_handler(LocalSkillNotReadyError, _local_skill_not_ready_handler)
     app.add_exception_handler(Exception, _unhandled_exception_handler)
 
-    @app.post("/api/skills/deactivate-all")
+    @app.post("/api/skillsets/activate")
     async def raiser():
         raise LocalSkillNotReadyError()
 
     client = TestClient(app, raise_server_exceptions=False)
-    response = client.post("/api/skills/deactivate-all")
+    response = client.post("/api/skillsets/activate")
 
     assert response.status_code == 409
     assert response.json() == {"detail": "Bot is not ready"}

@@ -553,13 +553,6 @@ API_LIFECYCLE_FLOWS: list[FlowCase] = [
                 expect={"success": True},
             ),
             FlowStep(
-                method="POST",
-                path="/api/skills/deactivate-all",
-                query={"entity_id": "{user_id}", "bot_id": "{bot_id}", "engine_type": "openclaw"},
-                expect_status=200,
-                expect={"success": True},
-            ),
-            FlowStep(
                 method="GET",
                 path="/api/skillsets/{skill_set_id}",
                 query={"user_id": "{user_id}", "bot_id": "{bot_id}"},
