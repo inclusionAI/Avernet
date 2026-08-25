@@ -160,24 +160,31 @@ if [[ ${#ENV_VARS[@]} -gt 0 ]]; then
     for entry in "${ENV_VARS[@]}"; do
         key="${entry%%=*}"
         val="${entry#*=}"
-        ENV_YAML="${ENV_YAML}\n        - name: ${key}\n          value: \"${val}\""
+        ENV_YAML="${ENV_YAML}
+        - name: ${key}
+          value: \"${val}\""
     done
 fi
 
 # --- Render template ---
 
-# Read template and replace ENV_VARS placeholder BEFORE envsubst,
-# because envsubst would consume ${ENV_VARS} as an env var (→ empty).
-RENDERED="$(cat "$TEMPLATE")"
+# envsubst first for ${...} placeholders (won't touch __ENV_VARS__)
+export SERVICE NAMESPACE IMAGE PORT REPLICAS CPU_REQUEST CPU_LIMIT MEMORY_REQUEST MEMORY_LIMIT
+RENDERED="$(cat "$TEMPLATE" | envsubst)"
 
+# Then replace __ENV_VARS__ with the env block (or remove if empty)
 if [[ -n "$ENV_YAML" ]]; then
-    # Use printf to expand \n into real newlines with proper indentation
-    RENDERED=$(printf '%b' "${RENDERED//\${ENV_VARS}/${ENV_YAML}}")
+    ENV_INDENTED=""
+    IFS=$'\n'
+    for line in $ENV_YAML; do
+        ENV_INDENTED="${ENV_INDENTED}        ${line}
+"
+    done
+    unset IFS
+    RENDERED="${RENDERED//__ENV_VARS__/$ENV_INDENTED}"
 else
-    RENDERED="${RENDERED//        \${ENV_VARS}/}"
+    RENDERED="${RENDERED//        __ENV_VARS__/}"
 fi
-
-# Now run envsubst for the remaining ${...} placeholders
 export SERVICE NAMESPACE IMAGE PORT REPLICAS CPU_REQUEST CPU_LIMIT MEMORY_REQUEST MEMORY_LIMIT
 RENDERED="$(echo "$RENDERED" | envsubst)"
 

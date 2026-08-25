@@ -36,7 +36,7 @@ spec:
         image: ${IMAGE}
         ports:
         - containerPort: ${PORT}
-        ${ENV_VARS}
+        __ENV_VARS__
         resources:
           requests:
             cpu: "${CPU_REQUEST}"
