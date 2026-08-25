@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     RuntimeLayoutProbeResult,
     RuntimeLayoutProbeStatus,
@@ -43,12 +47,13 @@ class ActiveAICodingBridgeRepairResult:
 async def request_active_aicoding_bridge_repair(
     *,
     skills: SkillsPoolSkillRepositoryProtocol,
+    reader: BotCapabilityStateReaderProtocol,
     runtime: SkillsPoolRuntimeProtocol,
     scope: BotSkillLayoutScope,
     state: BotSkillLayoutState,
+    bot: Mapping[str, object],
     bot_id: str,
     user_id: str,
-    logical_engine: str,
     layout_engine: str,
     initial_probe: RuntimeLayoutProbeResult,
 ) -> ActiveAICodingBridgeRepairResult:
@@ -80,11 +85,8 @@ async def request_active_aicoding_bridge_repair(
             )
         ]
         mappings = build_logical_skill_mappings(
-            skills.list_bot_active_assets(
-                env=scope.env,
-                bot_id=scope.bot_id,
-                owner_id=user_id,
-                engine=logical_engine,
+            reader.active_skill_assets(
+                bot_id=scope.bot_id, owner_id=user_id, bot=bot
             )
         )
     except ValueError as error:

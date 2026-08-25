@@ -56,7 +56,7 @@ class _Skills:
             "active": self.active,
         }
 
-    def list_bot_active_assets(self, **_kwargs):
+    def canned_active_assets(self, **_kwargs):
         if not self.active:
             return []
         return [
@@ -66,6 +66,13 @@ class _Skills:
                 git_path=self.git_path,
             )
         ]
+
+    def active_skill_assets(self, *, bot_id, owner_id, bot=None):
+        # Reader-shaped adapter over the fake's canned assets: instance
+        # monkeypatches of ``canned_active_assets`` keep steering it.
+        return tuple(
+            self.canned_active_assets(bot_id=bot_id, owner_id=owner_id)
+        )
 
 
 class _Sets:
@@ -205,7 +212,7 @@ class _RuntimeReconciler:
         projection = RuntimeProjectionResolver().resolve(
             RuntimeDesiredState(
                 skills=tuple(
-                    self.skills.list_bot_active_assets(
+                    self.skills.canned_active_assets(
                         env="pre",
                         bot_id=kwargs["bot_id"],
                         user_id=kwargs["owner_id"],
@@ -269,7 +276,7 @@ class _RuntimeReconciler:
                     "name": asset.name,
                     "git_path": asset.git_path,
                 }
-                for asset in self.skills.list_bot_active_assets(
+                for asset in self.skills.canned_active_assets(
                     env="pre",
                     bot_id=kwargs["bot_id"],
                     user_id=kwargs["owner_id"],
@@ -516,7 +523,7 @@ def _repo_service(
         runtime, normal_member=bool(references), engine=engine
     )
     if active_assets is not None:
-        skills.list_bot_active_assets = lambda **_kwargs: active_assets
+        skills.canned_active_assets = lambda **_kwargs: active_assets
     service = LocalSkillStateService(
         skills,
         installations,
@@ -760,7 +767,7 @@ async def test_deactivate_mapping_repository_failure_fails_closed_and_restores_s
     def fail_to_list_active_assets(**_kwargs):
         raise RuntimeError("repository unavailable")
 
-    skills.list_bot_active_assets = fail_to_list_active_assets
+    skills.canned_active_assets = fail_to_list_active_assets
 
     with pytest.raises(LocalSkillRuntimeSyncError):
         await service.set_local_skill_active(
@@ -789,7 +796,7 @@ async def test_deactivate_selects_pool_source_layout_after_cutover():
 @pytest.mark.asyncio
 async def test_center_projection_uses_v3_adapter_contract_without_current_locator():
     service, skills, _sets, _guard, runtime, _factory = _service(active=True)
-    skills.list_bot_active_assets = lambda **_kwargs: [
+    skills.canned_active_assets = lambda **_kwargs: [
         RegisteredSkillAsset(
             skill_id=9,
             name="center-skill",

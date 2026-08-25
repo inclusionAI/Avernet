@@ -84,18 +84,6 @@ class _Repo:
         self.created.clear()
         return True
 
-    def list_bot_active_assets(self, **_kwargs):
-        from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
-
-        return [
-            RegisteredSkillAsset(
-                skill_id=int(row["id"]), name=row["name"], git_path=row["git_path"]
-            )
-            for row in self.created
-            if row.get("active")
-        ]
-
-
 class _Sets:
     def __init__(self, fail_at=None, default_exists=True):
         self.default_args = None
@@ -487,17 +475,6 @@ class _ReplacementRepo(_Repo):
         self.rows = rows
         self.updates = []
         self.atomic_replacements = []
-
-    def list_bot_active_assets(self, **_kwargs):
-        from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
-
-        return [
-            RegisteredSkillAsset(
-                skill_id=int(row["id"]), name=row["name"], git_path=row["git_path"]
-            )
-            for row in self.rows
-            if row.get("active")
-        ]
 
     def list_bot_local_by_name(self, **_kwargs):
         return self.rows

@@ -27,6 +27,9 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.skill_center.services.skill_set_management_service import (
     SkillSetManagementService,
 )
+from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
+    BotCapabilityStateReader,
+)
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
 )
@@ -546,36 +549,13 @@ class _RuntimeSkills:
     def __init__(self, assets=()) -> None:
         self._assets = list(assets)
 
-    def list_bot_active_assets(self, **kwargs):
+    def list_bot_installed_assets(self, **kwargs):
         assert kwargs == {
             "env": "pre",
             "bot_id": "bot-1",
             "owner_id": "true-owner",
-            "engine": "openclaw",
         }
         return self._assets
-
-
-class _HistoricalAicodingRuntimeSkills(_RuntimeSkills):
-    def list_bot_active_assets(self, **kwargs):
-        assert kwargs == {
-            "env": "pre",
-            "bot_id": "bot-1",
-            "owner_id": "true-owner",
-            "engine": "aicoding",
-        }
-        return []
-
-
-class _PlainClaudeCodeRuntimeSkills(_RuntimeSkills):
-    def list_bot_active_assets(self, **kwargs):
-        assert kwargs == {
-            "env": "pre",
-            "bot_id": "bot-1",
-            "owner_id": "true-owner",
-            "engine": "claude_code",
-        }
-        return []
 
 
 class _RuntimePool:
@@ -613,7 +593,7 @@ class _CenterRuntimePool(_RuntimePool):
 
 
 class _CenterRuntimeSkills:
-    def list_bot_active_assets(self, **_kwargs):
+    def list_bot_installed_assets(self, **_kwargs):
         return [
             RegisteredSkillAsset(
                 skill_id=7,
@@ -625,14 +605,8 @@ class _CenterRuntimeSkills:
         ]
 
 
-class _AicodingImageCenterRuntimeSkills(_CenterRuntimeSkills):
-    def list_bot_active_assets(self, **kwargs):
-        assert kwargs["engine"] == "claude_code"
-        return super().list_bot_active_assets(**kwargs)
-
-
 class _TeclawRuntimeSkills:
-    def list_bot_active_assets(self, **_kwargs):
+    def list_bot_installed_assets(self, **_kwargs):
         return [
             RegisteredSkillAsset(
                 skill_id=8,
@@ -640,6 +614,15 @@ class _TeclawRuntimeSkills:
                 git_path="git://team/repo-skill",
             )
         ]
+
+
+def _reader(skills, repository=None, bots=None):
+    """The real reader over this file's fakes — flush ordering stays pinned."""
+    return BotCapabilityStateReader(
+        repository=repository if repository is not None else _McpInstallations(),
+        bot_repo=bots if bots is not None else _RuntimeBots(),
+        pool_skills=skills,
+    )
 
 
 class _RuntimeLayouts:
@@ -1688,19 +1671,22 @@ async def test_runtime_mapping_snapshot_has_no_runtime_side_effects():
         factory=_RuntimeFactory(),
         bot_repo=_RuntimeBots(),
         repository=repository,
-        pool_skills=_RuntimeSkills(
-            [
-                RegisteredSkillAsset(
-                    skill_id=1,
-                    name="qa",
-                    git_path="local://qa",
-                ),
-                RegisteredSkillAsset(
-                    skill_id=2,
-                    name="eva",
-                    git_path="git://business/eva",
-                ),
-            ]
+        reader=_reader(
+            _RuntimeSkills(
+                [
+                    RegisteredSkillAsset(
+                        skill_id=1,
+                        name="qa",
+                        git_path="local://qa",
+                    ),
+                    RegisteredSkillAsset(
+                        skill_id=2,
+                        name="eva",
+                        git_path="git://business/eva",
+                    ),
+                ]
+            ),
+            repository=repository,
         ),
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
@@ -1717,7 +1703,9 @@ async def test_runtime_mapping_snapshot_has_no_runtime_side_effects():
             corpus="repo", relative_path="business/eva", link_name="eva"
         ),
     )
-    assert repository.flush_calls == []
+    # The reader's DB-side flush runs on every read; what a snapshot must
+    # never do is touch the engine.
+    assert len(repository.flush_calls) == 1
     assert pool.publish_calls == []
     assert pool.verify_calls == []
 
@@ -1729,7 +1717,7 @@ async def test_runtime_projection_flushes_installations_first():
         factory=_RuntimeFactory(),
         bot_repo=_RuntimeBots(),
         repository=repository,
-        pool_skills=_RuntimeSkills(),
+        reader=_reader(_RuntimeSkills(), repository=repository),
         pool_runtime=_RuntimePool(),
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
@@ -1750,11 +1738,12 @@ async def test_runtime_projection_flushes_installations_first():
 
 @pytest.mark.asyncio
 async def test_runtime_projection_fails_before_engine_writes_when_flush_fails():
+    repository = _FailingFlushRepository()
     runtime = BotRuntimeProjector(
         factory=_RuntimeFactory(),
         bot_repo=_RuntimeBots(),
-        repository=_FailingFlushRepository(),
-        pool_skills=_RuntimeSkills(),
+        repository=repository,
+        reader=_reader(_RuntimeSkills(), repository=repository),
         pool_runtime=_RuntimePool(),
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
@@ -1772,7 +1761,7 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
         factory=factory,
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
-        pool_skills=_RuntimeSkills(),
+        reader=_reader(_RuntimeSkills()),
         pool_runtime=_RuntimePool(),
         pool_layouts=_RuntimeLayouts(),
         passport=passport,
@@ -1822,7 +1811,7 @@ async def test_runtime_reconcile_fails_closed_when_effective_cli_scope_cannot_be
         factory=factory,
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
-        pool_skills=_RuntimeSkills(),
+        reader=_reader(_RuntimeSkills()),
         pool_runtime=_RuntimePool(),
         pool_layouts=_RuntimeLayouts(),
         passport=passport,
@@ -1842,7 +1831,7 @@ async def test_runtime_reconcile_requires_and_uses_mapping_v3_for_center():
         factory=factory,
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
-        pool_skills=_CenterRuntimeSkills(),
+        reader=_reader(_CenterRuntimeSkills()),
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
@@ -1871,7 +1860,7 @@ async def test_coding_template_uses_aicoding_for_center_probe_but_keeps_logical_
         factory=factory,
         bot_repo=_AicodingImageRuntimeBots(),
         repository=_McpInstallations(),
-        pool_skills=_AicodingImageCenterRuntimeSkills(),
+        reader=_reader(_CenterRuntimeSkills()),
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
@@ -1890,8 +1879,8 @@ async def test_coding_template_uses_aicoding_for_center_probe_but_keeps_logical_
 @pytest.mark.parametrize(
     ("bots", "skills", "expected_engine"),
     [
-        (_PlainClaudeCodeRuntimeBots(), _PlainClaudeCodeRuntimeSkills(), "claude_code"),
-        (_HistoricalAicodingRuntimeBots(), _HistoricalAicodingRuntimeSkills(), "aicoding"),
+        (_PlainClaudeCodeRuntimeBots(), _RuntimeSkills(), "claude_code"),
+        (_HistoricalAicodingRuntimeBots(), _RuntimeSkills(), "aicoding"),
     ],
 )
 async def test_existing_coding_runtime_uses_its_resolved_layout(
@@ -1902,7 +1891,7 @@ async def test_existing_coding_runtime_uses_its_resolved_layout(
         factory=factory,
         bot_repo=bots,
         repository=_McpInstallations(),
-        pool_skills=skills,
+        reader=_reader(skills),
         pool_runtime=_RuntimePool(),
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
@@ -1922,7 +1911,7 @@ async def test_historical_aicoding_cleanup_uses_legacy_runtime_not_pool_mapping(
         factory=factory,
         bot_repo=_HistoricalAicodingRuntimeBots(),
         repository=_McpInstallations(),
-        pool_skills=_HistoricalAicodingRuntimeSkills(),
+        reader=_reader(_RuntimeSkills()),
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
@@ -1945,7 +1934,7 @@ async def test_historical_cleanup_rejects_center_before_runtime_or_mcp_delivery(
         factory=factory,
         bot_repo=_HistoricalAicodingRuntimeBots(),
         repository=_McpInstallations(),
-        pool_skills=_CenterRuntimeSkills(),
+        reader=_reader(_CenterRuntimeSkills()),
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
@@ -1968,7 +1957,7 @@ async def test_teclaw_v4_rejects_center_without_any_center_runtime_request():
         factory=factory,
         bot_repo=_TeclawRuntimeBots(),
         repository=_McpInstallations(),
-        pool_skills=_CenterRuntimeSkills(),
+        reader=_reader(_CenterRuntimeSkills()),
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
@@ -1990,7 +1979,7 @@ async def test_teclaw_v4_repo_projection_uses_artifact_runtime_not_pool_mapping(
         factory=factory,
         bot_repo=_TeclawRuntimeBots(),
         repository=_McpInstallations(),
-        pool_skills=_TeclawRuntimeSkills(),
+        reader=_reader(_TeclawRuntimeSkills()),
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
@@ -2019,7 +2008,7 @@ async def test_non_skill_projection_never_writes_skill_mappings():
         factory=factory,
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
-        pool_skills=_RuntimeSkills(),
+        reader=_reader(_RuntimeSkills()),
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),

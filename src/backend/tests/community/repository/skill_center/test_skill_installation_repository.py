@@ -99,8 +99,8 @@ def test_direct_installation_is_included_in_the_existing_runtime_mapping_query(t
             env="dev", owner_id="owner", bot_id="bot-1", skill_id=skill["id"]
         )
 
-        projected = skills.list_bot_active_assets(
-            env="dev", bot_id="bot-1", owner_id="owner", engine="openclaw"
+        projected = skills.list_bot_installed_assets(
+            env="dev", bot_id="bot-1", owner_id="owner"
         )
 
     assert [(asset.skill_id, asset.git_path) for asset in projected] == [

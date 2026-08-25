@@ -74,13 +74,13 @@ lands in the same group as the migration of its last caller.
       Installation join renamed `list_bot_installed_assets` (drop merge and
       the `engine` read parameter; dedup by id); update
       `core/repository/protocols/skills_pool.py`.
-- [ ] 3.4 Migrate merge-readers to `reader.active_skill_assets`: the
+- [x] 3.4 Migrate merge-readers to `reader.active_skill_assets`: the
       projector (snapshot + plan; drop the Group-2 direct repair call), the
       name-conflict guard in the state service,
       `skills_pool/mapping_convergence.py`, `recovery_service.py`,
       `reconcile_service.py`, `active_aicoding_bridge_repair.py`, Service-Bot
       `build_stage.py` (flush via reader); wiring updates.
-- [ ] 3.5 Guard: no caller of `list_bot_installed_assets` outside the
+- [x] 3.5 Guard: no caller of `list_bot_installed_assets` outside the
       reader; no reference to `list_bot_active_assets` remains.
 - [ ] 3.6 Projector test pinning `bot_default_engine_types` Default-Set
       precedence; run the projector contract + skills_pool tests.

@@ -37,7 +37,7 @@ from agentclaw.community.api.skill_parameter_service_factory import (
     SkillParameterServiceFactoryProtocol,
 )
 from agentclaw.community.api.bot_capability_state_reader import (
-    BotCapabilityStateReaderProtocol,
+    BotCapabilityStateReaderProtocol as ApiBotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
@@ -118,6 +118,9 @@ from agentclaw.community.core.skill_center.factories import (
 )
 from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
     LegacySkillSetCompatibilityFactoryProtocol,
+)
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol as CoreBotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
@@ -333,7 +336,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             scope=singleton,
         )
         binder.bind(
-            BotCapabilityStateReaderProtocol,
+            BotCapabilityStateReader,
             to=BotCapabilityStateReader,
             scope=singleton,
         )
@@ -347,6 +350,24 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             to=SkillPublishService,
             scope=singleton,
         )
+
+    @singleton
+    @provider
+    @inject
+    def core_capability_state_reader_protocol(
+        self, service: BotCapabilityStateReader
+    ) -> CoreBotCapabilityStateReaderProtocol:
+        """Expose the one reader singleton to Core consumers."""
+        return service
+
+    @singleton
+    @provider
+    @inject
+    def api_capability_state_reader_protocol(
+        self, service: BotCapabilityStateReader
+    ) -> ApiBotCapabilityStateReaderProtocol:
+        """Expose that same singleton through the public Service API."""
+        return service
 
     @singleton
     @provider
@@ -456,7 +477,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_set_service_factory: SkillSetServiceFactory,
-        pool_skills: SkillsPoolSkillRepositoryProtocol,
+        reader: CoreBotCapabilityStateReaderProtocol,
         runtime_reconciler: CoreBotRuntimeProjectorProtocol,
     ) -> LocalSkillStateServiceProtocol:
         return LocalSkillStateService(
@@ -465,7 +486,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             bot_repo,
             collaborator_service,
             skill_set_service_factory,
-            pool_skills,
+            reader,
             skill_set_repo,
             runtime_reconciler,
         )

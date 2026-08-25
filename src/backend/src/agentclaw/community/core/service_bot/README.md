@@ -26,8 +26,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skills_pool    # repository contracts consumed by this module
-  - agentclaw.community.core.repository.protocols.capability_desired_state    # installation flush before a new artifact build
-  - agentclaw.community.core.skill_center.bot_engine_scope    # engine scoping for that flush
+  - agentclaw.community.core.skill_center.capability_state_contract    # installation flush before a new artifact build
   - agentclaw.community.core.common_config
   - agentclaw.community.core.bot_collaborator    # collaborator permission and edit-lock enforcement for public lifecycle operations
   - agentclaw.community.core.bot_inventory.policies    # shared engine/deploy-mode combination policy for service upgrades

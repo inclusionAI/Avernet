@@ -117,7 +117,7 @@ def _pf(*args, **kw):
     kw.setdefault("teclaw_file_promotion", Mock())
     kw.setdefault("device_binding_repo", Mock())
     kw.setdefault("publish_operation_repo", _real_ledger())
-    kw.setdefault("capability_repository", Mock())
+    kw.setdefault("capability_reader", Mock())
     # The operation runner queries baas_service.list_bot_publishes for adopt-by-
     # query; a bare Mock returns a non-iterable Mock. Default it to "no prior
     # workflows" so upgrade/existing-bot flow tests issue normally.
@@ -1054,24 +1054,18 @@ async def test_build_phase_flushes_installations_before_artifact_build():
     router = DeployArtifactProducerRouter(
         providers={"baas": arca}, default_provider_key="baas"
     )
-    repository = Mock()
+    capability_reader = Mock()
     bot = {"bot_id": "b1", "active_engine": "openclaw", "env": "prod"}
     svc, _ = _build_svc_with_router(
         router,
         bot,
-        capability_repository=repository,
+        capability_reader=capability_reader,
     )
 
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)
     await svc.execute_build_phase(record, "op")
 
-    repository.flush_installations.assert_called_once_with(
-        bot_id="bot-source",
-        owner_id="u1",
-        env="prod",
-        engine_type="openclaw",
-        default_engine_types=("openclaw",),
-    )
+    capability_reader.flush.assert_called_once_with(bot=bot)
     assert arca.calls == [(bot, 3)]
 
 
@@ -1081,14 +1075,14 @@ async def test_build_phase_fails_without_producing_artifact_when_flush_fails():
     router = DeployArtifactProducerRouter(
         providers={"baas": arca}, default_provider_key="baas"
     )
-    repository = Mock()
-    repository.flush_installations.side_effect = RuntimeError(
+    capability_reader = Mock()
+    capability_reader.flush.side_effect = RuntimeError(
         "installation persistence unavailable"
     )
     svc, _ = _build_svc_with_router(
         router,
         {"bot_id": "b1", "active_engine": "openclaw", "env": "prod"},
-        capability_repository=repository,
+        capability_reader=capability_reader,
     )
 
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)

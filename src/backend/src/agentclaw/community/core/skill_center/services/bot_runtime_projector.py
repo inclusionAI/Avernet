@@ -9,17 +9,15 @@ from injector import inject
 from agentclaw.community.core.mcp.services.passport_scope import (
     filter_passport_mcp_codes,
 )
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
-    SkillsPoolSkillRepositoryProtocol,
-)
-from agentclaw.community.core.skill_center.bot_engine_scope import (
-    bot_default_engine_types,
-    bot_engine_type,
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
@@ -62,7 +60,7 @@ class BotRuntimeProjector:
         factory: SkillSetServiceFactory,
         bot_repo: BotRepository,
         repository: CapabilityDesiredStateRepositoryProtocol,
-        pool_skills: SkillsPoolSkillRepositoryProtocol,
+        reader: BotCapabilityStateReaderProtocol,
         pool_runtime: SkillsPoolRuntimeProtocol,
         pool_layouts: SkillsPoolLayoutRepositoryProtocol,
         passport: PassportPlugin,
@@ -70,7 +68,7 @@ class BotRuntimeProjector:
         self._factory = factory
         self._bot_repo = bot_repo
         self._repository = repository
-        self._pool_skills = pool_skills
+        self._reader = reader
         self._pool_runtime = pool_runtime
         self._pool_layouts = pool_layouts
         self._passport = passport
@@ -91,11 +89,8 @@ class BotRuntimeProjector:
             raise LocalSkillNotFoundError()
         engine = str(bot.get("active_engine") or "openclaw")
         skill_assets = list(
-            self._pool_skills.list_bot_active_assets(
-                env=str(bot["env"]),
-                bot_id=bot_id,
-                owner_id=owner_id,
-                engine=engine,
+            self._reader.active_skill_assets(
+                bot_id=bot_id, owner_id=owner_id, bot=bot
             )
         )
         if engine == "teclaw" and any(
@@ -114,7 +109,6 @@ class BotRuntimeProjector:
         service, bot, engine, projection, effective_cli_items = self._resolve_plan(
             bot_id=bot_id,
             owner_id=owner_id,
-            flush_before_read=True,
             retired_mappings=retired_mappings,
         )
         await self._apply_skill_projection(
@@ -190,21 +184,11 @@ class BotRuntimeProjector:
         *,
         bot_id: str,
         owner_id: str,
-        flush_before_read: bool = False,
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ):
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()
-        if flush_before_read:
-            self._repository.flush_installations(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                env=str(bot["env"]),
-                engine_type=bot_engine_type(bot),
-                default_engine_types=bot_default_engine_types(bot),
-            )
-
         return self._build_plan(
             bot=bot,
             bot_id=bot_id,
@@ -239,12 +223,12 @@ class BotRuntimeProjector:
             engine_type=engine,
             entity_type=bot.get("entity_type") or "staff",
         )
+        # The reader flushes before answering, so the plan is always built
+        # over Installation that agrees with Set configuration — the lazy
+        # flush every read runs, not a projector-only repair.
         skill_assets = tuple(
-            self._pool_skills.list_bot_active_assets(
-                env=str(bot["env"]),
-                bot_id=bot_id,
-                owner_id=owner_id,
-                engine=engine,
+            self._reader.active_skill_assets(
+                bot_id=bot_id, owner_id=owner_id, bot=bot
             )
         )
         if engine == "teclaw" and (

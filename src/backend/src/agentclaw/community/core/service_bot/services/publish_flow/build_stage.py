@@ -30,12 +30,8 @@ from agentclaw.community.core.service_bot.services.publish_flow.ext_state import
 from agentclaw.community.core.service_bot.services.publish_flow.provider_behavior import (
     ProviderBehaviorRouter,
 )
-from agentclaw.community.core.repository.protocols.capability_desired_state import (
-    CapabilityDesiredStateRepositoryProtocol,
-)
-from agentclaw.community.core.skill_center.bot_engine_scope import (
-    bot_default_engine_types,
-    bot_engine_type,
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.log import get_logger
 
@@ -58,14 +54,14 @@ class BuildStageRunner:
         baas_service: BaasService,
         producer_router: DeployArtifactProducerRouter,
         provider_behaviors: ProviderBehaviorRouter,
-        capability_repository: CapabilityDesiredStateRepositoryProtocol,
+        capability_reader: BotCapabilityStateReaderProtocol,
     ) -> None:
         self._ext_state = ext_state
         self._bot_service = bot_service
         self._baas_service = baas_service
         self._producer_router = producer_router
         self._provider_behaviors = provider_behaviors
-        self._capability_repository = capability_repository
+        self._capability_reader = capability_reader
 
     async def build(
         self,
@@ -96,13 +92,7 @@ class BuildStageRunner:
             # runtime projection would read, so flush Set configuration into
             # Installation first. This never runs for restart, scale, or
             # rollback of an already frozen artifact.
-            self._capability_repository.flush_installations(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                env=str(bot["env"]),
-                engine_type=bot_engine_type(bot),
-                default_engine_types=bot_default_engine_types(bot),
-            )
+            self._capability_reader.flush(bot=bot)
 
             # Select the artifact producer by device_provider: ARCA/baas → the
             # existing build(); teclaw → compose + freeze. produce_artifact is

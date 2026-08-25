@@ -40,8 +40,8 @@ from agentclaw.community.core.repository.protocols.skill_center import (
 from agentclaw.community.core.repository.protocols.skill_installation import (
     SkillInstallationRepositoryProtocol,
 )
-from agentclaw.community.core.repository.protocols.skills_pool import (
-    SkillsPoolSkillRepositoryProtocol,
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.core.skills_pool.mapping_intent import (
     build_logical_skill_mappings,
@@ -102,7 +102,7 @@ class LocalSkillStateService:
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_set_service_factory: SkillSetServiceFactory,
-        pool_skills: SkillsPoolSkillRepositoryProtocol,
+        reader: BotCapabilityStateReaderProtocol,
         skill_set_repo: SkillSetRepository,
         runtime_reconciler: BotRuntimeProjectorProtocol,
     ) -> None:
@@ -111,7 +111,7 @@ class LocalSkillStateService:
         self._bot_repo = bot_repo
         self._collaborators = collaborator_service
         self._skill_set_service_factory = skill_set_service_factory
-        self._pool_skills = pool_skills
+        self._reader = reader
         self._skill_set_repo = skill_set_repo
         self._runtime_reconciler = runtime_reconciler
 
@@ -359,11 +359,8 @@ class LocalSkillStateService:
     ) -> None:
         """Validate the resolver's one-name-per-active-entry invariant first."""
         try:
-            assets = self._pool_skills.list_bot_active_assets(
-                env=str(bot["env"]),
-                bot_id=bot_id,
-                owner_id=owner_id,
-                engine=str(bot["active_engine"]),
+            assets = self._reader.active_skill_assets(
+                bot_id=bot_id, owner_id=owner_id, bot=bot
             )
             candidate = RegisteredSkillAsset(
                 skill_id=int(skill["id"]),
