@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -306,23 +305,14 @@ impl ProviderManagementService for ProviderManagement {
 
     async fn list_provider_bots_by_task_modes(
         &self,
-        provider_id: &str,
-        provider_admin_token: &str,
         filter: ProviderBotTaskModesFilter,
     ) -> ServiceResult<Vec<ProviderBotRosterItem>> {
         let control_plane = self.control_plane.clone().ok_or_else(|| {
             ServiceError::InternalError("control-plane core not configured".to_string())
         })?;
-        // Reuse the same admin-token validation path as `list_provider_bots`.
-        // A bad/missing token surfaces as Unauthorized from the provider bot core.
-        let bindings = self
-            .provider_bot_core
-            .list_provider_bots(provider_id, provider_admin_token)
-            .await?;
-        let allowed_uuids: HashSet<String> = bindings
-            .into_iter()
-            .map(|binding| binding.bot_uuid)
-            .collect();
+        // Env-scoped task-mode roster. Provider admission (admin token +
+        // `allowed_switch_provider_ids`) is enforced by the route; this use
+        // case intentionally does not intersect with provider bot bindings.
         let env = bcs_config::resolve_env_str();
         let views = control_plane
             .list_by_task_modes(BotTaskModesQuery {
@@ -334,7 +324,6 @@ impl ProviderManagementService for ProviderManagement {
             .await?;
         let items = views
             .into_iter()
-            .filter(|view| allowed_uuids.contains(&view.record.bot_id))
             .map(|view| ProviderBotRosterItem {
                 bot_id: view.record.bot_id,
                 name: view.record.name,
