@@ -14,6 +14,12 @@ from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
+)
+from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
+    BotCapabilityStateReader,
+)
 from agentclaw.community.core.skill_center.services.local_skill_state_service import (
     LocalSkillStateService,
 )
@@ -167,7 +173,11 @@ def _seed_state(world, *, runtime_success: bool) -> None:
             world.get(BotRepository),
             world.get(CollaboratorServiceProtocol),
             runtime_factory,
-            world.get(SkillRepository),
+            BotCapabilityStateReader(
+                repository=world.get(CapabilityDesiredStateRepositoryProtocol),
+                bot_repo=world.get(BotRepository),
+                pool_skills=world.get(SkillRepository),
+            ),
             world.get(SkillSetRepository),
             runtime_factory._runtime,
         ),
