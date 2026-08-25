@@ -333,6 +333,7 @@ class BotRepository(Protocol):
         bot_id: Optional[str] = None,
         provider: Optional[str] = None,
         template_type: Optional[str] = None,
+        bot_status_list: Optional[List[str]] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[int, List[Dict[str, Any]]]:
@@ -342,6 +343,7 @@ class BotRepository(Protocol):
         Args:
             key: 模糊搜索 bot_name 或 owner_name
             bot_status: ac_bots.status 过滤
+            bot_status_list: ac_bots.status IN 过滤（与 bot_status 同时给出时叠加）；避免调用方为多个状态各查一次
             public: ac_bots.public 过滤
             owner_id: ac_bots.owner_id 过滤
             service_status_list: 服务状态列表过滤（不影响 bot 返回）
