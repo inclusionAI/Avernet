@@ -410,6 +410,92 @@ async def test_stream_dispatch_logs_raw_conversion_input_and_output(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("secret_key", "secret_value"),
+    (("secret", True), ("secret", False), ("isSecret", None)),
+)
+async def test_stream_dispatch_logs_and_delivers_secret_ask_user_input(
+    monkeypatch,
+    caplog,
+    secret_key,
+    secret_value,
+):
+    class _SecretInteractionStreamService:
+        async def handle_chat_send_stream(self, _input):
+            async def _chunks():
+                yield StreamChunk(
+                    type="interaction",
+                    content="Sensitive chunk content",
+                    metadata={
+                        "event": "interaction.requested",
+                        "payload": {
+                            "type": "event",
+                            "event": "interaction.requested",
+                            "payload": {
+                                "interactionId": "int-secret",
+                                "kind": "ask_user",
+                                "phase": "requested",
+                                "toolCallId": "tool-secret",
+                                "description": "Sensitive description",
+                                "questions": [
+                                    {
+                                        "header": "secret",
+                                        "question": "Sensitive secret question body",
+                                        secret_key: secret_value,
+                                    }
+                                ],
+                            },
+                        },
+                    },
+                )
+                yield StreamChunk(type="delta", content="after secret question")
+
+            return _chunks()
+
+    conversion_logger = logging.getLogger(f"test.bcn-secret-{secret_key}")
+    conversion_logger.handlers.clear()
+    conversion_logger.propagate = True
+    monkeypatch.setattr(
+        "secbaas.community.adapters.web.routers.bcn_downlink.bcn_router.bcn_converter_logger",
+        conversion_logger,
+    )
+    caplog.set_level(logging.INFO, logger=conversion_logger.name)
+
+    response = await _dispatch_chat_send_stream(
+        _chat_send_request(),
+        _SecretInteractionStreamService(),
+        _ConverterFactory(),
+    )
+    items = [item async for item in response.body_iterator]
+
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == conversion_logger.name
+        and record.getMessage().startswith("[convert]")
+    ]
+    assert len(items) == 2
+    assert items[0].startswith("id: 1\nevent: interaction\n")
+    assert items[1].startswith("id: 2\nevent: chat\n")
+
+    first_input, first_output = messages[0].split(" input=", 1)[1].split(" output=", 1)
+    logged_input = json.loads(first_input)
+    logged_question = logged_input["metadata"]["payload"]["payload"]["questions"][0]
+    assert logged_input["content"] == "Sensitive chunk content"
+    assert logged_input["metadata"]["payload"]["payload"]["description"] == (
+        "Sensitive description"
+    )
+    assert logged_question["question"] == "Sensitive secret question body"
+    assert logged_question[secret_key] is secret_value
+
+    converted = json.loads(first_output)
+    assert converted["event"] == "interaction"
+    converted_question = json.loads(converted["data"])["questions"][0]
+    assert converted_question["question"] == "Sensitive secret question body"
+    assert secret_key not in converted_question
+
+
+@pytest.mark.asyncio
 async def test_stream_dispatch_logs_raw_input_when_conversion_raises(
     monkeypatch,
     caplog,
