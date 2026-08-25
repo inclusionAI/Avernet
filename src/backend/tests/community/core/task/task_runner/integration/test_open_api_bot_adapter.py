@@ -52,7 +52,7 @@ def test_ensure_grant_falls_back_to_api_key_prefix_when_unset():
     client = httpx.AsyncClient(transport=transport, base_url="http://b:8890")
     a = OpenApiBotAdapter(_KeyNoPrefix(), http_client=client)
     _run(a.ensure_grant("bot9:ent1"))  # 已 allowed → 不走 grant
-    assert seen["get_path"] == "/api/v1/api-keys/ak12345678/allowed-bots"
+    assert seen["get_path"] == "/api/v1/api-keys/ak123456/allowed-bots"
 
 
 def test_ensure_grant_already_allowed():
