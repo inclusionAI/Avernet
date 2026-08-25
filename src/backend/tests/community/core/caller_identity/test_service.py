@@ -307,7 +307,7 @@ def test_exchange_caller_identity_reuses_supplied_caller_token() -> None:
         caller_token=caller_token,
     )
 
-    assert result is caller_token
+    assert result is None
     token_provider.exchange.assert_not_called()
     assert runtime_updater.update_caller_identity.call_args.kwargs["caller_token"] is caller_token
 

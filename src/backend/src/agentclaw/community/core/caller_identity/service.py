@@ -334,7 +334,7 @@ class CallerIdentityService:
         binding_id: int | None = None,
         is_test_exchange: bool = False,
         caller_token: CallerToken | None = None,
-    ) -> CallerToken:
+    ) -> None:
         """Exchange and install the Caller credential for one chat request."""
         token_reused = caller_token is not None
         if caller_token is None:
@@ -371,7 +371,6 @@ class CallerIdentityService:
         runtime_updater.update_caller_identity(
             **runtime_update_kwargs,
         )
-        return caller_token
 
     def exchange_caller_token(
         self,

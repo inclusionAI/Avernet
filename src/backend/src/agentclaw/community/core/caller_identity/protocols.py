@@ -109,7 +109,7 @@ class CallerIdentityTokenExchangeProtocol(Protocol):
         binding_id: int | None = None,
         is_test_exchange: bool = False,
         caller_token: CallerToken | None = None,
-    ) -> CallerToken: ...
+    ) -> None: ...
 
 
 __all__ = [
