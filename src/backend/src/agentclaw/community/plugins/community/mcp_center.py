@@ -62,6 +62,7 @@ class CommunityMCPCenter(MCPCenterPlugin):
         network_types: list[str] | None = None,
         categories: list[str] | None = None,
         tenants: list[str] | None = None,
+        tags: list[str] | None = None,
     ) -> dict[str, Any]:
         items = (
             self._registry.list_mcp_details(
@@ -76,6 +77,7 @@ class CommunityMCPCenter(MCPCenterPlugin):
                 network_types=network_types,
                 categories=categories,
                 tenants=tenants,
+                tags=tags,
             )
             if self._registry is not None
             else []

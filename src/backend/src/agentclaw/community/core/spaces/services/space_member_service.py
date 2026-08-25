@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from injector import inject
 
+from agentclaw.community.api.work_order_service import WorkOrderServiceProtocol
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
 from agentclaw.community.core.spaces.errors import (
     PersonalSpaceInvariantError,
@@ -20,6 +21,12 @@ from agentclaw.community.core.spaces.models import (
 )
 from agentclaw.community.core.spaces.services.space_access_service import (
     SpaceAccessService,
+)
+from agentclaw.community.core.work_orders.models import (
+    NotificationCategory,
+    WorkOrderEventType,
+    WorkOrderMessageContent,
+    WorkOrderMessageTitle,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.staff_dept import (
@@ -46,10 +53,12 @@ class SpaceMemberService:
         repository: SpaceRepositoryProtocol,
         access: SpaceAccessService,
         staff_dept: StaffDeptPlugin,
+        work_orders: WorkOrderServiceProtocol,
     ) -> None:
         self._repository = repository
         self._access = access
         self._staff_dept = staff_dept
+        self._work_orders = work_orders
 
     def _resolve_member_user_name(self, *, user_id: str) -> str:
         try:
@@ -122,6 +131,24 @@ class SpaceMemberService:
         )
         if not deleted:
             raise SpaceMemberNotFoundError("space member not found")
+        self._work_orders.create_work_order_event(
+            event_category=NotificationCategory.NOTICE,
+            biz_type="SPACE",
+            biz_id=str(space_id),
+            event_type=WorkOrderEventType.SPACE_MEMBER_REMOVED.value,
+            applicant_user_id=None,
+            approver_user_ids=[],
+            recipient_user_ids=[normalized],
+            title=WorkOrderMessageTitle.SPACE_MEMBER_REMOVED.value,
+            content={
+                "legacy_value": WorkOrderMessageContent.SPACE_MEMBER_REMOVED.format(
+                    space_name=space.name
+                )
+            },
+            apply_reason=None,
+            biz_data=None,
+            actor_id=actor_id,
+        )
         return True
 
     def update_role(

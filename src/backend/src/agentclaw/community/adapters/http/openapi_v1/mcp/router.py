@@ -20,6 +20,7 @@ bots slice took).
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Query, Request
@@ -81,7 +82,9 @@ from .schemas import (
 )
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/mcp", tags=["mcp"], route_class=PublicAPIRoute)
+router = APIRouter(
+    prefix="/openapi/v1/bots/mcp", tags=["mcp"], route_class=PublicAPIRoute
+)
 _GRANT_CHECKED_ADDRESSED_BOT = [Depends(require_granted_addressed_bot)]
 
 bot_mcp_router = APIRouter(
@@ -198,21 +201,78 @@ def _to_server(data: dict[str, Any]) -> McpServer:
     )
 
 
+def _optional_text(value: Any) -> str | None:
+    """Return an upstream text value without stringifying structured data."""
+    return value if isinstance(value, str) and value else None
+
+
+def _display_label(value: Any) -> str | None:
+    """Read a display label from either a string or a catalogue object."""
+    if isinstance(value, dict):
+        return _optional_text(value.get("name") or value.get("code"))
+    return _optional_text(value)
+
+
+def _snake_key(value: Any) -> Any:
+    """Convert one legacy camelCase object key to the OpenAPI snake_case form."""
+    if not isinstance(value, str):
+        return value
+    first_pass = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", value)
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", first_pass).lower()
+
+
+def _legacy_detail_to_openapi(value: Any) -> Any:
+    """Translate legacy key casing without dropping any marketplace content.
+
+    Tool declarations and endpoint header maps are opaque protocol payloads:
+    their nested keys are preserved exactly, matching the legacy detail route.
+    Every other catalogue mapping is recursively converted to snake_case. If
+    two differently-cased upstream keys collide with different values, retain
+    the later value under its original key as an allowed extension rather than
+    silently losing either value.
+    """
+    if isinstance(value, list):
+        return [_legacy_detail_to_openapi(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    projected: dict[Any, Any] = {}
+    source_keys: dict[Any, Any] = {}
+    for key, item in value.items():
+        public_key = _snake_key(key)
+        if public_key in {"tools", "headers", "input_schema", "env_variables"}:
+            public_value = item
+        else:
+            public_value = _legacy_detail_to_openapi(item)
+        if public_key in projected and projected[public_key] != public_value:
+            previous_key = source_keys[public_key]
+            if previous_key != public_key:
+                projected[previous_key] = projected[public_key]
+            projected[key] = public_value
+        else:
+            projected[public_key] = public_value
+        source_keys[public_key] = key
+    return projected
+
+
 def _to_server_detail(data: dict[str, Any]) -> McpServerDetail:
-    """Map an MCP Center detail record (with tools) to :class:`McpServerDetail`."""
-    base = _to_server(data)
-    tools = data.get("tools")
-    return McpServerDetail(
-        **base.model_dump(),
-        tools=tools if isinstance(tools, list) else [],
+    """Return a lossless snake_case equivalent of the legacy market detail."""
+    projected = _legacy_detail_to_openapi(data)
+    if not isinstance(projected, dict):
+        projected = {}
+    projected.setdefault(
+        "server_code", data.get("serverCode") or data.get("server_code") or ""
     )
+    projected.setdefault("name", data.get("name") or "")
+    projected.setdefault("description", data.get("description"))
+    projected.setdefault("network_types", normalize_network_types(data))
+    projected.setdefault("transport_protocol", primary_transport_protocol(data))
+    return McpServerDetail.model_validate(projected)
 
 
 def _category_label(category: Any) -> str:
     """A category's display string, tolerating dict or plain-string shapes."""
-    if isinstance(category, dict):
-        return category.get("name") or category.get("code") or ""
-    return str(category)
+    return _display_label(category) or ""
 
 
 def _to_tenant(data: dict[str, Any]) -> McpTenant:
@@ -315,6 +375,7 @@ async def list_mcp_tenants(
 @router.get(
     "/servers/{server_code}",
     response_model=Envelope[McpServerDetail],
+    response_model_exclude_unset=True,
     # Authenticated, not user-scoped — see /servers.
     dependencies=[Depends(require_principal)],
 )

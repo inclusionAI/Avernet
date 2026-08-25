@@ -177,6 +177,7 @@ class WorkOrderEventType(_DocumentedEnum):
     SPACE_JOIN_APPLIED = "SPACE_JOIN_APPLIED"
     SPACE_JOIN_REVIEWED = "SPACE_JOIN_REVIEWED"
     SPACE_MEMBER_ADDED = "SPACE_MEMBER_ADDED"
+    SPACE_MEMBER_REMOVED = "SPACE_MEMBER_REMOVED"
     BOT_COLLABORATOR_APPLIED = "BOT_COLLABORATOR_APPLIED"
     BOT_COLLABORATOR_REVIEWED = "BOT_COLLABORATOR_REVIEWED"
     BOT_MEMBER_ADDED = "BOT_MEMBER_ADDED"
@@ -196,6 +197,7 @@ class WorkOrderEventType(_DocumentedEnum):
         "SPACE_JOIN_APPLIED": "A user submitted a request to join a Space.",
         "SPACE_JOIN_REVIEWED": "A Space join request received a review decision.",
         "SPACE_MEMBER_ADDED": "A user was directly added to a Space.",
+        "SPACE_MEMBER_REMOVED": "A user was removed from a Space.",
         "BOT_COLLABORATOR_APPLIED": "A bot collaborator request was submitted.",
         "BOT_COLLABORATOR_REVIEWED": "A bot collaborator request was reviewed.",
         "BOT_MEMBER_ADDED": "A member was directly added to a bot.",
