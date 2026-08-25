@@ -231,6 +231,7 @@ async fn register_bot(ctx: &TestContext, provider: &ProviderFixture, bot_uuid: &
                 skills: vec![Skill::new("planning")],
                 scopes: vec!["campaign".to_string()],
                 bot_uuid: Some(bot_uuid.to_string()),
+                connection_mode: bcs_service_api::ProviderBotConnectionMode::Gateway,
             },
         )
         .await

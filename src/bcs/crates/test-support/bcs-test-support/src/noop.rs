@@ -461,6 +461,14 @@ impl ProviderManagementService for NoopProviderManagementService {
         Err(service_not_configured("provider management service"))
     }
 
+    async fn get_active_provider(
+        &self,
+        _provider_id: &str,
+        _provider_admin_token: &str,
+    ) -> ServiceResult<ProviderRecord> {
+        Err(service_not_configured("provider management service"))
+    }
+
     async fn update_provider(
         &self,
         _command: UpdateProviderCommand,
@@ -483,10 +491,24 @@ impl ProviderManagementService for NoopProviderManagementService {
         Err(service_not_configured("provider management service"))
     }
 
+    async fn list_provider_bots_by_task_modes(
+        &self,
+        _filter: ProviderBotTaskModesFilter,
+    ) -> ServiceResult<Vec<ProviderBotRosterItem>> {
+        Err(service_not_configured("provider management service"))
+    }
+
     async fn delete_provider_bot(
         &self,
         _command: DeleteProviderBotCommand,
     ) -> ServiceResult<DeleteProviderBotOutcome> {
+        Err(service_not_configured("provider management service"))
+    }
+
+    async fn update_provider_bot(
+        &self,
+        _command: UpdateProviderBotCommand,
+    ) -> ServiceResult<UpdateProviderBotOutcome> {
         Err(service_not_configured("provider management service"))
     }
 
@@ -1618,6 +1640,12 @@ impl BotOnboardingService for NoopBotOnboardingService {
         &self,
         _command: AdminBotOnboardCommand,
     ) -> ServiceResult<BotOnboardResult> {
+        Err(ServiceError::InternalError(
+            "Noop implementation".to_string(),
+        ))
+    }
+
+    async fn ensure_bot(&self, _command: EnsureBotCommand) -> ServiceResult<EnsureBotResult> {
         Err(ServiceError::InternalError(
             "Noop implementation".to_string(),
         ))

@@ -30,13 +30,8 @@ from agentclaw.community.core.service_bot.services.arca_image_pin import (
     copy_image_policy_to_ext,
     has_explicit_image_policy,
     resolve_current_arca_image,
-    apply_runtime_kind_to_ext,
-    runtime_kind_from_provider,
-    RUNTIME_KIND_ARCA,
-    RUNTIME_KIND_TECLAW,
     PublishImagePolicyResolver,
     ServiceBotImagePin,
-    resolve_publish_runtime_kind,
 )
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.core.service_bot.types import PublishStage
@@ -84,7 +79,6 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         self._common_config_service = common_config_service
         self._image_policy_resolver = PublishImagePolicyResolver(
             publish_repository=bot_publish_repo,
-            binding_repository=device_binding_repo,
             common_config_service=common_config_service,
         )
         self._env = get_current_env()
@@ -236,23 +230,17 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             source_bot.get("ext") if isinstance(source_bot, dict) else None
         )
         ext = copy_image_policy_to_ext(source_bot_ext, ext)
+        # The provider is NOT snapshotted onto the record: the container follows
+        # the bot's engine, and every later stage re-asks the bot. Only the
+        # resolved ARCA *image* is frozen here.
+        is_arca_service = (
+            isinstance(source_bot, dict)
+            and source_bot.get("bot_type") == "service"
+            and not self._bot_service.is_teclaw_bot(source_bot.get("active_engine"))
+        )
         image_policy_image: str | None = None
         if isinstance(source_bot, dict) and source_bot.get("bot_type") == "service":
-            runtime_kind = None
-            binding_id = source_bot.get("binding_id")
-            if isinstance(binding_id, int):
-                binding = self._device_binding_repo.get_by_id(binding_id)
-                runtime_kind = runtime_kind_from_provider(
-                    getattr(binding, "device_provider", None)
-                )
-            if runtime_kind is None:
-                runtime_kind = (
-                    RUNTIME_KIND_TECLAW
-                    if self._bot_service.is_teclaw_bot(source_bot.get("active_engine"))
-                    else RUNTIME_KIND_ARCA
-                )
-            ext = apply_runtime_kind_to_ext(ext, runtime_kind)
-            if runtime_kind == RUNTIME_KIND_ARCA:
+            if is_arca_service:
                 image_policy_image = resolve_current_arca_image(
                     self._common_config_service, env=self._env
                 )
@@ -264,10 +252,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         # protection is enabled, freeze the configured image on the new publish
         # record so all published operations remain reproducible.
         is_legacy_arca_service = (
-            isinstance(source_bot, dict)
-            and source_bot.get("bot_type") == "service"
-            and not self._bot_service.is_teclaw_bot(source_bot.get("active_engine"))
-            and not has_explicit_image_policy(source_bot_ext)
+            is_arca_service and not has_explicit_image_policy(source_bot_ext)
         )
         if is_legacy_arca_service and image_policy_image:
             ext = apply_image_pin_to_ext(ext, image_policy_image)
@@ -441,16 +426,23 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         )
 
     def resolve_publish_image_pin(
-        self, publish_record: BotPublishRecord
+        self,
+        publish_record: BotPublishRecord,
+        *,
+        device_provider: str,
     ) -> ServiceBotImagePin:
-        """Resolve image policy through the shared persisted-CAS seam."""
-        return self._image_policy_resolver.resolve(publish_record)
+        """Resolve image policy through :class:`PublishImagePolicyResolver`.
 
-    def resolve_publish_runtime_kind(self, publish_record: BotPublishRecord) -> str:
-        """Resolve provider identity only from Publish-owned persisted facts."""
-        return resolve_publish_runtime_kind(
-            publish_record,
-            binding_repository=self._device_binding_repo,
+        This is *the* image-policy operation: it re-reads the record, may
+        lazily snapshot the configured ARCA image under CAS, and returns the
+        resulting policy. (``arca_image_pin.image_policy_from_ext`` is only the
+        pure decoder the resolver uses internally.)
+
+        ``device_provider`` is the caller's resolved container token; the policy
+        never re-derives the provider from the record's ``ext``.
+        """
+        return self._image_policy_resolver.resolve(
+            publish_record, device_provider=device_provider
         )
 
     def record_draft_artifact(
@@ -993,7 +985,11 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             env=self._env,
         )
 
-        # 4. 检查是否有发布成功的记录（排除当前记录）
+        # 4. 仅当存在另一条「发布成功(SUCCESS)」记录时禁止删除当前草稿。
+        # 产品确认规则(8e3b6da27):历史版本已升级(UPGRADED)或已下线(RELEASED)时,
+        # 离线操作会新建一条 DRAFT,此时仍允许 Owner 删除草稿;仅 SUCCESS 表示线上仍有该 Bot,
+        # 须保留。FAILED 不视作「已上线」,可丢弃。与 service_publication_facade._actions
+        # 的删除可见性判定保持一致(改其一须同步)。
         for p in all_publishes:
             if p.id != publish_id and p.status == PublishStatus.SUCCESS:
                 return False
@@ -1083,8 +1079,14 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 f"[offline_publish] Publish status updated to draft: publish_id={publish_id}"
             )
 
-        # Step 5: 异步执行销毁流程（仅 ONLINE 阶段，VERIFY 阶段无需销毁）
+        # Step 5: both verify cancellation and online offline must tear down the
+        # corresponding runtime.  Merely changing VALIDATING -> DRAFT leaves the
+        # verify container alive and makes a later staging publish race a stale
+        # runtime.  The durable destroy task is idempotent for both stages.
         if stage == PublishStage.VERIFY.value:
+            publish_flow_service.enqueue_offline_destroy(
+                publish_id=publish_id, stage=stage, operator="system"
+            )
             result["message"] = f"验证环境已下线，发布单已回退到草稿状态: publish_id={publish_id}"
 
             logger.info(

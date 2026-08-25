@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::{Mutex, RwLock, oneshot};
 use tracing::{debug, info, warn};
 
 use bcs_config::resolve_env_str as resolve_env;
@@ -17,8 +17,10 @@ use bcs_service_api::port::repo::BotRepoPort;
 use bcs_service_api::{
     BindingChannels, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
+    BotTaskModesQuery, TaskModeMatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotDynamicStatus, BotMetricCount,
-    BotMetricsSnapshotPort, RegisteredBot, ServiceError, ServiceResult, Skill,
+    BotMetricsSnapshotPort, ConnectStreamError, FriendCheckInStrategy, RegisteredBot, ServiceError,
+    ServiceResult, Skill, UserVisibility, is_mock_token,
 };
 
 fn unix_millis() -> u64 {
@@ -76,6 +78,8 @@ pub struct BotConnection {
 #[derive(Debug)]
 pub struct MemoryBotRepo {
     bots: RwLock<BTreeMap<String, RegisteredBotInner>>,
+    /// Serializes control-plane snapshot merges through persistence and memory.
+    control_plane_patch_lock: Mutex<()>,
     /// Audit timestamps for the local control-plane projection.
     control_plane_audit: RwLock<HashMap<String, (u64, u64)>>,
     /// Token to bot_uuid mapping for authentication.
@@ -92,6 +96,8 @@ pub struct MemoryBotRepo {
     bots_base_dir: PathBuf,
     /// Pending one-shot request-response channels: request_id -> oneshot sender.
     pending_requests: RwLock<HashMap<String, oneshot::Sender<serde_json::Value>>>,
+    /// Control-plane task-mode toggles: (`task_claim_mode`, `task_dream_mode`).
+    task_modes: RwLock<HashMap<String, (bool, bool)>>,
 }
 
 /// Persisted capabilities format.
@@ -129,6 +135,12 @@ struct PersistedCapabilities {
     /// AI安全网关授权token
     #[serde(default, skip_serializing_if = "Option::is_none")]
     agent_token: Option<String>,
+    #[serde(default)]
+    user_visibility: UserVisibility,
+    #[serde(default)]
+    friend_ext: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    friend_check_in_strategy: FriendCheckInStrategy,
 }
 
 impl From<&PersistedCapabilities> for BotCapabilities {
@@ -178,6 +190,9 @@ struct RegisteredBotInner {
     created_by: Option<String>,
     /// Protocol version negotiated during bot.connect.
     protocol_version: u32,
+    user_visibility: UserVisibility,
+    friend_ext: serde_json::Map<String, serde_json::Value>,
+    friend_check_in_strategy: FriendCheckInStrategy,
 }
 
 impl RegisteredBotInner {
@@ -246,6 +261,7 @@ impl MemoryBotRepo {
     pub fn with_base_dir(bots_base_dir: PathBuf) -> Self {
         Self {
             bots: RwLock::new(BTreeMap::new()),
+            control_plane_patch_lock: Mutex::new(()),
             control_plane_audit: RwLock::new(HashMap::new()),
             token_to_bot: RwLock::new(HashMap::new()),
             deleted_bot_ids: RwLock::new(HashSet::new()),
@@ -253,6 +269,7 @@ impl MemoryBotRepo {
             bot_info_overrides: RwLock::new(HashMap::new()),
             bots_base_dir,
             pending_requests: RwLock::new(HashMap::new()),
+            task_modes: RwLock::new(HashMap::new()),
         }
     }
 
@@ -326,6 +343,18 @@ impl MemoryBotRepo {
             let bots = self.bots.read().await;
             bots.get(bot_id).and_then(|b| b.created_by.clone())
         };
+        let internal_attributes = {
+            let bots = self.bots.read().await;
+            bots.get(bot_id)
+                .map(|bot| {
+                    (
+                        bot.user_visibility,
+                        bot.friend_ext.clone(),
+                        bot.friend_check_in_strategy,
+                    )
+                })
+                .unwrap_or_default()
+        };
 
         let persisted = PersistedCapabilities {
             bot_id: bot_id.to_string(),
@@ -346,6 +375,9 @@ impl MemoryBotRepo {
             },
             agent_code: caps.agent_code.clone(),
             agent_token: caps.agent_token.clone(),
+            user_visibility: internal_attributes.0,
+            friend_ext: internal_attributes.1,
+            friend_check_in_strategy: internal_attributes.2,
         };
 
         let path = self.bot_info_path(bot_id);
@@ -368,6 +400,7 @@ impl Default for MemoryBotRepo {
     fn default() -> Self {
         Self {
             bots: RwLock::new(BTreeMap::new()),
+            control_plane_patch_lock: Mutex::new(()),
             control_plane_audit: RwLock::new(HashMap::new()),
             token_to_bot: RwLock::new(HashMap::new()),
             deleted_bot_ids: RwLock::new(HashSet::new()),
@@ -375,6 +408,7 @@ impl Default for MemoryBotRepo {
             bot_info_overrides: RwLock::new(HashMap::new()),
             bots_base_dir: PathBuf::from("."),
             pending_requests: RwLock::new(HashMap::new()),
+            task_modes: RwLock::new(HashMap::new()),
         }
     }
 }
@@ -423,16 +457,27 @@ impl BotRepoPort for MemoryBotRepo {
             .await;
 
         // Pre-read created_by from disk before acquiring lock
-        let persisted_created_by = {
+        let persisted = {
             let path = self.bot_info_path(&bot_id);
             if let Ok(content) = fs::read_to_string(&path).await {
-                serde_json::from_str::<PersistedCapabilities>(&content)
-                    .ok()
-                    .and_then(|p| p.created_by)
+                serde_json::from_str::<PersistedCapabilities>(&content).ok()
             } else {
                 None
             }
         };
+        let persisted_created_by = persisted.as_ref().and_then(|value| value.created_by.clone());
+        let persisted_user_visibility = persisted
+            .as_ref()
+            .map(|value| value.user_visibility)
+            .unwrap_or_default();
+        let persisted_friend_ext = persisted
+            .as_ref()
+            .map(|value| value.friend_ext.clone())
+            .unwrap_or_default();
+        let persisted_friend_check_in_strategy = persisted
+            .as_ref()
+            .map(|value| value.friend_check_in_strategy)
+            .unwrap_or_default();
 
         let mut bots = self.bots.write().await;
 
@@ -490,6 +535,9 @@ impl BotRepoPort for MemoryBotRepo {
                     actor_kind: bcs_service_api::ActorKind::Bot,
                     created_by: persisted_created_by,
                     protocol_version: 1,
+                    user_visibility: persisted_user_visibility,
+                    friend_ext: persisted_friend_ext,
+                    friend_check_in_strategy: persisted_friend_check_in_strategy,
                 },
             );
             info!(bot_id = %bot_id, "Bot registered");
@@ -501,6 +549,31 @@ impl BotRepoPort for MemoryBotRepo {
         entry.1 = now;
 
         Ok(())
+    }
+
+    async fn update_capabilities(
+        &self,
+        bot_id: &str,
+        capabilities: BotCapabilities,
+    ) -> ServiceResult<()> {
+        self.deleted_bot_ids.write().await.remove(bot_id);
+        self.sync_binding_channel_index(bot_id, &capabilities)
+            .await;
+        // Persist to disk verbatim (no empty-array skip), matching the
+        // wholesale replacement semantics of the core update path.
+        self.save_capabilities_to_disk(bot_id, &capabilities).await?;
+        let mut bots = self.bots.write().await;
+        if let Some(existing) = bots.get_mut(bot_id) {
+            existing.last_heartbeat = Instant::now();
+            existing.capabilities = capabilities;
+            let mut audit = self.control_plane_audit.write().await;
+            let now = unix_millis();
+            let entry = audit.entry(bot_id.to_string()).or_insert((now, now));
+            entry.1 = now;
+            Ok(())
+        } else {
+            Err(ServiceError::BotNotFound(bot_id.to_string()))
+        }
     }
 
     async fn register_with_owner_and_token(
@@ -522,6 +595,23 @@ impl BotRepoPort for MemoryBotRepo {
                 .and_then(|bot| bot.created_by.clone())
                 .unwrap_or_else(|| created_by.to_string())
         };
+        let persisted_attributes = {
+            let path = self.bot_info_path(&bot_id);
+            if let Ok(content) = fs::read_to_string(&path).await {
+                serde_json::from_str::<PersistedCapabilities>(&content)
+                    .ok()
+                    .map(|value| {
+                        (
+                            value.user_visibility,
+                            value.friend_ext,
+                            value.friend_check_in_strategy,
+                        )
+                    })
+                    .unwrap_or_default()
+            } else {
+                Default::default()
+            }
+        };
 
         let persisted = PersistedCapabilities {
             bot_id: bot_id.clone(),
@@ -542,6 +632,9 @@ impl BotRepoPort for MemoryBotRepo {
             },
             agent_code: capabilities.agent_code.clone(),
             agent_token: capabilities.agent_token.clone(),
+            user_visibility: persisted_attributes.0,
+            friend_ext: persisted_attributes.1.clone(),
+            friend_check_in_strategy: persisted_attributes.2,
         };
 
         let path = self.bot_info_path(&bot_id);
@@ -605,6 +698,9 @@ impl BotRepoPort for MemoryBotRepo {
                         actor_kind: bcs_service_api::ActorKind::Bot,
                         created_by: Some(created_by.to_string()),
                         protocol_version: 1,
+                        user_visibility: persisted_attributes.0,
+                        friend_ext: persisted_attributes.1,
+                        friend_check_in_strategy: persisted_attributes.2,
                     },
                 );
                 None
@@ -1044,6 +1140,9 @@ impl BotRepoPort for MemoryBotRepo {
                 actor_kind: bcs_service_api::ActorKind::Human,
                 created_by: Some(staff_no.to_string()),
                 protocol_version: 1,
+                user_visibility: UserVisibility::default(),
+                friend_ext: serde_json::Map::new(),
+                friend_check_in_strategy: FriendCheckInStrategy::default(),
             },
         );
 
@@ -1182,6 +1281,9 @@ impl BotRepoPort for MemoryBotRepo {
                         visibility: None,
                         agent_code: None,
                         agent_token: None,
+                        user_visibility: UserVisibility::default(),
+                        friend_ext: serde_json::Map::new(),
+                        friend_check_in_strategy: FriendCheckInStrategy::default(),
                     }),
                 Err(_) => PersistedCapabilities {
                     bot_id: bot_id.to_string(),
@@ -1198,6 +1300,9 @@ impl BotRepoPort for MemoryBotRepo {
                     visibility: None,
                     agent_code: None,
                     agent_token: None,
+                    user_visibility: UserVisibility::default(),
+                    friend_ext: serde_json::Map::new(),
+                    friend_check_in_strategy: FriendCheckInStrategy::default(),
                 },
             }
         } else {
@@ -1216,6 +1321,9 @@ impl BotRepoPort for MemoryBotRepo {
                 visibility: None,
                 agent_code: None,
                 agent_token: None,
+                user_visibility: UserVisibility::default(),
+                friend_ext: serde_json::Map::new(),
+                friend_check_in_strategy: FriendCheckInStrategy::default(),
             }
         };
 
@@ -1392,6 +1500,146 @@ impl BotRepoPort for MemoryBotRepo {
 
     // ===== Streaming Connection Management =====
 
+    async fn connect_or_promote_streaming(
+        &self,
+        bot_id: String,
+    ) -> Result<String, ConnectStreamError> {
+        let existing_token = self.load_token(&bot_id).await;
+        let is_mock = existing_token.as_deref().map(is_mock_token).unwrap_or(false);
+        let bot_exists = {
+            let in_mem = self.bots.read().await.get(&bot_id).is_some();
+            in_mem || existing_token.is_some() || self.bot_info_path(&bot_id).exists()
+        };
+        let in_memory_connected = {
+            let bots = self.bots.read().await;
+            bots.get(&bot_id)
+                .map(|bot| bot.ws_connection.is_some())
+                .unwrap_or(false)
+        };
+        let token_preview = |t: &str| format!("{}...", &t[..t.len().min(4)]);
+
+        match (bot_exists, is_mock, in_memory_connected) {
+            (false, _, _) => {
+                let session_token = uuid::Uuid::new_v4().to_string();
+                let mut bots = self.bots.write().await;
+                bots.insert(
+                    bot_id.clone(),
+                    RegisteredBotInner {
+                        bot_id: bot_id.clone(),
+                        last_heartbeat: Instant::now(),
+                        capabilities: BotCapabilities::default(),
+                        dynamic_status: BotDynamicStatus::default(),
+                        ws_connection: Some(BotConnection {
+                            session_token: session_token.clone(),
+                            connected_at: Instant::now(),
+                        }),
+                        session_token: Some(session_token.clone()),
+                        env: Some(resolve_env()),
+                        status: bcs_service_api::ActorStatus::Online,
+                        actor_kind: bcs_service_api::ActorKind::Bot,
+                        created_by: None,
+                        protocol_version: 1,
+                        user_visibility: UserVisibility::default(),
+                        friend_ext: serde_json::Map::new(),
+                        friend_check_in_strategy: FriendCheckInStrategy::default(),
+                    },
+                );
+                self.token_to_bot
+                    .write()
+                    .await
+                    .insert(session_token.clone(), bot_id.clone());
+                info!(
+                    bot_id = %bot_id,
+                    branch = "create",
+                    token_preview = %token_preview(&session_token),
+                    "register_streaming_connection: create"
+                );
+                Ok(session_token)
+            }
+            (true, true, _) => {
+                let previous_mock = existing_token.clone();
+                let session_token = uuid::Uuid::new_v4().to_string();
+                // Persist FIRST (disk file): if this fails, surface the error
+                // before any in-memory mutation, so memory and the persisted
+                // file never split into a half-state that only surfaces as a
+                // stale-MOCK reconnect after a restart. Persisting before the
+                // `bots.write()` lock also sidesteps the prior deadlock:
+                // `save_token` re-acquires `bots.write()`.
+                if let Err(err) = self.save_token(&bot_id, &session_token).await {
+                    warn!(
+                        bot_id = %bot_id,
+                        error = %err,
+                        "connect_or_promote_streaming: promote_mock disk persist failed; refusing ws"
+                    );
+                    return Err(ConnectStreamError::InternalError(format!(
+                        "promote_mock: failed to persist promoted token: {err}"
+                    )));
+                }
+                let mut bots = self.bots.write().await;
+                if let Some(bot) = bots.get_mut(&bot_id) {
+                    bot.ws_connection = Some(BotConnection {
+                        session_token: session_token.clone(),
+                        connected_at: Instant::now(),
+                    });
+                    bot.session_token = Some(session_token.clone());
+                    bot.last_heartbeat = Instant::now();
+                } else {
+                    bots.insert(
+                        bot_id.clone(),
+                        RegisteredBotInner {
+                            bot_id: bot_id.clone(),
+                            last_heartbeat: Instant::now(),
+                            capabilities: BotCapabilities::default(),
+                            dynamic_status: BotDynamicStatus::default(),
+                            status: bcs_service_api::ActorStatus::Online,
+                            actor_kind: bcs_service_api::ActorKind::Bot,
+                            created_by: None,
+                            protocol_version: 1,
+                            user_visibility: UserVisibility::default(),
+                            friend_ext: serde_json::Map::new(),
+                            friend_check_in_strategy: FriendCheckInStrategy::default(),
+                            env: Some(resolve_env()),
+                            ws_connection: Some(BotConnection {
+                                session_token: session_token.clone(),
+                                connected_at: Instant::now(),
+                            }),
+                            session_token: Some(session_token.clone()),
+                        },
+                    );
+                }
+                let mut token_to_bot = self.token_to_bot.write().await;
+                if let Some(prev) = previous_mock {
+                    token_to_bot.remove(&prev);
+                }
+                token_to_bot.insert(session_token.clone(), bot_id.clone());
+                info!(
+                    bot_id = %bot_id,
+                    branch = "promote_mock",
+                    previous_token_kind = "mock",
+                    token_preview = %token_preview(&session_token),
+                    "register_streaming_connection: promote_mock"
+                );
+                Ok(session_token)
+            }
+            (true, false, true) => {
+                warn!(
+                    bot_id = %bot_id,
+                    branch = "already_connected",
+                    "connect_or_promote_streaming: real-token bot already connected"
+                );
+                Err(ConnectStreamError::AlreadyConnected(bot_id))
+            }
+            (true, false, false) => {
+                warn!(
+                    bot_id = %bot_id,
+                    branch = "already_registered",
+                    "connect_or_promote_streaming: refusing empty/stale-token claim of real-token bot"
+                );
+                Err(ConnectStreamError::AlreadyRegistered(bot_id))
+            }
+        }
+    }
+
     async fn register_streaming_connection(&self, bot_id: String) -> Result<String, ()> {
         let mut bots = self.bots.write().await;
 
@@ -1433,6 +1681,9 @@ impl BotRepoPort for MemoryBotRepo {
                     actor_kind: bcs_service_api::ActorKind::Bot,
                     created_by: None,
                     protocol_version: 1,
+                    user_visibility: UserVisibility::default(),
+                    friend_ext: serde_json::Map::new(),
+                    friend_check_in_strategy: FriendCheckInStrategy::default(),
                 },
             );
         }
@@ -1495,6 +1746,9 @@ impl BotRepoPort for MemoryBotRepo {
                     actor_kind: bcs_service_api::ActorKind::Bot,
                     created_by: None,
                     protocol_version: 1,
+                    user_visibility: UserVisibility::default(),
+                    friend_ext: serde_json::Map::new(),
+                    friend_check_in_strategy: FriendCheckInStrategy::default(),
                 },
             );
         }
@@ -1579,6 +1833,9 @@ impl BotRepoPort for MemoryBotRepo {
                         actor_kind: bcs_service_api::ActorKind::Bot,
                         created_by: None,
                         protocol_version: 1,
+                        user_visibility: UserVisibility::default(),
+                        friend_ext: serde_json::Map::new(),
+                        friend_check_in_strategy: FriendCheckInStrategy::default(),
                     },
                 );
                 info!(bot_id = %bot_id, "Created minimal bot entry for HTTP connection");
@@ -1674,6 +1931,13 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
         else {
             return Ok(None);
         };
+        let (task_claim_mode, task_dream_mode) = self
+            .task_modes
+            .read()
+            .await
+            .get(bot_id)
+            .copied()
+            .unwrap_or((false, false));
         Ok(Some(BotControlPlaneRecord {
             bot_id: bot.bot_id.clone(),
             kind: bot.actor_kind,
@@ -1693,8 +1957,13 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
                 scopes: bot.capabilities.scopes.clone(),
             },
             agent_code: bot.capabilities.agent_code.clone(),
+            task_claim_mode,
+            task_dream_mode,
             created_at: audit.0,
             updated_at: audit.1,
+            user_visibility: bot.user_visibility,
+            friend_ext: bot.friend_ext.clone(),
+            friend_check_in_strategy: bot.friend_check_in_strategy,
         }))
     }
 
@@ -1786,16 +2055,74 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
         Ok(records)
     }
 
+    async fn list_control_plane_by_task_modes(
+        &self,
+        query: BotTaskModesQuery,
+    ) -> ServiceResult<Vec<BotControlPlaneRecord>> {
+        let ids = self.bots.read().await.keys().cloned().collect::<Vec<_>>();
+        let mut records = Vec::new();
+        for bot_id in ids {
+            let Some(bot) = self.get_control_plane(&bot_id, &query.env).await? else {
+                continue;
+            };
+            if bot.kind != bcs_service_api::ActorKind::Bot {
+                continue;
+            }
+            let passes = match (query.task_claim_mode, query.task_dream_mode, query.match_mode) {
+                (Some(claim), Some(dream), TaskModeMatch::All) => {
+                    bot.task_claim_mode == claim && bot.task_dream_mode == dream
+                }
+                (Some(claim), Some(dream), TaskModeMatch::Any) => {
+                    bot.task_claim_mode == claim || bot.task_dream_mode == dream
+                }
+                (Some(claim), None, _) => bot.task_claim_mode == claim,
+                (None, Some(dream), _) => bot.task_dream_mode == dream,
+                (None, None, _) => true,
+            };
+            if passes {
+                records.push(bot);
+            }
+        }
+        records.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| left.bot_id.cmp(&right.bot_id))
+        });
+        Ok(records)
+    }
+
     async fn patch_control_plane(
         &self,
         bot_id: &str,
         env: &str,
         patch: BotControlPlanePatch,
     ) -> ServiceResult<Option<BotControlPlaneRecord>> {
+        let _patch_guard = self.control_plane_patch_lock.lock().await;
+        if patch.user_visibility.is_some()
+            || patch.friend_ext.is_some()
+            || patch.friend_check_in_strategy.is_some()
+        {
+            debug!(
+                bot_id = %bot_id,
+                has_user_visibility = patch.user_visibility.is_some(),
+                has_friend_ext = patch.friend_ext.is_some(),
+                has_friend_check_in_strategy = patch.friend_check_in_strategy.is_some(),
+                "Patching internal Bot attributes in memory"
+            );
+        }
         if self.deleted_bot_ids.read().await.contains(bot_id) {
             return Ok(None);
         }
-        let (mut capabilities, token, created_by, record_env) = {
+        let (
+            mut capabilities,
+            token,
+            created_by,
+            record_env,
+            mut user_visibility,
+            mut friend_ext,
+            mut friend_check_in_strategy,
+        ) = {
             let bots = self.bots.read().await;
             let Some(bot) = bots.get(bot_id) else {
                 return Ok(None);
@@ -1809,6 +2136,9 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
                 bot.session_token.clone(),
                 bot.created_by.clone(),
                 record_env,
+                bot.user_visibility,
+                bot.friend_ext.clone(),
+                bot.friend_check_in_strategy,
             )
         };
 
@@ -1831,6 +2161,15 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
             if let Some(scopes) = descriptor.scopes.as_ref() {
                 capabilities.scopes = scopes.clone();
             }
+        }
+        if let Some(value) = patch.user_visibility {
+            user_visibility = value;
+        }
+        if let Some(value) = patch.friend_ext.as_ref() {
+            friend_ext = value.clone();
+        }
+        if let Some(value) = patch.friend_check_in_strategy {
+            friend_check_in_strategy = value;
         }
 
         let now = unix_millis();
@@ -1856,6 +2195,9 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
             visibility: Some(capabilities.visibility.clone()),
             agent_code: capabilities.agent_code.clone(),
             agent_token: capabilities.agent_token.clone(),
+            user_visibility,
+            friend_ext: friend_ext.clone(),
+            friend_check_in_strategy,
         };
         let path = self.bot_info_path(bot_id);
         let directory = path.parent().ok_or_else(|| {
@@ -1872,8 +2214,21 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
             bot.capabilities = capabilities;
             bot.created_by = created_by;
             bot.env = Some(record_env);
+            bot.user_visibility = user_visibility;
+            bot.friend_ext = friend_ext;
+            bot.friend_check_in_strategy = friend_check_in_strategy;
             if let Some(status) = patch.status {
                 bot.status = status;
+            }
+        }
+        {
+            let mut task_modes = self.task_modes.write().await;
+            let entry = task_modes.entry(bot_id.to_string()).or_insert((false, false));
+            if let Some(claim) = patch.task_claim_mode {
+                entry.0 = claim;
+            }
+            if let Some(dream) = patch.task_dream_mode {
+                entry.1 = dream;
             }
         }
         self.control_plane_audit

@@ -14,6 +14,9 @@ from typing import Any, Dict
 from agentclaw.community.core.bot_management.capabilities import (
     is_template_factory_config,
 )
+from agentclaw.community.core.workspace.runtime_identity import (
+    claude_code_uses_aicoding_runtime,
+)
 
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.utils import secret_utils
@@ -30,7 +33,6 @@ from ..provisioning import BotProvisioningContext, EngineProvisioningStrategy
 CODING_TEMPLATE_TYPES = frozenset({"applicationCoding", "personalCoding"})
 AICODING_ENGINE_TYPE = "aicoding"
 CLAUDE_CODE_ENGINE_TYPE = "claude_code"
-NORMAL_CC_TEMPLATE_TYPE = "normalcc"
 TEMPLATE_CONFIG_CONSUMING_ENGINES = frozenset(
     {AICODING_ENGINE_TYPE, CLAUDE_CODE_ENGINE_TYPE}
 )
@@ -97,10 +99,6 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         return (engine_type or default).strip().lower().replace("-", "_")
 
     @staticmethod
-    def normalize_template_type(template_type: str | None) -> str:
-        return (template_type or "").strip().lower()
-
-    @staticmethod
     def is_coding_template(template_type: str | None) -> bool:
         return template_type in CODING_TEMPLATE_TYPES
 
@@ -112,15 +110,9 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         template_type: str | None,
     ) -> bool:
         """Whether this bot should use the aicoding runtime engine."""
-        if (
-            cls.normalize_engine_type(active_engine, default="")
-            != CLAUDE_CODE_ENGINE_TYPE
-        ):
-            return False
-        normalized_template_type = cls.normalize_template_type(template_type)
-        return bool(
-            normalized_template_type
-            and normalized_template_type != NORMAL_CC_TEMPLATE_TYPE
+        return claude_code_uses_aicoding_runtime(
+            active_engine=active_engine,
+            template_type=template_type,
         )
 
     @classmethod
@@ -458,6 +450,87 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             ctx.bot_id,
             stored_version,
             incoming_version,
+        )
+
+    def refresh_restart_authorization(
+        self,
+        ctx: BotProvisioningContext,
+        bot: Dict[str, Any],
+        extra_configs: Dict[str, Any] | None,
+        *,
+        passport_plugin: Any,
+        skill_set_factory: Any,
+        template_service: Any,
+    ) -> None:
+        """Refresh this bot's Passport authorization scope on restart.
+
+        Mirrors the create-time passport scope (``create_flow._apply_passport``)
+        so an ``aicoding`` / ``claude_code`` bot keeps the same MCP + CLI grants
+        after a restart: recompute the passport MCP codes and the engine default
+        CLI items, then push them to Passport via ``update_passport`` as a full
+        ``resource_scope`` snapshot (Passport treats each resource list as a
+        full replacement). Best-effort: failures are logged by the caller and
+        must not block the restart.
+
+        Opt-in: only runs when ``extra_configs['confirmed_template_update']`` is
+        truthy — a plain restart must never silently rewrite the Passport
+        authorization scope. Anything falsy (missing key, None, false) no-ops.
+        """
+        if not (isinstance(extra_configs, dict) and extra_configs.get("confirmed_template_update")):
+            logger.info(
+                "[aicoding.restart] skip passport refresh: confirmed_template_update is not set "
+                "for bot_id=%s",
+                ctx.bot_id,
+            )
+            return
+        from agentclaw.community.core.bot_management.create_flow import (
+            _get_bot_mcp_codes,
+        )
+        from agentclaw.community.core.mcp.services._defaults import (
+            get_default_cli_items
+        )
+
+        stored_config: Dict[str, Any] = (
+            template_service.get_template_config(ctx.bot_id) or {}
+        )
+        engine_type = ctx.active_engine or self.engine_type
+        entity_id = str(bot.get("entity_id") or "")
+        entity_type = str(bot.get("entity_type") or "staff")
+        owner_id = ctx.owner_id
+
+        mcp_codes = _get_bot_mcp_codes(
+            skill_set_factory,
+            owner_id,
+            ctx.bot_id,
+            entity_id,
+            entity_type,
+            engine_type,
+        )
+        cli_items = get_default_cli_items(
+            engine_type,
+            ctx.template_type,
+            ext_info={"template_config": stored_config}
+            if stored_config
+            else None,
+        )
+
+        passport_plugin.update_passport(
+            bot_id=ctx.bot_id,
+            user_id=owner_id,
+            bot_name=bot.get("bot_name"),
+            bot_desc=bot.get("bot_desc"),
+            engine_type=engine_type,
+            resource_scope={
+                "mcp_codes": mcp_codes,
+                "cli_items": cli_items,
+            },
+        )
+        logger.info(
+            "[aicoding.restart] refreshed passport authorization scope: "
+            "bot_id=%s mcp_codes=%s cli_items=%s",
+            ctx.bot_id,
+            mcp_codes,
+            cli_items,
         )
 
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:

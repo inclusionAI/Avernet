@@ -8,7 +8,6 @@ use bcs_bot::{
     ActorDirectory, Bot, BotCandidateSearchCore, BotOnboarding, BotCore,
     EmptyWorkerProfileCoreService, HumanActor,
 };
-use bcs_friend::Friend;
 use bcs_group::{GroupManagement, GroupStore};
 use bcs_group_store::MemoryGroupRepo;
 use bcs_session::SessionManagementServiceImpl;
@@ -25,8 +24,7 @@ use bcs_service_api::{
     ActorDirectoryService, ActorStatus, AsyncA2aChatAccepted, AsyncA2aChatCommand,
     BlockingA2aChatCommand, BlockingA2aChatOutcome, BotCapabilities, BotOnboardingService,
     BotRegistryCoreService, CallerContext, ChatRunCancelCommand, ChatRunQueryCommand,
-    FriendCoreService, FriendRequest, FriendRequestCoreService, FriendRequestDirection,
-    FriendRequestStatus, FriendService, Group, GroupCoreService, GroupKind, GroupStatus,
+    FriendCoreService, Group, GroupCoreService, GroupKind, GroupStatus,
     GroupStrategy, HumanActorService, Participant, ParticipantRole, RelationCoreService,
     ServiceResult, SessionRepoPort, Skill,
 };
@@ -258,19 +256,6 @@ fn actor_directory_use_cases(
     ))
 }
 
-fn friend_use_cases(
-    registry: Arc<dyn BotRegistryCoreService>,
-    friend: Arc<dyn FriendCoreService>,
-    friend_request: Arc<dyn FriendRequestCoreService>,
-) -> Arc<dyn FriendService> {
-    Arc::new(Friend::new(
-        registry,
-        friend,
-        friend_request,
-        noop_relation(),
-    ))
-}
-
 fn human_actor_use_cases(registry: Arc<dyn BotRegistryCoreService>) -> Arc<dyn HumanActorService> {
     Arc::new(HumanActor::new(registry, noop_relation()))
 }
@@ -320,82 +305,6 @@ fn services_builder_with_group_use_cases(
         .group(group_service)
         .group_management(group_use_cases.clone())
         .group_query(group_use_cases)
-}
-
-struct RecordingFriendRequestCoreService {
-    request: FriendRequest,
-    created: Mutex<Vec<(String, String)>>,
-    listed: Mutex<Vec<(String, FriendRequestDirection, Option<FriendRequestStatus>)>>,
-    accepted: Mutex<Vec<String>>,
-    rejected: Mutex<Vec<String>>,
-}
-
-impl RecordingFriendRequestCoreService {
-    fn new(request: FriendRequest) -> Self {
-        Self {
-            request,
-            created: Mutex::new(Vec::new()),
-            listed: Mutex::new(Vec::new()),
-            accepted: Mutex::new(Vec::new()),
-            rejected: Mutex::new(Vec::new()),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl FriendRequestCoreService for RecordingFriendRequestCoreService {
-    async fn create_request(&self, from_bot: &str, to_bot: &str) -> ServiceResult<FriendRequest> {
-        self.created
-            .lock()
-            .await
-            .push((from_bot.to_string(), to_bot.to_string()));
-        let mut request = self.request.clone();
-        request.from_bot = from_bot.to_string();
-        request.to_bot = to_bot.to_string();
-        Ok(request)
-    }
-
-    async fn accept_request(&self, request_id: &str) -> ServiceResult<()> {
-        self.accepted.lock().await.push(request_id.to_string());
-        Ok(())
-    }
-
-    async fn reject_request(&self, request_id: &str) -> ServiceResult<()> {
-        self.rejected.lock().await.push(request_id.to_string());
-        Ok(())
-    }
-
-    async fn get_request(&self, _request_id: &str) -> ServiceResult<FriendRequest> {
-        Ok(self.request.clone())
-    }
-
-    async fn list_requests(
-        &self,
-        bot_id: &str,
-        direction: FriendRequestDirection,
-        status_filter: Option<FriendRequestStatus>,
-    ) -> Vec<FriendRequest> {
-        self.listed
-            .lock()
-            .await
-            .push((bot_id.to_string(), direction, status_filter));
-        vec![self.request.clone()]
-    }
-
-    async fn cancel_pending_requests(&self, _bot_id: &str) -> ServiceResult<usize> {
-        unreachable!("cancel_pending_requests is not used by route contract tests")
-    }
-}
-
-fn pending_friend_request(from_bot: &str, to_bot: &str) -> FriendRequest {
-    FriendRequest {
-        id: "request-1".to_string(),
-        from_bot: from_bot.to_string(),
-        to_bot: to_bot.to_string(),
-        status: FriendRequestStatus::Pending,
-        created_at: 11,
-        updated_at: 12,
-    }
 }
 
 #[async_trait::async_trait]
@@ -972,6 +881,70 @@ async fn set_visibility_route_updates_registry_and_triggers_sync_port() {
     );
     assert_eq!(sync_request.capabilities.domains, vec!["ops".to_string()]);
     assert_eq!(sync_request.capabilities.skills[0].name, "monitor");
+}
+
+#[tokio::test]
+async fn set_visibility_route_returns_before_visibility_sync_finishes() {
+    let temp_dir = TempDir::new().unwrap();
+    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    registry
+        .register(
+            "bot-visible".to_string(),
+            BotCapabilities {
+                visibility: "private".to_string(),
+                ..BotCapabilities::default()
+            },
+        )
+        .await
+        .unwrap();
+    registry
+        .store_token_mapping("visible-token".to_string(), "bot-visible".to_string())
+        .await;
+    let sync = Arc::new(SlowVisibilitySyncPort::new(
+        std::time::Duration::from_millis(250),
+    ));
+    let services = services_builder_with_bot_use_cases(registry).build_for_test();
+    let app = build_router(HttpAppState::new(services).with_visibility_sync(sync.clone()));
+
+    let response = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        app.oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/bots/bot-visible/visibility")
+                .header("authorization", "Bearer visible-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "visibility": "protected"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        ),
+    )
+    .await
+    .expect("visibility route should not wait for visibility sync")
+    .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let sync_request = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let notified = sync.notify.notified();
+            {
+                let requests = sync.requests.lock().await;
+                if let Some(request) = requests.first().cloned() {
+                    return request;
+                }
+            }
+            notified.await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(sync_request.bot_uuid, "bot-visible");
+    assert_eq!(sync_request.visibility, "protected");
 }
 
 #[tokio::test]
@@ -1835,353 +1808,11 @@ async fn admin_onboard_route_returns_onboarded_false_for_missing_bot() {
     assert_eq!(json["onboarded"], false);
 }
 
-#[tokio::test]
-async fn create_friend_request_route_uses_from_bot_fallback_and_service() {
-    let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
-    for bot_id in ["from-bot", "to-bot"] {
-        registry
-            .register(
-                bot_id.to_string(),
-                BotCapabilities {
-                    name: Some(bot_id.to_string()),
-                    visibility: "public".to_string(),
-                    ..BotCapabilities::default()
-                },
-            )
-            .await
-            .unwrap();
-    }
-    registry
-        .save_created_by("from-bot", "alice", true)
-        .await
-        .unwrap();
-    let friend_request = Arc::new(RecordingFriendRequestCoreService::new(
-        pending_friend_request("from-bot", "to-bot"),
-    ));
-    let friend = Arc::new(StaticFriendCoreService::default());
-    let services = services_builder_with_bot_use_cases_and_friend(registry.clone(), friend.clone())
-        .friend_use_cases(friend_use_cases(registry, friend, friend_request.clone()))
-        .build_for_test();
-    let chain = static_auth_chain("alice", "Alice");
-    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
-        ChainUserIdentityPort::new(chain),
-    )));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/friends/request")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "from_bot": "from-bot",
-                        "to_bot": "to-bot"
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["success"], true);
-    assert_eq!(json["data"]["id"], "request-1");
-    assert_eq!(json["data"]["from_bot"], "from-bot");
-    assert_eq!(json["data"]["to_bot"], "to-bot");
-    let calls = friend_request.created.lock().await;
-    assert_eq!(
-        calls.as_slice(),
-        &[("from-bot".to_string(), "to-bot".to_string())]
-    );
-}
-
-#[tokio::test]
-async fn list_friend_requests_route_uses_query_filters() {
-    let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
-    registry
-        .register("bot-alpha".to_string(), BotCapabilities::default())
-        .await
-        .unwrap();
-    registry
-        .save_created_by("bot-alpha", "alice", true)
-        .await
-        .unwrap();
-    let friend_request = Arc::new(RecordingFriendRequestCoreService::new(
-        pending_friend_request("sender-bot", "bot-alpha"),
-    ));
-    let friend = Arc::new(StaticFriendCoreService::default());
-    let services = services_builder_with_bot_use_cases_and_friend(registry.clone(), friend.clone())
-        .friend_use_cases(friend_use_cases(registry, friend, friend_request.clone()))
-        .build_for_test();
-    let chain = static_auth_chain("alice", "Alice");
-    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
-        ChainUserIdentityPort::new(chain),
-    )));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/friends/requests?bot_uuid=bot-alpha&direction=received&status=pending")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["success"], true);
-    assert_eq!(json["data"].as_array().unwrap().len(), 1);
-    assert_eq!(json["data"][0]["id"], "request-1");
-    let calls = friend_request.listed.lock().await;
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].0, "bot-alpha");
-    assert_eq!(calls[0].1, FriendRequestDirection::Received);
-    assert_eq!(calls[0].2, Some(FriendRequestStatus::Pending));
-}
-
-#[tokio::test]
-async fn accept_and_reject_friend_request_routes_require_receiver_token() {
-    let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
-    registry
-        .register("receiver-bot".to_string(), BotCapabilities::default())
-        .await
-        .unwrap();
-    registry
-        .store_token_mapping("receiver-token".to_string(), "receiver-bot".to_string())
-        .await;
-    let friend_request = Arc::new(RecordingFriendRequestCoreService::new(
-        pending_friend_request("sender-bot", "receiver-bot"),
-    ));
-    let friend = Arc::new(StaticFriendCoreService::default());
-    let services = Services::builder()
-        .registry(registry.clone())
-        .friend(friend.clone())
-        .friend_use_cases(friend_use_cases(registry, friend, friend_request.clone()))
-        .build_for_test();
-    let app = build_router(HttpAppState::new(services));
-
-    let accept_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/friends/requests/request-1/accept")
-                .header("authorization", "Bearer receiver-token")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(accept_response.status(), StatusCode::OK);
-
-    let reject_response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/friends/requests/request-1/reject")
-                .header("authorization", "Bearer receiver-token")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(reject_response.status(), StatusCode::OK);
-
-    assert_eq!(
-        friend_request.accepted.lock().await.as_slice(),
-        &["request-1".to_string()]
-    );
-    assert_eq!(
-        friend_request.rejected.lock().await.as_slice(),
-        &["request-1".to_string()]
-    );
-}
-
-#[tokio::test]
-async fn list_friends_route_returns_enriched_effective_online_entries() {
-    let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
-    for (bot_id, name) in [("owner-bot", "Owner"), ("friend-bot", "Friend")] {
-        registry
-            .register(
-                bot_id.to_string(),
-                BotCapabilities {
-                    name: Some(name.to_string()),
-                    summary: Some(format!("{name} summary")),
-                    ..BotCapabilities::default()
-                },
-            )
-            .await
-            .unwrap();
-    }
-    registry
-        .store_token_mapping("owner-token".to_string(), "owner-bot".to_string())
-        .await;
-    registry
-        .register_streaming_connection("friend-bot".to_string())
-        .await
-        .unwrap();
-    let friend = Arc::new(StaticFriendCoreService::new(vec![(
-        "owner-bot",
-        "friend-bot",
-    )]));
-    let friend_request = Arc::new(RecordingFriendRequestCoreService::new(
-        pending_friend_request("owner-bot", "friend-bot"),
-    ));
-    let services = Services::builder()
-        .registry(registry.clone())
-        .friend(friend.clone())
-        .friend_use_cases(friend_use_cases(registry, friend, friend_request))
-        .build_for_test();
-    let app = build_router(HttpAppState::new(services));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/bots/owner-bot/friends")
-                .header("authorization", "Bearer owner-token")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["success"], true);
-    let data = json["data"].as_array().unwrap();
-    assert_eq!(data.len(), 1);
-    assert_eq!(data[0]["bot_uuid"], "friend-bot");
-    assert_eq!(data[0]["name"], "Friend");
-    assert_eq!(data[0]["summary"], "Friend summary");
-    assert_eq!(data[0]["is_online"], true);
-}
-
-#[tokio::test]
-async fn list_friends_route_returns_404_when_target_bot_missing() {
-    let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
-    let friend = Arc::new(StaticFriendCoreService::default());
-    let friend_request = Arc::new(RecordingFriendRequestCoreService::new(
-        pending_friend_request("missing-bot", "friend-bot"),
-    ));
-    let services = services_builder_with_bot_use_cases_and_friend(registry.clone(), friend.clone())
-        .friend_use_cases(friend_use_cases(registry, friend, friend_request))
-        .build_for_test();
-    let chain = static_auth_chain("alice", "Alice");
-    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
-        ChainUserIdentityPort::new(chain),
-    )));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/bots/missing-bot/friends")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["success"], false);
-    assert_eq!(json["error"], "Bot 'missing-bot' not found");
-}
-
-#[tokio::test]
-async fn list_friends_route_returns_403_when_target_bot_owned_by_other_user() {
-    let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
-    registry
-        .register("other-bot".to_string(), BotCapabilities::default())
-        .await
-        .unwrap();
-    registry
-        .save_created_by("other-bot", "bob", true)
-        .await
-        .unwrap();
-    let friend = Arc::new(StaticFriendCoreService::default());
-    let friend_request = Arc::new(RecordingFriendRequestCoreService::new(
-        pending_friend_request("other-bot", "friend-bot"),
-    ));
-    let services = services_builder_with_bot_use_cases_and_friend(registry.clone(), friend.clone())
-        .friend_use_cases(friend_use_cases(registry, friend, friend_request))
-        .build_for_test();
-    let chain = static_auth_chain("alice", "Alice");
-    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
-        ChainUserIdentityPort::new(chain),
-    )));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/bots/other-bot/friends")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["success"], false);
-    assert_eq!(json["error"], "Not authorized to access bot 'other-bot'");
-}
-
-#[tokio::test]
-async fn list_friends_route_returns_401_when_user_identity_missing() {
-    let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
-    registry
-        .register("owned-bot".to_string(), BotCapabilities::default())
-        .await
-        .unwrap();
-    registry
-        .save_created_by("owned-bot", "alice", true)
-        .await
-        .unwrap();
-    let friend = Arc::new(StaticFriendCoreService::default());
-    let friend_request = Arc::new(RecordingFriendRequestCoreService::new(
-        pending_friend_request("owned-bot", "friend-bot"),
-    ));
-    let services = services_builder_with_bot_use_cases_and_friend(registry.clone(), friend.clone())
-        .friend_use_cases(friend_use_cases(registry, friend, friend_request))
-        .build_for_test();
-    let app = build_router(HttpAppState::new(services));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/bots/owned-bot/friends")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["success"], false);
-    assert_eq!(
-        json["error"],
-        "Unauthorized: no valid token or login session"
-    );
-}
-
+// Legacy friend-route contract tests (Strategy A/B ownership model, enriched
+// `{success,data}` wire shape) were retired by the edge-permission reform
+// (Task 3). The `/friends/*` + `/bots/{id}/friends` handlers now back onto
+// the Noop-wired `ConnectService`; the new wire contract and real-service
+// behavior are covered by Installment 3 tests.
 #[tokio::test]
 async fn create_group_route_persists_normal_group_and_includes_driver() {
     let temp_dir = TempDir::new().unwrap();

@@ -16,7 +16,8 @@ from agentclaw.community.core.service_bot.services.bot_build_service import BotB
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     ImagePolicyState,
     ServiceBotImagePin,
-    resolve_publish_image_pin as resolve_publish_image_pin_policy,
+    has_explicit_image_policy,
+    image_policy_from_ext,
 )
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
@@ -116,6 +117,7 @@ def _pf(*args, **kw):
     kw.setdefault("teclaw_file_promotion", Mock())
     kw.setdefault("device_binding_repo", Mock())
     kw.setdefault("publish_operation_repo", _real_ledger())
+    kw.setdefault("active_skillset_materializer", Mock())
     # The operation runner queries baas_service.list_bot_publishes for adopt-by-
     # query; a bare Mock returns a non-iterable Mock. Default it to "no prior
     # workflows" so upgrade/existing-bot flow tests issue normally.
@@ -124,49 +126,18 @@ def _pf(*args, **kw):
         baas.list_bot_publishes.return_value = []
     publish_service = args[0] if args else kw.get("bot_publish_service")
     if isinstance(publish_service, Mock):
-        def _resolve_image_policy(record):
-            artifact = (record.ext or {}).get("config_artifact")
-            if isinstance(artifact, dict) and artifact.get("engine_type") == "teclaw":
+        def _resolve_image_policy(record, *, device_provider):
+            # Stands in for PublishImagePolicyResolver.resolve: teclaw carries no
+            # ARCA policy, an explicit snapshot decodes as-is, and a record with no
+            # policy stays legacy. These flow tests predate runtime-pin
+            # configuration and focus on orchestration, so the resolver's lazy
+            # common-config snapshot is deliberately not modelled here — dedicated
+            # image-policy tests cover it.
+            if device_provider == "teclaw" or not has_explicit_image_policy(record.ext):
                 return ServiceBotImagePin(ImagePolicyState.LEGACY, None)
-            if not any(
-                key in (record.ext or {})
-                for key in (
-                    "sbot_pin_image",
-                    "sbot_docker_image",
-                    "sbot_use_default_image",
-                )
-            ):
-                # These flow tests predate runtime-pin configuration and focus
-                # on orchestration. Dedicated image-policy tests cover the
-                # production resolver's fail-closed behavior.
-                return ServiceBotImagePin(ImagePolicyState.LEGACY, None)
-            return resolve_publish_image_pin_policy(
-                record,
-                common_config_service=kw["common_config_service"],
-                env=record.env,
-            )
+            return image_policy_from_ext(record)
 
         publish_service.resolve_publish_image_pin.side_effect = _resolve_image_policy
-        def _resolve_runtime_kind(record):
-            ext = record.ext or {}
-            explicit = ext.get("sbot_runtime_kind")
-            if explicit == "arka":
-                return "arca"
-            if explicit in {"arca", "teclaw"}:
-                return explicit
-            artifact = ext.get("config_artifact")
-            if isinstance(artifact, dict) and artifact.get("engine_type") == "teclaw":
-                return "teclaw"
-            # Old flow fixtures express their historical binding through the
-            # BaaS provider mock. Production uses Publish ext/bindings only.
-            provider = (
-                baas.resolve_container_provider.return_value
-                if isinstance(baas, Mock)
-                else None
-            )
-            return "teclaw" if provider == "teclaw" else "arca"
-
-        publish_service.resolve_publish_runtime_kind.side_effect = _resolve_runtime_kind
     if "channel_overrides_reader" not in kw:
         # Default to "no channels for this stage" ({}), so promotion delivers the
         # base artifact with channels cleared — tests that care about channels pass
@@ -1023,7 +994,7 @@ class _StubProducer(DeployArtifactProducer):
         return DeployArtifact(success=True, ext=self.ext)
 
 
-def _build_svc_with_router(router, bot, provider="baas"):
+def _build_svc_with_router(router, bot, provider="baas", **publish_flow_kwargs):
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -1043,7 +1014,9 @@ def _build_svc_with_router(router, bot, provider="baas"):
     promo.stage_files = AsyncMock(return_value=PromotedRefs())
     svc = _pf(
         publish_service, build_service, baas_service, bot_service,
-        producer_router=router, teclaw_file_promotion=promo,
+        producer_router=router,
+        teclaw_file_promotion=promo,
+        **publish_flow_kwargs,
     )
     # Avoid touching real status/ext plumbing — isolate the build phase.
     svc._ext_state.get_latest_ext = Mock(return_value={})
@@ -1072,6 +1045,51 @@ async def test_build_phase_routes_arca_and_merges_mount_ext():
     ext_written = svc._ext_state.update_status.call_args.kwargs["ext"]
     assert ext_written["migration_path"] == "/m/3"
     assert ext_written["build_target_path"] == "/t/3"
+
+
+@pytest.mark.asyncio
+async def test_build_phase_materializes_active_skillset_installations_before_artifact_build():
+    arca = _StubProducer({"migration_path": "/m/3"})
+    router = DeployArtifactProducerRouter(
+        providers={"baas": arca}, default_provider_key="baas"
+    )
+    materializer = Mock()
+    svc, _ = _build_svc_with_router(
+        router,
+        {"bot_id": "b1", "active_engine": "openclaw"},
+        active_skillset_materializer=materializer,
+    )
+
+    record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)
+    await svc.execute_build_phase(record, "op")
+
+    materializer.materialize.assert_called_once_with(
+        bot_id="bot-source", owner_id="u1", engine_type="openclaw"
+    )
+    assert arca.calls == [({"bot_id": "b1", "active_engine": "openclaw"}, 3)]
+
+
+@pytest.mark.asyncio
+async def test_build_phase_fails_without_producing_artifact_when_materialization_fails():
+    arca = _StubProducer({"migration_path": "/m/3"})
+    router = DeployArtifactProducerRouter(
+        providers={"baas": arca}, default_provider_key="baas"
+    )
+    materializer = Mock()
+    materializer.materialize.side_effect = RuntimeError(
+        "installation persistence unavailable"
+    )
+    svc, _ = _build_svc_with_router(
+        router,
+        {"bot_id": "b1", "active_engine": "openclaw"},
+        active_skillset_materializer=materializer,
+    )
+
+    record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)
+    result = await svc.execute_build_phase(record, "op")
+
+    assert result.status == PublishStatus.FAILED
+    assert arca.calls == []
 
 
 @pytest.mark.asyncio
@@ -1825,6 +1843,56 @@ async def test_verify_first_release_stamps_canary_delivered_and_persisted():
     persisted = svc._ext_state.update_status.call_args.kwargs["ext"]["config_artifact"]
     assert persisted["engine_ext"]["stage"] == "canary"
     assert persisted["engine_ext"]["bot_id"] == "b2"
+
+
+@pytest.mark.asyncio
+async def test_release_provider_follows_the_bot_not_a_stale_publish_ext():
+    """A stale provider hint on ``ext`` must not decide the container.
+
+    The build stage picks its producer from ``resolve_container_provider(bot)``.
+    The release stage must reach the same answer, or a teclaw build is shipped to
+    an ARCA create (and vice versa). Here the record still carries the ARCA mount
+    chain plus an ARCA image pin from an earlier life, while the bot now runs in a
+    teclaw container: the bot wins, and the ARCA image pin is not consumed.
+    """
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.release_async = AsyncMock(
+        return_value={"bot_uuid": "BOT-1", "publish_id": 9}
+    )
+    build_service.generate_request_id = Mock(return_value="rid")
+    baas_service = Mock()
+    baas_service.resolve_container_provider.return_value = "teclaw"
+    svc = _pf(
+        publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
+    )
+    svc._ext_state.get_latest_ext = Mock(return_value=_artifact_ext("draft"))
+    svc._ext_state.update_status = Mock()
+    svc.approve_baas_publish = Mock()
+
+    record = _make_publish_record(
+        status=PublishStatus.BUILT.value,
+        ext={
+            **_artifact_ext("draft"),
+            "migration_path": "/build/v1",
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arca:v2",
+        },
+    )
+    await svc._execute_verify_first_release(
+        publish_record=record,
+        operator="op",
+        migration_path="/build/v1",
+        bot={"bot_id": "b2", "owner_id": "u1"},
+    )
+
+    baas_service.resolve_container_provider.assert_called_with(
+        {"bot_id": "b2", "owner_id": "u1"}
+    )
+    # The ARCA image policy is skipped for a teclaw container even though the
+    # record still carries a pin.
+    assert build_service.release_async.await_args.kwargs["docker_image"] is None
 
 
 @pytest.mark.asyncio
@@ -2833,14 +2901,15 @@ async def test_scale_bot_teclaw_returns_supported_message_without_baas_call():
         return_value=_make_publish_record(
             id=15,
             status=PublishStatus.SUCCESS.value,
-            ext={"sbot_runtime_kind": "teclaw"},
+            ext={"migration_path": "/build/v1"},
         )
     )
     bot_service.get_bot = Mock(
-        return_value={"bot_id": "bot-source", "active_engine": "openclaw", "ext": {}}
+        return_value={"bot_id": "bot-source", "active_engine": "teclaw", "ext": {}}
     )
-    # The current Draft is ARCA, but the immutable Publish is TeClaw-owned.
-    baas_service.resolve_container_provider.return_value = "baas"
+    # Scale support follows the bot's container, not anything cached on the
+    # publish record's ext.
+    baas_service.resolve_container_provider.return_value = "teclaw"
 
     result = await svc.scale_bot(publish_id=15, operator="u1")
 
@@ -3223,6 +3292,7 @@ def test_eval_teardown_success():
     assert result == {
         "success": True,
         "bot_uuid": "BOT-EVAL-2",
+        "default_tag": "",
         "message": "Eval environment teardown enqueued",
     }
     # #197: teardown is now enqueued as the durable eval_teardown task (delay 0),
@@ -3233,6 +3303,66 @@ def test_eval_teardown_success():
     assert call.args[0] == EVAL_TEARDOWN_TASK
     assert call.args[1] == {"publish_id": 301, "bot_uuid": "BOT-EVAL-2", "operator": "u1"}
     assert call.kwargs["delay_seconds"] == 0
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_with_default_tag():
+    """场景三：eval_publish 传入 default_tag 时写入 ext_info。"""
+    publish_service = Mock()
+    build_service = Mock()
+    build_service.release_async = AsyncMock(
+        return_value={"bot_uuid": "BOT-EVAL-TAG", "publish_id": 902, "status": "RUNNING"}
+    )
+    build_service.generate_request_id = Mock(return_value="rid-eval-tag")
+    baas_service = Mock()
+    bot_service = Mock()
+    bot_service.get_bot.return_value = {
+        "bot_id": "bot-source",
+        "entity_id": "u1",
+        "entity_type": "staff",
+        "ext": {},
+    }
+
+    task_queue_service = Mock()
+    svc = _pf(
+        publish_service, build_service, baas_service, bot_service, _arca_router(build_service),
+        task_queue_service=task_queue_service,
+    )
+    publish_service.get_publish_by_id.return_value = _make_publish_record(
+        id=302,
+        version=3,
+        ext={"migration_path": "/tmp/m302", "config_artifact": {"engine_ext": {}}},
+    )
+
+    result = await svc.eval_publish(302, "u1", biz_id="eval_chat:bot-1:eval", default_tag="eval")
+
+    assert result["success"] is True
+    assert result["bot_uuid"] == "BOT-EVAL-TAG"
+    ext_info = build_service.release_async.await_args.kwargs["ext_info"]
+    assert ext_info["biz_id"] == "eval_chat:bot-1:eval"
+    assert ext_info["default_tag"] == "eval"
+
+
+def test_eval_teardown_with_default_tag():
+    """场景三：eval_teardown 传入 default_tag 时记录到 result。"""
+    from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+        EVAL_TEARDOWN_TASK,
+    )
+
+    build_service = Mock()
+    baas_service = Mock()
+    task_queue_service = Mock()
+    svc = _pf(
+        Mock(), build_service, baas_service, Mock(), _arca_router(build_service),
+        task_queue_service=task_queue_service,
+    )
+
+    result = svc.eval_teardown("BOT-EVAL-3", operator="u1", publish_id=303, default_tag="eval")
+
+    assert result["success"] is True
+    assert result["bot_uuid"] == "BOT-EVAL-3"
+    assert result["default_tag"] == "eval"
+    task_queue_service.enqueue.assert_called_once()
 
 
 def test_get_baas_publish_progress_success_default_include_devices_public_name():

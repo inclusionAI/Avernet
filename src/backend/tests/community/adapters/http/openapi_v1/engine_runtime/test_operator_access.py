@@ -2,7 +2,7 @@
 
 Who may hold an operator channel is one rule (owner, or collaborator at
 member level or above — ``core/engine_runtime/gate.py``), and it must hold on
-all sixteen operations identically: a route that refused a session list but
+all twenty swept operations identically: a route that refused a session list but
 served an engine read would leak through the difference. The sweep asserts
 the matrix per route — owner served, collaborator served, anyone else
 answered byte-identically to a bot that does not exist.
@@ -16,6 +16,7 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 from tests.community.adapters.http.openapi_v1.conftest import (
+    mount_public_error_handlers,
     user_scoped_client,
 )
 from agentclaw.community.adapters.http.openapi_v1 import _ENGINE_RUNTIME_GROUPS
@@ -24,20 +25,31 @@ from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+from agentclaw.community.api.human_bot_friendship_service import (
+    HumanBotFriendshipServiceProtocol,
+)
 from agentclaw.community.core.engine_runtime.models import (
     ConnectionResult,
     EngineResult,
     SocketInfo,
 )
 
-from .conftest import BOT, OWNER, FakeRelay
+from .conftest import (
+    BOT,
+    OWNER,
+    FakeExpertChat,
+    FakeFriendships,
+    FakeRelay,
+    bind_seam_from_relay,
+)
 
 COLLABORATOR = "u-collab"
 STRANGER = "u-stranger"
 
 SESSION_ID = "session:abc:user:1"
 
-#: (method, path template, body) for all 16 routes — the same shape as the
+#: (method, path template, body) for all 20 swept routes — the same shape as the
 #: tenant-isolation sweep, kept separately because the two sweeps pin
 #: different halves (cross-tenant masking there, the operator matrix here)
 #: and must each fail on its own terms.
@@ -49,11 +61,15 @@ ROUTES = [
     ("delete", f"/{{bot}}/sessions/{SESSION_ID}", None),
     ("get", f"/{{bot}}/sessions/{SESSION_ID}/messages", None),
     ("delete", f"/{{bot}}/sessions/{SESSION_ID}/messages", None),
+    ("get", "/{bot}/sessions/favorites", None),
+    ("put", f"/{{bot}}/sessions/{SESSION_ID}/favorite", None),
+    ("delete", f"/{{bot}}/sessions/{SESSION_ID}/favorite", None),
     ("get", "/{bot}/engine/status", None),
     ("get", "/{bot}/engine/capabilities", None),
     ("get", "/{bot}/engine/available", None),
     ("get", "/{bot}/models", None),
     ("get", "/{bot}/models/openai/gpt-5.3", None),
+    ("get", "/{bot}/nodes", None),
     ("get", "/{bot}/approvals/mode?session_key=k", None),
     ("put", "/{bot}/approvals/mode?session_key=k", {"mode": "never"}),
     ("get", "/{bot}/approvals/modes", None),
@@ -72,7 +88,14 @@ _UNIVERSAL = {
 
 
 class _Connections:
-    """A succeeding connection double that runs the fake adjudication."""
+    """A succeeding connection double that runs the fake adjudication.
+
+    ``/connection`` is the one route in this sweep whose row did not migrate —
+    what it gates is what may be *composed*, not how the route is served — so
+    the real ``EngineConnectionService`` still adjudicates for itself in
+    ``connection.py``, and borrowing the relay's identical check keeps this
+    double faithful to that.
+    """
 
     def __init__(self, relay: FakeRelay) -> None:
         self._relay = relay
@@ -81,8 +104,12 @@ class _Connections:
     def build(self, *, bot_id, owner_id, caller_id, stage) -> ConnectionResult:
         self._relay.resolve_bot(bot_id, owner_id, caller_id)
         self.builds.append(
-            {"bot_id": bot_id, "owner_id": owner_id, "caller_id": caller_id,
-             "stage": stage}
+            {
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "caller_id": caller_id,
+                "stage": stage,
+            }
         )
         return ConnectionResult(
             engine="openclaw",
@@ -104,19 +131,23 @@ def connections(relay) -> _Connections:
 
 
 @pytest.fixture
-def make_caller(relay, connections):
-    """A client for ``caller`` across all five engine-runtime groups."""
+def make_caller(relay, connections, friendships, expert):
+    """A client for ``caller`` across all engine-runtime groups."""
 
     def _build(caller: str):
         class _M(Module):
             def configure(self, binder):
                 binder.bind(EngineRuntimeRelayProtocol, to=relay)
                 binder.bind(EngineConnectionServiceProtocol, to=connections)
+                binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
+                binder.bind(ExpertChatServiceProtocol, to=expert)
+                bind_seam_from_relay(binder, relay)
 
         app = FastAPI()
         for router in _ENGINE_RUNTIME_GROUPS:
             app.include_router(router)
         app.dependency_overrides[require_principal] = lambda: {"user_id": caller}
+        mount_public_error_handlers(app)
         attach_injector(app, Injector([_M()]))
         return user_scoped_client(app, caller)
 
@@ -127,16 +158,18 @@ def _url(suffix: str, bot: str = BOT) -> str:
     return f"/openapi/v1/bots{suffix.format(bot=bot)}"
 
 
-def test_all_sixteen_routes_are_covered():
+def test_all_twenty_routes_are_covered():
     """Guard the guard: a shrinking list would silently narrow this sweep."""
-    assert len(ROUTES) == 16
+    assert len(ROUTES) == 20
 
 
 @pytest.mark.parametrize(("method", "suffix", "body"), ROUTES, ids=lambda v: str(v))
-def test_the_owner_is_served_every_route(make_caller, method, suffix, body):
+def test_the_owner_is_served_every_route(make_caller, relay, method, suffix, body):
     """The case the expansion must not have closed: the owner, naming
     nothing extra."""
     client = make_caller(OWNER)
+    if suffix.endswith("/nodes"):
+        relay.results = [EngineResult(data=[])]
     kwargs = {"json": body} if body is not None else {}
     resp = getattr(client, method)(_url(suffix), **kwargs)
     assert resp.status_code in (200, 201), resp.json()
@@ -150,6 +183,8 @@ def test_a_collaborator_is_served_every_route(
     console on reads, writes and the socket alike, naming the owner they
     address."""
     relay.add_operator(COLLABORATOR)
+    if suffix.endswith("/nodes"):
+        relay.results = [EngineResult(data=[])]
     client = make_caller(COLLABORATOR)
     kwargs = {"json": body} if body is not None else {}
     kwargs["params"] = {"owner_id": OWNER}
@@ -195,3 +230,72 @@ def test_refused_and_absent_answers_are_byte_identical(make_caller):
     refused.pop("request_id")
     absent.pop("request_id")
     assert refused == absent
+
+
+def test_the_seam_is_what_decides_on_a_migrated_route(
+    relay, connections, friendships, expert
+):
+    """Two gates at one bar cannot be told apart by their answers — so separate them.
+
+    Sixteen of these operations declare ``Check(MEMBER)`` while
+    ``relay.resolve_bot`` still adjudicates underneath (it has to: the deferred
+    sessions handlers turn its refusal into the friend fallback). Both refuse a
+    stranger with the same masked 404, so the sweep above would pass whichever
+    one actually ran — and the row claims it is the seam.
+
+    So this makes them disagree. The fake relay is told the caller *is* an
+    operator; the seam's collaborator double is replaced with one that says
+    NONE. A 404 can then only have come from the seam, and it must, or the row
+    is a false claim.
+
+    The mirror case is the sweep: with the two agreeing, the caller is served.
+    """
+    from injector import InstanceProvider
+
+    from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+    from agentclaw.community.core.bot_collaborator.protocols import (
+        CollaboratorServiceProtocol,
+    )
+
+    relay.add_operator(STRANGER)
+
+    class _NeverACollaborator:
+        def get_operable_permission_level(self, *, bot, user_id, env=None):
+            return PermissionLevel.NONE
+
+    class _M(Module):
+        def configure(self, binder):
+            binder.bind(EngineRuntimeRelayProtocol, to=relay)
+            binder.bind(EngineConnectionServiceProtocol, to=connections)
+            binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
+            binder.bind(ExpertChatServiceProtocol, to=expert)
+            bind_seam_from_relay(binder, relay)
+            # Overrides the collaborator double the line above bound.
+            binder.bind(
+                CollaboratorServiceProtocol,
+                to=InstanceProvider(_NeverACollaborator()),
+            )
+
+    app = FastAPI()
+    for router in _ENGINE_RUNTIME_GROUPS:
+        app.include_router(router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": STRANGER}
+    mount_public_error_handlers(app)
+    attach_injector(app, Injector([_M()]))
+    client = user_scoped_client(app, STRANGER)
+
+    migrated = client.get(_url("/{bot}/engine/status"), params={"owner_id": OWNER})
+
+    assert migrated.status_code == 404, migrated.json()
+    assert migrated.json()["message"] == "Not found"
+
+    # And the deferred half, which the seam does not adjudicate: the relay
+    # admits, so the request is served. Same client, same disagreement — the
+    # only difference is the row.
+    deferred = client.get(_url("/{bot}/sessions"), params={"owner_id": OWNER})
+
+    assert deferred.status_code == 200, (
+        "a sessions row started being adjudicated by the seam; if that is "
+        "intended, the friend fallback in _resolve_session_backend has to be "
+        "expressible first — see _DEFERRED_OPERATIONS"
+    )

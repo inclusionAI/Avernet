@@ -4,7 +4,7 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use bcs_protocol::{CreateFriendRequestBody, ListFriendRequestsQuery};
+use bcs_protocol::http::friends::{CreateFriendRequestBody, ListRequestsQuery};
 use bcs_service_api::{
     BotDetailCommand, BotUseCaseError, CreateFriendRequestCommand, FriendRequest,
     FriendRequestDecisionCommand, FriendRequestDirection, FriendRequestStatus, FriendUseCaseError,
@@ -86,11 +86,11 @@ pub async fn list_friend_requests(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
-    Query(query): Query<ListFriendRequestsQuery>,
+    Query(query): Query<ListRequestsQuery>,
 ) -> Response {
-    let direction = match query.direction.as_deref() {
-        Some("sent") => FriendRequestDirection::Sent,
-        Some("all") => FriendRequestDirection::All,
+    let direction = match query.direction.as_str() {
+        "sent" => FriendRequestDirection::Sent,
+        "all" => FriendRequestDirection::All,
         _ => FriendRequestDirection::Received,
     };
     let status_filter = match query.status.as_deref() {

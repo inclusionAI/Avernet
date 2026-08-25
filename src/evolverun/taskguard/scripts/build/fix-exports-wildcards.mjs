@@ -15,7 +15,7 @@
  */
 import { readFileSync, writeFileSync } from 'fs';
 
-const pkgPath = new URL('../package.json', import.meta.url);
+const pkgPath = new URL('../../package.json', import.meta.url);
 const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
 
 let changed = false;

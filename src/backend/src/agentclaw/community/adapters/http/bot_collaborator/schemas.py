@@ -62,6 +62,12 @@ class ListCollaboratorsRequest(BaseModel):
     role: Optional[str] = Field(default=None, description="角色过滤（admin/member）")
 
 
+class BatchListCollaboratorsRequest(BaseModel):
+    """批量获取协作者列表请求。"""
+    bot_ids: List[str] = Field(..., description="当前协作参与的 Bot ID 列表")
+    role: Optional[str] = Field(default=None, description="角色过滤（admin/member）")
+
+
 class ListCollaboratorsResponse(BaseModel):
     """获取协作者列表响应。"""
     collaborators: List[CollaboratorInfo] = Field(default_factory=list, description="协作者列表")

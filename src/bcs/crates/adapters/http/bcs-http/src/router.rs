@@ -144,8 +144,18 @@ fn build_api_routes() -> Router<HttpAppState> {
                 .post(routes::providers::register_provider_bot),
         )
         .route(
+            "/providers/{provider_id}/bots/by-task-modes",
+            get(routes::providers::list_provider_bots_by_task_modes),
+        )
+        .route(
             "/providers/{provider_id}/bots/{bot_uuid}",
-            delete(routes::providers::delete_provider_bot),
+            delete(routes::providers::delete_provider_bot)
+                .patch(routes::providers::patch_provider_bot),
+        )
+        .route(
+            "/providers/{provider_id}/bots/{bot_uuid}/attributes",
+            get(routes::providers::get_provider_bot_attributes)
+                .patch(routes::providers::patch_provider_bot_attributes),
         )
         .route(
             "/providers/{provider_id}/disable",
@@ -173,6 +183,10 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/admin/bots/onboard",
             post(routes::onboard::admin_onboard_bot),
         )
+        .route(
+            "/admin/bots/{bot_uuid}/ensure",
+            post(routes::ensure::ensure_bot),
+        )
         .route("/admin/secret/{name}", get(routes::secret::pull_secret))
         .route("/actors/list", get(routes::actors::list_actors))
         .route("/actors/search", get(routes::actors::search_actors))
@@ -195,6 +209,21 @@ fn build_api_routes() -> Router<HttpAppState> {
         .route(
             "/friends/requests/{id}/reject",
             post(routes::friends::reject_friend_request),
+        )
+        .route(
+            "/collaboration/friend-connections/requests",
+            post(routes::friend_connections::create_friend_request)
+                .get(routes::friend_connections::list_friend_requests),
+        )
+        .route("/collaboration/friend-connections/requests/{id}/accept", post(routes::friend_connections::accept_friend_request))
+        .route("/collaboration/friend-connections/requests/{id}/reject", post(routes::friend_connections::reject_friend_request))
+        .route("/collaboration/friend-connections/requests/{id}/cancel", post(routes::friend_connections::cancel_friend_request))
+        .route("/collaboration/friend-connections/{actor}", delete(routes::friend_connections::revoke_friend))
+        .route("/collaboration/friend-connections", get(routes::friend_connections::list_friends_by_actor))
+        .route("/bots/search", get(routes::bots::search_bots))
+        .route(
+            "/bots/{id}/admission",
+            get(routes::admission::get_admission),
         )
         .route("/groups", get(routes::groups::list_groups).post(routes::groups::create_group))
         .route("/groups/my", get(routes::groups::list_my_groups))

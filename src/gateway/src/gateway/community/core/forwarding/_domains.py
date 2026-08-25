@@ -1,9 +1,11 @@
 """Domain → upstream-server resolution (transport-agnostic).
 
 The gateway routes by **domain**, and a domain claims a *path pattern*: a run of
-literal segments under the version base, followed by ``**``. Resolution gathers
-every domain whose pattern matches the path **and** which answers the requesting
-plane, then takes the most specific of those — match first, rank second. A path
+literal segments under the version base — optionally continued by ``{param}``
+segments, each claiming one segment whatever it holds — followed by ``**``.
+Resolution gathers every domain whose pattern matches the path **and** which
+answers the requesting plane, then takes the most specific of those — match
+first, rank second. A path
 no configured domain claims on that plane resolves to ``None`` (the caller
 denies — never an open proxy).
 
@@ -282,12 +284,44 @@ class Domain:
     def mount_prefix(self) -> str:
         """The fixed path this domain is reachable at.
 
-        Every accepted pattern is ``<literals>/**``, so this is the whole of it
-        bar the glob — the prefix a route is mounted on and the prefix a raw,
-        still-encoded path must carry literally. Validation is what makes it
-        meaningful: a pattern that could not produce one is refused at boot.
+        The pattern's leading literal run — everything up to its first
+        parameter or the glob. This is the prefix a route is mounted on and the
+        prefix a raw, still-encoded path must carry literally; for a pattern
+        with parameters it is *wider* than the claim, which a mount may be (the
+        entrypoint re-resolves the path) and the raw-path guard accounts for
+        (:meth:`raw_path_agrees` checks the whole pattern, not only this run).
+        Validation is what makes it meaningful: a pattern that could not
+        produce one past the version base is refused at boot.
         """
         return self.pattern.literal_prefix
+
+    def raw_path_agrees(self, raw_path: str) -> bool:
+        """Whether the still-encoded *raw_path* carries, literally, everything
+        routing decided on.
+
+        Routing and authentication read the *decoded* path; the socket plane
+        dials the *raw* one. Anywhere those two views disagree about a segment
+        that decided something, a request is authorised as one resource and
+        dialled as another. Two things decide:
+
+        - the anchoring prefix — the rewrite's own ``from`` when one is
+          declared, since :meth:`PathRewrite.apply` substitutes that literal
+          text in the raw path and it may sit deeper than the mount prefix;
+          otherwise the mount prefix, which chose the route and the
+          authentication rule. It must appear byte for byte, on a segment
+          boundary.
+        - every literal segment of the pattern, which may continue *past* a
+          parameter. A parameter's **value** decides nothing — any segment
+          matches it — so a parameter position may stay encoded however its
+          author wrote it, but a literal after one is as route-deciding as the
+          prefix and must be literal in the raw path too.
+        """
+        anchor = (
+            self.rewrite.from_prefix if self.rewrite is not None else self.mount_prefix
+        )
+        if raw_path != anchor and not raw_path.startswith(f"{anchor}/"):
+            return False
+        return self.pattern.matches(split_segments(raw_path))
 
     @property
     def serves_http(self) -> bool:
@@ -480,13 +514,18 @@ def _parse_pattern(name: str, raw: Any, base_path: str) -> PathPattern:
     can be written wider than that, and ``match: /**`` is precisely an open
     proxy — so the invariant now has to be enforced rather than assumed.
 
-    The accepted shape is a run of literal segments followed by ``**``, and the
-    literals must extend *past* one of the two Gateway API bases: the configured
-    public base path or the fixed internal ``/api/v1`` base. That refuses wide
-    patterns such as ``/**``, ``/openapi/**``, ``/openapi/v1/**``, and
-    ``/api/v1/**``, and also refuses a leading parameter, which pins nothing at
-    all: ``/openapi/v1/{x}/**`` matches every domain's traffic while looking
-    specific.
+    The accepted shape is literal segments, then optionally ``{param}`` segments
+    (a parameter claims one segment, whatever it holds; literals may continue
+    past it), followed by ``**``. The *leading literal run* must extend *past*
+    one of the two Gateway API bases: the configured public base path or the
+    fixed internal ``/api/v1`` base. That refuses wide patterns such as ``/**``,
+    ``/openapi/**``, ``/openapi/v1/**``, and ``/api/v1/**``, and also refuses a
+    parameter before the base is extended, which pins nothing at all:
+    ``/openapi/v1/{x}/**`` matches every domain's traffic while looking
+    specific. The pinned run is also what makes a parameter *serviceable*: it is
+    the :attr:`Domain.mount_prefix` a socket route is mounted on and the prefix
+    a raw path must carry literally, so both stay derivable however the rest of
+    the pattern varies.
 
     A trailing ``**`` is required rather than inferred. A domain serves a
     *subtree* — the bare prefix and everything beneath it — and writing the glob
@@ -503,27 +542,26 @@ def _parse_pattern(name: str, raw: Any, base_path: str) -> PathPattern:
             f"serves a subtree, and writing the glob keeps the width of the "
             f"claim visible where it is configured"
         )
-    literals = pattern.segments[:-1]
-    if GLOB in literals or any(_is_param_segment(seg) for seg in literals):
+    if GLOB in pattern.segments[:-1]:
         raise ValueError(
-            f"domain {name!r}: match {raw!r} must be literal segments followed "
-            f"by '/{GLOB}' — a parameter or an inner glob pins no prefix, so "
-            f"routes could not be mounted and a raw path could not be checked "
-            f"against it"
+            f"domain {name!r}: match {raw!r} may use '{GLOB}' only as its "
+            f"final segment — an inner glob pins no prefix, so routes could "
+            f"not be mounted and a raw path could not be checked against it"
         )
+    leading_literals = split_segments(pattern.literal_prefix)
     allowed_bases = (split_segments(base_path), split_segments(_INTERNAL_BASE_PATH))
     if not any(
-        literals[: len(base)] == base and len(literals) > len(base)
+        leading_literals[: len(base)] == base and len(leading_literals) > len(base)
         for base in allowed_bases
     ):
         allowed = ", ".join(
             f"{('/' + '/'.join(base)).rstrip('/')!r}" for base in allowed_bases
         )
         raise ValueError(
-            f"domain {name!r}: match {raw!r} is too broad — it must pin one "
-            f"of {allowed} plus at least one more literal segment. "
-            f"A wider pattern makes the gateway an open proxy into this "
-            f"domain's upstream"
+            f"domain {name!r}: match {raw!r} is too broad — its leading "
+            f"literal segments must pin one of {allowed} plus at least one "
+            f"more literal segment, before any parameter. A wider pattern "
+            f"makes the gateway an open proxy into this domain's upstream"
         )
     return pattern
 
@@ -533,29 +571,45 @@ def _is_param_segment(segment: str) -> bool:
 
 
 def _reject_ambiguous(domains: dict[str, Domain]) -> None:
-    """Refuse two domains that would answer one path on one plane.
+    """Refuse two domains that would answer one path on one plane, tied.
 
-    Only *identical* patterns can collide: every accepted pattern is a literal
-    prefix, so two of equal length differ at some segment and no path matches
-    both, while two of unequal length are ranked apart by literal count. Same
-    pattern and an overlapping plane, though, is a tie with no defined winner —
-    and the winner would decide which upstream receives the traffic.
+    Two patterns collide when some path matches both **and** their specificity
+    is equal, so ranking picks no winner — and the winner would decide which
+    upstream receives the traffic. Equal specificity means equal literal and
+    parameter counts, so the pre-glob runs are the same length; such a pair
+    both match some path exactly when every position is co-satisfiable — the
+    literals equal, or either side a parameter (``/openapi/v1/x/{p}/**`` and
+    ``/openapi/v1/{q}/y/**`` both claim ``/openapi/v1/x/y/…``). Overlaps that
+    *rank apart* are left alone deliberately: a literal carve-out beneath a
+    parameter's claim is the nesting the pattern grammar exists for.
 
-    Two declarations at one pattern for *different* planes are the supported way
-    to serve a prefix over both, so those are left alone.
+    Two colliding declarations for *different* planes are the supported way to
+    serve one prefix over both, so those are left alone too.
     """
     for name, domain in domains.items():
         for other_name, other in domains.items():
-            if other_name <= name or domain.pattern != other.pattern:
+            if other_name <= name or not _tied(domain.pattern, other.pattern):
                 continue
             shared = domain.protocols & other.protocols
             if shared:
                 raise ValueError(
-                    f"domains {name!r} and {other_name!r} both claim "
-                    f"{domain.mount_prefix!r} on {sorted(shared)} — which one "
-                    f"serves a request there is undefined. Give them different "
-                    f"patterns, or different protocols"
+                    f"domains {name!r} and {other_name!r} claim patterns "
+                    f"{'/' + '/'.join(domain.pattern.segments)!r} and "
+                    f"{'/' + '/'.join(other.pattern.segments)!r} that match a "
+                    f"common path with equal specificity on {sorted(shared)} — "
+                    f"which one serves a request there is undefined. Give them "
+                    f"different patterns, or different protocols"
                 )
+
+
+def _tied(pattern: PathPattern, other: PathPattern) -> bool:
+    """Whether some path matches both patterns and ranking picks no winner."""
+    if pattern.specificity != other.specificity:
+        return False
+    return len(pattern.segments) == len(other.segments) and all(
+        a == b or _is_param_segment(a) or _is_param_segment(b)
+        for a, b in zip(pattern.segments, other.segments)
+    )
 
 
 def _parse_protocols(name: str, raw: Any) -> frozenset[str]:

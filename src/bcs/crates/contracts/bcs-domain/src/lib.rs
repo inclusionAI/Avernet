@@ -13,6 +13,7 @@ pub mod actor;
 pub mod attachment;
 pub mod channel;
 pub mod collaboration;
+pub mod edge_permission;
 pub mod friend;
 pub mod fusion;
 pub mod group;
@@ -20,6 +21,7 @@ pub mod group_id;
 pub mod invite;
 pub mod message;
 pub mod organization;
+pub mod opening_message;
 pub mod proposal;
 pub mod provider;
 pub mod register;
@@ -64,8 +66,8 @@ pub use group::{
 };
 pub use group_id::{
     GENERATED_SESSION_ID_SUFFIX_CHARS, GROUP_ID_PREFIX, GroupIdBuildError,
-    MAX_GENERATED_GROUP_ID_CHARS, MAX_SESSION_ID_CHARS, channel_group_id,
-    generated_group_id,
+    MAX_CHANNEL_TYPE_CHARS, MAX_GENERATED_GROUP_ID_CHARS, MAX_SESSION_ID_CHARS,
+    channel_group_id, generated_group_id, is_valid_channel_type,
 };
 pub use message::{
     AuditEntry, BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
@@ -74,11 +76,16 @@ pub use message::{
     STATE_MACHINE_PANEL_MESSAGE_TYPE, SenderType, Task, TaskStatus,
 };
 pub use organization::{Organization, OrganizationMember};
+pub use opening_message::{
+    AixUiOpeningMessage, AixUiOpeningMessageType, AixUiOpeningTab, MAX_OPENING_MESSAGE_BYTES,
+    MAX_OPENING_MESSAGE_COMPONENT_BYTES, OpeningMessage, OpeningMessageError,
+    OpeningMessageRenderContext, RenderedOpeningMessage,
+};
 pub use proposal::GroupChatProposal;
 pub use provider::{
     BotDeliveryTarget, CoordinationMode, CoordinationSurface, ProviderAuthMode,
-    ProviderBotBinding, ProviderCoordinationConfig, ProviderCredential,
-    ProviderOrganizationManagementConfig, ProviderRecord, RedactedToken,
+    ProviderBotBinding, ProviderBotConnectionMode, ProviderCoordinationConfig,
+    ProviderCredential, ProviderOrganizationManagementConfig, ProviderRecord, RedactedToken,
 };
 pub use registry::{
     AgentCredentials, BindingChannel, BindingChannels, BotCapabilities, BotConnectParams,

@@ -38,6 +38,10 @@ class ArcaCreationResult(DeviceCreationResult):
     ttl_in_minutes: float | None = Field(
         default=None, description="沙箱空闲超时时间(分钟)"
     )
+    ttl_expiration_time: int | None = Field(
+        default=None,
+        description="沙箱到期时间戳（毫秒 epoch，与 info.ttl_timestamp 同单位）",
+    )
     envs: dict[str, str] | None = Field(default=None, description="环境变量")
     snapshot_id: str | None = Field(default=None, description="快照/镜像ID")
     metadata: dict[str, str] | None = Field(default=None, description="透传元数据")

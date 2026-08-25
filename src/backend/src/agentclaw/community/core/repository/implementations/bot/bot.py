@@ -35,6 +35,7 @@ literal ``NOW()`` / model ``onupdate``). Return shaping reuses
 prod consumers only read the projected subset) plus a nested
 ``publish``.
 """
+
 from __future__ import annotations
 
 import json
@@ -52,7 +53,9 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.repository.protocols.bot import BotRepository as BotRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import (
+    BotRepository as BotRepositoryProtocol,
+)
 
 logger = get_logger()
 
@@ -130,6 +133,7 @@ class BotRepository(
                 ext=ext,
                 bot_type=bot_data.get("bot_type", "personal"),
                 template_type=bot_data.get("template_type"),
+                space_id=bot_data.get("space_id"),
             )
             db.add(bot)
             db.flush()
@@ -156,14 +160,11 @@ class BotRepository(
         execution_options: Optional[dict] = None,
     ) -> Optional[Dict[str, Any]]:
         with self._db.orm_session() as db:
-            q = (
-                db.query(self.Model)
-                .filter(
-                    self.Model.bot_id == bot_id,
-                    self.Model.owner_id == owner_id,
-                    self.Model.is_delete == 0,
-                    self._env(),
-                )
+            q = db.query(self.Model).filter(
+                self.Model.bot_id == bot_id,
+                self.Model.owner_id == owner_id,
+                self.Model.is_delete == 0,
+                self._env(),
             )
             if execution_options:
                 q = q.execution_options(**execution_options)
@@ -330,15 +331,11 @@ class BotRepository(
         page_size: int = 20,
     ) -> tuple[int, List[Dict[str, Any]]]:
         with self._db.orm_session() as db:
-            query = db.query(self.Model).filter(
-                self.Model.is_delete == 0, self._env()
-            )
+            query = db.query(self.Model).filter(self.Model.is_delete == 0, self._env())
             if entity_id:
                 query = query.filter(self.Model.entity_id == entity_id)
             if entity_type:
-                query = query.filter(
-                    self.Model.entity_type == entity_type
-                )
+                query = query.filter(self.Model.entity_type == entity_type)
             total = query.count()
             bots = (
                 query.order_by(self.Model.gmt_create.desc())
@@ -357,14 +354,13 @@ class BotRepository(
         owner_id: Optional[str] = None,
         engine: Optional[str] = None,
         status: Optional[str] = None,
+        space_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
         bot_ids: Optional[List[str]] = None,
     ) -> tuple[int, List[Dict[str, Any]]]:
         with self._db.orm_session() as db:
-            query = db.query(self.Model).filter(
-                self.Model.is_delete == 0, self._env()
-            )
+            query = db.query(self.Model).filter(self.Model.is_delete == 0, self._env())
             if public:
                 query = query.filter(self.Model.public == public)
             if bot_name:
@@ -376,9 +372,7 @@ class BotRepository(
                     self.Model.bot_name.contains(bot_name, autoescape=True)
                 )
             if owner_name:
-                query = query.filter(
-                    self.Model.owner_name == owner_name
-                )
+                query = query.filter(self.Model.owner_name == owner_name)
             if bot_id:
                 query = query.filter(self.Model.bot_id == bot_id)
             if bot_ids is not None:
@@ -388,6 +382,8 @@ class BotRepository(
                 query = query.filter(self.Model.bot_id.in_(bot_ids))
             if owner_id:
                 query = query.filter(self.Model.owner_id == owner_id)
+            if space_id is not None:
+                query = query.filter(self.Model.space_id == space_id)
             if engine:
                 query = query.filter(self.Model.active_engine == engine)
             if status:
@@ -436,17 +432,47 @@ class BotRepository(
             )
             return [b.to_dict() for b in bots]
 
+    def list_bots_by_owner_bot_pairs(
+        self,
+        pairs: List[tuple[str, str]],
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[int, List[Dict[str, Any]]]:
+        """Page exact Bot/owner pairs within the current tenant and environment."""
+        if not pairs:
+            return 0, []
+        with self._db.orm_session() as db:
+            query = db.query(self.Model).filter(
+                or_(
+                    *[
+                        and_(
+                            self.Model.bot_id == bot_id,
+                            self.Model.owner_id == owner_id,
+                        )
+                        for bot_id, owner_id in pairs
+                    ]
+                ),
+                self.Model.is_delete == 0,
+                self._env(),
+            )
+            total = query.count()
+            bots = (
+                query.order_by(self.Model.gmt_create.desc(), self.Model.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
+            return total, [bot.to_dict() for bot in bots]
+
     def list_by_search(
         self,
         public: Optional[str] = None,
         search: Optional[str] = None,
-        page: int = 1,
-        page_size: int = 20,
+        page: int | None = 1,
+        page_size: int | None = 20,
     ) -> tuple[int, List[Dict[str, Any]]]:
         with self._db.orm_session() as db:
-            query = db.query(self.Model).filter(
-                self.Model.is_delete == 0, self._env()
-            )
+            query = db.query(self.Model).filter(self.Model.is_delete == 0, self._env())
             if public:
                 query = query.filter(self.Model.public == public)
             if search:
@@ -457,12 +483,17 @@ class BotRepository(
                     )
                 )
             total = query.count()
-            bots = (
-                query.order_by(self.Model.gmt_create.desc())
-                .offset((page - 1) * page_size)
-                .limit(page_size)
-                .all()
-            )
+            if page is None or page_size is None:
+                bots = query.order_by(
+                    self.Model.gmt_create.desc(), self.Model.id.desc()
+                ).all()
+            else:
+                bots = (
+                    query.order_by(self.Model.gmt_create.desc())
+                    .offset((page - 1) * page_size)
+                    .limit(page_size)
+                    .all()
+                )
             return total, [b.to_dict() for b in bots]
 
     # ── updates (single conditional statements) ─────────────────
@@ -497,6 +528,38 @@ class BotRepository(
             return None
         return self.get_by_id_and_owner(bot_id, owner_id)
 
+    def update_space_by_owner(
+        self, *, bot_id: str, owner_id: str, space_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """Update only ``space_id`` without widening the generic allowlist.
+
+        The generic ``update_by_owner`` intentionally mirrors the historical
+        production allowlist. Space assignment is a newer structured mutation,
+        so it gets an explicit repository operation instead of silently changing
+        the semantics of every existing caller.
+        """
+        with self._db.orm_session() as db:
+            rowcount = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.bot_id == bot_id,
+                    self.Model.owner_id == owner_id,
+                    self.Model.is_delete == 0,
+                    self._env(),
+                )
+                .update(
+                    {
+                        self.Model.space_id: space_id,
+                        self.Model.modifier_id: owner_id,
+                        self.Model.gmt_modified: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+        if rowcount == 0:
+            return None
+        return self.get_by_id_and_owner(bot_id, owner_id)
+
     def compare_and_set_ext(
         self,
         *,
@@ -506,11 +569,7 @@ class BotRepository(
         ext: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
         """Whole-column ``ext`` CAS scoped by owner, env, and live row."""
-        expected_json = (
-            json.dumps(expected_ext)
-            if expected_ext is not None
-            else None
-        )
+        expected_json = json.dumps(expected_ext) if expected_ext is not None else None
         ext_json = json.dumps(ext)
         with self._db.orm_session() as db:
             query = db.query(self.Model).filter(
@@ -534,9 +593,7 @@ class BotRepository(
             return None
         return self.get_by_id_and_owner(bot_id, owner_id)
 
-    def soft_delete_by_owner(
-        self, bot_id: str, owner_id: str
-    ) -> bool:
+    def soft_delete_by_owner(self, bot_id: str, owner_id: str) -> bool:
         with self._db.orm_session() as db:
             rowcount = (
                 db.query(self.Model)
@@ -560,21 +617,16 @@ class BotRepository(
 
     def count_by_owner(self, owner_id: str, exclude_bot_type: str | None = None) -> int:
         with self._db.orm_session() as db:
-            query = (
-                db.query(self.Model)
-                .filter(
-                    self.Model.is_delete == 0,
-                    self.Model.owner_id == owner_id,
-                    self._env(),
-                )
+            query = db.query(self.Model).filter(
+                self.Model.is_delete == 0,
+                self.Model.owner_id == owner_id,
+                self._env(),
             )
             if exclude_bot_type:
                 query = query.filter(self.Model.bot_type != exclude_bot_type)
             return query.count()
 
-    def exists_by_owner_and_bot_id(
-        self, owner_id: str, bot_id: str
-    ) -> bool:
+    def exists_by_owner_and_bot_id(self, owner_id: str, bot_id: str) -> bool:
         with self._db.orm_session() as db:
             return (
                 db.query(self.Model)
@@ -588,9 +640,7 @@ class BotRepository(
                 > 0
             )
 
-    def exists_by_owner_and_bot_type(
-        self, owner_id: str, bot_type: str
-    ) -> bool:
+    def exists_by_owner_and_bot_type(self, owner_id: str, bot_type: str) -> bool:
         with self._db.orm_session() as db:
             return (
                 db.query(self.Model)
@@ -617,9 +667,7 @@ class BotRepository(
                 > 0
             )
 
-    def get_by_bot_name(
-        self, bot_name: str
-    ) -> Optional[Dict[str, Any]]:
+    def get_by_bot_name(self, bot_name: str) -> Optional[Dict[str, Any]]:
         with self._db.orm_session() as db:
             bot = (
                 db.query(self.Model)
@@ -632,9 +680,7 @@ class BotRepository(
             )
             return bot.to_dict() if bot else None
 
-    def get_by_binding_id(
-        self, binding_id: int
-    ) -> Optional[Dict[str, Any]]:
+    def get_by_binding_id(self, binding_id: int) -> Optional[Dict[str, Any]]:
         with self._db.orm_session() as db:
             bot = (
                 db.query(self.Model)
@@ -673,7 +719,9 @@ class BotRepository(
     def get_device_provider_by_bot_id_and_owner(
         self, bot_id: str, owner_id: str
     ) -> Optional[Dict[str, Any]]:
-        from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
+        from agentclaw.community.core.devices.repository.models import (
+            EntityDeviceBinding,
+        )
 
         with self._db.orm_session() as db:
             row = (
@@ -685,8 +733,7 @@ class BotRepository(
                 .select_from(self.Model)
                 .outerjoin(
                     EntityDeviceBinding,
-                    self.Model.device_id
-                    == EntityDeviceBinding.device_id,
+                    self.Model.device_id == EntityDeviceBinding.device_id,
                 )
                 .filter(
                     self.Model.bot_id == bot_id,
@@ -700,10 +747,10 @@ class BotRepository(
                 return None
             return self._device_provider_result(row[0], row[1], row[2])
 
-    def get_device_provider_by_bot_id(
-        self, bot_id: str
-    ) -> Optional[Dict[str, Any]]:
-        from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
+    def get_device_provider_by_bot_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
+        from agentclaw.community.core.devices.repository.models import (
+            EntityDeviceBinding,
+        )
 
         with self._db.orm_session() as db:
             row = (
@@ -715,8 +762,7 @@ class BotRepository(
                 .select_from(self.Model)
                 .outerjoin(
                     EntityDeviceBinding,
-                    self.Model.device_id
-                    == EntityDeviceBinding.device_id,
+                    self.Model.device_id == EntityDeviceBinding.device_id,
                 )
                 .filter(
                     self.Model.bot_id == bot_id,
@@ -753,7 +799,9 @@ class BotRepository(
         from agentclaw.community.core.service_bot.repository.models import (
             BotPublishModel,
         )
-        from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
+        from agentclaw.community.core.devices.repository.models import (
+            EntityDeviceBinding,
+        )
 
         env = get_current_env()
         with self._db.orm_session() as db:
@@ -778,13 +826,10 @@ class BotRepository(
                     )
                 )
             else:
-                query = (
-                    db.query(self.Model, BotPublishModel)
-                    .outerjoin(
-                        BotPublishModel,
-                        (BotPublishModel.source_bot_pk == self.Model.id)
-                        & (BotPublishModel.env == env),
-                    )
+                query = db.query(self.Model, BotPublishModel).outerjoin(
+                    BotPublishModel,
+                    (BotPublishModel.source_bot_pk == self.Model.id)
+                    & (BotPublishModel.env == env),
                 )
 
             # 基础过滤
@@ -839,19 +884,19 @@ class BotRepository(
 
             # provider 过滤（按需 JOIN 设备绑定表，避免影响其它路径行数）
             if provider:
-                query = query.outerjoin(
-                    EntityDeviceBinding,
-                    (self.Model.device_id == EntityDeviceBinding.device_id)
-                    & (EntityDeviceBinding.env == env),
-                ).filter(
-                    EntityDeviceBinding.device_provider == provider
-                ).distinct()
+                query = (
+                    query.outerjoin(
+                        EntityDeviceBinding,
+                        (self.Model.device_id == EntityDeviceBinding.device_id)
+                        & (EntityDeviceBinding.env == env),
+                    )
+                    .filter(EntityDeviceBinding.device_provider == provider)
+                    .distinct()
+                )
 
             # service_status_list 过滤
             if service_status_list:
-                query = query.filter(
-                    BotPublishModel.status.in_(service_status_list)
-                )
+                query = query.filter(BotPublishModel.status.in_(service_status_list))
 
             # 去重（仅在 collaborator 查询时需要）
             if collaborator_user_id:
@@ -877,18 +922,14 @@ class BotRepository(
                 # 结果为 (bot, publish, user_role) 三元组
                 for bot, publish, user_role in results:
                     item = bot.to_dict()
-                    item["publish"] = (
-                        publish.to_dict() if publish else None
-                    )
+                    item["publish"] = publish.to_dict() if publish else None
                     item["user_role"] = user_role
                     items.append(item)
             else:
                 # 现有逻辑：结果为 (bot, publish) 二元组
                 for bot, publish in results:
                     item = bot.to_dict()
-                    item["publish"] = (
-                        publish.to_dict() if publish else None
-                    )
+                    item["publish"] = publish.to_dict() if publish else None
                     items.append(item)
             return total, items
 
@@ -910,9 +951,7 @@ class BotRepository(
                 ),
             )
             if entity_type:
-                query = query.filter(
-                    self.Model.entity_type == entity_type
-                )
+                query = query.filter(self.Model.entity_type == entity_type)
             if bot_type:
                 query = query.filter(self.Model.bot_type == bot_type)
             return [b.to_dict() for b in query.all()]
@@ -935,7 +974,7 @@ class BotRepository(
                 self.Model.is_delete == 0,
                 self.Model.env == env,
                 self.Model.ext.isnot(None),
-                func.json_extract(self.Model.ext, '$.is_domain_bot').is_(True),
+                func.json_extract(self.Model.ext, "$.is_domain_bot").is_(True),
             )
 
             if keyword:

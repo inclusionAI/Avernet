@@ -32,7 +32,8 @@ def test_create_group_chat_signs_and_sends_idempotency():
         seen["sig"] = req.headers.get("X-ECB-Signature")
         seen["tok"] = req.headers.get("X-ECB-Token")
         seen["idem"] = req.headers.get("Idempotency-Key")
-        import hmac, hashlib
+        import hashlib
+        import hmac
         ts = req.headers["X-ECB-Timestamp"]
         exp = hmac.new(b"s3c", f"{ts}{req.method}{req.url.path}".encode(), hashlib.sha256).hexdigest()
         assert req.headers["X-ECB-Signature"] == exp
@@ -104,3 +105,30 @@ def test_client_4xx_raises():
 
     with pytest.raises(BcsClientRequestError):
         _run(_adapter(h).get_group("g1"))
+
+
+def test_owned_client_isolated_when_event_loop_changes(monkeypatch):
+    import agentclaw.community.core.task.task_runner.integration.bcs_http_adapter as module
+
+    class _FakeClient:
+        instances = []
+
+        def __init__(self, *, base_url):
+            self.base_url = base_url
+            self.closed = False
+            self.__class__.instances.append(self)
+
+        async def request(self, method, path, **kwargs):
+            return httpx.Response(200, json={"session": {"status": "completed"}})
+
+        async def aclose(self):
+            self.closed = True
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", _FakeClient)
+    adapter = module.BcsHttpAdapter(_Tok())
+
+    _run(adapter.get_group("g1"))
+    _run(adapter.get_group("g2"))
+
+    assert len(_FakeClient.instances) == 2
+    assert _FakeClient.instances[1].closed is True

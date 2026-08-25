@@ -25,6 +25,35 @@ def _record(**overrides) -> RenderScreenRecord:
     return RenderScreenRecord(**defaults)
 
 
+def _bot(**overrides):
+    defaults = dict(
+        id=101,
+        bot_id="bot_001",
+        owner_id="owner_001",
+        active_engine="claude_code",
+        template_type="normalCC",
+    )
+    defaults.update(overrides)
+    return defaults
+
+
+def _dynamic_shared_bot(**overrides):
+    defaults = dict(
+        id=102,
+        bot_id="bot_001",
+        owner_id="owner_001",
+        active_engine="claude_code",
+        template_type="architect",
+        template_config={
+            "capabilities": {
+                "member_management": True,
+            },
+        },
+    )
+    defaults.update(overrides)
+    return defaults
+
+
 @pytest.fixture
 def mock_repo():
     repo = MagicMock()
@@ -32,31 +61,89 @@ def mock_repo():
 
 
 @pytest.fixture
-def service(mock_repo):
-    return RenderScreenService(repository=mock_repo)
+def mock_bot_repo():
+    repo = MagicMock()
+    repo.get_by_id.return_value = _bot()
+    return repo
+
+
+@pytest.fixture
+def mock_collaborator_repo():
+    repo = MagicMock()
+    repo.get_by_bot_and_user.return_value = None
+    return repo
+
+
+@pytest.fixture
+def service(mock_repo, mock_bot_repo, mock_collaborator_repo):
+    return RenderScreenService(
+        repository=mock_repo,
+        bot_repository=mock_bot_repo,
+        collaborator_repository=mock_collaborator_repo,
+    )
 
 
 class TestListRenderScreens:
-    def test_returns_records(self, service, mock_repo):
+    def test_returns_records_for_owner_scoped_bot(self, service, mock_repo, mock_bot_repo):
         mock_repo.list_by_bot_id.return_value = [
             _record(id=1, name="看板1"),
             _record(id=2, name="看板2"),
         ]
-        result = service.list_render_screens(bot_id="bot_001", owner_id="user_001")
+        result = service.list_render_screens(
+            bot_id="bot_001",
+            owner_id="user_001",
+            current_user_id="user_001",
+        )
         assert len(result) == 2
         mock_repo.list_by_bot_id.assert_called_once_with(bot_id="bot_001", owner_id="user_001")
+        mock_bot_repo.get_by_id.assert_called_once_with("bot_001")
 
-    def test_returns_empty(self, service, mock_repo):
-        mock_repo.list_by_bot_id.return_value = []
-        result = service.list_render_screens(bot_id="bot_empty", owner_id="user_empty")
-        assert result == []
+    def test_shared_coding_bot_lists_without_owner_filter(self, service, mock_repo, mock_bot_repo, mock_collaborator_repo):
+        mock_bot_repo.get_by_id.return_value = _bot(template_type="applicationCoding", active_engine="claude_code")
+        mock_collaborator_repo.get_by_bot_and_user.return_value = _record(id=9)
+        mock_repo.list_by_bot_id.return_value = [_record(id=1, owner_id="collab_001")]
 
-    def test_default_bot_isolates_by_owner(self, service, mock_repo):
-        """不同用户共享 bot_id='default' 时，需按 owner_id 隔离。"""
-        mock_repo.list_by_bot_id.return_value = [_record(owner_id="user_A")]
-        result = service.list_render_screens(bot_id="default", owner_id="user_A")
+        result = service.list_render_screens(
+            bot_id="bot_001",
+            owner_id="owner_001",
+            current_user_id="collab_001",
+        )
+
         assert len(result) == 1
-        mock_repo.list_by_bot_id.assert_called_once_with(bot_id="default", owner_id="user_A")
+        mock_repo.list_by_bot_id.assert_called_once_with(bot_id="bot_001", owner_id=None)
+
+    def test_shared_dynamic_template_bot_lists_without_owner_filter(self, service, mock_repo, mock_bot_repo, mock_collaborator_repo):
+        mock_bot_repo.get_by_id.return_value = _dynamic_shared_bot()
+        mock_collaborator_repo.get_by_bot_and_user.return_value = _record(id=9)
+        mock_repo.list_by_bot_id.return_value = [_record(id=1, owner_id="collab_001")]
+
+        result = service.list_render_screens(
+            bot_id="bot_001",
+            owner_id="owner_001",
+            current_user_id="collab_001",
+        )
+
+        assert len(result) == 1
+        mock_repo.list_by_bot_id.assert_called_once_with(bot_id="bot_001", owner_id=None)
+
+    def test_shared_coding_bot_denies_non_collaborator(self, service, mock_repo, mock_bot_repo):
+        mock_bot_repo.get_by_id.return_value = _bot(template_type="applicationCoding", active_engine="claude_code")
+        with pytest.raises(PermissionError):
+            service.list_render_screens(
+                bot_id="bot_001",
+                owner_id="owner_001",
+                current_user_id="stranger",
+            )
+
+
+    def test_missing_bot_fails_closed(self, service, mock_bot_repo):
+        mock_bot_repo.get_by_id.return_value = None
+        with pytest.raises(PermissionError, match="无权查看此 Bot 的 CDN 配置"):
+            service.list_render_screens(
+                bot_id="bot_missing",
+                owner_id="owner_001",
+                current_user_id="user_001",
+            )
 
 
 class TestCreateRenderScreen:
@@ -94,17 +181,80 @@ class TestCreateRenderScreen:
                 creator_id="user_001",
             )
 
-    def test_create_same_name_different_owner_ok(self, service, mock_repo):
-        """不同用户在各自 default bot 上创建同名配置不应冲突。"""
+    def test_create_shared_bot_uses_sharing_scope(self, service, mock_repo, mock_bot_repo, mock_collaborator_repo):
+        mock_bot_repo.get_by_id.return_value = _bot(template_type="applicationCoding", active_engine="claude_code")
+        mock_collaborator_repo.get_by_bot_and_user.return_value = _record(id=9)
         mock_repo.list_by_bot_id.return_value = []
         mock_repo.insert.return_value = 43
+
         record_id = service.create_render_screen(
-            bot_id="default", owner_id="user_B",
-            name="数据看板", cdn_url="https://cdn.example.com/v2/index.js",
-            creator_id="user_B",
+            bot_id="bot_001",
+            owner_id="user_001",
+            name="数据看板",
+            cdn_url="https://cdn.example.com/v2/index.js",
+            creator_id="collab_001",
+            current_user_id="collab_001",
         )
+
         assert record_id == 43
-        mock_repo.list_by_bot_id.assert_called_once_with(bot_id="default", owner_id="user_B")
+        mock_repo.list_by_bot_id.assert_called_once_with(bot_id="bot_001", owner_id=None)
+        mock_repo.insert.assert_called_once_with(
+            bot_id="bot_001",
+            owner_id="owner_001",
+            name="数据看板",
+            cdn_url="https://cdn.example.com/v2/index.js",
+            creator_id="collab_001",
+        )
+
+    def test_create_dynamic_shared_bot_uses_sharing_scope(self, service, mock_repo, mock_bot_repo, mock_collaborator_repo):
+        mock_bot_repo.get_by_id.return_value = _dynamic_shared_bot()
+        mock_collaborator_repo.get_by_bot_and_user.return_value = _record(id=9)
+        mock_repo.list_by_bot_id.return_value = []
+        mock_repo.insert.return_value = 44
+
+        record_id = service.create_render_screen(
+            bot_id="bot_001",
+            owner_id="user_001",
+            name="共享看板",
+            cdn_url="https://cdn.example.com/v3/index.js",
+            creator_id="collab_002",
+            current_user_id="collab_002",
+        )
+
+        assert record_id == 44
+        mock_repo.list_by_bot_id.assert_called_once_with(bot_id="bot_001", owner_id=None)
+        mock_repo.insert.assert_called_once_with(
+            bot_id="bot_001",
+            owner_id="owner_001",
+            name="共享看板",
+            cdn_url="https://cdn.example.com/v3/index.js",
+            creator_id="collab_002",
+        )
+
+    def test_create_shared_bot_denies_non_collaborator(self, service, mock_bot_repo):
+        mock_bot_repo.get_by_id.return_value = _bot(template_type="applicationCoding", active_engine="claude_code")
+        with pytest.raises(PermissionError):
+            service.create_render_screen(
+                bot_id="bot_001",
+                owner_id="user_001",
+                name="看板",
+                cdn_url="https://cdn.example.com/v1/index.js",
+                creator_id="stranger",
+                current_user_id="stranger",
+            )
+
+
+    def test_create_missing_bot_fails_closed(self, service, mock_bot_repo):
+        mock_bot_repo.get_by_id.return_value = None
+        with pytest.raises(PermissionError, match="无权操作此 Bot 的 CDN 配置"):
+            service.create_render_screen(
+                bot_id="bot_missing",
+                owner_id="user_001",
+                name="看板",
+                cdn_url="https://cdn.example.com/v1/index.js",
+                creator_id="user_001",
+                current_user_id="user_001",
+            )
 
 
 class TestUpdateRenderScreen:
@@ -119,6 +269,42 @@ class TestUpdateRenderScreen:
         mock_repo.get_by_id.return_value = None
         with pytest.raises(ValueError, match="not found"):
             service.update_render_screen(record_id=999, name="x", cdn_url="y")
+
+
+class TestAuthorizeRenderScreenRecord:
+    def test_authorize_record_owner_scoped(self, service, mock_repo):
+        mock_repo.get_by_id.side_effect = [_record(id=1, owner_id="user_001"), _bot()]
+        record = service.authorize_render_screen_record(record_id=1, user_id="user_001")
+        assert record.id == 1
+
+    def test_authorize_record_shared_bot_allows_collaborator(self, service, mock_repo, mock_bot_repo, mock_collaborator_repo):
+        mock_repo.get_by_id.return_value = _record(id=1, owner_id="owner_001")
+        mock_bot_repo.get_by_id.return_value = _bot(template_type="applicationCoding", active_engine="claude_code")
+        mock_collaborator_repo.get_by_bot_and_user.return_value = _record(id=9)
+
+        record = service.authorize_render_screen_record(record_id=1, user_id="collab_001")
+        assert record.id == 1
+
+    def test_authorize_record_dynamic_shared_bot_allows_collaborator(self, service, mock_repo, mock_bot_repo, mock_collaborator_repo):
+        mock_repo.get_by_id.return_value = _record(id=1, owner_id="owner_001")
+        mock_bot_repo.get_by_id.return_value = _dynamic_shared_bot(template_type="architect")
+        mock_collaborator_repo.get_by_bot_and_user.return_value = _record(id=9)
+
+        record = service.authorize_render_screen_record(record_id=1, user_id="collab_002")
+        assert record.id == 1
+
+    def test_authorize_record_shared_bot_denies_stranger(self, service, mock_repo, mock_bot_repo):
+        mock_repo.get_by_id.return_value = _record(id=1, owner_id="owner_001")
+        mock_bot_repo.get_by_id.return_value = _bot(template_type="applicationCoding", active_engine="claude_code")
+        with pytest.raises(PermissionError):
+            service.authorize_render_screen_record(record_id=1, user_id="stranger")
+
+
+    def test_authorize_record_missing_bot_fails_closed(self, service, mock_repo, mock_bot_repo):
+        mock_repo.get_by_id.return_value = _record(id=1, owner_id="owner_001")
+        mock_bot_repo.get_by_id.return_value = None
+        with pytest.raises(PermissionError, match="无权操作此 Bot 的 CDN 配置"):
+            service.authorize_render_screen_record(record_id=1, user_id="stranger")
 
 
 class TestDeleteRenderScreen:

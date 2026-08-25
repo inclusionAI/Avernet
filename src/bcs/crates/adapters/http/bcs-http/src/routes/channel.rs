@@ -219,8 +219,8 @@ pub async fn list_conversations_by_session(
     uri: Uri,
     Query(query): Query<ListConversationsBySessionQuery>,
 ) -> Result<Json<ConversationListResponse>, HttpAdapterError> {
-    let _staff_no = require_staff_no(&state, &headers, &uri).await?;
     let (bcs_session_id, channel_type) = normalize_session_query(query)?;
+    authorize_conversation_lookup(&state, &headers, &uri, &bcs_session_id).await?;
     let items = state
         .services
         .channel
@@ -229,6 +229,74 @@ pub async fn list_conversations_by_session(
         .map_err(channel_error)?;
     let items = items.into_iter().map(ConversationResponse::from).collect();
     Ok(Json(ConversationListResponse { items }))
+}
+
+async fn authorize_conversation_lookup(
+    state: &HttpAppState,
+    headers: &HeaderMap,
+    uri: &Uri,
+    bcs_session_id: &str,
+) -> Result<(), HttpAdapterError> {
+    enum Caller {
+        Bot(String),
+        Human { actor_id: String, staff_no: String },
+    }
+
+    let caller = if let Some(bot_uuid) = state.bot_uuid_from_headers(headers).await {
+        Caller::Bot(bot_uuid)
+    } else {
+        let staff_no = state
+            .user_identity
+            .extract(headers, uri)
+            .await
+            .and_then(|identity| identity.staff_no)
+            .map(|staff_no| staff_no.trim().to_string())
+            .filter(|staff_no| !staff_no.is_empty())
+            .ok_or_else(|| {
+                HttpAdapterError::Unauthorized(
+                    "valid bot token or human identity is required".to_string(),
+                )
+            })?;
+        Caller::Human {
+            actor_id: format!("human_{staff_no}"),
+            staff_no,
+        }
+    };
+
+    let session = state
+        .services
+        .session_management
+        .get(bcs_session_id)
+        .await
+        .map_err(|error| HttpAdapterError::Service(ServiceError::InternalError(error.to_string())))?
+        .ok_or_else(|| {
+            HttpAdapterError::Forbidden("caller cannot access this session".to_string())
+        })?;
+
+    // Session conversation mappings are non-public. Authorize against the
+    // session's current participants so callers cannot enumerate mappings for
+    // unrelated sessions by guessing their ids.
+    let authorized = match caller {
+        Caller::Bot(bot_uuid) => session
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == bot_uuid),
+        Caller::Human { actor_id, staff_no } => {
+            crate::routes::sessions::human_has_session_access(
+                state,
+                &session,
+                &actor_id,
+                &staff_no,
+            )
+            .await
+        }
+    };
+    if !authorized {
+        return Err(HttpAdapterError::Forbidden(
+            "caller cannot access this session".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 pub async fn set_binding_status(

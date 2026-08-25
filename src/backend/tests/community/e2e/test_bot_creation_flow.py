@@ -339,6 +339,7 @@ class TestRouterLogic:
         mock_passport_plugin = MagicMock()
         mock_passport_plugin.apply_first_agent_passport.return_value = {
             "token": "passport_token_123",
+            "agent_code": "agent-test",
             "iframe_url": None,
             "redirect_url": None,
         }
@@ -494,6 +495,9 @@ class TestRouterLogic:
         mock_passport_plugin.query_auth_status.return_value = {
             "status": "ISSUED",
             "token": "passport_token_issued",
+        }
+        mock_passport_plugin.query_agent_passport.return_value = {
+            "agent_code": "agent-test",
         }
 
         mock_bot_service = MagicMock()

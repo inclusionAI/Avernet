@@ -338,9 +338,11 @@ def install_middleware(
     # the same reason.
     from agentclaw.community.adapters.http.openapi_v1.middleware import (
         DeprecationHeaderMiddleware,
+        SensitiveResponseHeaderMiddleware,
     )
 
     app.add_middleware(DeprecationHeaderMiddleware)
+    app.add_middleware(SensitiveResponseHeaderMiddleware)
 
     # Add last so it is outermost: it must sanitize the shared ASGI scope
     # before tracer, auth context, and default access logging use it.

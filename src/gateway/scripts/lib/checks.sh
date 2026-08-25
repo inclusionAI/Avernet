@@ -18,3 +18,21 @@ run_check_basic() {
     cd "$_origin"
     log_info "check-basic passed"
 }
+
+run_check_format_ci() {
+    local _origin
+    _origin="$(pwd)"
+    cd "$GATEWAY_DIR" || return 1
+
+    log_stage
+    echo "[CHECK] check-format-ci: ruff check + ruff format --check (non-fixing)"
+
+    log_sub "Lint check (ruff check ...)..."
+    _run uv run ruff check . || { cd "$_origin"; return 1; }
+
+    log_sub "Format check (ruff format --check ...)..."
+    _run uv run ruff format --check . || { cd "$_origin"; return 1; }
+
+    cd "$_origin"
+    log_info "check-format-ci passed"
+}

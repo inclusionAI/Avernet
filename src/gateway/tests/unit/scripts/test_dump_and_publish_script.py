@@ -39,15 +39,20 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
 
     assert result.returncode == 0, result.stdout + result.stderr
     document = json.loads((tmp_path / "bcn.openapi.json").read_text(encoding="utf-8"))
-    assert sum(len(path_item) for path_item in document["paths"].values()) == 39
+    assert sum(len(path_item) for path_item in document["paths"].values()) == 56
     assert (
         "post"
         in document["paths"]["/openapi/v1/collaboration/sessions/{session_id}/token"]
     )
     assert "get" in document["paths"]["/openapi/v1/collaboration/messages/ws"]
-    assert "get" in document["paths"][
-        "/openapi/v1/collaboration/bots/{bot_id}/candidates"
-    ]
+    assert (
+        "get" in document["paths"]["/openapi/v1/collaboration/bots/{bot_id}/candidates"]
+    )
+    assert (
+        "post"
+        in document["paths"]["/openapi/v1/collaboration/friend-connections/requests"]
+    )
+    assert "delete" in document["paths"]["/openapi/v1/collaboration/friend-connections"]
     collection = document["paths"][
         "/openapi/v1/collaboration/sessions/{session_id}/collect"
     ]
@@ -64,10 +69,11 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
     internal = json.loads(
         (tmp_path / "bcn-internal.openapi.json").read_text(encoding="utf-8")
     )
-    assert sum(len(path_item) for path_item in internal["paths"].values()) == 10
-    assert "post" in internal["paths"][
-        "/api/v1/collaboration/sessions/{session_id}/files"
-    ]
+    assert sum(len(path_item) for path_item in internal["paths"].values()) == 21
+    assert (
+        "post" in internal["paths"]["/api/v1/collaboration/sessions/{session_id}/files"]
+    )
+    assert "post" in internal["paths"]["/api/v1/collaboration/definitions/validate"]
     assert [tag["name"] for tag in document["tags"]] == [
         "Collaboration / Bots",
         "Collaboration / Friendships",
@@ -75,6 +81,7 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
         "Collaboration / Sessions",
         "Collaboration / Invitations",
         "Collaboration / Channels",
+        "Collaboration / Event Subscriptions",
     ]
     assert document["paths"]["/openapi/v1/collaboration/sessions/{session_id}/token"][
         "post"

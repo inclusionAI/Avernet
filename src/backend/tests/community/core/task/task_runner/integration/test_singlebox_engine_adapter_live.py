@@ -57,11 +57,12 @@ class TestSingleboxEngineAdapterLive(unittest.TestCase):
 
     def test_send_message_then_poll_get_run(self) -> None:
         """executor/poller 路径:send_message 立即返 run_id,轮询 get_run 到终态。"""
-        rid = self._run(
+        sent = self._run(
             self._adapter.send_message(
                 bot_id=_BOT_ID, message="再回复一句：已就绪。", metadata={"phase": "execute"}
             )
         )
+        rid = sent.run_id
         self.assertTrue(rid.startswith("ws_"))
         deadline = time.time() + 60
         run: dict = {}

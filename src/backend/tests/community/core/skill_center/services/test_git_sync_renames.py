@@ -125,7 +125,7 @@ def _make_sync_service_for_sync():
     svc._run_sync = _run_sync_inline
     svc._git_fetch = AsyncMock(return_value={"success": True})
     svc._update_database = AsyncMock(return_value={"updated": 1})
-    svc._refresh_cache_async = AsyncMock()
+    svc._refresh_cache_async = AsyncMock(return_value={"cache_refreshed": True})
     svc._sync_upload_skills_repo_to_oss = MagicMock()
     svc._sync_refresh_meta_to_oss = MagicMock()
     return svc
@@ -157,7 +157,7 @@ async def test_sync_passes_skill_renames_when_skills_subtree_updates():
 
 
 @pytest.mark.asyncio
-async def test_sync_does_not_update_database_when_only_agents_subtree_updates():
+async def test_sync_rescans_database_and_refreshes_cache_when_git_tree_is_unchanged():
     svc = _make_sync_service_for_sync()
     svc._sync_subtree = AsyncMock(
         side_effect=[
@@ -172,16 +172,98 @@ async def test_sync_does_not_update_database_when_only_agents_subtree_updates():
         result = await svc.sync()
 
     assert result["success"] is True
-    assert result["cache_refreshed"] is False
-    svc._update_database.assert_not_awaited()
-    svc._refresh_cache_async.assert_not_awaited()
+    assert result["cache_refreshed"] is True
+    svc._update_database.assert_awaited_once_with(git_renames={})
+    svc._refresh_cache_async.assert_awaited_once()
     svc._sync_upload_skills_repo_to_oss.assert_not_called()
     # enable_oss_sync=False → OSS upload/refresh skipped
     svc._sync_refresh_meta_to_oss.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_sync_aborts_database_update_on_subtree_failure():
+async def test_sync_fails_stably_when_database_scan_reports_failed_rows():
+    svc = _make_sync_service_for_sync()
+    svc._sync_subtree = AsyncMock(
+        side_effect=[
+            {"success": True, "updated": True, "renames": {}},
+            {"success": True, "updated": False, "renames": {}},
+        ]
+    )
+    svc._update_database = AsyncMock(return_value={"created": 1, "failed": 1})
+
+    with patch.object(GlobalSyncLock, "acquire", return_value=True), patch.object(
+        GlobalSyncLock, "release"
+    ):
+        result = await svc.sync()
+
+    assert result["success"] is False
+    assert result["error"] == "Database scan failed"
+    assert result["database"] == {"created": 1, "failed": 1}
+
+
+@pytest.mark.asyncio
+async def test_sync_fails_stably_when_cache_refresh_reports_failure():
+    svc = _make_sync_service_for_sync()
+    svc._sync_subtree = AsyncMock(
+        side_effect=[
+            {"success": True, "updated": True, "renames": {}},
+            {"success": True, "updated": False, "renames": {}},
+        ]
+    )
+    svc._refresh_cache_async = AsyncMock(return_value={"cache_refreshed": False})
+
+    with patch.object(GlobalSyncLock, "acquire", return_value=True), patch.object(
+        GlobalSyncLock, "release"
+    ):
+        result = await svc.sync()
+
+    assert result["success"] is False
+    assert result["error"] == "Market cache refresh failed"
+    assert result["cache_refreshed"] is False
+
+
+@pytest.mark.asyncio
+async def test_unchanged_sync_does_not_hide_database_scan_failure():
+    svc = _make_sync_service_for_sync()
+    svc._sync_subtree = AsyncMock(
+        side_effect=[
+            {"success": True, "updated": False, "renames": {}},
+            {"success": True, "updated": False, "renames": {}},
+        ]
+    )
+    svc._update_database = AsyncMock(return_value={"failed": 1})
+
+    with patch.object(GlobalSyncLock, "acquire", return_value=True), patch.object(
+        GlobalSyncLock, "release"
+    ):
+        result = await svc.sync()
+
+    assert result["success"] is False
+    assert result["error"] == "Database scan failed"
+
+
+@pytest.mark.asyncio
+async def test_unchanged_sync_does_not_hide_cache_refresh_failure():
+    svc = _make_sync_service_for_sync()
+    svc._sync_subtree = AsyncMock(
+        side_effect=[
+            {"success": True, "updated": False, "renames": {}},
+            {"success": True, "updated": False, "renames": {}},
+        ]
+    )
+    svc._refresh_cache_async = AsyncMock(return_value={"cache_refreshed": False})
+
+    with patch.object(GlobalSyncLock, "acquire", return_value=True), patch.object(
+        GlobalSyncLock, "release"
+    ):
+        result = await svc.sync()
+
+    assert result["success"] is False
+    assert result["error"] == "Market cache refresh failed"
+
+
+@pytest.mark.asyncio
+async def test_sync_runs_database_update_when_every_subtree_is_unchanged():
     svc = _make_sync_service_for_sync()
     svc._sync_subtree = AsyncMock(
         side_effect=[
@@ -196,9 +278,9 @@ async def test_sync_aborts_database_update_on_subtree_failure():
         result = await svc.sync()
 
     assert result["success"] is True
-    assert result["cache_refreshed"] is False
-    svc._update_database.assert_not_awaited()
-    svc._refresh_cache_async.assert_not_awaited()
+    assert result["cache_refreshed"] is True
+    svc._update_database.assert_awaited_once_with(git_renames={})
+    svc._refresh_cache_async.assert_awaited_once()
     svc._sync_upload_skills_repo_to_oss.assert_not_called()
     svc._sync_refresh_meta_to_oss.assert_not_called()
 

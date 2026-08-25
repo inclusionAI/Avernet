@@ -31,6 +31,9 @@ from agentclaw.community.core.mcp.services._defaults import (
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_installation import (
+    SkillInstallationRepositoryProtocol,
+)
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
 from agentclaw.community.core.skill_center.policies.default_skill_set_selection import (
     DefaultSkillSetSelection,
@@ -170,6 +173,7 @@ class SkillSetService:
             tuple[str, str, str] | None,
         ]
         | None = None,
+        installations: SkillInstallationRepositoryProtocol | None = None,
     ):
         """
         Args:
@@ -191,6 +195,7 @@ class SkillSetService:
             entity_type: Entity type (e.g., staff, proj, team), used when entity_id is pure id
         """
         self.skill_repo = skill_repo
+        self._installations = installations
         self.skill_set_repo = skill_set_repo
         self.mcp_center = mcp_center
         self.mcp_config_service = mcp_config_service
@@ -427,10 +432,12 @@ class SkillSetService:
     ) -> str | None:
         """Best-effort template_type lookup for default-capability bucket routing."""
         target_bot_id = bot_id or self.bot_id
-        if not target_bot_id:
+        if not target_bot_id or not self.entity_id:
             return None
         try:
-            bot = self._bot_repo.get_by_id(str(target_bot_id))
+            bot = self._bot_repo.get_by_id_and_owner(
+                str(target_bot_id), str(self.entity_id)
+            )
             if isinstance(bot, dict):
                 template_type = bot.get("template_type")
                 if isinstance(template_type, str):
@@ -464,7 +471,9 @@ class SkillSetService:
             logger.warning(f"Error getting current active skill set: {e}")
         return None
 
-    def _sync_symlinks_to_device_if_needed(self, user_id: str | None = None) -> bool:
+    def _sync_symlinks_to_device_if_needed(
+        self, user_id: str | None = None, desired_skills: list[dict] | None = None
+    ) -> bool:
         """如果需要，同步软链配置到设备。
 
         将当前激活技能集的软链配置同步到远程设备或本地文件系统。
@@ -478,10 +487,10 @@ class SkillSetService:
         """
         try:
             # 获取当前激活技能集的软链配置（包括空列表，表示清空）
-            symlinks = self.get_symlink_mappings(
-                user_id=user_id,
-                bolt_id=self.bot_id
-            )
+            mapping_kwargs = {"user_id": user_id, "bolt_id": self.bot_id}
+            if desired_skills is not None:
+                mapping_kwargs["desired_skills"] = desired_skills
+            symlinks = self.get_symlink_mappings(**mapping_kwargs)
 
             # 通过 DeviceSyncPlugin 同步到设备 — 经 resolver + dispatcher 收口
             effective_user_id = user_id or self.entity_id or "default"
@@ -504,9 +513,61 @@ class SkillSetService:
             logger.warning(f"[_sync_symlinks_to_device_if_needed] Failed to sync symlinks: {e}", exc_info=True)
             return False
 
-    def sync_runtime(self) -> bool:
-        """Reconcile this Bot's desired Skill mapping to its runtime."""
-        return self._sync_symlinks_to_device_if_needed(self.user_id or self.entity_id)
+    def sync_runtime(self, *, desired_skills: list[dict] | None = None) -> bool:
+        """Apply one complete resolver-owned skill snapshot to the runtime."""
+        return self._sync_symlinks_to_device_if_needed(
+            self.user_id or self.entity_id, desired_skills
+        )
+
+    async def sync_mcp_desired_state(self, *, server_codes: set[str]) -> bool:
+        """Project the complete MCP desired state to the Bot runtime.
+
+        ``sync_all_mcp_servers`` is deliberately called even for an empty
+        set: it is the device-level reconciliation command that clears stale
+        allow-list entries.  Per-server detail delivery precedes that full
+        declaration so all newly allowed MCPs have their configured payload.
+
+        Detail delivery is handed to ``sync_mcp_details_for_bot`` rather than
+        looped one ``sync_mcp_detail`` at a time: every entry here targets the
+        same bot, and that entrypoint resolves the device once for the whole
+        batch instead of paying a blocking ws-info round trip per MCP.
+        """
+        try:
+            entries: list[dict[str, Any]] = []
+            for server_code in sorted(server_codes):
+                detail = self.mcp_center.get_mcp_detail(server_code)
+                if not detail:
+                    return False
+                entries.append(detail)
+            delivery = await self._mcp_sync_service.sync_mcp_details_for_bot(
+                user_id=self.user_id or self.entity_id or "",
+                mcp_entries=entries,
+                bot_id=self.bot_id,
+                entity_id=self.entity_id,
+                engine_type=self.engine_type,
+            )
+            if not delivery.get("success"):
+                return False
+            # resolve_for_bot 与 sync_all_mcp_servers 都是同步阻塞调用(前者含
+            # ws-info HTTP,后者是设备侧 HTTP),留在协程里会占住 event loop。
+            ctx = await asyncio.to_thread(
+                self._resolver.resolve_for_bot,
+                self.bot_id,
+                self.entity_id or self.user_id or "",
+            )
+            return bool(
+                await asyncio.to_thread(
+                    self._device_sync_dispatcher.dispatch(ctx).sync_all_mcp_servers,
+                    entries,
+                )
+            )
+        except Exception:
+            logger.warning(
+                "[sync_mcp_desired_state] MCP projection failed for bot_id=%s",
+                self.bot_id,
+                exc_info=True,
+            )
+            return False
 
     def _validate_name(self, name: str) -> None:
         """Validate skill set name (cannot contain underscore)."""
@@ -889,11 +950,8 @@ class SkillSetService:
             if git_paths:
                 # 修复: 传递 user_id 和 bolt_id 到 activate_skill，确保设备操作正确路由
                 # 获取 Bot 的 owner_id（用于设备绑定查询）
-                bot = self._bot_repo.get_by_id(self.bot_id)
-                owner_id = bot.get("owner_id") if bot else None
-                # fallback: 如果获取不到 owner_id，使用 entity_id 或 user_id
-                if not owner_id:
-                    owner_id = self.entity_id or user_id
+
+                owner_id = self.entity_id or user_id
 
                 # Activate all concurrently with proper device routing
                 activation_results = await asyncio.gather(
@@ -1001,6 +1059,23 @@ class SkillSetService:
         }
         return self.skill_repo.create(skill_data)
 
+    def resolve_or_create_legacy_market_skill(
+        self, *, identifier: str, owner_id: str, bot_id: str
+    ) -> str:
+        """Resolve the legacy name/path wire and materialize a Repo Skill if absent."""
+        market_skill = next(
+            (
+                item
+                for item in self.skill_service.get_skills_in_path("")
+                if item.get("id") == identifier
+                or str(item.get("path") or "").endswith(identifier)
+            ),
+            None,
+        )
+        if market_skill is None:
+            raise ValueError("Skill not found")
+        return str(self._create_skill_from_market(market_skill, owner_id, bot_id)["id"])
+
     async def remove_skill_from_set(
         self,
         skill_set_id: str,
@@ -1020,18 +1095,60 @@ class SkillSetService:
         # Check if this is the default skill set
         skill_set = self.get_skill_set(skill_set_id, user_id)
         if skill_set and skill_set.get('is_default'):
+            skill = self.skill_repo.get_by_id(skill_id)
+            if (
+                skill
+                and str(skill.get("git_path") or "").startswith("local://")
+                and self._installations is not None
+            ):
+                changed = self._installations.uninstall(
+                    env=str(skill["env"]),
+                    owner_id=self.entity_id,
+                    bot_id=self.bot_id,
+                    skill_id=skill_id,
+                )
+                synced = await self._sync_symlinks_to_device_if_needed(
+                    user_id or self.entity_id
+                )
+                if not synced and changed:
+                    self._installations.install(
+                        env=str(skill["env"]),
+                        owner_id=self.entity_id,
+                        bot_id=self.bot_id,
+                        skill_id=skill_id,
+                    )
+                    await self._sync_symlinks_to_device_if_needed(
+                        user_id or self.entity_id
+                    )
+                return synced
             # Default skill set: write exclusion record instead of deleting
             if not user_id:
                 user_id = self.entity_id
-            self.skill_set_repo.add_default_skill_exclusion(
-                user_id=user_id,
+            # The exclusion alone does not stop the Installation row from
+            # providing the Skill, so both halves go through one repository
+            # call and commit together under the Set lock.
+            from agentclaw.community.utils.env_utils import get_current_env
+
+            excluded_skill = self.skill_repo.get_by_id(skill_id)
+            # Reused by the rollback below.
+            removal_env = str(
+                excluded_skill["env"]
+                if excluded_skill is not None
+                else get_current_env()
+            )
+            # Keyed on the Bot owner: both rows are the Bot's state. ``user_id``
+            # stays the caller, for device sync and the symlink deactivation.
+            created, uninstalled = self.skill_set_repo.exclude_default_set_skill(
+                owner_id=self.entity_id or user_id,
                 bot_id=self.bot_id,
                 skill_set_id=int(skill_set_id),
                 skill_id=int(skill_id),
+                env=removal_env,
             )
             logger.info(
                 f"[remove_skill_from_set] Excluded skill {skill_id} from default set "
-                f"{skill_set_id} for user={user_id}, bot={self.bot_id}"
+                f"{skill_set_id} for owner={self.entity_id}, caller={user_id}, "
+                f"bot={self.bot_id} (created={created}, uninstalled={uninstalled})"
             )
 
             # Deactivate the skill symlink (skill is not shared across sets,
@@ -1057,13 +1174,22 @@ class SkillSetService:
                         "[remove_skill_from_set] Failed to deactivate skill %s: %s",
                         link_name, e,
                     )
-                    # Rollback: remove the exclusion record
-                    self.skill_set_repo.remove_default_skill_exclusion(
-                        user_id=user_id,
-                        bot_id=self.bot_id,
-                        skill_set_id=int(skill_set_id),
-                        skill_id=int(skill_id),
-                    )
+                    # Undo exactly what this call wrote — a retry that found
+                    # the exclusion already there wrote neither half.
+                    if created:
+                        self.skill_set_repo.remove_default_skill_exclusion(
+                            user_id=self.entity_id or user_id,
+                            bot_id=self.bot_id,
+                            skill_set_id=int(skill_set_id),
+                            skill_id=int(skill_id),
+                        )
+                    if uninstalled and self._installations is not None:
+                        self._installations.install(
+                            env=removal_env,
+                            owner_id=self.entity_id or user_id,
+                            bot_id=self.bot_id,
+                            skill_id=skill_id,
+                        )
                     return False
 
             # Sync symlinks to device
@@ -1170,9 +1296,13 @@ class SkillSetService:
 
         # Default skill set: filter out user-excluded skills
         # (mirrors get_set_mcp_servers which filters ac_default_skillset_mcp_exclusion)
-        if skill_set.get('is_default') and user_id and self.bot_id:
+        # The Bot owner, matching how the exclusion is written and read.
+        exclusion_owner_id = self.entity_id or user_id
+        if skill_set.get('is_default') and exclusion_owner_id and self.bot_id:
             excluded = self.skill_set_repo.get_excluded_skills(
-                user_id=user_id, bot_id=self.bot_id, skill_set_id=int(skill_set_id)
+                user_id=exclusion_owner_id,
+                bot_id=self.bot_id,
+                skill_set_id=int(skill_set_id),
             )
             excluded_ids = set(excluded)
             if excluded_ids:
@@ -1328,7 +1458,10 @@ class SkillSetService:
             ]
         """
         effective_bolt_id = bolt_id if bolt_id else self.bot_id
-        effective_user_id = user_id if user_id else self.entity_id
+        # ``user_id`` is the caller in historical adapters. Installation and
+        # Default exclusion state belong to the Bot owner carried by the
+        # factory's entity_id, never to a collaborator acting on that Bot.
+        effective_user_id = self.entity_id
 
         logger.info(f"[get_all_skill_sets_with_mcps] user_id={effective_user_id}, bolt_id={effective_bolt_id}")
 
@@ -1398,13 +1531,19 @@ class SkillSetService:
         """
         effective_bolt_id = bolt_id if bolt_id else self.bot_id
         effective_user_id = user_id if user_id else self.entity_id
+        from agentclaw.community.utils.env_utils import get_current_env
 
+        installed_skills = self.skill_repo.list_bot_installed_skills(
+            env=get_current_env(),
+            owner_id=effective_user_id,
+            bot_id=effective_bolt_id,
+        )
         # 1. 查询所有激活的技能集（包含默认能力集）
         active_skill_sets = self.list_active_skill_sets(
             user_id=effective_user_id,
             bolt_id=effective_bolt_id,
         )
-        if not active_skill_sets:
+        if not active_skill_sets and not installed_skills:
             logger.warning(f"[get_active_skills] 未找到激活的技能集: user_id={effective_user_id}, bolt_id={effective_bolt_id}")
             return []
 
@@ -1414,19 +1553,16 @@ class SkillSetService:
             skill_set_id = skill_set.get('id')
             skills = self.skill_set_repo.get_skills_in_set(str(skill_set_id))
 
-            # Default skill set: filter out user-excluded skills
-            # (mirrors get_set_mcp_servers which filters ac_default_skillset_mcp_exclusion)
-            if skill_set.get('is_default') and effective_user_id and effective_bolt_id:
-                excluded = self.skill_set_repo.get_excluded_skills(
-                    user_id=effective_user_id,
-                    bot_id=effective_bolt_id,
-                    skill_set_id=int(skill_set_id),
-                )
-                excluded_ids = set(excluded)
-                if excluded_ids:
-                    # skill id from _skill_to_dict is str, excluded_ids from DB are int
-                    skills = [s for s in skills if int(s.get('id', 0)) not in excluded_ids]
+            if skill_set.get('is_default'):
+                # Desired Local state is the active-only Installation fact.
+                # Never recover it from the legacy Default exclusion table.
+                skills = [
+                    skill
+                    for skill in skills
+                    if not str(skill.get("git_path") or "").startswith("local://")
+                ]
             all_skills.extend(skills)
+        all_skills.extend(installed_skills)
 
         # 3. 根据 git_path 去重
         seen_git_paths = set()
@@ -1445,6 +1581,7 @@ class SkillSetService:
         user_id: str | None = None,
         bolt_id: str | None = None,
         additional_skill_paths: list[str] | None = None,
+        desired_skills: list[dict] | None = None,
     ) -> list[SynlinkMappingInfo]:
         """生成技能激活软链配置（支持多能力集激活）
 
@@ -1461,7 +1598,11 @@ class SkillSetService:
         Returns:
             List[SynlinkMappingInfo]: 软链配置列表（已去重）
         """
-        unique_skills = self.get_active_skills(user_id=user_id, bolt_id=bolt_id)
+        unique_skills = (
+            list(desired_skills)
+            if desired_skills is not None
+            else self.get_active_skills(user_id=user_id, bolt_id=bolt_id)
+        )
 
         # Direct Skill CRUD is intentionally orthogonal to SkillSet membership.
         # The device boundary accepts a complete mapping publish, so the current
@@ -1506,11 +1647,12 @@ class SkillSetService:
             "aicoding": "/home/admin/.aicoding/skills-repo",
             "hermes": "/home/admin/.hermes/skills-repo",
         }
-        if self.runtime_engine_type not in ENGINE_SKILLS_DIR_MAP:
-            raise ValueError(
-                f"engine Skill layout not implemented: {self.runtime_engine_type}"
+        base_skills_dir = Path(
+            ENGINE_SKILLS_DIR_MAP.get(
+                self.runtime_engine_type,
+                "/home/admin/.openclaw/workspace/skills",
             )
-        base_skills_dir = Path(ENGINE_SKILLS_DIR_MAP[self.runtime_engine_type])
+        )
         # aicoding 引擎使用独立的 skills-repo 目录
         skills_repo_dir = Path(
             ENGINE_SKILLS_REPO_DIR_MAP.get(
@@ -1579,7 +1721,7 @@ class SkillSetService:
             if git_path.startswith('git://'):
                 # Git 技能: 指向 skills-repo
                 rel_path = git_path[6:]
-                link_name = rel_path.split('/')[-1] if '/' in rel_path else rel_path
+                link_name = skill_name or (rel_path.split('/')[-1] if '/' in rel_path else rel_path)
                 source = str(skills_repo_dir / rel_path)
                 target = str(base_skills_dir / link_name)
                 symlinks.append(SynlinkMappingInfo(source=source, target=target))
@@ -1607,6 +1749,13 @@ class SkillSetService:
                     source = str(skills_local_dir / source_name)
                 target = str(base_skills_dir / link_name)
                 symlinks.append(SynlinkMappingInfo(source=source, target=target))
+            elif git_path.startswith('center://'):
+                # This legacy file adapter has no Center request contract. A
+                # caller must route such a projection through the mapping-v3
+                # Engine adapter; silently omitting it would be fail-open.
+                raise ValueError("center skill requires a Center-capable runtime adapter")
+            else:
+                raise ValueError("unsupported skill source in runtime projection")
 
         resolved_mappings = symlinks
         if requested_paths:
@@ -2690,10 +2839,8 @@ class SkillSetSwitcher(_DeviceSyncMixin):
         # Step 3: Activate all skills in new set concurrently
         # 修复: 传递 user_id 和 bolt_id 到 activate_skill，确保设备操作正确路由
         # 获取 Bot 的 owner_id（用于设备绑定查询）
-        bot = self.skill_set_service._bot_repo.get_by_id(self.skill_set_service.bot_id)
-        owner_id = bot.get("owner_id") if bot else None
-        if not owner_id:
-            owner_id = self.skill_set_service.entity_id or user_id
+
+        owner_id = self.skill_set_service.entity_id or user_id
 
         skill_infos = [(skill.get('id'), skill.get('git_path')) for skill in new_skills]
         if skill_infos:
@@ -2890,10 +3037,8 @@ class SkillSetSwitcher(_DeviceSyncMixin):
 
         # 修复: 传递 user_id 和 bolt_id 到 activate_skill，确保设备操作正确路由
         # 获取 Bot 的 owner_id（用于设备绑定查询）
-        bot = self.skill_set_service._bot_repo.get_by_id(self.skill_set_service.bot_id)
-        owner_id = bot.get("owner_id") if bot else None
-        if not owner_id:
-            owner_id = self.skill_set_service.entity_id or user_id
+
+        owner_id = self.skill_set_service.entity_id or user_id
 
         # Activate all concurrently
         if tasks:

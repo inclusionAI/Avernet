@@ -242,6 +242,15 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                     self.registry.get_protocol_version(recipient).await,
                     &target,
                 );
+                let provider_tags = if target.is_http_provider() {
+                    participants
+                        .iter()
+                        .find(|participant| participant.bot_uuid == *recipient)
+                        .map(|participant| participant.tags.as_slice())
+                        .unwrap_or(&[])
+                } else {
+                    &[]
+                };
                 let (frame, delivery_kind) = match msg.delivery_type {
                     DeliveryType::Send => (
                         build_chat_send_frame(
@@ -253,6 +262,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                             BCS_SYSTEM_MESSAGE,
                             &[],
                             recipient,
+                            provider_tags,
                             &None,
                             &None,
                             false,

@@ -596,6 +596,9 @@ class TestAuthStatusEndpoint:
             "status": "ISSUED",
             "token": "passport_token_123",
         }
+        mock_passport_plugin.query_agent_passport.return_value = {
+            "agent_code": "agent-test",
+        }
 
         mock_ctx = MagicMock(spec=RequestContext)
         mock_ctx.user_id = "123456"

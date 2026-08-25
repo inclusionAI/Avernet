@@ -32,6 +32,7 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
     with_interceptors,
 )
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotServiceError,
@@ -298,8 +299,10 @@ class DimaWorkspaceResponse(BaseModel):
     response_model=DimaWorkspaceResponse,
 )
 @with_interceptors(CollaboratorPermissionInterceptor(
+    required_level=PermissionLevel.MEMBER,
     bot_id="$bot_id",
     owner_id="$user_id",
+    skip_lock_check=True,
 ))
 async def create_bot_dima_workspace(
     bot_id: str,
@@ -307,15 +310,17 @@ async def create_bot_dima_workspace(
     ctx: RequestContext = Depends(get_request_context),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> DimaWorkspaceResponse:
-    """为 applicationCoding bot 创建 DIMA 工作空间（幂等）。
+    """为 Coding bot 创建 DIMA 工作空间（幂等）。
+
+    支持 legacy applicationCoding，或 active_engine 为 claude_code/aicoding 的 Bot。
 
     使用场景：bot 创建时 DIMA 调用失败，前端检测到 template_config 中
     缺少 ``dima_space_id``，可调用本接口手动触发创建。
 
     幂等：已存在 ``dima_space_id`` 时直接返回该 ID，不会重复创建。
 
-    权限：bot owner 或 collaborator。``user_id`` 用于权限校验时定位 bot
-    所有者；不传时默认使用当前登录用户。
+    权限：bot owner 或 collaborator（至少 MEMBER）。``user_id`` 用于权限校验时
+    定位 bot 所有者；不传时默认使用当前登录用户。
     """
     operator_id = ctx.user_id
     if not operator_id or operator_id == "anonymous":

@@ -8,8 +8,8 @@ use bcs_service_api::application::v1::{
     ApplicationError, Bot, BotCandidate, BotCandidatePurpose, BotCandidateSearchItem,
     BotCandidateSearchMode, BotCandidateSearchResult, BotDescriptor, BotKind, BotProvider,
     BotReachability, BotService, BotSkill, BotStatus, BotVisibility, GetBot, HumanBot,
-    ListBotCandidates, ListMyBots, Page, PhysicalBot, QueryBots, SearchBotCandidates, UpdateBot,
-    require_authenticated_user,
+    InternalBotAttributesService, ListBotCandidates, ListMyBots, Page, PatchBotInternalAttributes,
+    PhysicalBot, QueryBots, SearchBotCandidates, UpdateBot, require_authenticated_user,
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateSearchCoreService,
@@ -30,6 +30,105 @@ pub struct BotServiceImpl {
     friends: Arc<dyn FriendCoreService>,
     candidate_search: Arc<dyn BotCandidateSearchCoreService>,
     config: BotServiceConfig,
+}
+
+pub struct InternalBotAttributesServiceImpl {
+    control_plane: Arc<dyn BotControlPlaneCoreService>,
+    config: BotServiceConfig,
+}
+
+impl InternalBotAttributesServiceImpl {
+    pub fn new(
+        control_plane: Arc<dyn BotControlPlaneCoreService>,
+        config: BotServiceConfig,
+    ) -> Self {
+        Self {
+            control_plane,
+            config,
+        }
+    }
+
+    fn validate_bot_id(bot_id: &str) -> Result<(), ApplicationError> {
+        if bot_id.trim().is_empty() {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "bot_id must not be empty",
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_visibility(visibility: Option<&str>) -> Result<(), ApplicationError> {
+        if let Some(visibility) = visibility
+            && !matches!(visibility, "public" | "protected" | "private")
+        {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "visibility must be public, protected, or private",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn load_record(&self, bot_id: &str) -> Result<BotControlPlaneRecord, ApplicationError> {
+        self.control_plane
+            .get_record(bot_id, &self.config.env)
+            .await
+            .map_err(map_service_error)?
+            .ok_or_else(|| {
+                ApplicationError::not_found(
+                    "bot_not_found",
+                    format!("Bot '{bot_id}' was not found"),
+                )
+            })
+    }
+}
+
+#[async_trait]
+impl InternalBotAttributesService for InternalBotAttributesServiceImpl {
+    async fn get(
+        &self,
+        bot_id: String,
+    ) -> Result<bcs_service_api::BotInternalAttributes, ApplicationError> {
+        Self::validate_bot_id(&bot_id)?;
+        Ok(self.load_record(&bot_id).await?.internal_attributes())
+    }
+
+    async fn patch(
+        &self,
+        command: PatchBotInternalAttributes,
+    ) -> Result<bcs_service_api::BotInternalAttributes, ApplicationError> {
+        Self::validate_bot_id(&command.bot_id)?;
+        Self::validate_visibility(command.visibility.as_deref())?;
+        if command.is_empty() {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "Bot internal attributes patch must contain at least one field",
+            ));
+        }
+        let updated = self
+            .control_plane
+            .patch(
+                &command.bot_id,
+                &self.config.env,
+                BotControlPlanePatch {
+                    visibility: command.visibility,
+                    user_visibility: command.user_visibility,
+                    friend_ext: command.friend_ext,
+                    friend_check_in_strategy: command.friend_check_in_strategy,
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(map_service_error)?
+            .ok_or_else(|| {
+                ApplicationError::not_found(
+                    "bot_not_found",
+                    format!("Bot '{}' was not found", command.bot_id),
+                )
+            })?;
+        Ok(updated.record.internal_attributes())
+    }
 }
 
 impl BotServiceImpl {
@@ -135,6 +234,9 @@ impl BotServiceImpl {
                         status,
                         env: record.env,
                         created_by: record.created_by,
+                        user_visibility: record.user_visibility,
+                        friend_ext: record.friend_ext,
+                        friend_check_in_strategy: record.friend_check_in_strategy,
                         created_at: record.created_at,
                         updated_at: record.updated_at,
                     }));
@@ -176,6 +278,11 @@ impl BotServiceImpl {
                     reachability,
                     provider,
                     agent_code: record.agent_code,
+                    task_claim_mode: record.task_claim_mode,
+                    task_dream_mode: record.task_dream_mode,
+                    user_visibility: record.user_visibility,
+                    friend_ext: record.friend_ext,
+                    friend_check_in_strategy: record.friend_check_in_strategy,
                     created_at: record.created_at,
                     updated_at: record.updated_at,
                 }))
@@ -399,10 +506,14 @@ impl BotService for BotServiceImpl {
                 command.bot_id
             )));
         }
-        if record.kind == ActorKind::Human && command.patch.descriptor.is_some() {
+        if record.kind == ActorKind::Human
+            && (command.patch.descriptor.is_some()
+                || command.patch.task_claim_mode.is_some()
+                || command.patch.task_dream_mode.is_some())
+        {
             return Err(ApplicationError::invalid(
                 "invalid_bot_kind",
-                "Human rows do not have a descriptor",
+                "Human rows do not support descriptor or task-mode patches",
             ));
         }
 
@@ -458,6 +569,12 @@ impl BotService for BotServiceImpl {
                     visibility: command.patch.visibility.map(visibility_value),
                     status: command.patch.status.map(domain_status),
                     descriptor,
+                    task_claim_mode: command.patch.task_claim_mode,
+                    task_dream_mode: command.patch.task_dream_mode,
+                    user_visibility: command.patch.user_visibility,
+                    friend_ext: command.patch.friend_ext,
+                    friend_check_in_strategy: command.patch.friend_check_in_strategy,
+                    ..Default::default()
                 },
             )
             .await

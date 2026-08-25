@@ -121,6 +121,39 @@ def test_caller_identity_rejects_ambiguous_bot_without_entity_id() -> None:
     service._bot_repo.get_by_id_and_owner.assert_not_called()
 
 
+def test_published_caller_binding_is_resolved_server_side_without_publish_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _bare_baas_service()
+    service._bot_publish_repo = MagicMock()
+    service._device_binding_repo = MagicMock()
+    resolver = MagicMock(return_value=27)
+    monkeypatch.setattr(
+        "agentclaw.community.core.engine_runtime.stage.resolve_stage_bind_id",
+        resolver,
+    )
+    bot = {"id": 41, "env": "dev", "binding_id": 3}
+
+    binding_id = service._resolve_caller_binding_id(
+        bot=bot,
+        bot_id="service-bot",
+        owner_user_id="owner-1",
+        stage="online",
+        publish_id=None,
+    )
+
+    assert binding_id == 27
+    resolver.assert_called_once_with(
+        service._bot_publish_repo,
+        service._device_binding_repo,
+        bot_pk=41,
+        bot_id="service-bot",
+        stage="online",
+        env="dev",
+    )
+    service._bot_publish_repo.get_by_id.assert_not_called()
+
+
 def test_caller_identity_test_exchange_allows_active_personal_bot() -> None:
     service = _bare_baas_service()
     service._bot_repo = MagicMock()

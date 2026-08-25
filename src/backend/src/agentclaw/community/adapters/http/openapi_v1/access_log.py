@@ -59,7 +59,7 @@ import time
 from fastapi import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
+from agentclaw.community.adapters.http.openapi_v1.contracts import PUBLIC_API_PREFIX
 from agentclaw.community.adapters.http.openapi_v1.dependencies import resolve_caller
 from agentclaw.community.core.gateway_principal import (
     AccessKeyPrincipal,
@@ -227,6 +227,14 @@ def _identity_fields(scope: Scope) -> list[str]:
     return [_kv("tenant", caller.tenant), _kv("caller", caller_label(caller))]
 
 
+#: Where this middleware publishes the wire status for later readers.
+#:
+#: On ``request.state`` (backed by the ASGI scope) rather than a contextvar,
+#: because the reader is a dependency teardown running after the response —
+#: a different task context, but the same scope.
+RESPONSE_STATUS_KEY = "openapi_response_status"
+
+
 class PublicApiAccessLogMiddleware:
     """Emit one INFO line per completed ``/openapi/v1`` request.
 
@@ -270,6 +278,15 @@ class PublicApiAccessLogMiddleware:
             nonlocal status
             if message["type"] == "http.response.start":
                 status = message["status"]
+                # Also published on the scope, where a *dependency teardown*
+                # can read it. This middleware sits outside everything, so it
+                # sees the status that goes on the wire — including one an
+                # exception handler produced, or one ``@envelope_errors``
+                # returned instead of raising. A ``yield`` dependency runs its
+                # teardown after the response is sent, so this is the only
+                # place the outcome is knowable to it; ``bot_access`` uses it
+                # to avoid recording an audit row for a mutation that failed.
+                scope.setdefault("state", {})[RESPONSE_STATUS_KEY] = status
             await send(message)
 
         try:

@@ -4,6 +4,7 @@ Bot management router.
 Provides CRUD operations for bots:
 - POST /api/bots - Create a new bot
 - GET /api/bots/{bot_id} - Get bot details
+- GET /api/bots/{bot_id}/classification - Get authenticated-public Bot type
 - GET /api/bots - List bots
 - PUT /api/bots/{bot_id} - Update bot
 - DELETE /api/bots/{bot_id} - Delete bot
@@ -52,6 +53,10 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     validate_bot_name,
 )
 from agentclaw.community.core.bot_management.errors import (
+    ApplicationCodingUnavailableError,
+    BotCombinationUnsupportedError,
+    BotLookupAmbiguousError,
+    BotTemplateInvalidError,
     CreateBotForOthersError,
     DefaultBotPassportRepairError,
 )
@@ -67,6 +72,8 @@ from agentclaw.community.core.bot_management.services.engine_resolver import res
 from agentclaw.community.core.bot_management.create_flow import (
     AuthPending,
     AuthStatus,
+    BotCreateContext,
+    BotCreateDeploymentMode,
     BotCreateSpec,
     complete_bot_authorization,
     create_bot_with_authorization,
@@ -961,12 +968,16 @@ async def create_bot(
             nick_name=nick_name,
             bot_id=bot_id,
             spec=_bot_create_spec(data, user_id),
+            context=BotCreateContext(
+                deployment_mode=BotCreateDeploymentMode.CLOUD,
+                space_kind="personal",
+            ),
             cookie=cookie,
             bot_service=bot_service,
             passport_plugin=passport_plugin,
             auth_rel_plugin=auth_rel_plugin,
             skill_set_factory=skill_set_factory,
-        )
+            )
 
         # Passport not yet issued → guide the user through authorization.
         if isinstance(outcome, AuthPending):
@@ -998,6 +1009,20 @@ async def create_bot(
             },
         )
 
+    except BotTemplateInvalidError as e:
+        logger.warning(f"[bot_router.create_bot] Invalid template: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=400, data=None)
+    except BotCombinationUnsupportedError as e:
+        logger.warning(f"[bot_router.create_bot] Unsupported create combination: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=409, data=None)
+    except ApplicationCodingUnavailableError as e:
+        logger.error(f"[bot_router.create_bot] Application Coding unavailable: {e}")
+        return ApiResponse(
+            success=False,
+            message="Application Coding is unavailable",
+            error_code=503,
+            data=None,
+        )
     except DefaultBotTeclawNotAllowedError as e:
         logger.warning(
             f"[bot_router.create_bot] Default Bot cannot use Teclaw Cloud: {e}"
@@ -1133,11 +1158,15 @@ async def get_auth_status(
             nick_name=nick_name,
             bot_id=bot_id,
             spec=_bot_create_spec(data, user_id),
+            context=BotCreateContext(
+                deployment_mode=BotCreateDeploymentMode.CLOUD,
+                space_kind="personal",
+            ),
             cookie=cookie,
             bot_service=bot_service,
             passport_plugin=passport_plugin,
             auth_rel_plugin=auth_rel_plugin,
-        )
+            )
 
         if result.status == AuthStatus.PENDING:
             return ApiResponse(
@@ -1157,6 +1186,24 @@ async def get_auth_status(
             data={"status": result.status},
         )
 
+    except BotTemplateInvalidError as e:
+        logger.warning(f"[bot_router.get_auth_status] Invalid template: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=400, data=None)
+    except BotCombinationUnsupportedError as e:
+        logger.warning(
+            f"[bot_router.get_auth_status] Unsupported create combination: {e}"
+        )
+        return ApiResponse(success=False, message=str(e), error_code=409, data=None)
+    except ApplicationCodingUnavailableError as e:
+        logger.error(
+            f"[bot_router.get_auth_status] Application Coding unavailable: {e}"
+        )
+        return ApiResponse(
+            success=False,
+            message="Application Coding is unavailable",
+            error_code=503,
+            data=None,
+        )
     except DefaultBotTeclawNotAllowedError as e:
         logger.warning(
             f"[bot_router.get_auth_status] Default Bot cannot use Teclaw Cloud: {e}"
@@ -1868,6 +1915,47 @@ async def get_bots_ceiling(
         return ApiResponse(
             success=False,
             message=f"获取 BOT 上限失败: {str(e)}",
+            error_code=500,
+            data=None,
+        )
+
+
+@router.get("/{bot_id}/classification", response_model=ApiResponse)
+async def get_bot_classification(
+    bot_id: str,
+    _user: AuthenticatedUser = Depends(get_current_user),  # noqa: B008
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+) -> ApiResponse:
+    """Return a Bot's minimal classification to any authenticated user.
+
+    This intentionally does not use the owner/collaborator interceptor: group
+    creation must classify a discoverable BCS actor before collaboration has
+    been established. The service returns an allowlisted projection only.
+    """
+    try:
+        classification = bot_service.get_bot_classification(bot_id)
+        if classification is None:
+            return ApiResponse(
+                success=False,
+                message=f"Bot不存在: {bot_id}",
+                error_code=404,
+                data=None,
+            )
+        return ApiResponse(success=True, data=classification)
+    except BotLookupAmbiguousError:
+        return ApiResponse(
+            success=False,
+            message=f"Bot ID 无法唯一定位: {bot_id}",
+            error_code=409,
+            data=None,
+        )
+    except Exception as e:
+        logger.error(
+            "[bot_router.get_bot_classification] Error: %s", e, exc_info=True
+        )
+        return ApiResponse(
+            success=False,
+            message="获取 Bot 类型失败",
             error_code=500,
             data=None,
         )

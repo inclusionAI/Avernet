@@ -9,11 +9,20 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bcs_db_api::{
+    DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbTransactionParam, DbTransactionStep, DbValue,
+    db_get_column, db_get_column_opt,
+};
+use bcs_event_store::EventAppendTransactionPlan;
 use tracing::info;
-use bcs_db_api::{DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue, db_get_column, db_get_column_opt};
 
-use bcs_service_api::core::session::{can_reactivate, new_session_id, validate_session_id};
-use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
+use bcs_service_api::core::session::{
+    can_reactivate, new_channel_session_id, new_session_id, validate_session_id,
+};
+use bcs_service_api::port::repo::{
+    AddSessionParticipantWithEvent, AppendEventRecord, CompleteSessionWithEvent,
+    CreateSessionWithEvent, NewSessionParams, RemoveSessionParticipantWithEvent, SessionRepoPort,
+};
 use bcs_service_api::{
     GroupSessionMetricCount, GroupSessionMetricsSnapshotPort, Participant, ParticipantMode,
     ServiceError, ServiceResult, Session, SessionKind, SessionStatus,
@@ -87,9 +96,8 @@ impl MySqlSessionStore {
         group_id: String,
         params: NewSessionParams,
         now: u64,
+        event: Option<&AppendEventRecord>,
     ) -> ServiceResult<Session> {
-        use bcs_db_api::DbTransactionStep;
-
         let session_kind = params.session_kind;
         let initial_cb = initial_callback_status(session_kind);
         let participants_json = serde_json::to_string(&params.participants).map_err(|e| {
@@ -169,6 +177,15 @@ impl MySqlSessionStore {
             )));
         }
 
+        if let Some(event) = event {
+            validate_session_event_scope(&session_value, event)?;
+            let event_plan = EventAppendTransactionPlan::build(event, self.flavor, steps.len())
+                .map_err(|error| {
+                    ServiceError::InternalError(format!("prepare Session Event append: {error}"))
+                })?;
+            steps.extend(event_plan.steps);
+        }
+
         self.db
             .transaction(steps)
             .await
@@ -187,6 +204,28 @@ fn json_to_db_value(v: &Option<serde_json::Value>) -> DbValue {
     match v {
         None => DbValue::Null,
         Some(j) => DbValue::String(j.to_string()),
+    }
+}
+
+fn validate_session_event_scope(
+    session: &Session,
+    event: &AppendEventRecord,
+) -> ServiceResult<()> {
+    if event.event.scope.group_id.as_deref() != Some(session.group_id.as_str())
+        || event.event.scope.session_id.as_deref() != Some(session.id.as_str())
+    {
+        return Err(ServiceError::InvalidOperation {
+            message: "Session Event scope does not match the mutated Session".to_string(),
+            request_id: None,
+        });
+    }
+    Ok(())
+}
+
+fn transaction_lock_suffix(flavor: DbSqlFlavor) -> &'static str {
+    match flavor {
+        DbSqlFlavor::Mysql => " FOR UPDATE",
+        DbSqlFlavor::Sqlite => "",
     }
 }
 
@@ -459,7 +498,13 @@ impl SessionRepoPort for MySqlSessionStore {
                 )));
             }
             return self
-                .insert_session(id.clone(), group_id.to_string(), params, current_millis())
+                .insert_session(
+                    id.clone(),
+                    group_id.to_string(),
+                    params,
+                    current_millis(),
+                    None,
+                )
                 .await;
         }
 
@@ -469,7 +514,13 @@ impl SessionRepoPort for MySqlSessionStore {
                 ServiceError::SessionInvalidParams(error.to_string())
             })?;
             match self
-                .insert_session(id, group_id.to_string(), params.clone(), current_millis())
+                .insert_session(
+                    id,
+                    group_id.to_string(),
+                    params.clone(),
+                    current_millis(),
+                    None,
+                )
                 .await
             {
                 Ok(sess) => return Ok(sess),
@@ -482,6 +533,63 @@ impl SessionRepoPort for MySqlSessionStore {
                     continue;
                 }
                 Err(e) => return Err(e),
+            }
+        }
+        Err(ServiceError::SessionInvalidParams(
+            "session_id collision retry exhausted (3 attempts)".to_string(),
+        ))
+    }
+
+    async fn create_with_event(&self, command: CreateSessionWithEvent) -> ServiceResult<Session> {
+        let session_id = command.params.id.clone().ok_or_else(|| {
+            ServiceError::SessionInvalidParams(
+                "Eventful Session creation requires a preallocated session_id".to_string(),
+            )
+        })?;
+        if !validate_session_id(&session_id, &command.group_id) {
+            return Err(ServiceError::SessionInvalidParams(format!(
+                "session_id {session_id} not valid for group {}",
+                command.group_id
+            )));
+        }
+        self.insert_session(
+            session_id,
+            command.group_id,
+            command.params,
+            current_millis(),
+            Some(&command.event),
+        )
+        .await
+    }
+
+    async fn create_channel(
+        &self,
+        group_id: &str,
+        channel_type: &str,
+        params: NewSessionParams,
+    ) -> ServiceResult<Session> {
+        for _ in 0..3 {
+            let id = new_channel_session_id(group_id, channel_type)
+                .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
+            match self
+                .insert_session(
+                    id,
+                    group_id.to_string(),
+                    params.clone(),
+                    current_millis(),
+                    None,
+                )
+                .await
+            {
+                Ok(session) => return Ok(session),
+                Err(ServiceError::InternalError(ref message))
+                    if message.to_ascii_lowercase().contains("duplicate")
+                        || message.contains("1062")
+                        || message.contains("UNIQUE constraint failed") =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error),
             }
         }
         Err(ServiceError::SessionInvalidParams(
@@ -585,6 +693,84 @@ impl SessionRepoPort for MySqlSessionStore {
             Some(row) => row_to_session(&row).map(Some),
             None => Err(ServiceError::SessionNotFound(session_id.to_string())),
         }
+    }
+
+    async fn complete_if_running_with_event(
+        &self,
+        command: CompleteSessionWithEvent,
+    ) -> ServiceResult<Option<Session>> {
+        let mut candidate = self
+            .get(&command.session_id)
+            .await
+            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
+        if candidate.status == SessionStatus::Completed {
+            return Ok(None);
+        }
+        if candidate.activation_count != command.expected_activation_count {
+            return Err(ServiceError::Conflict(format!(
+                "Session '{}' activation changed during completion",
+                command.session_id
+            )));
+        }
+        let now = current_millis();
+        candidate.status = SessionStatus::Completed;
+        candidate.output = command.output.clone();
+        candidate.error_message = command.error.clone();
+        candidate.updated_at = now;
+        candidate.completed_at = Some(now);
+        validate_session_event_scope(&candidate, &command.event)?;
+
+        let lock_sql = format!(
+            "SELECT session_id FROM bcs_group_sessions \
+             WHERE env = ? AND session_id = ? AND status = 'running' \
+               AND activation_count = ?{}",
+            transaction_lock_suffix(self.flavor),
+        );
+        let update_sql = format!(
+            "UPDATE bcs_group_sessions \
+             SET status = 'completed', output = ?, error_message = ?, \
+                 completed_at = ?, {} \
+             WHERE env = ? AND session_id = ? AND status = 'running' \
+               AND activation_count = ?",
+            self.flavor.set_modified_now(),
+        );
+        let mut steps = vec![
+            DbTransactionStep::Query(DbStatement::with_params(
+                lock_sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(command.session_id.as_str()),
+                    DbValue::I64(i64::from(command.expected_activation_count)),
+                ],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_transaction_params(
+                update_sql,
+                vec![
+                    DbTransactionParam::value(json_to_db_value(&command.output)),
+                    DbTransactionParam::value(DbValue::from(command.error.as_deref())),
+                    DbTransactionParam::value(DbValue::I64(now as i64)),
+                    DbTransactionParam::value(self.env.as_str()),
+                    DbTransactionParam::query_result(0, 0, "session_id"),
+                    DbTransactionParam::value(i64::from(command.expected_activation_count)),
+                ],
+            )),
+        ];
+        let event_plan = EventAppendTransactionPlan::build(
+            &command.event,
+            self.flavor,
+            steps.len(),
+        )
+        .map_err(|error| {
+            ServiceError::InternalError(format!("prepare Session completion Event: {error}"))
+        })?;
+        steps.extend(event_plan.steps);
+        self.db.transaction(steps).await.map_err(|error| {
+            ServiceError::Conflict(format!(
+                "Session '{}' changed during completion: {error}",
+                command.session_id
+            ))
+        })?;
+        Ok(Some(candidate))
     }
 
     async fn reactivate(
@@ -1070,6 +1256,116 @@ impl SessionRepoPort for MySqlSessionStore {
         Ok(current)
     }
 
+    async fn add_participant_with_event(
+        &self,
+        command: AddSessionParticipantWithEvent,
+    ) -> ServiceResult<Session> {
+        let mut candidate = self
+            .get(&command.session_id)
+            .await
+            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
+        if candidate
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == command.participant.bot_uuid)
+        {
+            return Ok(candidate);
+        }
+        if serde_json::to_value(&candidate.participants).ok()
+            != serde_json::to_value(&command.expected_participants).ok()
+        {
+            return Err(ServiceError::Conflict(format!(
+                "Session '{}' participants changed during addition",
+                command.session_id
+            )));
+        }
+
+        let expected_json = serde_json::to_string(&command.expected_participants)
+            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
+        let bot_uuid = command.participant.bot_uuid.clone();
+        let role = participant_role_to_str(command.participant.role);
+        let mut join_map = candidate
+            .participant_join_seq
+            .as_ref()
+            .and_then(serde_json::Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        join_map.insert(bot_uuid.clone(), serde_json::json!(candidate.current_msg_seq));
+        let join_seq_json = serde_json::Value::Object(join_map);
+        candidate.participant_join_seq = Some(join_seq_json.clone());
+        candidate.participants.push(command.participant);
+        candidate.updated_at = current_millis();
+        validate_session_event_scope(&candidate, &command.event)?;
+
+        let participants_json = serde_json::to_string(&candidate.participants)
+            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
+        let lock_sql = format!(
+            "SELECT session_id FROM bcs_group_sessions \
+             WHERE env = ? AND session_id = ? AND participants = ?{}",
+            transaction_lock_suffix(self.flavor),
+        );
+        let update_sql = format!(
+            "UPDATE bcs_group_sessions \
+             SET participants = ?, participant_join_seq = ?, {} \
+             WHERE env = ? AND session_id = ? AND participants = ?",
+            self.flavor.set_modified_now(),
+        );
+        let upsert_sql = format!(
+            "INSERT INTO bcs_session_participants \
+             (env, session_id, group_id, bot_uuid, role, gmt_create) \
+             VALUES (?, ?, ?, ?, ?, {}) {}",
+            self.flavor.now(),
+            self.flavor
+                .on_conflict_nothing(&["env", "session_id", "bot_uuid"]),
+        );
+        let mut steps = vec![
+            DbTransactionStep::Query(DbStatement::with_params(
+                lock_sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(command.session_id.as_str()),
+                    DbValue::from(expected_json.as_str()),
+                ],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_transaction_params(
+                update_sql,
+                vec![
+                    DbTransactionParam::value(participants_json.as_str()),
+                    DbTransactionParam::value(join_seq_json.to_string()),
+                    DbTransactionParam::value(self.env.as_str()),
+                    DbTransactionParam::query_result(0, 0, "session_id"),
+                    DbTransactionParam::value(expected_json.as_str()),
+                ],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_params(
+                upsert_sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(command.session_id.as_str()),
+                    DbValue::from(candidate.group_id.as_str()),
+                    DbValue::from(bot_uuid.as_str()),
+                    DbValue::from(role),
+                ],
+            )),
+        ];
+        let event_plan = EventAppendTransactionPlan::build(
+            &command.event,
+            self.flavor,
+            steps.len(),
+        )
+        .map_err(|error| {
+            ServiceError::InternalError(format!("prepare Session participant Event: {error}"))
+        })?;
+        steps.extend(event_plan.steps);
+        self.db.transaction(steps).await.map_err(|error| {
+            ServiceError::Conflict(format!(
+                "Session '{}' changed during participant addition: {error}",
+                command.session_id
+            ))
+        })?;
+        Ok(candidate)
+    }
+
     async fn remove_participant(
         &self,
         session_id: &str,
@@ -1138,6 +1434,95 @@ impl SessionRepoPort for MySqlSessionStore {
             .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
 
         Ok(current)
+    }
+
+    async fn remove_participant_with_event(
+        &self,
+        command: RemoveSessionParticipantWithEvent,
+    ) -> ServiceResult<Session> {
+        let mut candidate = self
+            .get(&command.session_id)
+            .await
+            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
+        if serde_json::to_value(&candidate.participants).ok()
+            != serde_json::to_value(&command.expected_participants).ok()
+        {
+            return Err(ServiceError::Conflict(format!(
+                "Session '{}' participants changed during removal",
+                command.session_id
+            )));
+        }
+        let before = candidate.participants.len();
+        candidate
+            .participants
+            .retain(|participant| participant.bot_uuid != command.bot_uuid);
+        if candidate.participants.len() == before {
+            return Err(ServiceError::SessionInvalidParams(format!(
+                "participant {} not in session {}",
+                command.bot_uuid, command.session_id
+            )));
+        }
+        candidate.updated_at = current_millis();
+        validate_session_event_scope(&candidate, &command.event)?;
+
+        let expected_json = serde_json::to_string(&command.expected_participants)
+            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
+        let participants_json = serde_json::to_string(&candidate.participants)
+            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
+        let lock_sql = format!(
+            "SELECT session_id FROM bcs_group_sessions \
+             WHERE env = ? AND session_id = ? AND participants = ?{}",
+            transaction_lock_suffix(self.flavor),
+        );
+        let update_sql = format!(
+            "UPDATE bcs_group_sessions SET participants = ?, {} \
+             WHERE env = ? AND session_id = ? AND participants = ?",
+            self.flavor.set_modified_now(),
+        );
+        let mut steps = vec![
+            DbTransactionStep::Query(DbStatement::with_params(
+                lock_sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(command.session_id.as_str()),
+                    DbValue::from(expected_json.as_str()),
+                ],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_transaction_params(
+                update_sql,
+                vec![
+                    DbTransactionParam::value(participants_json.as_str()),
+                    DbTransactionParam::value(self.env.as_str()),
+                    DbTransactionParam::query_result(0, 0, "session_id"),
+                    DbTransactionParam::value(expected_json.as_str()),
+                ],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_params(
+                "DELETE FROM bcs_session_participants \
+                 WHERE env = ? AND session_id = ? AND bot_uuid = ?",
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(command.session_id.as_str()),
+                    DbValue::from(command.bot_uuid.as_str()),
+                ],
+            )),
+        ];
+        let event_plan = EventAppendTransactionPlan::build(
+            &command.event,
+            self.flavor,
+            steps.len(),
+        )
+        .map_err(|error| {
+            ServiceError::InternalError(format!("prepare Session participant Event: {error}"))
+        })?;
+        steps.extend(event_plan.steps);
+        self.db.transaction(steps).await.map_err(|error| {
+            ServiceError::Conflict(format!(
+                "Session '{}' changed during participant removal: {error}",
+                command.session_id
+            ))
+        })?;
+        Ok(candidate)
     }
 
     async fn update_participant_mode(

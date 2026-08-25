@@ -28,6 +28,11 @@ from secbaas.community.plugins.bot_service import (
 from secbaas.community.plugins.cache.stub import StubCachePlugin
 from secbaas.community.plugins.database.mariadb.mariadb_orm import MariaDbOrmPlugin
 from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
+from secbaas.community.plugins.eval_env import (
+    NoopEvalBindingResolver,
+    NoopEvalConsistencyCheck,
+    NoopEvalSessionLog,
+)
 from secbaas.community.plugins.file_transfer import NoopFileTransferBackend
 from secbaas.community.plugins.sandbox.arca import (
     AliyunAckSandboxPlugin,
@@ -56,8 +61,10 @@ from secbaas.community.plugins.sandbox.k8s.real import K8sClientManager
 from secbaas.community.plugins.sandbox.poolab import StubPoolabSandboxPlugin
 from secbaas.community.plugins.sandbox.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
-from secbaas.community.plugins.secret import AliyunKmsSecretStorePlugin
-from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
+from secbaas.community.plugins.secret import (
+    AliyunKmsSecretStorePlugin,
+    StubSecretStorePlugin,
+)
 
 
 def _build_aliyun_ack_templates(
@@ -171,6 +178,20 @@ class PluginContainer(containers.DeclarativeContainer):
     file_transfer_backend = providers.Selector(
         config.plugins.file_transfer,
         stub=providers.Singleton(NoopFileTransferBackend),
+    )
+
+    # 评测环境 Plugin（stub=空操作, real=由 OCB 企业层通过 register_plugin_option 注入）
+    eval_binding_resolver = providers.Selector(
+        config.plugins.eval_env,
+        stub=providers.Singleton(NoopEvalBindingResolver),
+    )
+    eval_consistency_check = providers.Selector(
+        config.plugins.eval_env,
+        stub=providers.Singleton(NoopEvalConsistencyCheck),
+    )
+    eval_session_log = providers.Selector(
+        config.plugins.eval_env,
+        stub=providers.Singleton(NoopEvalSessionLog),
     )
 
 

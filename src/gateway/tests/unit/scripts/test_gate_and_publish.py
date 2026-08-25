@@ -87,16 +87,15 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
 
     assert public_document["openapi"] == "3.1.0"
     assert internal_document["openapi"] == "3.1.0"
-    assert public_operations == 39
-    assert internal_operations == 10
-    assert public_operations + internal_operations == 49
+    assert public_operations == 56
+    assert internal_operations == 21
+    assert public_operations + internal_operations == 77
     assert all(
         path.startswith("/openapi/v1/collaboration/")
         for path in public_document["paths"]
     )
     assert all(
-        path.startswith("/api/v1/collaboration/")
-        for path in internal_document["paths"]
+        path.startswith("/api/v1/collaboration/") for path in internal_document["paths"]
     )
 
     assert (
@@ -114,9 +113,7 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
             "user": "required",
             "app": "required",
         }
-    websocket = public_document["paths"][
-        "/openapi/v1/collaboration/messages/ws"
-    ]["get"]
+    websocket = public_document["paths"]["/openapi/v1/collaboration/messages/ws"]["get"]
     assert websocket["x-avernet-protocol"] == "websocket"
     assert websocket["x-avernet-security"] == {}
     assert (
@@ -124,6 +121,16 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
         in public_document["paths"][
             "/openapi/v1/collaboration/bots/{bot_id}/candidates"
         ]
+    )
+    assert (
+        "post"
+        in public_document["paths"][
+            "/openapi/v1/collaboration/friend-connections/requests"
+        ]
+    )
+    assert (
+        "delete"
+        in public_document["paths"]["/openapi/v1/collaboration/friend-connections"]
     )
     assert (
         "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"
@@ -143,6 +150,10 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
         in internal_document["paths"][
             "/api/v1/collaboration/sessions/{session_id}/files/{file_id}/content"
         ]
+    )
+    assert (
+        "post"
+        in internal_document["paths"]["/api/v1/collaboration/definitions/validate"]
     )
     assert (
         "/api/v1/collaboration/bots/{bot_id}/candidates"

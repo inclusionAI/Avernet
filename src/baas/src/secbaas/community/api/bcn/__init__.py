@@ -16,6 +16,9 @@ from ._exceptions import (
 )
 from ._models import (
     Attachment,
+    BcnInteractionAnswer,
+    BcnInteractionResolveInput,
+    BcnInteractionResolveResult,
     BotRef,
     ChatEvent,
     ChatHistoryInput,
@@ -45,6 +48,9 @@ __all__ = [
     # Models - 下行
     "Attachment",
     "BotRef",
+    "BcnInteractionAnswer",
+    "BcnInteractionResolveInput",
+    "BcnInteractionResolveResult",
     "ChatHistoryInput",
     "ChatHistoryResult",
     "ChatInjectInput",

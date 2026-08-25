@@ -9,6 +9,21 @@ import { asyncHandler } from "../../middleware/async-handler.js";
 export function createInternalFacadesRouter(facadeRepo: FacadeBindingRepository | null): Router {
   const router = Router();
 
+  /** GET / — list all facade bindings */
+  router.get("/", asyncHandler(async (_req: Request, res: Response) => {
+    if (!facadeRepo) {
+      res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
+      return;
+    }
+    try {
+      const rows = await facadeRepo.listAll();
+      res.json({ success: true, data: rows });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
+    }
+  }));
+
   /** PUT / — upsert a facade binding */
   router.put("/", asyncHandler(async (req: Request, res: Response) => {
     const { command, workflowId } = req.body as { command?: string; workflowId?: string };

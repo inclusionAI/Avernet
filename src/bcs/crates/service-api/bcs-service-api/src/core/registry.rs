@@ -35,6 +35,36 @@ pub enum ConnectError {
     InternalError(String),
 }
 
+/// Internal sentinel prefix for a plugin-mode pre-registration placeholder
+/// token. A `session_token` prefixed with this marks a bot created by a
+/// `connection_mode=plugin` provider registration before any plugin has
+/// attached over WebSocket; the WS-connect `connect_or_promote_streaming`
+/// branch promotes a MOCK to a real runtime token. Never exposed externally.
+pub const MOCK_TOKEN_PREFIX: &str = "MOCK_";
+
+/// Mint a fresh MOCK sentinel placeholder session token.
+pub fn mock_token() -> String {
+    format!("{MOCK_TOKEN_PREFIX}{}", uuid::Uuid::new_v4())
+}
+
+/// True iff the token is the BCS-internal MOCK placeholder sentinel.
+pub fn is_mock_token(token: &str) -> bool {
+    token.starts_with(MOCK_TOKEN_PREFIX)
+}
+
+/// Error type for `connect_or_promote_streaming`: explicit variants (vs the
+/// historical `Err(())` from `register_streaming_connection`) so `connect_bot`
+/// can route `AlreadyRegistered` vs `AlreadyConnected` without deducing intent.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ConnectStreamError {
+    #[error("Bot '{0}' is already connected")]
+    AlreadyConnected(String),
+    #[error("Bot '{0}' is already registered")]
+    AlreadyRegistered(String),
+    #[error("Internal error: {0}")]
+    InternalError(String),
+}
+
 // ============================================================================
 // Service Traits
 // ============================================================================
@@ -58,6 +88,28 @@ pub trait BotRegistryCoreService: Send + Sync {
         self.save_created_by(&bot_id_for_followup, created_by, false)
             .await?;
         self.save_token(&bot_id_for_followup, token).await
+    }
+
+    /// Replace a bot's capabilities wholesale, including cleared (empty)
+    /// `domains`/`skills`/`scopes` arrays.
+    ///
+    /// Unlike [`register`](Self::register) — whose existing-bot merge skips
+    /// empty capability arrays — this method assigns the given capabilities
+    /// verbatim, so a PATCH that clears a field actually takes effect in the
+    /// live registry and runtime discovery, not only in the database and the
+    /// response. Use this for partial updates; `register` remains the
+    /// registration/reconnect path whose skip-empty semantics onboard relies
+    /// on. Identity (`created_by`, session token) and runtime state are
+    /// preserved exactly as `register` preserves them.
+    async fn update_capabilities(
+        &self,
+        _bot_id: &str,
+        _capabilities: BotCapabilities,
+    ) -> ServiceResult<()> {
+        Err(ServiceError::InvalidOperation {
+            message: "capability replacement is not configured".to_string(),
+            request_id: None,
+        })
     }
 
     /// Update a bot's dynamic status.
@@ -430,6 +482,28 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// Register a new streaming connection for a bot.
     /// Returns Ok(token) on success, or Err if bot is already connected.
     async fn register_streaming_connection(&self, bot_id: String) -> Result<String, ()>;
+
+    /// Connect or promote a streaming connection by `bot_id`, deciding
+    /// atomically under the store write lock (no lock-free existence check):
+    /// - bot absent              → create it with a fresh real token + attach ws
+    /// - bot exists, MOCK token  → promote: replace MOCK with a real token +
+    ///   attach ws (and persist the real token back to `bcs_bots` so a later
+    ///   restart still resolves)
+    /// - bot exists, real token, no ws → `AlreadyRegistered` (anti-hijack: an
+    ///   empty/stale-token claim of a real-token bot is refused)
+    /// - bot exists, real token, ws present → `AlreadyConnected`
+    ///
+    /// Default impl delegates to [`register_streaming_connection`]
+    /// (preserving legacy semantics for noop/mock registries).
+    async fn connect_or_promote_streaming(
+        &self,
+        bot_id: String,
+    ) -> Result<String, ConnectStreamError> {
+        let id = bot_id.clone();
+        self.register_streaming_connection(bot_id)
+            .await
+            .map_err(|_| ConnectStreamError::AlreadyConnected(id))
+    }
 
     /// Reconnect a bot with an existing token.
     /// Returns Ok((bot_id, token)) on success, or Err if token is invalid or bot is already connected.

@@ -36,6 +36,36 @@ use tower::ServiceExt;
 
 const SID: &str = "group-1:00000001";
 
+// ---- channel conversation lookup ----------------------------------------
+
+#[tokio::test]
+async fn channel_conversation_lookup_allows_session_member_bot() {
+    let (app, _t) = bot_app("group-1", true).await;
+    let resp = get_channel_conversations(&app, SID, "Bearer driver-token").await;
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn channel_conversation_lookup_allows_human_via_owned_participant_bot() {
+    let (app, _t, _r) = human_app("alice").await;
+    let resp = get_channel_conversations(&app, SID, "").await;
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn channel_conversation_lookup_rejects_non_member_bot() {
+    let (app, _t) = bot_app("group-1", true).await;
+    let resp = get_channel_conversations(&app, SID, "Bearer outsider-token").await;
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn channel_conversation_lookup_requires_bot_or_human_identity() {
+    let (app, _t) = bot_app("group-1", true).await;
+    let resp = get_channel_conversations(&app, SID, "").await;
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
 // ---- read routes: list / capabilities ------------------------------------
 
 #[tokio::test]
@@ -155,6 +185,25 @@ async fn get(app: &axum::Router, sid: &str, auth: &str) -> axum::response::Respo
         b = b.header("authorization", auth);
     }
     app.clone().oneshot(b.body(Body::empty()).unwrap()).await.unwrap()
+}
+
+async fn get_channel_conversations(
+    app: &axum::Router,
+    sid: &str,
+    auth: &str,
+) -> axum::response::Response {
+    let mut request = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "/channels/conversations/by-session?bcs_session_id={sid}&channel_type=dingtalk"
+        ));
+    if !auth.is_empty() {
+        request = request.header("authorization", auth);
+    }
+    app.clone()
+        .oneshot(request.body(Body::empty()).unwrap())
+        .await
+        .unwrap()
 }
 
 /// Build an app whose session `SID` lives in `session_group`. When
@@ -300,6 +349,7 @@ fn bot_participant(bot_uuid: &str, role: ParticipantRole) -> Participant {
         role,
         actor_kind: ActorKind::Bot,
         mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+        tags: Vec::new(),
     }
 }
 

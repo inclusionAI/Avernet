@@ -6,14 +6,19 @@ naming the missing member, instead of raising ``AttributeError`` at the call
 site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 ``core/repository/README.md`` for why that direction is load-bearing.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod
 from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.bot_management.render_screen.models import RenderScreenRecord
-    from agentclaw.community.core.bot_management.repository.models import BotRestartLockRecord
+    from agentclaw.community.core.bot_management.render_screen.models import (
+        RenderScreenRecord,
+    )
+    from agentclaw.community.core.bot_management.repository.models import (
+        BotRestartLockRecord,
+    )
 
 
 @runtime_checkable
@@ -118,9 +123,7 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
-    def filter_live_bots(
-        self, pairs: list[tuple[str, str]]
-    ) -> set[tuple[str, str]]:
+    def filter_live_bots(self, pairs: list[tuple[str, str]]) -> set[tuple[str, str]]:
         """Which of these ``(bot_id, owner_id)`` bots are live, in one query.
 
         The many-owner sibling of :meth:`list_live_bot_ids_by_owner`, and it
@@ -172,6 +175,7 @@ class BotRepository(Protocol):
         owner_id: Optional[str] = None,
         engine: Optional[str] = None,
         status: Optional[str] = None,
+        space_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
         bot_ids: list[str] | None = None,
@@ -183,10 +187,10 @@ class BotRepository(Protocol):
         distinguishable — collapsing them would turn "this caller may reach no
         bots" into "show everything".
 
-        ``owner_id`` scopes to a single owner (exact), ``engine`` filters on the
-        active engine (exact), ``status`` filters on lifecycle status (exact).
-        All are optional and additive — omitting them reproduces the prior
-        result set and count exactly.
+        ``owner_id`` scopes to a single owner (exact), ``space_id`` to a
+        business Space (exact after canonical string persistence), ``engine``
+        filters on the active engine (exact), and ``status`` filters on lifecycle
+        status (exact). All are optional and additive.
         """
         ...
 
@@ -195,8 +199,8 @@ class BotRepository(Protocol):
         self,
         public: Optional[str] = None,
         search: Optional[str] = None,
-        page: int = 1,
-        page_size: int = 20,
+        page: int | None = 1,
+        page_size: int | None = 20,
     ) -> tuple[int, List[Dict[str, Any]]]:
         """List bots with pagination and search."""
         ...
@@ -206,6 +210,16 @@ class BotRepository(Protocol):
         self, pairs: List[tuple[str, str]]
     ) -> List[Dict[str, Any]]:
         """Live public bots matching any ``(bot_id, owner_id)`` pair, this env."""
+        ...
+
+    @abstractmethod
+    def list_bots_by_owner_bot_pairs(
+        self,
+        pairs: List[tuple[str, str]],
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[int, List[Dict[str, Any]]]:
+        """List live Bots matching exact ``(bot_id, owner_id)`` pairs."""
         ...
 
     @abstractmethod
@@ -228,6 +242,13 @@ class BotRepository(Protocol):
         self, bot_id: str, owner_id: str, update_data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """Update bot record by bot_id and owner_id."""
+        ...
+
+    @abstractmethod
+    def update_space_by_owner(
+        self, *, bot_id: str, owner_id: str, space_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """Atomically replace the structured Space assignment of an owned Bot."""
         ...
 
     @abstractmethod
@@ -294,9 +315,7 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
-    def get_device_provider_by_bot_id(
-        self, bot_id: str
-    ) -> Optional[Dict[str, Any]]:
+    def get_device_provider_by_bot_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
         """Get device_provider info by bot_id (no owner_id required)."""
         ...
 
@@ -406,9 +425,7 @@ class BotRestartLockRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
-    def release(
-        self, env: str, entity_id: str, bot_id: str, lock_token: str
-    ) -> bool:
+    def release(self, env: str, entity_id: str, bot_id: str, lock_token: str) -> bool:
         """Release the lock by hard-deleting the row — only if it's still ours.
 
         Compare-and-delete: ``DELETE WHERE (env, entity_id, bot_id) matches AND
@@ -453,7 +470,9 @@ class TemplateRepository(Protocol):
         ...
 
     @abstractmethod
-    def update_by_bot_id(self, bot_id: str, update_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def update_by_bot_id(
+        self, bot_id: str, update_data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Update template by bot_id.
 
         Args:
@@ -541,7 +560,12 @@ class RenderScreenRepository(Protocol):
         ...
 
     @abstractmethod
-    def list_by_bot_id(self, *, bot_id: str, owner_id: str) -> list[RenderScreenRecord]:
+    def list_by_bot_id(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str | None = None,
+    ) -> list[RenderScreenRecord]:
         """查询某 Bot 下所有未删除的 CDN 配置。"""
         ...
 

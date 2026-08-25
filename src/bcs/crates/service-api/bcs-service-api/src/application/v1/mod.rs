@@ -6,11 +6,16 @@
 
 pub mod authorization;
 pub mod bot;
+pub mod collaboration_definition;
+pub mod collaboration_template;
 pub mod error;
+pub mod event_subscription;
 pub mod friendship;
+pub mod friend_connection;
 pub mod group;
 pub mod group_session_connection;
 pub mod identity;
+pub mod internal_bot_attributes;
 pub mod invitation;
 pub mod message;
 pub mod principal;
@@ -22,14 +27,19 @@ pub use authorization::{
     require_human, select_principal,
 };
 pub use bot::*;
-pub use error::ApplicationError;
+pub use collaboration_definition::*;
+pub use collaboration_template::*;
+pub use error::*;
+pub use event_subscription::*;
 pub use friendship::*;
+pub use friend_connection::*;
 pub use group::*;
 pub use group_session_connection::*;
 pub use identity::{
     AuthenticatedAccessKeyIdentity, AuthenticatedAppIdentity, AuthenticatedBotIdentity,
     AuthenticatedCaller, AuthenticatedUserIdentity,
 };
+pub use internal_bot_attributes::*;
 pub use invitation::*;
 pub use message::*;
 pub use principal::{AuthenticatedUser, BotPrincipal, HumanPrincipal, Principal};

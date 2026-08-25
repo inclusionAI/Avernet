@@ -8,11 +8,11 @@ from datetime import datetime, timedelta
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.desktop_bot.services.desktop_bot_service import (
+from agentclaw.community.core.desktop_bot.errors import (
     DesktopBotOrphanError,
-    DesktopBotService,
     DesktopBotServiceError,
 )
+from agentclaw.community.core.desktop_bot.services.desktop_bot_service import DesktopBotService
 from agentclaw.community.core.desktop_bot.status_mapping import StatusDecision, map_baas_to_local
 from agentclaw.community.di.config import DesktopBotPeriodicScanConfig
 from agentclaw.community.kernel.lifecycle import LifecycleBase

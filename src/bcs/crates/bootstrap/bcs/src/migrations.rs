@@ -41,7 +41,12 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         actor_kind TEXT NOT NULL DEFAULT 'bot',
         status TEXT NOT NULL DEFAULT 'online',
         is_deleted INTEGER NOT NULL DEFAULT 0,
-        agent_code TEXT DEFAULT NULL
+        agent_code TEXT DEFAULT NULL,
+        task_claim_mode INTEGER NOT NULL DEFAULT 0,
+        task_dream_mode INTEGER NOT NULL DEFAULT 0,
+        user_visibility TEXT NOT NULL DEFAULT 'protected',
+        friend_ext TEXT DEFAULT NULL,
+        friend_check_in_strategy TEXT NOT NULL DEFAULT 'APPROVAL'
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bots_session_token ON bcs_bots(session_token)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bots_bot_env ON bcs_bots(bot_uuid, env)",
@@ -266,6 +271,7 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         env TEXT NOT NULL,
         routing_policy_json TEXT DEFAULT NULL,
         context TEXT DEFAULT NULL,
+        opening_message_json TEXT DEFAULT NULL,
         group_kind TEXT NOT NULL DEFAULT 'normal',
         dm_pair_key TEXT DEFAULT NULL,
         service_group_uuid TEXT DEFAULT NULL,
@@ -295,7 +301,8 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         role TEXT NOT NULL,
         env TEXT NOT NULL,
         actor_kind TEXT NOT NULL DEFAULT 'bot',
-        mode TEXT NOT NULL DEFAULT 'auto'
+        mode TEXT NOT NULL DEFAULT 'auto',
+        tags_json TEXT DEFAULT NULL
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_participants_env_group_bot ON bcs_group_participants(env, group_id, bot_uuid)",
     "CREATE INDEX IF NOT EXISTS idx_participants_bot ON bcs_group_participants(bot_uuid)",
@@ -682,6 +689,194 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_session_file ON bcs_session_files (env, session_id, file_id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_env_file_id ON bcs_session_files (env, file_id)",
     "CREATE INDEX IF NOT EXISTS idx_session_files_session ON bcs_session_files (env, session_id, gmt_create)",
+    // ── public Eventing ──────────────────────────────────
+    "CREATE TABLE IF NOT EXISTS bcs_event_subscriptions (
+        subscription_id TEXT NOT NULL PRIMARY KEY,
+        name TEXT NOT NULL,
+        scope_type TEXT NOT NULL,
+        scope_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        current_revision INTEGER NOT NULL,
+        created_by_type TEXT NOT NULL,
+        created_by_id TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        deleted_at TEXT DEFAULT NULL,
+        env TEXT NOT NULL
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_event_subscription_scope
+        ON bcs_event_subscriptions(env, scope_type, scope_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_event_subscription_status
+        ON bcs_event_subscriptions(env, status, updated_at)",
+    "CREATE INDEX IF NOT EXISTS idx_event_subscription_creator
+        ON bcs_event_subscriptions(env, created_by_type, created_by_id)",
+    "CREATE TABLE IF NOT EXISTS bcs_event_subscription_revisions (
+        subscription_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        event_filters_json TEXT NOT NULL,
+        payload_mode TEXT NOT NULL,
+        endpoint_url TEXT NOT NULL,
+        request_timeout_ms INTEGER NOT NULL,
+        activated_at TEXT NOT NULL,
+        retired_at TEXT DEFAULT NULL,
+        env TEXT NOT NULL,
+        PRIMARY KEY(subscription_id, revision)
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_event_revision_active
+        ON bcs_event_subscription_revisions(env, subscription_id, retired_at)",
+    "CREATE TABLE IF NOT EXISTS bcs_event_scope_epochs (
+        env TEXT NOT NULL,
+        scope_type TEXT NOT NULL,
+        scope_id TEXT NOT NULL,
+        epoch INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(env, scope_type, scope_id)
+    )",
+    "CREATE TABLE IF NOT EXISTS bcs_event_streams (
+        env TEXT NOT NULL,
+        stream_key TEXT NOT NULL,
+        last_sequence INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(env, stream_key)
+    )",
+    "CREATE TABLE IF NOT EXISTS bcs_events (
+        event_id TEXT NOT NULL PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        schema_version TEXT NOT NULL,
+        producer TEXT NOT NULL,
+        producer_key TEXT NOT NULL,
+        subject_type TEXT NOT NULL,
+        subject_id TEXT NOT NULL,
+        group_id TEXT DEFAULT NULL,
+        session_id TEXT DEFAULT NULL,
+        task_id TEXT DEFAULT NULL,
+        run_id TEXT DEFAULT NULL,
+        stream_key TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        actor_json TEXT DEFAULT NULL,
+        correlation_id TEXT DEFAULT NULL,
+        causation_event_id TEXT DEFAULT NULL,
+        trace_id TEXT DEFAULT NULL,
+        data_json TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        recorded_at TEXT NOT NULL,
+        fanout_status TEXT NOT NULL,
+        retention_until TEXT NOT NULL,
+        env TEXT NOT NULL
+    )",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uk_event_producer
+        ON bcs_events(env, producer, producer_key, event_type)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uk_event_stream_sequence
+        ON bcs_events(env, stream_key, sequence)",
+    "CREATE INDEX IF NOT EXISTS idx_event_fanout_status
+        ON bcs_events(env, fanout_status, recorded_at)",
+    "CREATE INDEX IF NOT EXISTS idx_event_scope_type
+        ON bcs_events(env, group_id, session_id, event_type, recorded_at)",
+    "CREATE INDEX IF NOT EXISTS idx_event_causation
+        ON bcs_events(env, causation_event_id)",
+    "CREATE INDEX IF NOT EXISTS idx_event_retention
+        ON bcs_events(env, retention_until, fanout_status)",
+    "CREATE TABLE IF NOT EXISTS bcs_event_fanout_targets (
+        target_id TEXT NOT NULL PRIMARY KEY,
+        event_id TEXT NOT NULL,
+        subscription_id TEXT NOT NULL,
+        subscription_revision INTEGER NOT NULL,
+        purpose TEXT NOT NULL,
+        replay_request_id TEXT NOT NULL DEFAULT '',
+        replay_of_delivery_id TEXT DEFAULT NULL,
+        depends_on_target_id TEXT DEFAULT NULL,
+        status TEXT NOT NULL,
+        lease_owner TEXT DEFAULT NULL,
+        lease_until TEXT DEFAULT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        materialized_at TEXT DEFAULT NULL,
+        cancelled_at TEXT DEFAULT NULL,
+        env TEXT NOT NULL
+    )",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uk_event_target_idempotency
+        ON bcs_event_fanout_targets(env, subscription_id, subscription_revision, event_id, purpose, replay_request_id)",
+    "CREATE INDEX IF NOT EXISTS idx_event_target_pending
+        ON bcs_event_fanout_targets(env, status, lease_until, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_event_target_dependency
+        ON bcs_event_fanout_targets(env, depends_on_target_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_event_target_subscription
+        ON bcs_event_fanout_targets(env, subscription_id, subscription_revision, status)",
+    "CREATE TABLE IF NOT EXISTS bcs_event_deliveries (
+        delivery_id TEXT NOT NULL PRIMARY KEY,
+        fanout_target_id TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        subscription_id TEXT NOT NULL,
+        subscription_revision INTEGER NOT NULL,
+        stream_key TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        payload_bytes BLOB NOT NULL,
+        payload_sha256 TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        first_attempt_at TEXT DEFAULT NULL,
+        last_attempt_at TEXT DEFAULT NULL,
+        next_attempt_at TEXT DEFAULT NULL,
+        lease_owner TEXT DEFAULT NULL,
+        lease_until TEXT DEFAULT NULL,
+        last_http_status INTEGER DEFAULT NULL,
+        last_error_category TEXT DEFAULT NULL,
+        last_error_summary TEXT DEFAULT NULL,
+        dead_lettered_at TEXT DEFAULT NULL,
+        cancelled_at TEXT DEFAULT NULL,
+        skipped_at TEXT DEFAULT NULL,
+        skip_actor TEXT DEFAULT NULL,
+        skip_reason TEXT DEFAULT NULL,
+        replay_of_delivery_id TEXT DEFAULT NULL,
+        resolved_by_delivery_id TEXT DEFAULT NULL,
+        resolved_at TEXT DEFAULT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        succeeded_at TEXT DEFAULT NULL,
+        env TEXT NOT NULL
+    )",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uk_event_delivery_target
+        ON bcs_event_deliveries(env, fanout_target_id)",
+    "CREATE INDEX IF NOT EXISTS idx_event_claim_due
+        ON bcs_event_deliveries(env, status, next_attempt_at, lease_until)",
+    "CREATE INDEX IF NOT EXISTS idx_event_strict_lane
+        ON bcs_event_deliveries(env, subscription_id, stream_key, status, sequence)",
+    "CREATE INDEX IF NOT EXISTS idx_event_delivery_subscription
+        ON bcs_event_deliveries(env, subscription_id, status, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_event_delivery_replay
+        ON bcs_event_deliveries(env, replay_of_delivery_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_event_delivery_retention
+        ON bcs_event_deliveries(env, status, succeeded_at, dead_lettered_at)",
+    "CREATE TABLE IF NOT EXISTS bcs_event_delivery_attempts (
+        delivery_id TEXT NOT NULL,
+        attempt_no INTEGER NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT DEFAULT NULL,
+        latency_ms INTEGER DEFAULT NULL,
+        result TEXT DEFAULT NULL,
+        http_status INTEGER DEFAULT NULL,
+        error_category TEXT DEFAULT NULL,
+        error_summary TEXT DEFAULT NULL,
+        response_bytes_observed INTEGER DEFAULT NULL,
+        worker_id TEXT NOT NULL,
+        PRIMARY KEY(delivery_id, attempt_no)
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_event_attempt_result
+        ON bcs_event_delivery_attempts(result, started_at)",
+    "CREATE TABLE IF NOT EXISTS bcs_event_subscription_audits (
+        audit_id TEXT NOT NULL PRIMARY KEY,
+        subscription_id TEXT NOT NULL,
+        revision INTEGER DEFAULT NULL,
+        action TEXT NOT NULL,
+        actor_type TEXT NOT NULL,
+        actor_id TEXT NOT NULL,
+        reason TEXT DEFAULT NULL,
+        details_json TEXT DEFAULT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        env TEXT NOT NULL
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_event_audit_subscription
+        ON bcs_event_subscription_audits(env, subscription_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_event_audit_actor
+        ON bcs_event_subscription_audits(env, actor_type, actor_id, created_at)",
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -722,6 +917,38 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration {
         version: 8,
         name: "human_input_im_requests",
+    },
+    SqliteMigration {
+        version: 9,
+        name: "eventing",
+    },
+    SqliteMigration {
+        version: 10,
+        name: "eventing_plaintext_endpoint",
+    },
+    SqliteMigration {
+        version: 11,
+        name: "group_opening_message",
+    },
+    SqliteMigration {
+        version: 12,
+        name: "add_bot_task_modes",
+    },
+    SqliteMigration {
+        version: 13,
+        name: "edge_permission",
+    },
+    SqliteMigration {
+        version: 14,
+        name: "add_bot_internal_attributes",
+    },
+    SqliteMigration {
+        version: 15,
+        name: "group_participant_tags",
+    },
+    SqliteMigration {
+        version: 16,
+        name: "expand_session_ids",
     },
 ];
 
@@ -824,6 +1051,25 @@ pub async fn run_sqlite_bootstrap_tables(db: &dyn DbPlugin) -> DbResult<()> {
     ensure_sqlite_message_owner_bot_id(db).await?;
     ensure_sqlite_session_collected_column(db).await?;
     ensure_bcs_session_files(db).await?;
+    ensure_sqlite_bot_task_modes(db).await?;
+    ensure_sqlite_bot_internal_attributes(db).await?;
+    Ok(())
+}
+
+async fn ensure_sqlite_group_opening_message_column(db: &dyn DbPlugin) -> DbResult<()> {
+    if !table_exists(db, "bcs_groups").await? {
+        return Ok(());
+    }
+    let columns = sqlite_table_columns(db, "bcs_groups").await?;
+    if !columns
+        .iter()
+        .any(|column| column == "opening_message_json")
+    {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_groups ADD COLUMN opening_message_json TEXT DEFAULT NULL",
+        ))
+        .await?;
+    }
     Ok(())
 }
 
@@ -849,6 +1095,66 @@ async fn ensure_sqlite_message_owner_bot_id(db: &dyn DbPlugin) -> DbResult<()> {
          ON bcs_messages(session_id, owner_bot_id, created_at, session_seq)",
     ))
     .await?;
+    Ok(())
+}
+
+async fn ensure_sqlite_bot_task_modes(db: &dyn DbPlugin) -> DbResult<()> {
+    let columns = db
+        .query(DbStatement::new("PRAGMA table_info(bcs_bots)"))
+        .await?;
+    let mut has_claim = false;
+    let mut has_dream = false;
+    for row in &columns {
+        match row.get_string("name")?.as_deref() {
+            Some("task_claim_mode") => has_claim = true,
+            Some("task_dream_mode") => has_dream = true,
+            _ => {}
+        }
+        if has_claim && has_dream {
+            break;
+        }
+    }
+    if !has_claim {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_bots ADD COLUMN task_claim_mode INTEGER NOT NULL DEFAULT 0",
+        ))
+        .await?;
+    }
+    if !has_dream {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_bots ADD COLUMN task_dream_mode INTEGER NOT NULL DEFAULT 0",
+        ))
+        .await?;
+    }
+    Ok(())
+}
+
+async fn ensure_sqlite_bot_internal_attributes(db: &dyn DbPlugin) -> DbResult<()> {
+    if !table_exists(db, "bcs_bots").await? {
+        return Ok(());
+    }
+    let columns = sqlite_table_columns(db, "bcs_bots").await?;
+    if !columns.iter().any(|column| column == "user_visibility") {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_bots ADD COLUMN user_visibility TEXT NOT NULL DEFAULT 'protected'",
+        ))
+        .await?;
+    }
+    if !columns.iter().any(|column| column == "friend_ext") {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_bots ADD COLUMN friend_ext TEXT DEFAULT NULL",
+        ))
+        .await?;
+    }
+    if !columns
+        .iter()
+        .any(|column| column == "friend_check_in_strategy")
+    {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_bots ADD COLUMN friend_check_in_strategy TEXT NOT NULL DEFAULT 'APPROVAL'",
+        ))
+        .await?;
+    }
     Ok(())
 }
 
@@ -905,20 +1211,24 @@ async fn ensure_bcs_session_files(db: &dyn DbPlugin) -> DbResult<()> {
                 storage_backend TEXT NOT NULL,
                 object_handle TEXT NOT NULL,
                 status TEXT NOT NULL
-            )"
-        )).await?;
+            )",
+        ))
+        .await?;
         db.execute(DbStatement::new(
             "CREATE UNIQUE INDEX IF NOT EXISTS uk_session_file \
-             ON bcs_session_files (env, session_id, file_id)"
-        )).await?;
+             ON bcs_session_files (env, session_id, file_id)",
+        ))
+        .await?;
         db.execute(DbStatement::new(
             "CREATE UNIQUE INDEX IF NOT EXISTS uk_env_file_id \
-             ON bcs_session_files (env, file_id)"
-        )).await?;
+             ON bcs_session_files (env, file_id)",
+        ))
+        .await?;
         db.execute(DbStatement::new(
             "CREATE INDEX IF NOT EXISTS idx_session_files_session \
-             ON bcs_session_files (env, session_id, gmt_create)"
-        )).await?;
+             ON bcs_session_files (env, session_id, gmt_create)",
+        ))
+        .await?;
     }
     Ok(())
 }
@@ -989,8 +1299,99 @@ async fn apply_sqlite_migration_body(
         // Startup DDL creates the HumanInput request table and indexes before
         // versioned migrations are recorded.
         8 => Ok(()),
+        // Startup DDL creates the additive Eventing tables and indexes before
+        // versioned migrations are recorded.
+        9 => Ok(()),
+        // Eventing was still under development when per-Subscription HMAC and
+        // encrypted endpoint storage were removed. Repair empty local schemas
+        // without discarding any persisted Subscription configuration.
+        10 => migrate_sqlite_eventing_plaintext_endpoint(db).await,
+        11 => ensure_sqlite_group_opening_message_column(db).await,
+        // task_claim_mode / task_dream_mode columns are added by
+        // ensure_sqlite_bot_task_modes in run_sqlite_bootstrap_tables;
+        // version 12 only records progress.
+        12 => Ok(()),
+        // Edge-permission tables (friend unification) + bcs_bots config columns.
+        13 => add_sqlite_edge_permission_schema(db).await,
+        // Internal Bot attribute columns are added by
+        // ensure_sqlite_bot_internal_attributes in run_sqlite_bootstrap_tables;
+        // version 14 only records progress.
+        14 => Ok(()),
+        15 => add_sqlite_group_participant_tags_schema(db).await,
+        // SQLite stores session identifiers as unbounded TEXT, so version 16
+        // records dialect parity with the MySQL/OceanBase VARCHAR expansion.
+        16 => Ok(()),
         _ => Ok(()),
     }
+}
+
+async fn migrate_sqlite_eventing_plaintext_endpoint(db: &dyn DbPlugin) -> DbResult<()> {
+    if !table_exists(db, "bcs_event_subscription_revisions").await? {
+        return Ok(());
+    }
+    let columns = sqlite_table_columns(db, "bcs_event_subscription_revisions").await?;
+    if columns.iter().any(|column| column == "endpoint_url") {
+        return Ok(());
+    }
+    if !columns.iter().any(|column| column == "endpoint_ciphertext") {
+        return Err(DbError::InvalidInput(
+            "unsupported bcs_event_subscription_revisions schema".to_string(),
+        ));
+    }
+    let rows = db
+        .query(DbStatement::new(
+            "SELECT COUNT(*) AS revision_count FROM bcs_event_subscription_revisions",
+        ))
+        .await?;
+    let revision_count: i64 = db_get_column(&rows[0], "revision_count")?;
+    if revision_count != 0 {
+        return Err(DbError::InvalidInput(
+            "cannot automatically replace encrypted Event Subscription endpoints; disable and recreate existing Subscriptions first"
+                .to_string(),
+        ));
+    }
+
+    db.transaction(vec![
+        DbTransactionStep::Execute(DbStatement::new(
+            "DROP TABLE IF EXISTS bcs_event_subscription_revisions__plaintext_migration",
+        )),
+        DbTransactionStep::Execute(DbStatement::new(
+            "CREATE TABLE bcs_event_subscription_revisions__plaintext_migration (
+                subscription_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                event_filters_json TEXT NOT NULL,
+                payload_mode TEXT NOT NULL,
+                endpoint_url TEXT NOT NULL,
+                request_timeout_ms INTEGER NOT NULL,
+                activated_at TEXT NOT NULL,
+                retired_at TEXT DEFAULT NULL,
+                env TEXT NOT NULL,
+                PRIMARY KEY(subscription_id, revision)
+            )",
+        )),
+        DbTransactionStep::Execute(DbStatement::new(
+            "DROP TABLE bcs_event_subscription_revisions",
+        )),
+        DbTransactionStep::Execute(DbStatement::new(
+            "ALTER TABLE bcs_event_subscription_revisions__plaintext_migration
+             RENAME TO bcs_event_subscription_revisions",
+        )),
+    ])
+    .await?;
+    Ok(())
+}
+
+async fn add_sqlite_group_participant_tags_schema(db: &dyn DbPlugin) -> DbResult<()> {
+    if table_exists(db, "bcs_group_participants").await? {
+        let columns = sqlite_table_columns(db, "bcs_group_participants").await?;
+        if !columns.iter().any(|column| column == "tags_json") {
+            db.execute(DbStatement::new(
+                "ALTER TABLE bcs_group_participants ADD COLUMN tags_json TEXT DEFAULT NULL",
+            ))
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 async fn add_sqlite_human_input_output_metadata_schema(db: &dyn DbPlugin) -> DbResult<()> {
@@ -1004,6 +1405,58 @@ async fn add_sqlite_human_input_output_metadata_schema(db: &dyn DbPlugin) -> DbR
             if !columns.iter().any(|column| column == name) {
                 db.execute(DbStatement::new(format!(
                     "ALTER TABLE bcs_state_machine_node_runs ADD COLUMN {name} {definition}"
+                )))
+                .await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn add_sqlite_edge_permission_schema(db: &dyn DbPlugin) -> DbResult<()> {
+    // Five edge-permission tables (idempotent; spec §3.1).
+    for stmt in [
+        "CREATE TABLE IF NOT EXISTS edge_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, grant_kind TEXT NOT NULL, grant_ref_id INTEGER NOT NULL, rules TEXT, status TEXT NOT NULL DEFAULT 'approved', originator_policy_type TEXT NOT NULL DEFAULT 'any', originator_policy_data TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uk_edge_from_to_env_ref ON edge_grants(from_id, to_id, env, grant_ref_id)",
+        "CREATE INDEX IF NOT EXISTS idx_edge_from_env_status ON edge_grants(from_id, env, status)",
+        "CREATE INDEX IF NOT EXISTS idx_edge_to_env_status ON edge_grants(to_id, env, status)",
+        "CREATE TABLE IF NOT EXISTS permission_profiles (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT NOT NULL, env TEXT NOT NULL, name TEXT NOT NULL DEFAULT 'default', description TEXT, rules_template TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, digest TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active', created_by TEXT NOT NULL, updated_by TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uk_profile_bot_env_default ON permission_profiles(bot_id, env, is_default) WHERE status = 'active'",
+        "CREATE INDEX IF NOT EXISTS idx_profile_bot_env ON permission_profiles(bot_id, env, status)",
+        "CREATE TABLE IF NOT EXISTS permission_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT NOT NULL, edge_id INTEGER, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, request_kind TEXT NOT NULL, requested_ref_id INTEGER, requested_rules TEXT, message TEXT, status TEXT NOT NULL DEFAULT 'pending', decision_reason TEXT, created_by TEXT NOT NULL, decided_by TEXT, decided_at TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uk_req_request_id ON permission_requests(request_id)",
+        "CREATE INDEX IF NOT EXISTS idx_req_to_env_status ON permission_requests(to_id, env, status)",
+        "CREATE INDEX IF NOT EXISTS idx_req_from_env_status ON permission_requests(from_id, env, status)",
+        "CREATE INDEX IF NOT EXISTS idx_req_edge ON permission_requests(edge_id)",
+        "CREATE TABLE IF NOT EXISTS capabilities (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT NOT NULL, env TEXT NOT NULL, tool TEXT NOT NULL, operation TEXT, specifier_schema TEXT, source TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', raw_metadata TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE INDEX IF NOT EXISTS idx_cap_bot_env ON capabilities(bot_id, env, status)",
+        "CREATE TABLE IF NOT EXISTS authz_decision_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, env TEXT NOT NULL, task_id TEXT, run_id TEXT, from_id TEXT NOT NULL, to_id TEXT NOT NULL, originator TEXT, context_type TEXT NOT NULL, decision TEXT NOT NULL, reason_code TEXT NOT NULL, grant_refs TEXT NOT NULL, context_json TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE INDEX IF NOT EXISTS idx_adl_env_from_to ON authz_decision_logs(env, from_id, to_id)",
+    ] {
+        db.execute(DbStatement::new(stmt)).await?;
+    }
+    // Edge tables: backfill gmt_create / gmt_modified audit columns for DBs
+    // that created the tables before the audit-column requirement landed.
+    // CREATE TABLE IF NOT EXISTS will not add columns to an existing table,
+    // so ALTER them in idempotently (spec §3.1 — 建表要求 gmt_create/gmt_modified).
+    for table in [
+        "edge_grants",
+        "permission_profiles",
+        "permission_requests",
+        "capabilities",
+        "authz_decision_logs",
+    ] {
+        if !table_exists(db, table).await? {
+            continue;
+        }
+        let columns = sqlite_table_columns(db, table).await?;
+        for (name, definition) in [
+            ("gmt_create", "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+            ("gmt_modified", "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+        ] {
+            if !columns.iter().any(|column| column == name) {
+                db.execute(DbStatement::new(format!(
+                    "ALTER TABLE {table} ADD COLUMN {name} {definition}"
                 )))
                 .await?;
             }
@@ -1211,6 +1664,15 @@ mod tests {
 
         let columns = column_names(&db, "bcs_bots").await?;
         assert!(columns.iter().any(|column| column == "agent_code"));
+        assert!(columns.iter().any(|column| column == "task_claim_mode"));
+        assert!(columns.iter().any(|column| column == "task_dream_mode"));
+        assert!(columns.iter().any(|column| column == "user_visibility"));
+        assert!(columns.iter().any(|column| column == "friend_ext"));
+        assert!(
+            columns
+                .iter()
+                .any(|column| column == "friend_check_in_strategy")
+        );
         let node_columns = column_names(&db, "bcs_state_machine_node_runs").await?;
         assert!(node_columns.iter().any(|column| column == "outcome"));
         assert!(node_columns.iter().any(|column| column == "responded_by"));
@@ -1236,7 +1698,11 @@ mod tests {
                     "sqlite".to_string()
                 ),
                 (3, "add_organizations".to_string(), "sqlite".to_string()),
-                (4, "add_session_collection".to_string(), "sqlite".to_string()),
+                (
+                    4,
+                    "add_session_collection".to_string(),
+                    "sqlite".to_string()
+                ),
                 (
                     5,
                     "add_session_collection_timestamp".to_string(),
@@ -1252,6 +1718,42 @@ mod tests {
                     8,
                     "human_input_im_requests".to_string(),
                     "sqlite".to_string()
+                ),
+(9, "eventing".to_string(), "sqlite".to_string()),
+                (
+                    10,
+                    "eventing_plaintext_endpoint".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    11,
+                    "group_opening_message".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    12,
+"add_bot_task_modes".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    13,
+                    "edge_permission".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    14,
+                    "add_bot_internal_attributes".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    15,
+                    "group_participant_tags".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    16,
+                    "expand_session_ids".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1264,7 +1766,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 8);
+        assert_eq!(report.pending_versions.len(), 16);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1291,10 +1793,32 @@ mod tests {
             "human_input_output_metadata"
         );
         assert_eq!(report.pending_versions[7].version, 8);
+        assert_eq!(report.pending_versions[7].name, "human_input_im_requests");
+        assert_eq!(report.pending_versions[8].version, 9);
+        assert_eq!(report.pending_versions[8].name, "eventing");
+        assert_eq!(report.pending_versions[9].version, 10);
         assert_eq!(
-            report.pending_versions[7].name,
-            "human_input_im_requests"
+            report.pending_versions[9].name,
+            "eventing_plaintext_endpoint"
         );
+assert_eq!(report.pending_versions[10].version, 11);
+        assert_eq!(report.pending_versions[10].name, "group_opening_message");
+        assert_eq!(report.pending_versions[11].version, 12);
+        assert_eq!(report.pending_versions[11].name, "add_bot_task_modes");
+        assert_eq!(report.pending_versions[12].version, 13);
+        assert_eq!(report.pending_versions[12].name, "edge_permission");
+        assert_eq!(report.pending_versions[13].version, 14);
+        assert_eq!(
+            report.pending_versions[13].name,
+            "add_bot_internal_attributes"
+        );
+        assert_eq!(report.pending_versions[14].version, 15);
+        assert_eq!(
+            report.pending_versions[14].name,
+            "group_participant_tags"
+        );
+        assert_eq!(report.pending_versions[15].version, 16);
+        assert_eq!(report.pending_versions[15].name, "expand_session_ids");
         Ok(())
     }
 
@@ -1315,7 +1839,11 @@ mod tests {
                     "sqlite".to_string()
                 ),
                 (3, "add_organizations".to_string(), "sqlite".to_string()),
-                (4, "add_session_collection".to_string(), "sqlite".to_string()),
+                (
+                    4,
+                    "add_session_collection".to_string(),
+                    "sqlite".to_string()
+                ),
                 (
                     5,
                     "add_session_collection_timestamp".to_string(),
@@ -1331,9 +1859,91 @@ mod tests {
                     8,
                     "human_input_im_requests".to_string(),
                     "sqlite".to_string()
+                ),
+(9, "eventing".to_string(), "sqlite".to_string()),
+                (
+                    10,
+                    "eventing_plaintext_endpoint".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    11,
+                    "group_opening_message".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    12,
+"add_bot_task_modes".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    13,
+                    "edge_permission".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    14,
+                    "add_bot_internal_attributes".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    15,
+                    "group_participant_tags".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    16,
+                    "expand_session_ids".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_eventing_database_upgrades_to_group_opening_message() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        run_sqlite_migrations(&db).await?;
+        db.execute(DbStatement::new(
+            "DELETE FROM bcs_schema_migrations WHERE version = 11",
+        ))
+        .await?;
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_groups DROP COLUMN opening_message_json",
+        ))
+        .await?;
+
+        let before = check_sqlite_migrations(&db).await?;
+        // Deleting only the v11 (group_opening_message) record leaves later
+        // migrations applied, so the max applied version stays at the latest
+        // schema version even though v11 is the sole pending re-apply.
+        assert_eq!(before.current_version, Some(sqlite_target_version()));
+        assert_eq!(
+            before
+                .pending_versions
+                .iter()
+                .map(|migration| (migration.version, migration.name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(11, "group_opening_message")]
+        );
+
+        run_sqlite_migrations(&db).await?;
+
+        assert!(
+            column_names(&db, "bcs_groups")
+                .await?
+                .iter()
+                .any(|column| column == "opening_message_json")
+        );
+        // group_opening_message is no longer the tail migration (task_modes at v12
+        // follows it), so assert it was re-applied as the version-11 row rather than
+        // as the last row. The column check above already proves the migration
+        // re-added opening_message_json; this row check pins it to the right version.
+        assert!(migration_rows(&db)
+            .await?
+            .iter()
+            .any(|(version, name, _)| *version == 11 && name == "group_opening_message"));
         Ok(())
     }
 
@@ -1441,6 +2051,101 @@ mod tests {
         assert!(err.to_string().contains("checksum mismatch"));
         Ok(())
     }
+
+    #[tokio::test]
+    async fn sqlite_bootstrap_adds_internal_attributes_to_legacy_bots() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_bots (bot_uuid TEXT NOT NULL, env TEXT NOT NULL, PRIMARY KEY (bot_uuid, env))",
+        ))
+        .await?;
+        db.execute(DbStatement::new(
+            "INSERT INTO bcs_bots (bot_uuid, env) VALUES ('legacy-bot', 'dev')",
+        ))
+        .await?;
+
+        ensure_sqlite_bot_internal_attributes(&db).await?;
+
+        let columns = column_names(&db, "bcs_bots").await?;
+        assert!(columns.iter().any(|column| column == "user_visibility"));
+        assert!(columns.iter().any(|column| column == "friend_ext"));
+        assert!(
+            columns
+                .iter()
+                .any(|column| column == "friend_check_in_strategy")
+        );
+        let rows = db
+            .query(DbStatement::new(
+                "SELECT user_visibility, friend_check_in_strategy FROM bcs_bots WHERE bot_uuid = 'legacy-bot'",
+            ))
+            .await?;
+        let row = rows.first().expect("legacy Bot row");
+        assert_eq!(
+            db_get_column::<String>(row, "user_visibility")?,
+            "protected"
+        );
+        assert_eq!(
+            db_get_column::<String>(row, "friend_check_in_strategy")?,
+            "APPROVAL"
+        );
+        Ok(())
+    }
+
+    // 建表要求: every edge-permission table must carry gmt_create / gmt_modified.
+    #[tokio::test]
+    async fn fresh_migrations_create_edge_tables_with_gmt_audit_columns() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        run_sqlite_migrations(&db).await?;
+        for table in [
+            "edge_grants",
+            "permission_profiles",
+            "permission_requests",
+            "capabilities",
+            "authz_decision_logs",
+        ] {
+            let columns = column_names(&db, table).await?;
+            assert!(
+                columns.iter().any(|c| c == "gmt_create"),
+                "{table} missing gmt_create"
+            );
+            assert!(
+                columns.iter().any(|c| c == "gmt_modified"),
+                "{table} missing gmt_modified"
+            );
+        }
+        let request_columns = column_names(&db, "permission_requests").await?;
+        assert!(request_columns.iter().any(|c| c == "request_id"));
+        Ok(())
+    }
+
+    // Repair path: a legacy DB that created the edge tables without gmt_* must
+    // get the audit columns backfilled by the idempotent ALTER in the migration.
+    #[tokio::test]
+    async fn edge_table_audit_columns_backfilled_for_legacy_db() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        // Legacy shape: edge_grants as built before the gmt_* audit-column
+        // requirement landed (current bigint PK + real columns, minus gmt_create/gmt_modified).
+        db.execute(DbStatement::new(
+            "CREATE TABLE edge_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, env TEXT NOT NULL, \
+             from_id TEXT NOT NULL, to_id TEXT NOT NULL, grant_kind TEXT NOT NULL, \
+             grant_ref_id INTEGER NOT NULL, rules TEXT, status TEXT NOT NULL DEFAULT 'approved', \
+             originator_policy_type TEXT NOT NULL DEFAULT 'any', originator_policy_data TEXT)",
+        ))
+        .await?;
+        // add_sqlite_edge_permission_schema also ALTERs bcs_bots; give it a stub.
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_bots (bot_uuid TEXT NOT NULL, env TEXT NOT NULL, \
+             PRIMARY KEY (bot_uuid, env))",
+        ))
+        .await?;
+        // Re-running the edge-permission migration (v9) must ADD the gmt columns
+        // via the idempotent ALTER repair (CREATE TABLE IF NOT EXISTS is a no-op).
+        add_sqlite_edge_permission_schema(&db).await?;
+        let columns = column_names(&db, "edge_grants").await?;
+        assert!(columns.iter().any(|c| c == "gmt_create"));
+        assert!(columns.iter().any(|c| c == "gmt_modified"));
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1451,24 +2156,34 @@ mod collection_migration_tests {
     async fn fresh_db() -> LocalSqliteDbPlugin {
         let db = LocalSqliteDbPlugin::new().expect("open in-memory sqlite");
         run_sqlite_bootstrap_tables(&db).await.expect("bootstrap");
-        run_sqlite_versioned_migrations(&db).await.expect("versioned");
+        run_sqlite_versioned_migrations(&db)
+            .await
+            .expect("versioned");
         db
     }
 
     #[tokio::test]
     async fn fresh_db_has_session_participants_collected_column() {
         let db = fresh_db().await;
-        let cols = sqlite_table_columns(&db, "bcs_session_participants").await.unwrap();
-        assert!(cols.iter().any(|c| c == "collected"),
-            "bcs_session_participants must have a collected column on fresh DB; got {cols:?}");
+        let cols = sqlite_table_columns(&db, "bcs_session_participants")
+            .await
+            .unwrap();
+        assert!(
+            cols.iter().any(|c| c == "collected"),
+            "bcs_session_participants must have a collected column on fresh DB; got {cols:?}"
+        );
     }
 
     #[tokio::test]
     async fn fresh_db_has_session_participants_collected_at_column() {
         let db = fresh_db().await;
-        let cols = sqlite_table_columns(&db, "bcs_session_participants").await.unwrap();
-        assert!(cols.iter().any(|c| c == "collected_at"),
-            "bcs_session_participants must have a collected_at column on fresh DB; got {cols:?}");
+        let cols = sqlite_table_columns(&db, "bcs_session_participants")
+            .await
+            .unwrap();
+        assert!(
+            cols.iter().any(|c| c == "collected_at"),
+            "bcs_session_participants must have a collected_at column on fresh DB; got {cols:?}"
+        );
     }
 
     #[tokio::test]
@@ -1484,13 +2199,242 @@ mod collection_migration_tests {
                 bot_uuid TEXT NOT NULL,
                 role TEXT NOT NULL,
                 env TEXT NOT NULL DEFAULT 'prod'
-            )"
-        )).await.unwrap();
-        run_sqlite_bootstrap_tables(&db).await.expect("bootstrap repairs legacy table");
-        let cols = sqlite_table_columns(&db, "bcs_session_participants").await.unwrap();
-        assert!(cols.iter().any(|c| c == "collected"),
-            "ensure function must add collected to legacy bcs_session_participants; got {cols:?}");
-        assert!(cols.iter().any(|c| c == "collected_at"),
-            "ensure function must add collected_at to legacy bcs_session_participants; got {cols:?}");
+            )",
+        ))
+        .await
+        .unwrap();
+        run_sqlite_bootstrap_tables(&db)
+            .await
+            .expect("bootstrap repairs legacy table");
+        let cols = sqlite_table_columns(&db, "bcs_session_participants")
+            .await
+            .unwrap();
+        assert!(
+            cols.iter().any(|c| c == "collected"),
+            "ensure function must add collected to legacy bcs_session_participants; got {cols:?}"
+        );
+        assert!(
+            cols.iter().any(|c| c == "collected_at"),
+            "ensure function must add collected_at to legacy bcs_session_participants; got {cols:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod eventing_migration_tests {
+    use super::*;
+    use bcs_db_local::LocalSqliteDbPlugin;
+
+    const MYSQL_EVENTING_MIGRATION: &str =
+        include_str!("../../../../migrations/mysql/009_eventing.sql");
+    const MYSQL_GROUP_OPENING_MIGRATION: &str =
+        include_str!("../../../../migrations/mysql/010_group_opening_message.sql");
+
+    const EVENTING_TABLES: &[&str] = &[
+        "bcs_event_subscriptions",
+        "bcs_event_subscription_revisions",
+        "bcs_event_scope_epochs",
+        "bcs_event_streams",
+        "bcs_events",
+        "bcs_event_fanout_targets",
+        "bcs_event_deliveries",
+        "bcs_event_delivery_attempts",
+        "bcs_event_subscription_audits",
+    ];
+
+    async fn sqlite_index_names(db: &dyn DbPlugin) -> DbResult<Vec<String>> {
+        let rows = db
+            .query(DbStatement::new(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_event_%' ORDER BY name",
+            ))
+            .await?;
+        rows.into_iter()
+            .map(|row| db_get_column(&row, "name"))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn empty_encrypted_revision_schema_migrates_to_plaintext_endpoint() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_event_subscription_revisions (
+                subscription_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                event_filters_json TEXT NOT NULL,
+                payload_mode TEXT NOT NULL,
+                endpoint_ciphertext BLOB NOT NULL,
+                endpoint_key_id TEXT NOT NULL,
+                endpoint_key_version INTEGER NOT NULL,
+                endpoint_nonce BLOB NOT NULL,
+                endpoint_auth_tag BLOB NOT NULL,
+                secret_ciphertext BLOB NOT NULL,
+                secret_key_id TEXT NOT NULL,
+                secret_key_version INTEGER NOT NULL,
+                secret_nonce BLOB NOT NULL,
+                secret_auth_tag BLOB NOT NULL,
+                request_timeout_ms INTEGER NOT NULL,
+                activated_at TEXT NOT NULL,
+                retired_at TEXT DEFAULT NULL,
+                env TEXT NOT NULL,
+                PRIMARY KEY(subscription_id, revision)
+            )",
+        ))
+        .await?;
+
+        migrate_sqlite_eventing_plaintext_endpoint(&db).await?;
+
+        let columns = sqlite_table_columns(&db, "bcs_event_subscription_revisions").await?;
+        assert!(columns.iter().any(|column| column == "endpoint_url"));
+        assert!(!columns.iter().any(|column| column == "endpoint_ciphertext"));
+        assert!(!columns.iter().any(|column| column == "secret_ciphertext"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fresh_sqlite_schema_contains_all_eventing_tables_columns_and_indexes() -> DbResult<()>
+    {
+        let db = LocalSqliteDbPlugin::new()?;
+        run_sqlite_migrations(&db).await?;
+
+        let group_columns = sqlite_table_columns(&db, "bcs_groups").await?;
+        assert!(
+            group_columns
+                .iter()
+                .any(|column| column == "opening_message_json"),
+            "bcs_groups missing opening_message_json"
+        );
+
+        for table in EVENTING_TABLES {
+            assert!(
+                table_exists(&db, table).await?,
+                "missing Eventing table {table}"
+            );
+        }
+        for (table, required_columns) in [
+            (
+                "bcs_event_subscriptions",
+                &[
+                    "subscription_id",
+                    "scope_type",
+                    "scope_id",
+                    "current_revision",
+                    "env",
+                ][..],
+            ),
+            (
+                "bcs_event_subscription_revisions",
+                &["subscription_id", "revision", "endpoint_url"][..],
+            ),
+            (
+                "bcs_events",
+                &[
+                    "event_id",
+                    "producer_key",
+                    "stream_key",
+                    "sequence",
+                    "retention_until",
+                ][..],
+            ),
+            (
+                "bcs_event_fanout_targets",
+                &[
+                    "target_id",
+                    "purpose",
+                    "depends_on_target_id",
+                    "replay_request_id",
+                    "lease_owner",
+                    "lease_until",
+                ][..],
+            ),
+            (
+                "bcs_event_deliveries",
+                &[
+                    "delivery_id",
+                    "payload_bytes",
+                    "payload_sha256",
+                    "lease_owner",
+                    "lease_until",
+                ][..],
+            ),
+            (
+                "bcs_event_delivery_attempts",
+                &["delivery_id", "attempt_no", "result", "worker_id"][..],
+            ),
+        ] {
+            let columns = sqlite_table_columns(&db, table).await?;
+            for required in required_columns {
+                assert!(
+                    columns.iter().any(|column| column == required),
+                    "{table} missing column {required}"
+                );
+            }
+        }
+
+        let indexes = sqlite_index_names(&db).await?;
+        for required in [
+            "idx_event_subscription_scope",
+            "idx_event_subscription_status",
+            "idx_event_claim_due",
+            "idx_event_strict_lane",
+            "idx_event_retention",
+        ] {
+            assert!(
+                indexes.iter().any(|index| index == required),
+                "missing index {required}"
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_scope_epoch_is_scope_local_and_has_no_global_offset_table() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        run_sqlite_migrations(&db).await?;
+
+        let columns = db
+            .query(DbStatement::new(
+                "PRAGMA table_info(bcs_event_scope_epochs)",
+            ))
+            .await?;
+        let primary_key = columns
+            .into_iter()
+            .filter_map(|row| {
+                let order: i64 = db_get_column(&row, "pk").ok()?;
+                let name: String = db_get_column(&row, "name").ok()?;
+                (order > 0).then_some((order, name))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            primary_key,
+            vec![
+                (1, "env".to_string()),
+                (2, "scope_type".to_string()),
+                (3, "scope_id".to_string()),
+            ]
+        );
+        assert!(!table_exists(&db, "bcs_event_offsets").await?);
+        assert!(!table_exists(&db, "bcs_event_global_cursor").await?);
+        Ok(())
+    }
+
+    #[test]
+    fn mysql_eventing_migration_is_additive_scope_local_and_indexed() {
+        for table in EVENTING_TABLES {
+            assert!(
+                MYSQL_EVENTING_MIGRATION.contains(&format!("CREATE TABLE IF NOT EXISTS `{table}`")),
+                "missing MySQL Eventing table {table}"
+            );
+        }
+        assert!(MYSQL_EVENTING_MIGRATION.contains("PRIMARY KEY (`env`, `scope_type`, `scope_id`)"));
+        assert!(MYSQL_EVENTING_MIGRATION.contains("KEY `idx_event_claim_due`"));
+        assert!(MYSQL_EVENTING_MIGRATION.contains("KEY `idx_event_strict_lane`"));
+        assert!(MYSQL_EVENTING_MIGRATION.contains("KEY `idx_event_retention`"));
+        assert!(!MYSQL_EVENTING_MIGRATION.contains("bcs_event_offsets"));
+        assert!(!MYSQL_EVENTING_MIGRATION.contains("bcs_event_global_cursor"));
+        assert!(!MYSQL_EVENTING_MIGRATION.contains("ALTER TABLE"));
+        assert!(
+            MYSQL_GROUP_OPENING_MIGRATION
+                .contains("ADD COLUMN `opening_message_json` text DEFAULT NULL")
+        );
     }
 }

@@ -56,7 +56,7 @@ class _SkillsPortMixin:
     _SKILLS_CENTER_LOCAL_ROOT_ENV = "SKILLS_CENTER_LOCAL_ROOT"
     _DEFAULT_SKILLS_CENTER_NAS_ROOT = "/home/admin/nfs/skills-center"
     _DEFAULT_SKILLS_CENTER_LOCAL_ROOT = str(
-        workspace_root() / "skills" / "skills-center"
+        workspace_root() / "skills-pool" / "skill-center"
     )
 
     @staticmethod
@@ -319,14 +319,12 @@ class _SkillsPortMixin:
         local_version_dir = local_uuid_dir / version_dir_name
 
         if local_version_dir.exists() and any(local_version_dir.iterdir()):
-            self._skills_ensure_current_symlink(local_uuid_dir, version_dir_name)
             return
 
         lock_key = f"{skill_uuid}/{version_dir_name}"
         lock = self._get_ensure_lock(lock_key)
         async with lock:
             if local_version_dir.exists() and any(local_version_dir.iterdir()):
-                self._skills_ensure_current_symlink(local_uuid_dir, version_dir_name)
                 return
 
             nas_version_dir = nas_root / skill_uuid / version_dir_name
@@ -337,7 +335,6 @@ class _SkillsPortMixin:
             await _asyncio.to_thread(
                 self._skills_rsync_dir, nas_version_dir, local_version_dir
             )
-            self._skills_ensure_current_symlink(local_uuid_dir, version_dir_name)
 
     async def ensure_center_skills(self, params: dict[str, Any]) -> dict[str, Any]:
         """Ensure each (skill_uuid, version) from ``params["items"]`` is present locally.

@@ -1,7 +1,8 @@
 """BCN 下行协议路由
 
 提供 BCN -> Provider 的下行接口:
-  - POST /bcn/v1/downlink  (chat.send / chat.inject / chat.history)
+  - POST /bcn/downlink
+    (chat.send / chat.inject / chat.history / interaction.resolve)
 
 本文件只负责:
   1. HTTP 认证与协议版本校验
@@ -28,7 +29,7 @@ from typing import Any
 from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from secbaas.community.adapters.web.routers.bcn_downlink.bcn_model import (
     BcnErrorDetail,
@@ -39,6 +40,8 @@ from secbaas.community.adapters.web.routers.bcn_downlink.bcn_model import (
     ChatInjectSuccessResponse,
     ChatSendRequest,
     ChatSendSuccessResponse,
+    InteractionResolveAckResponse,
+    InteractionResolveRequest,
 )
 from secbaas.community.adapters.web.routers.bcn_downlink.bcn_model import (
     HistoryMessage as BcnHistoryMessage,
@@ -47,6 +50,8 @@ from secbaas.community.api.bcn import (
     BcnBotNotFoundError,
     BcnDownlinkService,
     BcnError,
+    BcnInteractionAnswer,
+    BcnInteractionResolveInput,
     BcnInvalidRequestError,
     BcnUnauthorizedError,
     BcnUnsupportedMethodError,
@@ -54,6 +59,7 @@ from secbaas.community.api.bcn import (
     ChatInjectInput,
     ChatSendInput,
 )
+from secbaas.community.api.bot_interaction import InteractionServiceError
 from secbaas.community.api.bot_runtime import BotBindingNotFoundError
 from secbaas.community.api.sse import (
     SseConverterFactory,
@@ -178,7 +184,11 @@ def _register_stream(method: str, req_model: type[BaseModel]):
 @router.post(
     "/downlink",
     summary="BCN 下行统一入口",
-    description="接收 BCN 下行请求 (chat.send / chat.inject / chat.history)，根据 body.method 分发",
+    description=(
+        "接收 BCN 下行请求 "
+        "(chat.send / chat.inject / chat.history / interaction.resolve)，"
+        "根据 body.method 分发"
+    ),
     response_model=None,
     responses={
         200: {"description": "请求处理成功"},
@@ -207,6 +217,7 @@ async def bcn_downlink(
     ChatSendSuccessResponse
     | ChatInjectSuccessResponse
     | ChatHistorySuccessResponse
+    | InteractionResolveAckResponse
     | StreamingResponse
 ):
     """BCN 下行统一入口
@@ -217,6 +228,7 @@ async def bcn_downlink(
       - 否则快速返回 200 OK，异步执行后通过 uplink 回调
     - chat.inject: 向 Bot 注入消息（不触发推理）
     - chat.history: 查询聊天历史
+    - interaction.resolve: 持久化并排队 Engine interaction resolution
     """
     body = await request.json()
     method = body.get("method", "")
@@ -247,7 +259,17 @@ async def bcn_downlink(
         raise BcnUnsupportedMethodError(method)
 
     req_model, dispatcher = entry
-    req = req_model.model_validate(body)
+    try:
+        req = req_model.model_validate(body)
+    except ValidationError:
+        if method != "interaction.resolve":
+            raise
+        logger.warning("[interaction.resolve] invalid request structure")
+        return InteractionResolveAckResponse(
+            ok=False,
+            retryable=False,
+            error="invalid interaction.resolve request",
+        )
     return await dispatcher(req, service)
 
 
@@ -408,6 +430,52 @@ async def _dispatch_chat_history(
         next_before=result.next_before,
         next_after=result.next_after,
     )
+
+
+# ───────────────────────── interaction.resolve ─────────────────────────
+
+
+@_register("interaction.resolve", InteractionResolveRequest)
+async def _dispatch_interaction_resolve(
+    req: InteractionResolveRequest,
+    service: BcnDownlinkService,
+) -> InteractionResolveAckResponse:
+    """Translate the BCN webhook and return a finite Provider ACK."""
+    answers = None
+    if req.params.answers is not None:
+        answers = {
+            question_id: BcnInteractionAnswer(
+                values=tuple(answer.values),
+                question=answer.question,
+                header=answer.header,
+                custom_values=tuple(answer.custom_values or ()),
+            )
+            for question_id, answer in req.params.answers.items()
+        }
+
+    resolve_input = BcnInteractionResolveInput(
+        id=req.id,
+        session_id=req.session_id,
+        bcn_group_id=req.bcn_group_id,
+        interaction_id=req.params.interaction_id,
+        kind=req.params.kind,
+        idempotency_key=req.params.idempotency_key,
+        action=req.params.action,
+        decision=req.params.decision,
+        answers=answers,
+        request_envelope=req.model_dump(by_alias=True, exclude_none=True),
+    )
+
+    try:
+        result = await service.handle_interaction_resolve(resolve_input)
+    except InteractionServiceError as exc:
+        return InteractionResolveAckResponse(
+            ok=False,
+            retryable=False,
+            error=str(exc),
+        )
+
+    return InteractionResolveAckResponse(ok=result.ok)
 
 
 # ─────────────────────────── 内部辅助 ───────────────────────────

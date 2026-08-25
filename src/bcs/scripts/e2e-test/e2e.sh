@@ -84,16 +84,21 @@ source "$SCRIPT_DIR/register.sh"
 source "$SCRIPT_DIR/stories.sh"
 source "$SCRIPT_DIR/cli-stories.sh"
 source "$SCRIPT_DIR/session_files.sh"
+source "$SCRIPT_DIR/edge_permission.sh"
 
 # ============================================================================
 # Collect All Tests (Bash 3.2 compatible — no associative arrays)
 # ============================================================================
 
-ALL_SUITES=(stories)
+ALL_SUITES=(stories edge_permission)
 ALL_TESTS=()
 
 for test_name in "${E2E_TESTS_STORIES[@]}"; do
     ALL_TESTS+=("stories:$test_name")
+done
+
+for test_name in "${E2E_TESTS_EDGE_PERMISSION[@]}"; do
+    ALL_TESTS+=("edge_permission:$test_name")
 done
 
 # ============================================================================
@@ -104,6 +109,10 @@ if [ "$LIST_ONLY" = true ]; then
     echo "Available test suites:"
     echo "  stories:"
     for test_name in "${E2E_TESTS_STORIES[@]}"; do
+        echo "    - $test_name"
+    done
+    echo "  edge_permission:"
+    for test_name in "${E2E_TESTS_EDGE_PERMISSION[@]}"; do
         echo "    - $test_name"
     done
     exit 0

@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from secbaas.community.adapters.web.routers.open_api.message_router import (
     deliver_message,
@@ -30,6 +31,13 @@ from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.bot_run import BotRunRecord
 
 # ── helpers ──────────────────────────────────────────────────
+
+
+def _make_eval_session_log():
+    """创建 mock EvalSessionLogProtocol，extract_eval_headers 原样返回 metadata。"""
+    mock = MagicMock()
+    mock.extract_eval_headers.side_effect = lambda *, metadata, x_eval_id, x_default_tag: metadata
+    return mock
 
 
 def _make_api_key_record(app_type="system", app_id="bot-1:entity-1", tenant="t1"):
@@ -143,6 +151,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
         assert exc.value.status_code == 403
         detail = exc.value.detail
@@ -169,6 +178,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
             mock_policy.assert_called_once_with(api_key, "bot-1:entity-1")
         assert result.code == 0
@@ -197,6 +207,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
         assert result.code == 0
 
@@ -221,6 +232,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
             mock_policy.assert_called_once_with(api_key, "bot-1:123")
 
@@ -247,6 +259,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
 
     @pytest.mark.asyncio
@@ -270,6 +283,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
         assert result.code == 0
 
@@ -294,6 +308,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
         assert result.code == 0
 
@@ -318,6 +333,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
         assert result.code == OpenAPICode.BUSINESS_ERROR
         assert result.message == "Session not exist"
@@ -345,6 +361,7 @@ class TestDeliverMessage:
                     api_key_record=api_key,
                     context=ctx,
                     bot_runner=mock_runner,
+                    eval_session_log=_make_eval_session_log(),
                 )
         assert exc.value.status_code == 404
         assert exc.value.detail["code"] == 60001
@@ -373,6 +390,7 @@ class TestDeliverMessage:
                     api_key_record=api_key,
                     context=ctx,
                     bot_runner=mock_runner,
+                    eval_session_log=_make_eval_session_log(),
                 )
         assert exc.value.status_code == 503
         assert exc.value.detail["code"] == 60001
@@ -401,6 +419,7 @@ class TestDeliverMessage:
                     api_key_record=api_key,
                     context=ctx,
                     bot_runner=mock_runner,
+                    eval_session_log=_make_eval_session_log(),
                 )
         assert exc.value.status_code == 400
         assert exc.value.detail["code"] == OpenAPICode.BUSINESS_ERROR
@@ -427,6 +446,7 @@ class TestDeliverMessage:
                     api_key_record=api_key,
                     context=ctx,
                     bot_runner=mock_runner,
+                    eval_session_log=_make_eval_session_log(),
                 )
         assert exc.value.status_code == 500
         assert exc.value.detail["code"] == 50001
@@ -456,6 +476,7 @@ class TestDeliverMessageCallbackUrl:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
 
         call_kwargs = mock_runner.deliver_message.call_args.kwargs
@@ -481,6 +502,7 @@ class TestDeliverMessageCallbackUrl:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
 
         call_kwargs = mock_runner.deliver_message.call_args.kwargs
@@ -508,6 +530,7 @@ class TestDeliverMessageCallbackUrl:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
 
         call_kwargs = mock_runner.deliver_message.call_args.kwargs
@@ -548,6 +571,7 @@ class TestDeliverMessageStream:
                 context=ctx,
                 bot_runner=mock_runner,
                 converter_factory=_make_converter_factory(),
+                eval_session_log=_make_eval_session_log(),
             )
         assert exc.value.status_code == 403
 
@@ -579,6 +603,7 @@ class TestDeliverMessageStream:
                 context=ctx,
                 bot_runner=mock_runner,
                 converter_factory=_make_converter_factory(),
+                eval_session_log=_make_eval_session_log(),
             )
         assert isinstance(result, StreamingResponse)
         assert result.media_type == "text/event-stream"
@@ -606,6 +631,7 @@ class TestDeliverMessageStream:
                     context=ctx,
                     bot_runner=mock_runner,
                     converter_factory=_make_converter_factory(),
+                    eval_session_log=_make_eval_session_log(),
                 )
         assert exc.value.status_code == 400
 
@@ -631,6 +657,7 @@ class TestDeliverMessageStream:
                     context=ctx,
                     bot_runner=mock_runner,
                     converter_factory=_make_converter_factory(),
+                    eval_session_log=_make_eval_session_log(),
                 )
         assert exc.value.status_code == 404
 
@@ -656,6 +683,7 @@ class TestDeliverMessageStream:
                 context=ctx,
                 bot_runner=mock_runner,
                 converter_factory=_make_converter_factory(),
+                eval_session_log=_make_eval_session_log(),
             )
         call_kwargs = mock_runner.deliver_message_stream.call_args.kwargs
         assert call_kwargs["metadata"]["stream"] == "true"
@@ -688,6 +716,7 @@ class TestDeliverMessageStream:
                 context=ctx,
                 bot_runner=mock_runner,
                 converter_factory=_make_converter_factory(),
+                eval_session_log=_make_eval_session_log(),
             )
 
         items = []
@@ -979,3 +1008,194 @@ class TestGetMessageResult:
                 bot_runner=self._make_runner(record),
             )
             mock_policy.assert_called_once_with(api_key, "bot-42:entity-7")
+
+
+class TestResolveMessageInteraction:
+    @pytest.mark.asyncio
+    async def test_returns_rpc_res_envelope(self):
+        from secbaas.community.adapters.web.routers.open_api.message_router import (
+            resolve_message_interaction,
+        )
+        from secbaas.community.adapters.web.routers.open_api.model import (
+            InteractionResolveEnvelope,
+        )
+        from secbaas.community.api.bot_interaction import InteractionResolution
+        from secbaas.community.core.service.bot_interaction import (
+            InteractionResolveResult,
+        )
+
+        service = MagicMock()
+        service.resolve.return_value = InteractionResolveResult(
+            interaction_id="BAAS-INTERACTION-public-1"
+        )
+
+        response = await resolve_message_interaction(
+            request=InteractionResolveEnvelope(
+                type="req",
+                id="req-1",
+                method="interaction.resolve",
+                params={
+                    "sessionKey": "s-1",
+                    "interactionId": "BAAS-INTERACTION-public-1",
+                    "decision": "allow-once",
+                },
+            ),
+            api_key_record=_make_api_key_record(),
+            interaction_service=service,
+        )
+
+        body = response.model_dump(by_alias=True)
+        assert body["type"] == "res"
+        assert body["id"] == "req-1"
+        assert body["ok"] is True
+        service.resolve.assert_called_once_with(
+            baas_interaction_id="BAAS-INTERACTION-public-1",
+            resolution=InteractionResolution(decision="allow-once"),
+            request_envelope={
+                "type": "req",
+                "id": "req-1",
+                "method": "interaction.resolve",
+                "params": {
+                    "sessionKey": "s-1",
+                    "interactionId": "BAAS-INTERACTION-public-1",
+                    "decision": "allow-once",
+                },
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_forbidden_app_type_raises_403(self):
+        from secbaas.community.adapters.web.routers.open_api.message_router import (
+            resolve_message_interaction,
+        )
+        from secbaas.community.adapters.web.routers.open_api.model import (
+            InteractionResolveEnvelope,
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            await resolve_message_interaction(
+                request=InteractionResolveEnvelope(
+                    type="req",
+                    id="req-1",
+                    method="interaction.resolve",
+                    params={
+                        "sessionKey": "s-1",
+                        "interactionId": "int-1",
+                        "decision": "allow-once",
+                    },
+                ),
+                api_key_record=_make_api_key_record(app_type="user"),
+                interaction_service=MagicMock(),
+            )
+        assert exc.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_domain_conflict_returns_typed_rpc_error(self):
+        from secbaas.community.adapters.web.routers.open_api.message_router import (
+            resolve_message_interaction,
+        )
+        from secbaas.community.adapters.web.routers.open_api.model import (
+            InteractionResolveEnvelope,
+        )
+        from secbaas.community.core.service.bot_interaction import (
+            InteractionConflictError,
+        )
+
+        service = MagicMock()
+        service.resolve.side_effect = InteractionConflictError(
+            "interaction state is queued"
+        )
+        response = await resolve_message_interaction(
+            request=InteractionResolveEnvelope(
+                type="req",
+                id="req-1",
+                method="interaction.resolve",
+                params={
+                    "sessionKey": "s-1",
+                    "interactionId": "int-1",
+                    "decision": "allow-once",
+                },
+            ),
+            api_key_record=_make_api_key_record(),
+            interaction_service=service,
+        )
+
+        assert response.model_dump(by_alias=True) == {
+            "type": "res",
+            "id": "req-1",
+            "ok": False,
+            "error": {
+                "code": "CONFLICT",
+                "message": "interaction state is queued",
+            },
+        }
+
+    @pytest.mark.asyncio
+    async def test_repository_failure_propagates(self):
+        from secbaas.community.adapters.web.routers.open_api.message_router import (
+            resolve_message_interaction,
+        )
+        from secbaas.community.adapters.web.routers.open_api.model import (
+            InteractionResolveEnvelope,
+        )
+
+        service = MagicMock()
+        service.resolve.side_effect = RuntimeError("db down")
+        with pytest.raises(RuntimeError, match="db down"):
+            await resolve_message_interaction(
+                request=InteractionResolveEnvelope(
+                    type="req",
+                    id="req-1",
+                    method="interaction.resolve",
+                    params={
+                        "sessionKey": "s-1",
+                        "interactionId": "int-1",
+                        "decision": "allow-once",
+                    },
+                ),
+                api_key_record=_make_api_key_record(),
+                interaction_service=service,
+            )
+
+    @pytest.mark.parametrize(
+        "request_body",
+        [
+            {
+                "type": "event",
+                "id": "req-1",
+                "method": "interaction.resolve",
+                "params": {
+                    "sessionKey": "s-1",
+                    "interactionId": "int-1",
+                    "decision": "allow-once",
+                },
+            },
+            {
+                "type": "req",
+                "id": "req-1",
+                "method": "interaction.answer",
+                "params": {
+                    "sessionKey": "s-1",
+                    "interactionId": "int-1",
+                    "decision": "allow-once",
+                },
+            },
+            {
+                "type": "req",
+                "id": "req-1",
+                "method": "interaction.resolve",
+                "params": {
+                    "sessionKey": "",
+                    "interactionId": "int-1",
+                    "decision": "allow-once",
+                },
+            },
+        ],
+    )
+    def test_request_contract_rejects_invalid_envelopes(self, request_body):
+        from secbaas.community.adapters.web.routers.open_api.model import (
+            InteractionResolveEnvelope,
+        )
+
+        with pytest.raises(ValidationError):
+            InteractionResolveEnvelope.model_validate(request_body)

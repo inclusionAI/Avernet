@@ -1,6 +1,7 @@
-"""task HTTP 适配层:execute/dashboard/callback-report router + task_loop inbound PUSH callback router。"""
-from agentclaw.community.adapters.http.openapi_v1.task.router import (
-    router as task_router, task_callback_router,
-)
+"""task HTTP 公开适配层:execute/dashboard/list router(前端公开面,经 gateway spanner)。
 
-__all__ = ["task_router", "task_callback_router"]
+内部接口(回投 / bbs 接力 / 任务发现阶段)见 ``adapters/http/task/``(前缀 ``/api/v1/collaboration/tasks``)。
+"""
+from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
+
+__all__ = ["task_router"]

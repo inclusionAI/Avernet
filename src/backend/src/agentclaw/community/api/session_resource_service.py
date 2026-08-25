@@ -24,6 +24,10 @@ class SessionResourceServiceProtocol(Protocol):
 
     async def open_content(self, *args: Any, **kwargs: Any) -> Any: ...
 
+    async def open_session_file_content(
+        self, *args: Any, **kwargs: Any
+    ) -> Any: ...
+
     def reference(
         self,
         *,

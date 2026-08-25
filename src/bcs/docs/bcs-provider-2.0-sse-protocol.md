@@ -433,21 +433,25 @@ Submit（前端回传，只发 `values`）：
   "action": "submit",
   "answers": {
     "deploy_target": {"values": ["canary"]},
-    "components": {"values": ["web", "worker"]},
+    "components": {"values": ["web", "scheduler"]},
     "release_notes": {"values": ["Deploy after 22:00"]}
   }
 }
 ```
 
-BCS 转发给 Provider 时，按 `questionId` 把 requested 存储的原始 `question` 文本
-补进每个 answer（与 `values` 平级），Provider 收到的 answers 形如：
+BCS 转发给 Provider 时，会把前端提交的 `values` 与 requested 中对应 question 的
+`options[].value` 做精确匹配。命中的值保留在 `values`，未命中的值放入
+`customValues`；自由文本题不做分类。BCS 同时按 `questionId` 把 requested 存储的
+原始 `question` 和存在时的原始 `header` 补进每个 answer。BCS 会覆盖前端可能携带
+的 `question/header`；requested 没有 header 时保持缺失，不从 questionId 或其他
+字段合成。Provider 收到的 answers 形如：
 
 ```json
 {
   "action": "submit",
   "answers": {
-    "deploy_target": {"values": ["canary"], "question": "Where should this be deployed?"},
-    "components": {"values": ["web", "worker"], "question": "Which components?"},
+    "deploy_target": {"values": [], "customValues": ["canary"], "question": "Where should this be deployed?", "header": "Environment"},
+    "components": {"values": ["web"], "customValues": ["scheduler"], "question": "Which components?"},
     "release_notes": {"values": ["Deploy after 22:00"], "question": "Additional deployment instructions?"}
   }
 }
@@ -463,22 +467,37 @@ Cancel：
 
 - `questions` 必填，1～4 项；`questionId/question` 必填且 questionId 唯一。
 - `header` 可选，是短标题或分组标签，与完整问题 `question` 不同；协议不设置字符数限制。
-- `multiSelect`、`allowOther` 可选，省略为 false。
+- `multiSelect` 可选，省略为 false。`allowOther` 可选；对于带 options 的问题，BCS
+  在字段缺失时按 true 处理，只有显式 false 才禁止自定义输入。BaaS 在 Engine 未提供
+  `allowOther` 时会省略该字段，因此缺失是正常的 Provider 2.0 消息形态。
 - question 的 `options` 可选；存在时 1～4 项，`value/label` 必填，
   `description` 可选，不定义 `optionId`。
 - 省略 options 表示自由文本题，同时应省略 `allowOther`，答案仍放单元素
   `values[]`。
-- `allowOther=true` 时自定义输入直接合并进 `values[]`；Provider 根据是否命中原
-  option value 区分预定义值和自由文本，不引入第二套 custom 字段。
+- Frontend answer 只提交 `values[]`，其中既可以包含原 options 中声明的 value，也
+  可以包含用户的自定义输入；Frontend 不提交 `customValues`。
+- 对于选择题，BCS 用 requested `options[].value` 精确分类。命中的值转发为
+  `values[]`，未命中的值转发为 `customValues[]`。分类不使用 label，也不使用
+  模糊匹配。
+- requested 未携带 `allowOther` 时按 true 处理；显式 `allowOther=false` 且出现未命中
+  option 的值时，BCS 拒绝 resolve，不调用 Provider，并向 Frontend 返回
+  `invalid_request` 及明确消息。BCS 同时记录包含 bcsRunId、providerRunId、session、
+  group、bot、interaction、resolver 等关联字段的 warning 日志。
 - resolve 的 `action` 必须是 `submit/cancel`。submit 必须提供 answers，且
   questionId 集合与 requested 完全一致；本期所有问题都必须回答。
-- answers 的键是 `questionId`；每个 answer 只需 `values`，`question` 字段由 BCS
-  按 `questionId` 从 requested 存储的原始问题文本补齐后转发给 Provider，
-  前端 submit 不需要也不应自行回传 `question`。
+- answers 的键是 `questionId`；每个 Frontend answer 只提供 `values`。BCS 分类后，
+  发给 Provider 的 `values` 与 `customValues` 可以在多选题中同时非空。BCS 按
+  `questionId` 从 requested 存储数据补齐 `question` 和存在时的 `header`，并覆盖
+  前端可能回传的同名字段。header 缺失时不 fallback。
+- `header` 在 BCN 通用协议中仍然可选；具体 Provider 可以声明更严格的输入约束。
+  例如 BaaS 产生的 ask_user question 始终带 header，因此 BaaS resolve 要求每个
+  answer 都包含非空 header。
 - cancel 的语义由 action 决定。BCS 不额外禁止携带 answers，但 Provider/Frontend
   应发送最小的 `{action:"cancel"}`，避免产生歧义。
-- 单选和纯文本恰好一个 value；多选一个或多个；每项都是非空字符串。
-- `allowOther=false` 的选择题只接受原 options value；true 时也接受原样自由文本。
+- Frontend 的单选题 `values` 恰好一项，多选题至少一项；每项都是非空字符串。
+  纯文本题仍使用单元素 `values`，BCS 不生成 `customValues`。
+- Provider 收到的选择题 `values` 始终只包含原 options value；`customValues` 仅由
+  BCS 根据上述规则生成。
 - 本期不支持 `secret/isSecret`。Provider 遇到原生 secret question 必须拒绝转换，
   不能降级为普通明文问题。
 
@@ -491,7 +510,7 @@ Cancel：
 完整回显：
 
 ```json
-{"runId":"provider-run-1","seq":11,"phase":"resolved","interactionId":"interaction-2","kind":"ask_user","action":"submit","answers":{"deploy_target":{"values":["staging"]},"components":{"values":["web","worker"]},"release_notes":{"values":["Deploy after 22:00"]}}}
+{"runId":"provider-run-1","seq":11,"phase":"resolved","interactionId":"interaction-2","kind":"ask_user","action":"submit","answers":{"deploy_target":{"values":["staging"]},"components":{"values":["web"],"customValues":["scheduler"]},"release_notes":{"values":["Deploy after 22:00"]}}}
 ```
 
 ### 6.3 mode_switch
@@ -507,8 +526,9 @@ Requested：
   "kind": "mode_switch",
   "title": "Proceed with implementation?",
   "fromMode": "plan",
+  "targetMode": "execute",
   "options": [
-    {"decision": "proceed_accept_edits", "label": "Approve and accept edits", "targetMode": "acceptEdits"},
+    {"decision": "proceed_accept_edits", "label": "Approve and accept edits", "targetMode": "acceptEdits", "recommended": true},
     {"decision": "proceed_default", "label": "Approve and review edits", "targetMode": "default"},
     {"decision": "stay", "label": "Keep planning"}
   ]
@@ -529,9 +549,13 @@ Resolved：
 
 约束：
 
-- `options` 必填非空；每项 `decision/label` 必填，`description/targetMode` 可选。
-- `fromMode/targetMode` 是 Provider opaque string，BCS 不维护模式枚举。
-- 进入模式的 option 应提供 targetMode；保持、拒绝或继续规划的 option 可省略。
+- `options` 必填非空；每项 `decision/label` 必填，`description/targetMode/recommended`
+  可选。
+- 顶层 `fromMode`、`targetMode` 均为可选的 Provider opaque string，BCS 不维护
+  模式枚举。
+- `options[].targetMode` 是可选字段；进入已知模式的 option 应提供，保持、拒绝或
+  继续规划的 option 可省略。
+- `options[].recommended` 是可选 bool UI hint；省略表示该 option 无推荐标记。
 - resolve decision 必须来自 requested options；本期不支持附带反馈文本。
 - 该 kind 是 Provider 可选能力。不能可靠恢复同一 runtime 的引擎不应合成。
 - 本期必须保持同一 SSE、同一 run；创建新 thread/run 的模式选项不在范围内。
@@ -856,7 +880,7 @@ request/interaction ID、运行上下文以及 engine-native response。统一�
 | --- | --- | --- |
 | `exec` | interactionId、command、动态 decisions | interactionId + decision；toolCallId 可选关联 |
 | `ask_user` | 稳定 questionId、question、可选 options | action + questionId 到 values[]；Provider 可按原顺序或问题文本转回 |
-| `mode_switch` | 当前可用 decisions；fromMode 可选 | interactionId + decision；Provider 查回目标模式/原生 reply |
+| `mode_switch` | 当前可用 decisions；fromMode/targetMode 可选 | interactionId + decision；Provider 查回目标模式/原生 reply |
 
 因此协议不要求引擎本身统一事件名，也不要求每个引擎原生提供 `optionId`、BCS
 session ID 或 idempotency key。Provider 在 requested 时保存必要的 engine-native

@@ -556,22 +556,261 @@ async def test_timeout_scan_marks_failed_and_force_done(repo, queue):
     assert queue.get_by_run_id(run_id).status == "DONE"
 
 
-async def test_timeout_scan_requeue_keeps_queue_running(repo, queue):
-    _insert(repo, queue, "bot-1")
-    worker = _worker(queue, repo, _RequeuedExecutor())
-    record = queue.claim_pending_by_bot("bot-1", worker.worker_id, candidates=5)
+async def test_timeout_scan_skips_remote_running_with_fresh_heartbeat(repo, queue):
+    """非本机 RUNNING + 心跳正常 → 跳过，不 force_done。"""
+    run_id = _insert(repo, queue, "bot-1")
+    # 模拟另一台机器 claim 了这个任务
+    record = queue.claim_pending_by_bot("bot-1", "remote-worker", candidates=5)
+    assert record is not None
+    # 设置超时 meta 使 scan_timeout 能扫到
+    queue.update_meta(run_id, {"timeout": -1})
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex)
+
+    # mock scan_timeout 返回这条 record（模拟它已超时）
+    record = queue.get_by_run_id(run_id)
+    with patch.object(worker._queue, "scan_timeout", MagicMock(return_value=[record])):
+        await worker._timeout_scan_once()
+
+    # 心跳刚被 claim 时设置，应该是 fresh 的 → 不 force_done
+    assert queue.get_by_run_id(run_id).status == "RUNNING"
+
+
+async def test_timeout_scan_force_done_remote_running_with_stale_heartbeat(repo, queue):
+    """非本机 RUNNING + 心跳过期 → force_done。"""
+    run_id = _insert(repo, queue, "bot-1")
+    record = queue.claim_pending_by_bot("bot-1", "remote-worker", candidates=5)
+    assert record is not None
+    queue.update_meta(run_id, {"timeout": -1})
+
+    # 手动把 last_heartbeat 改到很久以前，模拟对端 worker 已 down
+    from datetime import datetime, timedelta
+
+    stale_time = datetime.now() - timedelta(seconds=300)
+    with patch.object(
+        queue,
+        "scan_timeout",
+        MagicMock(
+            return_value=[
+                BotRunQueueRecord(
+                    id=record.id,
+                    gmt_create=record.gmt_create,
+                    gmt_modified=record.gmt_modified,
+                    run_id=record.run_id,
+                    bot_id=record.bot_id,
+                    session_id=record.session_id,
+                    status="RUNNING",
+                    assigned_worker="remote-worker",
+                    last_heartbeat=stale_time,
+                    meta={"timeout": -1},
+                    env=record.env,
+                )
+            ]
+        ),
+    ):
+        ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+        worker = _worker(queue, repo, ex)
+        await worker._timeout_scan_once()
+
+    assert queue.get_by_run_id(run_id).status == "DONE"
+
+
+async def test_timeout_scan_force_done_remote_running_with_no_heartbeat(repo, queue):
+    """非本机 RUNNING + 无心跳（last_heartbeat=None）→ 视为过期，force_done。"""
+    run_id = _insert(repo, queue, "bot-1")
+    record = queue.claim_pending_by_bot("bot-1", "remote-worker", candidates=5)
     assert record is not None
 
-    mock_scan = MagicMock(return_value=[record])
-    mock_force_done = MagicMock(wraps=queue.force_done)
-    with (
-        patch.object(worker._queue, "scan_timeout", mock_scan),
-        patch.object(worker._queue, "force_done", mock_force_done),
+    stale_record = BotRunQueueRecord(
+        id=record.id,
+        gmt_create=record.gmt_create,
+        gmt_modified=record.gmt_modified,
+        run_id=record.run_id,
+        bot_id=record.bot_id,
+        session_id=record.session_id,
+        status="RUNNING",
+        assigned_worker="remote-worker",
+        last_heartbeat=None,
+        meta={"timeout": -1},
+        env=record.env,
+    )
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex)
+    with patch.object(
+        worker._queue, "scan_timeout", MagicMock(return_value=[stale_record])
     ):
         await worker._timeout_scan_once()
 
-    mock_force_done.assert_not_called()
-    assert queue.get_by_run_id(record.run_id).status == "RUNNING"
+    assert queue.get_by_run_id(run_id).status == "DONE"
+
+
+async def test_timeout_scan_cancels_local_running_task(repo, queue):
+    """本机 RUNNING 超时 → cancel 本机 task。"""
+    run_id = _insert(repo, queue, "bot-1")
+    record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+    assert record is not None
+    queue.update_meta(run_id, {"timeout": -1})
+
+    # 模拟一个正在执行的 task
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def fake_run():
+        started.set()
+        try:
+            await asyncio.sleep(999)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    task = asyncio.create_task(fake_run())
+    await started.wait()
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex)
+    worker._running_tasks[run_id] = task
+
+    local_record = queue.get_by_run_id(run_id)
+    with patch.object(
+        worker._queue, "scan_timeout", MagicMock(return_value=[local_record])
+    ):
+        await worker._timeout_scan_once()
+
+    # 让出事件循环，让被 cancel 的 task 执行 except CancelledError
+    await asyncio.sleep(0)
+    assert cancelled.is_set()
+    assert queue.get_by_run_id(run_id).status == "DONE"
+
+
+async def test_timeout_scan_skips_cancel_when_task_already_done(repo, queue):
+    """本机 RUNNING 超时但 task 已完成 → 不 cancel，仍 force_done。"""
+    run_id = _insert(repo, queue, "bot-1")
+    record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+    assert record is not None
+    queue.update_meta(run_id, {"timeout": -1})
+
+    async def done_task():
+        pass
+
+    task = asyncio.create_task(done_task())
+    await task
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex)
+    worker._running_tasks[run_id] = task
+
+    local_record = queue.get_by_run_id(run_id)
+    with patch.object(
+        worker._queue, "scan_timeout", MagicMock(return_value=[local_record])
+    ):
+        await worker._timeout_scan_once()
+
+    assert queue.get_by_run_id(run_id).status == "DONE"
+
+
+async def test_tick_tracks_running_task(repo, queue):
+    """_tick 派发后 _running_tasks 应有记录，_run_one 完成后清除。"""
+    run_id = _insert(repo, queue, "bot-1")
+    ex = _CompletingExecutor(repo)
+    worker = _worker(queue, repo, ex)
+
+    dispatched = await worker._tick()
+    assert dispatched == 1
+    # task 刚创建，_running_tasks 中应有记录
+    assert run_id in worker._running_tasks
+
+    # 等 task 完成
+    await asyncio.gather(*worker._running_tasks.values(), return_exceptions=True)
+    await _drain()
+
+    # _run_one finally 中应清除
+    assert run_id not in worker._running_tasks
+
+
+async def test_timeout_scan_stale_heartbeat_with_callback(repo, queue):
+    """非本机 RUNNING + 心跳过期 + 有 callback → force_done 并执行 callback。"""
+    from datetime import datetime, timedelta
+
+    run_id = _insert(repo, queue, "bot-1")
+    record = queue.claim_pending_by_bot("bot-1", "remote-worker", candidates=5)
+    assert record is not None
+
+    stale_record = BotRunQueueRecord(
+        id=record.id,
+        gmt_create=record.gmt_create,
+        gmt_modified=record.gmt_modified,
+        run_id=record.run_id,
+        bot_id=record.bot_id,
+        session_id=record.session_id,
+        status="RUNNING",
+        assigned_worker="remote-worker",
+        last_heartbeat=datetime.now() - timedelta(seconds=300),
+        meta={"timeout": -1, "callback_function": "test_cb"},
+        env=record.env,
+    )
+
+    callback_called = asyncio.Event()
+
+    async def test_callback(rid: str) -> None:
+        assert rid == run_id
+        callback_called.set()
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(
+        queue,
+        repo,
+        ex,
+        post_run_callback_factories={"test_cb": test_callback},
+    )
+    with patch.object(
+        worker._queue, "scan_timeout", MagicMock(return_value=[stale_record])
+    ):
+        await worker._timeout_scan_once()
+
+    assert callback_called.is_set()
+    assert queue.get_by_run_id(run_id).status == "DONE"
+
+
+async def test_timeout_scan_stale_heartbeat_callback_error_is_logged(repo, queue):
+    """非本机 RUNNING + 心跳过期 + callback 抛异常 → force_done，错误被 log。"""
+    from datetime import datetime, timedelta
+
+    run_id = _insert(repo, queue, "bot-1")
+    record = queue.claim_pending_by_bot("bot-1", "remote-worker", candidates=5)
+    assert record is not None
+
+    stale_record = BotRunQueueRecord(
+        id=record.id,
+        gmt_create=record.gmt_create,
+        gmt_modified=record.gmt_modified,
+        run_id=record.run_id,
+        bot_id=record.bot_id,
+        session_id=record.session_id,
+        status="RUNNING",
+        assigned_worker="remote-worker",
+        last_heartbeat=datetime.now() - timedelta(seconds=300),
+        meta={"timeout": -1, "callback_function": "bad_cb"},
+        env=record.env,
+    )
+
+    async def bad_callback(rid: str) -> None:
+        raise RuntimeError("callback boom")
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(
+        queue,
+        repo,
+        ex,
+        post_run_callback_factories={"bad_cb": bad_callback},
+    )
+    with patch.object(
+        worker._queue, "scan_timeout", MagicMock(return_value=[stale_record])
+    ):
+        await worker._timeout_scan_once()
+
+    # callback 失败不影响 force_done
+    assert queue.get_by_run_id(run_id).status == "DONE"
 
 
 async def test_requeue_pending_release_error_is_swallowed(repo, queue):

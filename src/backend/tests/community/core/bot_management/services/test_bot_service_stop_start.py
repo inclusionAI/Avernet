@@ -466,20 +466,35 @@ class TestStartBotBcnRegister:
             ext_update={"bcn_registered": True},
         )
 
-    def test_openclaw_personal_bot_does_not_trigger_bcn_register(self):
-        # 反例: active_engine=openclaw + bot_type=personal 不应触发 BCN 注册.
+    def test_openclaw_personal_bot_registers_plugin_mode(self):
+        # active_engine=openclaw + bot_type=personal 必须显式注册 BCN plugin 模式.
         svc = _make_service()
         svc._bcn_service = MagicMock()
+        svc._bcn_service.register_provider_bot.return_value = {
+            "bot_uuid": "u-openclaw-personal",
+        }
         bot = _make_bot()
         bot["active_engine"] = "openclaw"
         bot["bot_type"] = "personal"
         svc._repository.get_by_id_and_owner.side_effect = [bot, bot]
 
         with patch.object(svc, "_allocate_device_async"), \
+             patch.object(svc, "update_bot_ext") as mock_ext, \
              patch.object(BotService, "_is_claude_code_bcn_register_enabled", return_value=True):
             svc.start_bot(bot_id="bot001", user_id="user001")
 
-        svc._bcn_service.register_provider_bot.assert_not_called()
+        svc._bcn_service.register_provider_bot.assert_called_once_with(
+            teamclaw_bot_uuid="bot001",
+            owner_workno="user001",
+            name="TestBot",
+            summary="",
+            connection_mode="plugin",
+        )
+        mock_ext.assert_called_once_with(
+            bot_id="bot001",
+            user_id="user001",
+            ext_update={"bcn_registered": True},
+        )
 
     def test_bcn_register_failure_does_not_block_start(self):
         from agentclaw.community.core.bot_management.services.bcn_service import BcnServiceError

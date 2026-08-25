@@ -367,8 +367,8 @@ async fn test_group_chat_delivery_types() {
         "agent",
         &bot1_id,
         vec![
-            ParticipantInfo { bot_uuid: bot1_id.clone(), role: Some("driver".to_string()) },
-            ParticipantInfo { bot_uuid: bot2_id.clone(), role: Some("consultant".to_string()) },
+            ParticipantInfo { bot_uuid: bot1_id.clone(), role: Some("driver".to_string()), tags: Vec::new() },
+            ParticipantInfo { bot_uuid: bot2_id.clone(), role: Some("consultant".to_string()), tags: Vec::new() },
         ],
     ).await.expect("Failed to create group");
 
@@ -425,8 +425,8 @@ async fn test_group_chat_mention_routing() {
         "agent",
         &bot1_id,
         vec![
-            ParticipantInfo { bot_uuid: bot1_id.clone(), role: Some("driver".to_string()) },
-            ParticipantInfo { bot_uuid: bot2_id.clone(), role: Some("consultant".to_string()) },
+            ParticipantInfo { bot_uuid: bot1_id.clone(), role: Some("driver".to_string()), tags: Vec::new() },
+            ParticipantInfo { bot_uuid: bot2_id.clone(), role: Some("consultant".to_string()), tags: Vec::new() },
         ],
     ).await.expect("Failed to create group");
 
@@ -483,8 +483,8 @@ async fn test_sender_exclusion_in_group_chat() {
         "agent",
         &bot1_id,
         vec![
-            ParticipantInfo { bot_uuid: bot1_id.clone(), role: Some("driver".to_string()) },
-            ParticipantInfo { bot_uuid: bot2_id.clone(), role: Some("consultant".to_string()) },
+            ParticipantInfo { bot_uuid: bot1_id.clone(), role: Some("driver".to_string()), tags: Vec::new() },
+            ParticipantInfo { bot_uuid: bot2_id.clone(), role: Some("consultant".to_string()), tags: Vec::new() },
         ],
     ).await.expect("Failed to create group");
 
@@ -551,9 +551,9 @@ async fn test_real_person_broadcast_to_all() {
         "agent",
         &bot1_id,
         vec![
-            ParticipantInfo { bot_uuid: bot1_id.clone(), role: Some("driver".to_string()) },
-            ParticipantInfo { bot_uuid: bot2_id.clone(), role: Some("consultant".to_string()) },
-            ParticipantInfo { bot_uuid: sender_id.clone(), role: Some("consultant".to_string()) },
+            ParticipantInfo { bot_uuid: bot1_id.clone(), role: Some("driver".to_string()), tags: Vec::new() },
+            ParticipantInfo { bot_uuid: bot2_id.clone(), role: Some("consultant".to_string()), tags: Vec::new() },
+            ParticipantInfo { bot_uuid: sender_id.clone(), role: Some("consultant".to_string()), tags: Vec::new() },
         ],
     ).await.expect("Failed to create group");
 
@@ -637,7 +637,7 @@ async fn test_group_create_and_list() {
     let group = client.create_group(
         "agent",
         &bot_id,
-        vec![ParticipantInfo { bot_uuid: bot_id.clone(), role: Some("driver".to_string()) }],
+        vec![ParticipantInfo { bot_uuid: bot_id.clone(), role: Some("driver".to_string()), tags: Vec::new() }],
     ).await.expect("Failed to create group");
 
     assert!(!group.id.is_empty(), "Group should have an ID");

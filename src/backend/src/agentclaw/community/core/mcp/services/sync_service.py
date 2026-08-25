@@ -14,12 +14,17 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
 from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
 from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
+from agentclaw.community.core.mcp.services.detail_fanout import (
+    fan_out_mcp_details,
+    server_code_of,
+)
 from agentclaw.community.core.mcp.services.passport_scope import (
     passport_mcp_codes_from_entries,
     passport_mcp_items_from_entries,
@@ -38,6 +43,11 @@ if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
 
 logger = get_logger()
+
+# 详情投递的并发上限,理由见 ``detail_fanout.fan_out_mcp_details``。两条链路各有
+# 一个:desired state 投递(caller 给定列表)与 collect 后投递,可能并发打同一台设备。
+_DESIRED_STATE_DETAIL_CONCURRENCY = 10
+_COLLECTED_DETAIL_CONCURRENCY = 5
 
 
 def _merge_cli_items(
@@ -107,6 +117,7 @@ class MCPSyncService:
         passport_update: PassportPlugin,
         mcp_config_service: MCPConfigService,
         bot_repository: BotRepository,
+        caller_identity_repository: CallerIdentityRepositoryProtocol,
         resolver_provider: 'Callable[[], "DeviceContextResolver"]',
         device_sync_dispatcher_provider: 'Callable[[], "DeviceSyncDispatcher"]',
     ) -> None:
@@ -120,6 +131,7 @@ class MCPSyncService:
             passport_update: Passport 插件，用于更新 passport MCP 列表。
             mcp_config_service: MCP 配置服务，用于构建同步请求参数。
             bot_repository: Bot 仓库，用于查询 bot 信息。
+            caller_identity_repository: Caller 身份仓库，用于保留显式 MCP 调用身份。
             resolver_provider: Lazy thunk 返回 ``DeviceContextResolver`` — 全仓
                 唯一 provider 解析点。以 ``(bot_id, user_id)`` 入参,经 binding +
                 ConnInfoBuilder 输出 typed ``DeviceContext``,取代旧
@@ -141,6 +153,7 @@ class MCPSyncService:
         self.passport_update = passport_update
         self.mcp_config_service = mcp_config_service
         self.bot_repository = bot_repository
+        self.caller_identity_repository = caller_identity_repository
         self._resolver_provider = resolver_provider
         self._device_sync_dispatcher_provider = device_sync_dispatcher_provider
 
@@ -258,7 +271,14 @@ class MCPSyncService:
         """
         _bot = bot_id or "unknown"
         try:
-            ctx = self._resolver_provider().resolve_for_bot(bot_id, entity_id or user_id)
+            # resolve_for_bot 是同步的,且内部要打一次阻塞 ws-info HTTP + 若干 DB
+            # 查询。直接在协程里调用会占住 event loop,把 caller 的并发投递重新
+            # 串行化(caller 的 gather 只有等这里让出才能轮到下一个 MCP)。
+            ctx = await asyncio.to_thread(
+                self._resolver_provider().resolve_for_bot,
+                bot_id,
+                entity_id or user_id,
+            )
         except (DeviceNotBoundError, UnknownProviderError):
             error = f"bot={_bot} 缺少设备连接信息，无法推送 MCP 配置"
             logger.error("[MCPSyncService] %s", error)
@@ -278,6 +298,79 @@ class MCPSyncService:
             logger.error("[MCPSyncService] %s", error)
             return {"success": False, "error": error}
 
+        return {"success": True}
+
+    async def sync_mcp_details_for_bot(
+        self,
+        *,
+        user_id: str,
+        mcp_entries: list[dict[str, Any]],
+        bot_id: str,
+        entity_id: Optional[str] = None,
+        engine_type: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """把一批已备齐的 MCP 详情推送到**同一个** bot 的设备。
+
+        跟逐条 ``sync_mcp_detail`` 只差一处,但是决定性的一处:设备解析
+        (``resolve_for_bot`` + dispatch)只做一次。一份 desired state 里所有
+        MCP 的目标 bot 相同,逐条解析等于把同一个答案算 N 遍——每遍一次阻塞
+        ws-info HTTP 加若干 DB 查询,而且跑在 event loop 上,会把 caller 的并发
+        投递重新串行化。与 ``_sync_mcp_details`` 的差别则在入参:那条链路自己去
+        ``BotMCPProvider`` collect 列表,这里直接收 caller 给定的 desired state。
+
+        Args:
+            user_id: 用户 ID。仅用于 ``build_mcp_sync_payload`` 取该用户的 MCP
+                配置(api_key 等),是 per-user 维度。
+            mcp_entries: 待推送的 MCP 详情列表;caller 已备齐,本方法不再回查。
+            bot_id: 目标 bot ID——列表内所有 MCP 共用。
+            entity_id: bot 所属实体 ID,缺省回退到 ``user_id``。
+            engine_type: 引擎类型,默认 ``openclaw``。
+
+        Returns:
+            ``{"success": bool, "error": str}``,失败时 ``error`` 列出失败的
+            server_code。
+        """
+        _bot = bot_id or "unknown"
+        if not mcp_entries:
+            # 无 MCP 可投递:不必解析设备。allow-list 的声明是 caller 的事。
+            return {"success": True}
+
+        try:
+            # resolve_for_bot 同步且内含阻塞 ws-info HTTP + DB 查询,放线程池,
+            # 否则会占住 event loop。
+            ctx = await asyncio.to_thread(
+                self._resolver_provider().resolve_for_bot,
+                bot_id,
+                entity_id or user_id,
+            )
+        except (DeviceNotBoundError, UnknownProviderError):
+            error = f"bot={_bot} 缺少设备连接信息，无法推送 MCP 配置"
+            logger.error("[MCPSyncService] %s", error)
+            return {"success": False, "error": error}
+        plugin = self._device_sync_dispatcher_provider().dispatch(ctx)
+
+        _successes, failures = await fan_out_mcp_details(
+            mcps=mcp_entries,
+            push_one=lambda mcp: self._sync_mcp_detail(
+                plugin=plugin,
+                user_id=user_id,
+                mcp_data=mcp,
+                engine_type=engine_type,
+            ),
+            concurrency=_DESIRED_STATE_DETAIL_CONCURRENCY,
+            bot_id=bot_id,
+        )
+
+        if failures:
+            codes = [server_code_of(m) or "unknown" for m in failures]
+            error = f"向 bot={_bot} 推送 MCP 配置失败: {', '.join(codes)}"
+            logger.error("[MCPSyncService] %s", error)
+            return {"success": False, "error": error}
+
+        logger.info(
+            "[MCPSyncService] desired state 详情推送完成: bot=%s, count=%s",
+            _bot, len(mcp_entries),
+        )
         return {"success": True}
 
     async def remove_mcp_detail(
@@ -391,7 +484,8 @@ class MCPSyncService:
         passport_result = await self._update_passport(
             bot_id=bot_id,
             user_id=user_id,
-            synced_server_codes=passport_mcp_codes,
+            owner_id=entity_id,
+            synced_mcps=active_mcps,
             engine_type=effective_engine,
         )
         if not passport_result.get("success"):
@@ -668,77 +762,28 @@ class MCPSyncService:
             )
         self._enrich_from_mcp_center(all_mcps)
 
-        mcp_codes_list = [
-            (m.get("server_code") or m.get("serverCode"))
-            for m in all_mcps
-            if m.get("server_code") or m.get("serverCode")
-        ]
+        mcp_codes_list = [c for c in map(server_code_of, all_mcps) if c]
         logger.info(
             "[MCPSyncService] 正在推送 %s 个 MCP 详情到 bot=%s, codes=%s, "
             "entity_id=%s, user_id=%s",
             len(all_mcps), bot_id, mcp_codes_list, entity_id, user_id,
         )
 
-        # 3. 并发推送，但限制并发数为 5，防止一次性向设备发太多 HTTP 请求把引擎压垮。
-        semaphore = asyncio.Semaphore(5)
+        # 3. 并发推送并归类结果——限流与异常兜底见 ``fan_out_mcp_details``。
+        successes, failures = await fan_out_mcp_details(
+            mcps=all_mcps,
+            push_one=lambda mcp: self._sync_mcp_detail(
+                plugin=plugin,
+                user_id=user_id,
+                mcp_data=mcp,
+                engine_type=engine_type,
+            ),
+            concurrency=_COLLECTED_DETAIL_CONCURRENCY,
+            bot_id=bot_id,
+        )
 
-        async def sync_one(mcp: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-            async with semaphore:
-                server_code = mcp.get("server_code") or mcp.get("serverCode")
-                if not server_code:
-                    logger.warning(
-                        "[MCPSyncService] 跳过无 server_code 的 MCP, "
-                        "bot_id=%s, mcp=%s",
-                        bot_id, mcp,
-                    )
-                    return (mcp, False)
-                try:
-                    # 经共享 helper 合并 payload 并下发；插件按容器类型决定投递方式
-                    # （arca/baas 单条 /api/mcp；teclaw 整产物）。
-                    ok = await self._sync_mcp_detail(
-                        plugin=plugin,
-                        user_id=user_id,
-                        mcp_data=mcp,
-                        engine_type=engine_type,
-                    )
-                    return (mcp, ok)
-                except Exception as e:
-                    logger.error(
-                        "[MCPSyncService] 同步 %s 异常, bot_id=%s, error=%s",
-                        server_code, bot_id, e,
-                    )
-                    return (mcp, False)
-
-        tasks = [sync_one(mcp) for mcp in all_mcps]
-        # return_exceptions=True 保证单个 MCP 失败不会阻断其他 MCP 的同步。
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # 4. 分类收集成功和失败的 MCP；CancelledError 必须向上抛，不能吞掉。
-        successes: list[dict[str, Any]] = []
-        failures: list[dict[str, Any]] = []
-
-        for mcp, res in zip(all_mcps, results, strict=True):
-            if isinstance(res, asyncio.CancelledError):
-                # CancelledError 代表上层要求取消任务，必须向上抛，不能吞掉。
-                raise res
-            if isinstance(res, Exception):
-                server_code = mcp.get("server_code") or mcp.get("serverCode")
-                logger.error(
-                    "[MCPSyncService] 任务异常 %s, bot_id=%s, error=%s",
-                    server_code, bot_id, res,
-                )
-                failures.append(mcp)
-            elif res[1]:
-                successes.append(mcp)
-            else:
-                failures.append(mcp)
-
-        success_codes = [
-            (m.get("server_code") or m.get("serverCode")) for m in successes
-        ]
-        failed_codes = [
-            (m.get("server_code") or m.get("serverCode")) for m in failures
-        ]
+        success_codes = [server_code_of(m) for m in successes]
+        failed_codes = [server_code_of(m) for m in failures]
         logger.info(
             "[MCPSyncService] 详情同步完成: 成功 %s, 失败 %s, success_codes=%s, failed_codes=%s, "
             "bot_id=%s, entity_id=%s, user_id=%s",
@@ -786,7 +831,10 @@ class MCPSyncService:
             return False
 
         # 用 MCPConfigService 合并用户自定义配置与默认模板，生成设备端需要的完整 payload。
-        _api_key, merged_headers, _endpoint_env, _transport_protocol = self.mcp_config_service.build_mcp_sync_payload(
+        # 同步方法且要读一次 DB,跟 sync_single_mcp 一样放线程池——留在协程里会占住
+        # event loop,让并发投递退化成串行。
+        _api_key, merged_headers, _endpoint_env, _transport_protocol = await asyncio.to_thread(
+            self.mcp_config_service.build_mcp_sync_payload,
             user_id=user_id,
             mcp_data=mcp_data,
             api_key=api_key,
@@ -851,50 +899,49 @@ class MCPSyncService:
         self,
         bot_id: str,
         user_id: str,
-        synced_server_codes: list[str],
+        owner_id: str,
+        synced_mcps: list[dict[str, Any]],
         engine_type: Optional[str] = None,
     ) -> dict[str, Any]:
-        """通知 passport 系统更新 bot 当前可用的 MCP codes 列表。
-
-        passport 用该列表做前端权限校验等下游消费。bot 元数据同时用于
-        解析默认 CLI 授权范围；若查询失败，为避免写入不完整的 CLI 快照，
-        本次 passport 更新会中止并返回失败。
-
-        Args:
-            bot_id: 目标 bot ID。
-            user_id: 用户 ID。
-            synced_server_codes: 当前应生效的 MCP server code 列表。
-            engine_type: 引擎类型。
-
-        Returns:
-            ``{"success": bool, "error": str|None}`` 格式的结果字典。
-        """
+        """更新完整 MCP scope；身份或 bot 元数据不可读取时中止覆盖。"""
         bot_name: Optional[str] = None
         bot_desc: Optional[str] = None
         template_type: Optional[str] = None
         template_config: Optional[Mapping[str, Any]] = None
         try:
-            bot = self.bot_repository.get_by_id_and_owner(bot_id, user_id)
+            bot = self.bot_repository.get_by_id_and_owner(bot_id, owner_id)
             if bot:
                 bot_name = bot.get("bot_name")
                 bot_desc = bot.get("bot_desc")
                 template_type = bot.get("template_type")
                 raw_template_config = bot.get("template_config")
-                if isinstance(raw_template_config, Mapping):
-                    template_config = raw_template_config
-                engine_type = (
-                    bot.get("active_engine") or bot.get("engine_type") or engine_type
-                )
+                template_config = raw_template_config if isinstance(raw_template_config, Mapping) else None
+                engine_type = bot.get("active_engine") or bot.get("engine_type") or engine_type
         except Exception as e:
             error = f"获取 bot 信息失败，无法安全解析默认 CLI 范围: {e}"
             logger.error("[MCPSyncService] %s, bot_id=%s", error, bot_id)
             return {"success": False, "error": error}
 
+        identity_modes: Mapping[str, object] = {}
+        try:
+            if bot:
+                identity_modes = self.caller_identity_repository.list_draft_call_types(int(bot["id"]), str(engine_type))
+            else:
+                logger.info("[MCPSyncService] 未找到持久化 bot，按 owner 刷新 MCP scope: bot_id=%s", bot_id)
+            mcp_items = passport_mcp_items_from_entries(synced_mcps, identity_modes=identity_modes)
+        except Exception as e:
+            error = f"查询 MCP 调用身份失败: {e}"
+            logger.error("[MCPSyncService] %s, bot_id=%s", error, bot_id)
+            return {"success": False, "error": error}
+
+        synced_server_codes = [item["mcp_code"] for item in mcp_items]
+        caller_mcp_codes = [
+            item["mcp_code"] for item in mcp_items if item["identity_mode"] == "caller"
+        ]
+
         # MCP 同步触发 resourceManifest 更新时，要回填当前 CLI，避免覆盖式更新丢失 CLI 授权。
         try:
-            current_cli_items = self.passport_update.query_passport_clis(
-                bot_id, user_id
-            )
+            current_cli_items = self.passport_update.query_passport_clis(bot_id, user_id)
         except Exception as e:
             error = f"查询 CLI 范围失败: {e}"
             logger.error("[MCPSyncService] %s", error)
@@ -921,12 +968,13 @@ class MCPSyncService:
             )
 
         try:
-            # resource_scope 是完整快照：MCP 来自同步结果，CLI 来自当前许可证 + 引擎默认 CLI。
+            # resource_scope 是完整快照：MCP 身份与 CLI 都必须回传，避免覆盖丢失授权。
             self.passport_update.update_passport(
                 bot_id=bot_id,
                 user_id=user_id,
                 resource_scope={
                     "mcp_codes": synced_server_codes,
+                    "mcp_items": mcp_items,
                     "cli_items": cli_items,
                 },
                 bot_name=bot_name,
@@ -935,11 +983,12 @@ class MCPSyncService:
             )
             logger.info(
                 "[MCPSyncService] updatePassport 成功: "
-                "bot_id=%s, user_id=%s, mcps=%s, clis=%s, "
+                "bot_id=%s, user_id=%s, mcps=%s, caller_mcps=%s, clis=%s, "
                 "engine_type=%s, bot_name=%s",
                 bot_id,
                 user_id,
                 synced_server_codes,
+                caller_mcp_codes,
                 cli_items,
                 engine_type,
                 bot_name,

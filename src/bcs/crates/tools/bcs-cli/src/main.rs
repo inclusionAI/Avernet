@@ -493,7 +493,7 @@ fn merge_baas_session_id_into_meta(
     Ok(Some(serde_json::Value::Object(meta_object)))
 }
 
-/// Split a service session id of the form `{group_id}:{8_hex}` into its
+/// Split a service session id at its canonical `{group_id}:<session_suffix>` boundary into its
 /// `(group_id, session_id)` parts. `group_arg` always wins when supplied;
 /// otherwise the colon split must succeed.
 fn split_service_sid<'a>(
@@ -506,7 +506,7 @@ fn split_service_sid<'a>(
     match sid.split_once(':') {
         Some((gid, _)) if !gid.is_empty() => Ok((gid, sid)),
         _ => Err(anyhow!(
-            "Cannot infer group from session id '{}'. Expected '{{group}}:{{8_hex}}' \
+            "Cannot infer group from session id '{}'. Expected '{{group}}:<session_suffix>' \
              or pass --group explicitly.",
             sid
         )),
@@ -2828,6 +2828,7 @@ pub async fn run() -> Result<()> {
                             "worker".to_string()
                         }
                     }),
+                    tags: Vec::new(),
                 })
                 .collect();
             if group_strategy.is_some()
@@ -2840,6 +2841,7 @@ pub async fn run() -> Result<()> {
                     bcs_protocol::ParticipantInfo {
                         bot_uuid: driver.clone(),
                         role: Some("manager".to_string()),
+                        tags: Vec::new(),
                     },
                 );
             }

@@ -106,6 +106,18 @@ class HttpClient(Plugin, Protocol):
         """Issue a DELETE to ``base_url + path`` and return the response."""
         ...
 
+    def patch(
+        self,
+        path: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+        json: Any | None = None,
+        headers: Mapping[str, str] | None = None,
+        timeout: float = 30.0,
+    ) -> httpx.Response:
+        """Issue a PATCH to ``base_url + path`` and return the response."""
+        ...
+
     def stream(
         self,
         method: str,

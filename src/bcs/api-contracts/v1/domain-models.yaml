@@ -37,6 +37,22 @@ BotVisibility:
     - private
   description: Discovery and collaboration visibility stored for the Bot.
 
+UserVisibility:
+  type: string
+  enum:
+    - public
+    - protected
+    - private
+  description: Human-side addability visibility used by friend connection policy.
+
+FriendCheckInStrategy:
+  type: string
+  enum:
+    - OPEN
+    - APPROVAL
+    - DEPT_FREE
+  description: Friend request approval strategy used by friend connection policy.
+
 BotStatus:
   type: string
   enum:
@@ -128,6 +144,11 @@ PhysicalBot:
     - reachability
     - created_at
     - updated_at
+    - task_claim_mode
+    - task_dream_mode
+    - user_visibility
+    - friend_ext
+    - friend_check_in_strategy
   properties:
     bot_id:
       type: string
@@ -170,6 +191,20 @@ PhysicalBot:
       format: int64
       minimum: 0
       description: Unix milliseconds mapped from gmt_modified.
+    task_claim_mode:
+      type: boolean
+      description: Task-claim opt-in toggle. Defaults to false when never set.
+    task_dream_mode:
+      type: boolean
+      description: Task-dream opt-in toggle. Defaults to false when never set.
+    user_visibility:
+      $ref: "#/UserVisibility"
+    friend_ext:
+      type: object
+      additionalProperties: true
+      description: Friend connection policy extension, including department scopes.
+    friend_check_in_strategy:
+      $ref: "#/FriendCheckInStrategy"
   description: >-
     A physical software Bot. descriptor and reachability are normalized even
     when their legacy source columns are incomplete.
@@ -184,6 +219,9 @@ HumanBot:
     - visibility
     - status
     - env
+    - user_visibility
+    - friend_ext
+    - friend_check_in_strategy
     - created_at
     - updated_at
   properties:
@@ -209,6 +247,14 @@ HumanBot:
       minLength: 1
       description: >-
         Immutable creator staff_no. Omitted when a legacy row has no creator.
+    user_visibility:
+      $ref: "#/UserVisibility"
+    friend_ext:
+      type: object
+      additionalProperties: true
+      description: Friend connection policy extension, including department scopes.
+    friend_check_in_strategy:
+      $ref: "#/FriendCheckInStrategy"
     created_at:
       type: integer
       format: int64
@@ -464,6 +510,10 @@ Participant:
         - manager
         - worker
         - observer
+    tags:
+      type: array
+      items:
+        type: string
     mode:
       type: string
       enum:
@@ -471,6 +521,11 @@ Participant:
         - muted
         - present
         - absent
+    tags:
+      type: array
+      items:
+        type: string
+      description: Provider routing tags scoped to this Group or Session membership.
 
 DeliveryPolicy:
   type: object
@@ -555,7 +610,6 @@ NormalGroupSummary:
     updated_at:
       type: integer
       minimum: 0
-
 DirectMessageGroupSummary:
   type: object
   additionalProperties: false
@@ -597,7 +651,6 @@ DirectMessageGroupSummary:
     updated_at:
       type: integer
       minimum: 0
-
 GroupSummary:
   oneOf:
     - $ref: "#/NormalGroupSummary"
@@ -686,6 +739,48 @@ CollaborationConfiguration:
       manager_worker: "#/ManagerWorkerConfiguration"
       state_machine: "#/StateMachineConfiguration"
 
+AixUiOpeningMessageTab:
+  type: object
+  additionalProperties: false
+  properties:
+    id:
+      type: string
+    title:
+      type: string
+    closable:
+      type: boolean
+
+AixUiOpeningMessage:
+  type: object
+  additionalProperties: false
+  required:
+    - type
+    - component
+  properties:
+    type:
+      type: string
+      enum: [card, panel]
+    component:
+      type: string
+      minLength: 1
+      maxLength: 256
+    params:
+      type: object
+      additionalProperties: true
+    tab:
+      $ref: "#/AixUiOpeningMessageTab"
+
+OpeningMessage:
+  description: >-
+    StateMachine Run opening-message template. Supported placeholders are
+    {{bcs.group_id}}, {{bcs.session_id}}, {{bcs.run_id}},
+    {{bcs.group_name}}, and {{bcs.session_name}}.
+  oneOf:
+    - type: string
+      minLength: 1
+      maxLength: 65536
+    - $ref: "#/AixUiOpeningMessage"
+
 CollaborationGroupDetail:
   type: object
   additionalProperties: false
@@ -716,6 +811,8 @@ CollaborationGroupDetail:
       $ref: "#/GroupVisibility"
     context:
       type: string
+    opening_message:
+      $ref: "#/OpeningMessage"
     originator_actor_id:
       type: string
     participants:
@@ -733,6 +830,13 @@ CollaborationGroupDetail:
     updated_at:
       type: integer
       minimum: 0
+    event_subscriptions:
+      type: array
+      description: >-
+        Present only on a successful Group create request that provisioned
+        inline Event Subscriptions. Endpoint URLs are redacted.
+      items:
+        $ref: ./openapi/event-subscriptions.yaml#/EventSubscription
 
 DirectMessageGroupDetail:
   type: object
@@ -776,6 +880,13 @@ DirectMessageGroupDetail:
     updated_at:
       type: integer
       minimum: 0
+    event_subscriptions:
+      type: array
+      description: >-
+        Present only on a successful Group create request that provisioned
+        inline Event Subscriptions. Endpoint URLs are redacted.
+      items:
+        $ref: ./openapi/event-subscriptions.yaml#/EventSubscription
 
 GroupDetail:
   oneOf:
@@ -1601,6 +1712,159 @@ FriendRequestPage:
       type: integer
       minimum: 1
 
+
+FriendConnectionActorType:
+  type: string
+  enum:
+    - human
+    - bot
+
+FriendConnectionActor:
+  type: object
+  additionalProperties: false
+  required:
+    - type
+    - id
+  properties:
+    type:
+      $ref: "#/FriendConnectionActorType"
+    id:
+      type: string
+      minLength: 1
+
+FriendConnectionRequestStatus:
+  type: string
+  enum:
+    - pending
+    - approved
+    - rejected
+    - cancelled
+
+FriendConnectionRequestDirection:
+  type: string
+  enum:
+    - received
+    - sent
+    - all
+
+FriendConnectionCreateStatus:
+  type: string
+  enum:
+    - pending
+    - approved
+    - public_no_edge
+
+FriendConnectionCreateResult:
+  type: object
+  additionalProperties: false
+  required:
+    - request_ids
+    - edge_ids
+    - status
+    - auto_accepted
+  properties:
+    request_ids:
+      type: array
+      items:
+        type: string
+    edge_ids:
+      type: array
+      items:
+        type: integer
+        format: int64
+    status:
+      $ref: "#/FriendConnectionCreateStatus"
+    auto_accepted:
+      type: boolean
+
+FriendConnectionRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - request_id
+    - from_actor
+    - to_actor
+    - status
+    - created_by
+  properties:
+    request_id:
+      type: string
+    edge_id:
+      type: integer
+      format: int64
+    from_actor:
+      $ref: "#/FriendConnectionActor"
+    to_actor:
+      $ref: "#/FriendConnectionActor"
+    message:
+      type: string
+    status:
+      $ref: "#/FriendConnectionRequestStatus"
+    decision_reason:
+      type: string
+    created_by:
+      $ref: "#/FriendConnectionActor"
+    decided_by:
+      $ref: "#/FriendConnectionActor"
+    decided_at:
+      type: integer
+      format: int64
+      minimum: 0
+
+FriendConnectionRequestPage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+    - page
+    - page_size
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/FriendConnectionRequest"
+    total:
+      type: integer
+      minimum: 0
+    page:
+      type: integer
+      minimum: 1
+    page_size:
+      type: integer
+      minimum: 1
+
+FriendConnection:
+  type: object
+  additionalProperties: false
+  required:
+    - actor
+    - is_online
+  properties:
+    actor:
+      $ref: "#/FriendConnectionActor"
+    name:
+      type: string
+    summary:
+      type: string
+    is_online:
+      type: boolean
+
+FriendConnectionPage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/FriendConnection"
+    total:
+      type: integer
+      minimum: 0
+
 # ---- Success envelopes for batch 2 resources ------------------------------
 
 SessionDetailEnvelope:
@@ -1818,6 +2082,79 @@ FriendRequestPageEnvelope:
       type: string
     data:
       $ref: "#/FriendRequestPage"
+    request_id:
+      type: string
+
+
+CreatedFriendConnectionRequestEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20100
+    message:
+      type: string
+    data:
+      $ref: "#/FriendConnectionCreateResult"
+    request_id:
+      type: string
+
+FriendConnectionRequestPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/FriendConnectionRequestPage"
+    request_id:
+      type: string
+
+FriendConnectionRequestDecisionEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/FriendConnectionRequest"
+    request_id:
+      type: string
+
+FriendConnectionPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/FriendConnectionPage"
     request_id:
       type: string
 

@@ -152,7 +152,7 @@ export async function createMcpServerBase(config: McpServerConfig): Promise<McpS
         // loadConfig may fail in standalone mode — env vars only
       }
     }
-    if (resolvedBaseUrl && resolvedPrivateKeyB64) {
+    if (resolvedBaseUrl) {
       try {
         // Read iamtoken from env var or application.yaml for Cookie-based auth with clawweb.
         // Only set iamtoken on macOS (local dev) when the value is present in
@@ -165,9 +165,12 @@ export async function createMcpServerBase(config: McpServerConfig): Promise<McpS
             try { resolvedIamtoken = loadConfig().app.api.iamtoken; } catch { /* ignore */ }
           }
         }
+        // When privateKeyB64 is empty, create ApiClient without signing — the
+        // corp extension's implementation will skip Ed25519 signing and send
+        // unsigned requests. This allows API persistence to work without a key.
         apiClient = new ApiClient({
           baseUrl: resolvedBaseUrl,
-          privateKeyB64: resolvedPrivateKeyB64,
+          privateKeyB64: resolvedPrivateKeyB64 ?? undefined,
           iamtoken: resolvedIamtoken || undefined,
           timeout: parseInt(process.env.CLAWWEB_API_TIMEOUT ?? "5000", 10),
           maxRetries: 3,
@@ -176,13 +179,18 @@ export async function createMcpServerBase(config: McpServerConfig): Promise<McpS
         setFlowRunRepository(flowRunApiRepo);
         const nodeExecApiRepo = new NodeExecutionApiRepository(apiClient);
         setNodeExecutionRepository(nodeExecApiRepo);
-        log.info(`TaskFlow persistence: API mode → ${resolvedBaseUrl}/api/internal/runs`);
-        log.info(`Node execution persistence: API mode → ${resolvedBaseUrl}/api/internal/node-executions`);
+        if (resolvedPrivateKeyB64) {
+          log.info(`TaskFlow persistence: API mode → ${resolvedBaseUrl}/api/internal/runs (signed)`);
+          log.info(`Node execution persistence: API mode → ${resolvedBaseUrl}/api/internal/node-executions (signed)`);
+        } else {
+          log.warn(`TaskFlow persistence: API mode → ${resolvedBaseUrl}/api/internal/runs (unsigned — no privateKeyB64 configured)`);
+          log.warn(`Node execution persistence: API mode → ${resolvedBaseUrl}/api/internal/node-executions (unsigned — no privateKeyB64 configured)`);
+        }
       } catch (err) {
         log.warn(`API client init failed, using in-memory TaskFlow:`, err instanceof Error ? err.message : String(err));
       }
     } else {
-      log.info(`TaskFlow persistence: in-memory mode (set CLAWWEB_API_URL + CLAWWEB_API_PRIVATE_KEY or api.baseUrl + api.privateKeyB64 in application.yaml)`);
+      log.info(`TaskFlow persistence: in-memory mode (set CLAWWEB_API_URL or api.baseUrl in application.yaml)`);
     }
   } else {
     setFlowRunRepository(flowRunApiRepo);

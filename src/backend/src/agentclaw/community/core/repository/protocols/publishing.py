@@ -9,7 +9,7 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Protocol, Sequence, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishOperationRecord
@@ -164,6 +164,15 @@ class BotPublishRepositoryProtocol(Protocol):
         Returns:
             List of BotPublishRecord.
         """
+        ...
+
+    @abstractmethod
+    def list_by_source_bots(
+        self,
+        source_bot_pks: Sequence[int],
+        env: str,
+    ) -> List[BotPublishRecord]:
+        """List publish records for multiple source bots in one query."""
         ...
 
     @abstractmethod

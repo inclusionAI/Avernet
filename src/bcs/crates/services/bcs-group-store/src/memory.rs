@@ -3,12 +3,16 @@
 //! This repository is intended for tests and local single-node development.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 use tracing::debug;
 
-use bcs_service_api::port::repo::GroupRepoPort;
+use bcs_event_store::MemoryEventStore;
+use bcs_service_api::port::repo::{
+    CommitGroupEventfulMutation, FinalizeGroupProvisioning, GroupEventfulMutation, GroupRepoPort,
+};
 use bcs_service_api::{
     Group as DomainGroup, GroupKind, GroupMessage, GroupMutableFieldsPatch, GroupStatus,
     GroupStrategy, Participant, ParticipantMode, ServiceError, ServiceResult, ServiceSpec,
@@ -21,12 +25,24 @@ use bcs_service_api::{GroupMetricCount, GroupMetricsSnapshotPort};
 pub struct MemoryGroupRepo {
     groups: RwLock<HashMap<String, DomainGroup>>,
     message_counts: RwLock<HashMap<String, usize>>,
+    event_store: Option<Arc<MemoryEventStore>>,
+    event_env: Option<String>,
 }
 
 impl MemoryGroupRepo {
     /// Create a new group store.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_event_store(
+        mut self,
+        event_store: Arc<MemoryEventStore>,
+        env: impl Into<String>,
+    ) -> Self {
+        self.event_store = Some(event_store);
+        self.event_env = Some(env.into());
+        self
     }
 }
 
@@ -68,6 +84,122 @@ impl GroupMetricsSnapshotPort for MemoryGroupRepo {
 
 #[async_trait]
 impl GroupRepoPort for MemoryGroupRepo {
+    async fn finalize_provisioning(&self, command: FinalizeGroupProvisioning) -> ServiceResult<()> {
+        let event_store =
+            self.event_store
+                .as_ref()
+                .ok_or_else(|| ServiceError::InvalidOperation {
+                    message: "Memory Group provisioning requires the shared Memory Event Store"
+                        .to_string(),
+                    request_id: None,
+                })?;
+        let mut groups = self.groups.write().await;
+        let group = groups
+            .get_mut(&command.group_id)
+            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
+        if group.record_status != "provisioning" {
+            return Err(ServiceError::InvalidOperation {
+                message: format!(
+                    "Group '{}' is not awaiting provisioning finalization",
+                    command.group_id
+                ),
+                request_id: None,
+            });
+        }
+        let updated_at = command.finalized_at_ms;
+        event_store
+            .finalize_group_provisioning(
+                &command.group_id,
+                &command.subscription_ids,
+                &command.events,
+                command.finalized_at_ms,
+                &command.env,
+                || {
+                    group.record_status = "active".to_string();
+                    group.updated_at = updated_at;
+                    Ok(())
+                },
+            )
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        Ok(())
+    }
+
+    async fn commit_eventful_mutation(
+        &self,
+        command: CommitGroupEventfulMutation,
+    ) -> ServiceResult<DomainGroup> {
+        let mut groups = self.groups.write().await;
+        let current = groups
+            .get(&command.group_id)
+            .cloned()
+            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
+        if current.version != command.expected_version {
+            return Err(ServiceError::Conflict(format!(
+                "Group '{}' expected version {}, found {}",
+                command.group_id, command.expected_version, current.version
+            )));
+        }
+        let deleting = matches!(&command.mutation, GroupEventfulMutation::Delete);
+        if deleting && command.event.is_some() {
+            return Err(ServiceError::InvalidOperation {
+                message: "Group deletion is not part of the public Event Catalog".to_string(),
+                request_id: None,
+            });
+        }
+        let mut candidate = current;
+        apply_memory_group_mutation(&mut candidate, &command.mutation, command.mutated_at_ms)?;
+
+        if let Some(event) = command.event.as_ref() {
+            let event_store =
+                self.event_store
+                    .as_ref()
+                    .ok_or_else(|| ServiceError::InvalidOperation {
+                        message:
+                            "Eventful Memory Group mutation requires the shared Memory Event Store"
+                                .to_string(),
+                        request_id: None,
+                    })?;
+            event_store
+                .commit_group_mutation(&command.group_id, event, || {
+                    if deleting {
+                        groups.remove(&command.group_id);
+                    } else {
+                        groups.insert(command.group_id.clone(), candidate.clone());
+                    }
+                    Ok(())
+                })
+                .await
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        } else if deleting {
+            if let Some(event_store) = self.event_store.as_ref() {
+                let env =
+                    self.event_env
+                        .as_deref()
+                        .ok_or_else(|| ServiceError::InvalidOperation {
+                            message: "Memory Group deletion requires an Event environment"
+                                .to_string(),
+                            request_id: None,
+                        })?;
+                event_store
+                    .commit_group_deletion(&command.group_id, env, command.mutated_at_ms, || {
+                        groups.remove(&command.group_id);
+                        Ok(())
+                    })
+                    .await
+                    .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+            } else {
+                // Eventing is an optional capability in isolated tests and
+                // embedded callers. Without an Event Store there can be no
+                // subscriptions or pending deliveries to reconcile.
+                groups.remove(&command.group_id);
+            }
+        } else {
+            groups.insert(command.group_id.clone(), candidate.clone());
+        }
+        Ok(candidate)
+    }
+
     async fn upsert(&self, group: DomainGroup) -> ServiceResult<()> {
         let mut groups = self.groups.write().await;
         debug!(group_id = %group.id, "Group upserted");
@@ -89,6 +221,9 @@ impl GroupRepoPort for MemoryGroupRepo {
         }
         if let Some(context) = patch.context {
             group.context = Some(context);
+        }
+        if let Some(opening_message) = patch.opening_message {
+            group.opening_message = opening_message;
         }
         if let Some(visibility) = patch.visibility {
             group.visibility = visibility;
@@ -514,6 +649,92 @@ impl GroupRepoPort for MemoryGroupRepo {
     }
 }
 
+fn apply_memory_group_mutation(
+    group: &mut DomainGroup,
+    mutation: &GroupEventfulMutation,
+    mutated_at_ms: u64,
+) -> ServiceResult<()> {
+    match mutation {
+        GroupEventfulMutation::PatchMutableFields(patch) => {
+            if let Some(label) = &patch.label {
+                group.label = Some(label.clone());
+            }
+            if let Some(context) = &patch.context {
+                group.context = Some(context.clone());
+            }
+            if let Some(opening_message) = &patch.opening_message {
+                group.opening_message = opening_message.clone();
+            }
+            if let Some(visibility) = &patch.visibility {
+                group.visibility = visibility.clone();
+            }
+            if let Some(delivery) = patch.default_bot_final_delivery {
+                group
+                    .routing_policy
+                    .get_or_insert_with(Default::default)
+                    .default_bot_final_delivery = delivery;
+            }
+        }
+        GroupEventfulMutation::UpdateStatus(status) => group.status = *status,
+        GroupEventfulMutation::AddParticipant {
+            participant,
+            actor_is_public,
+        } => {
+            if group
+                .participants
+                .iter()
+                .any(|existing| existing.bot_uuid == participant.bot_uuid)
+            {
+                return Err(ServiceError::Conflict(format!(
+                    "Participant '{}' is already in Group '{}'",
+                    participant.bot_uuid, group.id
+                )));
+            }
+            if participant.is_bot() && group.visibility == "public" && !actor_is_public {
+                return Err(ServiceError::ExistNonPublicBots {
+                    bots: vec![(participant.bot_uuid.clone(), participant.bot_name.clone())],
+                });
+            }
+            group.participants.push(participant.clone());
+        }
+        GroupEventfulMutation::RemoveParticipant { actor_id } => {
+            let initial_len = group.participants.len();
+            group
+                .participants
+                .retain(|participant| participant.bot_uuid != *actor_id);
+            if group.participants.len() == initial_len {
+                return Err(ServiceError::ParticipantNotFound(actor_id.clone()));
+            }
+        }
+        GroupEventfulMutation::UpdateParticipantMode { actor_id, mode } => {
+            let participant = group
+                .participants
+                .iter_mut()
+                .find(|participant| participant.bot_uuid == *actor_id)
+                .ok_or_else(|| ServiceError::ParticipantNotFound(actor_id.clone()))?;
+            if participant.effective_mode() == *mode {
+                return Err(ServiceError::Conflict(format!(
+                    "Participant '{actor_id}' mode is already {mode:?}"
+                )));
+            }
+            participant.mode = Some(*mode);
+        }
+        GroupEventfulMutation::UpdateRoutingPolicy(policy) => {
+            group.routing_policy = Some(policy.clone());
+        }
+        GroupEventfulMutation::UpdateServiceSpec(service_spec) => {
+            group.service_spec = service_spec.clone();
+        }
+        GroupEventfulMutation::Delete => {}
+    }
+    group.version = group
+        .version
+        .checked_add(1)
+        .ok_or_else(|| ServiceError::Conflict(format!("Group '{}' version overflow", group.id)))?;
+    group.updated_at = mutated_at_ms;
+    Ok(())
+}
+
 /// Helper functions for creating groups.
 pub struct GroupBuilder {
     id: Option<String>,
@@ -577,6 +798,7 @@ impl GroupBuilder {
             originator: self.originator,
             routing_policy: None,
             context: None,
+            opening_message: None,
             participants: self.participants,
             messages: Vec::new(),
             workspace: Workspace::default(),
@@ -621,6 +843,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 
@@ -671,6 +894,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 
@@ -720,6 +944,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 
@@ -733,6 +958,7 @@ mod tests {
             role: ParticipantRole::Consultant, // Different role
             actor_kind: bcs_service_api::ActorKind::default(),
             mode: None,
+            tags: Vec::new(),
         };
         store
             .add_participant("test-group", duplicate)
@@ -755,6 +981,7 @@ mod tests {
             role: ParticipantRole::Consultant,
             actor_kind: bcs_service_api::ActorKind::default(),
             mode: None,
+            tags: Vec::new(),
         };
 
         let result = store.add_participant("nonexistent", participant).await;
@@ -933,6 +1160,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 
@@ -953,6 +1181,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .participant(Participant {
                 bot_uuid: "initiator-bot".to_string(),
@@ -961,6 +1190,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 
@@ -982,6 +1212,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .participant(Participant {
                 bot_uuid: "dba".to_string(),
@@ -990,6 +1221,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .participant(Participant {
                 bot_uuid: "security".to_string(),
@@ -998,6 +1230,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 
@@ -1037,6 +1270,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .participant(Participant {
                 bot_uuid: "dba".to_string(),
@@ -1045,6 +1279,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 
@@ -1123,6 +1358,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
         store.upsert(session2).await.unwrap();
@@ -1183,6 +1419,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .participant(Participant {
                 bot_uuid: "dev-bot".to_string(),
@@ -1191,6 +1428,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .participant(Participant {
                 bot_uuid: "qa-bot".to_string(),
@@ -1199,6 +1437,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
+                tags: Vec::new(),
             })
             .build();
 

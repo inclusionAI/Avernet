@@ -19,3 +19,19 @@ class DefaultBotPassportRepairError(Exception):
 
 class BotLookupAmbiguousError(RuntimeError):
     """A caller-specific Bot lookup matched more than one live row."""
+
+
+class BotCreateError(Exception):
+    """Base error for Bot creation policy failures."""
+
+
+class BotTemplateInvalidError(BotCreateError):
+    """The supplied Bot template attributes are malformed or unsupported."""
+
+
+class BotCombinationUnsupportedError(BotCreateError):
+    """The requested Bot/template combination cannot be created."""
+
+
+class ApplicationCodingUnavailableError(BotCreateError):
+    """Application Coding requires a Workspace Hosting capability."""

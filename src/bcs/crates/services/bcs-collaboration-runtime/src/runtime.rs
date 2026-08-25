@@ -9,7 +9,8 @@ use bcs_domain::{
     BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
     CollaborationDefinition, CollaborationDefinitionRef, CollaborationRuntimeDefinition, Group,
     GroupKind, GroupMessage, GroupMessageType, GroupRuntimeBinding, GroupStatus, GroupStrategy,
-    MessageRole, NewMessage, Participant, ParticipantMode, ParticipantRole, ResolvedParticipant,
+    MessageOwnerFilter, MessageQuery, MessageRole, NewMessage, OpeningMessageRenderContext,
+    Participant, ParticipantMode, ParticipantRole, RenderedOpeningMessage, ResolvedParticipant,
     ResolvedParticipantBinding, RuntimeParticipantBinding, STATE_MACHINE_PANEL_MESSAGE_TYPE,
     SenderType, Session, StateMachineAssignee, StateMachineDeliveryCorrelation,
     StateMachineNodeKind, StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun,
@@ -20,37 +21,40 @@ use bcs_protocol::{
     build_chat_send_frame,
 };
 use bcs_route_security::OutboundUrlGuard;
-use bcs_service_api::port::repo::MessageRepoPort;
+use bcs_service_api::port::repo::{MessageRepoPort, StateMachineEventfulTransition};
+use bcs_service_api::port::{EventRecordFactoryPort, NewEvent};
+use bcs_service_api::types::{
+    EVENT_SCHEMA_VERSION_V1, EventActor, EventActorType, EventScope, EventSubject,
+};
 use bcs_service_api::{
     AuthenticatedHumanCaller, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
-    BotRunContext, BotRunContextPort,
-    BotDeliveryTarget, BotRegistryCoreService, CancelStateMachineRunCommand, ChatEventState,
-    CollaborationDefinitionRecord, CollaborationDefinitionValidationOutcome,
-    CollaborationEventRepoPort, CollaborationRuntimeError, CollaborationRuntimeService,
-    ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand,
-    DefinitionYamlSource, FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort,
-    FrontendDeliveryTarget, GroupCollaborationDefinitionView, GroupCoreService,
-    GroupRuntimeBindingRepoPort, HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome,
-    HandleSessionHumanInputCommand, HandleSessionHumanInputOutcome, HumanInputReadyEvent,
-    HumanRunAccessCommand, JudgeArtifact, JudgeEvaluatorPort, JudgeRequest,
-    ListPendingHumanNodesCommand, MAX_COLLABORATION_DEFINITION_YAML_BYTES,
-    MESSAGE_LOG_SCHEMA_VERSION, MSG_LOG_TARGET, MarkHumanNodeRunningCommand, MessageLogContent,
-    MessageLogEventType, MessageLogMode, MessageLogStatus, NewSessionParams,
-    PatchGroupCollaborationDefinitionCommand, PendingHumanNodeView, RespondHumanNodeCommand,
-    RespondHumanNodeOutcome, RunFallbackDelivery, ServiceError, SessionChannelDeliveryOutcome,
-    SessionChannelOutboundPort, SessionHistoryResult, SessionKind, SessionManagementService,
-    SessionStateMachinePermissionCommand, SessionStateMachinePermissionView, SessionStatus,
-    SessionUseCaseError,
-    StartSessionStateMachineRunCommand, StartStateMachineRunCommand,
-    StartStateMachineRunOutcome, StateMachineDefinitionRepoPort,
-    StateMachineGraphDefinitionView, StateMachineGraphEdgeView, StateMachineGraphNodeView,
-    StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineNodeSubStatus,
-    StateMachineResultPublishCommand, StateMachineResultPublisherPort,
+    BotDeliveryTarget, BotRegistryCoreService, BotRunContext, BotRunContextPort,
+    CancelStateMachineRunCommand, ChatEventState, CollaborationDefinitionRecord,
+    CollaborationDefinitionValidationOutcome, CollaborationEventRepoPort,
+    CollaborationRuntimeError, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
+    ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand, DefinitionYamlSource,
+    FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort, FrontendDeliveryTarget,
+    GroupCollaborationDefinitionView, GroupCoreService, GroupRuntimeBindingRepoPort,
+    HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HandleSessionHumanInputCommand,
+    HandleSessionHumanInputOutcome, HumanInputReadyEvent, HumanRunAccessCommand, JudgeArtifact,
+    JudgeEvaluatorPort, JudgeRequest, ListPendingHumanNodesCommand,
+    MAX_COLLABORATION_DEFINITION_YAML_BYTES, MESSAGE_LOG_SCHEMA_VERSION, MSG_LOG_TARGET,
+    MarkHumanNodeRunningCommand, MessageLogContent, MessageLogEventType, MessageLogMode,
+    MessageLogStatus, NewSessionParams, PatchGroupCollaborationDefinitionCommand,
+    PendingHumanNodeView, RespondHumanNodeCommand, RespondHumanNodeOutcome, RunFallbackDelivery,
+    ServiceError, SessionChannelDeliveryOutcome, SessionChannelOutboundPort, SessionHistoryResult,
+    SessionKind, SessionManagementService, SessionStateMachinePermissionCommand,
+    SessionStateMachinePermissionView, SessionStatus, SessionUseCaseError,
+    StartSessionStateMachineRunCommand, StartStateMachineRunCommand, StartStateMachineRunOutcome,
+    StateMachineDefinitionRepoPort, StateMachineGraphDefinitionView, StateMachineGraphEdgeView,
+    StateMachineGraphNodeView, StateMachineJudgeOutputView, StateMachineNodeRunView,
+    StateMachineNodeSubStatus, StateMachineResultPublishCommand, StateMachineResultPublisherPort,
     StateMachineRunAccessCommand, StateMachineRunGraphView, StateMachineRunRepoPort,
     StateMachineRunView, StateMachineTerminalEvent, StateMachineTerminalStatus,
     UpgradeGroupCollaborationDefinitionCommand, ValidateCollaborationDefinitionYamlCommand,
     message_log_json,
 };
+use chrono::{SecondsFormat, TimeZone, Utc};
 use serde_json::Value;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -66,6 +70,36 @@ use crate::validation::validate_authoring_definition_yaml;
 const DEFAULT_JUDGE_TIMEOUT_MS: u64 = 90_000;
 const MAX_HUMAN_RESPONSE_BYTES: usize = 64 * 1024;
 const SESSION_STATE_MACHINE_POLICY_VERSION: &str = "session_state_machine_v1";
+
+fn event_timestamp(milliseconds: u64) -> Result<String, CollaborationRuntimeError> {
+    Utc.timestamp_millis_opt(i64::try_from(milliseconds).map_err(|_| {
+        CollaborationRuntimeError::InvalidRequest("Event timestamp is out of range".to_string())
+    })?)
+    .single()
+    .map(|value| value.to_rfc3339_opts(SecondsFormat::Millis, true))
+    .ok_or_else(|| {
+        CollaborationRuntimeError::InvalidRequest("Event timestamp is invalid".to_string())
+    })
+}
+
+fn predecessor_node_ids(compiled: &CompiledStateMachine, node_id: &str) -> Vec<String> {
+    let mut predecessor_node_ids = compiled.upstreams.get(node_id).cloned().unwrap_or_default();
+    predecessor_node_ids.sort();
+    predecessor_node_ids.dedup();
+    predecessor_node_ids
+}
+
+fn content_value(value: Value) -> Result<Value, CollaborationRuntimeError> {
+    let size = serde_json::to_vec(&value)
+        .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
+        .len();
+    Ok(serde_json::json!({
+        "content_type": "application/json",
+        "size_bytes": size,
+        "json": value,
+        "truncated": false
+    }))
+}
 
 enum JudgeEvaluationResult {
     Outcome(String),
@@ -87,6 +121,7 @@ pub struct CollaborationRuntime {
     message_repo: Option<Arc<dyn MessageRepoPort>>,
     session_channel_outbound: Option<Arc<dyn SessionChannelOutboundPort>>,
     result_publisher: Option<Arc<dyn StateMachineResultPublisherPort>>,
+    event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
     judge: Arc<dyn JudgeEvaluatorPort>,
     callback_url_guard: OutboundUrlGuard,
 }
@@ -129,6 +164,7 @@ impl CollaborationRuntime {
             message_repo: None,
             session_channel_outbound: None,
             result_publisher: None,
+            event_record_factory: None,
             callback_url_guard: OutboundUrlGuard::strict(),
         }
     }
@@ -177,9 +213,68 @@ impl CollaborationRuntime {
         self
     }
 
+    pub fn with_event_record_factory(
+        mut self,
+        event_record_factory: Arc<dyn EventRecordFactoryPort>,
+    ) -> Self {
+        self.event_record_factory = Some(event_record_factory);
+        self
+    }
+
     pub fn with_callback_url_guard(mut self, callback_url_guard: OutboundUrlGuard) -> Self {
         self.callback_url_guard = callback_url_guard;
         self
+    }
+
+    fn prepare_public_event(
+        &self,
+        event_type: &str,
+        run: &StateMachineRun,
+        subject_type: &str,
+        subject_id: &str,
+        producer_key_suffix: &str,
+        actor_id: Option<&str>,
+        actor_type: Option<EventActorType>,
+        occurred_at_ms: u64,
+        data: BTreeMap<String, Value>,
+    ) -> Result<Option<bcs_service_api::port::repo::AppendEventRecord>, CollaborationRuntimeError>
+    {
+        let Some(factory) = self.event_record_factory.as_ref() else {
+            return Ok(None);
+        };
+        let occurred_at = event_timestamp(occurred_at_ms)?;
+        factory
+            .prepare(NewEvent {
+                event_id: format!("evt_{}", Uuid::new_v4()),
+                event_type: event_type.to_string(),
+                schema_version: EVENT_SCHEMA_VERSION_V1.to_string(),
+                producer: "bcs-state-machine".to_string(),
+                producer_key: format!("{event_type}:{}:{producer_key_suffix}", run.run_id),
+                occurred_at,
+                subject: EventSubject {
+                    subject_type: subject_type.to_string(),
+                    id: subject_id.to_string(),
+                },
+                scope: EventScope {
+                    group_id: Some(run.group_id.clone()),
+                    session_id: Some(run.session_id.clone()),
+                    run_id: Some(run.run_id.clone()),
+                    ..EventScope::default()
+                },
+                stream_key: format!("state-machine-run:{}", run.run_id),
+                actor: actor_id.zip(actor_type).map(|(id, actor_type)| EventActor {
+                    actor_type,
+                    id: id.to_string(),
+                    display_name: None,
+                }),
+                correlation_id: Some(run.run_id.clone()),
+                causation_event_id: None,
+                trace_id: None,
+                data,
+            })
+            .map_err(|error| {
+                CollaborationRuntimeError::Internal(ServiceError::InternalError(error.to_string()))
+            })
     }
 
     async fn resolve_definition(
@@ -437,21 +532,76 @@ impl CollaborationRuntime {
             ))
         })?;
         let deadline = now.saturating_add(timeout_ms);
-        let marked = self
-            .runs
-            .mark_human_node_running_if_run_active(MarkHumanNodeRunningCommand {
-                run_id: run.run_id.clone(),
-                node_id: node_id.to_string(),
-                attempt: node_run.attempt,
-                started_at_ms: now,
-                timeout_deadline_ms: deadline,
-            })
-            .await?;
+        let assignee_id = match &node.assignee {
+            Some(StateMachineAssignee::RuntimeActor { actor }) => Some(actor.as_str()),
+            _ => None,
+        };
+        let mut data = BTreeMap::from([
+            ("run_id".to_string(), serde_json::json!(run.run_id.clone())),
+            ("node_id".to_string(), serde_json::json!(node_id)),
+            ("attempt".to_string(), serde_json::json!(node_run.attempt)),
+            (
+                "predecessor_node_ids".to_string(),
+                serde_json::json!(predecessor_node_ids(compiled, node_id)),
+            ),
+            (
+                "started_at".to_string(),
+                serde_json::json!(event_timestamp(now)?),
+            ),
+        ]);
+        if let Some(assignee_id) = assignee_id {
+            data.insert("assignee_id".to_string(), serde_json::json!(assignee_id));
+        }
+        let event = self.prepare_public_event(
+            "state_machine.node.started",
+            run,
+            "state_machine.node",
+            node_id,
+            &format!("{node_id}:{}:started", node_run.attempt),
+            None,
+            None,
+            now,
+            data,
+        )?;
+        let command = MarkHumanNodeRunningCommand {
+            run_id: run.run_id.clone(),
+            node_id: node_id.to_string(),
+            attempt: node_run.attempt,
+            started_at_ms: now,
+            timeout_deadline_ms: deadline,
+        };
+        let marked = match event {
+            Some(event) => {
+                self.runs
+                    .commit_eventful_transition(StateMachineEventfulTransition::StartHumanNode {
+                        command,
+                        event,
+                    })
+                    .await?
+            }
+            None => {
+                self.runs
+                    .mark_human_node_running_if_run_active(command)
+                    .await?
+            }
+        };
         if !marked {
             return Ok(());
         }
-        self.publish_state_machine_panel_event(group, run, None)
-            .await;
+        match self.opening_message_for_existing_run(run).await {
+            Ok(opening_message) => {
+                self.publish_state_machine_panel_event(group, run, &opening_message)
+                    .await;
+            }
+            Err(error) => {
+                warn!(
+                    run_id = %run.run_id,
+                    session_id = %run.session_id,
+                    error = %error,
+                    "state_machine: failed to reload opening message for frontend publication"
+                );
+            }
+        }
         let Some(notification) = node.notification.as_ref() else {
             return Ok(());
         };
@@ -566,16 +716,59 @@ impl CollaborationRuntime {
                 ))
             })?;
         let delivery_request_id = format!("smnode-{}-{}-{}", run.run_id, node_id, attempt);
-        let marked = self
-            .runs
-            .mark_node_running_if_run_active(
-                &run.run_id,
-                node_id,
-                attempt,
-                delivery_request_id.clone(),
-                bcs_protocol::now_ms(),
-            )
-            .await?;
+        let started_at = bcs_protocol::now_ms();
+        let event = self.prepare_public_event(
+            "state_machine.node.started",
+            run,
+            "state_machine.node",
+            node_id,
+            &format!("{node_id}:{attempt}:started"),
+            Some(&assignee_bot_id),
+            Some(EventActorType::Bot),
+            started_at,
+            BTreeMap::from([
+                ("run_id".to_string(), serde_json::json!(run.run_id.clone())),
+                ("node_id".to_string(), serde_json::json!(node_id)),
+                ("attempt".to_string(), serde_json::json!(attempt)),
+                (
+                    "predecessor_node_ids".to_string(),
+                    serde_json::json!(predecessor_node_ids(compiled, node_id)),
+                ),
+                (
+                    "assignee_id".to_string(),
+                    serde_json::json!(assignee_bot_id.clone()),
+                ),
+                (
+                    "started_at".to_string(),
+                    serde_json::json!(event_timestamp(started_at)?),
+                ),
+            ]),
+        )?;
+        let marked = match event {
+            Some(event) => {
+                self.runs
+                    .commit_eventful_transition(StateMachineEventfulTransition::StartBotNode {
+                        run_id: run.run_id.clone(),
+                        node_id: node_id.to_string(),
+                        attempt,
+                        delivery_request_id: delivery_request_id.clone(),
+                        started_at_ms: started_at,
+                        event,
+                    })
+                    .await?
+            }
+            None => {
+                self.runs
+                    .mark_node_running_if_run_active(
+                        &run.run_id,
+                        node_id,
+                        attempt,
+                        delivery_request_id.clone(),
+                        started_at,
+                    )
+                    .await?
+            }
+        };
         if !marked {
             return Ok(());
         }
@@ -635,6 +828,29 @@ impl CollaborationRuntime {
             delivery_request_id = %delivery_request_id,
             "state_machine: node dispatch started"
         );
+        let target = if let Some(registry) = self.bot_registry.as_ref() {
+            registry.resolve_delivery_target(&assignee_bot_id).await?
+        } else {
+            BotDeliveryTarget::WebSocket {
+                bot_id: assignee_bot_id.clone(),
+            }
+        };
+        let provider_tags = if target.is_http_provider() {
+            self.sessions
+                .get(&run.session_id)
+                .await
+                .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
+                .and_then(|session| {
+                    session
+                        .participants
+                        .into_iter()
+                        .find(|participant| participant.bot_uuid == assignee_bot_id)
+                })
+                .map(|participant| participant.tags)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let mut frame = build_chat_send_frame(
             &delivery_request_id,
             &group.id,
@@ -644,6 +860,7 @@ impl CollaborationRuntime {
             BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
             &[],
             &assignee_bot_id,
+            &provider_tags,
             &None,
             &None,
             false,
@@ -659,13 +876,6 @@ impl CollaborationRuntime {
                 }
             }
         }
-        let target = if let Some(registry) = self.bot_registry.as_ref() {
-            registry.resolve_delivery_target(&assignee_bot_id).await?
-        } else {
-            BotDeliveryTarget::WebSocket {
-                bot_id: assignee_bot_id.clone(),
-            }
-        };
         let delivery_result = match self
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -796,13 +1006,13 @@ impl CollaborationRuntime {
         &self,
         group: &Group,
         run: &StateMachineRun,
-        session_title: Option<&str>,
+        opening_message: &RenderedOpeningMessage,
     ) {
         let Some(frontend_delivery) = self.frontend_delivery.as_ref() else {
             return;
         };
-        let content = format_state_machine_panel_message(&run.run_id, session_title);
-        let metadata = state_machine_panel_metadata(run);
+        let content = opening_message.content.clone();
+        let metadata = state_machine_panel_metadata(run, opening_message.component.as_deref());
         let payload = serde_json::json!({
             "run_id": run.run_id.clone(),
             "bcs_group_id": group.id.clone(),
@@ -869,19 +1079,17 @@ impl CollaborationRuntime {
     async fn persist_state_machine_panel_message(
         &self,
         run: &StateMachineRun,
-        session_title: Option<&str>,
+        opening_message: &RenderedOpeningMessage,
     ) -> Result<(), CollaborationRuntimeError> {
         let Some(message_repo) = self.message_repo.as_ref() else {
             return Err(CollaborationRuntimeError::Internal(
                 ServiceError::InvalidOperation {
-                    message: "state-machine panel message repository is not configured"
-                        .to_string(),
+                    message: "state-machine panel message repository is not configured".to_string(),
                     request_id: None,
                 },
             ));
         };
         let message_id = format!("{}:000-panel", run.run_id);
-        let content = format_state_machine_panel_message(&run.run_id, session_title);
         message_repo
             .append_message(NewMessage {
                 group_id: run.group_id.clone(),
@@ -890,9 +1098,12 @@ impl CollaborationRuntime {
                 sender_type: SenderType::Bot,
                 message_type: STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string(),
                 content: serde_json::json!({
-                    "text": content,
+                    "text": opening_message.content,
                     "bot_name": BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
-                    "metadata": state_machine_panel_metadata(run),
+                    "metadata": state_machine_panel_metadata(
+                        run,
+                        opening_message.component.as_deref(),
+                    ),
                 }),
                 client_msg_id: Some(message_id),
                 owner_bot_id: None,
@@ -906,6 +1117,70 @@ impl CollaborationRuntime {
                 )))
             })?;
         Ok(())
+    }
+
+    async fn persisted_state_machine_opening_message(
+        &self,
+        run: &StateMachineRun,
+    ) -> Result<Option<RenderedOpeningMessage>, CollaborationRuntimeError> {
+        let Some(message_repo) = self.message_repo.as_ref() else {
+            return Ok(None);
+        };
+        let page = message_repo
+            .query_messages(MessageQuery {
+                group_id: run.group_id.clone(),
+                session_id: run.session_id.clone(),
+                cursor: None,
+                limit: 1_000,
+                keyword: None,
+                sender_id: Some(BCS_STATE_MACHINE_MESSAGE_SENDER.to_string()),
+                message_type: Some(STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string()),
+                owner_filter: MessageOwnerFilter::Any,
+                time_range: Some((run.created_at, run.created_at)),
+                visible_from_seq: None,
+            })
+            .await
+            .map_err(|error| {
+                CollaborationRuntimeError::Internal(ServiceError::InternalError(format!(
+                    "state-machine opening message load failed: {error}"
+                )))
+            })?;
+        let expected_client_msg_id = format!("{}:000-panel", run.run_id);
+        Ok(page
+            .messages
+            .into_iter()
+            .find(|message| {
+                message.run_id == run.run_id
+                    || message.client_msg_id.as_deref() == Some(expected_client_msg_id.as_str())
+            })
+            .map(|message| {
+                let content = message
+                    .content
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let component = message
+                    .content
+                    .pointer("/metadata/state_machine/component")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                RenderedOpeningMessage { content, component }
+            }))
+    }
+
+    async fn opening_message_for_existing_run(
+        &self,
+        run: &StateMachineRun,
+    ) -> Result<RenderedOpeningMessage, CollaborationRuntimeError> {
+        if let Some(message) = self.persisted_state_machine_opening_message(run).await? {
+            return Ok(message);
+        }
+        let session_title = self.session_title(&run.session_id).await;
+        Ok(default_state_machine_opening_message(
+            &run.run_id,
+            session_title.as_deref(),
+        ))
     }
 
     async fn publish_state_machine_bot_event(
@@ -1089,21 +1364,28 @@ impl CollaborationRuntime {
         }
     }
 
-    async fn state_machine_panel_message(&self, run: &StateMachineRun) -> GroupMessage {
-        let session_title = self.session_title(&run.session_id).await;
-        GroupMessage {
+    async fn state_machine_panel_message(
+        &self,
+        run: &StateMachineRun,
+    ) -> Result<GroupMessage, CollaborationRuntimeError> {
+        let opening_message = self.opening_message_for_existing_run(run).await?;
+        let RenderedOpeningMessage { content, component } = opening_message;
+        Ok(GroupMessage {
             id: format!("{}:000-panel", run.run_id),
             timestamp: run.created_at,
             sender: BCS_STATE_MACHINE_MESSAGE_SENDER.to_string(),
-            content: format_state_machine_panel_message(&run.run_id, session_title.as_deref()),
+            content,
             message_type: GroupMessageType::Bot,
             bot_name: Some(BCS_STATE_MACHINE_MESSAGE_SENDER_NAME.to_string()),
             role: MessageRole::Assistant,
             history_meta: None,
-            metadata: Some(state_machine_panel_metadata(run)),
+            metadata: Some(state_machine_panel_metadata(
+                run,
+                component.as_deref(),
+            )),
             run_id: String::new(),
             attachments: None,
-        }
+        })
     }
 
     async fn state_machine_messages_from_snapshot(
@@ -1124,7 +1406,7 @@ impl CollaborationRuntime {
             }
         };
         let mut messages = Vec::new();
-        messages.push(self.state_machine_panel_message(run).await);
+        messages.push(self.state_machine_panel_message(run).await?);
         for node in nodes {
             if let Some(artifact_text) = node.artifact_text.as_ref() {
                 let is_human = node.responded_by.is_some();
@@ -1345,9 +1627,11 @@ impl CollaborationRuntime {
         });
         let output_len = output.as_ref().map_or(0, String::len);
         let now = bcs_protocol::now_ms();
-        let session = self.sessions.get(&run.session_id).await.map_err(|error| {
-            CollaborationRuntimeError::InvalidRequest(error.to_string())
-        })?;
+        let session = self
+            .sessions
+            .get(&run.session_id)
+            .await
+            .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?;
         let is_chat_session = session
             .as_ref()
             .is_some_and(|session| session.session_kind == SessionKind::Chat);
@@ -1364,26 +1648,63 @@ impl CollaborationRuntime {
                     .await;
             }
         }
-        self.runs
-            .update_run_status(
-                &run.run_id,
-                StateMachineRunStatus::Completed,
-                output.clone(),
-                None,
-                now,
-                Some(now),
-            )
-            .await?;
+        let event = self.prepare_public_event(
+            "state_machine.run.completed",
+            run,
+            "state_machine.run",
+            &run.run_id,
+            "completed",
+            None,
+            None,
+            now,
+            BTreeMap::from([
+                (
+                    "completed_at".to_string(),
+                    serde_json::json!(event_timestamp(now)?),
+                ),
+                (
+                    "output".to_string(),
+                    content_value(output.clone().map_or(Value::Null, Value::String))?,
+                ),
+                (
+                    "duration_ms".to_string(),
+                    serde_json::json!(now.saturating_sub(run.created_at)),
+                ),
+            ]),
+        )?;
+        let completed = match event {
+            Some(event) => {
+                self.runs
+                    .commit_eventful_transition(StateMachineEventfulTransition::CompleteRun {
+                        run_id: run.run_id.clone(),
+                        output: output.clone(),
+                        completed_at_ms: now,
+                        event,
+                    })
+                    .await?
+            }
+            None => {
+                self.runs
+                    .update_run_status(
+                        &run.run_id,
+                        StateMachineRunStatus::Completed,
+                        output.clone(),
+                        None,
+                        now,
+                        Some(now),
+                    )
+                    .await?
+            }
+        };
+        if !completed {
+            return Ok(self.run_view(&run.run_id).await?);
+        }
         let (session_complete_result, session_transitioned) = if is_chat_session {
             ("chat_preserved", false)
         } else {
             match self
                 .sessions
-                .complete_if_running(
-                    &run.session_id,
-                    output.clone().map(Value::String),
-                    None,
-                )
+                .complete_if_running(&run.session_id, output.clone().map(Value::String), None)
                 .await
             {
                 Ok(Some(session)) => {
@@ -1494,16 +1815,11 @@ impl CollaborationRuntime {
         Ok(())
     }
 
-    async fn is_chat_session(
-        &self,
-        session_id: &str,
-    ) -> Result<bool, CollaborationRuntimeError> {
+    async fn is_chat_session(&self, session_id: &str) -> Result<bool, CollaborationRuntimeError> {
         self.sessions
             .get(session_id)
             .await
-            .map(|session| {
-                session.is_some_and(|session| session.session_kind == SessionKind::Chat)
-            })
+            .map(|session| session.is_some_and(|session| session.session_kind == SessionKind::Chat))
             .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))
     }
 
@@ -1616,10 +1932,49 @@ impl CollaborationRuntime {
             .max(1);
         if attempt + 1 < max_attempts {
             let next_attempt = attempt + 1;
-            let scheduled = self
-                .runs
-                .schedule_node_retry(&run.run_id, node_id, attempt, next_attempt)
-                .await?;
+            let retry_at = bcs_protocol::now_ms();
+            let event = self.prepare_public_event(
+                "state_machine.node.retry_scheduled",
+                run,
+                "state_machine.node",
+                node_id,
+                &format!("{node_id}:{attempt}:retry:{next_attempt}"),
+                None,
+                None,
+                retry_at,
+                BTreeMap::from([
+                    ("run_id".to_string(), serde_json::json!(run.run_id.clone())),
+                    ("node_id".to_string(), serde_json::json!(node_id)),
+                    ("attempt".to_string(), serde_json::json!(attempt)),
+                    ("next_attempt".to_string(), serde_json::json!(next_attempt)),
+                    ("max_attempts".to_string(), serde_json::json!(max_attempts)),
+                    (
+                        "retry_at".to_string(),
+                        serde_json::json!(event_timestamp(retry_at)?),
+                    ),
+                    ("reason".to_string(), serde_json::json!(error.clone())),
+                ]),
+            )?;
+            let scheduled = match event {
+                Some(event) => {
+                    self.runs
+                        .commit_eventful_transition(
+                            StateMachineEventfulTransition::ScheduleNodeRetry {
+                                run_id: run.run_id.clone(),
+                                node_id: node_id.to_string(),
+                                failed_attempt: attempt,
+                                next_attempt,
+                                event,
+                            },
+                        )
+                        .await?
+                }
+                None => {
+                    self.runs
+                        .schedule_node_retry(&run.run_id, node_id, attempt, next_attempt)
+                        .await?
+                }
+            };
             if scheduled {
                 self.events
                     .append_event(
@@ -1635,7 +1990,7 @@ impl CollaborationRuntime {
                             "max_attempts": max_attempts,
                             "reason": error,
                         }),
-                        bcs_protocol::now_ms(),
+                        retry_at,
                     )
                     .await?;
                 info!(
@@ -2114,9 +2469,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         if !session
             .participants
             .iter()
-            .any(|participant| {
-                participant.is_bot() && participant.bot_uuid == cmd.caller_bot_id
-            })
+            .any(|participant| participant.is_bot() && participant.bot_uuid == cmd.caller_bot_id)
         {
             return Ok(denied(
                 "caller_not_session_member",
@@ -2384,7 +2737,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         }
         let run_id = format!("sm-{}", Uuid::new_v4());
         let now = bcs_protocol::now_ms();
-        let run = StateMachineRun {
+        let mut run = StateMachineRun {
             run_id: run_id.clone(),
             definition_id: definition.id.clone(),
             definition_version: definition.version,
@@ -2392,7 +2745,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             group_version: group.version,
             session_id,
             created_by: cmd.caller_id.clone(),
-            status: StateMachineRunStatus::Running,
+            status: StateMachineRunStatus::Pending,
             input: cmd.input,
             output: None,
             error: None,
@@ -2433,6 +2786,95 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             .await?;
             return Err(error.into());
         }
+        let run_mode = if is_one_shot_session_run {
+            "one_shot"
+        } else {
+            "configured"
+        };
+        let created_event = self.prepare_public_event(
+            "state_machine.run.created",
+            &run,
+            "state_machine.run",
+            &run.run_id,
+            "created",
+            run.created_by.as_deref(),
+            None,
+            now,
+            BTreeMap::from([
+                (
+                    "definition_id".to_string(),
+                    serde_json::json!(run.definition_id.clone()),
+                ),
+                (
+                    "definition_version".to_string(),
+                    serde_json::json!(run.definition_version),
+                ),
+                ("run_mode".to_string(), serde_json::json!(run_mode)),
+                ("status".to_string(), serde_json::json!("running")),
+            ]),
+        )?;
+        let started_event = self.prepare_public_event(
+            "state_machine.run.started",
+            &run,
+            "state_machine.run",
+            &run.run_id,
+            "started",
+            run.created_by.as_deref(),
+            None,
+            now,
+            BTreeMap::from([
+                ("run_mode".to_string(), serde_json::json!(run_mode)),
+                (
+                    "started_at".to_string(),
+                    serde_json::json!(event_timestamp(now)?),
+                ),
+                ("input".to_string(), content_value(run.input.clone())?),
+            ]),
+        )?;
+        match (created_event, started_event) {
+            (Some(created_event), Some(started_event)) => {
+                if !self
+                    .runs
+                    .commit_eventful_transition(StateMachineEventfulTransition::StartRun {
+                        run_id: run.run_id.clone(),
+                        started_at_ms: now,
+                        events: vec![created_event, started_event],
+                    })
+                    .await?
+                {
+                    return Err(CollaborationRuntimeError::Conflict(
+                        "state-machine run no longer pending during start".to_string(),
+                    ));
+                }
+            }
+            (None, None) => {
+                if !self
+                    .runs
+                    .update_run_status(
+                        &run.run_id,
+                        StateMachineRunStatus::Running,
+                        None,
+                        None,
+                        now,
+                        None,
+                    )
+                    .await?
+                {
+                    return Err(CollaborationRuntimeError::Conflict(
+                        "state-machine run no longer pending during start".to_string(),
+                    ));
+                }
+            }
+            _ => {
+                return Err(CollaborationRuntimeError::Internal(
+                    ServiceError::InternalError(
+                        "state-machine run Event preparation was inconsistent".to_string(),
+                    ),
+                ));
+            }
+        }
+        run.status = StateMachineRunStatus::Running;
+        run.updated_at = now;
         info!(
             run_id = %run.run_id,
             group_id = %run.group_id,
@@ -2445,16 +2887,25 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             node_count = node_count,
             "state_machine: run started"
         );
-        if is_one_shot_session_run {
-            if let Err(error) = self
-                .persist_state_machine_panel_message(&run, session_title.as_deref())
-                .await
-            {
+        let opening_message = match render_state_machine_opening_message(
+            &group,
+            &run,
+            session_title.as_deref(),
+        ) {
+            Ok(message) => message,
+            Err(error) => {
                 self.fail_run(&run, error.to_string()).await?;
                 return Err(error);
             }
+        };
+        if let Err(error) = self
+            .persist_state_machine_panel_message(&run, &opening_message)
+            .await
+        {
+            self.fail_run(&run, error.to_string()).await?;
+            return Err(error);
         }
-        self.publish_state_machine_panel_event(&group, &run, session_title.as_deref())
+        self.publish_state_machine_panel_event(&group, &run, &opening_message)
             .await;
         for node_id in &compiled.initial_nodes {
             self.dispatch_node(&compiled, &group, &run, node_id).await?;
@@ -2652,18 +3103,73 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         {
             JudgeEvaluationResult::Outcome(outcome) => {
                 let completed_at = bcs_protocol::now_ms();
-                let completed = self
-                    .runs
-                    .complete_node_attempt(
-                        &run.run_id,
-                        &cmd.node_id,
-                        node.attempt,
-                        outcome.clone(),
-                        content,
-                        Some(cmd.caller_actor_id),
-                        completed_at,
-                    )
-                    .await?;
+                let completed_content = content.clone();
+                let responded_by = cmd.caller_actor_id.clone();
+                let event = self.prepare_public_event(
+                    "state_machine.node.completed",
+                    &run,
+                    "state_machine.node",
+                    &cmd.node_id,
+                    &format!("{}:{}:completed", cmd.node_id, node.attempt),
+                    Some(&responded_by),
+                    Some(EventActorType::Human),
+                    completed_at,
+                    BTreeMap::from([
+                        ("run_id".to_string(), serde_json::json!(run.run_id.clone())),
+                        (
+                            "node_id".to_string(),
+                            serde_json::json!(cmd.node_id.clone()),
+                        ),
+                        ("attempt".to_string(), serde_json::json!(node.attempt)),
+                        ("outcome".to_string(), serde_json::json!(outcome.clone())),
+                        (
+                            "output".to_string(),
+                            content_value(Value::String(completed_content.clone()))?,
+                        ),
+                        (
+                            "completed_at".to_string(),
+                            serde_json::json!(event_timestamp(completed_at)?),
+                        ),
+                        (
+                            "duration_ms".to_string(),
+                            serde_json::json!(
+                                completed_at
+                                    .saturating_sub(node.started_at.unwrap_or(completed_at),)
+                            ),
+                        ),
+                    ]),
+                )?;
+                let completed = match event {
+                    Some(event) => {
+                        self.runs
+                            .commit_eventful_transition(
+                                StateMachineEventfulTransition::CompleteNode {
+                                    run_id: run.run_id.clone(),
+                                    node_id: cmd.node_id.clone(),
+                                    attempt: node.attempt,
+                                    outcome: outcome.clone(),
+                                    artifact_text: completed_content,
+                                    responded_by: Some(responded_by),
+                                    completed_at_ms: completed_at,
+                                    event,
+                                },
+                            )
+                            .await?
+                    }
+                    None => {
+                        self.runs
+                            .complete_node_attempt(
+                                &run.run_id,
+                                &cmd.node_id,
+                                node.attempt,
+                                outcome.clone(),
+                                content,
+                                Some(cmd.caller_actor_id),
+                                completed_at,
+                            )
+                            .await?
+                    }
+                };
                 if !completed {
                     return Err(CollaborationRuntimeError::Conflict(
                         "human response lost the completion race".to_string(),
@@ -2748,16 +3254,19 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             {
                 continue;
             }
-            if !state_machine.nodes.get(&node_run.node_id).is_some_and(|node| {
-                node.kind == StateMachineNodeKind::HumanInput
-                    && match &node.assignee {
-                        None => true,
-                        Some(StateMachineAssignee::RuntimeActor { actor }) => {
-                            actor == &cmd.caller_actor_id
+            if !state_machine
+                .nodes
+                .get(&node_run.node_id)
+                .is_some_and(|node| {
+                    node.kind == StateMachineNodeKind::HumanInput
+                        && match &node.assignee {
+                            None => true,
+                            Some(StateMachineAssignee::RuntimeActor { actor }) => {
+                                actor == &cmd.caller_actor_id
+                            }
+                            Some(StateMachineAssignee::BotBinding { .. }) => false,
                         }
-                        Some(StateMachineAssignee::BotBinding { .. }) => false,
-                    }
-            })
+                })
             {
                 continue;
             }
@@ -3231,19 +3740,79 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 match evaluation {
                     JudgeEvaluationResult::Outcome(outcome) => {
                         let completed_at = bcs_protocol::now_ms();
-                        if self
-                            .runs
-                            .complete_node_attempt(
-                                &correlation.state_machine_run_id,
-                                &correlation.node_id,
-                                correlation.attempt,
-                                outcome.clone(),
-                                text,
-                                None,
-                                completed_at,
-                            )
-                            .await?
-                        {
+                        let completed_output = text.clone();
+                        let event = self.prepare_public_event(
+                            "state_machine.node.completed",
+                            &run,
+                            "state_machine.node",
+                            &correlation.node_id,
+                            &format!("{}:{}:completed", correlation.node_id, correlation.attempt),
+                            Some(&cmd.bot_id),
+                            Some(EventActorType::Bot),
+                            completed_at,
+                            BTreeMap::from([
+                                ("run_id".to_string(), serde_json::json!(run.run_id.clone())),
+                                (
+                                    "node_id".to_string(),
+                                    serde_json::json!(correlation.node_id.clone()),
+                                ),
+                                (
+                                    "attempt".to_string(),
+                                    serde_json::json!(correlation.attempt),
+                                ),
+                                ("outcome".to_string(), serde_json::json!(outcome.clone())),
+                                (
+                                    "output".to_string(),
+                                    content_value(Value::String(completed_output.clone()))?,
+                                ),
+                                (
+                                    "completed_at".to_string(),
+                                    serde_json::json!(event_timestamp(completed_at)?),
+                                ),
+                                (
+                                    "duration_ms".to_string(),
+                                    serde_json::json!(
+                                        completed_at.saturating_sub(
+                                            node.as_ref()
+                                                .and_then(|node| node.started_at)
+                                                .unwrap_or(completed_at),
+                                        )
+                                    ),
+                                ),
+                            ]),
+                        )?;
+                        let completed = match event {
+                            Some(event) => {
+                                self.runs
+                                    .commit_eventful_transition(
+                                        StateMachineEventfulTransition::CompleteNode {
+                                            run_id: correlation.state_machine_run_id.clone(),
+                                            node_id: correlation.node_id.clone(),
+                                            attempt: correlation.attempt,
+                                            outcome: outcome.clone(),
+                                            artifact_text: completed_output,
+                                            responded_by: None,
+                                            completed_at_ms: completed_at,
+                                            event,
+                                        },
+                                    )
+                                    .await?
+                            }
+                            None => {
+                                self.runs
+                                    .complete_node_attempt(
+                                        &correlation.state_machine_run_id,
+                                        &correlation.node_id,
+                                        correlation.attempt,
+                                        outcome.clone(),
+                                        text,
+                                        None,
+                                        completed_at,
+                                    )
+                                    .await?
+                            }
+                        };
+                        if completed {
                             info!(
                                 run_id = %correlation.state_machine_run_id,
                                 group_id = %run.group_id,
@@ -3486,14 +4055,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
     ) -> Result<(), CollaborationRuntimeError> {
         let sessions = self
             .sessions
-            .list_by_group(
-                group_id,
-                None,
-                0,
-                RUNTIME_CLEANUP_SESSION_LIMIT,
-                None,
-                None,
-            )
+            .list_by_group(group_id, None, 0, RUNTIME_CLEANUP_SESSION_LIMIT, None, None)
             .await
             .map_err(|error| {
                 CollaborationRuntimeError::Internal(ServiceError::InternalError(error.to_string()))
@@ -3515,14 +4077,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
     ) -> Result<(), CollaborationRuntimeError> {
         let sessions = self
             .sessions
-            .list_by_group(
-                group_id,
-                None,
-                0,
-                RUNTIME_CLEANUP_SESSION_LIMIT,
-                None,
-                None,
-            )
+            .list_by_group(group_id, None, 0, RUNTIME_CLEANUP_SESSION_LIMIT, None, None)
             .await
             .map_err(|error| {
                 CollaborationRuntimeError::Internal(ServiceError::InternalError(error.to_string()))
@@ -3652,7 +4207,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                     cmd.target_definition.id.clone(),
                     cmd.target_definition.version,
                 )
-        })?;
+            })?;
         let compiled = validate_definition(definition)?;
         let final_participant_bindings = cmd
             .participant_bindings
@@ -3755,13 +4310,15 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             validate_runtime_participant_bindings(definition, &group, &participant_bindings)?;
         }
         let requires_human_input_channel =
-            definition_for_validation.as_ref().is_some_and(|definition| {
-                matches!(
-                    &definition.runtime,
-                    CollaborationRuntimeDefinition::StateMachine(state_machine)
-                        if state_machine.human_input_channel.is_some()
-                )
-            });
+            definition_for_validation
+                .as_ref()
+                .is_some_and(|definition| {
+                    matches!(
+                        &definition.runtime,
+                        CollaborationRuntimeDefinition::StateMachine(state_machine)
+                            if state_machine.human_input_channel.is_some()
+                    )
+                });
 
         self.bindings
             .bind_default_definition(
@@ -4987,19 +5544,23 @@ fn state_machine_message_metadata(
     })
 }
 
-fn state_machine_panel_metadata(run: &StateMachineRun) -> Value {
-    serde_json::json!({
-        "state_machine": {
-            "run_id": run.run_id.clone(),
-            "definition_id": run.definition_id.clone(),
-            "definition_version": run.definition_version,
-            "event": "panel",
-            "component": "bcsPanel.StateMachineRunView",
-        }
-    })
+fn state_machine_panel_metadata(run: &StateMachineRun, component: Option<&str>) -> Value {
+    let mut state_machine = serde_json::json!({
+        "run_id": run.run_id.clone(),
+        "definition_id": run.definition_id.clone(),
+        "definition_version": run.definition_version,
+        "event": "panel",
+    });
+    if let Some(component) = component {
+        state_machine["component"] = Value::String(component.to_string());
+    }
+    serde_json::json!({ "state_machine": state_machine })
 }
 
-fn format_state_machine_panel_message(run_id: &str, session_title: Option<&str>) -> String {
+fn default_state_machine_opening_message(
+    run_id: &str,
+    session_title: Option<&str>,
+) -> RenderedOpeningMessage {
     let title_suffix = session_title
         .map(str::trim)
         .filter(|title| !title.is_empty())
@@ -5011,9 +5572,38 @@ fn format_state_machine_panel_message(run_id: &str, session_title: Option<&str>)
         json_string(&title)
     ));
     let params_json = single_quoted_json_attr(format!("{{\"runId\":{}}}", json_string(run_id)));
-    format!(
-        "<AixUI\n  type=\"panel\"\n  component=\"bcsPanel.StateMachineRunView\"\n  tab='{tab_json}'\n  params='{params_json}'\n/>"
-    )
+    RenderedOpeningMessage {
+        content: format!(
+            "<AixUI\n  type=\"panel\"\n  component=\"bcsPanel.StateMachineRunView\"\n  tab='{tab_json}'\n  params='{params_json}'\n/>"
+        ),
+        component: Some("bcsPanel.StateMachineRunView".to_string()),
+    }
+}
+
+fn render_state_machine_opening_message(
+    group: &Group,
+    run: &StateMachineRun,
+    session_title: Option<&str>,
+) -> Result<RenderedOpeningMessage, CollaborationRuntimeError> {
+    let Some(opening_message) = group.opening_message.as_ref() else {
+        return Ok(default_state_machine_opening_message(
+            &run.run_id,
+            session_title,
+        ));
+    };
+    opening_message
+        .render(OpeningMessageRenderContext {
+            group_id: &group.id,
+            session_id: &run.session_id,
+            run_id: &run.run_id,
+            group_name: group.label.as_deref(),
+            session_name: session_title,
+        })
+        .map_err(|error| {
+            CollaborationRuntimeError::InvalidRequest(format!(
+                "invalid_opening_message: {error}"
+            ))
+        })
 }
 
 fn json_string(value: &str) -> String {
@@ -5095,6 +5685,25 @@ mod tests {
     #[test]
     fn default_judge_timeout_is_ninety_seconds() {
         assert_eq!(DEFAULT_JUDGE_TIMEOUT_MS, 90_000);
+    }
+
+    #[test]
+    fn default_opening_message_keeps_the_existing_state_machine_panel() {
+        assert_eq!(
+            default_state_machine_opening_message("run-1", Some("发布检查")),
+            RenderedOpeningMessage {
+                content: concat!(
+                    "<AixUI\n",
+                    "  type=\"panel\"\n",
+                    "  component=\"bcsPanel.StateMachineRunView\"\n",
+                    "  tab='{\"id\":\"state-machine-run-run-1\",\"title\":\"State Machine - 发布检查\",\"closable\":true}'\n",
+                    "  params='{\"runId\":\"run-1\"}'\n",
+                    "/>"
+                )
+                .to_string(),
+                component: Some("bcsPanel.StateMachineRunView".to_string()),
+            }
+        );
     }
 
     #[test]

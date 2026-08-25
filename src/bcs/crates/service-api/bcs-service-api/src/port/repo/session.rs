@@ -9,6 +9,8 @@ use crate::types::{
     Participant, ParticipantMode, ServiceResult, Session, SessionKind, SessionStatus,
 };
 
+use super::AppendEventRecord;
+
 /// Session 服务层入参（创建新 session）。
 #[derive(Debug, Clone, Default)]
 pub struct NewSessionParams {
@@ -20,15 +22,67 @@ pub struct NewSessionParams {
     pub input: Option<serde_json::Value>,
     pub created_by: Option<String>,
     pub session_title: Option<String>,
-    /// 显式指定 session_id；不传则由实现层生成 `{group_id}:{8_hex}`。
+    /// 显式指定 session_id；不传则由实现层生成原生 `{group_id}:{8_hex}` ID。
     pub id: Option<String>,
     pub meta: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateSessionWithEvent {
+    pub group_id: String,
+    pub params: NewSessionParams,
+    pub event: AppendEventRecord,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompleteSessionWithEvent {
+    pub session_id: String,
+    pub expected_activation_count: i32,
+    pub output: Option<serde_json::Value>,
+    pub error: Option<String>,
+    pub event: AppendEventRecord,
+}
+
+#[derive(Debug, Clone)]
+pub struct AddSessionParticipantWithEvent {
+    pub session_id: String,
+    pub expected_participants: Vec<Participant>,
+    pub participant: Participant,
+    pub event: AppendEventRecord,
+}
+
+#[derive(Debug, Clone)]
+pub struct RemoveSessionParticipantWithEvent {
+    pub session_id: String,
+    pub expected_participants: Vec<Participant>,
+    pub bot_uuid: String,
+    pub event: AppendEventRecord,
 }
 
 /// Session 持久化 port。
 #[async_trait]
 pub trait SessionRepoPort: Send + Sync {
     async fn create(&self, group_id: &str, params: NewSessionParams) -> ServiceResult<Session>;
+    async fn create_with_event(&self, command: CreateSessionWithEvent) -> ServiceResult<Session> {
+        let _ = command;
+        Err(ServiceError::InvalidOperation {
+            message: "Eventful Session creation is not configured".to_string(),
+            request_id: None,
+        })
+    }
+
+    /// Create a Session whose canonical id identifies the concrete Channel source.
+    async fn create_channel(
+        &self,
+        group_id: &str,
+        channel_type: &str,
+        mut params: NewSessionParams,
+    ) -> ServiceResult<Session> {
+        let id = crate::core::session::new_channel_session_id(group_id, channel_type)
+            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
+        params.id = Some(id);
+        self.create(group_id, params).await
+    }
     async fn get(&self, session_id: &str) -> Option<Session>;
     async fn belongs_to_group(&self, session_id: &str, group_id: &str) -> bool;
     async fn list_by_group(
@@ -96,6 +150,17 @@ pub trait SessionRepoPort: Send + Sync {
         error: Option<String>,
     ) -> ServiceResult<Option<Session>>;
 
+    async fn complete_if_running_with_event(
+        &self,
+        command: CompleteSessionWithEvent,
+    ) -> ServiceResult<Option<Session>> {
+        let _ = command;
+        Err(ServiceError::InvalidOperation {
+            message: "Eventful Session completion is not configured".to_string(),
+            request_id: None,
+        })
+    }
+
     async fn reactivate(
         &self,
         session_id: &str,
@@ -106,11 +171,27 @@ pub trait SessionRepoPort: Send + Sync {
         session_id: &str,
         participant: Participant,
     ) -> ServiceResult<Session>;
-    async fn remove_participant(
+    async fn add_participant_with_event(
         &self,
-        session_id: &str,
-        bot_uuid: &str,
-    ) -> ServiceResult<Session>;
+        command: AddSessionParticipantWithEvent,
+    ) -> ServiceResult<Session> {
+        let _ = command;
+        Err(ServiceError::InvalidOperation {
+            message: "Eventful Session participant addition is not configured".to_string(),
+            request_id: None,
+        })
+    }
+    async fn remove_participant(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<Session>;
+    async fn remove_participant_with_event(
+        &self,
+        command: RemoveSessionParticipantWithEvent,
+    ) -> ServiceResult<Session> {
+        let _ = command;
+        Err(ServiceError::InvalidOperation {
+            message: "Eventful Session participant removal is not configured".to_string(),
+            request_id: None,
+        })
+    }
     async fn update_participant_mode(
         &self,
         session_id: &str,
@@ -118,7 +199,8 @@ pub trait SessionRepoPort: Send + Sync {
         mode: ParticipantMode,
     ) -> ServiceResult<Session>;
     async fn update_callback_status(&self, session_id: &str, status: &str) -> ServiceResult<()>;
-    async fn update_title(&self, session_id: &str, title: Option<String>) -> ServiceResult<Session>;
+    async fn update_title(&self, session_id: &str, title: Option<String>)
+    -> ServiceResult<Session>;
     async fn list_group_ids_by_session_participant(&self, bot_uuid: &str) -> Vec<String>;
     async fn try_list_group_ids_by_session_participant(
         &self,
@@ -160,11 +242,7 @@ pub trait SessionRepoPort: Send + Sync {
     ///
     /// Used by the session-list HTTP layer to surface per-session collected
     /// state for a given participant without a per-row query.
-    async fn collected_at_map(
-        &self,
-        _session_ids: &[&str],
-        _bot_uuid: &str,
-    ) -> Vec<(String, u64)> {
+    async fn collected_at_map(&self, _session_ids: &[&str], _bot_uuid: &str) -> Vec<(String, u64)> {
         Vec::new()
     }
 }

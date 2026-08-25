@@ -27,7 +27,8 @@ class _Bcs:
 
     async def create_group(self, req):
         self.created.append(req)
-        return BcsCreateGroupResult(group_id="g1", definition_ref=None)
+        # 建群自带初始 session(BCS create_group 返 session_id);chat 派发复用之,不再 create_session。
+        return BcsCreateGroupResult(group_id="g1", session_id="s1", definition_ref=None)
 
     async def create_session(self, group_id, *, bootstrap_prompt=None, idempotency_key=None):
         self.sessions.append((group_id, bootstrap_prompt))
@@ -89,7 +90,7 @@ def test_dispatch_coop_group_session_mode_registers_session_handle():
     _run(exe.form_coop_group(GroupFormation(bot_ids=["drv"], collab_mode="chat")))
     ok = _run(exe.dispatch([_node(group_id="g1")]))
     assert ok == [True]
-    assert bcs.sessions[0][0] == "g1"
+    assert bcs.sessions == [], "chat 派发应复用建群初始 session,不再 create_session"
     h = poller.registered[0]
     assert h.session_id == "s1" and h.run_id is None and h.collab_mode == "chat"
     assert h.loop_task_id == "t1::n1"

@@ -16,10 +16,10 @@ pub use bcs_config_api::{
 // data-contract crate so downstream modules can depend on them without
 // pulling in the rest of the `bcs` binary.
 pub use bcs_config_api::{
-    AuthChainConfig, AuthSdkConfig, ChannelConfigSection, DingTalkAccountConfig,
-    FusionProviderConfig, LlmConfig, LlmProviderType, LogOutputConfig, LogOutputFormat,
-    LoggingConfig, ManifestConfig, LeaderElectionConfig, SecretConfig, StructuredOutputMode, SecurityConfig,
-    UserDirectoryConfig, UserDirectoryProviderConfig,
+    AuthChainConfig, AuthSdkConfig, ChannelConfigSection, DingTalkAccountConfig, EventingConfig,
+    FusionProviderConfig, LeaderElectionConfig, LlmConfig, LlmProviderType, LogOutputConfig,
+    LogOutputFormat, LoggingConfig, ManifestConfig, SecretConfig, SecurityConfig,
+    StructuredOutputMode, UserDirectoryConfig, UserDirectoryProviderConfig,
     deserialize_optional_secret, serialize_optional_secret,
 };
 #[allow(unused_imports)]
@@ -240,9 +240,7 @@ impl TelemetryConfig {
             let endpoint = reqwest::Url::parse(endpoint)
                 .map_err(|error| format!("telemetry.otlp_traces_endpoint is invalid: {error}"))?;
             if !matches!(endpoint.scheme(), "http" | "https") {
-                return Err(
-                    "telemetry.otlp_traces_endpoint must use http or https".to_string(),
-                );
+                return Err("telemetry.otlp_traces_endpoint must use http or https".to_string());
             }
         }
         for (name, value) in &self.extra_headers {
@@ -282,8 +280,7 @@ pub struct OpenApiV1Config {
 impl Default for OpenApiV1Config {
     fn default() -> Self {
         Self {
-            public_collaboration_base_url:
-                default_openapi_v1_public_collaboration_base_url(),
+            public_collaboration_base_url: default_openapi_v1_public_collaboration_base_url(),
         }
     }
 }
@@ -292,13 +289,10 @@ impl OpenApiV1Config {
     pub fn validated_public_collaboration_base_url(&self) -> Result<String, String> {
         let raw = self.public_collaboration_base_url.trim();
         if raw.is_empty() {
-            return Err(
-                "openapi_v1.public_collaboration_base_url must not be blank".to_string(),
-            );
+            return Err("openapi_v1.public_collaboration_base_url must not be blank".to_string());
         }
         let mut url = url::Url::parse(raw).map_err(|_| {
-            "openapi_v1.public_collaboration_base_url must be an absolute HTTP(S) URL"
-                .to_string()
+            "openapi_v1.public_collaboration_base_url must be an absolute HTTP(S) URL".to_string()
         })?;
         if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
             return Err(
@@ -308,8 +302,7 @@ impl OpenApiV1Config {
         }
         if !url.username().is_empty() || url.password().is_some() {
             return Err(
-                "openapi_v1.public_collaboration_base_url must not contain userinfo"
-                    .to_string(),
+                "openapi_v1.public_collaboration_base_url must not contain userinfo".to_string(),
             );
         }
         if url.query().is_some() || url.fragment().is_some() {
@@ -624,6 +617,11 @@ pub struct BcsConfig {
     #[serde(default)]
     pub bcs_endpoint: Option<String>,
 
+    /// Backend work-order service base URL used for friend-connect notifications.
+    /// When unset, BCS keeps the legacy no-op notification port.
+    #[serde(default)]
+    pub friend_work_order_base_url: Option<String>,
+
     /// Botchat frontend URL (e.g. "https://botchat.example.com").
     /// Used to generate frontend URLs: onboard registration, chat pages, etc.
     #[serde(default)]
@@ -718,6 +716,10 @@ pub struct BcsConfig {
     #[serde(default)]
     pub security: SecurityConfig,
 
+    /// Public Event recording and delivery configuration.
+    #[serde(default)]
+    pub eventing: EventingConfig,
+
     /// Message history configuration.
     #[serde(default)]
     pub message_history: MessageHistoryConfig,
@@ -745,8 +747,9 @@ pub struct BcsConfig {
     #[serde(default)]
     pub session_files: SessionFilesConfig,
 
-    /// Provider IDs allowed to call the switch-bot-delivery endpoint.
-    /// Empty list means no provider can switch bot delivery.
+    /// Provider IDs allowed to use backend-only Provider Bot operations,
+    /// including switch-bot-delivery and Bot attribute management.
+    /// Empty list means no Provider has either capability.
     #[serde(default)]
     pub allowed_switch_provider_ids: Vec<String>,
 
@@ -984,6 +987,27 @@ fn path_is_under_root(path: &str, root: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
+fn validate_http_base_url(value: &str, field_name: &str) -> Result<(), String> {
+    let raw = value.trim();
+    if raw.is_empty() {
+        return Err(format!("{field_name} must not be blank"));
+    }
+    let url = url::Url::parse(raw)
+        .map_err(|error| format!("{field_name} must be an absolute HTTP(S) URL: {error}"))?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(format!(
+            "{field_name} must be an absolute HTTP(S) URL"
+        ));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(format!("{field_name} must not contain userinfo"));
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err(format!("{field_name} must not contain query or fragment"));
+    }
+    Ok(())
+}
+
 impl Default for BcsConfig {
     fn default() -> Self {
         Self {
@@ -1014,6 +1038,7 @@ impl Default for BcsConfig {
             max_group_messages: default_max_group_messages(),
             strict_container_validation: true,
             bcs_endpoint: None,
+            friend_work_order_base_url: None,
             botchat_url: None,
             register_path: default_register_path(),
             default_visibility: None,
@@ -1034,6 +1059,7 @@ impl Default for BcsConfig {
             async_chat_run_max_entries: default_async_chat_run_max_entries(),
             security_gateway: SecurityGatewayConfig::default(),
             security: SecurityConfig::default(),
+            eventing: EventingConfig::default(),
             message_history: MessageHistoryConfig::default(),
             api_keys: Vec::new(),
             metrics: MetricsConfig::default(),
@@ -1199,7 +1225,8 @@ impl BcsConfig {
         let mut config = result.config;
         let local_path_base_dir = local_path_base_dir_for_config_dir(&result.config_dir);
         normalize_local_paths(&mut config, &local_path_base_dir);
-        validate_loaded_config(&config).map_err(|err| err.to_string())?;
+        validate_loaded_config_for_environment(&config, result.environment)
+            .map_err(|err| err.to_string())?;
         Ok(config)
     }
 
@@ -1245,7 +1272,8 @@ impl BcsConfig {
                 let local_path_base_dir = local_path_base_dir_for_config_dir(&result.config_dir);
                 normalize_local_paths(&mut config, &local_path_base_dir);
 
-                if let Err(e) = validate_loaded_config(&config) {
+                if let Err(e) = validate_loaded_config_for_environment(&config, result.environment)
+                {
                     panic!("Invalid BCS configuration: {}", e);
                 }
                 config
@@ -1362,14 +1390,20 @@ impl BcsConfig {
                 let mut config: Self = serde_json::from_str(&content)?;
                 let local_path_base_dir = local_path_base_dir_for_config_file(path);
                 normalize_local_paths(&mut config, &local_path_base_dir);
-                validate_loaded_config(&config)?;
+                validate_loaded_config_for_environment(
+                    &config,
+                    crate::config_loader::Environment::resolve(),
+                )?;
                 Ok(config)
             }
             "toml" => {
                 let mut config: Self = toml::from_str(&content)?;
                 let local_path_base_dir = local_path_base_dir_for_config_file(path);
                 normalize_local_paths(&mut config, &local_path_base_dir);
-                validate_loaded_config(&config)?;
+                validate_loaded_config_for_environment(
+                    &config,
+                    crate::config_loader::Environment::resolve(),
+                )?;
                 Ok(config)
             }
             _ => {
@@ -1377,13 +1411,19 @@ impl BcsConfig {
                 if let Ok(mut config) = serde_json::from_str::<Self>(&content) {
                     let local_path_base_dir = local_path_base_dir_for_config_file(path);
                     normalize_local_paths(&mut config, &local_path_base_dir);
-                    validate_loaded_config(&config)?;
+                    validate_loaded_config_for_environment(
+                        &config,
+                        crate::config_loader::Environment::resolve(),
+                    )?;
                     return Ok(config);
                 }
                 let mut config: Self = toml::from_str(&content)?;
                 let local_path_base_dir = local_path_base_dir_for_config_file(path);
                 normalize_local_paths(&mut config, &local_path_base_dir);
-                validate_loaded_config(&config)?;
+                validate_loaded_config_for_environment(
+                    &config,
+                    crate::config_loader::Environment::resolve(),
+                )?;
                 Ok(config)
             }
         }
@@ -1429,6 +1469,10 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
             "provider_chat_run_timeout_ms must be greater than zero",
         )));
     }
+    config.eventing.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn std::error::Error>
+    })?;
     config.gateway_principal.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -1445,6 +1489,12 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
+    if let Some(base_url) = config.friend_work_order_base_url.as_deref() {
+        validate_http_base_url(base_url, "friend_work_order_base_url").map_err(|e| {
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+                as Box<dyn std::error::Error>
+        })?;
+    }
     config
         .openapi_v1
         .validated_public_collaboration_base_url()
@@ -1465,6 +1515,40 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
             Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
                 as Box<dyn std::error::Error>
         })?;
+    }
+    Ok(())
+}
+
+fn validate_loaded_config_for_environment(
+    config: &BcsConfig,
+    environment: crate::config_loader::Environment,
+) -> Result<(), Box<dyn std::error::Error>> {
+    validate_loaded_config(config)?;
+    validate_eventing_environment_policy(config, environment).map_err(|error| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, error))
+            as Box<dyn std::error::Error>
+    })
+}
+
+fn validate_eventing_environment_policy(
+    config: &BcsConfig,
+    environment: crate::config_loader::Environment,
+) -> Result<(), String> {
+    if !config.eventing.enabled
+        || !matches!(
+            environment,
+            crate::config_loader::Environment::Pre
+                | crate::config_loader::Environment::Prod
+                | crate::config_loader::Environment::Gray
+        )
+    {
+        return Ok(());
+    }
+    if config.eventing.webhook.allow_http_loopback {
+        return Err(
+            "eventing.webhook.allow_http_loopback must be false outside local/development"
+                .to_string(),
+        );
     }
     Ok(())
 }
@@ -1545,8 +1629,8 @@ mod tests {
             signing_key_secret = "other_manual_teamclawgw_principal_signing_key"
         "#;
 
-        let config: BcsConfig = toml::from_str(toml)
-            .expect("parse configurable group-session WebSocket secret name");
+        let config: BcsConfig =
+            toml::from_str(toml).expect("parse configurable group-session WebSocket secret name");
 
         assert_eq!(
             config.group_session_ws.signing_key_secret,
@@ -1590,7 +1674,10 @@ mod tests {
             config.provider_http.bypass_headers,
             vec!["X-Sandbox-Bypass".to_string()]
         );
-        config.provider_http.validate().expect("valid bypass header");
+        config
+            .provider_http
+            .validate()
+            .expect("valid bypass header");
     }
 
     #[test]
@@ -1636,7 +1723,10 @@ mod tests {
         let config: BcsConfig = toml::from_str(toml).expect("parse provider stream gray config");
 
         assert!(config.provider_stream_gray_enabled);
-        assert_eq!(config.provider_stream_gray_created_by, vec!["197262".to_string()]);
+        assert_eq!(
+            config.provider_stream_gray_created_by,
+            vec!["197262".to_string()]
+        );
     }
 
     #[test]
@@ -1751,10 +1841,7 @@ x-collector-route = "collector-local"
         assert!(invalid_endpoint.validate().is_err());
 
         let invalid_header = TelemetryConfig {
-            extra_headers: BTreeMap::from([(
-                "invalid header".to_string(),
-                "value".to_string(),
-            )]),
+            extra_headers: BTreeMap::from([("invalid header".to_string(), "value".to_string())]),
             ..TelemetryConfig::default()
         };
         assert!(invalid_header.validate().is_err());
@@ -1967,7 +2054,8 @@ x-collector-route = "collector-local"
             enabled = true
         "#;
 
-        let err = toml::from_str::<BcsConfig>(toml).expect_err("public BCS rejects Ant-only mist config");
+        let err =
+            toml::from_str::<BcsConfig>(toml).expect_err("public BCS rejects Ant-only mist config");
         assert!(err.to_string().contains("unknown field"));
     }
 
@@ -2064,7 +2152,9 @@ file = "assets/panel/dist/index.umd.js"
         let dir = tempfile::tempdir().unwrap();
         let config_dir = dir.path().join("configs");
         std::fs::create_dir_all(&config_dir).unwrap();
-        std::fs::write(config_dir.join("bcs-config.toml"), r#"
+        std::fs::write(
+            config_dir.join("bcs-config.toml"),
+            r#"
 bots_base_dir = "/bots"
 
 [collaboration.templates]
@@ -2074,7 +2164,9 @@ base_dir = "seeds/collaboration-templates"
 name = "bcsPanel"
 type = "file"
 file = "assets/panel/dist/index.umd.js"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let config = BcsConfig::try_load_with_env(Some(&config_dir)).unwrap();
         let expected_root = std::fs::canonicalize(dir.path()).unwrap();
@@ -2099,7 +2191,9 @@ file = "assets/panel/dist/index.umd.js"
         let dir = tempfile::tempdir().unwrap();
         let config_dir = dir.path().join("bcs-config");
         std::fs::create_dir_all(&config_dir).unwrap();
-        std::fs::write(config_dir.join("bcs-config.toml"), r#"
+        std::fs::write(
+            config_dir.join("bcs-config.toml"),
+            r#"
 bots_base_dir = "/bots"
 
 [collaboration.templates]
@@ -2109,7 +2203,9 @@ base_dir = "seeds/collaboration-templates"
 name = "bcsPanel"
 type = "file"
 file = "assets/panel/dist/index.umd.js"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let config = BcsConfig::try_load_with_env(Some(&config_dir)).unwrap();
         let expected_root = std::fs::canonicalize(&config_dir).unwrap();
@@ -2280,8 +2376,14 @@ tenant = "teamclaw"
         let cfg: SessionFilesConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.storage_backend, "baas");
         assert_eq!(cfg.share_link_ttl, 3600);
-        assert_eq!(cfg.backend["endpoint"], toml::Value::String("http://baas:8080".into()));
-        assert_eq!(cfg.backend["tenant"], toml::Value::String("teamclaw".into()));
+        assert_eq!(
+            cfg.backend["endpoint"],
+            toml::Value::String("http://baas:8080".into())
+        );
+        assert_eq!(
+            cfg.backend["tenant"],
+            toml::Value::String("teamclaw".into())
+        );
     }
 
     #[test]
@@ -2338,7 +2440,8 @@ tenant = "teamclaw"
             }
         }"#;
 
-        let err = serde_json::from_str::<BcsConfig>(json).expect_err("legacy group_storage rejected");
+        let err =
+            serde_json::from_str::<BcsConfig>(json).expect_err("legacy group_storage rejected");
         assert!(err.to_string().contains("unknown field"));
     }
 
@@ -2375,8 +2478,14 @@ tenant = "teamclaw"
             .providers
             .get("distributed")
             .expect("distributed provider options");
-        assert_eq!(provider.get("zone").and_then(|value| value.as_str()), Some("default"));
-        assert_eq!(provider.get("lock_prefix").and_then(|value| value.as_str()), Some("bcs"));
+        assert_eq!(
+            provider.get("zone").and_then(|value| value.as_str()),
+            Some("default")
+        );
+        assert_eq!(
+            provider.get("lock_prefix").and_then(|value| value.as_str()),
+            Some("bcs")
+        );
     }
 
     #[test]
@@ -2439,8 +2548,14 @@ lock_prefix = "bcs"
             .providers
             .get("distributed")
             .expect("distributed provider options");
-        assert_eq!(provider.get("zone").and_then(|value| value.as_str()), Some("default"));
-        assert_eq!(provider.get("lock_prefix").and_then(|value| value.as_str()), Some("bcs"));
+        assert_eq!(
+            provider.get("zone").and_then(|value| value.as_str()),
+            Some("default")
+        );
+        assert_eq!(
+            provider.get("lock_prefix").and_then(|value| value.as_str()),
+            Some("bcs")
+        );
     }
 
     #[test]
@@ -2543,7 +2658,10 @@ password = "redis-pass"
         assert_eq!(connection.auth_mode, RedisAuthMode::Redis);
         assert_eq!(connection.username.as_deref(), Some("bcs"));
         assert_eq!(
-            connection.password.as_ref().map(|password| password.expose_secret().as_str()),
+            connection
+                .password
+                .as_ref()
+                .map(|password| password.expose_secret().as_str()),
             Some("redis-pass")
         );
     }
@@ -2673,4 +2791,78 @@ base_url = "https://directory.example.com"
         assert!(err.to_string().contains("base_url"));
     }
 
+    #[test]
+    fn eventing_section_parses_record_only_rollout() {
+        let config: BcsConfig = toml::from_str(
+            r#"
+            bots_base_dir = "/bots"
+
+            [eventing]
+            enabled = true
+            dispatcher_enabled = false
+
+            "#,
+        )
+        .expect("parse Eventing config");
+
+        assert!(config.eventing.enabled);
+        assert!(!config.eventing.dispatcher_enabled);
+    }
+
+    #[test]
+    fn invalid_eventing_bounds_fail_loaded_config_validation() {
+        let mut config = BcsConfig::default();
+        config.eventing.worker_concurrency = 0;
+
+        let error = validate_loaded_config(&config)
+            .expect_err("invalid Eventing concurrency rejected")
+            .to_string();
+
+        assert!(error.contains("eventing.worker_concurrency"));
+    }
+
+    #[test]
+    fn production_rejects_eventing_http_loopback() {
+        let mut loopback = BcsConfig::default();
+        loopback.eventing.enabled = true;
+        loopback.eventing.webhook.allow_http_loopback = true;
+        let loopback_error = validate_eventing_environment_policy(
+            &loopback,
+            crate::config_loader::Environment::Prod,
+        )
+        .expect_err("production loopback HTTP rejected");
+        assert!(loopback_error.contains("allow_http_loopback"));
+    }
+
+    #[test]
+    fn checked_in_configs_parse_without_obsolete_eventing_auth_config() {
+        for path in [
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../configs/bcs-config-example.toml"
+            ),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../configs/bcs-config-local.toml"
+            ),
+        ] {
+            let source = std::fs::read_to_string(path).expect("read checked-in config");
+            let _: BcsConfig = toml::from_str(&source).expect("parse checked-in config");
+            assert!(!source.contains("secret_protector"));
+            assert!(!source.contains("bcn-eventing-webhook-protector"));
+        }
+    }
+
+    #[test]
+    fn checked_in_local_config_enables_event_delivery() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../configs/bcs-config-local.toml"
+        );
+        let source = std::fs::read_to_string(path).expect("read checked-in local config");
+        let config: BcsConfig = toml::from_str(&source).expect("parse checked-in local config");
+
+        assert!(config.eventing.enabled);
+        assert!(config.eventing.dispatcher_enabled);
+    }
 }

@@ -36,6 +36,7 @@ bcs-group-store = { workspace = true }
 
 [dev-dependencies]
 bcs-bot = { workspace = true }
+bcs-event-store = { workspace = true }
 bcs-friend = { workspace = true }
 bcs-relation = { workspace = true }
 bcs-session = { workspace = true }

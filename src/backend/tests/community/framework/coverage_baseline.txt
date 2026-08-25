@@ -72,6 +72,47 @@
 # tests/community/endpoints/test_openapi_skill_{upload,delete,state}.py rather
 # than a line in this file. Every line added below is deleted with the
 # deprecated package.
+#
+# 2026-08-17: the Bot Workshop inventory added the unified bot list, local-bot
+# lifecycle, service-publication lifecycle, approval and edit-lock routes below.
+# They require the same gateway-signed principal that the endpoint case runner
+# still cannot mint, so they join the existing /openapi/v1 debt tracked by #651.
+# Their handlers have focused adapter/service tests; remove these entries once
+# the shared runner can exercise authenticated success and error paths.
+#
+# 2026-08-24: the routines (7) and resources (7) operations come off this log.
+# Every entry above blames one thing -- "the harness has no minter", so a case
+# could assert nothing but a 401. That stopped being true when
+# test_openapi_session_files.py minted a principal in the test tree: point
+# init_principal_verifier_config at a local signing key and hand the runner a
+# token signed with it. tests/community/endpoints/test_openapi_routines.py and
+# test_openapi_resources.py do the same, so these fourteen are covered on the
+# wire and the gate holds them from here on. The debt the remaining lines
+# record is unchanged, and #651 still covers the minter and the backfill for
+# them. Hand edited rather than regenerated, to keep these notes.
+#
+# 2026-08-24 (second pass): more bot-scoped groups come off this log -- bots,
+# sessions, engine runtime (approvals/connection/engine/models), service
+# publications (lifecycle + edit-lock), local bots, the MCP catalogue, bot
+# identity, bot skills reads, authorized apps, and the retiring routines/resources
+# addresses. Same unblocking as the note above: the principal minter exists in
+# the test tree, so these operations are driven on the wire instead of asserting
+# a 401. Their cases live in tests/community/endpoints/test_openapi_*.py. Hand
+# edited rather than regenerated, to keep these notes.
+#
+# Correcting the 2026-08-10 note above while the lines it describes come off:
+# an App identity CAN be minted here, so "which the harness cannot mint at all"
+# no longer holds. The token's `principals` claim is a list of the gateway's
+# discriminated union (core/gateway_principal/models.py), so an
+# {"type": "app", ...} entry beside the user entry projects onto AppPrincipal
+# exactly as the user entry projects onto UserPrincipal, and
+# require_user_and_app_principal is satisfied. The App's tenant must be
+# DEFAULT_AVERNET_TENANT, because a user principal asserts none and the request
+# is isolated by the App's. A user+app set is still a human request --
+# require_acting_caller keys the grant path off a caller naming no user -- so
+# no grant adjudication intervenes. test_openapi_authorized_apps.py does this,
+# and confirms the App half is load-bearing: drop the app entry and the two
+# operations that need it answer 401 instead of 201/200.
 DELETE /api/bot-render-screens/{record_id}: missing [happy, error]
 DELETE /api/bots/{bot_id}: missing [happy, error]
 DELETE /api/desktop/bots/{bot_id}: missing [happy, error]
@@ -85,16 +126,8 @@ DELETE /api/skillsets/{skill_set_id}/skills/{skill_id}: missing [happy, error]
 DELETE /api/skillsets/{skill_set_id}: missing [happy, error]
 DELETE /api/v1/expert-chats/{bot_id}/{owner_id}/session: missing [happy, error]
 DELETE /api/v1/expert-chats/{bot_id}/{owner_id}: missing [happy, error]
-DELETE /openapi/v1/bots/resources: missing [happy, error]
-DELETE /openapi/v1/bots/routines/{routine_id}: missing [happy, error]
 DELETE /openapi/v1/bots/sessions/{bot_id}/{session_id}/messages: missing [happy, error]
 DELETE /openapi/v1/bots/sessions/{bot_id}/{session_id}: missing [happy, error]
-DELETE /openapi/v1/bots/{bot_id}/authorized-apps/{app_id}: missing [happy, error]
-DELETE /openapi/v1/bots/{bot_id}/resources: missing [happy, error]
-DELETE /openapi/v1/bots/{bot_id}/routines/{routine_id}: missing [happy, error]
-DELETE /openapi/v1/bots/{bot_id}/sessions/{session_id}/messages: missing [happy, error]
-DELETE /openapi/v1/bots/{bot_id}/sessions/{session_id}: missing [happy, error]
-DELETE /openapi/v1/bots/{bot_id}: missing [happy, error]
 GET /api/aicoding/workflows: missing [happy, error]
 GET /api/aicoding/{entity_type}/{entity_id}/bot/{bot_id}/aicoding.bindings.json: missing [happy, error]
 GET /api/antcode/projects: missing [happy, error]
@@ -178,7 +211,6 @@ GET /api/skillsets/with-mcps: missing [happy, error]
 GET /api/skillsets/{skill_set_id}/mcps: missing [happy, error]
 GET /api/skillsets/{skill_set_id}/skills: missing [happy, error]
 GET /api/skillsets/{skill_set_id}: missing [happy, error]
-GET /api/skillsets: missing [happy, error]
 GET /api/system/health/bots: missing [happy, error]
 GET /api/system/health/engine: missing [happy, error]
 GET /api/system/health/sandbox: missing [happy, error]
@@ -218,71 +250,25 @@ GET /api/v1/skill-center/sync-categories: missing [happy, error]
 GET /api/v1/skill-center/verify-symlinks: missing [happy, error]
 GET /openapi/v1/bots/approvals/{bot_id}/mode: missing [happy, error]
 GET /openapi/v1/bots/approvals/{bot_id}/modes: missing [happy, error]
-GET /openapi/v1/bots/authorized: missing [happy, error]
-GET /openapi/v1/bots/ceiling: missing [happy, error]
-GET /openapi/v1/bots/check-name: missing [happy, error]
 GET /openapi/v1/bots/connection/{bot_id}: missing [happy, error]
 GET /openapi/v1/bots/engine/{bot_id}/available: missing [happy, error]
 GET /openapi/v1/bots/engine/{bot_id}/capabilities: missing [happy, error]
 GET /openapi/v1/bots/engine/{bot_id}/status: missing [happy, error]
 GET /openapi/v1/bots/identity/{bot_id}/{file_type}: missing [happy, error]
 GET /openapi/v1/bots/identity/{bot_id}: missing [happy, error]
-GET /openapi/v1/bots/mcp/servers/{server_code}/config: missing [happy, error]
-GET /openapi/v1/bots/mcp/servers/{server_code}/permissions: missing [happy, error]
-GET /openapi/v1/bots/mcp/servers/{server_code}: missing [happy, error]
-GET /openapi/v1/bots/mcp/servers: missing [happy, error]
-GET /openapi/v1/bots/mcp/tenants: missing [happy, error]
 GET /openapi/v1/bots/models/{bot_id}/{model_id:path}: missing [happy, error]
 GET /openapi/v1/bots/models/{bot_id}: missing [happy, error]
-GET /openapi/v1/bots/resources/download: missing [happy, error]
-GET /openapi/v1/bots/resources/preview: missing [happy, error]
-GET /openapi/v1/bots/resources/stat: missing [happy, error]
-GET /openapi/v1/bots/resources: missing [happy, error]
-GET /openapi/v1/bots/routines/{routine_id}/runs: missing [happy, error]
-GET /openapi/v1/bots/routines/{routine_id}: missing [happy, error]
-GET /openapi/v1/bots/routines: missing [happy, error]
 GET /openapi/v1/bots/sessions/{bot_id}/{session_id}/messages: missing [happy, error]
 GET /openapi/v1/bots/sessions/{bot_id}/{session_id}: missing [happy, error]
 GET /openapi/v1/bots/sessions/{bot_id}: missing [happy, error]
 GET /openapi/v1/bots/skills/{skill_id}: missing [happy, error]
 GET /openapi/v1/bots/skills: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/approvals/mode: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/approvals/modes: missing [happy, error]
 GET /openapi/v1/bots/{bot_id}/auth-status: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/authorized-apps: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/connection: missing [happy, error]
 GET /openapi/v1/bots/{bot_id}/engine-config: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/engine/available: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/engine/capabilities: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/engine/config: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/engine/status: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/identity/{file_type}: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/identity: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/models/{model_id:path}: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/models: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/passport: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/resources/download: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/resources/preview: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/resources/stat: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/resources: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/routines/{routine_id}/runs: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/routines/{routine_id}: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/routines: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/sessions/{session_id}/messages: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/sessions/{session_id}: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/sessions: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/skills/{skill_id}: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/skills: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}/status: missing [happy, error]
-GET /openapi/v1/bots/{bot_id}: missing [happy, error]
-GET /openapi/v1/bots: missing [happy, error]
 OPTIONS /api/v1/token/exchange: missing [happy, error]
 OPTIONS /api/v1/token/iam: missing [happy, error]
 PATCH /api/bots/{bot_id}/ext: missing [happy, error]
-PATCH /openapi/v1/bots/routines/{routine_id}: missing [happy, error]
 PATCH /openapi/v1/bots/sessions/{bot_id}/{session_id}: missing [happy, error]
-PATCH /openapi/v1/bots/{bot_id}/routines/{routine_id}: missing [happy, error]
-PATCH /openapi/v1/bots/{bot_id}/sessions/{session_id}: missing [happy, error]
 POST /api/aicoding/workspace/initialize: missing [happy, error]
 POST /api/approvals/mode/get: missing [happy, error]
 POST /api/approvals/mode/set: missing [happy, error]
@@ -364,7 +350,6 @@ POST /api/skills/market/search: missing [happy, error]
 POST /api/skills/market/sync: missing [happy, error]
 POST /api/skills/skillset/activate: missing [happy, error]
 POST /api/skills/skillset/deactivate: missing [happy, error]
-POST /api/skills/skillset/switch: missing [happy, error]
 POST /api/skills/skillset/sync: missing [happy, error]
 POST /api/skills/sync-from-git: missing [happy, error]
 POST /api/skills/upload: missing [happy, error]
@@ -418,19 +403,7 @@ POST /api/v1/skill-center/refresh-bot: missing [happy, error]
 POST /api/v1/skill-center/sync-categories: missing [happy, error]
 POST /api/v1/skill-center/sync: missing [happy, error]
 POST /api/v1/token/exchange: missing [happy, error]
-POST /openapi/v1/bots/resources/mkdir: missing [happy, error]
-POST /openapi/v1/bots/resources/upload: missing [happy, error]
-POST /openapi/v1/bots/routines/{routine_id}/run: missing [happy, error]
-POST /openapi/v1/bots/routines: missing [happy, error]
 POST /openapi/v1/bots/sessions/{bot_id}: missing [happy, error]
-POST /openapi/v1/bots/{bot_id}/authorized-apps: missing [happy, error]
-POST /openapi/v1/bots/{bot_id}/resources/mkdir: missing [happy, error]
-POST /openapi/v1/bots/{bot_id}/resources/upload: missing [happy, error]
-POST /openapi/v1/bots/{bot_id}/restart: missing [happy, error]
-POST /openapi/v1/bots/{bot_id}/routines/{routine_id}/run: missing [happy, error]
-POST /openapi/v1/bots/{bot_id}/routines: missing [happy, error]
-POST /openapi/v1/bots/{bot_id}/sessions: missing [happy, error]
-POST /openapi/v1/bots: missing [happy, error]
 PUT /api/aicoding/{entity_type}/{entity_id}/bot/{bot_id}/aicoding.bindings.json: missing [happy, error]
 PUT /api/bot-render-screens/{record_id}: missing [happy, error]
 PUT /api/bots/{bot_id}/engine-config: missing [happy, error]
@@ -443,9 +416,4 @@ PUT /api/skills/{skill_uuid}/members/{user_id}/role: missing [happy, error]
 PUT /api/skillsets/{skill_set_id}: missing [happy, error]
 PUT /openapi/v1/bots/approvals/{bot_id}/mode: missing [happy, error]
 PUT /openapi/v1/bots/identity/{bot_id}/{file_type}: missing [happy, error]
-PUT /openapi/v1/bots/mcp/servers/{server_code}/config: missing [happy, error]
-PUT /openapi/v1/bots/{bot_id}/approvals/mode: missing [happy, error]
 PUT /openapi/v1/bots/{bot_id}/engine-config: missing [happy, error]
-PUT /openapi/v1/bots/{bot_id}/engine/config: missing [happy, error]
-PUT /openapi/v1/bots/{bot_id}/identity/{file_type}: missing [happy, error]
-PUT /openapi/v1/bots/{bot_id}: missing [happy, error]

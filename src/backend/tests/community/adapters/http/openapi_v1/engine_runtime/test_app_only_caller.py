@@ -31,6 +31,10 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import
 )
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+from agentclaw.community.api.human_bot_friendship_service import (
+    HumanBotFriendshipServiceProtocol,
+)
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
 from agentclaw.community.core.gateway_principal import (
     AppPrincipal,
@@ -120,7 +124,7 @@ def grants() -> FakeGrants:
 
 
 @pytest.fixture
-def app_client(relay, grants):
+def app_client(relay, grants, friendships, expert):
     """A client whose credential names an application and no end user."""
 
     def _build(caller: Any = None):
@@ -128,6 +132,8 @@ def app_client(relay, grants):
             def configure(self, binder):
                 binder.bind(EngineRuntimeRelayProtocol, to=relay)
                 binder.bind(BotAppGrantServiceProtocol, to=grants)
+                binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
+                binder.bind(ExpertChatServiceProtocol, to=expert)
 
         app = FastAPI()
         app.include_router(sessions_router)

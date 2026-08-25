@@ -1,25 +1,32 @@
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State, rejection::JsonRejection},
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
 use bcs_protocol::{
-    BCN_PROVIDER_ID_HEADER, PatchProviderRequest, ProviderAuthModeDto,
-    ProviderCoordinationConfigDto, ProviderCoordinationModeDto, ProviderInfoResponse,
-    ProviderOrganizationManagementConfigDto, RegisterProviderBotRequest,
+    BCN_PROVIDER_ID_HEADER, PatchProviderBotRequest, PatchProviderRequest, ProviderAuthModeDto,
+    ProviderBotConnectionModeDto, ProviderCoordinationConfigDto, ProviderCoordinationModeDto,
+    ProviderInfoResponse, ProviderOrganizationManagementConfigDto, RegisterProviderBotRequest,
     RegisterProviderBotResponse, RegisterProviderRequest, RegisterProviderResponse,
+};
+use bcs_service_api::application::v1::{
+    ApplicationError, BotInternalAttributes, FriendCheckInStrategy, InternalBotAttributesService,
+    PatchBotInternalAttributes, UserVisibility,
 };
 use bcs_service_api::{
     BotUseCaseError, CoordinationMode, DeleteProviderBotCommand, ProviderAuthMode,
-    ProviderBotBinding, ProviderCoordinationConfig, ProviderOrganizationManagementConfig,
+    ProviderBotBinding, ProviderBotConnectionMode, ProviderBotRosterItem,
+    ProviderBotTaskModesFilter, ProviderCoordinationConfig, ProviderOrganizationManagementConfig,
     ProviderRecord, RegisterProviderBotCommand, RegisterProviderCommand, ServiceError,
-    SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult, UpdateProviderCommand,
+    SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult, TaskModeMatch,
+    UpdateProviderBotCommand, UpdateProviderCommand,
 };
-use serde_json::{Value, json};
-use tracing::info;
+use serde::{Deserialize, Deserializer};
+use serde_json::{Map, Value, json};
+use tracing::{info, warn};
 
-use crate::mapping::capabilities::to_core_skill;
+use crate::mapping::capabilities::{to_core_skill, to_wire_skill};
 use crate::state::HttpAppState;
 
 #[derive(Debug, serde::Deserialize)]
@@ -32,6 +39,38 @@ pub struct ProviderStreamGrayRequest {
 pub struct ProviderStreamGrayResponse {
     pub enabled: bool,
     pub created_by: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatchProviderBotAttributesRequest {
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
+    pub visibility: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
+    pub user_visibility: Option<UserVisibility>,
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
+    pub friend_ext: Option<Map<String, Value>>,
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
+    pub friend_check_in_strategy: Option<FriendCheckInStrategy>,
+}
+
+impl PatchProviderBotAttributesRequest {
+    fn is_empty(&self) -> bool {
+        self.visibility.is_none()
+            && self.user_visibility.is_none()
+            && self.friend_ext.is_none()
+            && self.friend_check_in_strategy.is_none()
+    }
+
+    fn into_command(self, bot_id: String) -> PatchBotInternalAttributes {
+        PatchBotInternalAttributes {
+            bot_id,
+            visibility: self.visibility,
+            user_visibility: self.user_visibility,
+            friend_ext: self.friend_ext,
+            friend_check_in_strategy: self.friend_check_in_strategy,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -187,6 +226,16 @@ pub async fn register_provider_bot(
 ) -> Result<Json<RegisterProviderBotResponse>, ProviderRouteError> {
     let provider_admin_token = bearer_token(&headers)?;
     let allowed_switch_provider = state.allowed_switch_provider_ids.contains(&provider_id);
+    let connection_mode = req
+        .connection_mode
+        .unwrap_or(ProviderBotConnectionModeDto::Gateway);
+    // plugin mode is accepted only for allow-listed providers (§3.0 admission gate).
+    if matches!(connection_mode, ProviderBotConnectionModeDto::Plugin) && !allowed_switch_provider {
+        return Err(ProviderRouteError::bad_request(
+            "connection_mode plugin requires an allow-listed provider",
+        ));
+    }
+    let plugin_mode = matches!(connection_mode, ProviderBotConnectionModeDto::Plugin);
     let bot_uuid = allowed_switch_provider.then(|| req.provider_bot_ref.clone());
     let outcome = state
         .services
@@ -202,7 +251,12 @@ pub async fn register_provider_bot(
             skills: req.skills.into_iter().map(to_core_skill).collect(),
             scopes: req.scopes,
             bot_uuid,
-            reject_existing_bot_uuid: allowed_switch_provider,
+            // Gateway mode over an allow-listed provider rejects a collision where
+            // provider_bot_ref is already used as a bot_uuid; plugin mode relaxes
+            // this so W-before-P /补注册 over an existing real-token bot proceeds to
+            // the token-preserving soft-merge path.
+            reject_existing_bot_uuid: allowed_switch_provider && !plugin_mode,
+            connection_mode: connection_mode_from_wire(connection_mode),
         })
         .await
         .map_err(provider_error)?;
@@ -230,6 +284,127 @@ pub async fn list_provider_bots(
         .map_err(provider_error)?;
     let items: Vec<Value> = bindings.into_iter().map(binding_to_json).collect();
     Ok(Json(json!({ "items": items })))
+}
+
+/// `GET /providers/{provider_id}/bots/by-task-modes` — internal (non-OpenAPI)
+/// roster consumed by backend task discovery/dispatch. Admission mirrors
+/// `switch_bot_delivery`: the Bearer must authenticate the path provider admin
+/// and that `provider_id` must be in `allowed_switch_provider_ids`. The roster
+/// is env-scoped — it returns all current-env bots whose control-plane toggles
+/// satisfy the filter, and is intentionally not intersected with provider bot
+/// bindings.
+pub async fn list_provider_bots_by_task_modes(
+    State(state): State<HttpAppState>,
+    Path(provider_id): Path<String>,
+    headers: HeaderMap,
+    Query(params): Query<TaskModesQueryParams>,
+) -> Result<Json<Value>, ProviderRouteError> {
+    let token = bearer_token(&headers)?;
+
+    let provider = state
+        .services
+        .provider_core
+        .authenticate_provider_admin(&token)
+        .await
+        .map_err(provider_error)?;
+
+    if provider.provider_id != provider_id {
+        return Err(ProviderRouteError {
+            status: StatusCode::FORBIDDEN,
+            message: "provider_id_mismatch".to_string(),
+        });
+    }
+
+    if !state.allowed_switch_provider_ids.contains(&provider_id) {
+        return Err(ProviderRouteError {
+            status: StatusCode::FORBIDDEN,
+            message: format!(
+                "provider '{}' is not allowed to access the task-mode roster",
+                provider_id
+            ),
+        });
+    }
+
+    let filter = ProviderBotTaskModesFilter {
+        task_claim_mode: parse_task_mode_toggle("task_claim_mode", &params.task_claim_mode)?,
+        task_dream_mode: parse_task_mode_toggle("task_dream_mode", &params.task_dream_mode)?,
+        match_mode: match params
+            .match_mode
+            .as_deref()
+            .map(str::trim)
+            .map(|value| value.eq_ignore_ascii_case("all"))
+        {
+            Some(true) => TaskModeMatch::All,
+            _ => TaskModeMatch::Any,
+        },
+    };
+    let items = state
+        .services
+        .provider_management
+        .list_provider_bots_by_task_modes(filter)
+        .await
+        .map_err(provider_error)?;
+    let items: Vec<Value> = items.into_iter().map(roster_item_to_json).collect();
+    Ok(Json(json!({ "items": items })))
+}
+
+pub async fn get_provider_bot_attributes(
+    State(state): State<HttpAppState>,
+    Path((provider_id, bot_uuid)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<BotInternalAttributes>, ProviderRouteError> {
+    require_provider_bot_attributes_access(&state, &provider_id, &bot_uuid, &headers).await?;
+    let attributes = internal_bot_attributes_service(&state)?
+        .get(bot_uuid.clone())
+        .await
+        .map_err(internal_attributes_error)?;
+    info!(
+        provider_id,
+        bot_uuid, "Provider Bot attributes read completed"
+    );
+    Ok(Json(attributes))
+}
+
+pub async fn patch_provider_bot_attributes(
+    State(state): State<HttpAppState>,
+    Path((provider_id, bot_uuid)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Result<Json<PatchProviderBotAttributesRequest>, JsonRejection>,
+) -> Result<Json<BotInternalAttributes>, ProviderRouteError> {
+    require_provider_bot_attributes_access(&state, &provider_id, &bot_uuid, &headers).await?;
+    let Json(body) = body.map_err(|_| {
+        warn!(
+            provider_id,
+            bot_uuid,
+            failure = "invalid_json_body",
+            "Provider Bot attributes patch rejected"
+        );
+        ProviderRouteError::bad_request("request body is invalid")
+    })?;
+    if body.is_empty() {
+        return Err(ProviderRouteError::bad_request(
+            "bot attributes patch must contain at least one field",
+        ));
+    }
+    info!(
+        provider_id,
+        bot_uuid,
+        has_visibility = body.visibility.is_some(),
+        has_user_visibility = body.user_visibility.is_some(),
+        has_friend_ext = body.friend_ext.is_some(),
+        friend_ext_key_count = body.friend_ext.as_ref().map(|value| value.len()),
+        has_friend_check_in_strategy = body.friend_check_in_strategy.is_some(),
+        "Provider Bot attributes patch accepted"
+    );
+    let attributes = internal_bot_attributes_service(&state)?
+        .patch(body.into_command(bot_uuid.clone()))
+        .await
+        .map_err(internal_attributes_error)?;
+    info!(
+        provider_id,
+        bot_uuid, "Provider Bot attributes patch completed"
+    );
+    Ok(Json(attributes))
 }
 
 pub async fn delete_provider_bot(
@@ -291,6 +466,45 @@ fn delete_provider_bot_response(
         body["message"] = json!(message);
     }
     Json(body)
+}
+
+pub async fn patch_provider_bot(
+    State(state): State<HttpAppState>,
+    Path((provider_id, provider_bot_ref)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(req): Json<PatchProviderBotRequest>,
+) -> Result<Json<Value>, ProviderRouteError> {
+    let provider_admin_token = bearer_token(&headers)?;
+    let outcome = state
+        .services
+        .provider_management
+        .update_provider_bot(UpdateProviderBotCommand {
+            provider_id,
+            provider_admin_token,
+            provider_bot_ref,
+            name: req.name,
+            summary: req.summary,
+            domains: req.domains,
+            skills: req
+                .skills
+                .map(|skills| skills.into_iter().map(to_core_skill).collect()),
+            scopes: req.scopes,
+            visibility: req.visibility,
+        })
+        .await
+        .map_err(provider_error)?;
+
+    Ok(Json(json!({
+        "bot_uuid": outcome.bot_uuid,
+        "provider_id": outcome.provider_id,
+        "provider_bot_ref": outcome.provider_bot_ref,
+        "name": outcome.name,
+        "summary": outcome.summary,
+        "domains": outcome.domains,
+        "skills": outcome.skills.into_iter().map(to_wire_skill).collect::<Vec<_>>(),
+        "scopes": outcome.scopes,
+        "visibility": outcome.visibility,
+    })))
 }
 
 pub async fn resolve_agentpass_bot(
@@ -381,6 +595,13 @@ fn auth_mode_from_wire(mode: ProviderAuthModeDto) -> ProviderAuthMode {
     }
 }
 
+fn connection_mode_from_wire(mode: ProviderBotConnectionModeDto) -> ProviderBotConnectionMode {
+    match mode {
+        ProviderBotConnectionModeDto::Gateway => ProviderBotConnectionMode::Gateway,
+        ProviderBotConnectionModeDto::Plugin => ProviderBotConnectionMode::Plugin,
+    }
+}
+
 fn auth_mode_to_wire(mode: &str) -> ProviderAuthModeDto {
     match mode {
         "agentpass" => ProviderAuthModeDto::AgentPass,
@@ -422,6 +643,138 @@ fn organization_management_to_wire(
     ProviderOrganizationManagementConfigDto {
         authorized_manager_provider_ids: config.authorized_manager_provider_ids,
     }
+}
+
+async fn require_provider_bot_attributes_access(
+    state: &HttpAppState,
+    provider_id: &str,
+    bot_uuid: &str,
+    headers: &HeaderMap,
+) -> Result<(), ProviderRouteError> {
+    let provider_admin_token = bearer_token(headers)?;
+    state
+        .services
+        .provider_management
+        .get_active_provider(provider_id, &provider_admin_token)
+        .await
+        .map_err(provider_error)?;
+
+    // COSEC: Attribute access is fail-closed: only an authenticated Provider
+    // explicitly listed for backend operations may reach its own active Bot.
+    if !state
+        .allowed_switch_provider_ids
+        .iter()
+        .any(|configured_id| configured_id == provider_id)
+    {
+        warn!(
+            provider_id,
+            bot_uuid,
+            failure = "provider_not_allowed",
+            "Provider Bot attributes access rejected"
+        );
+        return Err(ProviderRouteError {
+            status: StatusCode::FORBIDDEN,
+            message: "provider is not allowed to manage bot attributes".to_string(),
+        });
+    }
+
+    let binding = state
+        .services
+        .provider_bot_core
+        .get_provider_bot_binding_by_bot_uuid(bot_uuid)
+        .await
+        .map_err(provider_error)?
+        .ok_or_else(|| ProviderRouteError {
+            status: StatusCode::NOT_FOUND,
+            message: format!("bot not found: {bot_uuid}"),
+        })?;
+    if binding.disabled {
+        return Err(ProviderRouteError {
+            status: StatusCode::NOT_FOUND,
+            message: format!("bot not found: {bot_uuid}"),
+        });
+    }
+    if binding.provider_id != provider_id {
+        warn!(
+            provider_id,
+            bot_uuid,
+            binding_provider_id = binding.provider_id,
+            failure = "provider_bot_binding_mismatch",
+            "Provider Bot attributes access rejected"
+        );
+        return Err(ProviderRouteError {
+            status: StatusCode::FORBIDDEN,
+            message: "provider does not own bot".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn internal_bot_attributes_service(
+    state: &HttpAppState,
+) -> Result<&std::sync::Arc<dyn InternalBotAttributesService>, ProviderRouteError> {
+    state
+        .internal_bot_attributes_service
+        .as_ref()
+        .ok_or_else(|| ProviderRouteError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "bot attributes service is not configured".to_string(),
+        })
+}
+
+fn internal_attributes_error(error: ApplicationError) -> ProviderRouteError {
+    match error {
+        ApplicationError::InvalidInput { message, .. } => ProviderRouteError::bad_request(message),
+        ApplicationError::Unauthenticated => {
+            ProviderRouteError::unauthorized("authentication is required")
+        }
+        ApplicationError::Forbidden(message) | ApplicationError::ForbiddenCode { message, .. } => {
+            ProviderRouteError {
+                status: StatusCode::FORBIDDEN,
+                message,
+            }
+        }
+        ApplicationError::NotFound { message, .. } => ProviderRouteError {
+            status: StatusCode::NOT_FOUND,
+            message,
+        },
+        ApplicationError::Conflict { message, .. } => ProviderRouteError {
+            status: StatusCode::CONFLICT,
+            message,
+        },
+        ApplicationError::Gone { message, .. } => ProviderRouteError {
+            status: StatusCode::GONE,
+            message,
+        },
+        ApplicationError::QuotaExceeded { message, .. } => ProviderRouteError {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            message,
+        },
+        ApplicationError::PayloadTooLarge { message, .. } => ProviderRouteError {
+            status: StatusCode::PAYLOAD_TOO_LARGE,
+            message,
+        },
+        ApplicationError::Unprocessable { message, .. } => ProviderRouteError {
+            status: StatusCode::UNPROCESSABLE_ENTITY,
+            message,
+        },
+        ApplicationError::BadGateway { message, .. } => ProviderRouteError {
+            status: StatusCode::BAD_GATEWAY,
+            message,
+        },
+        ApplicationError::Internal(message) => ProviderRouteError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message,
+        },
+    }
+}
+
+fn deserialize_present_non_null<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 fn bearer_token(headers: &HeaderMap) -> Result<String, ProviderRouteError> {
@@ -540,6 +893,42 @@ fn binding_to_json(binding: ProviderBotBinding) -> Value {
     })
 }
 
+fn roster_item_to_json(item: ProviderBotRosterItem) -> Value {
+    json!({
+        "bot_id": item.bot_id,
+        "name": item.name,
+        "env": item.env,
+        "task_claim_mode": item.task_claim_mode,
+        "task_dream_mode": item.task_dream_mode,
+    })
+}
+
+/// Query params for `GET /providers/{provider_id}/bots/by-task-modes`. Toggles
+/// arrive as strings so empty/absent values can be tolerated as "do not filter".
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct TaskModesQueryParams {
+    pub task_claim_mode: Option<String>,
+    pub task_dream_mode: Option<String>,
+    #[serde(rename = "match")]
+    pub match_mode: Option<String>,
+}
+
+/// Parse a task-mode toggle query param. `None`/empty => do not filter on this
+/// toggle; `true`/`1` => filter for the toggle ON; `false`/`0` => filter OFF.
+fn parse_task_mode_toggle(
+    name: &str,
+    value: &Option<String>,
+) -> Result<Option<bool>, ProviderRouteError> {
+    match value.as_deref().map(str::trim) {
+        None | Some("") => Ok(None),
+        Some("true") | Some("1") => Ok(Some(true)),
+        Some("false") | Some("0") => Ok(Some(false)),
+        Some(other) => Err(ProviderRouteError::bad_request(format!(
+            "invalid {name} value '{other}'; expected true|false"
+        ))),
+    }
+}
+
 #[derive(Debug, serde::Deserialize)]
 pub struct SwitchBotDeliveryRequest {
     pub bot_id: String,
@@ -646,5 +1035,67 @@ fn switch_delivery_error(error: BotUseCaseError) -> ProviderRouteError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: other.to_string(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_attribute_application_errors_keep_their_http_status() {
+        let cases = vec![
+            (
+                ApplicationError::invalid("invalid", "invalid"),
+                StatusCode::BAD_REQUEST,
+            ),
+            (ApplicationError::Unauthenticated, StatusCode::UNAUTHORIZED),
+            (
+                ApplicationError::forbidden("forbidden"),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                ApplicationError::not_found("missing", "missing"),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                ApplicationError::conflict("conflict", "conflict"),
+                StatusCode::CONFLICT,
+            ),
+            (
+                ApplicationError::Gone {
+                    code: "gone".into(),
+                    message: "gone".into(),
+                },
+                StatusCode::GONE,
+            ),
+            (
+                ApplicationError::QuotaExceeded {
+                    code: "quota".into(),
+                    message: "quota".into(),
+                },
+                StatusCode::TOO_MANY_REQUESTS,
+            ),
+            (
+                ApplicationError::payload_too_large("large", "large"),
+                StatusCode::PAYLOAD_TOO_LARGE,
+            ),
+            (
+                ApplicationError::unprocessable("unprocessable", "unprocessable"),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                ApplicationError::bad_gateway("upstream", "upstream"),
+                StatusCode::BAD_GATEWAY,
+            ),
+            (
+                ApplicationError::internal("internal"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+
+        for (error, expected_status) in cases {
+            assert_eq!(internal_attributes_error(error).status, expected_status);
+        }
     }
 }

@@ -3,10 +3,10 @@
 负责与 BCN (Bot Coordination Network) 服务交互，包括：
 - Bot 入网注册 (onboard, 上行)
 - Bot 信息同步 (name, summary)
-- claude_code engine 启动时的 Provider Bot 注册 (下行, 见 register_provider_bot)
+- Bot create/start 时的 Provider Bot 注册 (下行, 见 register_provider_bot)
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Mapping, Optional
 
 import httpx
 
@@ -230,8 +230,9 @@ class BcnService:
         owner_workno: str,
         name: str,
         summary: str,
+        connection_mode: Literal["plugin"] | None = None,
     ) -> Dict[str, Any]:
-        """claude_code engine start 时把 bot 注册为 Provider 的 bot (下行链路)。
+        """将 bot 注册为 Provider bot (下行链路)。
 
         语雀: doc 548864073, POST /providers/{provider_id}/bots
 
@@ -240,6 +241,8 @@ class BcnService:
             owner_workno: bot 所有者工号 (例如 "100000")
             name: bot 显示名
             summary: bot 简介 (空字符串也可)
+            connection_mode: 仅 OpenClaw personal 使用 ``plugin``；未传时由 BCN
+                按既有 ``gateway`` 默认处理。
 
         Returns:
             BCN 返回的 dict, 关键字段:
@@ -262,7 +265,8 @@ class BcnService:
         if not provider_cfg:
             logger.info(
                 f"[BcnService.register_provider_bot] env={env} skipped "
-                f"(no provider credentials), provider_bot_ref={provider_bot_ref}"
+                f"(no provider credentials), provider_bot_ref={provider_bot_ref} "
+                f"connection_mode={connection_mode}"
             )
             return {
                 "bot_uuid": "",
@@ -282,6 +286,8 @@ class BcnService:
             "owners": owners,
             "provider_bot_ref": provider_bot_ref,
         }
+        if connection_mode is not None:
+            payload["connection_mode"] = connection_mode
         path = f"/providers/{provider_id}/bots"
         headers = {
             "Content-Type": "application/json",
@@ -289,8 +295,7 @@ class BcnService:
         }
         logger.info(
             f"[BcnService.register_provider_bot] POST {path} "
-            f"provider_bot_ref={provider_bot_ref} name={name} "
-            f"summary_len={len(summary or '')}"
+            f"provider_bot_ref={provider_bot_ref} connection_mode={connection_mode}"
         )
 
         try:
@@ -302,7 +307,8 @@ class BcnService:
             if response.status_code == 409:
                 logger.warning(
                     f"[BcnService.register_provider_bot] 409 idempotent: "
-                    f"provider_bot_ref={provider_bot_ref} already registered"
+                    f"provider_bot_ref={provider_bot_ref} connection_mode={connection_mode} "
+                    f"already registered"
                 )
                 body: Dict[str, Any] = {}
                 try:
@@ -319,7 +325,7 @@ class BcnService:
             logger.info(
                 f"[BcnService.register_provider_bot] OK "
                 f"bot_uuid={response_data.get('bot_uuid')} "
-                f"provider_bot_ref={provider_bot_ref}"
+                f"provider_bot_ref={provider_bot_ref} connection_mode={connection_mode}"
             )
             return response_data
 
@@ -328,22 +334,23 @@ class BcnService:
             status = e.response.status_code if e.response else "N/A"
             logger.error(
                 f"[BcnService.register_provider_bot] HTTP error: "
-                f"status={status} body={error_body} "
-                f"provider_bot_ref={provider_bot_ref}"
+                f"status={status} "
+                f"provider_bot_ref={provider_bot_ref} connection_mode={connection_mode}"
             )
             raise BcnServiceError(
                 f"BCN register_provider_bot HTTP error: {status} - {error_body}"
             )
         except httpx.TimeoutException as e:
             logger.error(
-                f"[BcnService.register_provider_bot] Timeout: {e} "
-                f"provider_bot_ref={provider_bot_ref}"
+                f"[BcnService.register_provider_bot] Timeout: "
+                f"provider_bot_ref={provider_bot_ref} connection_mode={connection_mode}"
             )
             raise BcnServiceError(f"BCN register_provider_bot timeout: {e}")
         except Exception as e:
             logger.error(
-                f"[BcnService.register_provider_bot] Unexpected error: {e} "
-                f"provider_bot_ref={provider_bot_ref}"
+                f"[BcnService.register_provider_bot] Unexpected error: "
+                f"error_type={type(e).__name__} provider_bot_ref={provider_bot_ref} "
+                f"connection_mode={connection_mode}"
             )
             raise BcnServiceError(f"BCN register_provider_bot error: {e}")
 
@@ -552,6 +559,197 @@ class BcnService:
                 f"provider_bot_ref={provider_bot_ref}"
             )
             raise BcnServiceError(f"BCN delete_provider_bot error: {e}")
+
+    def get_attributes(self, *, bot_uuid: str) -> Dict[str, Any]:
+        """读取已注册 Bot 的协作属性 (Provider 管理 API GET)。
+
+        GET /providers/{provider_id}/bots/{bot_uuid}/attributes — 与
+        register/switch/delete provider-bot 同套鉴权:仅 ``Authorization:
+        Bearer {provider_admin_token}``，``provider_id`` 在 path，不传
+        ``X-BCN-Provider-Id``。响应直接是属性对象 (``user_visibility`` /
+        ``friend_ext`` / ``friend_check_in_strategy``)。非 prod/pre 或凭据
+        空时跳过 (返 ``{"skipped": True}``)。
+        """
+        env = get_current_env()
+        provider_cfg = _get_provider_config(env, self._config)
+        if not provider_cfg:
+            return {"skipped": True}
+        provider_id = provider_cfg["provider_id"]
+        token = provider_cfg["provider_admin_token"]
+        path = f"/providers/{provider_id}/bots/{bot_uuid}/attributes"
+        try:
+            response = self._http.get(
+                path, headers={"Authorization": f"Bearer {token}"}, timeout=self._timeout
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, dict) else {}
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else "No response"
+            status = e.response.status_code if e.response else "N/A"
+            raise BcnServiceError(
+                f"BCS attributes get HTTP error: {status} - {error_body}"
+            )
+        except httpx.TimeoutException as e:
+            raise BcnServiceError(f"BCS attributes get timeout: {e}")
+        except Exception as e:
+            raise BcnServiceError(f"BCS attributes get error: {e}")
+
+    def list_bots_by_task_modes(
+        self,
+        *,
+        claim: bool | None = None,
+        dream: bool | None = None,
+        match: str = "any",
+    ) -> List[Dict[str, Any]]:
+        """查询满足任务模式开关的 provider bot roster(BCS provider 路由,Bearer)。
+
+        ``GET /providers/{provider_id}/bots/by-task-modes`` ——与 register/switch/attributes
+        provider-bot 同套鉴权:仅 ``Authorization: Bearer {provider_admin_token}``，``provider_id``
+        在 path，复用 ``_get_provider_config`` 解析的统一 provider 身份(BcnConfig prod/pre)。与其它
+        BcnService 方法一致直接返回 BCN 响应原结构(``{"items": [...]}`` 取 ``items``)。
+
+        ``claim``/``dream`` 为 ``None`` 表示该开关不过滤(不下发 query)；``match`` 为 any|all。
+        非 prod/pre 或凭据空时抛 :class:`BcnServiceError`(BBS 调用方按 fail-open 处理)。
+        """
+        env = get_current_env()
+        provider_cfg = _get_provider_config(env, self._config)
+        if not provider_cfg:
+            raise BcnServiceError(
+                f"task-mode roster provider credentials not configured for env={env}"
+            )
+        provider_id = provider_cfg["provider_id"]
+        token = provider_cfg["provider_admin_token"]
+        path = f"/providers/{provider_id}/bots/by-task-modes"
+        params: Dict[str, str] = {"match": match}
+        if claim is not None:
+            params["task_claim_mode"] = "true" if claim else "false"
+        if dream is not None:
+            params["task_dream_mode"] = "true" if dream else "false"
+        logger.info(
+            "[BcnService.list_bots_by_task_modes] GET %s claim=%s dream=%s match=%s",
+            path, claim, dream, match,
+        )
+        try:
+            response = self._http.get(
+                path,
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=self._timeout,
+            )
+            response.raise_for_status()
+            items = response.json().get("items", [])
+            return items if isinstance(items, list) else []
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else "No response"
+            status = e.response.status_code if e.response else "N/A"
+            raise BcnServiceError(
+                f"BCN list_bots_by_task_modes HTTP error: {status} - {error_body}"
+            )
+        except httpx.TimeoutException as e:
+            raise BcnServiceError(f"BCN list_bots_by_task_modes timeout: {e}")
+        except BcnServiceError:
+            raise
+        except Exception as e:
+            raise BcnServiceError(f"BCN list_bots_by_task_modes error: {e}")
+
+    def patch_attributes(
+        self, *, bot_uuid: str, body: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """局部更新 Bot 协作属性 (Provider 管理 API PATCH)。
+
+        PATCH /providers/{provider_id}/bots/{bot_uuid}/attributes，同套鉴权。
+        body 至少含一个可更新字段 (``user_visibility`` / ``friend_ext`` /
+        ``friend_check_in_strategy``)；``friend_ext`` 顶层对象整体替换、传
+        ``{}`` 清空。非 prod/pre 或凭据空时跳过。
+        """
+        env = get_current_env()
+        provider_cfg = _get_provider_config(env, self._config)
+        if not provider_cfg:
+            return {"skipped": True}
+        provider_id = provider_cfg["provider_id"]
+        token = provider_cfg["provider_admin_token"]
+        path = f"/providers/{provider_id}/bots/{bot_uuid}/attributes"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        try:
+            response = self._http.patch(
+                path, json=body, headers=headers, timeout=self._timeout
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, dict) else {}
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else "No response"
+            status = e.response.status_code if e.response else "N/A"
+            raise BcnServiceError(
+                f"BCS attributes patch HTTP error: {status} - {error_body}"
+            )
+        except httpx.TimeoutException as e:
+            raise BcnServiceError(f"BCS attributes patch timeout: {e}")
+        except Exception as e:
+            raise BcnServiceError(f"BCS attributes patch error: {e}")
+
+    def check_admission(
+        self,
+        bot_uuid: str,
+        actor: str,
+        originator: str | None = None,
+    ) -> Dict[str, Any]:
+        """Check BCS admission: is ``actor`` allowed to access ``bot_uuid``?
+
+        Calls ``GET /bots/{bot_uuid}/admission`` on BCS (edge-permission SoR).
+        Returns the BCS ``AdmissionResult`` dict:
+        ``{allowed, grants, reason_code, public_default}``.
+
+        Used at Phase 4 cutover to replace the old ``BotFriendRepository``
+        friend-check in ``SessionResourceService._resolve_upload_context``.
+
+        Args:
+            bot_uuid: BCS composite bot id (``{backend_bot_id}:{owner_workno}``).
+            actor: requesting actor id (``human_<staff_no>`` or bot_uuid).
+            originator: optional originator (BCS defaults to ``actor``).
+
+        Returns:
+            AdmissionResult dict from BCS.
+
+        Raises:
+            BcnServiceError: on HTTP error or timeout.
+        """
+        params: Dict[str, str] = {"actor": actor}
+        if originator is not None:
+            params["originator"] = originator
+
+        try:
+            response = self._http.get(
+                f"/bots/{bot_uuid}/admission",
+                params=params,
+                timeout=self._timeout,
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else "No response"
+            status = e.response.status_code if e.response else "N/A"
+            logger.error(
+                f"[BcnService.check_admission] HTTP error: "
+                f"status={status} body={error_body} bot_uuid={bot_uuid}"
+            )
+            raise BcnServiceError(
+                f"BCS admission HTTP error: {status} - {error_body}"
+            )
+        except httpx.TimeoutException as e:
+            logger.error(
+                f"[BcnService.check_admission] Timeout: {e} bot_uuid={bot_uuid}"
+            )
+            raise BcnServiceError(f"BCS admission timeout: {e}")
+        except Exception as e:
+            logger.error(
+                f"[BcnService.check_admission] Unexpected error: {e} bot_uuid={bot_uuid}"
+            )
+            raise BcnServiceError(f"BCS admission error: {e}")
 
 
 # ``BcnService`` is wired as a @singleton via the injector

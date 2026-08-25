@@ -137,11 +137,19 @@ bcs-app-bot = { workspace = true }
 bcs-app-group = { workspace = true }
 bcs-app-session = { workspace = true }
 bcs-app-invitation = { workspace = true }
+bcs-app-collaboration-template = { workspace = true }
+bcs-app-collaboration-definition = { workspace = true }
 bcs-provider-http = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-friend-store = { workspace = true }
 bcs-group-store = { workspace = true }
+# Noop edge-permission service impls back the `connect`/`admission`
+# `BcsServerState` fields in the in-memory/dev path + test helpers. The
+# production DB path uses `bcs-edge-permission` / `bcs-edge-permission-store`.
+bcs-test-support = { workspace = true }
 bcs-relation-store = { workspace = true }
+bcs-edge-permission-store = { workspace = true }
+bcs-edge-permission = { workspace = true }
 bcs-session = { workspace = true }
 bcs-session-store = { workspace = true }
 bcs-session-file = { workspace = true }
@@ -151,6 +159,9 @@ bcs-storage-local = { workspace = true }
 bcs-storage-baas  = { path = "../../plugins/bcs-storage-baas" }
 bcs-message = { workspace = true }
 bcs-message-store = { workspace = true }
+bcs-event-store = { workspace = true }
+bcs-eventing = { workspace = true }
+bcs-webhook-client = { workspace = true }
 bcs-callback = { workspace = true }
 bcs-collaboration-template = { workspace = true }
 bcs-collaboration-runtime = { workspace = true }

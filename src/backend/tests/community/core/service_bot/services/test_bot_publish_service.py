@@ -24,7 +24,44 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationState,
     PublishStatus,
 )
+from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
+    TECLAW_DEVICE_PROVIDER,
+    resolve_device_provider,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.provider_behavior import (
+    DefaultProviderBehavior,
+    ProviderBehaviorRouter,
+    TeclawProviderBehavior,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
+
+
+def _flow_service_with_real_provider_seam() -> MagicMock:
+    """A ``PublishFlowService`` stub whose provider seam is the real router.
+
+    The draft-restore preflight asks the flow service for the bot's
+    ``ProviderBehavior``, so these tests keep exercising the real per-provider
+    artifact rule (and the real engine → device_provider mapping) instead of
+    asserting against a mock.
+    """
+    router = ProviderBehaviorRouter(
+        {
+            TECLAW_DEVICE_PROVIDER: TeclawProviderBehavior(
+                build_service=MagicMock(),
+                resolver=MagicMock(),
+                device_fs_dispatcher=MagicMock(),
+                teclaw_file_promotion=MagicMock(),
+            ),
+            "arca": DefaultProviderBehavior(),
+            "baas": DefaultProviderBehavior(),
+        },
+        default_provider_key="baas",
+    )
+    flow_service = MagicMock()
+    flow_service.provider_behavior.side_effect = lambda bot: router.resolve(
+        resolve_device_provider((bot or {}).get("active_engine"))
+    )
+    return flow_service
 
 
 def _make_service(
@@ -63,7 +100,10 @@ def _make_service(
     return BotPublishService(
         bot_publish_repo=bot_publish_repo,
         bot_repo=bot_repo or MagicMock(),
-        publish_flow_service_provider=publish_flow_service_provider or (lambda: MagicMock()),
+        publish_flow_service_provider=(
+            publish_flow_service_provider
+            or (lambda flow=_flow_service_with_real_provider_seam(): flow)
+        ),
         bot_service=bot_service or MagicMock(),
         device_binding_repo=device_binding_repo or MagicMock(),
         bcn_service=bcn_service or MagicMock(),
@@ -145,7 +185,6 @@ class TestCreatePublishImagePolicy:
         assert ext == {
             "migration_path": "/build/v1",
             "sbot_use_default_image": True,
-            "sbot_runtime_kind": "arca",
         }
         common_config.get_value.assert_called_once()
 
@@ -170,10 +209,7 @@ class TestCreatePublishImagePolicy:
             common_config_value=config_value,
         )
 
-        assert ext == {
-            "migration_path": "/build/v1",
-            "sbot_runtime_kind": "arca",
-        }
+        assert ext == {"migration_path": "/build/v1"}
         common_config.get_value.assert_called_once()
 
     def test_legacy_arca_bot_snapshots_enabled_common_config_image(self):
@@ -190,7 +226,6 @@ class TestCreatePublishImagePolicy:
             "migration_path": "/build/v1",
             "sbot_pin_image": True,
             "sbot_docker_image": "registry/arca:v2",
-            "sbot_runtime_kind": "arca",
         }
         common_config.get_value.assert_called_once()
 
@@ -204,10 +239,7 @@ class TestCreatePublishImagePolicy:
             common_config_value=None,
         )
 
-        assert ext == {
-            "migration_path": "/build/v1",
-            "sbot_runtime_kind": "arca",
-        }
+        assert ext == {"migration_path": "/build/v1"}
         common_config.get_value.assert_called_once()
 
     def test_teclaw_publish_does_not_consume_arca_common_config(self):
@@ -221,10 +253,9 @@ class TestCreatePublishImagePolicy:
             is_teclaw=True,
         )
 
-        assert ext == {
-            "migration_path": "/build/v1",
-            "sbot_runtime_kind": "teclaw",
-        }
+        # The provider is not snapshotted onto the record any more — the publish
+        # record carries only the image policy (here: none, teclaw owns its image).
+        assert ext == {"migration_path": "/build/v1"}
         common_config.get_value.assert_not_called()
 
 
@@ -618,8 +649,10 @@ class TestOfflinePublish:
         mock_repo.update_status.assert_called_once_with(
             1, PublishStatus.DRAFT, PublishStatus.VALIDATING
         )
-        # VERIFY 阶段不执行销毁流程（也不入队）
-        mock_publish_flow_service.enqueue_offline_destroy.assert_not_called()
+        # 取消预发既回退状态，也用持久任务销毁 verify 运行时。
+        mock_publish_flow_service.enqueue_offline_destroy.assert_called_once_with(
+            publish_id=1, stage=PublishStage.VERIFY, operator="system"
+        )
 
     @pytest.mark.asyncio
     async def test_offline_publish_not_found(self):
@@ -861,6 +894,30 @@ class TestCanDeleteBot:
 
         result = service.can_delete_bot(publish_id=1)
         assert result is False
+
+    @pytest.mark.parametrize(
+        "historical_status",
+        [PublishStatus.UPGRADED, PublishStatus.RELEASED],
+    )
+    def test_can_delete_bot_allows_inactive_publish_history(
+        self, historical_status
+    ):
+        """历史版本已升级或下线时，当前草稿仍可删除。"""
+        mock_repo = Mock()
+        draft_record = _create_mock_record(
+            record_id=2,
+            status=PublishStatus.DRAFT,
+        )
+        historical_record = _create_mock_record(
+            record_id=1,
+            status=historical_status,
+        )
+        mock_repo.get_by_id.return_value = draft_record
+        mock_repo.list_by_source_bot.return_value = [draft_record, historical_record]
+
+        service = _make_service(bot_publish_repo=mock_repo)
+
+        assert service.can_delete_bot(publish_id=2) is True
 
 
 class TestCanEditBot:

@@ -5,7 +5,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 
 @dataclass(slots=True, frozen=True)
@@ -182,6 +182,42 @@ class ChatHistoryResult:
     has_more: bool = False
     next_before: int | None = None
     next_after: int | None = None
+
+
+# ─────────────────────────── interaction.resolve ───────────────────────────
+
+
+@dataclass(slots=True, frozen=True)
+class BcnInteractionAnswer:
+    """One BCS ask-user answer in incoming question order."""
+
+    values: tuple[str, ...]
+    question: str
+    header: str
+    custom_values: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class BcnInteractionResolveInput:
+    """Validated BCN Provider resolution ready for normalization."""
+
+    id: str
+    session_id: str
+    bcn_group_id: str
+    interaction_id: str
+    kind: Literal["ask_user", "exec", "mode_switch"]
+    idempotency_key: str
+    action: Literal["submit", "cancel"] | None
+    decision: str | None
+    answers: dict[str, BcnInteractionAnswer] | None
+    request_envelope: dict[str, Any]
+
+
+@dataclass(slots=True, frozen=True)
+class BcnInteractionResolveResult:
+    """Provider acknowledgement after a resolution is durably queued."""
+
+    ok: bool = True
 
 
 # ─────────────────────────── 上行协议模型 ───────────────────────────

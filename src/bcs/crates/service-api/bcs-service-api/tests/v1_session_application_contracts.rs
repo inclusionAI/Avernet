@@ -302,6 +302,7 @@ fn session_participant_serializes_bot_and_human_actors() {
         actor_kind: ActorKind::Bot,
         name: Some("Zhang San".into()),
         role: bcs_service_api::application::v1::ParticipantRole::Driver,
+        tags: vec!["tenant-a".into()],
         mode: ParticipantMode::Auto,
         joined_at: Some(42),
     };
@@ -309,6 +310,7 @@ fn session_participant_serializes_bot_and_human_actors() {
     assert_eq!(bot_json["actor_id"], "bot-1");
     assert_eq!(bot_json["actor_kind"], "bot");
     assert_eq!(bot_json["role"], "driver");
+    assert_eq!(bot_json["tags"], serde_json::json!(["tenant-a"]));
     assert_eq!(bot_json["mode"], "auto");
     assert_eq!(bot_json["joined_at"], 42);
 
@@ -317,6 +319,7 @@ fn session_participant_serializes_bot_and_human_actors() {
         actor_kind: ActorKind::Human,
         name: Some("Alice".into()),
         role: bcs_service_api::application::v1::ParticipantRole::Consultant,
+        tags: Vec::new(),
         mode: ParticipantMode::Present,
         joined_at: None,
     };

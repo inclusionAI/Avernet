@@ -874,11 +874,17 @@ async function getAccessibleWorkflows(deps: VersionCommandDeps): Promise<string[
   }
 }
 
-/** Create a DeployHistoryApiRepository if config is available. */
+/** Create a DeployHistoryApiRepository if config is available.
+ *  When signatureKey is empty, the ApiClient will be created without signing —
+ *  requests will be sent unsigned to clawWebBaseUrl. */
 function createDeployHistoryApiRepo(deps: VersionCommandDeps): DeployHistoryApiRepository | null {
-  if (!deps.clawWebBaseUrl || !deps.signatureKey) {
+  if (!deps.clawWebBaseUrl) {
     console.warn(`[deploy-history] Cannot create ApiClient: clawWebBaseUrl=${deps.clawWebBaseUrl ? "✓" : "MISSING"}, signatureKey=${deps.signatureKey ? "✓" : "MISSING"}`);
     return null;
+  }
+  const signingLabel = deps.signatureKey ? "signed" : "unsigned (no privateKeyB64)";
+  if (!deps.signatureKey) {
+    console.warn(`[deploy-history] ApiClient will send unsigned requests: ${signingLabel}`);
   }
   const client = new ApiClient({ baseUrl: deps.clawWebBaseUrl, privateKeyB64: deps.signatureKey });
   return new DeployHistoryApiRepository(client);

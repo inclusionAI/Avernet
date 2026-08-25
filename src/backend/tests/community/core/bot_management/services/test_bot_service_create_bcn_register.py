@@ -1,11 +1,11 @@
 """Unit tests for BCN provider registration during create_bot.
 
-create_bot 在设备分配成功后，应按与 start_bot 相同的条件注册 BCN Provider:
+create_bot 在 Bot 落库后、设备分配前，应按与 start_bot 相同的条件注册 BCN Provider:
 - active_engine == "claude_code" 且 template_type == "normalCC"
 - active_engine == "claude_code" 且 template_type == "personalCoding"
 - active_engine == "aicoding" 且 template_type == "personalCoding"
 - active_engine == "teclaw" (所有 bot_type)
-- active_engine == "openclaw" 且 bot_type == "service"
+- active_engine == "openclaw" 且 bot_type 为 "service" 或 "personal"
 - 注册失败不阻塞 create_bot 主流程
 """
 from __future__ import annotations
@@ -375,10 +375,18 @@ class TestCreateBotBcnRegister:
             summary="oc svc desc",
         )
 
-    def test_openclaw_personal_does_not_trigger_bcn_register(self):
-        """openclaw 引擎 personal bot 创建时不应触发 BCN 注册。"""
+    def test_openclaw_personal_registers_plugin_before_device_allocation(self):
+        """OpenClaw personal creation registers plugin mode before apply_device."""
         svc = _make_service()
-        _attach_device_service(svc)
+        device_service = _attach_device_service(svc)
+        timeline = []
+        device_result = _device_result()
+        device_service.apply_device.side_effect = lambda **kwargs: (
+            timeline.append(("apply_device", kwargs)), device_result
+        )[1]
+        svc._bcn_service.register_provider_bot.side_effect = lambda **kwargs: (
+            timeline.append(("register", kwargs)), {"bot_uuid": "u1"}
+        )[1]
 
         with patch.object(BotService, "_is_claude_code_bcn_register_enabled", return_value=True):
             svc.create_bot(
@@ -390,7 +398,31 @@ class TestCreateBotBcnRegister:
                 bot_type="personal",
             )
 
-        svc._bcn_service.register_provider_bot.assert_not_called()
+        assert [name for name, _ in timeline[:2]] == ["register", "apply_device"]
+        assert timeline[0][1]["connection_mode"] == "plugin"
+
+    @pytest.mark.parametrize(
+        ("capabilities", "expected"),
+        [
+            ({"bcn": {"join_as_provider": False}}, False),
+            ({"enable_bcn_network": True}, True),
+        ],
+    )
+    def test_openclaw_personal_respects_declared_bcn_capability(
+        self,
+        capabilities,
+        expected,
+    ):
+        """Factory capability must stay ahead of the legacy OpenClaw fallback."""
+        assert BotService._should_register_bcn_provider(
+            active_engine="openclaw",
+            bot_type="personal",
+            template_type="personal",
+            template_config={
+                "template_key": "openclaw-personal",
+                "capabilities": capabilities,
+            },
+        ) is expected
 
     def test_moltis_engine_does_not_trigger_bcn_register(self):
         """moltis 引擎不应触发 BCN 注册。"""

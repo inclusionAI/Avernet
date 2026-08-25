@@ -83,6 +83,41 @@ pub struct BotQueryByIdsResult {
     pub bots: Vec<BotQueryEntry>,
 }
 
+/// Request for `GET /bots/search`: name/summary fuzzy search + visibility
+/// + actor-status filtering over the active bot registry.
+///
+/// `visibility`: `None` → return `public` + `protected` bots (default visible
+/// scope); `Some(values)` → return only bots whose visibility is one of those
+/// values (including `"private"` when explicitly requested). An empty values
+/// list intentionally matches no bots. The delivery adapter decides the
+/// effective scope per its auth state.
+///
+/// `requester_actor_id`: when present, the caller is excluded from its own
+/// search results.
+///
+/// `tc_bot`: `Some(true)` restricts to TC (TeamClaw backend) bots — those with
+/// an owner-suffixed `bot_uuid` whose suffix equals `created_by`; `Some(false)`
+/// restricts to non-TC bots; `None` applies no such filter.
+#[derive(Debug, Clone, Default)]
+pub struct SearchBotsCommand {
+    pub q: Option<String>,
+    pub visibility: Option<Vec<String>>,
+    pub status: Option<ActorStatus>,
+    pub requester_actor_id: Option<String>,
+    pub tc_bot: Option<bool>,
+}
+
+/// Response payload for `GET /bots/search`.
+///
+/// The service returns the **full** filtered + sorted set; the delivery
+/// adapter applies caller-dependent `is_friend` post-filtering and pagination
+/// so `total` / `offset` / `limit` reflect the final page.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BotSearchResult {
+    pub items: Vec<BotQueryEntry>,
+    pub total: u64,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct BotDiscoveryCommand {
     pub q: Option<String>,
@@ -202,6 +237,13 @@ pub trait BotQueryService: Send + Sync {
         &self,
         _command: BotQueryByIdsCommand,
     ) -> Result<BotQueryByIdsResult, BotUseCaseError> {
+        Err(bot_query_not_configured().into())
+    }
+
+    async fn search_bots(
+        &self,
+        _command: SearchBotsCommand,
+    ) -> Result<BotSearchResult, BotUseCaseError> {
         Err(bot_query_not_configured().into())
     }
 }

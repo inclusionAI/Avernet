@@ -8,7 +8,13 @@ from typing import Any, Protocol, runtime_checkable
 class RenderScreenServiceProtocol(Protocol):
     """Service API for render-screen CRUD."""
 
-    def list_render_screens(self, *, bot_id: str, owner_id: str) -> list[Any]: ...
+    def list_render_screens(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str | None = None,
+        current_user_id: str | None = None,
+    ) -> list[Any]: ...
 
     def create_render_screen(self, *args: Any, **kwargs: Any) -> Any: ...
 
@@ -17,3 +23,12 @@ class RenderScreenServiceProtocol(Protocol):
     def delete_render_screen(self, *, record_id: int) -> None: ...
 
     def get_render_screen(self, record_id: int) -> Any | None: ...
+
+    def authorize_render_screen_bot(self, *, bot_id: str, user_id: str) -> str: ...
+
+    def authorize_render_screen_record(
+        self,
+        *,
+        record_id: int,
+        user_id: str,
+    ) -> Any: ...

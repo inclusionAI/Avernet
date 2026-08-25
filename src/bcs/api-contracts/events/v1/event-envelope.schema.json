@@ -1,0 +1,566 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tag:inclusionai.com,2026:bcs:event-envelope:v1",
+  "title": "BCS Public Event Envelope V1",
+  "description": "Canonical externally visible BCS Event envelope. event_type is the discriminator for data.",
+  "type": "object",
+  "required": [
+    "spec_version",
+    "event_id",
+    "event_type",
+    "schema_version",
+    "source",
+    "occurred_at",
+    "recorded_at",
+    "subject",
+    "scope",
+    "stream",
+    "data"
+  ],
+  "properties": {
+    "spec_version": {
+      "const": "1.0"
+    },
+    "event_id": {
+      "$ref": "#/$defs/OpaqueId"
+    },
+    "event_type": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "source": {
+      "const": "bcs"
+    },
+    "occurred_at": {
+      "$ref": "#/$defs/Timestamp"
+    },
+    "recorded_at": {
+      "$ref": "#/$defs/Timestamp"
+    },
+    "subject": {
+      "$ref": "#/$defs/Subject"
+    },
+    "scope": {
+      "$ref": "#/$defs/Scope"
+    },
+    "stream": {
+      "$ref": "#/$defs/Stream"
+    },
+    "actor": {
+      "$ref": "#/$defs/Actor"
+    },
+    "correlation_id": {
+      "$ref": "#/$defs/OpaqueId"
+    },
+    "causation_event_id": {
+      "$ref": "#/$defs/OpaqueId"
+    },
+    "trace_id": {
+      "$ref": "#/$defs/OpaqueId"
+    },
+    "data": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true,
+  "discriminator": {
+    "propertyName": "event_type"
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/GroupCreatedEvent" },
+    { "$ref": "#/$defs/GroupParticipantAddedEvent" },
+    { "$ref": "#/$defs/GroupParticipantRemovedEvent" },
+    { "$ref": "#/$defs/SessionCreatedEvent" },
+    { "$ref": "#/$defs/SessionCompletedEvent" },
+    { "$ref": "#/$defs/SessionParticipantAddedEvent" },
+    { "$ref": "#/$defs/SessionParticipantRemovedEvent" },
+    { "$ref": "#/$defs/TaskAssignedEvent" },
+    { "$ref": "#/$defs/TaskCompletedEvent" },
+    { "$ref": "#/$defs/StateMachineRunCreatedEvent" },
+    { "$ref": "#/$defs/StateMachineRunStartedEvent" },
+    { "$ref": "#/$defs/StateMachineRunCompletedEvent" },
+    { "$ref": "#/$defs/StateMachineNodeStartedEvent" },
+    { "$ref": "#/$defs/StateMachineNodeCompletedEvent" },
+    { "$ref": "#/$defs/StateMachineNodeRetryScheduledEvent" },
+    { "$ref": "#/$defs/MessageCreatedEvent" }
+  ],
+  "$defs": {
+    "OpaqueId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "ShortString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "ReasonCode": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "maxLength": 128
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "NonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "PositiveSequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "ActorType": {
+      "type": "string",
+      "enum": ["human", "bot", "app", "system"]
+    },
+    "RunMode": {
+      "type": "string",
+      "enum": ["configured", "one_shot"]
+    },
+    "Subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "group",
+            "session",
+            "participant",
+            "task",
+            "state_machine.run",
+            "state_machine.node",
+            "message"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/OpaqueId"
+        }
+      }
+    },
+    "Scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "group_id": { "$ref": "#/$defs/OpaqueId" },
+        "session_id": { "$ref": "#/$defs/OpaqueId" },
+        "task_id": { "$ref": "#/$defs/OpaqueId" },
+        "run_id": { "$ref": "#/$defs/OpaqueId" }
+      }
+    },
+    "Stream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "sequence"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "sequence": {
+          "$ref": "#/$defs/PositiveSequence"
+        }
+      }
+    },
+    "Actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "$ref": "#/$defs/ActorType" },
+        "id": { "$ref": "#/$defs/OpaqueId" },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "ActorReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "$ref": "#/$defs/ActorType" },
+        "id": { "$ref": "#/$defs/OpaqueId" },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "ContentProjection": {
+      "$ref": "tag:inclusionai.com,2026:bcs:content-projection:v1"
+    },
+    "AttachmentSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file_id", "name", "media_type", "size_bytes", "status"],
+      "properties": {
+        "file_id": { "$ref": "#/$defs/OpaqueId" },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "size_bytes": { "$ref": "#/$defs/NonNegativeInteger" },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "ready", "failed"]
+        }
+      }
+    },
+
+    "GroupCreatedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "group.created" },
+        "data": { "$ref": "#/$defs/GroupCreatedData" }
+      }
+    },
+    "GroupParticipantAddedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "group.participant.added" },
+        "data": { "$ref": "#/$defs/GroupParticipantAddedData" }
+      }
+    },
+    "GroupParticipantRemovedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "group.participant.removed" },
+        "data": { "$ref": "#/$defs/GroupParticipantRemovedData" }
+      }
+    },
+    "SessionCreatedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "session.created" },
+        "data": { "$ref": "#/$defs/SessionCreatedData" }
+      }
+    },
+    "SessionCompletedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "session.completed" },
+        "data": { "$ref": "#/$defs/SessionCompletedData" }
+      }
+    },
+    "SessionParticipantAddedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "session.participant.added" },
+        "data": { "$ref": "#/$defs/SessionParticipantAddedData" }
+      }
+    },
+    "SessionParticipantRemovedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "session.participant.removed" },
+        "data": { "$ref": "#/$defs/SessionParticipantRemovedData" }
+      }
+    },
+    "TaskAssignedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "task.assigned" },
+        "data": { "$ref": "#/$defs/TaskAssignedData" }
+      }
+    },
+    "TaskCompletedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "task.completed" },
+        "data": { "$ref": "#/$defs/TaskCompletedData" }
+      }
+    },
+    "StateMachineRunCreatedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "state_machine.run.created" },
+        "data": { "$ref": "#/$defs/StateMachineRunCreatedData" }
+      }
+    },
+    "StateMachineRunStartedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "state_machine.run.started" },
+        "data": { "$ref": "#/$defs/StateMachineRunStartedData" }
+      }
+    },
+    "StateMachineRunCompletedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "state_machine.run.completed" },
+        "data": { "$ref": "#/$defs/StateMachineRunCompletedData" }
+      }
+    },
+    "StateMachineNodeStartedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "state_machine.node.started" },
+        "data": { "$ref": "#/$defs/StateMachineNodeStartedData" }
+      }
+    },
+    "StateMachineNodeCompletedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "state_machine.node.completed" },
+        "data": { "$ref": "#/$defs/StateMachineNodeCompletedData" }
+      }
+    },
+    "StateMachineNodeRetryScheduledEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "state_machine.node.retry_scheduled" },
+        "data": { "$ref": "#/$defs/StateMachineNodeRetryScheduledData" }
+      }
+    },
+    "MessageCreatedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "message.created" },
+        "data": { "$ref": "#/$defs/MessageCreatedData" }
+      }
+    },
+
+    "GroupCreatedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["group_kind", "strategy", "name", "status", "version"],
+      "properties": {
+        "group_kind": { "$ref": "#/$defs/ShortString" },
+        "strategy": { "$ref": "#/$defs/ShortString" },
+        "name": { "$ref": "#/$defs/ShortString" },
+        "status": { "$ref": "#/$defs/ShortString" },
+        "version": { "$ref": "#/$defs/NonNegativeInteger" }
+      }
+    },
+    "GroupParticipantAddedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor_id", "actor_type", "role", "mode", "group_version"],
+      "properties": {
+        "actor_id": { "$ref": "#/$defs/OpaqueId" },
+        "actor_type": { "$ref": "#/$defs/ActorType" },
+        "role": { "$ref": "#/$defs/ShortString" },
+        "mode": { "$ref": "#/$defs/ShortString" },
+        "group_version": { "$ref": "#/$defs/NonNegativeInteger" }
+      }
+    },
+    "GroupParticipantRemovedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor_id", "actor_type", "previous_role", "reason", "group_version"],
+      "properties": {
+        "actor_id": { "$ref": "#/$defs/OpaqueId" },
+        "actor_type": { "$ref": "#/$defs/ActorType" },
+        "previous_role": { "$ref": "#/$defs/ShortString" },
+        "reason": { "$ref": "#/$defs/ReasonCode" },
+        "group_version": { "$ref": "#/$defs/NonNegativeInteger" }
+      }
+    },
+    "SessionCreatedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_kind", "status", "initial"],
+      "properties": {
+        "session_kind": { "$ref": "#/$defs/ShortString" },
+        "status": { "$ref": "#/$defs/ShortString" },
+        "created_by": { "$ref": "#/$defs/OpaqueId" },
+        "initial": { "type": "boolean" }
+      }
+    },
+    "SessionCompletedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["completed_by", "reason", "summary"],
+      "properties": {
+        "completed_by": { "$ref": "#/$defs/OpaqueId" },
+        "reason": { "$ref": "#/$defs/ReasonCode" },
+        "summary": { "$ref": "#/$defs/ContentProjection" }
+      }
+    },
+    "SessionParticipantAddedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor_id", "actor_type", "role", "mode", "visible_from_seq"],
+      "properties": {
+        "actor_id": { "$ref": "#/$defs/OpaqueId" },
+        "actor_type": { "$ref": "#/$defs/ActorType" },
+        "role": { "$ref": "#/$defs/ShortString" },
+        "mode": { "$ref": "#/$defs/ShortString" },
+        "visible_from_seq": { "$ref": "#/$defs/NonNegativeInteger" }
+      }
+    },
+    "SessionParticipantRemovedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor_id", "actor_type", "previous_role", "reason"],
+      "properties": {
+        "actor_id": { "$ref": "#/$defs/OpaqueId" },
+        "actor_type": { "$ref": "#/$defs/ActorType" },
+        "previous_role": { "$ref": "#/$defs/ShortString" },
+        "reason": { "$ref": "#/$defs/ReasonCode" }
+      }
+    },
+    "TaskAssignedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "manager_id", "worker_id", "assignment"],
+      "properties": {
+        "task_id": { "$ref": "#/$defs/OpaqueId" },
+        "manager_id": { "$ref": "#/$defs/OpaqueId" },
+        "worker_id": { "$ref": "#/$defs/OpaqueId" },
+        "session_id": { "$ref": "#/$defs/OpaqueId" },
+        "assignment": { "$ref": "#/$defs/ContentProjection" }
+      }
+    },
+    "TaskCompletedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "manager_id", "worker_id", "result", "completed_at"],
+      "properties": {
+        "task_id": { "$ref": "#/$defs/OpaqueId" },
+        "manager_id": { "$ref": "#/$defs/OpaqueId" },
+        "worker_id": { "$ref": "#/$defs/OpaqueId" },
+        "session_id": { "$ref": "#/$defs/OpaqueId" },
+        "result": { "$ref": "#/$defs/ContentProjection" },
+        "completed_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "StateMachineRunCreatedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["definition_id", "definition_version", "run_mode", "status"],
+      "properties": {
+        "definition_id": { "$ref": "#/$defs/OpaqueId" },
+        "definition_version": { "$ref": "#/$defs/NonNegativeInteger" },
+        "run_mode": { "$ref": "#/$defs/RunMode" },
+        "status": { "const": "running" }
+      }
+    },
+    "StateMachineRunStartedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_mode", "started_at", "input"],
+      "properties": {
+        "run_mode": { "$ref": "#/$defs/RunMode" },
+        "started_at": { "$ref": "#/$defs/Timestamp" },
+        "input": { "$ref": "#/$defs/ContentProjection" }
+      }
+    },
+    "StateMachineRunCompletedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["completed_at", "output", "duration_ms"],
+      "properties": {
+        "completed_at": { "$ref": "#/$defs/Timestamp" },
+        "output": { "$ref": "#/$defs/ContentProjection" },
+        "duration_ms": { "$ref": "#/$defs/NonNegativeInteger" }
+      }
+    },
+    "StateMachineNodeStartedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "node_id", "attempt", "started_at"],
+      "properties": {
+        "run_id": { "$ref": "#/$defs/OpaqueId" },
+        "node_id": { "$ref": "#/$defs/OpaqueId" },
+        "attempt": { "$ref": "#/$defs/NonNegativeInteger" },
+        "predecessor_node_ids": {
+          "type": "array",
+          "description": "All direct predecessor node IDs in the run definition. Empty for an initial node. Events recorded before this field was introduced may omit it.",
+          "items": { "$ref": "#/$defs/OpaqueId" },
+          "uniqueItems": true
+        },
+        "assignee_id": { "$ref": "#/$defs/OpaqueId" },
+        "started_at": { "$ref": "#/$defs/Timestamp" },
+        "timeout_deadline": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "StateMachineNodeCompletedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "node_id", "attempt", "outcome", "output", "completed_at", "duration_ms"],
+      "properties": {
+        "run_id": { "$ref": "#/$defs/OpaqueId" },
+        "node_id": { "$ref": "#/$defs/OpaqueId" },
+        "attempt": { "$ref": "#/$defs/NonNegativeInteger" },
+        "outcome": { "$ref": "#/$defs/ShortString" },
+        "output": { "$ref": "#/$defs/ContentProjection" },
+        "completed_at": { "$ref": "#/$defs/Timestamp" },
+        "duration_ms": { "$ref": "#/$defs/NonNegativeInteger" }
+      }
+    },
+    "StateMachineNodeRetryScheduledData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "node_id", "attempt", "next_attempt", "max_attempts", "retry_at", "reason"],
+      "properties": {
+        "run_id": { "$ref": "#/$defs/OpaqueId" },
+        "node_id": { "$ref": "#/$defs/OpaqueId" },
+        "attempt": { "$ref": "#/$defs/NonNegativeInteger" },
+        "next_attempt": { "$ref": "#/$defs/NonNegativeInteger" },
+        "max_attempts": { "$ref": "#/$defs/NonNegativeInteger" },
+        "retry_at": { "$ref": "#/$defs/Timestamp" },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        }
+      }
+    },
+    "MessageCreatedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logical_message_id", "message_type", "sender", "content", "attachments"],
+      "properties": {
+        "logical_message_id": { "$ref": "#/$defs/OpaqueId" },
+        "message_type": {
+          "type": "string",
+          "const": "chat"
+        },
+        "sender": { "$ref": "#/$defs/ActorReference" },
+        "run_id": { "$ref": "#/$defs/OpaqueId" },
+        "task_id": { "$ref": "#/$defs/OpaqueId" },
+        "content": { "$ref": "#/$defs/ContentProjection" },
+        "attachments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AttachmentSummary" }
+        }
+      }
+    }
+  }
+}

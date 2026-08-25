@@ -1,20 +1,12 @@
 from dependency_injector import containers, providers
 
 from secbaas.community.api.publish_manage import PublishService
-from secbaas.community.core.database import db_manager as _db_manager
+from secbaas.community.core.service.device_manage import (
+    ArcaScheduleAwareDeviceService,
+)
 from secbaas.community.core.service.paas import DeviceCallbackHandler
 from secbaas.community.core.service.paas.desktop import ConnectionManager
 from secbaas.community.logger import get_logger
-
-# ── Enterprise-only optional imports ─────────────────────────────────────
-try:
-    from secbaas.enterprise.core.arca_ttl_renewal import (
-        TtlRenewalScheduleRepository,
-    )
-
-    _HAS_ENTERPRISE_RENEWAL = True
-except ImportError:
-    _HAS_ENTERPRISE_RENEWAL = False
 
 from ._configs import ConfigError, ConfigKey, DatabaseConfig, _read_config
 from ._core_repository import CoreRepositoryContainer
@@ -137,11 +129,23 @@ def _select_renewal_task(engine, legacy_task, deadline_task):
 
     Per D-04: if/else branch (not Plugin Selector).  When engine="legacy"
     (the default), DeviceTtlTimerTask is registered as before.  When
-    engine="deadline", DeadlineRenewalScheduler replaces it in the cron list.
+    engine="deadline", the deadline task provider (default: the
+    ``deadline_renewal_task`` provider; registry resolution was removed
+    with the task_registry in 05.2-07) replaces it in the cron list.
+
+    None defense: an engine="deadline" configuration whose deadline task
+    provider resolves to None falls back to legacy with a warning instead
+    of mounting None into the AppScheduler.
 
     Phase 7 cleanup will delete this function and the legacy branch.
     """
     if engine == "deadline":
+        if deadline_task is None:
+            logger.warning(
+                "renewal_scheduler.engine='deadline' but no deadline task "
+                "registered — falling back to legacy"
+            )
+            return legacy_task
         return deadline_task
     return legacy_task
 
@@ -161,13 +165,6 @@ class ApplicationContainer(containers.DeclarativeContainer):
         config=config,
         connection_management=connection_management,
         ws_relay_session_repository=repository.ws_relay_session_repository,
-    )
-
-    # ── Shared enterprise repository (used by both services and tasks) ──
-    ttl_renewal_schedule_repo = (
-        providers.Singleton(TtlRenewalScheduleRepository, database=_db_manager)
-        if _HAS_ENTERPRISE_RENEWAL
-        else providers.Object(None)
     )
 
     services = providers.Container(
@@ -200,6 +197,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         local_user_machine_repo=repository.local_user_machine_repository,
         bot_run_repository=repository.bot_run_repository,
         bot_run_queue_repository=repository.bot_run_queue_repository,
+        bot_run_interaction_repository=repository.bot_run_interaction_repository,
         bot_run_queue_chunk_repository=repository.bot_run_queue_chunk_repository,
         bot_qpm_repository=repository.bot_qpm_repository,
         distributed_lock_repository=repository.distributed_lock_repository,
@@ -212,7 +210,9 @@ class ApplicationContainer(containers.DeclarativeContainer):
             DeviceCallbackHandler,
             publish_service_factory=_lazy_publish_service,
         ),
-        ttl_renewal_schedule_repository=ttl_renewal_schedule_repo,
+eval_binding_resolver=plugins.eval_binding_resolver,
+        eval_consistency_check=plugins.eval_consistency_check,
+        eval_session_log=plugins.eval_session_log,
     )
 
     tasks = providers.Container(
@@ -225,7 +225,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ticket_repository=repository.ticket_repository,
         paas_service_facade=services.paas_facade,
         file_transfer_backend=services.file_transfer_backend,
-        ttl_renewal_schedule_repository=ttl_renewal_schedule_repo,
+        arca_ttl_schedule_repository=repository.arca_ttl_schedule_repository,
     )
 
     cron_lifecycle = providers.Singleton(
@@ -236,7 +236,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
                 _select_renewal_task,
                 config.renewal_scheduler.engine,
                 tasks.device_ttl_timer_task,
-                tasks.deadline_renewal_scheduler,
+                tasks.deadline_renewal_task,
             ),
             tasks.bot_run_recovery_task,
             tasks.file_transfer_poller_task,
@@ -359,11 +359,27 @@ def _log_config_summary(container: containers.DeclarativeContainer) -> None:
     logger.info("Container config:\n%s", formatted)
 
 
-def _inject_enterprise_plugins(container: ApplicationContainer) -> None:
-    """Inject enterprise plugin options into a container instance's Selectors.
+def _apply_enterprise_plugins(container: ApplicationContainer) -> None:
+    """Inject enterprise plugin options and apply engine-driven overlays.
 
     Runs at instance level (not class level) so that only this container
-    is affected.  Called after every container creation.
+    is affected.  Called after every container creation, before
+    ``initialize_services`` resolves providers — never after.
+
+    Part 1 — plugin injection: the ``plugin_registry`` path
+    (``has_enterprise_plugins`` + ``inject_into_plugin_container``)
+    serves ALL residual enterprise plugins (arca_sdk sandbox, ZDAS_ORM,
+    real cache/secret/auth/file_transfer, poolab/teclaw).  It must stay;
+    removing it broke enterprise DI with ``Selector has no "arca_sdk"
+    provider`` (Pitfall 3).
+
+    Part 2 — engine-switch device-service overlay (D-08'): when
+    ``config.renewal_scheduler.engine == "deadline"``, ``device_service``
+    is overridden with the schedule-aware wrapper (Singleton, five parent
+    dependencies + schedule_repo, same parameter group as the former
+    enterprise factory).  Under the legacy engine the native
+    ``DefaultDeviceService`` runs and the cold table is never written.
+    This is the ONLY config-driven switch point (Rule 14).
     """
     try:
         from secbaas.community.plugin_registry import (
@@ -375,3 +391,31 @@ def _inject_enterprise_plugins(container: ApplicationContainer) -> None:
             inject_into_plugin_container(container)
     except ImportError:
         pass
+
+    # Singleton, not Factory: every consumer baked with the device_service
+    # provider reference (publish_service, router Provide chains) must
+    # resolve the SAME wrapped instance. A Factory here would construct a
+    # fresh wrapper per resolution call and break consumer identity.
+    if container.config.renewal_scheduler.engine() == "deadline":
+        container.services().override_providers(
+            device_service=providers.Singleton(
+                ArcaScheduleAwareDeviceService,
+                schedule_repo=container.repository().arca_ttl_schedule_repository(),
+                # WR-02: the wrapper's register lead window must follow the
+                # same config-driven rule as the scheduler (half of the
+                # arca TTL period), not a hardcoded 12h — otherwise a
+                # reconfigured arca.default_ttl_minutes would diverge the
+                # lifecycle writes from scheduler/discovery writes until
+                # the next self-healing pass. Same int coercion as
+                # _core_tasks (WR-03: no ArcaConfigSchema).
+                default_ttl_minutes=providers.Callable(
+                    lambda v: int(v) if v else 1440,
+                    container.config.arca.default_ttl_minutes,
+                ),
+                paas_facade=container.services().paas_facade(),
+                repository=container.repository().device_repository(),
+                device_template_service=container.services().device_template_service(),
+                secret_plugin=container.plugins().secret_plugin(),
+                callback_handler=container.services().device_callback_handler(),
+            )
+        )

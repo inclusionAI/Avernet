@@ -29,10 +29,13 @@ def _cb(loop_task_id: str, workflow_type: str, *, success: bool, data: Any = Non
         result["gaps"] = gaps
     if exec_error is not None:
         result["exec_error"] = exec_error
-    return TaskCallbackData(
-        loop_task_id=loop_task_id, workflow_type=workflow_type,
-        workflow_id=0, instance_id=0, result=result,
-    )
+    return TaskCallbackData(data={
+        "loop_task_id": loop_task_id,
+        "workflow_type": workflow_type,
+        "workflow_id": 0,
+        "instance_id": 0,
+        "result": result,
+    })
 
 
 def _parse_acceptance(content: Any) -> tuple[bool, list[str], Any]:

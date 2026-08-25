@@ -25,13 +25,13 @@ def _data(loop_task_id: str = "t1::c1", *, success: bool = True, data=None, fail
         result["data"] = data
     if fail_detail is not None:
         result["fail_detail"] = fail_detail
-    return TaskCallbackData(
-        loop_task_id=loop_task_id,
-        workflow_type=workflow_type,
-        workflow_id=1,
-        instance_id=10,
-        result=result,
-    )
+    return TaskCallbackData(data={
+        "loop_task_id": loop_task_id,
+        "workflow_type": workflow_type,
+        "workflow_id": 1,
+        "instance_id": 10,
+        "result": result,
+    })
 
 
 def _run(coro):
@@ -109,14 +109,14 @@ class TestAdapt:
     def test_adapt_folds_ext_info_into_extend_props(self):
         adapter = CallbackAdapter()
         d = _data(success=True, data="ok")
-        d.result["_ext_info"] = {"k": "v"}
+        d.data["result"]["_ext_info"] = {"k": "v"}
         patch = adapter.adapt(d)
         assert patch.extend_props_patch == {"k": "v"}
 
     def test_adapt_merges_ext_info_and_fail_detail(self):
         adapter = CallbackAdapter()
         d = _data(success=False, fail_detail="gap1")
-        d.result["_ext_info"] = {"k": "v"}
+        d.data["result"]["_ext_info"] = {"k": "v"}
         patch = adapter.adapt(d)
         assert patch.extend_props_patch == {"k": "v", "fail_detail": "gap1"}
 
@@ -127,7 +127,7 @@ class TestAdaptStart:
         from agentclaw.community.core.task.domain.models import Status
         adapter = CallbackAdapter()
         d = _data(loop_task_id="t1::c1")
-        d.result["_ext_info"] = {"k": "v"}
+        d.data["result"]["_ext_info"] = {"k": "v"}
         patch = adapter.adapt_start(d)
         assert (patch.task_id, patch.node_id) == ("t1", "c1")
         assert patch.status == Status.RUNNING
@@ -169,6 +169,125 @@ class TestTaskLoopCallback:
         assert (p.task_id, p.node_id) == ("t1", "c1")
         assert p.status == Status.RUNNING
         assert p.acceptance_result is None   # start 不带 acceptance
+
+
+class TestPersist:
+    """回投落库:data 为 dict → 解析字段 upsert task_callback;非 dict / 无 repo → 不落。"""
+
+    class _FakeRepo:
+        def __init__(self):
+            self.calls = []
+
+        def upsert(self, rec):
+            self.calls.append(rec)
+            return rec
+
+    def test_persist_dict_upserts_with_parsed_fields(self):
+        repo = self._FakeRepo()
+        cb = TaskLoopCallback(CallbackAdapter(), RecordingEngine(), callback_repo=repo)
+        _run(cb.report_result(_data(loop_task_id="t1::c1", success=True, data="done")))
+        assert len(repo.calls) == 1
+        rec = repo.calls[0]
+        assert rec.run_id == "t1" and rec.node_id == "c1"
+        assert rec.result_success is True
+        assert rec.exec_error is None
+        # 无 workflow_source/instance_in data → NOT NULL 列退 ""(空保持空)
+        assert rec.invoker == ""
+        assert rec.main_session_id == ""
+        assert rec.orig_callback_data  # payload 的 JSON
+
+    def test_persist_maps_source_and_instance(self):
+        repo = self._FakeRepo()
+        cb = TaskLoopCallback(CallbackAdapter(), RecordingEngine(), callback_repo=repo)
+        _run(cb.report_result(TaskCallbackData(data={
+            "loop_task_id": "t::n", "workflow_source": "bcn",
+            "workflow_instance_id": "i9", "result": {"success": False, "exec_error": "boom"},
+        })))
+        rec = repo.calls[0]
+        assert rec.invoker == "bcn"
+        assert rec.main_session_id == "i9"
+        assert rec.result_success is False
+        assert rec.exec_error == "boom"
+
+    def test_persist_skipped_when_data_not_dict(self):
+        repo = self._FakeRepo()
+        cb = TaskLoopCallback(CallbackAdapter(), RecordingEngine(), callback_repo=repo)
+        _run(cb.report_result(TaskCallbackData(data="not-a-dict")))
+        assert repo.calls == []  # 非 dict 不落库
+
+    def test_persist_skipped_when_no_repo(self):
+        cb = TaskLoopCallback(CallbackAdapter(), RecordingEngine())  # callback_repo=None
+        _run(cb.report_result(_data(loop_task_id="t1::c1", success=True)))  # 不抛、推进引擎
+
+    def test_persist_claw_mind_maps_to_table_fields(self):
+        # ClawMind HttpCallbackPayload → task_callback 记录(字段对齐 task_callback 列)+ 落库
+        from agentclaw.community.adapters.http.task.translator import translate_claw_mind
+        import json as _json
+        raw = {
+            "workflow_id": "wf-1", "flow_id": "fl-1", "status": "node_succeeded",
+            "ext_info": {"flow_runs": {"status": "succeeded", "origin_session_id": "S-9"},
+                         "node_executions": [{"node_id": "N1", "status": "succeeded",
+                                               "output_json": {"answer": 42}, "error_text": None}]},
+        }
+        repo = self._FakeRepo()
+        engine = RecordingEngine()
+        cb = TaskLoopCallback(CallbackAdapter(), engine, callback_repo=repo)
+        _run(cb.ingest(translate_claw_mind(raw, "result").data))   # 只落库,不推进引擎
+        assert len(repo.calls) == 1
+        assert engine.reports == [] and engine.starts == []         # ingest 不推进编排核
+        rec = repo.calls[0]
+        assert rec.invoker == "claw_mind"
+        assert rec.run_id == "fl-1" and rec.node_id == ""          # loop_task_id = flow_id(run 实例,对齐 BCN)
+        assert rec.main_session_id == "S-9"                        # origin_session_id
+        assert rec.status == "succeeded"                           # 底层 flow_runs.status
+        assert rec.result_success is True
+        assert rec.exec_error is None
+        assert rec.result == {"success": True, "data": {"answer": 42}}
+        assert rec.execution_graph == raw["ext_info"]              # 全量 ext_info 快照
+        assert rec.extend_props is None                            # claw_mind 无额外扩展
+        assert _json.loads(rec.orig_callback_data) == raw          # 原始 body
+
+    def test_persist_bcn_maps_to_table_fields(self):
+        # BCN CloudEvent → task_callback 记录(字段对齐)+ 落库
+        from agentclaw.community.adapters.http.task.translator import translate_bcn
+        import json as _json
+        raw = {
+            "spec_version": "1.0", "event_id": "evt-1",
+            "event_type": "state_machine.node.completed", "source": "bcs",
+            "scope": {"group_id": "g1", "session_id": "s-1", "run_id": "run-1"},
+            "stream": {"key": "state-machine-run:run-1", "sequence": 6},
+            "actor": {"type": "bot", "id": "b1"},
+            "data": {"run_id": "run-1", "node_id": "N1", "attempt": 1,
+                     "outcome": "success", "output": {"answer": 7}},
+        }
+        repo = self._FakeRepo()
+        engine = RecordingEngine()
+        cb = TaskLoopCallback(CallbackAdapter(), engine, callback_repo=repo)
+        _run(cb.ingest(translate_bcn(raw).data))                    # 只落库,不推进引擎
+        assert len(repo.calls) == 1
+        assert engine.reports == [] and engine.starts == []         # ingest 不推进编排核
+        rec = repo.calls[0]
+        assert rec.invoker == "bcn"
+        assert rec.run_id == "run-1" and rec.node_id == "N1"
+        assert rec.main_session_id == "s-1"                       # scope.session_id
+        assert rec.status == "state_machine.node.completed"       # event_type
+        assert rec.result_success is True
+        assert rec.result == {"success": True, "data": {"answer": 7}}
+        assert rec.execution_graph == raw["data"]                 # 事件体
+        assert rec.extend_props is None
+        assert _json.loads(rec.orig_callback_data) == raw         # 原始 event
+
+    def test_persist_does_not_block_engine_on_repo_failure(self):
+        class _BrokenRepo:
+            def upsert(self, rec):
+                raise RuntimeError("db down")
+        cb = TaskLoopCallback(CallbackAdapter(), RecordingEngine(), callback_repo=_BrokenRepo())
+        engine = RecordingEngine()
+        cb2 = TaskLoopCallback(CallbackAdapter(), engine, callback_repo=_BrokenRepo())
+        _run(cb2.report_result(_data(loop_task_id="t1::c1", success=True, data="done")))
+        # 落库失败不阻断推进
+        assert len(engine.reports) == 1
+        assert (engine.reports[0].task_id, engine.reports[0].node_id) == ("t1", "c1")
 
 
 class TestZeroCase:

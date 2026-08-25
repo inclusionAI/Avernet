@@ -1,13 +1,17 @@
 # `agentclaw.community.core.bot_management`
 
-Bot lifecycle, repository, engine resolution, render-screen models, and skill-set switching.
+Bot lifecycle, creation policy, repository, engine resolution, render-screen models, and skill-set switching.
 
 ## Context Boundary
 
 ```yaml
-purpose: "Bot lifecycle, repository, engine resolution, render-screen models, and skill-set switching."
+purpose: "Bot lifecycle, creation policy, repository, engine resolution, render-screen models, and skill-set switching."
 provides:
   - "BotService"
+  - "BotCreateContext"
+  - "BotCreateDeploymentMode"
+  - "PreparedBotCreate"
+  - "prepare_bot_create"
   - "BotRepository protocol + impl"
   - "EngineResolver"
   - "DataInitService"
@@ -28,6 +32,7 @@ consumes:
   - "TaskQueueService"
   - "HandlerRegistry"
   - "CommonConfigService"
+  - "BotSpaceAccessProtocol (implemented by the Spaces context)"
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
@@ -49,6 +54,9 @@ internal_dependencies:
   - agentclaw.community.core.events
   - agentclaw.community.core.resources
   - agentclaw.community.core.service_bot
+  - agentclaw.community.core.bot_management.bot_space    # narrow cross-context Space membership contract
+  - agentclaw.community.core.spaces.errors    # typed Space membership failures propagated by Bot Space assignment
+  - agentclaw.community.core.spaces.models    # SpaceRecord/SpaceType used by Bot Space assignment
   - agentclaw.community.core.skill_center
   - agentclaw.community.core.task_queue
   - agentclaw.community.core.workspace

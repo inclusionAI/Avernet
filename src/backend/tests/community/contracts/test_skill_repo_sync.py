@@ -63,3 +63,15 @@ def test_local_skills_root_is_under_home(world) -> None:
     # Local impl returns ~/.openclaw/workspace/skills — fingerprint.
     assert ".openclaw" in str(root)
     assert root.name == "skills"
+
+
+def test_local_scan_target_prefers_host_repo_source(
+    world, tmp_path, monkeypatch
+) -> None:
+    plugin = world.get(SkillRepoSyncPlugin)
+    repo_dir = tmp_path / "skills-repo"
+    repo_dir.mkdir()
+    fallback = tmp_path / "engine-view-fallback"
+    monkeypatch.setattr(plugin, "get_local_skills_root", lambda: tmp_path)
+
+    assert plugin.get_scan_target(fallback) == repo_dir

@@ -100,8 +100,10 @@ class PoolSkillMappingIntent:
     """Path-agnostic mapping resolved by the active Engine implementation."""
 
     corpus: str
-    relative_path: str
+    relative_path: str | None
     link_name: str
+    skill_uuid: str | None = None
+    sc_version_number: str | None = None
 
 
 @dataclass
