@@ -74,6 +74,7 @@ _PROVIDER_METHODS = (
     "ecb",
     "gateway",
     "baas",
+    "deploy_runtime",
     "workspace_hosting",
     "skill_scan",
     "masa_agent_eval",

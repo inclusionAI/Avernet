@@ -98,6 +98,16 @@ from agentclaw.community.core.repository.protocols.skills_pool import SkillsPool
 from agentclaw.community.core.service_bot.services.deploy.external_compose_producer import (
     ExternalComposeProducer,
 )
+from agentclaw.community.core.service_bot.services.deploy.ack_composer import (
+    AckDeployConfigComposer,
+)
+from agentclaw.community.core.service_bot.services.deploy.deploy_config_composer import (
+    DeployConfigComposer,
+)
+from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
+    ManagedDeployConfigComposer,
+)
+from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.core.service_bot.services.deploy.producer import (
     DeployArtifactProducerRouter,
 )
@@ -185,9 +195,50 @@ class ServiceBotModule(Module):
     @singleton
     @provider
     @inject
+    def deploy_config_composer(
+        self,
+        deploy_runtime: cfg.DeployRuntimeConfig,
+        bot_repo: BotRepository,
+        sandbox_registry: EngineSandboxRegistry,
+    ) -> DeployConfigComposer:
+        """Select the composer for the container this deployment runs.
+
+        Rule 14: the choice is config, made once here, never branched on
+        downstream. The value is already validated against
+        :class:`DeployRuntime` by ``ConfigModule.deploy_runtime``, so this is a
+        total mapping over the enum — a member added there without a composer
+        here is a ``ValueError`` at wiring time rather than a silent default.
+        """
+        from agentclaw.community.core.storage import path as storage_path
+
+        composer: DeployConfigComposer
+        match deploy_runtime.runtime:
+            case DeployRuntime.MANAGED:
+                composer = ManagedDeployConfigComposer(
+                    storage_path=storage_path,
+                    sandbox_registry=sandbox_registry,
+                    bot_repo=bot_repo,
+                )
+            case DeployRuntime.ACK:
+                composer = AckDeployConfigComposer()
+            case unhandled:
+                raise ValueError(
+                    f"no DeployConfigComposer wired for deploy runtime "
+                    f"{unhandled!r}"
+                )
+
+        logger.info(
+            "[NEW-ARCH] DeployConfigComposer selected: %s", composer.name
+        )
+        return composer
+
+    @singleton
+    @provider
+    @inject
     def baas_service(
         self,
         baas: cfg.BaasConfig,
+        deploy_composer: DeployConfigComposer,
         bot_repo: BotRepository,
         bot_publish_repo: BotPublishRepositoryProtocol,
         system_config_service: SystemConfigService,
@@ -220,6 +271,7 @@ class ServiceBotModule(Module):
             baas_api_base=api_base,
             tenant=baas.tenant,
             template_uuid=baas.template_uuid,
+            deploy_composer=deploy_composer,
             bot_repo=bot_repo,
             bot_publish_repo=bot_publish_repo,
             system_config_service=system_config_service,
@@ -238,11 +290,12 @@ class ServiceBotModule(Module):
         )
         logger.info(
             "[NEW-ARCH] BaasService initialized: api_base=%s, tenant=%s, template_uuid=%s, "
-            "personal_bot_template_uuid=%s",
+            "personal_bot_template_uuid=%s, deploy_runtime=%s",
             api_base,
             baas.tenant,
             baas.template_uuid,
             baas.personal_bot_template_uuid,
+            deploy_composer.name,
         )
         return service
 
