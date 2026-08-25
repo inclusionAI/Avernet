@@ -290,6 +290,14 @@ class _ConverterFactory:
         return DefaultStreamConverter()
 
 
+class _FailingLogBackend:
+    def info(self, *_args, **_kwargs) -> None:
+        raise RuntimeError("log backend boom")
+
+    def exception(self, *_args, **_kwargs) -> None:
+        raise RuntimeError("log backend boom")
+
+
 def test_bcn_logging_converter_has_distinct_name() -> None:
     converter = _BcnLoggingStreamConverter(DefaultStreamConverter())
 
@@ -483,6 +491,51 @@ async def test_stream_dispatch_log_serialization_cannot_abort_conversion():
     assert len(items) == 1
     assert items[0].startswith("id: 1\nevent: chat\n")
     assert "hello" in items[0]
+
+
+@pytest.mark.asyncio
+async def test_stream_dispatch_log_backend_failure_cannot_abort_conversion(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "secbaas.community.adapters.web.routers.bcn_downlink.bcn_router.bcn_converter_logger",
+        _FailingLogBackend(),
+    )
+
+    response = await _dispatch_chat_send_stream(
+        _chat_send_request(),
+        _StreamService(),
+        _ConverterFactory(),
+    )
+
+    items = [item async for item in response.body_iterator]
+
+    assert len(items) == 1
+    assert items[0].startswith("id: 1\nevent: chat\n")
+
+
+def test_converter_preserves_delegate_error_when_exception_logging_fails(
+    monkeypatch,
+) -> None:
+    class _FailingConverter:
+        @staticmethod
+        def name() -> str:
+            return "failing"
+
+        def convert(self, _chunk, *, run_id: str):
+            raise ValueError(f"convert boom: {run_id}")
+
+    monkeypatch.setattr(
+        "secbaas.community.adapters.web.routers.bcn_downlink.bcn_router.bcn_converter_logger",
+        _FailingLogBackend(),
+    )
+    converter = _BcnLoggingStreamConverter(_FailingConverter())
+
+    with pytest.raises(ValueError, match="convert boom: run-1"):
+        converter.convert(
+            StreamChunk(type="delta", content="hello"),
+            run_id="run-1",
+        )
 
 
 @pytest.mark.asyncio

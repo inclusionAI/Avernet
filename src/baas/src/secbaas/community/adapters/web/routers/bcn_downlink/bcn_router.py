@@ -24,6 +24,7 @@ import json
 import os
 import uuid
 from collections.abc import AsyncIterator, Callable
+from contextlib import suppress
 from typing import Any
 
 from dependency_injector.wiring import Provide, inject
@@ -135,24 +136,26 @@ class _BcnLoggingStreamConverter:
         try:
             event = self._delegate.convert(chunk, run_id=run_id)
         except Exception as exc:
-            bcn_converter_logger.exception(
+            with suppress(Exception):
+                bcn_converter_logger.exception(
+                    "[convert] source=bcn_downlink run_id=%s input=%s output=%s",
+                    run_id,
+                    raw_input,
+                    _log_json(
+                        {
+                            "error_type": type(exc).__name__,
+                            "error_message": _safe_log_string(exc),
+                        }
+                    ),
+                )
+            raise
+        with suppress(Exception):
+            bcn_converter_logger.info(
                 "[convert] source=bcn_downlink run_id=%s input=%s output=%s",
                 run_id,
                 raw_input,
-                _log_json(
-                    {
-                        "error_type": type(exc).__name__,
-                        "error_message": _safe_log_string(exc),
-                    }
-                ),
+                _log_json(_event_log_payload(event)),
             )
-            raise
-        bcn_converter_logger.info(
-            "[convert] source=bcn_downlink run_id=%s input=%s output=%s",
-            run_id,
-            raw_input,
-            _log_json(_event_log_payload(event)),
-        )
         return event
 
 
