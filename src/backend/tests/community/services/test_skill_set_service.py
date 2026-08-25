@@ -5,6 +5,34 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+
+class _InstallationReader:
+    """Reader fake answering from the same Installation seed the tests set."""
+
+    def __init__(self, skill_repo) -> None:
+        self._skill_repo = skill_repo
+
+    def active_skill_assets(self, *, bot_id, owner_id, bot=None):
+        from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+
+        return tuple(
+            RegisteredSkillAsset(
+                skill_id=int(row["id"]),
+                name=str(row["name"]),
+                git_path=str(row.get("git_path") or ""),
+                skill_uuid=row.get("skill_uuid"),
+                sc_version_number=(
+                    str(row["sc_version_number"])
+                    if row.get("sc_version_number") is not None
+                    else None
+                ),
+            )
+            for row in self._skill_repo.list_bot_installed_skills(
+                env="dev", owner_id=owner_id, bot_id=bot_id
+            )
+        )
+
+
 class TestGetSymlinkMappings:
     """Tests for get_symlink_mappings method."""
 
@@ -35,7 +63,9 @@ class TestGetSymlinkMappings:
             local_dir=tmp_path / "skills-local",
             bot_repo=MagicMock(),
             path_factory=MagicMock(),
+            reader=_InstallationReader(mock_skill_repo),
         )
+        mock_skill_repo.list_bot_installed_skills.return_value = []
         return service
 
     def _skills_dir(self, service):
@@ -54,7 +84,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Test Skill Set", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "cct-zbb-instraction-query",
@@ -93,7 +123,7 @@ class TestGetSymlinkMappings:
         )
 
     def test_pool_locator_is_used_as_mapping_source_without_legacy_rewrite(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         pool_source = (
             "/home/admin/.openclaw/workspace/skills-pool/skills-local/handmade"
@@ -101,7 +131,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Pool", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "handmade",
@@ -118,7 +148,7 @@ class TestGetSymlinkMappings:
         assert mappings[0].target.endswith("/openclaw/workspace/skills/handmade")
 
     def test_cutover_finalizing_rewrites_legacy_locator_to_pool_source(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         pool_local = (
             "/home/admin/.openclaw/workspace/skills-pool/skills-local"
@@ -133,7 +163,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Pool cutover", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "handmade",
@@ -159,7 +189,7 @@ class TestGetSymlinkMappings:
         )
 
     def test_claude_pool_locators_drive_restart_mappings(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         pool_local = (
             "/home/admin/.claude_code/workspace/skills-pool/skills-local/handmade"
@@ -174,7 +204,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Claude Pool", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "handmade",
@@ -204,7 +234,7 @@ class TestGetSymlinkMappings:
         ]
 
     def test_aicoding_pool_locators_drive_restart_mappings(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         pool_local = (
             "/home/admin/.aicoding/workspace/skills-pool/skills-local/handmade"
@@ -219,7 +249,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "AICoding Pool", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "handmade",
@@ -249,7 +279,7 @@ class TestGetSymlinkMappings:
         ]
 
     def test_hermes_pool_locators_drive_restart_mappings(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         pool_local = (
             "/home/admin/.hermes/workspace/skills-pool/skills-local/handmade"
@@ -264,7 +294,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Hermes Pool", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "handmade",
@@ -349,12 +379,12 @@ class TestGetSymlinkMappings:
         ]
 
     def test_direct_activation_deduplicates_existing_identical_mapping(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Active", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "same",
@@ -369,12 +399,12 @@ class TestGetSymlinkMappings:
         assert len(mappings) == 1
 
     def test_direct_activation_rejects_runtime_target_collision(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Active", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "same",
@@ -388,7 +418,7 @@ class TestGetSymlinkMappings:
             )
 
     def test_pool_active_repo_only_skill_uses_canonical_pool_source(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         skill_set_service.entity_id = "100015"
         skill_set_service.engine_type = "openclaw"
@@ -400,7 +430,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Pool", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "2",
                 "name": "repo-skill",
@@ -432,7 +462,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Test Skill Set", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {"id": "1", "name": "my-local-skill", "git_path": "local://my-local-skill"}
         ]
         symlinks = skill_set_service.get_symlink_mappings(
@@ -449,7 +479,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Test Skill Set", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "query-user-trade-record-list",
@@ -472,7 +502,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Test Skill Set", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "skill-name",
