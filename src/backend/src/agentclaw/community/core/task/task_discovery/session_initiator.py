@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from typing import Any, Protocol
 
 import httpx
@@ -25,52 +24,14 @@ from agentclaw.community.core.task.task_discovery.models import (
     DiscoverySession,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.utils.env_utils import is_local_mode
 
 logger = get_logger()
-
-#: fallback 地址 — 仅在环境变量和 singlebox 探测都失败时使用
-_DEFAULT_BACKEND_URL = "http://localhost:8888"
-_DEFAULT_FRONTEND_URL = "http://localhost:8000"
 
 #: WebSocket 协议常量
 _WS_PROTOCOL = 3
 _WS_HANDSHAKE_TIMEOUT = 10.0
 _WS_SEND_TIMEOUT = 10.0
 _WS_REPLY_TIMEOUT = 60.0  # 仅 wait_for_reply=True 时使用
-
-
-def _resolve_frontend_url() -> str:
-    """环境感知地解析前端 workbench URL。
-
-    优先级：
-      1. ``FRONTEND_URL`` 环境变量（pre/prod 由部署平台注入）
-      2. local 模式（``DEPLOY_PROFILE`` 为 test/singlebox/corp_test）
-         → ``SINGLEBOX_FRONTEND_URL`` 环境变量（默认 localhost:8000）
-      3. fallback ``localhost:8000``
-    """
-    url = os.environ.get("FRONTEND_URL")
-    if url:
-        return url
-    if is_local_mode():
-        return os.environ.get("SINGLEBOX_FRONTEND_URL", _DEFAULT_FRONTEND_URL)
-    return _DEFAULT_FRONTEND_URL
-
-
-def _resolve_backend_url() -> str:
-    """环境感知地解析 backend 自身 URL。
-
-    优先级：
-      1. ``BACKEND_URL`` 环境变量（pre/prod 由部署平台注入）
-      2. local 模式 → ``SINGLEBOX_BACKEND_URL`` 环境变量（默认 localhost:8888）
-      3. fallback ``localhost:8888``
-    """
-    url = os.environ.get("BACKEND_URL")
-    if url:
-        return url
-    if is_local_mode():
-        return os.environ.get("SINGLEBOX_BACKEND_URL", _DEFAULT_BACKEND_URL)
-    return _DEFAULT_BACKEND_URL
 
 
 class SessionInitiator(Protocol):
@@ -107,12 +68,13 @@ class CronRelaySessionInitiator:
     def __init__(
         self,
         cron_relay: Any,
-        frontend_url: str | None = None,
+        frontend_url: str = "http://localhost:8000",
+        backend_url: str = "http://localhost:8888",
         wait_for_reply: bool = False,
     ):
         self._cron_relay = cron_relay
-        self._frontend_url = frontend_url or _resolve_frontend_url()
-        self._backend_url = _resolve_backend_url()
+        self._frontend_url = frontend_url
+        self._backend_url = backend_url
         self._wait_for_reply = wait_for_reply
 
     async def initiate_session(

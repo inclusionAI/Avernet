@@ -71,6 +71,20 @@ def _resolve_db_path() -> str:
     return os.environ.get("TASK_DISCOVERY_DATA_FILE", _DEFAULT_DB)
 
 
+_DEFAULT_BACKEND_URL = "http://localhost:8888"
+_DEFAULT_FRONTEND_URL = "http://localhost:8000"
+
+
+def _resolve_frontend_url() -> str:
+    """Resolve frontend workbench URL from env (DI factory — config lives here, not in core/)."""
+    return os.environ.get("FRONTEND_URL", _DEFAULT_FRONTEND_URL)
+
+
+def _resolve_backend_url() -> str:
+    """Resolve backend self URL from env (DI factory — config lives here, not in core/)."""
+    return os.environ.get("BACKEND_URL", _DEFAULT_BACKEND_URL)
+
+
 class TaskDiscoveryModule(Module):
     """DI bindings for task discovery."""
 
@@ -119,8 +133,12 @@ class TaskDiscoveryModule(Module):
         self,
         cron_relay: _ApiCronRelayServiceProtocol,
     ) -> SessionInitiator:
-        """构建 CronRelaySessionInitiator（注入 cron relay）。"""
-        return CronRelaySessionInitiator(cron_relay=cron_relay)
+        """构建 CronRelaySessionInitiator（注入 cron relay + resolved URLs）。"""
+        return CronRelaySessionInitiator(
+            cron_relay=cron_relay,
+            frontend_url=_resolve_frontend_url(),
+            backend_url=_resolve_backend_url(),
+        )
 
     @singleton
     @provider
