@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Iterable
-from typing import List, Optional, Protocol, runtime_checkable
+from typing import Any, List, Optional, Protocol, runtime_checkable
 
 from .skill_center_types import (
     SpaceCreateData,
@@ -104,6 +104,21 @@ class SpaceSkillRepository(Protocol):
         reason: str | None,
         env: str,
     ) -> SpaceSkillGrantSetRecord: ...
+
+
+@runtime_checkable
+class SkillEditorRequestRepositoryProtocol(Protocol):
+    """Atomic Skill-owned seam spanning editor requests and their Work Orders."""
+
+    @abstractmethod
+    def create_skill_editor_request(self, **kwargs: Any) -> Any: ...
+
+    @abstractmethod
+    def review_skill_editor_request(self, **kwargs: Any) -> Any: ...
+
+    @staticmethod
+    @abstractmethod
+    def reroute_pending_reviewer(session: Any, **kwargs: Any) -> None: ...
 
 
 @runtime_checkable

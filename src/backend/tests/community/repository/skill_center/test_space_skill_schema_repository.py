@@ -52,6 +52,8 @@ class _Database:
         finally:
             session.close()
 
+    transactional_orm_session = orm_session
+
 
 @pytest.fixture
 def db() -> _Database:

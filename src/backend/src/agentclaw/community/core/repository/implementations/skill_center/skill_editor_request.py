@@ -38,11 +38,14 @@ from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderModel,
     WorkOrderNotificationModel,
 )
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillEditorRequestRepositoryProtocol,
+)
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
-class _SkillEditorWorkOrderRepository:
-    """Keep Skill Grant mutation and Work Order completion in one transaction."""
+class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
+    """Skill-owned integration UoW for editor requests and Work Orders."""
 
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
@@ -393,5 +396,74 @@ class _SkillEditorWorkOrderRepository:
                 reviewed_at=reviewed_at,
             )
 
+    @staticmethod
+    def reroute_pending_reviewer(
+        session,
+        *,
+        skill_id: int,
+        previous_owner_user_id: str,
+        new_owner_user_id: str,
+        env: str,
+    ) -> None:
+        """Move pending Skill reviews with the authoritative Owner Grant."""
+        pending_ids = [
+            work_order_id
+            for (work_order_id,) in session.query(WorkOrderModel.id)
+            .filter(
+                WorkOrderModel.biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value,
+                WorkOrderModel.biz_id == str(skill_id),
+                WorkOrderModel.status == WorkOrderStatus.PENDING.value,
+                WorkOrderModel.env == env,
+            )
+            .with_for_update()
+            .all()
+        ]
+        if not pending_ids:
+            return
+        session.query(WorkOrderApproverModel).filter(
+            WorkOrderApproverModel.work_order_id.in_(pending_ids),
+            WorkOrderApproverModel.approver_user_id == previous_owner_user_id,
+            WorkOrderApproverModel.status == WorkOrderApproverStatus.PENDING.value,
+            WorkOrderApproverModel.env == env,
+        ).update(
+            {WorkOrderApproverModel.status: WorkOrderApproverStatus.CANCELLED.value},
+            synchronize_session=False,
+        )
+        for work_order_id in pending_ids:
+            new_approver = (
+                session.query(WorkOrderApproverModel)
+                .filter(
+                    WorkOrderApproverModel.work_order_id == work_order_id,
+                    WorkOrderApproverModel.approver_user_id == new_owner_user_id,
+                    WorkOrderApproverModel.env == env,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if new_approver is None:
+                session.add(
+                    WorkOrderApproverModel(
+                        work_order_id=work_order_id,
+                        approver_user_id=new_owner_user_id,
+                        status=WorkOrderApproverStatus.PENDING.value,
+                        env=env,
+                    )
+                )
+            else:
+                new_approver.status = WorkOrderApproverStatus.PENDING.value
+                new_approver.review_remark = None
+                new_approver.reviewed_at = None
+            session.query(WorkOrderNotificationModel).filter(
+                WorkOrderNotificationModel.work_order_id == work_order_id,
+                WorkOrderNotificationModel.recipient_user_id == previous_owner_user_id,
+                WorkOrderNotificationModel.notification_category
+                == NotificationCategory.APPROVAL.value,
+                WorkOrderNotificationModel.env == env,
+            ).update(
+                {WorkOrderNotificationModel.recipient_user_id: new_owner_user_id},
+                synchronize_session=False,
+            )
+        session.flush()
 
-__all__ = ["_SkillEditorWorkOrderRepository"]
+
+__all__ = ["SkillEditorRequestRepository"]

@@ -15,8 +15,8 @@ from agentclaw.community.core.repository.implementations.work_orders.bot_editor 
 from agentclaw.community.core.repository.implementations.work_orders.creation import (
     _WorkOrderCreationRepository,
 )
-from agentclaw.community.core.repository.implementations.work_orders.skill_editor import (
-    _SkillEditorWorkOrderRepository,
+from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
+    SkillEditorRequestRepository,
 )
 from agentclaw.community.core.repository.protocols.work_orders import (
     WorkOrderRepositoryProtocol,
@@ -70,7 +70,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         self._Space = SpaceModel
         self._Member = SpaceMemberModel
         self._bot_editor = _BotEditorWorkOrderRepository(db)
-        self._skill_editor = _SkillEditorWorkOrderRepository(db)
+        self._skill_editor = SkillEditorRequestRepository(db)
         self._creation = _WorkOrderCreationRepository(db)
 
     @staticmethod
