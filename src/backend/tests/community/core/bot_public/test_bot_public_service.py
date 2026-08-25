@@ -12,6 +12,7 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogAddress,
     BotCatalogCaller,
     BotCatalogMetadata,
+    BotCatalogMetadataPage,
     BotCatalogMetadataUnavailableError,
     BotCatalogSearchUnavailableError,
 )
@@ -65,6 +66,13 @@ def _make_operator(staff_id="op_user", nick_name="Operator") -> OperatorContext:
     op.nick_name = nick_name
     op.operator_name = nick_name
     return op
+
+
+def _metadata_page(items, total=None):
+    return BotCatalogMetadataPage(
+        total=len(items) if total is None else total,
+        items=items,
+    )
 
 
 def _make_bot(bot_id="bot1", owner_id="owner1", public="0", ext=None):
@@ -1465,10 +1473,13 @@ class TestSearchPublicBotsByKeyword:
 
     def test_catalog_search_joins_only_the_current_bcs_page_and_reports_its_count(self):
         metadata = MagicMock()
-        metadata.search_public_bot_metadata.return_value = [
-            BotCatalogMetadata(BotCatalogAddress("bot-1", "entity-1"), "bot"),
-            BotCatalogMetadata(BotCatalogAddress("missing", "entity-2"), "bot"),
-        ]
+        metadata.search_public_bot_metadata.return_value = _metadata_page(
+            [
+                BotCatalogMetadata(BotCatalogAddress("bot-1", "entity-1"), "bot"),
+                BotCatalogMetadata(BotCatalogAddress("missing", "entity-2"), "bot"),
+            ],
+            total=2,
+        )
         repository = MagicMock()
         non_public = _make_catalog_bot("bot-1", "entity-1")
         non_public["public"] = "0"
@@ -1485,7 +1496,7 @@ class TestSearchPublicBotsByKeyword:
             request_id="trace-1",
         )
 
-        assert result["total"] == 1
+        assert result["total"] == 2
         assert [bot["bot_id"] for bot in result["items"]] == ["bot-1"]
         assert [bot["bot_uuid"] for bot in result["items"]] == ["bot-1:entity-1"]
         metadata.search_public_bot_metadata.assert_called_once_with(
@@ -1501,15 +1512,41 @@ class TestSearchPublicBotsByKeyword:
             page_size=2,
         )
 
+    def test_catalog_search_preserves_bcs_total_when_join_has_fewer_items(self):
+        metadata = MagicMock()
+        metadata.search_public_bot_metadata.return_value = _metadata_page(
+            [BotCatalogMetadata(BotCatalogAddress("bot-1", "entity-1"), "bot")],
+            total=21,
+        )
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (
+            1,
+            [_make_catalog_bot("bot-1", "entity-1")],
+        )
+        svc = _make_service(
+            bot_repository=repository, catalog_metadata_service=metadata
+        )
+
+        result = svc.search_catalog_public_bots_by_keyword(
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace-bcs-total",
+        )
+
+        assert result["total"] == 21
+        assert len(result["items"]) == 1
+
     def test_catalog_search_prefers_validated_bcs_bot_uuid(self):
         metadata = MagicMock()
-        metadata.search_public_bot_metadata.return_value = [
-            BotCatalogMetadata(
-                BotCatalogAddress("bot-1", "entity-1"),
-                "bot",
-                bot_uuid=" bot-1 : entity-1 ",
-            )
-        ]
+        metadata.search_public_bot_metadata.return_value = _metadata_page(
+            [
+                BotCatalogMetadata(
+                    BotCatalogAddress("bot-1", "entity-1"),
+                    "bot",
+                    bot_uuid=" bot-1 : entity-1 ",
+                )
+            ],
+            total=1,
+        )
         repository = MagicMock()
         repository.list_bots_by_owner_bot_pairs.return_value = (
             1,
@@ -1531,7 +1568,9 @@ class TestSearchPublicBotsByKeyword:
         bcs_item = BotCatalogMetadata(
             BotCatalogAddress("shared", "entity-a"), "bot", is_friend=False
         )
-        metadata.search_public_bot_metadata.return_value = [bcs_item]
+        metadata.search_public_bot_metadata.return_value = _metadata_page(
+            [bcs_item], total=1
+        )
         repository = MagicMock()
         repository.list_bots_by_owner_bot_pairs.return_value = (
             1,
@@ -1568,7 +1607,9 @@ class TestSearchPublicBotsByKeyword:
             friend_check_in_strategy={},
             user_visibility="private",
         )
-        metadata.search_public_bot_metadata.return_value = [bcs_item]
+        metadata.search_public_bot_metadata.return_value = _metadata_page(
+            [bcs_item], total=1
+        )
         repository = MagicMock()
         repository.list_bots_by_owner_bot_pairs.return_value = (
             2,
@@ -1602,10 +1643,13 @@ class TestSearchPublicBotsByKeyword:
 
     def test_catalog_search_restores_bcs_order_and_isolates_same_bot_id_by_entity(self):
         metadata = MagicMock()
-        metadata.search_public_bot_metadata.return_value = [
-            BotCatalogMetadata(BotCatalogAddress("shared", "entity-a"), "bot"),
-            BotCatalogMetadata(BotCatalogAddress("shared", "entity-b"), "bot"),
-        ]
+        metadata.search_public_bot_metadata.return_value = _metadata_page(
+            [
+                BotCatalogMetadata(BotCatalogAddress("shared", "entity-a"), "bot"),
+                BotCatalogMetadata(BotCatalogAddress("shared", "entity-b"), "bot"),
+            ],
+            total=3,
+        )
         repository = MagicMock()
         repository.list_bots_by_owner_bot_pairs.return_value = (
             3,
@@ -1623,7 +1667,7 @@ class TestSearchPublicBotsByKeyword:
             caller=BotCatalogCaller("tenant-1", None, 7), request_id="trace-2"
         )
 
-        assert result["total"] == 2
+        assert result["total"] == 3
         assert [bot["entity_id"] for bot in result["items"]] == [
             "entity-a",
             "entity-b",
@@ -1681,14 +1725,17 @@ class TestSearchPublicBotsByKeyword:
             }
         )
         metadata = MagicMock()
-        metadata.search_public_bot_metadata.return_value = [
-            BotCatalogMetadata(
-                BotCatalogAddress("malformed", "entity-malformed"), "bot"
-            ),
-            BotCatalogMetadata(
-                BotCatalogAddress("sensitive", "entity-sensitive"), "bot"
-            ),
-        ]
+        metadata.search_public_bot_metadata.return_value = _metadata_page(
+            [
+                BotCatalogMetadata(
+                    BotCatalogAddress("malformed", "entity-malformed"), "bot"
+                ),
+                BotCatalogMetadata(
+                    BotCatalogAddress("sensitive", "entity-sensitive"), "bot"
+                ),
+            ],
+            total=2,
+        )
         repository = MagicMock()
         repository.list_bots_by_owner_bot_pairs.return_value = (2, [malformed, sensitive])
         svc = _make_service(
