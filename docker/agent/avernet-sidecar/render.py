@@ -227,7 +227,7 @@ def render_virtual_hosts(rules: list[OutboundRule], cluster: str = "outbound_ori
     """
     if not rules:
         # Default catch-all: no header ops, just pass-through
-        return render_default_virtual_host(cluster)
+        return "\n" + render_default_virtual_host(cluster)
 
     groups: dict[tuple[str, ...], OutboundRule] = {}
     order: list[tuple[str, ...]] = []
