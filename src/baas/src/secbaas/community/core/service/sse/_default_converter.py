@@ -22,7 +22,7 @@ from typing import Any
 from secbaas.community.api.sse import SseEvent, StreamChunk
 from secbaas.community.logger import get_logger
 
-logger = get_logger("bcn-converter")
+logger = get_logger("core-service")
 
 _INTERACTION_EVENT_PHASES = {
     "interaction.requested": "requested",
@@ -270,6 +270,21 @@ def _transform_ask_user_requested(
     run_id: str,
 ) -> bool:
     raw_questions = payload.get("questions")
+    if isinstance(raw_questions, list):
+        for index, question in enumerate(raw_questions):
+            if not isinstance(question, dict):
+                continue
+            for key in ("secret", "isSecret"):
+                if key in question:
+                    _warn_interaction(
+                        run_id=run_id,
+                        interaction_id=data["interactionId"],
+                        kind=data["kind"],
+                        field_path=f"payload.questions[{index}].{key}",
+                        error_type="secret_question_unsupported",
+                    )
+                    return False
+
     questions = _convert_ask_user_questions(
         raw_questions,
         run_id=run_id,
