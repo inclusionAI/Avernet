@@ -95,6 +95,7 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
         return h
 
     async def ensure_grant(self, bot_id: str) -> None:
+        logger.info("[task][openapi_bot] ensure_grant bot_id=%s")
         prefix = self._k.api_key_prefix or self._k.api_key[:_DEFAULT_KEY_PREFIX_LEN]
         logger.info("[task][openapi_bot] >>> ensure_grant GET /api/v1/api-keys/%s/allowed-bots bot_id=%s base_url=%s",
                     prefix, bot_id, self._k.base_url)
@@ -169,6 +170,7 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
         终态返回 get_run 的 data dict;超时(默认 180s=3 分钟)抛 OpenApiTimeoutError;
         grant 403 → OpenApiAuthError、5xx → OpenApiServerError 透传给同步调用方。
         """
+        logger.info("[task][openapi_bot] <<< send_and_wait, bot_id=%s", bot_id)
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(
@@ -180,6 +182,7 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
     async def send_and_wait_async(self, *, bot_id: str, message: str,
                                    metadata: dict[str, Any] | None = None, timeout: float = 180.0,
                                    poll_interval: float = 2.0) -> dict[str, Any]:
+        logger.info("[task][openapi_bot] >>> send_and_wait_async bot_id=%s base_url=%s", bot_id, self._k.base_url)
         await self.ensure_grant(bot_id)
         sent = await self.send_message(bot_id=bot_id, message=message, metadata=metadata or {})
         run_id = sent.run_id
