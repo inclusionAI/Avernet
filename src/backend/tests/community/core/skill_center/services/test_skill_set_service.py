@@ -556,8 +556,11 @@ class TestRemoveSkillFromDefaultSet:
                 skill_service=skill_service or MagicMock(),
                 bot_repo=MagicMock(),
                 path_factory=MagicMock(),
-                installations=installations,
             )
+        # The ctor no longer takes an Installation writer; the G.16-dead
+        # legacy method under test still reads the attribute until the
+        # cleanup group deletes both together.
+        svc._installations = installations
         svc.entity_id = "staff_user1"
         svc.bot_id = "default"
         svc.entity_type = "staff"
@@ -1587,8 +1590,9 @@ class TestRemoveRepoSkillFromDefaultSetUninstalls:
                 skill_service=skill_service,
                 bot_repo=MagicMock(),
                 path_factory=MagicMock(),
-                installations=installations,
             )
+        # See TestRemoveSkillFromDefaultSet._make_svc on this attribute.
+        svc._installations = installations
         svc.entity_id = "staff_user1"
         svc.bot_id = "default"
         svc.entity_type = "staff"

@@ -35,9 +35,6 @@ from agentclaw.community.api.local_skill_delete_service import (
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
 )
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
-)
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
@@ -179,7 +176,6 @@ def client():
             for protocol in (
                 LocalSkillQueryServiceProtocol,
                 LocalSkillDeleteServiceProtocol,
-                LocalSkillStateServiceProtocol,
                 LocalSkillUploadServiceProtocol,
                 BotSkillAssetServiceProtocol,
             ):

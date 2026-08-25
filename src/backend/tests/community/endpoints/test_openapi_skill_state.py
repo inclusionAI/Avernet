@@ -7,8 +7,8 @@ import time
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
 )
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
@@ -20,16 +20,20 @@ from agentclaw.community.core.repository.protocols.capability_desired_state impo
 from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
     BotCapabilityStateReader,
 )
-from agentclaw.community.core.skill_center.services.local_skill_state_service import (
-    LocalSkillStateService,
+from agentclaw.community.core.repository.protocols.bot import (
+    BotCollabLogRepositoryProtocol,
 )
+from agentclaw.community.core.skill_center.authorization_hook import (
+    BotCapabilityAuthorizationHookProtocol,
+)
+from agentclaw.community.core.skill_center.services.direct_activation_service import (
+    DirectActivationService,
+)
+from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillSetRepository,
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.repository.protocols.skill_installation import (
-    SkillInstallationRepositoryProtocol,
-)
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -74,6 +78,9 @@ class _Runtime:
     async def project(self, **_kwargs) -> None:
         if not self.success:
             raise RuntimeError("runtime reconcile failed")
+
+    async def snapshot_skill_mappings(self, **_kwargs):
+        return ()
 
 
 class _RuntimeFactory:
@@ -164,20 +171,20 @@ def _seed_state(world, *, runtime_success: bool) -> None:
         )
     runtime_factory = _RuntimeFactory(runtime_success)
     world.injector.binder.bind(
-        LocalSkillStateServiceProtocol,
-        to=LocalSkillStateService(
-            world.get(SkillRepository),
-            world.get(SkillInstallationRepositoryProtocol),
+        DirectActivationServiceProtocol,
+        to=DirectActivationService(
+            world.get(CapabilityDesiredStateRepositoryProtocol),
             world.get(BotRepository),
-            world.get(CollaboratorServiceProtocol),
-            runtime_factory,
+            world.get(SkillRepository),
+            runtime_factory._runtime,
+            world.get(BotCapabilityAuthorizationHookProtocol),
+            world.get(BotCollabLogRepositoryProtocol),
+            world.get(MCPCenterPlugin),
             BotCapabilityStateReader(
                 repository=world.get(CapabilityDesiredStateRepositoryProtocol),
                 bot_repo=world.get(BotRepository),
                 pool_skills=world.get(SkillRepository),
             ),
-            world.get(SkillSetRepository),
-            runtime_factory._runtime,
         ),
         scope=None,
     )

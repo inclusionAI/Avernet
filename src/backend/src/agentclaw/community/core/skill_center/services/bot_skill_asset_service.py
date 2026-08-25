@@ -54,19 +54,13 @@ class _AssetAdapter(Protocol):
     ) -> tuple[dict[str, Any], dict[str, Any], str]: ...
 
 
-class _LocalSkillStatePort(Protocol):
-    async def set_local_skill_active(
-        self, *, skill_id: str, actor_id: str, active: bool
+class _DirectActivationPort(Protocol):
+    async def activate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
     ) -> dict[str, Any]: ...
 
-    async def set_repo_skill_active(
-        self,
-        *,
-        skill_id: str,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        active: bool,
+    async def deactivate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
     ) -> dict[str, Any]: ...
 
 
@@ -82,7 +76,7 @@ class BotSkillAssetService(BotSkillAssetServiceProtocol):
         skill_service_factory: SkillServiceFactory,
         parameter_service_factory: SkillParameterServiceFactory,
         device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
-        local_state_service: _LocalSkillStatePort,
+        direct_activation: _DirectActivationPort,
     ) -> None:
         self._skill_repo = skill_repo
         self._bot_repo = bot_repo
@@ -90,7 +84,7 @@ class BotSkillAssetService(BotSkillAssetServiceProtocol):
         self._skill_service_factory = skill_service_factory
         self._parameter_service_factory = parameter_service_factory
         self._device_context_resolver_provider = device_context_resolver_provider
-        self._local_state_service = local_state_service
+        self._direct_activation = direct_activation
         self._adapters: dict[SkillAssetKind, _AssetAdapter] = {
             SkillAssetKind.LOCAL: _LocalAssetAdapter(self),
             SkillAssetKind.REPO: _RepoAssetAdapter(self),
@@ -181,22 +175,17 @@ class BotSkillAssetService(BotSkillAssetServiceProtocol):
         user_id: str,
         active: bool,
     ) -> dict[str, Any]:
-        skill = self.get_skill(
-            skill_id=skill_id,
-            bot_id=bot_id,
-            owner_id=owner_id,
-            user_id=user_id,
+        # No pre-resolution here: the direct-activation service resolves the
+        # asset kind itself (Local rows carry their own Bot/owner, shared Repo
+        # rows take the addressed pair) and refuses the rest.
+        command = (
+            self._direct_activation.activate_skill
+            if active
+            else self._direct_activation.deactivate_skill
         )
-        if self._kind_for(skill) is SkillAssetKind.REPO:
-            return await self._local_state_service.set_repo_skill_active(
-                skill_id=skill_id,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                actor_id=user_id,
-                active=active,
-            )
-        return await self._local_state_service.set_local_skill_active(
-            skill_id=skill_id, actor_id=user_id, active=active
+        return await command(
+            skill_id=skill_id, bot_id=bot_id, owner_id=owner_id,
+            actor_id=user_id,
         )
 
     async def get_content(

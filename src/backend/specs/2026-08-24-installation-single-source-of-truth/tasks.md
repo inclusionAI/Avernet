@@ -143,7 +143,7 @@ lands in the same group as the migration of its last caller.
       `api/direct_activation_service.py`; MCP direct commands move here from
       the Set service; OpenAPI MCP router re-injects; `list_installed_mcps`
       reads move to the reader.
-- [ ] 7.5 Delete `LocalSkillStateService` (+ `api/local_skill_state_service.py`)
+- [x] 7.5 Delete `LocalSkillStateService` (+ `api/local_skill_state_service.py`)
       and `SkillInstallationRepository` (+ protocol) once their last callers
       are migrated; port their tests to the new service (including MCP↔skill
       parity cases for direct activate/deactivate).

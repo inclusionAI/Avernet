@@ -31,9 +31,6 @@ from agentclaw.community.api.local_skill_delete_service import (
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
 )
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
-)
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
@@ -64,8 +61,8 @@ from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclus
 from agentclaw.community.core.skill_center.services.local_skill_query_service import (
     LocalSkillQueryService,
 )
-from agentclaw.community.core.skill_center.services.local_skill_state_service import (
-    LocalSkillStateService,
+from agentclaw.community.core.skill_center.services.direct_activation_service import (
+    DirectActivationService,
 )
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
@@ -208,7 +205,6 @@ def _client(
         def configure(self, binder):
             binder.bind(LocalSkillQueryServiceProtocol, to=query)
             binder.bind(LocalSkillUploadServiceProtocol, to=_Upload())
-            binder.bind(LocalSkillStateServiceProtocol, to=state_service)
             binder.bind(LocalSkillDeleteServiceProtocol, to=delete or _Delete())
             binder.bind(BotSkillAssetServiceProtocol, to=asset_service)
             # The seven ``{skill_id}`` operations declare ``Check(MEMBER)``
@@ -256,7 +252,6 @@ def test_upload_replacement_returns_200_and_updated_operation():
         def configure(self, binder):
             binder.bind(LocalSkillQueryServiceProtocol, to=_Query())
             binder.bind(LocalSkillUploadServiceProtocol, to=_UpdatedUpload())
-            binder.bind(LocalSkillStateServiceProtocol, to=_State())
             binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
 
     app = FastAPI()
@@ -294,7 +289,6 @@ def test_upload_folder_preserves_legacy_file_paths_and_returns_created_skill():
         def configure(self, binder):
             binder.bind(LocalSkillQueryServiceProtocol, to=query)
             binder.bind(LocalSkillUploadServiceProtocol, to=upload)
-            binder.bind(LocalSkillStateServiceProtocol, to=_State())
             binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
             binder.bind(BotSkillAssetServiceProtocol, to=_Asset())
 
@@ -333,7 +327,6 @@ def test_upload_folder_rejects_misaligned_paths_before_service_call():
         def configure(self, binder):
             binder.bind(LocalSkillQueryServiceProtocol, to=query)
             binder.bind(LocalSkillUploadServiceProtocol, to=upload)
-            binder.bind(LocalSkillStateServiceProtocol, to=_State())
             binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
             binder.bind(BotSkillAssetServiceProtocol, to=_Asset())
 
@@ -998,20 +991,21 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
             return self.runtime
 
     factory = _Factory()
-    service = LocalSkillStateService(
-        skills,
+    service = DirectActivationService(
         object(),
         bots,
+        skills,
+        factory.runtime,
         object(),
-        factory,
         object(),
         object(),
         object(),
     )
     with avernet_tenant_scope("tenant-b"):
         with pytest.raises(LocalSkillNotFoundError):
-            await service.set_local_skill_active(
-                skill_id=skill["id"], actor_id="owner", active=True
+            await service.activate_skill(
+                skill_id=skill["id"], bot_id="bot", owner_id="owner",
+                actor_id="owner",
             )
     assert factory.runtime.calls == 0
 
@@ -1053,7 +1047,6 @@ def test_a_caller_with_no_relation_is_refused_before_the_asset_service_runs(
         def configure(self, binder):
             binder.bind(LocalSkillQueryServiceProtocol, to=query)
             binder.bind(LocalSkillUploadServiceProtocol, to=_Upload())
-            binder.bind(LocalSkillStateServiceProtocol, to=_State())
             binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
             binder.bind(BotSkillAssetServiceProtocol, to=asset)
             # Default level is NONE, and ``stranger`` does not own the bot, so

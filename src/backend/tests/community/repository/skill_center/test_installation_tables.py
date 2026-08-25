@@ -1,4 +1,4 @@
-"""Desired-state persistence for Bot Skill Installations."""
+"""The per-table Installation command modules — the tables' only writers."""
 
 from contextlib import contextmanager
 
@@ -7,17 +7,19 @@ from sqlalchemy.dialects import mysql
 from sqlalchemy.schema import CreateTable
 from sqlalchemy.orm import sessionmaker
 
+from agentclaw.community.core.models.mcp import BotMCPInstallation
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
     Skill,
     SkillSet,
     SkillSetSkill,
 )
-from agentclaw.community.core.repository.implementations.skill_center.installation import (
-    SkillInstallationRepository,
-)
 from agentclaw.community.core.repository.implementations.skill_center.skill import (
     SkillRepository,
+)
+from agentclaw.community.core.repository.implementations.skill_center.tables import (
+    mcp_installations,
+    skill_installations,
 )
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
@@ -39,43 +41,44 @@ class _Database:
             session.close()
 
 
-def test_skill_installation_is_active_only_idempotent_and_tenant_scoped(tmp_path) -> None:
+def test_skill_installation_is_idempotent_and_tenant_scoped(tmp_path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'installation.db'}")
     BotSkillInstallation.__table__.create(engine)
-    installations = SkillInstallationRepository(_Database(engine))
+    db = _Database(engine)
+    scope = {"env": "pre", "owner_id": "owner-a", "bot_id": "bot-1"}
 
-    with avernet_tenant_scope("tenant-a"):
-        assert installations.install(
-            env="pre", owner_id="owner-a", bot_id="bot-1", skill_id="42"
-        ) is True
-        assert installations.install(
-            env="pre", owner_id="owner-a", bot_id="bot-1", skill_id="42"
-        ) is False
-        assert installations.list_installed_skill_ids(
-            env="pre", owner_id="owner-a", bot_id="bot-1"
-        ) == {42}
-        assert installations.list_installed_skill_ids(
-            env="pre", owner_id="owner-b", bot_id="bot-1"
+    with avernet_tenant_scope("tenant-a"), db.orm_session() as session:
+        assert skill_installations.install(session, **scope, skill_id=42) is True
+        assert skill_installations.install(session, **scope, skill_id=42) is False
+        assert skill_installations.installed_ids(session, **scope) == {42}
+        assert skill_installations.installed_ids(
+            session, env="pre", owner_id="owner-b", bot_id="bot-1"
         ) == set()
 
-    with avernet_tenant_scope("tenant-b"):
-        assert installations.list_installed_skill_ids(
-            env="pre", owner_id="owner-a", bot_id="bot-1"
-        ) == set()
-        assert installations.install(
-            env="pre", owner_id="owner-a", bot_id="bot-1", skill_id="42"
-        ) is True
+    with avernet_tenant_scope("tenant-b"), db.orm_session() as session:
+        assert skill_installations.installed_ids(session, **scope) == set()
+        assert skill_installations.install(session, **scope, skill_id=42) is True
 
-    with avernet_tenant_scope("tenant-a"):
-        assert installations.uninstall(
-            env="pre", owner_id="owner-a", bot_id="bot-1", skill_id="42"
-        ) is True
-        assert installations.uninstall(
-            env="pre", owner_id="owner-a", bot_id="bot-1", skill_id="42"
-        ) is False
-        assert installations.list_installed_skill_ids(
-            env="pre", owner_id="owner-a", bot_id="bot-1"
-        ) == set()
+    with avernet_tenant_scope("tenant-a"), db.orm_session() as session:
+        assert skill_installations.uninstall(session, **scope, skill_ids={42}) == 1
+        assert skill_installations.uninstall(session, **scope, skill_ids={42}) == 0
+        assert skill_installations.installed_ids(session, **scope) == set()
+
+
+def test_mcp_installation_mirrors_the_skill_table_contract(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'mcp-installation.db'}")
+    BotMCPInstallation.__table__.create(engine)
+    db = _Database(engine)
+    scope = {"env": "pre", "owner_id": "owner-a", "bot_id": "bot-1"}
+
+    with avernet_tenant_scope("tenant-a"), db.orm_session() as session:
+        assert mcp_installations.install(session, **scope, server_code="mcp.a") is True
+        assert mcp_installations.install(session, **scope, server_code="mcp.a") is False
+        assert mcp_installations.installed_codes(session, **scope) == {"mcp.a"}
+        assert (
+            mcp_installations.uninstall(session, **scope, server_codes={"mcp.a"}) == 1
+        )
+        assert mcp_installations.installed_codes(session, **scope) == set()
 
 
 def test_direct_installation_is_included_in_the_existing_runtime_mapping_query(tmp_path) -> None:
@@ -83,7 +86,6 @@ def test_direct_installation_is_included_in_the_existing_runtime_mapping_query(t
     for model in (Skill, SkillSet, SkillSetSkill, BotSkillInstallation):
         model.__table__.create(engine)
     db = _Database(engine)
-    installations = SkillInstallationRepository(db)
     skills = SkillRepository(db)
 
     with avernet_tenant_scope("tenant-a"):
@@ -95,9 +97,11 @@ def test_direct_installation_is_included_in_the_existing_runtime_mapping_query(t
                 "bolt_id": "bot-1",
             }
         )
-        assert installations.install(
-            env="dev", owner_id="owner", bot_id="bot-1", skill_id=skill["id"]
-        )
+        with db.orm_session() as session:
+            assert skill_installations.install(
+                session, env="dev", owner_id="owner", bot_id="bot-1",
+                skill_id=int(skill["id"]),
+            )
 
         projected = skills.list_bot_installed_assets(
             env="dev", bot_id="bot-1", owner_id="owner"

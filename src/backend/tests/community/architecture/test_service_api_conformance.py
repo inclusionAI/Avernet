@@ -80,8 +80,8 @@ from agentclaw.community.api.local_skill_query_service import (
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
 )
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
@@ -145,8 +145,8 @@ from agentclaw.community.core.skill_center.services.bot_runtime_projector import
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
 )
-from agentclaw.community.core.skill_center.services.local_skill_state_service import (
-    LocalSkillStateService,
+from agentclaw.community.core.skill_center.services.direct_activation_service import (
+    DirectActivationService,
 )
 from agentclaw.community.core.bot_app_grant.services import BotAppGrantService
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
@@ -188,7 +188,7 @@ _PAIRS = [
     (BotRuntimeProjectorProtocol, BotRuntimeProjector),
     (LocalSkillQueryServiceProtocol, LocalSkillQueryService),
     (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
-    (LocalSkillStateServiceProtocol, LocalSkillStateService),
+    (DirectActivationServiceProtocol, DirectActivationService),
     (LocalSkillDeleteServiceProtocol, LocalSkillDeleteService),
     (RepositoryCatalogServiceProtocol, RepositoryCatalogService),
     (SkillSetManagementServiceProtocol, SkillSetManagementService),

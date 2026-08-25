@@ -35,9 +35,6 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
-from agentclaw.community.core.repository.protocols.skill_installation import (
-    SkillInstallationRepositoryProtocol,
-)
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
 from agentclaw.community.core.skill_center.policies.default_skill_set_selection import (
     DefaultSkillSetSelection,
@@ -177,7 +174,6 @@ class SkillSetService:
             tuple[str, str, str] | None,
         ]
         | None = None,
-        installations: SkillInstallationRepositoryProtocol | None = None,
         reader: BotCapabilityStateReaderProtocol | None = None,
     ):
         """
@@ -200,7 +196,10 @@ class SkillSetService:
             entity_type: Entity type (e.g., staff, proj, team), used when entity_id is pure id
         """
         self.skill_repo = skill_repo
-        self._installations = installations
+        # The direct Installation writer is gone (the UoW owns the table); the
+        # only readers of this attribute are the G.16-dead legacy mutation
+        # methods below, deleted with them in the cleanup group.
+        self._installations = None
         self.skill_set_repo = skill_set_repo
         self.mcp_center = mcp_center
         self.mcp_config_service = mcp_config_service

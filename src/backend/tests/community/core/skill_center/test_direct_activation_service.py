@@ -10,6 +10,7 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
+    LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     McpPermissionDeniedError,
     SkillSetAccessDeniedError,
@@ -333,3 +334,92 @@ async def test_skill_wire_translates_reconcile_failure_and_compensates():
         )
 
     assert len(repository.restore_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_not_ready_bot_refuses_before_any_write():
+    class _PendingBots(_Bots):
+        def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict | None:
+            bot = super().get_by_id_and_owner(bot_id, owner_id)
+            return {**bot, "status": "PENDING"} if bot else None
+
+    repository = _Repository()
+    service = DirectActivationService(
+        repository, _PendingBots(), _Skills(), _SuccessfulRuntime(),
+        _Authorization(), _Audit(), _McpCenter(allowed=True), _Reader(),
+    )
+
+    with pytest.raises(LocalSkillNotReadyError):
+        await service.activate_skill(
+            skill_id="7", bot_id="bot-1", owner_id="true-owner",
+            actor_id="true-owner",
+        )
+    assert repository.install_skill_calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_space_asset_and_a_mismatched_local_row_are_masked_as_not_found():
+    class _MoreSkills(_Skills):
+        _ROWS = {
+            **_Skills._ROWS,
+            "9": {
+                "id": 9,
+                "name": "space-skill",
+                "git_path": "center://space-skill",
+                "user_id": None,
+                "bolt_id": None,
+            },
+        }
+
+    repository = _Repository()
+    service = DirectActivationService(
+        repository, _Bots(), _MoreSkills(), _SuccessfulRuntime(),
+        _Authorization(), _Audit(), _McpCenter(allowed=True), _Reader(),
+    )
+
+    # A Space (center://) asset has no direct-activation wire.
+    with pytest.raises(LocalSkillNotFoundError):
+        await service.activate_skill(
+            skill_id="9", bot_id="bot-1", owner_id="true-owner",
+            actor_id="true-owner",
+        )
+    # A Local row carries its own Bot: addressing it through another Bot
+    # must not resolve.
+    with pytest.raises(LocalSkillNotFoundError):
+        await service.activate_skill(
+            skill_id="7", bot_id="another-bot", owner_id="true-owner",
+            actor_id="true-owner",
+        )
+    assert repository.install_skill_calls == []
+
+
+@pytest.mark.asyncio
+async def test_an_idempotent_deactivate_still_projects_the_runtime():
+    """`changed=False` is not "skip the engine": the projection converges the
+    runtime with desired state even when the row was already absent."""
+
+    class _UnchangedRepository(_Repository):
+        @staticmethod
+        def _mutation() -> DesiredStateMutation:
+            return DesiredStateMutation(
+                {}, False, CapabilityDesiredState(set(), {}, {})
+            )
+
+    class _CountingRuntime(_SuccessfulRuntime):
+        def __init__(self) -> None:
+            self.projections = 0
+
+        async def project(self, **_kwargs) -> None:
+            self.projections += 1
+
+    runtime = _CountingRuntime()
+    service = _service(repository=_UnchangedRepository(), runtime=runtime)
+
+    result = await service.deactivate_skill(
+        skill_id="7", bot_id="bot-1", owner_id="true-owner",
+        actor_id="true-owner",
+    )
+
+    assert result["changed"] is False
+    assert result["active"] is False
+    assert runtime.projections == 1
