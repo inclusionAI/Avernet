@@ -25,6 +25,7 @@ from secbaas.community.api.device_manage import (
     PaasError,
 )
 from secbaas.community.api.tenant_manage import TenantType
+from secbaas.community.core.utils.time_utils import format_ttl_expiration_time
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.sandbox.arca import (
     ArcaSandboxError,
@@ -363,16 +364,23 @@ class ArcaPaasService(PaasService):
                 info.status.value if hasattr(info.status, "value") else str(info.status)
             )
 
-            # CR-01: extract sandbox expiration timestamp (ms epoch, same unit
-            # as info.ttl_timestamp). Numeric guard required: mock sandbox info
+            # CR-01: extract the sandbox expiration field pair — the formatted
+            # '%Y-%m-%d %H:%M:%S' string in fixed Asia/Shanghai (+08:00,
+            # host-tz independent) plus the ms-epoch integer (same unit as
+            # info.ttl_timestamp). Numeric guard required: mock sandbox info
             # objects are MagicMock, so a missing ttl_timestamp yields a
             # MagicMock child via getattr — passing it through would pollute
             # pydantic validation. Non-numeric values fall back to None
             # (discovery scan then uses its now+12h fallback).
             raw_ttl_timestamp = getattr(info, "ttl_timestamp", None)
-            ttl_expiration_time = (
+            ttl_expiration_timestamp = (
                 int(raw_ttl_timestamp)
                 if isinstance(raw_ttl_timestamp, (int, float))
+                else None
+            )
+            ttl_expiration_time = (
+                format_ttl_expiration_time(ttl_expiration_timestamp)
+                if ttl_expiration_timestamp is not None
                 else None
             )
 
@@ -384,6 +392,7 @@ class ArcaPaasService(PaasService):
                 resources=info.resources,
                 ttl_in_minutes=info.ttl_in_minutes,
                 ttl_expiration_time=ttl_expiration_time,
+                ttl_expiration_timestamp=ttl_expiration_timestamp,
                 envs=info.envs,
                 snapshot_id=info.snapshot_id,
                 metadata=info.metadata,

@@ -431,7 +431,8 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                     DeviceModel.provider_device_id.label("sandbox_id"),
                     literal("baas_device").label("source_table"),
                     self._json_unquote(
-                        DeviceModel.provider_device_props, "$.ttl_expiration_time"
+                        DeviceModel.provider_device_props,
+                        "$.ttl_expiration_timestamp",
                     ).label("ttl"),
                 )
                 .select_from(DeviceModel)
@@ -467,7 +468,8 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                     binding_sandbox.label("sandbox_id"),
                     literal("ac_entity_device_binding").label("source_table"),
                     self._json_unquote(
-                        DeviceBindingModel.device_props, "$.ttl_expiration_time"
+                        DeviceBindingModel.device_props,
+                        "$.ttl_expiration_timestamp",
                     ).label("ttl"),
                 )
                 .select_from(DeviceBindingModel)
