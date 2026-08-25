@@ -142,12 +142,37 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation: ...
     @abstractmethod
-    def install_mcp(
-        self, *, bot_id: str, owner_id: str, server_code: str, engine_type: str | None = None
+    def install_skill(
+        self, *, bot_id: str, owner_id: str, skill_id: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> DesiredStateMutation:
+        """Write the direct Installation fact for one Skill.
+
+        R1 is decided here, under the transaction: a Skill any of the Bot's
+        Sets holds — the Default included, excluded or not — refuses direct
+        control with ``RESOURCE_MANAGED_BY_SKILL_SET``.
+        """
+        ...
+    @abstractmethod
+    def uninstall_skill(
+        self, *, bot_id: str, owner_id: str, skill_id: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation: ...
     @abstractmethod
+    def install_mcp(
+        self, *, bot_id: str, owner_id: str, server_code: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> DesiredStateMutation:
+        """The MCP twin of :meth:`install_skill`, same R1 rule."""
+        ...
+    @abstractmethod
     def uninstall_mcp(
-        self, *, bot_id: str, owner_id: str, server_code: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, server_code: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation: ...
     @abstractmethod
     def list_installed_mcps(

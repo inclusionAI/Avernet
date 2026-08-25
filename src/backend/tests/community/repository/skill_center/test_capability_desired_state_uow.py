@@ -2048,3 +2048,125 @@ def test_a_default_set_mcp_member_cannot_join_an_ordinary_set():
             default_engine_types=("openclaw",),
         )
     assert "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET" in str(error.value)
+
+
+def test_direct_skill_installation_mirrors_the_mcp_pair():
+    """install/uninstall_skill carry the exact contract of the MCP twin."""
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        skill = Skill(name="tool", git_path="git://tool", env="dev")
+        skill_set = SkillSet(
+            name="set", user_id="owner", bolt_id="bot", is_active=False, env="dev"
+        )
+        session.add_all([skill, skill_set])
+        session.flush()
+
+    assert repository.install_skill(
+        bot_id="bot", owner_id="owner", skill_id=str(skill.id)
+    ).changed
+    assert not repository.install_skill(
+        bot_id="bot", owner_id="owner", skill_id=str(skill.id)
+    ).changed
+    with pytest.raises(
+        SkillSetControlPlaneConflictError, match="RESOURCE_DIRECT_ACTIVE"
+    ):
+        repository.add_skill(
+            bot_id="bot", owner_id="owner", set_id=str(skill_set.id),
+            skill_id=str(skill.id),
+        )
+    assert repository.uninstall_skill(
+        bot_id="bot", owner_id="owner", skill_id=str(skill.id)
+    ).changed
+    assert not repository.uninstall_skill(
+        bot_id="bot", owner_id="owner", skill_id=str(skill.id)
+    ).changed
+    assert repository.add_skill(
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id),
+        skill_id=str(skill.id),
+    ).changed
+    with pytest.raises(
+        SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_SKILL_SET"
+    ):
+        repository.install_skill(
+            bot_id="bot", owner_id="owner", skill_id=str(skill.id)
+        )
+    with pytest.raises(
+        SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_SKILL_SET"
+    ):
+        repository.uninstall_skill(
+            bot_id="bot", owner_id="owner", skill_id=str(skill.id)
+        )
+
+
+def test_an_excluded_default_member_refuses_direct_control_for_skills_and_mcps():
+    """Exclusion is not a hand-back: the member stays Set-managed (R1)."""
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        default = SkillSet(
+            name="default", user_id="", bolt_id="", engine_type="openclaw",
+            is_default=True, env="dev",
+        )
+        skill = Skill(name="member", git_path="git://member", env="dev")
+        session.add_all([default, skill])
+        session.flush()
+        session.add_all(
+            [
+                SkillSetSkill(
+                    skill_set_id=default.id, skill_id=skill.id, env="dev"
+                ),
+                SkillSetMCPServer(
+                    skill_set_id=default.id, server_code="mcp.member",
+                    name="member", env="dev",
+                ),
+                DefaultSkillsetSkillExclusion(
+                    user_id="owner", bot_id="bot", skill_set_id=default.id,
+                    skill_id=skill.id,
+                ),
+                DefaultSkillsetMcpExclusion(
+                    user_id="owner", bot_id="bot", skill_set_id=default.id,
+                    server_code="mcp.member",
+                ),
+            ]
+        )
+
+    scope = dict(engine_type="openclaw", default_engine_types=("openclaw",))
+    for command, address in [
+        (repository.install_skill, dict(skill_id=str(skill.id))),
+        (repository.uninstall_skill, dict(skill_id=str(skill.id))),
+        (repository.install_mcp, dict(server_code="mcp.member")),
+        (repository.uninstall_mcp, dict(server_code="mcp.member")),
+    ]:
+        with pytest.raises(
+            SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_SKILL_SET"
+        ):
+            command(bot_id="bot", owner_id="owner", **scope, **address)
+
+
+def test_direct_skill_installation_validates_existence_and_name_uniqueness():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        active = Skill(name="dup", git_path="git://active", env="dev")
+        rival = Skill(name="dup", git_path="git://rival", env="dev")
+        foreign = Skill(
+            name="foreign", git_path="local://foreign", bolt_id="another-bot",
+            user_id="someone", env="dev",
+        )
+        session.add_all([active, rival, foreign])
+        session.flush()
+
+    assert repository.install_skill(
+        bot_id="bot", owner_id="owner", skill_id=str(active.id)
+    ).changed
+    with pytest.raises(SkillRuntimeNameConflictError):
+        repository.install_skill(
+            bot_id="bot", owner_id="owner", skill_id=str(rival.id)
+        )
+    with pytest.raises(SkillSetControlPlaneNotFoundError):
+        repository.install_skill(bot_id="bot", owner_id="owner", skill_id="999999")
+    with pytest.raises(SkillSetControlPlaneNotFoundError):
+        repository.install_skill(
+            bot_id="bot", owner_id="owner", skill_id=str(foreign.id)
+        )

@@ -131,7 +131,7 @@ lands in the same group as the migration of its last caller.
       {skill_installations,mcp_installations,default_exclusions}.py`
       (session-in functions); the UoW and the flush use them — each table's
       SQL now has one owner.
-- [ ] 7.2 Add UoW commands `install_skill` / `uninstall_skill` (mirror of
+- [x] 7.2 Add UoW commands `install_skill` / `uninstall_skill` (mirror of
       the renamed `install_mcp` / `uninstall_mcp`: snapshot, R1 facts read
       under the transaction, write, `DesiredStateMutation` return).
 - [ ] 7.3 Extract the shared mutate-reconcile-compensate helper from

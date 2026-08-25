@@ -15,9 +15,6 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 from agentclaw.community.core.skill_center.policies.capability_ownership import (
     require_can_join_set,
 )
-from agentclaw.community.core.skill_center.errors import (
-    SkillSetControlPlaneConflictError,
-)
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -142,13 +139,23 @@ class McpSkillSetControlPlaneCommands:
             session.flush()
             return DesiredStateMutation(self._as_item(row), True, old)
 
-    def install_mcp(self, *, bot_id: str, owner_id: str, server_code: str, engine_type: str | None = None) -> DesiredStateMutation:
+    def install_mcp(
+        self, *, bot_id: str, owner_id: str, server_code: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
-            if self._mcp_has_ordinary_membership(
-                session, bot_id, owner_id, server_code
-            ):
-                raise SkillSetControlPlaneConflictError("RESOURCE_MANAGED_BY_SKILL_SET")
+            self._require_not_set_managed(
+                session,
+                set_ids=self._mcp_referencing_set_ids(
+                    session, server_code=server_code
+                ),
+                bot_id=bot_id,
+                owner_id=owner_id,
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+            )
             if server_code in old.mcp_installations:
                 return DesiredStateMutation({}, False, old)
             mcp_installations.install(
@@ -158,13 +165,23 @@ class McpSkillSetControlPlaneCommands:
             session.flush()
             return DesiredStateMutation({}, True, old)
 
-    def uninstall_mcp(self, *, bot_id: str, owner_id: str, server_code: str, engine_type: str | None = None) -> DesiredStateMutation:
+    def uninstall_mcp(
+        self, *, bot_id: str, owner_id: str, server_code: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
-            if self._mcp_has_ordinary_membership(
-                session, bot_id, owner_id, server_code
-            ):
-                raise SkillSetControlPlaneConflictError("RESOURCE_MANAGED_BY_SKILL_SET")
+            self._require_not_set_managed(
+                session,
+                set_ids=self._mcp_referencing_set_ids(
+                    session, server_code=server_code
+                ),
+                bot_id=bot_id,
+                owner_id=owner_id,
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+            )
             changed = mcp_installations.uninstall(
                 session, bot_id=bot_id, owner_id=owner_id,
                 env=get_current_env(), server_codes={server_code},
