@@ -51,7 +51,7 @@
 
 | 触发 / 上下文 | 命中段 |
 |---|---|
-| 用户消息以 `/task` 开头 / 上下文含 `[RESUME_TASK]` / 仅 `<AixUI … component="task-loop">` 副屏标签 | 段1 recognition |
+| 用户消息以 `/task` 开头 / 上下文含 `[RESUME_TASK]` / 仅 `<AixUI … component="taskPanel.TaskLoopView">` 副屏标签 | 段1 recognition |
 | prompt 头部 `[planning]` + 目标节点 `node_id` + 任务态快照 | 段2 planning |
 | prompt 头部 `[search]` + 子任务需求 + 候选集 `catalog` | 段3 search |
 | worker 执行完叶子任务需自验收（框架 `format_execute` 投递 goal/instruction/sibling_outputs/execute_output） | 段4 acceptance |
