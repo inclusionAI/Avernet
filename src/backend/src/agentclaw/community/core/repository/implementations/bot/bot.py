@@ -790,6 +790,7 @@ class BotRepository(
         bot_id: Optional[str] = None,
         provider: Optional[str] = None,
         template_type: Optional[str] = None,
+        bot_status_list: Optional[List[str]] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[int, List[Dict[str, Any]]]:
@@ -845,6 +846,8 @@ class BotRepository(
             # bot_status 过滤
             if bot_status:
                 query = query.filter(self.Model.status == bot_status)
+            if bot_status_list:
+                query = query.filter(self.Model.status.in_(bot_status_list))
 
             # public 过滤
             if public:

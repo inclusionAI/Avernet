@@ -36,6 +36,9 @@ class BotInventoryBotPort(Protocol):
         page: int = 1,
         page_size: int = 20,
         bot_ids: list[str] | None = None,
+        # Inventory cards never surface template_config, so inventory pulls
+        # opt out of the batched template read.
+        attach_templates: bool = True,
     ) -> Mapping[str, Any]: ...
 
 
