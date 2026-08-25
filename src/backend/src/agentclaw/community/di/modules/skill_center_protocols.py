@@ -15,9 +15,7 @@ from agentclaw.community.api.skill_propagation_service import SkillPropagationSe
 from agentclaw.community.api.skill_publish_service import SkillPublishServiceProtocol
 from agentclaw.community.api.skill_scan_service import SkillScanServiceProtocol
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
-from agentclaw.community.api.skill_set_activator_factory import SkillSetActivatorFactoryProtocol
 from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
-from agentclaw.community.api.skill_set_switcher_factory import SkillSetSwitcherFactoryProtocol
 from agentclaw.community.core.skill_center.factories import (
     SkillParameterServiceFactory,
     SkillServiceFactory,
@@ -32,10 +30,6 @@ from agentclaw.community.core.skill_center.services.skill_member_service import 
 from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
 from agentclaw.community.core.skill_center.services.skill_publish_service import SkillPublishService
 from agentclaw.community.core.skill_center.services.skill_scan import SkillScanService
-from agentclaw.community.core.skill_center.services.skill_set_service import (
-    SkillSetActivatorFactory,
-    SkillSetSwitcherFactory,
-)
 
 
 class SkillCenterProtocolBindings:
@@ -113,14 +107,3 @@ class SkillCenterProtocolBindings:
     def _skill_set_service_factory_protocol(self, svc: SkillSetServiceFactory) -> SkillSetServiceFactoryProtocol:
         return svc
 
-    @singleton
-    @provider
-    @inject
-    def _skill_set_activator_factory_protocol(self, svc: SkillSetActivatorFactory) -> SkillSetActivatorFactoryProtocol:
-        return svc
-
-    @singleton
-    @provider
-    @inject
-    def _skill_set_switcher_factory_protocol(self, svc: SkillSetSwitcherFactory) -> SkillSetSwitcherFactoryProtocol:
-        return svc

@@ -216,9 +216,15 @@ device 层正处于 agentbox/arca 双链路拆分迁移中（背景见 `docs/sup
 
 | 文件 | 职责 |
 |---|---|
-| `api/skill_center/skills.py` | skill CRUD 路由 |
-| `api/skill_center/skillsets.py` | skill_set CRUD 路由 |
-| `core/skill_center/services/skill_set_service.py` | `get_symlink_mappings()`、`SkillSetActivator`、`SkillSetSwitcher` |
+| `adapters/http/skill_center/skills.py` | 遗留 `/api/skills` 路由（读走 `SkillQueryService`，激活/去激活走 `DirectActivationService`） |
+| `adapters/http/skill_center/skillsets.py` | 遗留 `/api/skillsets` 路由（写走 `SkillSetManagementService` 控制面） |
+| `core/skill_center/services/skill_set_management_service.py` | `SkillSetManagementService` — Set 范围的期望态命令服务（Default-Set 编辑落为 per-Bot 排除行） |
+| `core/skill_center/services/direct_activation_service.py` | `DirectActivationService` — 单能力（skill/MCP）直接激活命令服务 |
+| `core/skill_center/services/skill_query_service.py` | `SkillQueryService` — Bot skill 的唯一查询缝（列表/详情/内容/参数，读前先 flush） |
+| `core/skill_center/services/bot_capability_state_reader.py` | `BotCapabilityStateReader` — flush-then-read 的唯一激活态读模型 |
+| `core/skill_center/policies/capability_ownership.py` | `CapabilityOwnershipPolicy` — R1/R2/R3 所有权规则的唯一裁决点 |
+| `core/repository/implementations/skill_center/capability_desired_state.py` | `CapabilityDesiredStateRepository` — 期望态 UoW；`tables/` 子包是 Installation/排除表 SQL 的唯一属地 |
+| `core/skill_center/services/skill_set_service.py` | `get_symlink_mappings()`（激活写路径已收敛到 desired-state 控制面） |
 | `core/skill_center/services/skill_service.py` | `upload_skill()`、`activate_skill()` 单个软链操作 |
 | `core/skill_center/services/skill_symlink_listener.py` | `SkillSymlinkListener` — 订阅 `DeviceActivatedEvent`，VM 激活后自动全量下发软链 |
 | `core/skill_center/services/git_sync.py` | `GitSyncService` — git 来源同步（startup / sync_bootstrap / periodic / OSS） |

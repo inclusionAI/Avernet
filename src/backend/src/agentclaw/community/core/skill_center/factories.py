@@ -35,8 +35,8 @@ from agentclaw.community.core.repository.protocols.skill_center import SkillRepo
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillSetRepository,
 )
-from agentclaw.community.core.repository.protocols.skill_installation import (
-    SkillInstallationRepositoryProtocol,
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.core.skill_center.path_resolution import (
     build_pool_local_path_adapter,
@@ -487,7 +487,7 @@ class SkillSetServiceFactory:
             tuple[str, str, str] | None,
         ],
         ext_info_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
-        installations: SkillInstallationRepositoryProtocol | None = None,
+        reader: BotCapabilityStateReaderProtocol | None = None,
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
@@ -502,7 +502,7 @@ class SkillSetServiceFactory:
         self._path_factory = path_factory
         self._pool_layout_paths = pool_layout_paths
         self._ext_info_provider = ext_info_provider
-        self._installations = installations
+        self._reader = reader
 
     def create(
         self,
@@ -622,7 +622,7 @@ class SkillSetServiceFactory:
             default_skill_set_selection_policy=get_default_skill_set_selection_policy(),
             path_factory=self._path_factory,
             pool_layout_paths=self._pool_layout_paths,
-            installations=self._installations,
+            reader=self._reader,
         )
 
 

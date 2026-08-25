@@ -1,8 +1,36 @@
 """Unit tests for SkillSetService symlink mapping and sync logic."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+
+class _InstallationReader:
+    """Reader fake answering from the same Installation seed the tests set."""
+
+    def __init__(self, skill_repo) -> None:
+        self._skill_repo = skill_repo
+
+    def active_skill_assets(self, *, bot_id, owner_id, bot=None):
+        from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+
+        return tuple(
+            RegisteredSkillAsset(
+                skill_id=int(row["id"]),
+                name=str(row["name"]),
+                git_path=str(row.get("git_path") or ""),
+                skill_uuid=row.get("skill_uuid"),
+                sc_version_number=(
+                    str(row["sc_version_number"])
+                    if row.get("sc_version_number") is not None
+                    else None
+                ),
+            )
+            for row in self._skill_repo.list_bot_installed_skills(
+                env="dev", owner_id=owner_id, bot_id=bot_id
+            )
+        )
 
 
 class TestGetSymlinkMappings:
@@ -35,7 +63,9 @@ class TestGetSymlinkMappings:
             local_dir=tmp_path / "skills-local",
             bot_repo=MagicMock(),
             path_factory=MagicMock(),
+            reader=_InstallationReader(mock_skill_repo),
         )
+        mock_skill_repo.list_bot_installed_skills.return_value = []
         return service
 
     def _skills_dir(self, service):
@@ -54,7 +84,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Test Skill Set", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "cct-zbb-instraction-query",
@@ -93,7 +123,7 @@ class TestGetSymlinkMappings:
         )
 
     def test_pool_locator_is_used_as_mapping_source_without_legacy_rewrite(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         pool_source = (
             "/home/admin/.openclaw/workspace/skills-pool/skills-local/handmade"
@@ -101,7 +131,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Pool", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "handmade",
@@ -118,7 +148,7 @@ class TestGetSymlinkMappings:
         assert mappings[0].target.endswith("/openclaw/workspace/skills/handmade")
 
     def test_cutover_finalizing_rewrites_legacy_locator_to_pool_source(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         pool_local = (
             "/home/admin/.openclaw/workspace/skills-pool/skills-local"
@@ -133,7 +163,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Pool cutover", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "handmade",
@@ -159,7 +189,7 @@ class TestGetSymlinkMappings:
         )
 
     def test_claude_pool_locators_drive_restart_mappings(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         pool_local = (
             "/home/admin/.claude_code/workspace/skills-pool/skills-local/handmade"
@@ -174,7 +204,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Claude Pool", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "handmade",
@@ -204,7 +234,7 @@ class TestGetSymlinkMappings:
         ]
 
     def test_aicoding_pool_locators_drive_restart_mappings(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         pool_local = (
             "/home/admin/.aicoding/workspace/skills-pool/skills-local/handmade"
@@ -219,7 +249,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "AICoding Pool", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "handmade",
@@ -249,7 +279,7 @@ class TestGetSymlinkMappings:
         ]
 
     def test_hermes_pool_locators_drive_restart_mappings(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         pool_local = (
             "/home/admin/.hermes/workspace/skills-pool/skills-local/handmade"
@@ -264,7 +294,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Hermes Pool", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "handmade",
@@ -349,12 +379,12 @@ class TestGetSymlinkMappings:
         ]
 
     def test_direct_activation_deduplicates_existing_identical_mapping(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Active", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "same",
@@ -369,12 +399,12 @@ class TestGetSymlinkMappings:
         assert len(mappings) == 1
 
     def test_direct_activation_rejects_runtime_target_collision(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Active", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "same",
@@ -388,7 +418,7 @@ class TestGetSymlinkMappings:
             )
 
     def test_pool_active_repo_only_skill_uses_canonical_pool_source(
-        self, skill_set_service, mock_skill_set_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         skill_set_service.entity_id = "100015"
         skill_set_service.engine_type = "openclaw"
@@ -400,7 +430,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Pool", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "2",
                 "name": "repo-skill",
@@ -432,7 +462,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Test Skill Set", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {"id": "1", "name": "my-local-skill", "git_path": "local://my-local-skill"}
         ]
         symlinks = skill_set_service.get_symlink_mappings(
@@ -449,7 +479,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Test Skill Set", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "query-user-trade-record-list",
@@ -472,7 +502,7 @@ class TestGetSymlinkMappings:
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Test Skill Set", "is_default": False}
         ]
-        mock_skill_set_repo.get_skills_in_set.return_value = [
+        mock_skill_repo.list_bot_installed_skills.return_value = [
             {
                 "id": "1",
                 "name": "skill-name",
@@ -496,7 +526,7 @@ class TestGetSymlinkMappings:
 
 
 class TestAddRemoveSkillSync:
-    """Tests for add_skills_to_set and remove_skill_from_set sync behavior."""
+    """Tests for the resolver-owned symlink sync the mutations relied on."""
 
     @pytest.fixture
     def mock_skill_set_repo(self):
@@ -535,130 +565,6 @@ class TestAddRemoveSkillSync:
             ),
         )
         return service
-
-    @pytest.mark.asyncio
-    async def test_add_skills_to_active_set_triggers_sync(
-        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
-    ):
-        """测试：在激活的技能集中添加技能会触发软链同步到设备"""
-        # Arrange: 设置技能集为激活状态（is_active=True）
-        mock_skill_set_repo.get_by_id.return_value = {
-            "id": "1",
-            "name": "TestSet",
-            "is_default": False,
-            "is_active": True,
-        }
-        mock_skill_set_repo.get_skills_in_set.return_value = []
-
-        # Mock 技能（bolt_id 必须与 service.bot_id 一致，否则触发跨 Bot 校验）
-        mock_skill_repo.get_by_id.return_value = {
-            "id": "123",
-            "name": "test-skill",
-            "git_path": "git://business/test/skill",
-            "bolt_id": "test_bot",
-        }
-
-        with patch.object(
-            skill_set_service, "_sync_symlinks_to_device_if_needed"
-        ) as mock_sync:
-            with patch.object(
-                skill_set_service.skill_service,
-                "activate_skill",
-                new_callable=AsyncMock,
-                return_value=True,
-            ):
-                with patch(
-                    "agentclaw.community.core.skill_center.services.skill_set_service.SkillSetMetadataWriter"
-                ):
-                    # Act
-                    result = await skill_set_service.add_skills_to_set(
-                        "1", ["123"], user_id="100015"
-                    )
-
-        # Assert: 同步方法被调用
-        mock_sync.assert_called_once()
-        assert len(result["success"]) == 1
-
-    @pytest.mark.asyncio
-    async def test_add_skills_to_inactive_set_no_sync(
-        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
-    ):
-        """测试：在非激活的技能集中添加技能不会触发同步"""
-        # Arrange: 设置技能集为非激活状态（is_active=False）
-        mock_skill_set_repo.get_by_id.return_value = {
-            "id": "1",
-            "name": "TestSet",
-            "is_default": False,
-            "is_active": False,
-        }
-        mock_skill_set_repo.get_skills_in_set.return_value = []
-
-        mock_skill_repo.get_by_id.return_value = {
-            "id": "123",
-            "name": "test-skill",
-            "bolt_id": "test_bot",
-        }
-
-        with patch.object(
-            skill_set_service, "_sync_symlinks_to_device_if_needed"
-        ) as mock_sync:
-            with patch(
-                "agentclaw.community.core.skill_center.services.skill_set_service.SkillSetMetadataWriter"
-            ):
-                # Act
-                await skill_set_service.add_skills_to_set(
-                    "1", ["123"], user_id="100015"
-                )
-
-        # Assert: 同步方法没有被调用
-        mock_sync.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_remove_skill_from_active_set_triggers_sync(
-        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
-    ):
-        """测试：在激活的技能集中移除技能会触发软链同步（包括空列表情况）"""
-        # Arrange
-        mock_skill_set_repo.get_by_id.return_value = {
-            "id": "1",
-            "name": "TestSet",
-            "is_default": False,
-        }
-        # get_all_active_skill_sets 返回包含当前 skill_set_id 的列表（表示激活状态）
-        mock_skill_set_repo.get_all_active_skill_sets.return_value = [{"id": "1"}]
-
-        mock_skill_repo.get_by_id.return_value = {
-            "id": "123",
-            "name": "test-skill",
-            "git_path": "git://business/test/skill",
-        }
-        mock_skill_set_repo.remove_skill_from_set.return_value = True
-
-        with patch.object(
-            skill_set_service, "_sync_symlinks_to_device_if_needed"
-        ) as mock_sync:
-            with patch.object(
-                skill_set_service.skill_service,
-                "deactivate_skill",
-                new_callable=AsyncMock,
-                return_value=True,
-            ):
-                with patch.object(
-                    skill_set_service.skill_service,
-                    "get_link_name",
-                    return_value="business_test_skill",
-                ):
-                    with patch(
-                        "agentclaw.community.core.skill_center.services.skill_set_service.SkillSetMetadataWriter"
-                    ):
-                        # Act
-                        result = await skill_set_service.remove_skill_from_set(
-                            "1", "123", user_id="100015"
-                        )
-
-        # Assert: 即使移除后技能集为空，也会触发同步（清空设备软链）
-        mock_sync.assert_called_once()
-        assert result is True
 
     def test_sync_symlinks_with_device_proxy(
         self, skill_set_service, mock_skill_set_repo
@@ -718,48 +624,3 @@ class TestAddRemoveSkillSync:
             )
 
         assert result is False
-
-    @pytest.mark.asyncio
-    async def test_add_skill_already_in_other_set_rejected(
-        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
-    ):
-        """测试：同一 bot 下，一个 skill 不能同时属于多个 skill set"""
-        # Target set we're adding to
-        mock_skill_set_repo.get_by_id.return_value = {
-            "id": "2",
-            "name": "Set2",
-            "is_default": False,
-            "is_active": False,
-        }
-        # Skill not in target set, but in another set
-        mock_skill_set_repo.get_skills_in_set.side_effect = lambda sid: (
-            [{"id": "999", "name": "shared-skill"}] if sid == "1" else []
-        )
-
-        mock_skill_repo.get_by_id.return_value = {
-            "id": "999",
-            "name": "shared-skill",
-            "bolt_id": "test_bot",
-        }
-
-        # list_skill_sets returns two sets: set '1' has the skill, set '2' is target
-        with patch.object(
-            skill_set_service,
-            "list_skill_sets",
-            return_value=[
-                {"id": "1", "name": "Set1"},
-                {"id": "2", "name": "Set2"},
-            ],
-        ):
-            with patch(
-                "agentclaw.community.core.skill_center.services.skill_set_service.SkillSetMetadataWriter"
-            ):
-                result = await skill_set_service.add_skills_to_set(
-                    "2", ["999"], user_id="100015"
-                )
-
-        # Should be rejected
-        assert len(result["failed"]) == 1
-        assert "already exists in another skill set" in result["failed"][0]["error"]
-        # add_skill_to_set should NOT have been called
-        mock_skill_set_repo.add_skill_to_set.assert_not_called()

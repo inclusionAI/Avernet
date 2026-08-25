@@ -433,7 +433,7 @@ def test_the_seam_asks_the_space_aware_policy_not_the_raw_role():
     collaborator row after being removed from the Space resolves to ``NONE``.
 
     That is stricter than what several migrating groups enforced. ``skill_centre``
-    (via ``check_collaborator_permission``), ``bot_skill_asset_service`` and the
+    (via ``check_collaborator_permission``), ``skill_query_service`` and the
     engine-runtime gate (via ``get_permission_level``) all asked for the raw role
     and admitted such a caller; 58 of the 82 ``Check`` rows therefore refuse
     someone today who was admitted before. Recorded in ``spec.md`` and the

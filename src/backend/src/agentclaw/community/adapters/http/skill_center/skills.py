@@ -34,8 +34,6 @@ from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.core.access.admin_scopes import skill_admin
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.skill_center.schemas import (
-    ActivateRequest,
-    ActivateResponse,
     ActivateSkillFailedItem,
     ActivateSkillSetRequest,
     ActivateSkillSetResponse,
@@ -51,7 +49,6 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     BatchAddSkillMembersRequest,
     CreateSkillRequest,
     CurrentSkillSetResponse,
-    DeactivateResponse,
     DeactivateSkillSetRequest,
     DeactivateSkillSetResponse,
     DownloadUrlResponse,
@@ -94,8 +91,8 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
     recover_legacy_skill_set_scope,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
+from agentclaw.community.api.skill_set_management_service import (
+    SkillSetManagementServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import (
@@ -107,7 +104,8 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillRuntimeSyncError,
     SkillDeleteConsistencyError,
     SkillReferencedBySkillSetError,
-    SkillSetManagedResourceError,
+    SkillRuntimeNameConflictError,
+    SkillSetControlPlaneConflictError,
 )
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.skills_pool.edit_guard import (
@@ -130,16 +128,10 @@ from agentclaw.community.api.runtime_layout_probe_service import (
     RuntimeLayoutProbeStatus,
 )
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
-from agentclaw.community.api.skill_set_activator_factory import (
-    SkillSetActivatorFactoryProtocol,
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
 )
-from agentclaw.community.api.skill_set_service_factory import (
-    SkillSetServiceFactoryProtocol,
-)
-from agentclaw.community.api.skill_set_switcher_factory import (
-    SkillSetSwitcherFactoryProtocol,
-)
-from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
+from agentclaw.community.api.skill_query_service import SkillQueryServiceProtocol
 from agentclaw.community.api.repository_catalog_service import (
     RepositoryCatalogServiceProtocol,
 )
@@ -152,7 +144,6 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
 )
-from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,
@@ -394,7 +385,7 @@ def _get_skill_set_path_params(
     bot_id: str | None,
     engine_type: str | None,
     bot_repo: BotRepository,
-    control_plane: SkillSetControlPlaneServiceProtocol,
+    control_plane: SkillSetManagementServiceProtocol,
 ) -> tuple:
     """Recover the deprecated SkillSet Bot address before path normalization."""
     entity_id, bot_id = recover_legacy_skill_set_scope(
@@ -453,78 +444,6 @@ def _get_skill_by_id_or_link_name(service, skill_id: str, *bolt_ids: str | None)
             return skill
     return None
 
-
-def _require_pool_runtime_sync_success(
-    service,
-    sync_result,
-    *,
-    detail: str,
-) -> None:
-    """Fail closed when a Pool-owned CRUD could not reach runtime state.
-
-    Legacy bots retain their historical best-effort behavior. Pool-owned I/O
-    cannot do that safely: its DB locator, canonical files and active mapping
-    must describe one committed layout.
-    """
-
-    if getattr(service, "runtime_uses_pool_paths", False) is not True:
-        return
-    if not isinstance(sync_result, dict) or sync_result.get("success") is not True:
-        raise HTTPException(status_code=502, detail=detail)
-
-
-async def _set_legacy_asset_active_if_resolved(
-    *,
-    asset_service: BotSkillAssetServiceProtocol,
-    skill_reference: str,
-    source_path: str,
-    bot_id: str,
-    owner_id: str,
-    actor_id: str,
-    active: bool,
-) -> dict[str, Any] | None:
-    """Adapt historical path/link references to the one Installation command."""
-    control_plane_bound = callable(
-        getattr(asset_service, "resolve_legacy_skill_id", None)
-    )
-    if not skill_reference.isdecimal() and not control_plane_bound:
-        # Transitional compatibility fixtures and deployments that have not
-        # bound the additive control plane retain the old adapter path.  Once
-        # the control plane is bound, a non-decimal reference may never fall
-        # through to a second mutation model.
-        return None
-    try:
-        skill_id = (
-            skill_reference
-            if skill_reference.isdecimal()
-            else asset_service.resolve_legacy_skill_id(
-                skill_reference=skill_reference,
-                source_path=source_path,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                user_id=actor_id,
-            )
-        )
-        asset_service.get_skill(
-            skill_id=skill_id,
-            bot_id=bot_id,
-            owner_id=owner_id,
-            user_id=actor_id,
-        )
-        return await asset_service.set_active(
-            skill_id=skill_id,
-            bot_id=bot_id,
-            owner_id=owner_id,
-            user_id=actor_id,
-            active=active,
-        )
-    except LocalSkillNotFoundError:
-        if control_plane_bound:
-            raise
-        return None
-
-
-# ==================== Core CRUD APIs ====================
 
 @router.post(
     "/upload",
@@ -1077,34 +996,46 @@ async def get_current_skill_set(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    switcher_factory: SkillSetSwitcherFactoryProtocol = Injected(
-        SkillSetSwitcherFactoryProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> CurrentSkillSetResponse:
     """[DEPRECATED] Get the currently active skill set.
 
     请使用 GET /skillset/active 获取所有激活的能力集列表。
     此接口将在未来版本中移除。
+
+    Multiple Sets activate independently now; this wire's "the current
+    Set" is answered as the first ordinary active Set, else null.
     """
-    # Get effective path parameters
     (
         effective_entity_id,
         effective_bot_id,
-        effective_engine,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop,
+        _effective_engine,
+        _runtime_engine,
+        _effective_entity_type,
+        _is_desktop,
     ) = _get_path_params(
         ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
     )
 
-    switcher = switcher_factory.create(
-        entity_id=effective_entity_id,
+    sets = control_plane.list_sets(
         bot_id=effective_bot_id,
-        engine_type=effective_engine,
+        owner_id=effective_entity_id,
+        user_id=ctx.user_id or effective_entity_id,
     )
-    current = switcher.get_current_skill_set()
-
+    current = next(
+        (
+            item
+            for item in sets
+            if item.get("is_active") and not item.get("is_default")
+        ),
+        None,
+    )
+    if current is not None:
+        # The historical payload named the id ``skill_set_id``; keep the
+        # alias so deprecated-wire readers survive the re-sourcing.
+        current = {**current, "skill_set_id": current.get("id")}
     return CurrentSkillSetResponse(success=True, data=current)
 
 
@@ -1121,8 +1052,8 @@ async def sync_skill_set(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> SwitchSkillSetResponse:
     """Sync a skill set to active skills without deactivating others."""
@@ -1145,7 +1076,7 @@ async def sync_skill_set(
         control_plane=control_plane,
     )
 
-    result = await control_plane.sync(
+    result = await control_plane.legacy_activate(
         bot_id=effective_bot_id,
         owner_id=effective_entity_id,
         actor_id=ctx.user_id,
@@ -1176,11 +1107,8 @@ async def activate_skill_set(
     request: ActivateSkillSetRequest,
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    activator_factory: SkillSetActivatorFactoryProtocol = Injected(
-        SkillSetActivatorFactoryProtocol
-    ),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> ActivateSkillSetResponse:
     """激活单个能力集（增量激活，不清除其他已激活的能力集）
@@ -1235,11 +1163,8 @@ async def deactivate_skill_set(
     request: DeactivateSkillSetRequest,
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    activator_factory: SkillSetActivatorFactoryProtocol = Injected(
-        SkillSetActivatorFactoryProtocol
-    ),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> DeactivateSkillSetResponse:
     """取消激活单个能力集
@@ -1302,8 +1227,8 @@ async def get_active_skill_sets(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> ActiveSkillSetsResponse:
     """获取当前 bot 的所有激活能力集列表
@@ -1344,381 +1269,6 @@ async def get_active_skill_sets(
 
 
 # ==================== Skill Activation APIs (动态路径) ====================
-
-
-@router.post("/{skill_id}/activate", response_model=ActivateResponse)
-async def activate_skill(
-    skill_id: str,
-    request: ActivateRequest,
-    entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(
-        None, description="Entity type (staff/proj/team, default: staff)"
-    ),
-    bot_id: str | None = Query(None, description="Bot ID (default: default)"),
-    engine_type: str | None = Query(
-        None, description="Engine type override; defaults to bot's active_engine"
-    ),
-    ctx: RequestContext = Depends(get_request_context),
-    bot_repo: BotRepository = Injected(BotRepository),
-    path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(
-        SkillServiceFactoryProtocol
-    ),
-    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(
-        SkillSetServiceFactoryProtocol
-    ),
-    resolver: DeviceContextResolver = Injected(DeviceContextResolver),
-    device_sync_dispatcher: DeviceSyncDispatcher = Injected(DeviceSyncDispatcher),
-    asset_service: BotSkillAssetServiceProtocol = Injected(
-        BotSkillAssetServiceProtocol
-    ),
-) -> ActivateResponse:
-    """Activate a skill by creating symlink."""
-    logger.info(
-        f"[skills.activate_skill] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, skill_id={skill_id}, entity_id={entity_id}"
-    )
-
-    # Get effective path parameters
-    (
-        effective_entity_id,
-        effective_bot_id,
-        effective_engine,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop,
-    ) = _get_path_params(
-        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
-    )
-
-    # Keep the published BFF response shape, but translate every reference that
-    # now resolves to an ``ac_skill.id`` through the unified desired-state
-    # control plane.  Non-decimal relative paths/link names are legacy wire,
-    # not a second activation model.
-    try:
-        result = await _set_legacy_asset_active_if_resolved(
-            asset_service=asset_service,
-            skill_reference=request.relative_path or skill_id,
-            source_path=request.source_path,
-            bot_id=effective_bot_id,
-            owner_id=effective_entity_id,
-            actor_id=ctx.user_id,
-            active=True,
-        )
-    except LocalSkillRuntimeSyncError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail="Failed to synchronize activated skills to runtime",
-        ) from exc
-    if result is not None:
-        return ActivateResponse(
-            success=True,
-            message="Skill activated successfully",
-            link_name=str(result["name"]),
-        )
-
-    # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(
-        effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type
-    )
-    local_dir = path_factory.get_bot_skills_local_dir(
-        effective_entity_id,
-        effective_bot_id,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop=is_desktop,
-    )
-    path_factory.get_bot_engine_dir(
-        effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type
-    )
-    repo_dir = path_factory.get_bot_skills_repo_dir(
-        effective_entity_id,
-        effective_bot_id,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop=is_desktop,
-    )
-
-    # Create per-request service instance with user-specific paths
-    service = skill_service_factory.create(
-        active_dir=skills_dir,
-        repo_dir=repo_dir,
-        local_dir=local_dir,
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-    )
-
-    actual_skill_id = request.relative_path if request.relative_path else skill_id
-    # activate_skill is async — direct await; previously the call was
-    # wrapped in run_in_threadpool which silently dropped the coroutine
-    # (returning a truthy coroutine object, so `if not success` never
-    # triggered). Plus the second positional arg `request.source_path`
-    # was being misaligned with the `user_id` parameter — switch to
-    # kwargs to make the contract explicit.
-    success = await service.activate_skill(
-        actual_skill_id,
-        user_id=ctx.user_id,
-        bolt_id=effective_bot_id,
-    )
-    if not success:
-        raise HTTPException(status_code=400, detail="Failed to activate skill")
-    link_name = service.get_link_name(actual_skill_id)
-
-    # 关键修复：同步软链到设备（支持 Arca 模式）
-    try:
-        ctx_dev = resolver.resolve_for_bot(effective_bot_id, effective_entity_id)
-        device_sync = device_sync_dispatcher.dispatch(ctx_dev)
-        skill_set_service = skill_set_service_factory.create(
-            user_id=ctx.user_id,
-            entity_id=effective_entity_id,
-            bot_id=effective_bot_id,
-            engine_type=effective_engine,
-            entity_type=effective_entity_type,
-        )
-        mapping_kwargs: dict[str, Any] = {
-            "user_id": ctx.user_id,
-            "bolt_id": effective_bot_id,
-        }
-        if service.runtime_uses_pool_paths:
-            mapping_kwargs["additional_skill_paths"] = [actual_skill_id]
-        symlinks = skill_set_service.get_symlink_mappings(**mapping_kwargs)
-        symlinks_dict = [sm.to_dict() for sm in symlinks]
-        sync_result = device_sync.sync_symlinks(symlinks_dict)
-        logger.info(f"[skills.activate_skill] Device sync result: {sync_result}")
-    except Exception as e:
-        logger.warning(f"[skills.activate_skill] Device sync skipped or failed: {e}")
-        _require_pool_runtime_sync_success(
-            service,
-            None,
-            detail="Failed to synchronize activated skills to runtime",
-        )
-    else:
-        _require_pool_runtime_sync_success(
-            service,
-            sync_result,
-            detail="Failed to synchronize activated skills to runtime",
-        )
-
-    logger.info(
-        f"[skills.activate_skill] Success: skill_id={actual_skill_id}, link_name={link_name}"
-    )
-    return ActivateResponse(
-        success=True, message="Skill activated successfully", link_name=link_name
-    )
-
-
-@router.post("/{skill_id}/deactivate", response_model=DeactivateResponse)
-async def deactivate_skill(
-    skill_id: str,
-    entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(
-        None, description="Entity type (staff/proj/team, default: staff)"
-    ),
-    bot_id: str | None = Query(None, description="Bot ID (default: default)"),
-    engine_type: str | None = Query(
-        None, description="Engine type override; defaults to bot's active_engine"
-    ),
-    ctx: RequestContext = Depends(get_request_context),
-    bot_repo: BotRepository = Injected(BotRepository),
-    path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(
-        SkillServiceFactoryProtocol
-    ),
-    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(
-        SkillSetServiceFactoryProtocol
-    ),
-    resolver: DeviceContextResolver = Injected(DeviceContextResolver),
-    device_sync_dispatcher: DeviceSyncDispatcher = Injected(DeviceSyncDispatcher),
-    asset_service: BotSkillAssetServiceProtocol = Injected(
-        BotSkillAssetServiceProtocol
-    ),
-) -> DeactivateResponse:
-    """Deactivate a skill by removing symlink."""
-    logger.info(
-        f"[skills.deactivate_skill] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, skill_id={skill_id}, entity_id={entity_id}"
-    )
-
-    # Get effective path parameters
-    (
-        effective_entity_id,
-        effective_bot_id,
-        effective_engine,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop,
-    ) = _get_path_params(
-        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
-    )
-
-    try:
-        result = await _set_legacy_asset_active_if_resolved(
-            asset_service=asset_service,
-            skill_reference=skill_id,
-            source_path="",
-            bot_id=effective_bot_id,
-            owner_id=effective_entity_id,
-            actor_id=ctx.user_id,
-            active=False,
-        )
-    except LocalSkillRuntimeSyncError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail="Failed to synchronize deactivated skills to runtime",
-        ) from exc
-    if result is not None:
-        return DeactivateResponse(
-            success=True, message="Skill deactivated successfully"
-        )
-
-    # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(
-        effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type
-    )
-    local_dir = path_factory.get_bot_skills_local_dir(
-        effective_entity_id,
-        effective_bot_id,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop=is_desktop,
-    )
-    path_factory.get_bot_engine_dir(
-        effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type
-    )
-    repo_dir = path_factory.get_bot_skills_repo_dir(
-        effective_entity_id,
-        effective_bot_id,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop=is_desktop,
-    )
-
-    # Create per-request service instance with user-specific paths
-    service = skill_service_factory.create(
-        active_dir=skills_dir,
-        repo_dir=repo_dir,
-        local_dir=local_dir,
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-    )
-
-    # deactivate_skill is async — must await; previously a direct sync call
-    # returned an un-awaited coroutine object that the truthy `if not success`
-    # check ignored, so the endpoint silently no-op'd.
-    success = await service.deactivate_skill(
-        skill_id,
-        user_id=ctx.user_id,
-        bolt_id=effective_bot_id,
-    )
-    if not success:
-        raise HTTPException(status_code=400, detail="Failed to deactivate skill")
-
-    # 关键修复：同步软链到设备（支持 Arca 模式，即使为空也要同步以清理设备端软链）
-    try:
-        ctx_dev = resolver.resolve_for_bot(effective_bot_id, effective_entity_id)
-        device_sync = device_sync_dispatcher.dispatch(ctx_dev)
-        skill_set_service = skill_set_service_factory.create(
-            user_id=ctx.user_id,
-            entity_id=effective_entity_id,
-            bot_id=effective_bot_id,
-            engine_type=effective_engine,
-            entity_type=effective_entity_type,
-        )
-        symlinks = skill_set_service.get_symlink_mappings(
-            user_id=ctx.user_id,
-            bolt_id=effective_bot_id,
-        )
-        symlinks_dict = [sm.to_dict() for sm in symlinks]
-        sync_result = device_sync.sync_symlinks(symlinks_dict)
-        logger.info(f"[skills.deactivate_skill] Device sync result: {sync_result}")
-    except Exception as e:
-        logger.warning(f"[skills.deactivate_skill] Device sync skipped or failed: {e}")
-        _require_pool_runtime_sync_success(
-            service,
-            None,
-            detail="Failed to synchronize deactivated skills to runtime",
-        )
-    else:
-        _require_pool_runtime_sync_success(
-            service,
-            sync_result,
-            detail="Failed to synchronize deactivated skills to runtime",
-        )
-
-    logger.info(f"[skills.deactivate_skill] Success: skill_id={skill_id}")
-    return DeactivateResponse(success=True, message="Skill deactivated successfully")
-
-
-@router.post("/deactivate-all", response_model=SwitchSkillSetResponse)
-async def deactivate_all_skills(
-    entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(
-        None, description="Entity type (staff/proj/team, default: staff)"
-    ),
-    bot_id: str | None = Query(None, description="Bot ID (default: default)"),
-    engine_type: str | None = Query(
-        None, description="Engine type override; defaults to bot's active_engine"
-    ),
-    ctx: RequestContext = Depends(get_request_context),
-    bot_repo: BotRepository = Injected(BotRepository),
-    switcher_factory: SkillSetSwitcherFactoryProtocol = Injected(
-        SkillSetSwitcherFactoryProtocol
-    ),
-    path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
-) -> SwitchSkillSetResponse:
-    """Deactivate all currently active skills."""
-    # Get effective path parameters
-    (
-        effective_entity_id,
-        effective_bot_id,
-        effective_engine,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop,
-    ) = _get_path_params(
-        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
-    )
-
-    # Get user-specific paths using new directory structure
-    path_factory.get_bot_skills_dir(
-        effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type
-    )
-    path_factory.get_bot_skills_local_dir(
-        effective_entity_id,
-        effective_bot_id,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop=is_desktop,
-    )
-    path_factory.get_bot_engine_dir(
-        effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type
-    )
-    path_factory.get_bot_skills_repo_dir(
-        effective_entity_id,
-        effective_bot_id,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop=is_desktop,
-    )
-
-    switcher = switcher_factory.create(
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-    )
-    result = await switcher.deactivate_all_skills()
-    return SwitchSkillSetResponse(
-        success=result.success,
-        message=result.message,
-        data={
-            "activated": result.activated,
-            "deactivated": result.deactivated,
-            "failed": result.failed,
-        },
-    )
-
-
-# ==================== Skill README API ====================
 
 
 @router.get("/{skill_id}/readme", response_model=SkillReadmeResponse)
@@ -2119,8 +1669,11 @@ async def activate_skills_batch(
     engine_type: Optional[str] = Query(
         None, description="Engine type override; defaults to bot's active_engine"
     ),
-    asset_service: BotSkillAssetServiceProtocol = Injected(
-        BotSkillAssetServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
+    ),
+    direct_activation: DirectActivationServiceProtocol = Injected(
+        DirectActivationServiceProtocol
     ),
 ) -> ActivateSkillsResponse:
     """Compatibility batch adapter over the canonical Direct control plane."""
@@ -2135,19 +1688,18 @@ async def activate_skills_batch(
     results: dict[str, list[dict[str, str]]] = {"success": [], "failed": []}
     for path in request.skill_paths:
         try:
-            skill_id = asset_service.resolve_legacy_skill_id(
+            skill_id = query_service.resolve_legacy_skill_id(
                 skill_reference=path,
                 source_path=path,
                 bot_id=effective_bot_id,
                 owner_id=effective_owner_id,
                 user_id=ctx.user_id,
             )
-            item = await asset_service.set_active(
+            item = await direct_activation.activate_skill(
                 skill_id=skill_id,
                 bot_id=effective_bot_id,
                 owner_id=effective_owner_id,
-                user_id=ctx.user_id,
-                active=True,
+                actor_id=ctx.user_id,
             )
             results["success"].append(
                 {
@@ -2158,7 +1710,14 @@ async def activate_skills_batch(
                     "path": str(item.get("git_path") or path),
                 }
             )
-        except (LocalSkillNotFoundError, SkillSetManagedResourceError) as exc:
+        except (
+            LocalSkillNotFoundError,
+            # The R1 refusal (Set-managed capability) and the one-name-per-
+            # active invariant now surface from the UoW as the control-plane
+            # conflict family; each is one item's failure, never the batch's.
+            SkillSetControlPlaneConflictError,
+            SkillRuntimeNameConflictError,
+        ) as exc:
             results["failed"].append(
                 {"path": path, "error": str(exc) or type(exc).__name__}
             )

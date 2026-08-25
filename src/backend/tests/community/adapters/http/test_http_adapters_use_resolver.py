@@ -104,8 +104,11 @@ def _skills_router_app(mock_ctx, tmp_path):
     from agentclaw.community.api.skill_set_service_factory import (
         SkillSetServiceFactoryProtocol,
     )
-    from agentclaw.community.api.bot_skill_asset_service import (
-        BotSkillAssetServiceProtocol,
+    from agentclaw.community.api.skill_query_service import (
+        SkillQueryServiceProtocol,
+    )
+    from agentclaw.community.api.direct_activation_service import (
+        DirectActivationServiceProtocol,
     )
 
     ctx = _make_ctx()
@@ -116,22 +119,30 @@ def _skills_router_app(mock_ctx, tmp_path):
     dispatcher = MagicMock()
     dispatcher.dispatch.return_value = sync_plugin
 
-    asset_service = MagicMock()
+    query_service = MagicMock()
 
     def _resolve_legacy(**kwargs):
         _ = kwargs
         return "1"
 
-    asset_service.resolve_legacy_skill_id.side_effect = _resolve_legacy
-    asset_service.set_active = AsyncMock(
-        return_value={
-            "id": "1",
-            "name": "a",
-            "link_name": "a",
-            "git_path": "git://path/a",
-        }
-    )
-    resolver.asset_service = asset_service
+    query_service.resolve_legacy_skill_id.side_effect = _resolve_legacy
+    query_service.get_skill.return_value = {
+        "id": "1",
+        "name": "a",
+        "bolt_id": "bot-1",
+        "user_id": "user-1",
+    }
+    _record = {
+        "id": "1",
+        "name": "a",
+        "link_name": "a",
+        "git_path": "git://path/a",
+    }
+    direct_activation = MagicMock()
+    direct_activation.activate_skill = AsyncMock(return_value=_record)
+    direct_activation.deactivate_skill = AsyncMock(return_value=_record)
+    resolver.query_service = query_service
+    resolver.direct_activation = direct_activation
 
     # ─── Other deps used by the endpoints ───
     skill_service = MagicMock()
@@ -178,7 +189,8 @@ def _skills_router_app(mock_ctx, tmp_path):
             binder.bind(SkillSetServiceFactory, to=skill_set_service_factory)
             binder.bind(DeviceContextResolver, to=resolver)
             binder.bind(DeviceSyncDispatcher, to=dispatcher)
-            binder.bind(BotSkillAssetServiceProtocol, to=asset_service)
+            binder.bind(SkillQueryServiceProtocol, to=query_service)
+            binder.bind(DirectActivationServiceProtocol, to=direct_activation)
 
     injector = Injector([_TestModule()])
     attach_injector(app, injector)
@@ -250,61 +262,6 @@ def _skillsets_router_app(mock_ctx, tmp_path):
 
 
 class TestSkillsEndpointsUseResolver:
-    def test_activate_skill_endpoint_uses_resolver(self, mock_request_ctx, tmp_path):
-        with _skills_router_app(mock_request_ctx, tmp_path) as (
-            client,
-            resolver,
-            dispatcher,
-            _sync_plugin,
-        ):
-            resp = client.post(
-                "/api/skills/sk-x/activate",
-                json={"source_path": "sk-x"},
-                params={
-                    "entity_id": "user-1",
-                    "entity_type": "staff",
-                    "bot_id": "bot-1",
-                    "engine_type": "openclaw",
-                },
-            )
-            assert resp.status_code == 200, resp.text
-            resolver.resolve_for_bot.assert_not_called()
-            dispatcher.dispatch.assert_not_called()
-            resolver.asset_service.set_active.assert_awaited_once_with(
-                skill_id="1",
-                bot_id="bot-1",
-                owner_id="user-1",
-                user_id="user-1",
-                active=True,
-            )
-
-    def test_deactivate_skill_endpoint_uses_resolver(self, mock_request_ctx, tmp_path):
-        with _skills_router_app(mock_request_ctx, tmp_path) as (
-            client,
-            resolver,
-            dispatcher,
-            _sync_plugin,
-        ):
-            resp = client.post(
-                "/api/skills/sk-x/deactivate",
-                params={
-                    "entity_id": "user-1",
-                    "entity_type": "staff",
-                    "bot_id": "bot-1",
-                    "engine_type": "openclaw",
-                },
-            )
-            assert resp.status_code == 200, resp.text
-            resolver.resolve_for_bot.assert_not_called()
-            dispatcher.dispatch.assert_not_called()
-            resolver.asset_service.set_active.assert_awaited_once_with(
-                skill_id="1",
-                bot_id="bot-1",
-                owner_id="user-1",
-                user_id="user-1",
-                active=False,
-            )
-
     def test_activate_skills_batch_endpoint_uses_resolver(
         self, mock_request_ctx, tmp_path
     ):
@@ -328,12 +285,11 @@ class TestSkillsEndpointsUseResolver:
             # control plane; that deep module owns runtime resolution.
             resolver.resolve_for_bot.assert_not_called()
             dispatcher.dispatch.assert_not_called()
-            resolver.asset_service.set_active.assert_awaited_once_with(
+            resolver.direct_activation.activate_skill.assert_awaited_once_with(
                 skill_id="1",
                 bot_id="bot-1",
                 owner_id="user-1",
-                user_id="user-1",
-                active=True,
+                actor_id="user-1",
             )
 
 

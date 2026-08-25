@@ -25,7 +25,6 @@ from agentclaw.community.core.repository.protocols.bot import (
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillRepository,
-    SkillSetRepository,
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillDuplicateError,
@@ -43,7 +42,7 @@ from agentclaw.community.core.skill_center.factories import (
     SkillServiceFactory,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
-    BotRuntimeProjectionReconcilerProtocol,
+    BotRuntimeProjectorProtocol,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import (
     SkillManifestError,
@@ -78,17 +77,15 @@ class LocalSkillUploadService:
     def __init__(
         self,
         skill_repo: SkillRepository,
-        skill_set_repo: SkillSetRepository,
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
         audit_log_repo: BotCollabLogRepositoryProtocol,
         edit_guard: SkillsPoolEditGuard,
         device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
-        runtime_reconciler: BotRuntimeProjectionReconcilerProtocol,
+        runtime_reconciler: BotRuntimeProjectorProtocol,
     ) -> None:
         self._skill_repo = skill_repo
-        self._skill_set_repo = skill_set_repo
         self._bot_repo = bot_repo
         self._collaborators = collaborator_service
         self._skill_service_factory = skill_service_factory
@@ -263,49 +260,6 @@ class LocalSkillUploadService:
             entity_id=str(bot["entity_id"]),
             bot_id=bot_id,
         )
-
-    def _ensure_default_set(
-        self, *, owner_id: str, bot_id: str, engine_type: str | None
-    ) -> dict[str, Any]:
-        default_set = self._skill_set_repo.get_default(
-            user_id=owner_id,
-            bolt_id=bot_id,
-            engine_type=engine_type,
-        )
-        if default_set is not None:
-            return default_set
-        return self._skill_set_repo.create(
-            {
-                "name": "默认技能集",
-                "description": "系统默认技能集，用户可以根据需要添加或移除技能",
-                "user_id": owner_id,
-                "bolt_id": bot_id,
-                "is_default": True,
-                "is_builtin": False,
-                "is_active": False,
-                "engine_type": engine_type,
-            }
-        )
-
-    def _ensure_default_set_membership(
-        self,
-        *,
-        owner_id: str,
-        bot_id: str,
-        engine_type: str | None,
-        skill_id: str,
-    ) -> None:
-        """Repair legacy Local Skill membership before publishing a replacement."""
-        default_set = self._ensure_default_set(
-            owner_id=owner_id, bot_id=bot_id, engine_type=engine_type
-        )
-        members = self._skill_set_repo.get_skills_in_set(str(default_set["id"]))
-        if any(str(member.get("id")) == skill_id for member in members):
-            return
-        if not self._skill_set_repo.add_skill_to_set(
-            str(default_set["id"]), skill_id, user_id=owner_id
-        ):
-            raise LocalSkillStorageError()
 
     async def _replace(
         self,
@@ -573,7 +527,7 @@ class LocalSkillUploadService:
 
     async def _sync_runtime(self, owner_id: str, bot_id: str) -> bool:
         try:
-            await self._runtime_reconciler.reconcile(
+            await self._runtime_reconciler.project(
                 bot_id=bot_id,
                 owner_id=owner_id,
             )

@@ -148,7 +148,7 @@ class ServicePublicationFacade:
         So both gates run, at the same bar, and the row is still honest: for
         ``/openapi/v1`` the seam is the *declared* authority and refuses first;
         this is the transport-agnostic one the Service API promises. Same shape
-        as ``bot_skill_asset_service`` and ``skill_set_control_plane``.
+        as ``skill_query_service`` and ``skill_set_management_service``.
 
         ``level`` is returned as well as enforced, because it answers a second
         question the bar does not: :meth:`_actions` reports what the caller may

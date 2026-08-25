@@ -117,7 +117,7 @@ def _pf(*args, **kw):
     kw.setdefault("teclaw_file_promotion", Mock())
     kw.setdefault("device_binding_repo", Mock())
     kw.setdefault("publish_operation_repo", _real_ledger())
-    kw.setdefault("active_skillset_materializer", Mock())
+    kw.setdefault("capability_reader", Mock())
     # The operation runner queries baas_service.list_bot_publishes for adopt-by-
     # query; a bare Mock returns a non-iterable Mock. Default it to "no prior
     # workflows" so upgrade/existing-bot flow tests issue normally.
@@ -1033,13 +1033,19 @@ async def test_build_phase_routes_arca_and_merges_mount_ext():
     router = DeployArtifactProducerRouter(
         providers={"baas": arca, "teclaw": teclaw}, default_provider_key="baas"
     )
-    svc, _ = _build_svc_with_router(router, {"bot_id": "b1", "active_engine": "openclaw"})
+    bot = {
+        "bot_id": "b1",
+        "owner_id": "owner-1",
+        "active_engine": "openclaw",
+        "env": "prod",
+    }
+    svc, _ = _build_svc_with_router(router, bot)
 
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)
     await svc.execute_build_phase(record, "op")
 
     # openclaw → baas → ARCA producer; teclaw stub untouched.
-    assert arca.calls == [({"bot_id": "b1", "active_engine": "openclaw"}, 3)]
+    assert arca.calls == [(bot, 3)]
     assert teclaw.calls == []
     # ARCA ext carries the mount chain unchanged (the durable record).
     ext_written = svc._ext_state.update_status.call_args.kwargs["ext"]
@@ -1048,41 +1054,52 @@ async def test_build_phase_routes_arca_and_merges_mount_ext():
 
 
 @pytest.mark.asyncio
-async def test_build_phase_materializes_active_skillset_installations_before_artifact_build():
+async def test_build_phase_flushes_installations_before_artifact_build():
     arca = _StubProducer({"migration_path": "/m/3"})
     router = DeployArtifactProducerRouter(
         providers={"baas": arca}, default_provider_key="baas"
     )
-    materializer = Mock()
+    capability_reader = Mock()
+    bot = {
+        "bot_id": "b1",
+        "owner_id": "owner-1",
+        "active_engine": "openclaw",
+        "env": "prod",
+    }
     svc, _ = _build_svc_with_router(
         router,
-        {"bot_id": "b1", "active_engine": "openclaw"},
-        active_skillset_materializer=materializer,
+        bot,
+        capability_reader=capability_reader,
     )
 
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)
     await svc.execute_build_phase(record, "op")
 
-    materializer.materialize.assert_called_once_with(
-        bot_id="bot-source", owner_id="u1", engine_type="openclaw"
+    capability_reader.active_skill_assets.assert_called_once_with(
+        bot_id="b1", owner_id="owner-1", bot=bot
     )
-    assert arca.calls == [({"bot_id": "b1", "active_engine": "openclaw"}, 3)]
+    assert arca.calls == [(bot, 3)]
 
 
 @pytest.mark.asyncio
-async def test_build_phase_fails_without_producing_artifact_when_materialization_fails():
+async def test_build_phase_fails_without_producing_artifact_when_flush_fails():
     arca = _StubProducer({"migration_path": "/m/3"})
     router = DeployArtifactProducerRouter(
         providers={"baas": arca}, default_provider_key="baas"
     )
-    materializer = Mock()
-    materializer.materialize.side_effect = RuntimeError(
+    capability_reader = Mock()
+    capability_reader.active_skill_assets.side_effect = RuntimeError(
         "installation persistence unavailable"
     )
     svc, _ = _build_svc_with_router(
         router,
-        {"bot_id": "b1", "active_engine": "openclaw"},
-        active_skillset_materializer=materializer,
+        {
+            "bot_id": "b1",
+            "owner_id": "owner-1",
+            "active_engine": "openclaw",
+            "env": "prod",
+        },
+        capability_reader=capability_reader,
     )
 
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)
@@ -1101,15 +1118,19 @@ async def test_build_phase_routes_external_and_merges_artifact_ext():
     router = DeployArtifactProducerRouter(
         providers={"baas": arca, "teclaw": teclaw}, default_provider_key="baas"
     )
-    svc, _ = _build_svc_with_router(
-        router, {"bot_id": "b2", "active_engine": "teclaw"}, provider="teclaw"
-    )
+    bot = {
+        "bot_id": "b2",
+        "owner_id": "owner-1",
+        "active_engine": "teclaw",
+        "env": "prod",
+    }
+    svc, _ = _build_svc_with_router(router, bot, provider="teclaw")
 
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=2)
     await svc.execute_build_phase(record, "op")
 
     # baas reports a TECLAW container → teclaw producer.
-    assert teclaw.calls == [({"bot_id": "b2", "active_engine": "teclaw"}, 2)]
+    assert teclaw.calls == [(bot, 2)]
     assert arca.calls == []
     # external pins the refs-only artifact onto ext (no mount chain). The teclaw
     # file-promotion gather merges its (here empty) snapshot into the artifact,
@@ -1131,7 +1152,15 @@ async def test_build_phase_failed_artifact_returns_failed_result():
     router = DeployArtifactProducerRouter(
         providers={"baas": _Fail()}, default_provider_key="baas"
     )
-    svc, _ = _build_svc_with_router(router, {"bot_id": "b", "active_engine": "openclaw"})
+    svc, _ = _build_svc_with_router(
+        router,
+        {
+            "bot_id": "b",
+            "owner_id": "owner-1",
+            "active_engine": "openclaw",
+            "env": "prod",
+        },
+    )
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=1)
 
     # The build phase catches failures and returns a FAILED result (not raises),

@@ -262,7 +262,7 @@ def test_a_directly_installed_shared_skill_is_listed(tmp_path):
 
     Activating a shared Repo Skill that belongs to no SkillSet writes an
     Installation row and nothing else — the Skill row still names another owner
-    and another Bot. ``list_bot_active_assets`` puts it in the runtime
+    and another Bot. ``list_bot_installed_assets`` puts it in the runtime
     projection, so a listing that admitted only Bot-owned and SkillSet-bridged
     rows would hide a Skill the Bot is actually running.
     """

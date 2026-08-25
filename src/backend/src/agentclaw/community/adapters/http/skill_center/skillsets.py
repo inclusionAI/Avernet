@@ -67,8 +67,8 @@ from agentclaw.community.api.skill_service_factory import SkillServiceFactoryPro
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
 )
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
+from agentclaw.community.api.skill_set_management_service import (
+    SkillSetManagementServiceProtocol,
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
@@ -193,7 +193,7 @@ def _get_skill_set_path_params(
     bot_id: Optional[str],
     engine_type: Optional[str],
     bot_repo: BotRepository,
-    control_plane: SkillSetControlPlaneServiceProtocol,
+    control_plane: SkillSetManagementServiceProtocol,
 ) -> tuple:
     """Resolve the deprecated optional Bot address before normal path handling."""
     entity_id, bot_id = recover_legacy_skill_set_scope(
@@ -236,8 +236,8 @@ async def list_skill_sets(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> SkillSetListResponse:
     """List all skill sets with their skills. Default skill set is listed first."""
@@ -306,8 +306,8 @@ async def create_skill_set(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> SkillSetDetailResponse:
     """Create a new skill set."""
@@ -360,8 +360,8 @@ async def list_skill_sets_with_mcps(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> SkillSetsWithMCPsResponse:
     """获取用户所有 skillset 及其关联的 MCP 列表。"""
@@ -396,7 +396,7 @@ async def list_skill_sets_with_mcps(
                 for m in item.get("mcps", [])
             ],
         )
-        for item in control_plane.resources(
+        for item in control_plane.list_resources(
             bot_id=effective_bot_id,
             owner_id=effective_entity_id,
             user_id=_legacy_actor(ctx, user_id or entity_id),
@@ -426,8 +426,8 @@ async def list_skill_set_resources(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> SkillSetResourcesResponse:
     """获取能力集资源聚合视图（MCP + 默认能力集 CLI）。"""
@@ -462,7 +462,7 @@ async def list_skill_set_resources(
             ],
             clis=[CLIInSetResponse(**cli) for cli in item.get("clis", [])],
         )
-        for item in control_plane.resources(
+        for item in control_plane.list_resources(
             bot_id=effective_bot_id,
             owner_id=effective_entity_id,
             user_id=_legacy_actor(ctx, user_id or entity_id),
@@ -486,8 +486,8 @@ async def get_skill_set(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> SkillSetDetailResponse:
     """Get a skill set by ID."""
@@ -537,8 +537,8 @@ async def update_skill_set(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> SkillSetDetailResponse:
     """Update a skill set."""
@@ -596,8 +596,8 @@ async def delete_skill_set(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> MessageResponse:
     """Delete a skill set."""
@@ -645,8 +645,8 @@ async def get_skill_set_skills(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> SkillSetSkillsResponse:
     """Get all skills in a skill set."""
@@ -712,8 +712,8 @@ async def add_skills_to_set(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> AddSkillsResponse:
     """Add skills to a skill set."""
@@ -816,8 +816,8 @@ async def remove_skill_from_set(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> MessageResponse:
     """Remove a skill from a skill set."""
@@ -1751,8 +1751,8 @@ async def get_skill_set_mcps(
     skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(
         SkillSetServiceFactoryProtocol
     ),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> SkillSetMCPsResponse:
     """Get all MCP servers in a skill set."""
@@ -1836,8 +1836,8 @@ async def add_mcp_to_skill_set(
     skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(
         SkillSetServiceFactoryProtocol
     ),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> AddMCPResponse:
     """Add an MCP server to a skill set."""
@@ -1897,8 +1897,8 @@ async def remove_mcp_from_skill_set(
     skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(
         SkillSetServiceFactoryProtocol
     ),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> MessageResponse:
     """Remove an MCP server from a skill set."""
@@ -2079,8 +2079,9 @@ async def sync_skills_to_device(
         )
 
         # 获取当前 bot 所有 active 能力集的合并 symlink mappings
+        # (Installation-keyed on the Bot's OWNER, not the acting user)
         symlinks = service.get_symlink_mappings(
-            user_id=user_id,
+            user_id=effective_entity_id,
             bolt_id=effective_bot_id,
         )
         symlinks_dict = [sm.to_dict() for sm in symlinks]

@@ -37,16 +37,15 @@ from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
-)
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
+from agentclaw.community.api.skill_query_service import (
+    SkillQueryServiceProtocol,
 )
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
-from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
+)
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
 from agentclaw.community.core.gateway_principal import (
     AppPrincipal,
@@ -142,22 +141,27 @@ class _Skills:
     async def delete_local_skill(self, *, skill_id: str, owner_id: str, user_id: str):
         self.deleted.append(skill_id)
 
-    async def set_local_skill_active(self, *, skill_id: str, actor_id: str, active):
+    def get_skill(self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str):
+        return self.get_local_skill(skill_id=skill_id, actor_id=user_id)
+
+    async def activate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+    ):
         self.activated.append(skill_id)
         return {
             **self.get_local_skill(skill_id=skill_id, actor_id=actor_id),
             "changed": True,
         }
 
-    def get_skill(self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str):
-        return self.get_local_skill(skill_id=skill_id, actor_id=user_id)
-
-    async def set_active(
-        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str, active
+    async def deactivate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
     ):
-        return await self.set_local_skill_active(
-            skill_id=skill_id, actor_id=user_id, active=active
-        )
+        self.activated.append(skill_id)
+        return {
+            **self.get_local_skill(skill_id=skill_id, actor_id=actor_id),
+            "active": False,
+            "changed": True,
+        }
 
     def list_bot_skills(
         self, *, bot_id, owner_id, actor_id, page, page_size, active=None, keyword=None
@@ -197,11 +201,10 @@ def client(skills, cron):
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotAppGrantServiceProtocol, to=_Grants())
-            binder.bind(LocalSkillQueryServiceProtocol, to=skills)
+            binder.bind(SkillQueryServiceProtocol, to=skills)
             binder.bind(LocalSkillDeleteServiceProtocol, to=skills)
-            binder.bind(LocalSkillStateServiceProtocol, to=skills)
             binder.bind(LocalSkillUploadServiceProtocol, to=skills)
-            binder.bind(BotSkillAssetServiceProtocol, to=skills)
+            binder.bind(DirectActivationServiceProtocol, to=skills)
             binder.bind(CronRelayServiceProtocol, to=cron)
             # The four ``{skill_id}`` operations declare ``Check(MEMBER)``
             # now, so the seam runs on them. It is not what this file is

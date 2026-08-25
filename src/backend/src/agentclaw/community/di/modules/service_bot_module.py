@@ -76,8 +76,8 @@ from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemD
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.repository.protocols.publishing import PublishOperationRepository
-from agentclaw.community.core.skill_center.services.active_skillset_installation_materializer import (
-    ActiveSkillSetInstallationMaterializer,
+from agentclaw.community.api.bot_capability_state_reader import (
+    BotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
@@ -526,7 +526,7 @@ class ServiceBotModule(Module):
         channel_overrides_reader: ChannelEngineOverridesReader,
         task_queue_service: TaskQueueService,
         publish_operation_repo: PublishOperationRepository,
-        active_skillset_materializer: ActiveSkillSetInstallationMaterializer,
+        capability_reader: BotCapabilityStateReaderProtocol,
     ) -> PublishFlowService:
         """Construct ``PublishFlowService``.
 
@@ -551,7 +551,7 @@ class ServiceBotModule(Module):
             channel_overrides_reader=channel_overrides_reader,
             task_queue_service=task_queue_service,
             publish_operation_repo=publish_operation_repo,
-            active_skillset_materializer=active_skillset_materializer,
+            capability_reader=capability_reader,
         )
 
     @singleton

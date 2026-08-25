@@ -82,7 +82,7 @@ class _RuntimeFactory:
     def sync_runtime(self):
         return True
 
-    async def reconcile(self, **_kwargs):
+    async def project(self, **_kwargs):
         return None
 
 
@@ -204,7 +204,6 @@ def _seed_uploadable_bot(world) -> None:
         LocalSkillUploadServiceProtocol,
         to=LocalSkillUploadService(
             world.get(SkillRepository),
-            world.get(SkillSetRepository),
             world.get(BotRepository),
             world.get(CollaboratorServiceProtocol),
             storage_factory,

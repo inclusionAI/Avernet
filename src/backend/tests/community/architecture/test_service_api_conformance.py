@@ -50,10 +50,9 @@ import pytest
 from agentclaw.community.api.bot_dormant_service import (
     BotDormantActivateServiceProtocol,
 )
-from agentclaw.community.api.bot_runtime_projection_reconciler import (
-    BotRuntimeProjectionReconcilerProtocol,
+from agentclaw.community.api.bot_runtime_projector import (
+    BotRuntimeProjectorProtocol,
 )
-from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
@@ -74,20 +73,20 @@ from agentclaw.community.api.health_diagnosis_service import (
 from agentclaw.community.api.local_bot_workflow_service import (
     LocalBotWorkflowServiceProtocol,
 )
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
+from agentclaw.community.api.skill_query_service import (
+    SkillQueryServiceProtocol,
 )
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
 )
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
+from agentclaw.community.api.skill_set_management_service import (
+    SkillSetManagementServiceProtocol,
 )
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
@@ -133,20 +132,17 @@ from agentclaw.community.core.harness.services.health_diagnosis_service import (
     HealthDiagnosisService,
 )
 from agentclaw.community.core.services.engine_config import EngineConfigService
-from agentclaw.community.core.skill_center.services.local_skill_query_service import (
-    LocalSkillQueryService,
+from agentclaw.community.core.skill_center.services.skill_query_service import (
+    SkillQueryService,
 )
-from agentclaw.community.core.skill_center.services.bot_skill_asset_service import (
-    BotSkillAssetService,
-)
-from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
-    BotRuntimeProjectionReconciler,
+from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
+    BotRuntimeProjector,
 )
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
 )
-from agentclaw.community.core.skill_center.services.local_skill_state_service import (
-    LocalSkillStateService,
+from agentclaw.community.core.skill_center.services.direct_activation_service import (
+    DirectActivationService,
 )
 from agentclaw.community.core.bot_app_grant.services import BotAppGrantService
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
@@ -155,8 +151,8 @@ from agentclaw.community.core.skill_center.services.local_skill_delete_service i
 from agentclaw.community.core.skill_center.services.repository_catalog_service import (
     RepositoryCatalogService,
 )
-from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
-    SkillSetControlPlaneService,
+from agentclaw.community.core.skill_center.services.skill_set_management_service import (
+    SkillSetManagementService,
 )
 from agentclaw.community.core.market_favorites.services import MarketFavoriteService
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
@@ -184,14 +180,13 @@ _PAIRS = [
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
     (EngineConnectionServiceProtocol, EngineConnectionService),
     (HealthDiagnosisServiceProtocol, HealthDiagnosisService),
-    (BotSkillAssetServiceProtocol, BotSkillAssetService),
-    (BotRuntimeProjectionReconcilerProtocol, BotRuntimeProjectionReconciler),
-    (LocalSkillQueryServiceProtocol, LocalSkillQueryService),
+    (BotRuntimeProjectorProtocol, BotRuntimeProjector),
+    (SkillQueryServiceProtocol, SkillQueryService),
     (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
-    (LocalSkillStateServiceProtocol, LocalSkillStateService),
+    (DirectActivationServiceProtocol, DirectActivationService),
     (LocalSkillDeleteServiceProtocol, LocalSkillDeleteService),
     (RepositoryCatalogServiceProtocol, RepositoryCatalogService),
-    (SkillSetControlPlaneServiceProtocol, SkillSetControlPlaneService),
+    (SkillSetManagementServiceProtocol, SkillSetManagementService),
     (SpaceServiceProtocol, SpaceService),
     (SpaceAccessServiceProtocol, SpaceAccessService),
     (SpaceMemberServiceProtocol, SpaceMemberService),

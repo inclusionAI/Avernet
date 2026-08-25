@@ -95,8 +95,8 @@ provides:
   - RenderScreenRepository
   - TemplateRepository
   - UserMCPConfigRepository
-  - SkillSetControlPlaneRepositoryProtocol
-  - SkillSetControlPlaneRepository
+  - CapabilityDesiredStateRepositoryProtocol
+  - CapabilityDesiredStateRepository
   # spaces / market_favorites
   - SpaceRepositoryProtocol
   - MarketFavoriteRepositoryProtocol
@@ -149,7 +149,6 @@ provides:
   - SkillMemberRepository
   - SkillPropagationLogRepository
   - SkillRepository
-  - SkillInstallationRepositoryProtocol
   - SpaceSkillRepository
   - SkillSetRepository
   # skills_pool
@@ -196,7 +195,6 @@ provides:
   - OrmPublishOperationRepository
   # skill_center
   - SpaceSkillRepository
-  - SkillInstallationRepository
   # skills_pool
   - SkillsPoolLayoutRepository
   - SkillsPoolRolloutRepository
