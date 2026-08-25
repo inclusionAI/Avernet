@@ -12,6 +12,8 @@ class SkillSetDesiredState:
     memberships: dict[int, tuple[tuple[int, str | None, str | None], ...]]
     mcp_installations: set[str] = field(default_factory=set)
     mcp_memberships: dict[int, tuple[str, ...]] = field(default_factory=dict)
+    default_skill_exclusions: set[tuple[int, int]] = field(default_factory=set)
+    default_mcp_exclusions: set[tuple[int, str]] = field(default_factory=set)
 
 
 @dataclass(frozen=True)

@@ -302,6 +302,174 @@ def test_global_default_reads_apply_owner_bot_exclusions_without_hiding_membersh
         bot_id="default", owner_id="owner-b", set_id=str(default.id), engine_type="openclaw"
     )] == ["included", "excluded"]
 
+
+def test_remove_skill_from_global_default_writes_owner_bot_exclusion_only():
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        default = SkillSet(
+            name="system-default", user_id="", bolt_id="", engine_type="openclaw",
+            is_default=True, is_active=True, env="dev",
+        )
+        skill = Skill(name="default-skill", git_path="git://default-skill", env="dev")
+        session.add_all([default, skill])
+        session.flush()
+        session.add_all([
+            SkillSetSkill(skill_set_id=default.id, skill_id=skill.id, env="dev"),
+            BotSkillInstallation(
+                bot_id="bot", owner_id="owner", skill_id=skill.id, env="dev"
+            ),
+        ])
+        set_id, skill_id = str(default.id), str(skill.id)
+
+    repository = SkillSetControlPlaneRepository(db)
+    first = repository.remove_skill(
+        bot_id="bot", owner_id="owner", set_id=set_id, skill_id=skill_id,
+        engine_type="openclaw",
+    )
+    second = repository.remove_skill(
+        bot_id="bot", owner_id="owner", set_id=set_id, skill_id=skill_id,
+        engine_type="openclaw",
+    )
+
+    assert first.changed is True
+    assert second.changed is False
+    with db.orm_session() as session:
+        exclusion = session.query(DefaultSkillsetSkillExclusion).one()
+        assert (
+            exclusion.user_id, exclusion.bot_id,
+            exclusion.skill_set_id, exclusion.skill_id,
+        ) == ("owner", "bot", int(set_id), int(skill_id))
+        assert session.query(SkillSetSkill).count() == 1
+        assert session.query(BotSkillInstallation).count() == 0
+
+
+def test_default_skill_exclusion_preserves_active_ordinary_set_installation():
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        default = SkillSet(
+            name="system-default", user_id="", bolt_id="", engine_type="openclaw",
+            is_default=True, is_active=True, env="dev",
+        )
+        ordinary = SkillSet(
+            name="ordinary", user_id="owner", bolt_id="bot", engine_type="openclaw",
+            is_active=True, env="dev",
+        )
+        skill = Skill(name="shared", git_path="git://shared", env="dev")
+        session.add_all([default, ordinary, skill])
+        session.flush()
+        session.add_all([
+            SkillSetSkill(skill_set_id=default.id, skill_id=skill.id, env="dev"),
+            SkillSetSkill(skill_set_id=ordinary.id, skill_id=skill.id, env="dev"),
+            BotSkillInstallation(
+                bot_id="bot", owner_id="owner", skill_id=skill.id, env="dev"
+            ),
+        ])
+        set_id, skill_id = str(default.id), str(skill.id)
+
+    mutation = SkillSetControlPlaneRepository(db).remove_skill(
+        bot_id="bot", owner_id="owner", set_id=set_id, skill_id=skill_id,
+        engine_type="openclaw",
+    )
+
+    assert mutation.changed is True
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetSkillExclusion).count() == 1
+        assert session.query(BotSkillInstallation).count() == 1
+
+
+def test_remove_mcp_from_global_default_writes_dynamic_default_exclusion_only():
+    """Default MCPs are projected, so no ac_skill_set_mcp row is required."""
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        default = SkillSet(
+            name="system-default", user_id="", bolt_id="", engine_type="teclaw",
+            is_default=True, is_active=True, env="dev",
+        )
+        session.add(default)
+        session.flush()
+        session.add(BotMCPInstallation(
+            bot_id="bot", owner_id="owner",
+            server_code="mcp.dynamic-default", env="dev",
+        ))
+        set_id = str(default.id)
+
+    repository = SkillSetControlPlaneRepository(db)
+    first = repository.remove_mcp(
+        bot_id="bot", owner_id="owner", set_id=set_id,
+        server_code="mcp.dynamic-default", engine_type="teclaw",
+    )
+    second = repository.remove_mcp(
+        bot_id="bot", owner_id="owner", set_id=set_id,
+        server_code="mcp.dynamic-default", engine_type="teclaw",
+    )
+
+    assert first.changed is True
+    assert second.changed is False
+    with db.orm_session() as session:
+        exclusion = session.query(DefaultSkillsetMcpExclusion).one()
+        assert (
+            exclusion.user_id, exclusion.bot_id,
+            exclusion.skill_set_id, exclusion.server_code,
+        ) == ("owner", "bot", int(set_id), "mcp.dynamic-default")
+        assert session.query(SkillSetMCPServer).count() == 0
+        assert session.query(BotMCPInstallation).count() == 1
+
+
+def test_restore_desired_state_restores_default_exclusions():
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        default = SkillSet(
+            name="system-default", user_id="", bolt_id="", engine_type="openclaw",
+            is_default=True, is_active=True, env="dev",
+        )
+        first = Skill(name="first", git_path="git://first", env="dev")
+        second = Skill(name="second", git_path="git://second", env="dev")
+        session.add_all([default, first, second])
+        session.flush()
+        session.add_all([
+            SkillSetSkill(skill_set_id=default.id, skill_id=first.id, env="dev"),
+            SkillSetSkill(skill_set_id=default.id, skill_id=second.id, env="dev"),
+            DefaultSkillsetSkillExclusion(
+                user_id="owner", bot_id="bot", skill_set_id=default.id,
+                skill_id=first.id,
+            ),
+            DefaultSkillsetMcpExclusion(
+                user_id="owner", bot_id="bot", skill_set_id=default.id,
+                server_code="mcp.existing",
+            ),
+            BotSkillInstallation(
+                bot_id="bot", owner_id="owner", skill_id=second.id, env="dev"
+            ),
+        ])
+        set_id, second_id = str(default.id), str(second.id)
+
+    repository = SkillSetControlPlaneRepository(db)
+    mutation = repository.remove_skill(
+        bot_id="bot", owner_id="owner", set_id=set_id, skill_id=second_id,
+        engine_type="openclaw",
+    )
+    repository.remove_mcp(
+        bot_id="bot", owner_id="owner", set_id=set_id,
+        server_code="mcp.new", engine_type="openclaw",
+    )
+    repository.restore_desired_state(
+        bot_id="bot", owner_id="owner", state=mutation.previous_state,
+        engine_type="openclaw",
+    )
+
+    with db.orm_session() as session:
+        assert {
+            (row.skill_set_id, row.skill_id)
+            for row in session.query(DefaultSkillsetSkillExclusion).all()
+        } == {(int(set_id), 1)}
+        assert {
+            (row.skill_set_id, row.server_code)
+            for row in session.query(DefaultSkillsetMcpExclusion).all()
+        } == {(int(set_id), "mcp.existing")}
+        assert {
+            row.skill_id for row in session.query(BotSkillInstallation).all()
+        } == {int(second_id)}
+
 def test_ensure_active_skillset_installations_uses_install_repository_upsert_seam():
     db = _Database()
     with db.transactional_orm_session() as session:
