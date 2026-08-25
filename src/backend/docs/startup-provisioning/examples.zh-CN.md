@@ -34,12 +34,17 @@ open API；容器重建后 bot 立即可用但内容可能滞后；scale-out 出
 携带凭证访问业务方的源站**（平台 → 业务方）——这是平台对业务方唯一的
 出向调用。secret 写后不可读回（schema §2.1）。
 
-**一个端点、一种形状**——凭证不区分 git / OSS：它的职责只是「往请求头
-注入一个值」，git-ness 属于 `source` 而非凭证。两个源各注册一次：
+**一个端点、一个 body schema**：`PUT /openapi/v1/provisioning/credentials/{name}`。
+下面是同一个接口的两次调用（`{name}` 是凭证名，如同 `PUT /users/alice` 与
+`PUT /users/bob`），两次是因为要存**两个不同的 secret**——git 一个、制品库
+一个。body 的判别键 `type` 是**认证机制**而非存储类型：git 源与 OSS 源在
+这里都是「注入一个静态请求头」，走同一个 `type: header`（schema §2.1 另留
+了 `oss_aksk` / `basic` 两种机制，v1 未实现）。
 
 ```text
 PUT /openapi/v1/provisioning/credentials/corp-git-content
 {
+  "type": "header",
   "header_name": "PRIVATE-TOKEN",
   "secret": "…",                                                   # 仓库级只读 token 或机器人账号 token，不用个人 PAT
   "allowed_prefixes": ["https://code.example-corp.com/team/content"]
@@ -47,6 +52,7 @@ PUT /openapi/v1/provisioning/credentials/corp-git-content
 
 PUT /openapi/v1/provisioning/credentials/oss-artifacts
 {
+  "type": "header",
   "header_name": "Authorization",
   "secret": "Bearer …",
   "allowed_prefixes": ["https://artifacts.example-corp.com/tools/"]

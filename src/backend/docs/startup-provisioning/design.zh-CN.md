@@ -233,9 +233,12 @@ fetch 是平台发出的普通 HTTPS GET，所以私有源鉴权的问题是「�
    被误用。前缀按**路径段边界**匹配（`…/team/content` 不得匹配
    `…/team/content-secret`）。
 
-   **一个端点、一种形状**：凭证不区分 git / URL / OSS——它的职责只是
-   「注入一个请求头」，而 git 源调托管服务 HTTP API、URL 源发普通 GET，
-   注入动作相同，**git-ness 属于 `source` 而非凭证**。前缀这一个字段同时
+   **一个端点、一个 body schema**：body 的判别键 `type` 是**认证机制**，
+   不是存储类型——`git`/`oss`/`url` 属于 `source`，凭证不关心（git 源调
+   托管服务 HTTP API、URL 源发普通 GET，注入动作相同）。v1 只实现
+   `type: header`（`header_name` + `secret`）；预留 `oss_aksk`
+   （`access_key_id` + `access_key_secret`，AK/SK 每请求现场签名，装不进
+   header 形状）与 `basic`，将来加进同一端点而不必新开接口。前缀这一个字段同时
    覆盖两种收敛：git 的仓库白名单与对象存储的桶前缀，本质都是「某 origin
    下的路径前缀」。二者都是单 origin 承载大量互不相关内容，故前缀必填、
    不设「整 origin」默认；要覆盖整个 origin 需显式写 `https://host/`。
@@ -306,7 +309,7 @@ token**（类 GitLab 的 Project/Deploy Token，天生单仓库有效）；托�
 | `GET /openapi/v1/bots/{bot_id}/provisioning/capabilities` | 该 bot 的逐类别支持表 |
 | `POST /openapi/v1/bots/{bot_id}/provisioning/apply` | 显式 apply（可带 `dry_run=true` 返回计划不执行） |
 | `GET /openapi/v1/bots/{bot_id}/provisioning/last-apply` | 最近一次 apply report |
-| `PUT /openapi/v1/provisioning/credentials/{name}` | 写入/轮换租户级命名凭证（`header_name` / `secret` / `allowed_prefixes`，§4.5）。**一个端点覆盖 git / URL / OSS**——凭证不区分源类型。租户级路径：凭证不属于单个 bot |
+| `PUT /openapi/v1/provisioning/credentials/{name}` | 写入/轮换租户级命名凭证：单一 body schema，判别键 `type`（v1 仅 `header`：`header_name` + `secret`）+ `allowed_prefixes`，§4.5。**一个端点覆盖 git / URL / OSS**。租户级路径：凭证不属于单个 bot |
 | `GET /openapi/v1/provisioning/credentials[/{name}]` | 列表 / 单个，仅掩码元数据，**永不返回 secret** |
 | `DELETE /openapi/v1/provisioning/credentials/{name}` | 删除；仍被引用时引用条目在下次 apply 记 `failed` |
 

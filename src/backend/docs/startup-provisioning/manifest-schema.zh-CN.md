@@ -100,13 +100,26 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
 （URL 中的 `{name}`）是自由标识符**，`auth` 按它做字典查找取出凭证对象；
 名字与 `allowed_prefixes` 里的域名之间不存在任何字符串匹配或推导关系。
 
-**一个端点、一种形状**——凭证不区分 git / URL / OSS：它的全部职责是「往
-请求头注入一个值」，而 git 源我们调托管服务的 HTTP API、URL 源发普通
-GET，注入动作完全相同。**git-ness 属于 `source`，不属于凭证。**
+**一个端点、一个 body schema**。判别键是**认证机制**（凭证怎么作用到请求
+上），**不是存储类型**——`git` / `oss` / `url` 是**源**的属性，凭证不关心：
+git 源调托管服务 HTTP API、URL 源发普通 GET，注入动作相同。
+
+```text
+PUT /openapi/v1/provisioning/credentials/{name}
+{
+  "type": "header",                     # 判别键；v1 唯一实现，缺省即 header
+  "allowed_prefixes": ["…"],            # 所有 type 共有（见下）
+  "header_name": "PRIVATE-TOKEN",       # ↓ type=header 专有
+  "secret": "…"
+}
+```
+
+两个实际调用（同一端点、同一 schema，只是 `{name}` 与取值不同）：
 
 ```text
 PUT /openapi/v1/provisioning/credentials/corp-git-content
 {
+  "type": "header",
   "header_name": "PRIVATE-TOKEN",                                  # 按托管服务定（O11）
   "secret": "…",                                                   # 仓库级只读 token / 机器人账号 token
   "allowed_prefixes": ["https://code.example-corp.com/team/content"]
@@ -114,13 +127,27 @@ PUT /openapi/v1/provisioning/credentials/corp-git-content
 
 PUT /openapi/v1/provisioning/credentials/oss-artifacts
 {
+  "type": "header",
   "header_name": "Authorization",
   "secret": "Bearer …",
   "allowed_prefixes": ["https://artifacts.example-corp.com/tools/"]
 }
 ```
 
-manifest 条目按名字引用（`auth:`），或声明在命名源上（§2.3）。
+两次调用是因为**存了两个不同的 secret**（git 一个、制品库一个），不是两个
+接口——`{name}` 是凭证名，同 `PUT /users/alice` 与 `PUT /users/bob` 的关系。
+一个凭证装多个 secret 是反模式：轮换周期、权限边界、可出示范围都会糊在一起。
+
+**预留的 `type`（v1 写入即拒绝，等真实需求再实现）**：
+
+| type | 字段 | 何时需要 |
+| --- | --- | --- |
+| `header`（v1） | `header_name` + `secret` | 静态请求头：git token、多数对象存储的临时 token |
+| `oss_aksk`（预留） | `access_key_id` + `access_key_secret` | 阿里云 OSS 等的 **AK/SK 请求签名**——不是固定头，而是每个请求现场按签名算法计算，装不进 header 形状 |
+| `basic`（预留） | `username` + `password` | HTTP Basic 源 |
+
+判别键留在 `type` 上而非源类型上，是为了让 AK/SK 这类**机制不同**的凭证将来
+能直接加进同一个端点，而不必新开接口。
 
 #### `allowed_prefixes`：凭证可被出示给谁
 
