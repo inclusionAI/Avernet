@@ -11,6 +11,7 @@ from typing import Any
 
 from kubernetes.client import ApiClient, AppsV1Api, CoreV1Api
 from kubernetes.client.rest import ApiException
+from kubernetes.stream import stream as k8s_stream
 
 from secbaas.community.api.device_manage import (
     OutBoundOperationRule,
@@ -186,7 +187,8 @@ class AliyunAckSandbox(ArcaSandbox):
         started = time.monotonic()
         try:
             core_api = CoreV1Api(self._client)
-            resp = core_api.connect_get_namespaced_pod_exec(
+            resp = k8s_stream(
+                core_api.connect_get_namespaced_pod_exec,
                 name=self._pod_name,
                 namespace=self._namespace,
                 container=self._container_name,

@@ -225,14 +225,16 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         docs = list(yaml.safe_load_all(rendered))
         deployment_name = ""
         container_name = ""
+        resource_kinds = []
         for doc in docs:
             if not doc:
                 continue
-            if doc.get("kind") == "Deployment":
+            kind = doc.get("kind", "")
+            resource_kinds.append(f"{kind}/{doc.get('metadata', {}).get('name', '')}")
+            if kind == "Deployment":
                 deployment_name = doc["metadata"]["name"]
                 containers = doc["spec"]["template"]["spec"]["containers"]
                 container_name = containers[0]["name"]
-                break
 
         client = self._client()
         create_from_yaml(
@@ -242,10 +244,11 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         )
 
         logger.info(
-            "[aliyun_ack] template applied uid=%s namespace=%s deployment=%s",
+            "[aliyun_ack] template applied uid=%s namespace=%s deployment=%s resources=[%s]",
             uid,
             namespace,
             deployment_name,
+            ", ".join(resource_kinds),
         )
         return deployment_name, container_name
 
