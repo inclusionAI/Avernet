@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 from uuid import UUID
 
 import pytest
@@ -798,3 +800,68 @@ def test_grant_write_rechecks_owner_membership_inside_the_transaction(db):
     assert repo.list_grants(
         space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
     )["managers"] == []
+
+
+def test_owner_transfer_rechecks_admin_reason_inside_the_transaction(db):
+    from agentclaw.community.core.skill_center.errors import (
+        SpaceSkillGrantReasonRequiredError,
+    )
+
+    repo, space_id, skill_id = _grant_fixture(db)
+
+    with pytest.raises(SpaceSkillGrantReasonRequiredError):
+        repo.transfer_owner(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id="space-admin",
+            new_owner_user_id="member-2",
+            reason=None,
+            env="dev",
+        )
+
+    assert repo.list_grants(
+        space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
+    )["owner"]["user_id"] == "owner-1"
+
+
+def test_concurrent_owner_transfers_leave_one_owner_and_surface_the_loser(tmp_path):
+    class _FileDatabase(_Database):
+        def __init__(self, path: Path):
+            self.engine = create_engine(
+                f"sqlite:///{path}", connect_args={"timeout": 1}
+            )
+            Base.metadata.create_all(self.engine)
+            self._factory = sessionmaker(bind=self.engine)
+
+    concurrent_db = _FileDatabase(tmp_path / "grant-race.sqlite")
+    repo, space_id, skill_id = _grant_fixture(concurrent_db)
+    start = Barrier(2)
+
+    def transfer(target: str):
+        start.wait()
+        try:
+            return repo.transfer_owner(
+                space_id=space_id,
+                skill_id=skill_id,
+                actor_id="owner-1",
+                new_owner_user_id=target,
+                reason=None,
+                env="dev",
+            )
+        except Exception as exc:  # the losing transaction must stay observable
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(transfer, ("member-2", "manager-1")))
+
+    assert sum(not isinstance(outcome, Exception) for outcome in outcomes) == 1
+    assert sum(isinstance(outcome, Exception) for outcome in outcomes) == 1
+    with concurrent_db.orm_session() as session:
+        active_owners = session.query(SkillGrant).filter_by(
+            skill_id=skill_id,
+            role="OWNER",
+            status="ACTIVE",
+            owner_slot=1,
+            env="dev",
+        ).all()
+        assert len(active_owners) == 1

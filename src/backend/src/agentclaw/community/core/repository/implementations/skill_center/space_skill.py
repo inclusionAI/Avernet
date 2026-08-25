@@ -37,6 +37,7 @@ from agentclaw.community.core.skill_center.errors import (
     SpaceSkillGrantForbiddenError,
     SpaceSkillGrantMemberRequiredError,
     SpaceSkillGrantNotFoundError,
+    SpaceSkillGrantReasonRequiredError,
 )
 
 
@@ -369,6 +370,10 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             )
             if actor_id != current_owner.user_id and not is_admin:
                 raise SpaceSkillGrantForbiddenError("owner or space admin required")
+            if actor_id != current_owner.user_id and not reason:
+                raise SpaceSkillGrantReasonRequiredError(
+                    "space admin reason required"
+                )
             self._require_active_member(
                 session, space_id=space_id, user_id=new_owner_user_id, env=env
             )
