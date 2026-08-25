@@ -330,6 +330,11 @@ impl ProviderManagementService for ProviderManagement {
                 env: view.record.env,
                 task_claim_mode: view.record.task_claim_mode,
                 task_dream_mode: view.record.task_dream_mode,
+                updated_at: view.record.updated_at,
+                visibility: view.record.visibility,
+                created_by: view.record.created_by,
+                status: view.record.status,
+                user_visibility: view.record.user_visibility,
             })
             .collect();
         Ok(items)
