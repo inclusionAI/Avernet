@@ -1,6 +1,6 @@
 # Manifest 完整示例与逐块讲解
 
-> 状态：DRAFT（讨论稿）。本文给出**一份完整的置备文档示例**（§1），然后
+> 状态：DRAFT（讨论稿）。本文给出**一份完整的配置清单文档示例**（§1），然后
 > 逐块讲解每一段的含义、可选写法与 apply 时平台实际做了什么（§2 起）。
 > 规范性定义见 `manifest-schema.zh-CN.md`，设计论证见 `design.zh-CN.md`；
 > 本文所引端点、字段、路径均取自现有业务代码。
@@ -23,7 +23,7 @@ teclaw）。他们的资产分两类，存放位置也不同：
 open API；容器重建后 bot 立即可用但内容可能滞后；scale-out 出来的实例
 之间还可能不一致。
 
-**置备文档解决的问题**：写一次，每个 bot 的每次拉起自动收敛到声明的状态。
+**配置清单文档解决的问题**：写一次，每个 bot 的每次拉起自动收敛到声明的状态。
 
 ## 1. 完整示例
 
@@ -34,7 +34,7 @@ open API；容器重建后 bot 立即可用但内容可能滞后；scale-out 出
 携带凭证访问业务方的源站**（平台 → 业务方）——这是平台对业务方唯一的
 出向调用。secret 写后不可读回（schema §2.1）。
 
-**一个端点、一个 body schema**：`PUT /openapi/v1/provisioning/credentials/{name}`。
+**一个端点、一个 body schema**：`PUT /openapi/v1/source-credentials/{name}`。
 下面是同一个接口的两次调用（`{name}` 是凭证名，如同 `PUT /users/alice` 与
 `PUT /users/bob`），两次是因为要存**两个不同的 secret**——git 一个、制品库
 一个。body 的判别键 `type` 是**认证机制**而非存储类型：git 源与 OSS 源在
@@ -42,7 +42,7 @@ open API；容器重建后 bot 立即可用但内容可能滞后；scale-out 出
 了 `oss_aksk` / `basic` 两种机制，v1 未实现）。
 
 ```text
-PUT /openapi/v1/provisioning/credentials/corp-git-content
+PUT /openapi/v1/source-credentials/corp-git-content
 {
   "type": "header",
   "header_name": "PRIVATE-TOKEN",
@@ -50,7 +50,7 @@ PUT /openapi/v1/provisioning/credentials/corp-git-content
   "allowed_prefixes": ["https://code.example-corp.com/team/content"]
 }
 
-PUT /openapi/v1/provisioning/credentials/oss-artifacts
+PUT /openapi/v1/source-credentials/oss-artifacts
 {
   "type": "header",
   "header_name": "Authorization",
@@ -69,7 +69,7 @@ secret 落库前用 AES-GCM 加密（复用既有 `TokenVault`，形态
 fetch 前在内存中解密出示、用完即弃。生产环境解析不到主密钥则**拒绝写入
 凭证**，绝不明文落库。
 
-### 1.2 置备文档
+### 1.2 配置清单文档
 
 ```yaml
 schema_version: 1

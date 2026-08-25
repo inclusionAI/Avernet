@@ -6,7 +6,7 @@
 
 ## 1. 顶层结构
 
-置备文档（经 `PUT /openapi/v1/bots/{bot_id}/provisioning` 写入）：
+配置清单文档（经 `PUT /openapi/v1/bots/{bot_id}/config-manifest` 写入）：
 
 ```yaml
 schema_version: 1
@@ -43,7 +43,7 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
 | 类别 | 内容本性 | 典型来源 |
 | --- | --- | --- |
 | identity / skills / resources | **文本表达**（md、SKILL.md、csv/json…） | git（§2.2/§2.3）；也可 URL |
-| engine_config / mcp | 文本，但**内联在 manifest 内**（键值 / 注册表引用） | 无 source——它们的「文本」就是置备文档自身 |
+| engine_config / mcp | 文本，但**内联在 manifest 内**（键值 / 注册表引用） | 无 source——它们的「文本」就是配置清单文档自身 |
 | cli_tools | **二进制制品** | URL + 强制 `digest`（§3.7） |
 
 `cli_tools` 是唯一的例外，且是原则性的：**git 管表达，制品库管产物**。
@@ -105,7 +105,7 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
 git 源调托管服务 HTTP API、URL 源发普通 GET，注入动作相同。
 
 ```text
-PUT /openapi/v1/provisioning/credentials/{name}
+PUT /openapi/v1/source-credentials/{name}
 {
   "type": "header",                     # 判别键；v1 唯一实现，缺省即 header
   "allowed_prefixes": ["…"],            # 所有 type 共有（见下）
@@ -117,7 +117,7 @@ PUT /openapi/v1/provisioning/credentials/{name}
 两个实际调用（同一端点、同一 schema，只是 `{name}` 与取值不同）：
 
 ```text
-PUT /openapi/v1/provisioning/credentials/corp-git-content
+PUT /openapi/v1/source-credentials/corp-git-content
 {
   "type": "header",
   "header_name": "PRIVATE-TOKEN",                                  # 按托管服务定（O11）
@@ -125,7 +125,7 @@ PUT /openapi/v1/provisioning/credentials/corp-git-content
   "allowed_prefixes": ["https://code.example-corp.com/team/content"]
 }
 
-PUT /openapi/v1/provisioning/credentials/oss-artifacts
+PUT /openapi/v1/source-credentials/oss-artifacts
 {
   "type": "header",
   "header_name": "Authorization",
@@ -185,7 +185,7 @@ URL（忽略可选的 `.git` 后缀），URL 源比较完整目标 URL。
 区分新密文与存量明文（零迁移），将来换算法可升 `v2`。
 
 **一条本场景必须新增的守卫**：`TokenVault` 在 master_key 为空时明文直落
-（为本地联调，与 `outbound_rules` 单 box 同形）。这对 provisioning 凭证
+（为本地联调，与 `outbound_rules` 单 box 同形）。这对 源凭证
 在**生产环境绝不可接受**——生产 profile 下解析不到主密钥必须**拒绝写入
 凭证**（fail closed），而不是静默明文存。否则一次密钥库配置疏忽，全租户
 的 git token 就明文躺在 DB 里。
@@ -516,7 +516,7 @@ cli_tools:
 
 | 项 | 建议上限 |
 | --- | --- |
-| 置备文档总大小 | 64 KiB（script 部分另按现状 24 KiB） |
+| 配置清单文档总大小 | 64 KiB（script 部分另按现状 24 KiB） |
 | 每类别条目数 | 50 |
 | `content` 内联单条 | 64 KiB |
 | fetch 单条目 | skills zip 100 MiB；resources 文件 100 MiB；identity 1 MiB；cli_tools 单工具 200 MiB |

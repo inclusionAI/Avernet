@@ -7,7 +7,7 @@
 
 | 团队 | v1 工作量 | 说明 |
 | --- | --- | --- |
-| backend（平台） | **主体**：置备文档存储 + API、平台侧 apply、guarded fetcher、能力表、apply report | 全部在平台侧 |
+| backend（平台） | **主体**：配置清单文档存储 + API、平台侧 apply、guarded fetcher、能力表、apply report | 全部在平台侧 |
 | teclaw | **零改动**（必答确认 T1–T3；`cli_tools` 相关 T4、可选优化 T5，见 §3） | artifact schema 不动、组装管线不动、不加出网要求 |
 | ARCA 系引擎（openclaw / claude_code / aicoding / hermes / moltis） | **零改动**（2 项确认，见 §4） | 声明式走平台实体 + 现有交付；script 走 #935 现状；cli_tools 需确认 PATH 注入点（A2） |
 | BaaS | **零改动** | 启动链、hook 派发均不变 |
@@ -111,7 +111,7 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
 | O2 | desktop 是否纳入 v1 的 manifest 支持面 | 纳入（平台侧 apply 无额外成本），交付路径由 desktop owner 确认 | desktop owner |
 | O3 | 显式 `POST …/apply` 是否进 v1 | 进（业务「立即生效」诉求大概率存在；teclaw 侧 = 一次 artifact 重组下发，无新机制） | backend + 业务 |
 | O4 | 限额数值（manifest-schema §5） | 按建议值起步 | backend |
-| O5 | strict 就绪门控（置备失败 = 不就绪）是否 v2 做 | v2 再议，两家族必须同步 | 平台 + 两引擎家族 |
+| O5 | strict 就绪门控（配置应用失败 = 不就绪）是否 v2 做 | v2 再议，两家族必须同步 | 平台 + 两引擎家族 |
 | O6 | 模板级 manifest（一份声明 → 多个 bot） | v2；v1 仅 bot 级 | 业务 |
 | O7 | `center://` skill-center 引用源 | v2 | backend |
 | O8 | 凭证注入方式是否需要请求头之外的形态（query 参数 token / mTLS） | v1 仅请求头；有真实业务源依赖再评估 | backend + 业务 |
@@ -154,6 +154,6 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
    分散在多个仓库（则需多个命名源，凭证的 `allowed_prefixes` 相应列出
    多个前缀）？tag 命名与发布节奏是什么（是否会重打同名 tag——
    重打即声明含义变化，下次 apply 收敛到新内容）？
-10. **配置本身是否也想进 git**：v2 方向是置备文档自身托管于仓库、平台只
+10. **配置本身是否也想进 git**：v2 方向是配置清单文档自身托管于仓库、平台只
    存指针（design §9.1，可顺带解掉模板级 manifest）。若这是你们期望的
    终态，请提出——它会影响 v1 的 API 设计取舍。

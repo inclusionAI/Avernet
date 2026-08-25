@@ -1,18 +1,19 @@
-# Bot Startup Provisioning（启动置备）设计文档
+# Bot Config Manifest（Bot 配置清单）设计文档
 
-> **状态：DRAFT（讨论稿）。** 本目录是「启动置备」特性的设计文档。
+> **状态：DRAFT（讨论稿）。** 本目录是「Bot 配置清单」特性的设计文档。
 > 尚未进入实现阶段；定稿后按仓库惯例补充英文版。
 
 ## 一句话说明
 
-让用户把「这个 bot 启动完成时应该具备什么」——MCP、工作区资源（单文件或
+让用户把「这个 bot 应该具备什么配置」——MCP、工作区资源（单文件或
 整个目录）、local skills、engine config、identity 文件、给模型调用的 CLI
-工具，以及（在支持的引擎上）一段自定义 shell 脚本——存放在 bot 上；平台在每次容器/实例重建时自动将其变成现实。用户不感知
-任何引擎的目录结构与引擎间差异。
+工具，以及（在支持的引擎上）一段自定义 shell 脚本——声明在一份文档里；平台在每个生命周期边界（创建 / republish / 重建 /
+显式 apply）让实际状态向它收敛。用户不感知任何引擎的目录结构与引擎间
+差异。
 
 ## 核心结论（TL;DR）
 
-置备意图分为两部分，能力边界不同：
+配置意图分为两部分，能力边界不同：
 
 1. **声明式 manifest**（引擎无关，所有引擎支持）：声明要什么、从哪来
    （git 引用 / `source` URL / 内联内容 / 平台注册项引用），**不写路径、
@@ -70,8 +71,8 @@
 | 术语 | 含义 |
 | --- | --- |
 | TC Open API | `/openapi/v1/...` 公开 API 面（`adapters/http/openapi_v1/`） |
-| manifest | bot 级存储的声明式置备文档，本设计的核心新增物 |
-| script | #935 的 per-bot startup script，本设计中作为置备文档的命令式部分 |
+| manifest | 配置清单的声明式部分（六个类别），本设计的核心新增物 |
+| script | #935 的 per-bot startup script，本设计中作为配置清单的命令式部分 |
 | apply 点 | 平台评估并应用 manifest 的生命周期边界（创建 / republish / 重建式 restart / 显式 apply） |
 | 物化（materialize） | 平台把 `source` URL 的内容 fetch 下来、写入平台存储（对 teclaw 即 OSS store）的动作 |
 | ARCA 系 | 走 `_build_create_bot_payload` 组装启动命令的单容器引擎家族：openclaw / claude_code / aicoding / hermes / moltis |

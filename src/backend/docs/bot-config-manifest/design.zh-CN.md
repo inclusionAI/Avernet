@@ -1,4 +1,4 @@
-# Startup Provisioning 设计
+# Bot Config Manifest 设计
 
 > 状态：DRAFT（讨论稿）。术语与文档地图见 `README.zh-CN.md`。
 
@@ -27,9 +27,9 @@ md）维护在他们自己的服务上，希望 bot 每次拉起时自动取最�
 
 ## 2. 方案总览
 
-### 2.1 置备意图 = manifest + script
+### 2.1 配置意图 = manifest + script
 
-一个 bot 的启动置备意图存为**一份 bot 级文档**，含两个部分：
+一个 bot 的启动配置意图存为**一份 bot 级文档**，含两个部分：
 
 | 部分 | 性质 | 表达能力 | 引擎支持 |
 | --- | --- | --- | --- |
@@ -95,8 +95,8 @@ reconcile / quarantine 机制不认识它们，**可能把它们当作 drift 清
 ① #926 的立项动机就是实例一致性，LLM 每次启动解释一遍自然语言，N 个实例
 可能得到 N 种状态，恰好重新引入要消灭的问题；② 容器就绪靠 exit code 门控，
 「agent 认为自己完成了」不是可门控状态；③ 自举顺序——跑 skill 依赖引擎已
-配置好，而启动置备干的正是配置引擎；④ 每次启动付 token 成本与 agent 时延
-（现有 user stage 预算 300s）；⑤ 审计与回放困难。但两者不冲突：确定性置备
+配置好，而Bot 配置清单干的正是配置引擎；④ 每次启动付 token 成本与 agent 时延
+（现有 user stage 预算 300s）；⑤ 审计与回放困难。但两者不冲突：确定性配置
 层建成后，可以再提供官方 skill 封装此能力面向对话场景——NL 层建在确定性层
 之上成立，反之不成立。
 
@@ -111,7 +111,7 @@ reconcile / quarantine 机制不认识它们，**可能把它们当作 drift 清
 | 重建式 restart（destroy-and-create） | ✅ | 与 #935 script 的重跑边界一致 |
 | scale-out | ❌ | 复用上次 compose 的结果。实例间天然一致：所有实例共享同一份平台状态 |
 | manifest PUT | ❌ | **惰性生效**，与 #935「PUT script 不影响活容器」口径一致 |
-| `POST …/provisioning/apply`（显式） | ✅ | 用户要「立即生效」时用。落成实体后经各 provider 的**既有**通道生效——对活的 teclaw bot 即其既有逐文件通道（与今天手工调 open API 的生效方式一致；`TeclawDeviceFileSystem` 现状即「活容器是文件真相源，编辑不整包重投」），artifact 重组仍只发生在既有晋升点 |
+| `POST …/config-manifest/apply`（显式） | ✅ | 用户要「立即生效」时用。落成实体后经各 provider 的**既有**通道生效——对活的 teclaw bot 即其既有逐文件通道（与今天手工调 open API 的生效方式一致；`TeclawDeviceFileSystem` 现状即「活容器是文件真相源，编辑不整包重投」），artifact 重组仍只发生在既有晋升点 |
 
 ### 3.2 GitOps 语义：声明获胜、漂移纠正
 
@@ -192,10 +192,10 @@ report。tag 被重打即声明含义变化，下次 apply 收敛到新内容—
 | `skip` | 记 `skipped`，继续后续条目 |
 | `fail` | 中止本次 apply，剩余条目记 `skipped`，apply 结果 `FAILED` |
 
-**apply 失败与就绪门控**：v1 与 #935 script 的语义保持一致——用户置备失败
+**apply 失败与就绪门控**：v1 与 #935 script 的语义保持一致——用户配置应用失败
 **不阻断** bot 就绪（平台自身 bootstrap 失败照旧 FAILED），结果完整记录在
 apply report。理由：同一产品功能在两类引擎上失败表现必须一致，业务才解释得
-通。teclaw 的 publish-poll（PENDING → ACTIVE/FAILED）具备做强门控（置备失败
+通。teclaw 的 publish-poll（PENDING → ACTIVE/FAILED）具备做强门控（配置应用失败
 = 不就绪）的条件，「strict 模式」列为 v2 讨论项，且若做必须两个家族同步做。
 
 ### 4.4 Guarded fetcher（SSRF 防护）
@@ -257,7 +257,7 @@ fetch 是平台发出的普通 HTTPS GET，所以私有源鉴权的问题是「�
    `v2`）。解密只发生在 fetch 前的内存中，用完即弃。
 
    **本场景必须新增一道守卫**：`TokenVault` 在 master_key 为空时明文直落
-   （为本地联调，与 `outbound_rules` 单 box 同形）——这对 provisioning 凭证
+   （为本地联调，与 `outbound_rules` 单 box 同形）——这对 源凭证
    在生产环境不可接受。生产 profile 下解析不到主密钥必须**拒绝写入凭证**
    （fail closed），否则一次密钥库配置疏忽就会让全租户 token 明文躺在 DB 里。
 6. **引擎面为零**：fetch 全在平台侧完成，凭证不下发容器、不进 artifact
@@ -285,7 +285,7 @@ token**（类 GitLab 的 Project/Deploy Token，天生单仓库有效）；托�
 「查不到」状态，把无关抖动变成对 bot 的误判）。读写两侧用同一判定函数，
 否则 GET 宣称支持而 PUT 拒绝。未知引擎 fail closed。
 
-`GET …/provisioning/capabilities` 返回该 bot 的逐类别支持表，业务可先探再写。
+`GET …/config-manifest/capabilities` 返回该 bot 的逐类别支持表，业务可先探再写。
 
 判定结果同时堵上 #935 已知的静默坑：ARCA-direct 遗留 bot、LOCAL/singlebox
 的 script 判定为不支持（而非静默不执行）；manifest 因为是平台侧 apply，
@@ -303,18 +303,18 @@ token**（类 GitLab 的 Project/Deploy Token，天生单仓库有效）；托�
 
 | 方法与路径 | 语义 |
 | --- | --- |
-| `GET /openapi/v1/bots/{bot_id}/provisioning` | 读整份置备文档（manifest + script） |
-| `PUT /openapi/v1/bots/{bot_id}/provisioning` | 整体替换；校验 schema、逐类别能力、限额；对不支持的部分整体拒绝（400/422 带逐条原因），不部分写入 |
-| `DELETE /openapi/v1/bots/{bot_id}/provisioning` | 清除。已由 manifest 落成的实体**保留但摘除 managed 标记**（变回手工实体），不级联删除——删除声明 ≠ 删除资产 |
-| `GET /openapi/v1/bots/{bot_id}/provisioning/capabilities` | 该 bot 的逐类别支持表 |
-| `POST /openapi/v1/bots/{bot_id}/provisioning/apply` | 显式 apply（可带 `dry_run=true` 返回计划不执行） |
-| `GET /openapi/v1/bots/{bot_id}/provisioning/last-apply` | 最近一次 apply report |
-| `PUT /openapi/v1/provisioning/credentials/{name}` | 写入/轮换租户级命名凭证：单一 body schema，判别键 `type`（v1 仅 `header`：`header_name` + `secret`）+ `allowed_prefixes`，§4.5。**一个端点覆盖 git / URL / OSS**。租户级路径：凭证不属于单个 bot |
-| `GET /openapi/v1/provisioning/credentials[/{name}]` | 列表 / 单个，仅掩码元数据，**永不返回 secret** |
-| `DELETE /openapi/v1/provisioning/credentials/{name}` | 删除；仍被引用时引用条目在下次 apply 记 `failed` |
+| `GET /openapi/v1/bots/{bot_id}/config-manifest` | 读整份配置清单文档（manifest + script） |
+| `PUT /openapi/v1/bots/{bot_id}/config-manifest` | 整体替换；校验 schema、逐类别能力、限额；对不支持的部分整体拒绝（400/422 带逐条原因），不部分写入 |
+| `DELETE /openapi/v1/bots/{bot_id}/config-manifest` | 清除。已由 manifest 落成的实体**保留但摘除 managed 标记**（变回手工实体），不级联删除——删除声明 ≠ 删除资产 |
+| `GET /openapi/v1/bots/{bot_id}/config-manifest/capabilities` | 该 bot 的逐类别支持表 |
+| `POST /openapi/v1/bots/{bot_id}/config-manifest/apply` | 显式 apply（可带 `dry_run=true` 返回计划不执行） |
+| `GET /openapi/v1/bots/{bot_id}/config-manifest/last-apply` | 最近一次 apply report |
+| `PUT /openapi/v1/source-credentials/{name}` | 写入/轮换租户级命名凭证：单一 body schema，判别键 `type`（v1 仅 `header`：`header_name` + `secret`）+ `allowed_prefixes`，§4.5。**一个端点覆盖 git / URL / OSS**。租户级路径：凭证不属于单个 bot |
+| `GET /openapi/v1/source-credentials[/{name}]` | 列表 / 单个，仅掩码元数据，**永不返回 secret** |
+| `DELETE /openapi/v1/source-credentials/{name}` | 删除；仍被引用时引用条目在下次 apply 记 `failed` |
 
 兼容性：既有 `GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script`
-（#935）保留，成为置备文档 `script` 部分的别名视图（write-through），行为
+（#935）保留，成为配置清单文档 `script` 部分的别名视图（write-through），行为
 不变。鉴权沿用 `_GRANT_CHECKED` + `ADMISSION` 模式。
 
 ## 7. 可观测性
@@ -341,7 +341,7 @@ apply 在平台侧执行，天然产出结构化记录（#935 的 `last-start` �
 `resolved_sha`）——「这批 bot 线上跑的是哪一版内容」由此可查；条目层记
 `from`（来自哪个源）或 `source_digest`（URL 源）。
 
-经 `GET …/provisioning/last-apply` 暴露。script 的输出维持现状：容器内
+经 `GET …/config-manifest/last-apply` 暴露。script 的输出维持现状：容器内
 `/home/admin/logs/startup_script.log`。
 
 ## 8. 存储与租户
@@ -349,20 +349,20 @@ apply 在平台侧执行，天然产出结构化记录（#935 的 `last-start` �
 沿用 `bot_startup_script` 模块验证过的机制：bot 级一行、
 `(avernet_tenant, script_key)` 唯一键（`script_key = sha256(env, entity_id,
 bot_id)`，规避 InnoDB 3072 字节索引上限）、租户守卫注册。实现形态（新
-`core/bot_provisioning` 模块吸收 `bot_startup_script`，或并列）留到实现
+`core/bot_config_manifest` 模块吸收 `bot_startup_script`，或并列）留到实现
 planning 决定；模块边界按 `context-boundary-format.md` 出 README。
 
 ## 9. 分期
 
 | 期 | 内容 |
 | --- | --- |
-| **v1** | manifest 五类（mcp / resources / skills / engine_config / identity；resources 含**目录条目**——归档 + `strip_components` 展开，schema §3.2）+ script 归编到置备文档；source 支持 URL 与 **git 引用**两种形态（tag/branch/SHA 版本化，schema §2.2；凭证统一形状，`allowed_prefixes` 必填），**命名源 `sources`/`from`** 让一次 `ref` 变更原子地升级整套配置（schema §2.3）；平台侧 apply + guarded fetcher；租户级凭证引用（§4.5，仅请求头注入；AES-GCM 落库 + 密钥库主密钥）；能力表；apply report；teclaw 经 artifact 组装生效 |
+| **v1** | manifest 五类（mcp / resources / skills / engine_config / identity；resources 含**目录条目**——归档 + `strip_components` 展开，schema §3.2）+ script 归编到配置清单文档；source 支持 URL 与 **git 引用**两种形态（tag/branch/SHA 版本化，schema §2.2；凭证统一形状，`allowed_prefixes` 必填），**命名源 `sources`/`from`** 让一次 `ref` 变更原子地升级整套配置（schema §2.3）；平台侧 apply + guarded fetcher；租户级凭证引用（§4.5，仅请求头注入；AES-GCM 落库 + 密钥库主密钥）；能力表；apply report；teclaw 经 artifact 组装生效 |
 | **cli_tools（schema 已定稿，排期后置）** | 给模型调用的命令行工具（schema §3.7）：静态二进制/压缩包、digest 强制、平台工具目录 + PATH 注入；ARCA 系先行（A2），teclaw 待确认（T4）。按业务优先级排期 |
 | **v2 候选** | 条目级结果上报（teclaw 唯一可能的契约增量）；strict 就绪门控；`apply_once`；skill-center 引用源（`center://uuid@version`）；目录源的更多传输形态（索引文件 / 对象存储前缀——「文件夹语义」需要带目录枚举能力的协议；git 与归档已进 v1）；engine plugin 类目（**注册表引用**模式，照 MCP 模子而非任意 URL——插件在引擎进程内自动执行，供应链敏感度最高；前置确认见 O10）；容器内 op CLI（服务 script 用户体验：`install-skill` 等意图层命令，ARCA 系实现）；凭证注入的扩展形态（query 参数 / mTLS，O8）；模板级 manifest（一份声明应用于多个 bot）；**manifest 自身托管于 git**（§9.1） |
 
 ### 9.1 v2 方向：manifest 自身托管于 git
 
-顺着「置备内容都是文本表达」推到底，**置备声明本身也是文本**，也可以活在
+顺着「配置内容都是文本表达」推到底，**配置声明本身也是文本**，也可以活在
 业务的内容仓库里。平台侧 bot 上存的退化为一个**指针**——
 `{git, ref, credential}`，`manifest.yaml` 从仓库根读取。这是 Flux/ArgoCD
 的模式，收益有三：
