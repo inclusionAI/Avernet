@@ -147,7 +147,7 @@ lands in the same group as the migration of its last caller.
       and `SkillInstallationRepository` (+ protocol) once their last callers
       are migrated; port their tests to the new service (including MCP↔skill
       parity cases for direct activate/deactivate).
-- [ ] 7.6 Guard: `ac_bot_skill_installation` / `ac_bot_mcp_installation` are
+- [x] 7.6 Guard: `ac_bot_skill_installation` / `ac_bot_mcp_installation` are
       written only from `tables/` modules, reached only via the UoW.
 
 ## Group 8 — Default-Set exclusion commands (restored opt-out)
