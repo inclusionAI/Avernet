@@ -9,10 +9,17 @@ delta with empty content, final with empty content.
 
 import json
 import logging
+import sys
 from copy import deepcopy
 
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.service.sse import DefaultStreamConverter
+
+
+def test_converter_uses_dedicated_logger():
+    converter_module = sys.modules[DefaultStreamConverter.__module__]
+
+    assert converter_module.logger.name == "bcn-converter"
 
 
 def _data(event) -> dict:

@@ -22,7 +22,7 @@ from typing import Any
 from secbaas.community.api.sse import SseEvent, StreamChunk
 from secbaas.community.logger import get_logger
 
-logger = get_logger("core-service")
+logger = get_logger("bcn-converter")
 
 _INTERACTION_EVENT_PHASES = {
     "interaction.requested": "requested",
