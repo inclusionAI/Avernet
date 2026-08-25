@@ -177,11 +177,11 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
     ) -> list[dict]:
         """Query ACTIVE rows where next_renew_at < :now (caller-supplied).
 
-        ``now`` must be a naive-UTC datetime computed by the caller
-        (CR-01 clock domain): both sides of the comparison then share
-        the UTC wall clock and the due gate is time-zone independent of
-        the DB server clock (SQLite CURRENT_TIMESTAMP is UTC; MySQL
-        NOW() follows the server time zone).
+        ``now`` must be a naive fixed-Asia/Shanghai (+08:00) datetime computed
+        by the caller via ``naive_cst_now`` (CR-01 clock domain): both sides of
+        the comparison then share the +08:00 wall clock and the due gate is
+        time-zone independent of the DB server clock (SQLite CURRENT_TIMESTAMP
+        is UTC; MySQL NOW() follows the server time zone).
 
         LEFT JOINs the corresponding hot table to verify the container
         still exists and provide device_props for TTL extraction.
