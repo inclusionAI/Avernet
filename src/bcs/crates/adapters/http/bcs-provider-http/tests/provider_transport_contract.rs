@@ -85,7 +85,7 @@ async fn interaction_resolve_reuses_provider_route_and_expects_json_ack() {
 }
 
 #[tokio::test]
-async fn interaction_resolve_forwards_ask_user_header() {
+async fn interaction_resolve_forwards_ask_user_metadata_and_custom_values() {
     let captured: CapturedState = Arc::new(Mutex::new(None));
     let app = Router::new()
         .route("/webhook", post(capture_ack))
@@ -112,7 +112,8 @@ async fn interaction_resolve_forwards_ask_user_header() {
                     "deploy_target": {
                         "header": "Deployment environment",
                         "question": "Where should this be deployed?",
-                        "values": ["staging"]
+                        "values": [],
+                        "customValues": ["private cloud"]
                     }
                 }
             }),
@@ -128,7 +129,8 @@ async fn interaction_resolve_forwards_ask_user_header() {
         json!({
             "header": "Deployment environment",
             "question": "Where should this be deployed?",
-            "values": ["staging"]
+            "values": [],
+            "customValues": ["private cloud"]
         })
     );
     server.abort();

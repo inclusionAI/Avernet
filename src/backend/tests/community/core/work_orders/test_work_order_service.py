@@ -44,6 +44,11 @@ from agentclaw.community.core.work_orders.services.work_order_service import (
     WorkOrderNotificationService,
     WorkOrderService,
 )
+from agentclaw.community.plugin_api.staff_dept import (
+    StaffDeptPlugin,
+    StaffProfileInfo,
+    StaffProfileLookupError,
+)
 
 NOW = datetime(2026, 8, 18, 8, 0, 0)
 
@@ -112,7 +117,7 @@ def _notification() -> WorkOrderNotificationRecord:
     )
 
 
-def _service():
+def _service(*, staff_dept: StaffDeptPlugin | None = None):
     repository = MagicMock()
     spaces = MagicMock()
     access = MagicMock()
@@ -121,6 +126,12 @@ def _service():
     collaborator_repository = MagicMock()
     collaborators = MagicMock()
     member_management = MagicMock()
+    if staff_dept is None:
+        staff_dept = MagicMock(spec=StaffDeptPlugin)
+        staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+            work_no="applicant-1",
+            nick_name=None,
+        )
     return (
         WorkOrderService(
             repository,
@@ -131,6 +142,7 @@ def _service():
             collaborator_repository,
             collaborators,
             member_management,
+            staff_dept,
         ),
         repository,
         spaces,
@@ -148,6 +160,7 @@ def _bot_editor_service():
     collaborator_repository = MagicMock()
     collaborators = MagicMock()
     member_management = MagicMock()
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
     service = WorkOrderService(
         repository,
         spaces,
@@ -157,6 +170,7 @@ def _bot_editor_service():
         collaborator_repository,
         collaborators,
         member_management,
+        staff_dept,
     )
     return (
         service,
@@ -355,8 +369,90 @@ def test_create_space_join_request_normalizes_and_delegates() -> None:
     )
 
 
+def test_create_space_join_request_uses_staff_nickname() -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="applicant-1",
+        nick_name="  花花  ",
+    )
+    service, repository, spaces, access, _ = _service(staff_dept=staff_dept)
+    access.require_space.return_value = _space()
+    spaces.get_member.return_value = None
+    repository.create_space_join_request.return_value = _work_order()
+
+    service.create_space_join_request(
+        space_id=7, applicant_user_id="applicant-1", reason="join"
+    )
+
+    staff_dept.get_profile_by_work_no.assert_called_once_with(work_no="applicant-1")
+    assert (
+        repository.create_space_join_request.call_args.kwargs["applicant_name"]
+        == "花花"
+    )
+
+
+@pytest.mark.parametrize("nickname", [None, "", "   "])
+def test_create_space_join_request_falls_back_when_nickname_is_missing(
+    nickname: str | None,
+) -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="applicant-1",
+        nick_name=nickname,
+    )
+    service, repository, spaces, access, _ = _service(staff_dept=staff_dept)
+    access.require_space.return_value = _space()
+    spaces.get_member.return_value = None
+
+    service.create_space_join_request(
+        space_id=7, applicant_user_id="applicant-1", reason="join"
+    )
+
+    assert (
+        repository.create_space_join_request.call_args.kwargs["applicant_name"]
+        == "applicant-1"
+    )
+
+
+def test_create_space_join_request_falls_back_when_staff_lookup_fails() -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.side_effect = StaffProfileLookupError("down")
+    service, repository, spaces, access, _ = _service(staff_dept=staff_dept)
+    access.require_space.return_value = _space()
+    spaces.get_member.return_value = None
+
+    service.create_space_join_request(
+        space_id=7, applicant_user_id="applicant-1", reason="join"
+    )
+
+    assert (
+        repository.create_space_join_request.call_args.kwargs["applicant_name"]
+        == "applicant-1"
+    )
+
+
+def test_create_space_join_request_truncates_staff_nickname() -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="applicant-1",
+        nick_name="花" * 129,
+    )
+    service, repository, spaces, access, _ = _service(staff_dept=staff_dept)
+    access.require_space.return_value = _space()
+    spaces.get_member.return_value = None
+
+    service.create_space_join_request(
+        space_id=7, applicant_user_id="applicant-1", reason="join"
+    )
+
+    assert repository.create_space_join_request.call_args.kwargs[
+        "applicant_name"
+    ] == "花" * 128
+
+
 def test_create_rejects_personal_space() -> None:
-    service, repository, spaces, access, _ = _service()
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    service, repository, spaces, access, _ = _service(staff_dept=staff_dept)
     access.require_space.return_value = _space(SpaceType.PERSONAL)
 
     with pytest.raises(WorkOrderJoinNotAllowedError):
@@ -366,10 +462,12 @@ def test_create_rejects_personal_space() -> None:
 
     spaces.get_member.assert_not_called()
     repository.create_space_join_request.assert_not_called()
+    staff_dept.get_profile_by_work_no.assert_not_called()
 
 
 def test_create_rejects_existing_member() -> None:
-    service, repository, spaces, access, _ = _service()
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    service, repository, spaces, access, _ = _service(staff_dept=staff_dept)
     access.require_space.return_value = _space()
     spaces.get_member.return_value = object()
 
@@ -379,6 +477,7 @@ def test_create_rejects_existing_member() -> None:
         )
 
     repository.create_space_join_request.assert_not_called()
+    staff_dept.get_profile_by_work_no.assert_not_called()
 
 
 def test_list_items_forwards_filters_and_normalizes_pagination() -> None:

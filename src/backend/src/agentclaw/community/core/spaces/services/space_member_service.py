@@ -21,7 +21,15 @@ from agentclaw.community.core.spaces.models import (
 from agentclaw.community.core.spaces.services.space_access_service import (
     SpaceAccessService,
 )
+from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.staff_dept import (
+    StaffDeptPlugin,
+    StaffProfileLookupError,
+)
 from agentclaw.community.utils.env_utils import get_current_env
+
+
+logger = get_logger()
 
 
 class SpaceMemberService:
@@ -32,27 +40,30 @@ class SpaceMemberService:
             raise SpaceMemberInvalidError("member user id is empty")
         return normalized
 
-    @staticmethod
-    def _user_name(value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = value.strip()
-        if not normalized:
-            return None
-        if len(normalized) > 128:
-            raise SpaceMemberInvalidError(
-                "member user name must contain at most 128 characters"
-            )
-        return normalized
-
     @inject
     def __init__(
         self,
         repository: SpaceRepositoryProtocol,
         access: SpaceAccessService,
+        staff_dept: StaffDeptPlugin,
     ) -> None:
         self._repository = repository
         self._access = access
+        self._staff_dept = staff_dept
+
+    def _resolve_member_user_name(self, *, user_id: str) -> str:
+        try:
+            profile = self._staff_dept.get_profile_by_work_no(work_no=user_id)
+        except StaffProfileLookupError:
+            logger.warning(
+                "failed to resolve space member nickname; falling back to user id",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
+            return user_id
+
+        nickname = (profile.nick_name or "").strip()
+        return nickname[:128] or user_id
 
     def list_members(
         self,
@@ -78,14 +89,12 @@ class SpaceMemberService:
         space_id: int,
         actor_id: str,
         user_id: str,
-        user_name: str | None = None,
         role: SpaceRole,
     ) -> SpaceMemberRecord:
         space, _ = self._access.require_space_owner(space_id=space_id, user_id=actor_id)
         if space.space_type is SpaceType.PERSONAL:
             raise PersonalSpaceInvariantError("personal space cannot add members")
         normalized = self._user_id(user_id)
-        normalized_user_name = self._user_name(user_name)
         if (
             self._repository.get_member(
                 space_id=space_id, user_id=normalized, env=get_current_env()
@@ -93,10 +102,11 @@ class SpaceMemberService:
             is not None
         ):
             raise SpaceMemberAlreadyExistsError("space member already exists")
+        resolved_user_name = self._resolve_member_user_name(user_id=normalized)
         return self._repository.add_member(
             space_id=space_id,
             user_id=normalized,
-            user_name=normalized_user_name,
+            user_name=resolved_user_name,
             role=role,
             creator_id=actor_id,
             env=get_current_env(),

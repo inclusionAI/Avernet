@@ -69,7 +69,7 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
     internal = json.loads(
         (tmp_path / "bcn-internal.openapi.json").read_text(encoding="utf-8")
     )
-    assert sum(len(path_item) for path_item in internal["paths"].values()) == 13
+    assert sum(len(path_item) for path_item in internal["paths"].values()) == 21
     assert (
         "post" in internal["paths"]["/api/v1/collaboration/sessions/{session_id}/files"]
     )

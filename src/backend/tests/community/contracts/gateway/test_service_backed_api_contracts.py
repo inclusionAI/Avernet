@@ -331,6 +331,31 @@ class TestServiceBackedBotManagementApiContracts:
             label="service-backed GET /api/bots/{id} data",
         )
 
+    def test_get_bot_classification_uses_real_service_contract(
+        self,
+        gw_client,
+        world,
+        contract_snapshot_update,
+    ):
+        _seed_bot(world, bot_type="service", owner_id="another-owner")
+        _assert_real_bot_service_bound(world)
+
+        resp = gw_client.get(f"/api/bots/{BOT_ID}/classification")
+        body = resp.json()
+
+        assert_success(body, "service-backed GET /api/bots/{id}/classification")
+        assert_api_response_contract(
+            body,
+            "service_backed_rule01_GET_api_bots_id_classification",
+            update=contract_snapshot_update,
+        )
+        assert_has_fields(
+            body["data"],
+            {"bot_id": str, "bot_type": str},
+            label="service-backed GET /api/bots/{id}/classification data",
+            strict=True,
+        )
+
     def test_list_bots_by_owner_uses_real_service_contract(
         self,
         gw_client,

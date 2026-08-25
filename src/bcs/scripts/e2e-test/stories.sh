@@ -1446,19 +1446,14 @@ print("1" if any(i.get("bot_uuid") == target for i in d.get("items", [])) else "
 ' "$provider_bot_uuid" 2>/dev/null || echo 0)
     assert_eq "published provider agent appears in provider list" "$listed_bot" "1"
 
+    # by-task-modes is now admission-gated by the same backend-only allowlist
+    # as Bot attributes and delivery switch. This fixture Provider is
+    # intentionally not listed (standalone allowlist is empty), so the roster
+    # must fail closed (403) like the attribute reads above.
     api_request_headers GET "/providers/${provider_id}/bots/by-task-modes" "" \
         "Authorization: Bearer ${admin_token}"
-    require_status "operator lists task-mode roster" "200" || return
-    local roster_items
-    roster_items=$(printf '%s' "$RESPONSE" | python3 -c '
-import json,sys
-try:
-    d=json.load(sys.stdin)
-    print("1" if isinstance(d.get("items"), list) else "0")
-except Exception:
-    print("0")
-' 2>/dev/null || echo 0)
-    assert_eq "task-mode roster returns an items array" "$roster_items" "1"
+    require_status "unapproved provider cannot list task-mode roster" "403" || return
+    assert_contains "task-mode roster guardrail names provider allow-list" "$RESPONSE" "not allowed to access the task-mode roster"
 
     api_request_headers POST "/providers/agentpass/resolve" '{}' \
         "X-BCN-Provider-Id: ${provider_id}" \

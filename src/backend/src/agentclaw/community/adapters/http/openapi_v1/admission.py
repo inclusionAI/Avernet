@@ -634,7 +634,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (
         "POST",
         "/openapi/v1/bots/spaces/{space_id}/join-requests",
-    ): AdmissionMode.USER_GATED,
+    ): AdmissionMode.REFUSED,
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/editor-requests",

@@ -36,6 +36,18 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             ),
             task_spec=json.dumps(record.task_spec),
             status=record.status.value,
+            graph_run_id=record.graph_run_id,
+            graph_loop_round=record.graph_loop_round,
+            graph_output=json.dumps(record.graph_output) if record.graph_output is not None else None,
+            graph_extend_props=(
+                json.dumps(record.graph_extend_props)
+                if record.graph_extend_props is not None
+                else None
+            ),
+            graph_version=record.graph_version,
+            lease_owner=record.lease_owner,
+            lease_until=record.lease_until,
+            heartbeat_at=record.heartbeat_at,
         )
 
     def insert(self, record: TaskInfoRecord) -> TaskInfoRecord:

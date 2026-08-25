@@ -14,9 +14,13 @@ CREATE TABLE IF NOT EXISTS `task_callback` (
     `result_success`             tinyint(1)       DEFAULT NULL                     COMMENT '是否成功',
     `exec_error`                 text                     DEFAULT NULL                     COMMENT '错误信息',
     `extend_props`                 text             DEFAULT NULL                               COMMENT '扩展属性',
+    `event_id`                     varchar(256)    DEFAULT NULL,
+    `process_status`               varchar(64)     DEFAULT NULL,
+    `processed_at`                 timestamp       NULL DEFAULT NULL,
     `gmt_create`                 timestamp        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `gmt_modified`               timestamp        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_workflow_instance` (`run_id`, `node_id`),
-    KEY `idx_session_id` (`main_session_id`)
+    KEY `idx_session_id` (`main_session_id`),
+    UNIQUE KEY `uk_task_callback_event` (`event_id`)
 ) DEFAULT CHARSET = utf8mb4 COMMENT='节点执行回调记录';

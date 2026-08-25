@@ -17,6 +17,7 @@ from agentclaw.community.core.bot_management.create_flow import (
     BotCreateContext,
     BotCreateDeploymentMode,
     BotCreateSpec,
+    BotCreateTemplateValidationMode,
     complete_bot_authorization,
     create_bot_with_authorization,
     prepare_bot_create,
@@ -159,6 +160,29 @@ def test_prepare_valid_application_coding_returns_detached_config() -> None:
     assert prepared.template_config == payload
     assert prepared.template_config is not payload
     assert prepared.requires_workspace_hosting is True
+
+
+def test_prepare_legacy_application_coding_preserves_template_uid() -> None:
+    payload = {"template_uid": "legacy-template", "devflow_workflow": "x"}
+    prepared = _prepare(
+        template_type="applicationCoding",
+        template_config=payload,
+    )
+    assert prepared.template_config == payload
+    assert prepared.template_config is not payload
+    assert prepared.requires_workspace_hosting is True
+
+
+def test_prepare_public_application_coding_rejects_template_uid() -> None:
+    with pytest.raises(
+        BotTemplateInvalidError,
+        match="server-managed fields.*template_uid",
+    ):
+        _prepare(
+            template_type="applicationCoding",
+            template_config={"template_uid": "caller-value"},
+            template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
+        )
 
 
 def test_shared_create_rejects_missing_hosting_before_passport() -> None:

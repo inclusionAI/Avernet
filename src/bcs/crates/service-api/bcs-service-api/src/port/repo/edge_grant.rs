@@ -22,10 +22,10 @@ pub trait EdgeGrantRepoPort: Send + Sync {
     /// Friends of `actor` (any direction, default-profile edge) — actor ids only.
     async fn list_friends(&self, actor: &str, env: &str) -> Vec<String>;
 
-    async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<()>;
+    async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<u64>;
 
-    async fn revoke_grant(&self, edge_id: &str, env: &str) -> ServiceResult<()>;
+    async fn revoke_grant(&self, edge_id: u64, env: &str) -> ServiceResult<()>;
 
     /// Cached source for friend-edge discrimination: `(bot_id, env) -> default profile_id`.
-    async fn get_default_profile_id(&self, bot_id: &str, env: &str) -> Option<String>;
+    async fn get_default_profile_id(&self, bot_id: &str, env: &str) -> Option<u64>;
 }

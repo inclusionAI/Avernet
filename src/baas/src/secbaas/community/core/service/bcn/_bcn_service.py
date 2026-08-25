@@ -94,7 +94,11 @@ def _normalize_interaction_resolution(
             or not source_answer.question.strip()
         ):
             raise ValueError("ask_user answer identity must be non-empty")
-        joined_values = "，".join(source_answer.values)
+        rendered_values = list(source_answer.values)
+        rendered_values.extend(
+            f"自定义输入: {value}" for value in source_answer.custom_values
+        )
+        joined_values = "，".join(rendered_values)
         summaries.append(f"{source_answer.header}: {joined_values}")
         if source_answer.header in values:
             logger.warning(
@@ -104,7 +108,9 @@ def _normalize_interaction_resolution(
             )
         values[source_answer.header] = joined_values
         answers[source_answer.question] = joined_values
-        selected_options.append(tuple(source_answer.values))
+        selected_options.append(
+            ("other",) if source_answer.custom_values else tuple(source_answer.values)
+        )
 
     summary = "；".join(summaries)
     return InteractionResolution(

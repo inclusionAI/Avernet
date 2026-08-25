@@ -53,6 +53,7 @@ class BotInventoryService:
         keyword: str | None,
         engine: str | None,
         deploy_mode: DeployMode | None,
+        is_service: bool | None = None,
         bot_ids: list[str] | None = None,
         page: int,
         page_size: int,
@@ -66,6 +67,14 @@ class BotInventoryService:
                 engine=engine,
                 bot_ids=bot_ids,
             )
+            if is_service is True:
+                cloud_rows = [
+                    row for row in cloud_rows if row.get("bot_type") == "service"
+                ]
+            elif is_service is False:
+                cloud_rows = [
+                    row for row in cloud_rows if row.get("bot_type") != "service"
+                ]
             service_rows = [
                 row for row in cloud_rows if row.get("bot_type") == "service"
             ]
@@ -95,8 +104,10 @@ class BotInventoryService:
                     )
                     for lifecycle_card in service_cards.get(bot_id, ())
                 )
-        if deploy_mode in (None, DeployMode.LOCAL) and (
-            space is None or space.kind == "personal"
+        if (
+            is_service is not True
+            and deploy_mode in (None, DeployMode.LOCAL)
+            and (space is None or space.kind == "personal")
         ):
             cards.extend(
                 self._to_local_item(row, owner_id, space, PermissionLevel.OWNER)

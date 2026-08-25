@@ -28,5 +28,7 @@
 /src/backend/tests/community/adapters/http/task/ @totalfrank @regrecall @msjbear @jiangj0627
 /src/backend/tests/community/api/task/ @totalfrank @regrecall @msjbear @jiangj0627
 /src/backend/tests/community/core/task/ @totalfrank @regrecall @msjbear @jiangj0627
-/src/backend/tests/community/adapters/http/task @totalfrank @regrecall @msjbear @jiangj0627
-/src/backend/tests/community/api/task  @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/src/agentclaw/community/di/modules/task_*.py                      @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/src/agentclaw/community/core/repository/protocols/task.py        @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/specs/*task*/                                                    @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/tests/community/repository/task/                                @totalfrank @regrecall @msjbear @jiangj0627

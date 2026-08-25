@@ -369,6 +369,17 @@ user_config:
     "GET /openapi/v1/collaboration/sessions/shared-file/content": {}
     "GET /api/v1/collaboration/sessions/shared-file/content": {}
 
+    # State-machine-run operations require a gateway-signed User Principal so
+    # BCN's verify_principal boundary admits the request and the HTTP-layer
+    # auth can map caller.user -> AuthenticatedHumanCaller. Legacy
+    # direct-to-BCS routes still allow anonymous reads (dual-exposure).
+    "/api/v1/collaboration/state-machine-runs/**":
+      user: required
+
+    # Public static resources served by the v1 internal public boundary.
+    "GET /api/v1/collaboration/manifest": {}
+    "/api/v1/collaboration/assets/**": {}
+
     "/openapi/v1/bcsfuse/**":
       user: required
 

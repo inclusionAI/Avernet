@@ -57,11 +57,7 @@ def member_service():
         id=2,
         space_id=kwargs["space_id"],
         user_id=kwargs["user_id"].strip(),
-        user_name=(
-            kwargs["user_name"].strip()
-            if kwargs["user_name"] and kwargs["user_name"].strip()
-            else None
-        ),
+        user_name="backend-resolved-name",
         role=kwargs["role"],
         env="test",
         created_by="owner-1",
@@ -188,25 +184,20 @@ def test_add_member_accepts_an_optional_role(
     assert member_service.add_member.call_args.kwargs["role"] is expected_role
 
 
-@pytest.mark.parametrize(
-    ("member_user_name", "expected"),
-    [
-        (None, None),
-        ("", ""),
-        ("  Zhang San  ", "  Zhang San  "),
-    ],
-)
-def test_add_member_maps_member_user_name_to_service(
-    client, member_service, member_user_name, expected
-):
-    payload = {"member_user_id": "member-1", "role": "MEMBER"}
-    if member_user_name is not None:
-        payload["member_user_name"] = member_user_name
-
-    response = client.post("/openapi/v1/bots/spaces/7/members", json=payload)
+def test_add_member_ignores_legacy_member_user_name(client, member_service):
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/members",
+        json={
+            "member_user_id": "member-1",
+            "member_user_name": "forged-name",
+            "role": "MEMBER",
+        },
+    )
 
     assert response.status_code == 201
-    assert member_service.add_member.call_args.kwargs["user_name"] == expected
+    kwargs = member_service.add_member.call_args.kwargs
+    assert kwargs["user_id"] == "member-1"
+    assert "user_name" not in kwargs
 
 
 def test_add_member_rejects_member_user_name_over_128_characters(client):
@@ -233,6 +224,8 @@ def test_openapi_advertises_nullable_member_profile_fields(client):
         option.get("type") == "string" and option.get("maxLength") == 128
         for option in user_name_schema["anyOf"]
     )
+    assert "ignored" in user_name_schema["description"]
+    assert "member_user_id" in user_name_schema["description"]
 
     favorite_properties = schemas["MarketFavoriteItem"]["properties"]
     assert set(favorite_properties) == {

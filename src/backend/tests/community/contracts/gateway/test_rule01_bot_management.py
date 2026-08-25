@@ -51,6 +51,10 @@ def _bind_bot(app):
     # Handler 调用 get_engine_paths 为每个 bot 计算路径
     svc.get_engine_paths.return_value = {"openclaw": "/tmp/test/openclaw"}
     svc.get_bot.return_value = MOCK_BOT_ITEM
+    svc.get_bot_classification.return_value = {
+        "bot_id": "bot_test_001",
+        "bot_type": "service",
+    }
     svc.create_bot.return_value = {
         "bot": MOCK_BOT_ITEM,
         "passport": {"agent_code": "ac_001", "status": "AUTHORIZED"},
@@ -147,6 +151,30 @@ class TestGetBot:
             {"bot_id": str, "bot_name": str, "owner_id": str, "status": str,
              "engine_types": list, "active_engine": str, "binding_id": int},
             label="GET /api/bots/{id} data")
+
+
+class TestGetBotClassification:
+    def test_classification_is_minimal_and_authenticated(
+        self,
+        gw_client,
+        app_with_testing_modules,
+        contract_snapshot_update,
+    ):
+        _bind_bot(app_with_testing_modules)
+        resp = gw_client.get("/api/bots/bot_test_001/classification")
+        body = resp.json()
+        assert_success(body, "GET /api/bots/{id}/classification")
+        assert_response_data_contract(
+            body,
+            "rule01_GET_api_bots_id_classification",
+            update=contract_snapshot_update,
+        )
+        assert_has_fields(
+            body["data"],
+            {"bot_id": str, "bot_type": str},
+            label="GET /api/bots/{id}/classification data",
+            strict=True,
+        )
 
 
 class TestCreateBot:

@@ -75,6 +75,9 @@ class TaskRunner:
                 port = self._deliveries.get(mode)
                 if port is not None:
                     return bool(await port.deliver(node))
+                logger.warning(
+                    "[task][runner] start_run 退桩(无 execution_backend 且无 %s delivery 注入)→ node=%s 记日志返 True,不真实发起",
+                    mode, node.node_id)
                 self._run_log.append(
                     {
                         "task_id": node.task_id,
@@ -117,6 +120,10 @@ class TaskRunner:
             return await self._execution_backend.form_coop_group(gf)
         gid = f"grp_{uuid.uuid4().hex[:8]}"
         self._groups[gid] = gf
+        logger.warning(
+            "[task][runner] form_coop_group 退桩(无 execution_backend)→ 造假 group_id=%s;"
+            "无真群/无 poller,任务将卡 RUNNING 不收敛。排查: grep [task][engine] execution_backend 不装配",
+            gid)
         return gid
 
     async def trigger_workflow(self, *, bot_id: str, message: str,
@@ -125,12 +132,14 @@ class TaskRunner:
         if self._execution_backend is not None:
             return await self._execution_backend.trigger_workflow(
                 bot_id=bot_id, message=message, metadata=metadata)
+        logger.warning("[task][runner] trigger_workflow 退桩(无 execution_backend)→ 造假 run_id,单 bot 不真实发起")
         return BotSendResult(run_id=f"stub_{uuid.uuid4().hex[:8]}", session_id=None)
 
     async def get_group_session(self, group_id: str) -> str | None:
         """Fetch the initial session_id for a coop group; create one if absent."""
         if self._execution_backend is not None:
             return await self._execution_backend.get_group_session(group_id)
+        logger.debug("[task][runner] get_group_session 退桩→ None(group_id=%s 无 execution_backend)", group_id)
         return None
 
     async def run_bbs(self, execution_graph) -> None:
@@ -139,7 +148,7 @@ class TaskRunner:
         否则 stub 记日志(Avernet 无后端兜底,不抛)。"""
         if self._execution_backend is not None:
             return await self._execution_backend.run_bbs(execution_graph)
-        logger.info("[runner] run_bbs stub (no execution_backend) task=%s", execution_graph.task_id)
+        logger.info("[task][runner] run_bbs stub (no execution_backend) task=%s", execution_graph.task_id)
 
     def _build_context(self, task_id: str, node_id: str) -> dict[str, Any]:
         """上下文组装(Runner 内聚;内部自动判定,无 NODE/SUBTREE/TASK scope 入参)。
