@@ -1,11 +1,12 @@
 # `agentclaw.community.core.skill_center`
 
-Skill Center domain — skill set switching, market sync, repository sync, skill auth, propagation logging.
+Skill Center domain — Bot capability desired state (Skills and MCPs), market
+sync, repository sync, skill auth, propagation logging.
 
 ## Context Boundary
 
 ```yaml
-purpose: "Skill Center domain — skill set switching, market sync, repository sync, skill auth, propagation logging."
+purpose: "Skill Center domain — Bot capability desired state (Skills and MCPs), market sync, repository sync, skill auth, propagation logging."
 provides:
   - "SkillSetService"
   - "MarketSyncService"
@@ -13,13 +14,12 @@ provides:
   - "GitSyncService"
   - "SkillAuthService"
   - "CurrentRuntimeLayoutProbeService"
-  - "LocalSkillQueryService"
+  - "SkillQueryService"
   - "LocalSkillUploadService"
   - "DirectActivationService"
   - "LocalSkillDeleteService"
   - "BotCapabilityAuthorizationHookProtocol"
   - "SkillSetManagementService"
-  - "BotSkillAssetService"
   - "RuntimeProjectionResolver"
   - "BotCapabilityStateReader"
   - "BotRuntimeProjector"
@@ -103,7 +103,39 @@ internal_dependencies:
 
 ### Change impact
 
-Skill-set switching is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols.
+Capability activation is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols.
+
+### One writer, one flush, one reader, one rule book
+
+Installation (`ac_bot_skill_installation` / `ac_bot_mcp_installation`) is the
+single source of truth for a Bot's active capabilities, and four seams keep it
+that way:
+
+- **One writer.** Each Installation/exclusion table's SQL lives in exactly one
+  command module under
+  `core/repository/implementations/skill_center/tables/`; only the
+  `CapabilityDesiredStateRepository` unit of work composes them. An
+  architecture test (`test_installation_table_write_ownership.py`) fails any
+  other module that writes the models.
+- **One flush.** `flush_installations` is the only reconciliation from Set
+  configuration into Installation, and every read-side consumer runs it first
+  (details below).
+- **One reader.** `BotCapabilityStateReader` answers every "what is active on
+  this Bot" question — it flushes, then reads Installation alone.
+  `SkillQueryService` (listing/detail/content/parameters) and
+  `DirectActivationService.list_installed_mcps` answer through it.
+- **One rule book.** `policies/capability_ownership.py` owns the ownership
+  rules: R1 a Set-held capability (Default included, excluded or not) refuses
+  direct control; R2 a directly-active capability refuses joining a Set; R3 a
+  capability lives in at most one Set. Command services consult the policy
+  inside the write transaction; nothing else re-derives those decisions.
+
+Writes go through two command services, one per scope, with identical shape —
+authorize, mutate desired state in one UoW transaction, project the complete
+runtime, compensate on failure: `SkillSetManagementService` for Set-scoped
+mutations (Default-Set edits become per-Bot exclusion rows) and
+`DirectActivationService` for Set-free single-capability activation, Skills
+and MCPs alike.
 
 `ac_bot_skill_installation` materializes the current active Desired State with
 identity `(tenant, env, owner_id, bot_id, skill_id)`. Installation tables were

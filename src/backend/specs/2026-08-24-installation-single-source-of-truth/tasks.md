@@ -208,7 +208,7 @@ lands in the same group as the migration of its last caller.
       `SkillSetService` methods: `add_skills_to_set`,
       `remove_skill_from_set`, `add_mcp_to_skill_set`,
       `remove_mcp_from_skill_set` (keep any still reached; record in PR).
-- [ ] 11.4 Update `core/skill_center/README.md` context boundary + narrative
+- [x] 11.4 Update `core/skill_center/README.md` context boundary + narrative
       (one writer, one flush, one reader, one rule book; new names).
 - [ ] 11.5 Update `adapters/http/skill_center/CLAUDE.md` key-file index.
 
