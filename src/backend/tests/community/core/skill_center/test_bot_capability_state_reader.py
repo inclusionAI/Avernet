@@ -148,11 +148,11 @@ def test_a_missing_bot_raises_before_any_flush():
     assert repository.flush_calls == []
 
 
-def test_the_public_flush_addresses_the_bot_named_by_its_row():
+def test_member_skill_ids_flushes_and_answers_the_set_membership_half():
     reader, repository, _pool, bots = _reader()
 
-    plan = reader.flush(bot=_BOT)
+    ids = reader.member_skill_ids(bot=_BOT)
 
     assert bots.lookups == []
     assert repository.flush_calls == [_EXPECTED_FLUSH]
-    assert plan.skills_to_install == frozenset({1})
+    assert ids == frozenset({1})

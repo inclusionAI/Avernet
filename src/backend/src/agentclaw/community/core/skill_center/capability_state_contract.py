@@ -9,9 +9,6 @@ if TYPE_CHECKING:
     # Deferred: skills_pool consumers import this contract while their own
     # package __init__ is still executing, so a module-level import of
     # skills_pool.models here would close an import cycle.
-    from agentclaw.community.core.repository.capability_desired_state_types import (
-        InstallationFlushPlan,
-    )
     from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
 
 
@@ -25,8 +22,12 @@ class BotCapabilityStateReaderProtocol(Protocol):
     DB-side only — the reader never triggers a runtime projection.
     """
 
-    def flush(self, *, bot: Mapping[str, Any]) -> InstallationFlushPlan:
-        """Make Installation agree with SkillSet configuration for one Bot."""
+    def member_skill_ids(self, *, bot: Mapping[str, Any]) -> frozenset[int]:
+        """Flush, then answer which Skills the Bot's Sets bring to it.
+
+        The listing filter needs this half of the flush plan: a bridged
+        Skill belongs on the page even though only a Set ties it to the Bot.
+        """
         ...
 
     def active_skill_assets(

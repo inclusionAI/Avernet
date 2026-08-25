@@ -1033,7 +1033,12 @@ async def test_build_phase_routes_arca_and_merges_mount_ext():
     router = DeployArtifactProducerRouter(
         providers={"baas": arca, "teclaw": teclaw}, default_provider_key="baas"
     )
-    bot = {"bot_id": "b1", "active_engine": "openclaw", "env": "prod"}
+    bot = {
+        "bot_id": "b1",
+        "owner_id": "owner-1",
+        "active_engine": "openclaw",
+        "env": "prod",
+    }
     svc, _ = _build_svc_with_router(router, bot)
 
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)
@@ -1055,7 +1060,12 @@ async def test_build_phase_flushes_installations_before_artifact_build():
         providers={"baas": arca}, default_provider_key="baas"
     )
     capability_reader = Mock()
-    bot = {"bot_id": "b1", "active_engine": "openclaw", "env": "prod"}
+    bot = {
+        "bot_id": "b1",
+        "owner_id": "owner-1",
+        "active_engine": "openclaw",
+        "env": "prod",
+    }
     svc, _ = _build_svc_with_router(
         router,
         bot,
@@ -1065,7 +1075,9 @@ async def test_build_phase_flushes_installations_before_artifact_build():
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)
     await svc.execute_build_phase(record, "op")
 
-    capability_reader.flush.assert_called_once_with(bot=bot)
+    capability_reader.active_skill_assets.assert_called_once_with(
+        bot_id="b1", owner_id="owner-1", bot=bot
+    )
     assert arca.calls == [(bot, 3)]
 
 
@@ -1076,12 +1088,17 @@ async def test_build_phase_fails_without_producing_artifact_when_flush_fails():
         providers={"baas": arca}, default_provider_key="baas"
     )
     capability_reader = Mock()
-    capability_reader.flush.side_effect = RuntimeError(
+    capability_reader.active_skill_assets.side_effect = RuntimeError(
         "installation persistence unavailable"
     )
     svc, _ = _build_svc_with_router(
         router,
-        {"bot_id": "b1", "active_engine": "openclaw", "env": "prod"},
+        {
+            "bot_id": "b1",
+            "owner_id": "owner-1",
+            "active_engine": "openclaw",
+            "env": "prod",
+        },
         capability_reader=capability_reader,
     )
 
@@ -1101,7 +1118,12 @@ async def test_build_phase_routes_external_and_merges_artifact_ext():
     router = DeployArtifactProducerRouter(
         providers={"baas": arca, "teclaw": teclaw}, default_provider_key="baas"
     )
-    bot = {"bot_id": "b2", "active_engine": "teclaw", "env": "prod"}
+    bot = {
+        "bot_id": "b2",
+        "owner_id": "owner-1",
+        "active_engine": "teclaw",
+        "env": "prod",
+    }
     svc, _ = _build_svc_with_router(router, bot, provider="teclaw")
 
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=2)
@@ -1131,7 +1153,13 @@ async def test_build_phase_failed_artifact_returns_failed_result():
         providers={"baas": _Fail()}, default_provider_key="baas"
     )
     svc, _ = _build_svc_with_router(
-        router, {"bot_id": "b", "active_engine": "openclaw", "env": "prod"}
+        router,
+        {
+            "bot_id": "b",
+            "owner_id": "owner-1",
+            "active_engine": "openclaw",
+            "env": "prod",
+        },
     )
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=1)
 

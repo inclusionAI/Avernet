@@ -12,6 +12,7 @@ Skill is visible before any listing ran.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
@@ -214,9 +215,6 @@ def test_a_collaborator_without_permission_is_refused_before_any_write():
 
 
 class _AssetSkills:
-    def __init__(self) -> None:
-        self.flushed_before_read: bool | None = None
-
     def get_by_id(self, skill_id: str):
         if skill_id != "42":
             return None
@@ -227,10 +225,6 @@ class _AssetSkills:
             "user_id": "owner",
             "bolt_id": "bot",
         }
-
-    def list_bot_installed_skills(self, *, env: str, owner_id: str, bot_id: str):
-        assert (env, owner_id, bot_id) == ("pre", "owner", "bot")
-        return [{"id": "42"}]
 
 
 class _AssetBots:
@@ -247,12 +241,15 @@ class _AssetBots:
 
 
 class _RecordingReader:
-    def __init__(self) -> None:
-        self.flushes: list[dict] = []
+    """The reader's read surface: flush happens inside, callers only read."""
 
-    def flush(self, *, bot):
-        self.flushes.append(dict(bot))
-        return _EMPTY
+    def __init__(self) -> None:
+        self.reads: list[tuple[str, str]] = []
+
+    def active_skill_assets(self, *, bot_id, owner_id, bot=None):
+        assert bot is not None
+        self.reads.append((bot_id, owner_id))
+        return (SimpleNamespace(skill_id=42),)
 
 
 class _Storage:
@@ -374,7 +371,7 @@ def test_resolved_bot_skill_uses_installation_projection_for_active_state() -> N
     )
 
     assert record["active"] is True
-    assert len(reader.flushes) == 1
+    assert reader.reads == [("bot", "owner")]
 
 
 # ── The merged seam's own promise, against the real repository ──────
@@ -463,7 +460,7 @@ def test_a_bridged_skill_is_active_in_detail_before_any_listing_ran(tmp_path):
         )
 
     reader = BotCapabilityStateReader(
-        CapabilityDesiredStateRepository(db), bots, object()
+        CapabilityDesiredStateRepository(db), bots, skills
     )
     service = SkillQueryService(
         skills, bots, object(), reader, object(), object(), lambda: object()

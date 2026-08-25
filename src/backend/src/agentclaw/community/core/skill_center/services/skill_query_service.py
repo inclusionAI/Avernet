@@ -111,12 +111,13 @@ class SkillQueryService(SkillQueryServiceProtocol):
         bot = self._require_view_access(
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
-        # Returns the plan it applied, so the page need not resolve again.
-        plan = self._reader.flush(bot=bot)
+        # The reader flushes before answering, so the page need not resolve
+        # Set membership again.
+        member_ids = self._reader.member_skill_ids(bot=bot)
         return self._skill_repo.list_bot_skills(
             bot_id=bot_id,
             user_id=owner_id,
-            skill_set_member_ids=plan.member_skill_ids,
+            skill_set_member_ids=member_ids,
             page=page,
             page_size=page_size,
             active=active,
@@ -155,15 +156,14 @@ class SkillQueryService(SkillQueryServiceProtocol):
             user_id=user_id,
         )
         # ``active`` is a desired-state projection, never an asset attribute,
-        # and it answers from Installation *after* the flush — a
+        # and the reader answers from Installation after its flush — a
         # SkillSet-bridged Skill is active in detail before any listing ran.
-        self._reader.flush(bot=bot)
-        installed = self._skill_repo.list_bot_installed_skills(
-            env=str(bot["env"]), owner_id=_owner_id, bot_id=bot_id
+        installed = self._reader.active_skill_assets(
+            bot_id=bot_id, owner_id=_owner_id, bot=bot
         )
         return {
             **skill,
-            "active": any(str(item.get("id")) == skill_id for item in installed),
+            "active": any(asset.skill_id == int(skill_id) for asset in installed),
         }
 
     # ── Legacy reference resolution ─────────────────────────────────

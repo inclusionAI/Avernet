@@ -620,7 +620,7 @@ def _real_query_service(db, bots, skills) -> SkillQueryService:
     parameters is read, so nothing ever calls them.
     """
     reader = BotCapabilityStateReader(
-        CapabilityDesiredStateRepository(db), bots, object()
+        CapabilityDesiredStateRepository(db), bots, skills
     )
     return SkillQueryService(
         skills, bots, object(), reader, object(), object(), lambda: object()

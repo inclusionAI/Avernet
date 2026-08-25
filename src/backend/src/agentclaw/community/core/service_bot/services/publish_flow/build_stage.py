@@ -89,10 +89,14 @@ class BuildStageRunner:
                 raise PublishFlowServiceError(f"Bot not found: {bot_id}")
 
             # A new service artifact must capture the same desired state a
-            # runtime projection would read, so flush Set configuration into
-            # Installation first. This never runs for restart, scale, or
-            # rollback of an already frozen artifact.
-            self._capability_reader.flush(bot=bot)
+            # runtime projection would read. Reading the Bot's active assets
+            # through the reader flushes Set configuration into Installation
+            # first — the very state the producer below freezes; the returned
+            # assets themselves are re-read inside the producer. This never
+            # runs for restart, scale, or rollback of a frozen artifact.
+            self._capability_reader.active_skill_assets(
+                bot_id=str(bot["bot_id"]), owner_id=str(bot["owner_id"]), bot=bot
+            )
 
             # Select the artifact producer by device_provider: ARCA/baas → the
             # existing build(); teclaw → compose + freeze. produce_artifact is

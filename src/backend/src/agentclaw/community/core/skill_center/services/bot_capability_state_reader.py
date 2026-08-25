@@ -45,12 +45,13 @@ class BotCapabilityStateReader:
         self._bot_repo = bot_repo
         self._pool_skills = pool_skills
 
-    def flush(self, *, bot: Mapping[str, Any]) -> InstallationFlushPlan:
-        return self._flush(
+    def member_skill_ids(self, *, bot: Mapping[str, Any]) -> frozenset[int]:
+        plan = self._flush(
             bot=bot,
             bot_id=str(bot["bot_id"]),
             owner_id=str(bot["owner_id"]),
         )
+        return plan.member_skill_ids
 
     def active_skill_assets(
         self,
