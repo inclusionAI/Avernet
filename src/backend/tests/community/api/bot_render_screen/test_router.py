@@ -68,7 +68,8 @@ class TestListRenderScreens:
         data = resp.json()
         assert data["success"] is True
         assert data["data"] == []
-        mock_service.authorize_render_screen_bot.assert_called_once_with(bot_id="bot_001", user_id="testuser")
+        # 读放开：list 不再走 bot 级鉴权，写操作仍校验
+        mock_service.authorize_render_screen_bot.assert_not_called()
         mock_service.list_render_screens.assert_called_once_with(
             bot_id="bot_001",
             owner_id=None,
