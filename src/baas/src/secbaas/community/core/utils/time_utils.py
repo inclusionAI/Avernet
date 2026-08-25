@@ -39,10 +39,11 @@ def naive_cst_now() -> datetime:
 
 
 def naive_cst_fromtimestamp(ts: float) -> datetime:
-    """Epoch seconds (or millis) → naive Asia/Shanghai (+08:00) wall clock.
+    """Epoch seconds → naive Asia/Shanghai (+08:00) wall clock.
 
     ``datetime.fromtimestamp`` interprets the epoch in the fixed zone, so
     the result is host-timezone independent (Asia/Shanghai has no DST).
+    Callers holding millisecond epochs must divide by 1000 first.
     """
     return datetime.fromtimestamp(ts, tz=CST).replace(tzinfo=None)
 
