@@ -261,6 +261,7 @@ async def _walk_device_fs(
     base_rel: str,
     should_descend,
     max_entries: int = 20000,
+    max_files: int | None = None,
 ) -> list[dict]:
     """Client-side recursive walk over a device-fs, mirroring ``_walk_arca``.
 
@@ -273,12 +274,23 @@ async def _walk_device_fs(
     ``"data/report.csv"``, ready for the search filter / browser rules directly).
     ``should_descend`` receives that workspace-relative ``rel``. Returns ``None`` when
     the root level fails to list (parity with ``_walk_arca``'s "root failed" sentinel).
+
+    ``max_entries`` caps the COMBINED file+directory list (shared with
+    ``search_files`` — do not repurpose it for a file-only budget). ``max_files``,
+    when opt-in, short-circuits the walk once the count of NON-directory entries
+    reaches the limit, so a directory-heavy tree cannot consume the file-only budget
+    before all regular files are enumerated (the directory-download cap counts
+    regular files only).
     """
     out: list[dict] = []
     root_failed = False
+    file_count = 0
+
+    def _file_budget_reached() -> bool:
+        return max_files is not None and file_count >= max_files
 
     async def walk(current_rel: str) -> None:
-        nonlocal root_failed
+        nonlocal root_failed, file_count
         logical = f"{WORKSPACE_NS}/{current_rel}" if current_rel else WORKSPACE_NS
         try:
             entries = await device_fs.list_dir(logical)
@@ -303,11 +315,15 @@ async def _walk_device_fs(
                 "size_human": e.get("size_human"),
                 "modified_at": e.get("modified_at"),
             })
+            if not is_dir:
+                file_count += 1
+                if _file_budget_reached():
+                    return
             if len(out) >= max_entries:
                 return
             if is_dir and (should_descend is None or should_descend(rel)):
                 await walk(rel)
-                if len(out) >= max_entries:
+                if len(out) >= max_entries or _file_budget_reached():
                     return
 
     await walk(base_rel)
@@ -554,7 +570,7 @@ async def download_directory(
     # the device-fs (workspace/<rel> namespace); local/unbound → local-FS below.
     if device_fs is not None:
         entries = await _walk_device_fs(
-            device_fs, path, should_descend=None, max_entries=_ZIP_DOWNLOAD_MAX_FILES + 1,
+            device_fs, path, should_descend=None, max_files=_ZIP_DOWNLOAD_MAX_FILES + 1,
         )
         if entries is None:
             raise HTTPException(status_code=404, detail="Directory not found on device")
