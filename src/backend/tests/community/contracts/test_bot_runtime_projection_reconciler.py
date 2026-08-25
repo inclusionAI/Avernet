@@ -1,15 +1,12 @@
-"""Consumer conformance for the Bot runtime projection Service API."""
+"""Consumer conformance for the Bot runtime projection contract."""
 
 from __future__ import annotations
 
 import pytest
 from injector import inject, singleton
 
-from agentclaw.community.api.bot_runtime_projection_reconciler import (
-    BotRuntimeProjectionReconcilerProtocol,
-)
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
-    BotRuntimeProjectionReconcilerProtocol as CoreBotRuntimeProjectionReconcilerProtocol,
+    BotRuntimeProjectionReconcilerProtocol,
 )
 from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
     BotRuntimeProjectionReconciler,
@@ -69,13 +66,14 @@ def _consumer(world, runtime: _RecordingReconciler) -> _Consumer:
     return world.injector.create_object(_Consumer)
 
 
-def test_world_wires_service_api_to_the_real_reconciler(world) -> None:
+def test_world_wires_the_contract_to_the_real_reconciler(world) -> None:
+    """One contract, one implementation, one singleton behind both names."""
     assert isinstance(
         world.get(BotRuntimeProjectionReconcilerProtocol),
         BotRuntimeProjectionReconciler,
     )
     assert world.get(BotRuntimeProjectionReconcilerProtocol) is world.get(
-        CoreBotRuntimeProjectionReconcilerProtocol
+        BotRuntimeProjectionReconciler
     )
 
 
