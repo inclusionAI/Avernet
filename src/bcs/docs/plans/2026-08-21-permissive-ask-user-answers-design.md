@@ -1,5 +1,10 @@
 # Permissive Ask-User Answers Design
 
+> **Superseded (2026-08-24):** The approved contract now classifies Frontend
+> `values` against requested options, treats missing `allowOther` as true, and
+> rejects off-list values when `allowOther=false`. See
+> [BCN Ask-User Custom Values Design](../../../baas/docs/2026-08-24-bcn-ask-user-custom-values-design.md).
+
 ## Context
 
 BCS currently treats `allowOther` as a server-side authorization flag. When it
