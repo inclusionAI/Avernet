@@ -6,7 +6,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use bcs_service_api::application::v1::{
     AddGroupParticipant, AuthenticatedCaller, CreateGroup, DeleteGroup, DeleteGroupParticipant,
-    EventSubscription, GetGroup, GroupDetail, ListGroups, UpdateGroup,
+    EventSubscription, GetGroup, GroupDetail, ListGroups, ListPublicGroups, UpdateGroup,
 };
 use serde::Serialize;
 
@@ -15,12 +15,13 @@ use crate::v1::common::{
 };
 use crate::v1::openapi::dto::group::{
     AddParticipantRequest, CreateGroupRequest, DeleteGroupQuery, ListGroupsQuery,
-    UpdateGroupRequest,
+    ListPublicGroupsQuery, UpdateGroupRequest,
 };
 
 pub fn router() -> Router<ApiState> {
     Router::new()
         .route("/groups", get(list_groups).post(create_group))
+        .route("/groups/public", get(list_public_groups))
         .route(
             "/groups/{group_id}",
             get(get_group).patch(update_group).delete(delete_group),
@@ -55,6 +56,30 @@ async fn list_groups(
             visibility: query.visibility,
             membership,
             kind,
+            strategy: query.strategy,
+        })
+        .await
+        .map_err(|error| application_error_response(&request_id, error))?;
+    Ok((
+        StatusCode::OK,
+        Json(Envelope::success(20_000, "OK", result, request_id.0)),
+    )
+        .into_response())
+}
+
+async fn list_public_groups(
+    State(state): State<ApiState>,
+    Extension(_caller): Extension<AuthenticatedCaller>,
+    Extension(request_id): Extension<RequestId>,
+    query: Result<Query<ListPublicGroupsQuery>, QueryRejection>,
+) -> Result<Response, ErrorResponse> {
+    let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let result = state
+        .group_service
+        .list_public_groups(ListPublicGroups {
+            offset: query.offset,
+            limit: query.limit,
+            q: query.q,
             strategy: query.strategy,
         })
         .await

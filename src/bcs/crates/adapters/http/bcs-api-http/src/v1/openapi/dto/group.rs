@@ -58,6 +58,17 @@ pub struct ListGroupsQuery {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ListPublicGroupsQuery {
+    #[serde(default)]
+    pub offset: u64,
+    #[serde(default = "default_limit")]
+    pub limit: u64,
+    pub q: Option<String>,
+    pub strategy: Option<GroupStrategy>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeleteGroupQuery {
     #[serde(default)]
     pub acting_bot_id: Option<String>,
