@@ -34,6 +34,9 @@ from agentclaw.community.adapters.http.openapi_v1.authorization import (
 from agentclaw.community.api.collaborator_lock_service import (
     CollaboratorLockServiceProtocol,
 )
+from agentclaw.community.api.member_management_capability import (
+    MemberManagementCapabilityProtocol,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
@@ -216,7 +219,7 @@ def _surface(
                     to=InstanceProvider(locks),
                 )
                 binder.bind(
-                    MemberManagementCapabilityService,
+                    MemberManagementCapabilityProtocol,
                     to=InstanceProvider(capabilities),
                 )
 

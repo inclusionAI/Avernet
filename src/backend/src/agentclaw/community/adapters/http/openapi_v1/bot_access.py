@@ -61,15 +61,15 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 from agentclaw.community.api.collaborator_lock_service import (
     CollaboratorLockServiceProtocol,
 )
+from agentclaw.community.api.member_management_capability import (
+    MemberManagementCapabilityProtocol,
+)
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
     resolve_operable_permission_level,
-)
-from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
-    MemberManagementCapabilityService,
 )
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
@@ -207,7 +207,7 @@ async def _uses_member_management_semantics(
 ) -> bool:
     """Preserve the legacy session-lock exception for coding applications."""
     bots = _service(request, BotRepository)
-    capabilities = _service(request, MemberManagementCapabilityService)
+    capabilities = _service(request, MemberManagementCapabilityProtocol)
     if bots is None or capabilities is None:
         return False
     try:

@@ -344,7 +344,6 @@ from agentclaw.community.adapters.http.error_logging import (  # noqa: E402
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (  # noqa: E402
     BotAccessRefusedError,
-    BotEditLockError,
     GrantNotResolvableError,
     MissingPrincipalError,
     UserIdMismatchError,
@@ -831,29 +830,6 @@ async def _bot_access_refused_handler(
     return JSONResponse(
         status_code=404,
         content={"detail": "Not found"},
-        headers=_trace_headers(request),
-    )
-
-
-@app.exception_handler(BotEditLockError)
-async def _bot_edit_lock_handler(
-    request: Request, exc: BotEditLockError,
-) -> JSONResponse:
-    """Envelope edit-lock failures raised before the route handler runs."""
-    mapped = _public_mapped_error(request, exc)
-    if mapped is not None:
-        log = logger.error if mapped.status_code >= 500 else logger.warning
-        log(
-            "[Public %s] %s on %s %s: %s%s",
-            mapped.status_code,
-            type(exc).__name__, request.method, request.url.path, exc,
-            params_suffix(request),
-            exc_info=exc,
-        )
-        return mapped
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal Server Error"},
         headers=_trace_headers(request),
     )
 

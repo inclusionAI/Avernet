@@ -21,6 +21,9 @@ from agentclaw.community.api.collaborator_lock_service import (
     CollaboratorLockServiceProtocol,
 )
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
+from agentclaw.community.api.member_management_capability import (
+    MemberManagementCapabilityProtocol,
+)
 from agentclaw.community.core.bot_collaborator.protocols import (
     BotServiceProtocol,
     CollaboratorServiceProtocol as CoreCollaboratorServiceProtocol,
@@ -203,4 +206,12 @@ class BotCollaboratorModule(Module):
     def _collaborator_lock_service_protocol(
         self, svc: CollaboratorLockService
     ) -> CollaboratorLockServiceProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _member_management_capability_protocol(
+        self, svc: MemberManagementCapabilityService
+    ) -> MemberManagementCapabilityProtocol:
         return svc

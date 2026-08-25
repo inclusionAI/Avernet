@@ -85,9 +85,9 @@ def mount_public_error_handlers(app: FastAPI) -> FastAPI:
     """
     from agentclaw.community.adapters.http.app import (
         _bot_access_refused_handler,
-        _bot_edit_lock_handler,
         _grant_not_resolvable_handler,
         _principal_error_handler,
+        _unhandled_exception_handler,
         _user_id_mismatch_handler,
         _validation_error_handler,
     )
@@ -96,7 +96,7 @@ def mount_public_error_handlers(app: FastAPI) -> FastAPI:
     app.add_exception_handler(UserIdMismatchError, _user_id_mismatch_handler)
     app.add_exception_handler(GrantNotResolvableError, _grant_not_resolvable_handler)
     app.add_exception_handler(BotAccessRefusedError, _bot_access_refused_handler)
-    app.add_exception_handler(BotEditLockError, _bot_edit_lock_handler)
+    app.add_exception_handler(BotEditLockError, _unhandled_exception_handler)
     app.add_exception_handler(RequestValidationError, _validation_error_handler)
     return app
 
