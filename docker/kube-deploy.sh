@@ -174,14 +174,7 @@ RENDERED="$(cat "$TEMPLATE" | envsubst)"
 
 # Then replace __ENV_VARS__ with the env block (or remove if empty)
 if [[ -n "$ENV_YAML" ]]; then
-    ENV_INDENTED=""
-    IFS=$'\n'
-    for line in $ENV_YAML; do
-        ENV_INDENTED="${ENV_INDENTED}        ${line}
-"
-    done
-    unset IFS
-    RENDERED="${RENDERED//__ENV_VARS__/$ENV_INDENTED}"
+    RENDERED="${RENDERED//__ENV_VARS__/$ENV_YAML}"
 else
     RENDERED="${RENDERED//        __ENV_VARS__/}"
 fi
