@@ -24,7 +24,6 @@ import json
 import os
 import uuid
 from collections.abc import AsyncIterator, Callable
-from contextlib import suppress
 from typing import Any
 
 from dependency_injector.wiring import Provide, inject
@@ -66,7 +65,6 @@ from secbaas.community.api.sse import (
     SseConverterFactory,
     SseEvent,
     StreamChunk,
-    StreamConverter,
     convert_chunks_to_sse,
     with_sse_heartbeat,
 )
@@ -75,88 +73,6 @@ from secbaas.community.logger import get_logger
 from secbaas.community.spi.secret import SecretStorePlugin
 
 logger = get_logger("router-open-api")
-bcn_converter_logger = get_logger("bcn-converter")
-
-
-def _safe_log_string(value: Any) -> str:
-    try:
-        return str(value)
-    except Exception:
-        try:
-            return repr(value)
-        except Exception:
-            return "<unserializable>"
-
-
-def _log_json(value: Any) -> str:
-    try:
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            default=_safe_log_string,
-            separators=(",", ":"),
-        )
-    except Exception:
-        return _safe_log_string(value)
-
-
-def _chunk_log_payload(chunk: StreamChunk) -> dict[str, Any]:
-    return {
-        "type": chunk.type,
-        "content": chunk.content,
-        "usage": chunk.usage,
-        "metadata": chunk.metadata,
-        "engine_type": chunk.engine_type,
-    }
-
-
-def _event_log_payload(event: SseEvent | None) -> dict[str, Any] | None:
-    if event is None:
-        return None
-    return {
-        "event": event.event,
-        "data": event.data,
-        "id": event.id,
-        "retry": event.retry,
-    }
-
-
-class _BcnLoggingStreamConverter:
-    """Log raw input and output for conversions initiated by BCN downlink."""
-
-    def __init__(self, delegate: StreamConverter) -> None:
-        self._delegate = delegate
-
-    @staticmethod
-    def name() -> str:
-        return "bcn-logging"
-
-    def convert(self, chunk: StreamChunk, *, run_id: str) -> SseEvent | None:
-        raw_input = _log_json(_chunk_log_payload(chunk))
-        try:
-            event = self._delegate.convert(chunk, run_id=run_id)
-        except Exception as exc:
-            with suppress(Exception):
-                bcn_converter_logger.exception(
-                    "[convert] source=bcn_downlink run_id=%s input=%s output=%s",
-                    run_id,
-                    raw_input,
-                    _log_json(
-                        {
-                            "error_type": type(exc).__name__,
-                            "error_message": _safe_log_string(exc),
-                        }
-                    ),
-                )
-            raise
-        with suppress(Exception):
-            bcn_converter_logger.info(
-                "[convert] source=bcn_downlink run_id=%s input=%s output=%s",
-                run_id,
-                raw_input,
-                _log_json(_event_log_payload(event)),
-            )
-        return event
 
 
 router = APIRouter(prefix="/bcn", tags=["BCN Downlink"])
@@ -399,7 +315,7 @@ async def _dispatch_chat_send_stream(
     except ValueError as exc:
         raise BcnInvalidRequestError(str(exc)) from exc
 
-    converter = _BcnLoggingStreamConverter(converter_factory.create("default"))
+    converter = converter_factory.create("bcn")
 
     def on_error(e: Exception) -> str:
         logger.exception("[chat.send.stream] Unexpected error: run_id=%s", req.id)

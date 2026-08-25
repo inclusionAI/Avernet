@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import time
+from contextlib import suppress
 from typing import Any
 
 from secbaas.community.api.sse import SseEvent, StreamChunk
@@ -24,6 +25,7 @@ from secbaas.community.logger import get_logger
 
 logger = get_logger("bcn-converter")
 
+_LOG_TEXT_PREVIEW_CHARS = 10
 _INTERACTION_EVENT_PHASES = {
     "interaction.requested": "requested",
     "interaction.resolved": "resolved",
@@ -35,6 +37,131 @@ _DEFAULT_EXEC_OPTIONS = (
     {"label": "Allow always", "decision": "allow-always"},
     {"label": "Deny", "decision": "deny"},
 )
+
+
+def _safe_log_string(value: Any) -> str:
+    with suppress(Exception):
+        return str(value)
+    with suppress(Exception):
+        return repr(value)
+    return "<unserializable>"
+
+
+def _log_json(value: Any) -> str:
+    with suppress(Exception):
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            default=_safe_log_string,
+            separators=(",", ":"),
+        )
+    return _safe_log_string(value)
+
+
+def _preview_log_text(value: Any) -> Any:
+    if not isinstance(value, str) or len(value) <= _LOG_TEXT_PREVIEW_CHARS:
+        return value
+    return f"{value[:_LOG_TEXT_PREVIEW_CHARS]}…<truncated:{len(value)}>"
+
+
+def _thinking_metadata_log_payload(metadata: Any) -> Any:
+    if not isinstance(metadata, dict):
+        return metadata
+    engine_frame = metadata.get("engine_frame")
+    if not isinstance(engine_frame, dict) or engine_frame.get("stream") != "thinking":
+        return metadata
+    data = engine_frame.get("data")
+    if not isinstance(data, dict):
+        return metadata
+
+    projected_data = dict(data)
+    for key in ("delta", "text"):
+        if key in projected_data:
+            projected_data[key] = _preview_log_text(projected_data[key])
+    projected_frame = dict(engine_frame)
+    projected_frame["data"] = projected_data
+    projected_metadata = dict(metadata)
+    projected_metadata["engine_frame"] = projected_frame
+    return projected_metadata
+
+
+def _chunk_log_payload(chunk: StreamChunk) -> dict[str, Any]:
+    content = chunk.content
+    metadata = chunk.metadata
+    if chunk.type in {"delta", "final", "error", "aborted"}:
+        content = _preview_log_text(content)
+    elif chunk.type == "agent":
+        metadata = _thinking_metadata_log_payload(metadata)
+    return {
+        "type": chunk.type,
+        "content": content,
+        "usage": chunk.usage,
+        "metadata": metadata,
+        "engine_type": chunk.engine_type,
+    }
+
+
+def _preview_chat_message(data: dict[str, Any]) -> None:
+    message = data.get("message")
+    if not isinstance(message, dict):
+        return
+    content = message.get("content")
+    if not isinstance(content, list):
+        return
+
+    projected_content = []
+    for item in content:
+        if isinstance(item, dict) and "text" in item:
+            projected_item = dict(item)
+            projected_item["text"] = _preview_log_text(projected_item["text"])
+            projected_content.append(projected_item)
+        else:
+            projected_content.append(item)
+    projected_message = dict(message)
+    projected_message["content"] = projected_content
+    data["message"] = projected_message
+
+
+def _event_log_data(event: SseEvent) -> str:
+    if event.event not in {"chat", "agent"}:
+        return event.data
+    data = json.loads(event.data)
+    if not isinstance(data, dict):
+        return event.data
+    projected_data = dict(data)
+    if event.event == "chat":
+        for key in ("deltaText", "errorMessage"):
+            if key in projected_data:
+                projected_data[key] = _preview_log_text(projected_data[key])
+        _preview_chat_message(projected_data)
+    elif projected_data.get("stream") == "thinking":
+        for key in ("delta", "text"):
+            if key in projected_data:
+                projected_data[key] = _preview_log_text(projected_data[key])
+    return json.dumps(projected_data, ensure_ascii=False)
+
+
+def _event_log_payload(event: SseEvent | None) -> dict[str, Any] | None:
+    if event is None:
+        return None
+    return {
+        "event": event.event,
+        "data": _event_log_data(event),
+        "id": event.id,
+        "retry": event.retry,
+    }
+
+
+def _chunk_log_json(chunk: StreamChunk) -> str:
+    with suppress(Exception):
+        return _log_json(_chunk_log_payload(chunk))
+    return "<unserializable>"
+
+
+def _event_log_json(event: SseEvent | None) -> str:
+    with suppress(Exception):
+        return _log_json(_event_log_payload(event))
+    return "<unserializable>"
 
 
 class DefaultStreamConverter:
@@ -54,20 +181,48 @@ class DefaultStreamConverter:
     than read from the engine frame, so downstream sequencing never reorders.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, conversion_logging_enabled: bool = False) -> None:
         self._seq = 0
+        self._conversion_logging_enabled = conversion_logging_enabled
 
     @staticmethod
     def name() -> str:
         return "default"
 
     def convert(self, chunk: StreamChunk, *, run_id: str) -> SseEvent | None:
-        converted = _transform_chunk(chunk, _engine_name(chunk), run_id)
-        if converted is None:
-            return None
-        if converted["event"].startswith(":"):
-            return SseEvent(event=converted["event"], data="")
-        return self._build_event(converted["event"], converted["data"], run_id)
+        raw_input = _chunk_log_json(chunk) if self._conversion_logging_enabled else ""
+        try:
+            converted = _transform_chunk(chunk, _engine_name(chunk), run_id)
+            if converted is None:
+                event = None
+            elif converted["event"].startswith(":"):
+                event = SseEvent(event=converted["event"], data="")
+            else:
+                event = self._build_event(converted["event"], converted["data"], run_id)
+        except Exception as exc:
+            if self._conversion_logging_enabled:
+                with suppress(Exception):
+                    logger.exception(
+                        "[convert] source=bcn_downlink run_id=%s input=%s output=%s",
+                        run_id,
+                        raw_input,
+                        _log_json(
+                            {
+                                "error_type": type(exc).__name__,
+                                "error_message": _safe_log_string(exc),
+                            }
+                        ),
+                    )
+            raise
+        if self._conversion_logging_enabled:
+            with suppress(Exception):
+                logger.info(
+                    "[convert] source=bcn_downlink run_id=%s input=%s output=%s",
+                    run_id,
+                    raw_input,
+                    _event_log_json(event),
+                )
+        return event
 
     def _build_event(
         self,
