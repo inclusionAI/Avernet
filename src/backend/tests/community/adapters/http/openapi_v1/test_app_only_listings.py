@@ -54,6 +54,9 @@ from agentclaw.community.api.space_service import (
 from agentclaw.community.api.space_skill_query_service import (
     SpaceSkillQueryServiceProtocol,
 )
+from agentclaw.community.api.space_skill_grant_service import (
+    SpaceSkillGrantServiceProtocol,
+)
 from agentclaw.community.api.work_order_service import (
     WorkOrderNotificationServiceProtocol,
     WorkOrderServiceProtocol,
@@ -220,6 +223,7 @@ def make_client(bots):
                 binder.bind(SpaceServiceProtocol, to=unexpected)
                 binder.bind(SpaceMemberServiceProtocol, to=unexpected)
                 binder.bind(SpaceSkillQueryServiceProtocol, to=unexpected)
+                binder.bind(SpaceSkillGrantServiceProtocol, to=unexpected)
                 binder.bind(MarketFavoriteServiceProtocol, to=unexpected)
                 binder.bind(WorkOrderServiceProtocol, to=unexpected)
                 binder.bind(WorkOrderNotificationServiceProtocol, to=unexpected)
