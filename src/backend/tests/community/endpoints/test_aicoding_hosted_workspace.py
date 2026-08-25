@@ -189,6 +189,28 @@ def create_dima_workspace_allows_member_collaborator():
 @endpoint_test(
     method="POST",
     path="/api/aicoding/bot/{bot_id}/dima-workspace",
+    scenario="member_collaborator_self_resolved",
+    input=CaseInput(
+        path_params={"bot_id": "bot_app_coding_collab"},
+        query_params={"user_id": "u_member"},
+        headers={"x-user-id": "u_member"},
+    ),
+    seed=_seed_app_coding_bot_with_member_collaborator,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "data": {"dima_space_id": "W_STUB_bot_app_coding_collab"},
+        },
+    ),
+)
+def create_dima_workspace_allows_member_collaborator_self_resolved():
+    """协作者用自己的 user_id 访问时，也能通过协作者关系解析到真实 owner。"""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/aicoding/bot/{bot_id}/dima-workspace",
     scenario="error_non_coding",
     input=CaseInput(
         path_params={"bot_id": "bot_personal"},
