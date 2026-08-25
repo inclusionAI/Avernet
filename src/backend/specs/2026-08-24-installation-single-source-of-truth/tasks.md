@@ -181,7 +181,7 @@ lands in the same group as the migration of its last caller.
       `api/skill_set_{activator,switcher}_factory.py`, DI providers, and
       `CURRENT_SET_FILE` plumbing only they used; migrate or delete their
       tests.
-- [ ] 9.5 Guard: no reference to Activator/Switcher anywhere.
+- [x] 9.5 Guard: no reference to Activator/Switcher anywhere.
 
 ## Group 10 — SkillQueryService (one query seam, one fewer layer)
 
