@@ -16,57 +16,41 @@ user_config:
   # 插件配置
   plugins:
     auth: "stub"
-    crypto: "stub"          # stub | real
     secret: "stub"          # stub | real
-    scheduler: "stub"       # stub | real
-    cache: "stub"           # stub | real
+    cache: "stub"           # stub | redis
     bot_service: "stub"  # real | local | stub
     engine_adapter: "stub"  # stub | real (aicoding/hermes/claude_code engine adapter)
     file_transfer: "stub"  # stub | real
+    database: "sqlite"        # sqlite | mariadb
     eval_env: "stub"       # stub | real (评测环境 Plugin: stub=空操作, real=实际逻辑)
-    database:
-      plugin_database: "SQLITE_ORM"    # ZDAS_ORM (production ORM) | SQLITE_ORM (test only)
-      database_url: "sqlite:////tmp/secbaas.db"
-      create_schema: true
-      seed_data: true
     sandbox:
       arca: stub #  arca_sdk or stub
       desktop: stub # real or stub
-      teclaw: stub # real or stub
       k8s: stub # real or stub
       docker: stub # real or stub
       poolab: stub # real or stub
-  # Arca 沙箱配置（用于定时任务续期）
-  arca:
-    enabled: true  # 设置为 true 启用沙箱续期定时任务
-    base_url: "http://arca.example.com:8080"
-    template_id: "ARCA-TEMPLATE-000000"
-    oss_mount_id: "dummy_mount_id"
-    api_key: "@dummy_api_key"
-    default_ttl_minutes: 1440 # 分钟 => 1 天
+    bot:
+      teclaw: stub # real or stub
 
-  # Aliyun ACK 沙箱模板配置（第二类模板，用于 plugins.sandbox.arca = "aliyun_ack"）
-  # 默认使用 dummy 值，启用该后端时才需填充 cluster 与 pod 真实值，无需新增配置键。
-  aliyun_ack_template:
-    template_id: "ALIYUN-ACK-TEMPLATE-000000"
-    cluster:
-      endpoint: "https://k8s.example.com"
-      region: "cn-hangzhou"
-      cluster_name: "ack-sandbox"
-      kubeconfig: ""
-      context: "ack-sandbox"
-      access_key_id: "@dummy_access_key_id"
-      access_key_secret: "@dummy_access_key_secret"
-    pod:
-      image: "ubuntu:22.04"
-      namespace: "default"
-      service_account: ""
-      cpu_request: ""
-      cpu_limit: ""
-      memory_request: ""
-      memory_limit: ""
-      storage_class: ""
-      envs: {}
+  # 数据库连接配置
+  database:
+    database_url: "sqlite:////tmp/secbaas.db"
+    create_schema: true
+    seed_data: true
+
+  # Aliyun ACK 集群连接配置（用于 plugins.sandbox.arca = "aliyun_ack"）
+  aliyun_ack_cluster:
+    api_server: "https://k8s.example.com"
+    token: ""
+    namespace: "default"
+
+  # 沙箱镜像配置（按引擎 template_id → 容器名 → 镜像地址）
+  sandbox_images:
+    ALIYUN_ACK_DEFAULT:
+      avernet-agent: "openclaw:latest"
+      avernet-sidecar: "nginx:alpine"
+      init: "busybox:latest"
+      nas-server: ""
 
   bot_service:
     proxy_base_url: "https://bot_service.example.com"
@@ -135,8 +119,9 @@ user_config:
     engine: "legacy"
 
   # 设备 TTL 定时器配置（每 30 分钟扫描整个到期队列并续期+探活）
+  # ARCA 沙箱 TTL 续期为企业版能力：社区版默认关闭此定时任务（enabled: false）。
   device_ttl_timer:
-    enabled: true  # 是否启用定时任务
+    enabled: false  # 社区版禁用 ARCA 沙箱 TTL 续期定时任务；企业 overlay 置 true
     cron_interval_seconds: 1800  # 执行间隔（秒），默认: 1800（30分钟）
     batch_size: 100  # 每页拉取条数，默认: 100
     max_page_concurrency: 10  # 每页内并发续期的最大并发数
@@ -147,7 +132,7 @@ user_config:
 
   # 文件传输轮询器配置（定期检测 OSS 上传完成并触发 device 下载）
   file_transfer_poller:
-    enabled: true  # 是否启用定时任务
+    enabled: false  # 是否启用定时任务
     cron_interval_seconds: 10  # 执行间隔（秒），默认: 10
     upload_timeout_seconds: 3600  # 上传超时（秒），超时未完成写入的 ticket 标记 FAILED
     lock_expire_seconds: 300  # per-ticket 分布式锁过期时间（秒），默认: 300
@@ -163,6 +148,23 @@ user_config:
     lock_renew_interval_seconds: 30  # 分布式锁自动续期间隔（秒），默认: 30（0 表示禁用续期）
     stale_seconds: 120  # RUNNING 超过此时长无心跳视为悬挂（秒），默认: 120
     dry_run: false  # 测试模式：只打印日志
+
+  # Expired ACK sandbox timer config (periodically scans expired devices, destroys Pod, stops bot)
+  # NOTE: This task only takes effect for Aliyun ACK-created sandboxes
+  # (plugins.sandbox.arca == "aliyun_ack"). Enterprise arc_sdk sandboxes are
+  # reclaimed by the ARC platform itself; this task does not participate.
+  # Disabled by default in community (enabled: false).
+  expire_sandbox_timer:
+    enabled: false  # 社区版禁用过期沙箱销毁定时任务
+    cron_interval_seconds: 86400  # 执行间隔（秒），默认: 86400（1天）
+    batch_size: 100  # 每页拉取条数，默认: 100
+    max_page_concurrency: 10  # 每页内并发停 bot 的最大并发数
+    query_retries: 3  # 单页查询 DB 失败时的重试次数
+    lock_name: "expire_sandbox_timer_lock"  # 分布式锁名称基准，运行时追加环境后缀
+    lock_expire_seconds: 1750  # 分布式锁租约（秒），须 < cron 间隔
+    dry_run: false  # 测试模式：只打印日志，不销毁/停 bot
+    grace_seconds: 0  # 到期判定余量（秒），抵消时钟偏差
+    default_ttl_minutes: 10080  # 业务默认 TTL（分钟），extra_config 缺失时回退（7 天）
 
   # BCN 下行协议配置
   bcn:

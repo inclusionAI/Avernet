@@ -1,0 +1,75 @@
+# ============================================================
+# service-deployment.yaml — Generic K8s deployment template
+#
+# Rendered by docker/services/kube-deploy.sh into a service-specific
+# manifest. Uses envsubst-compatible ${...} placeholders.
+#
+# Placeholders:
+#   SERVICE     — service name (baas | gateway | bcs | backend)
+#   SERVICE     — service name (baas | gateway | bcs | backend)
+#   NAMESPACE   — K8s namespace
+#   IMAGE       — container image with tag
+#   PORT        — container + service port
+#   REPLICAS    — number of pod replicas (default 2)
+#   CPU_REQUEST, CPU_LIMIT, MEMORY_REQUEST, MEMORY_LIMIT — resource spec
+#   ENV_VARS    — rendered env var entries (one "- name: ..." block per line)
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${SERVICE}
+  namespace: ${NAMESPACE}
+  labels:
+    app: ${SERVICE}
+spec:
+  replicas: ${REPLICAS}
+  selector:
+    matchLabels:
+      app: ${SERVICE}
+  template:
+    metadata:
+      labels:
+        app: ${SERVICE}
+    spec:
+      containers:
+      - name: ${SERVICE}
+        image: ${IMAGE}
+        ports:
+        - containerPort: ${PORT}
+        __ENV_VARS__
+        resources:
+          requests:
+            cpu: "${CPU_REQUEST}"
+            memory: "${MEMORY_REQUEST}"
+          limits:
+            cpu: "${CPU_LIMIT}"
+            memory: "${MEMORY_LIMIT}"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: ${PORT}
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: ${PORT}
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${SERVICE}
+  namespace: ${NAMESPACE}
+  labels:
+    app: ${SERVICE}
+spec:
+  type: ClusterIP
+  selector:
+    app: ${SERVICE}
+  ports:
+  - name: http
+    port: ${PORT}
+    targetPort: ${PORT}
+    protocol: TCP

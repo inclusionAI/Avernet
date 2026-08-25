@@ -5,6 +5,10 @@ from ._deadline_renewal_config import DeadlineRenewalSchedulerConfig
 from ._deadline_renewal_report import GapDetectionResult, RenewalRunReport
 from ._deadline_renewal_task import DeadlineRenewalScheduler
 from ._device_ttl_timer_task import DeviceTtlTimerTask, DeviceTtlTimerTaskConfig
+from ._expire_sandbox_timer_task import (
+    ExpireSandboxTimerTask,
+    ExpireSandboxTimerTaskConfig,
+)
 from ._file_transfer_poller import FileTransferPoller, FileTransferPollerConfig
 
 __all__ = [
@@ -14,6 +18,8 @@ __all__ = [
     "DeadlineRenewalSchedulerConfig",
     "DeviceTtlTimerTask",
     "DeviceTtlTimerTaskConfig",
+    "ExpireSandboxTimerTask",
+    "ExpireSandboxTimerTaskConfig",
     "FileTransferPoller",
     "FileTransferPollerConfig",
     "GapDetectionResult",

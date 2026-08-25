@@ -8,22 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 
-class DatabasePluginConfig(Protocol):
-    """Minimal config contract for ``DataSourcePlugin.init_database``.
-
-    Every database plugin implementation receives a config object with
-    at least ``plugin_type`` and ``db_url`` attributes.  The concrete
-    ``DatabaseConfig`` dataclass (in ``secbaas.community.bootstrap``) satisfies
-    this protocol structurally.
-    """
-
-    plugin_type: Any
-    """Which plugin backend was selected (e.g. ``SQLITE_ORM``)."""
-
-    db_url: str
-    """Optional database URL override from application config."""
-
-
 class ConnectionProvider(Protocol):
     """Minimal interface for obtaining database connections."""
 
@@ -46,7 +30,11 @@ class DataSourcePlugin(Protocol):
     * ``close`` — dispose all connection pools
     * ``create_all`` — create database schema (no-op for managed schemas)
     * ``seed`` — insert required seed data (no-op if not applicable)
-    * ``init_database`` — initialise the plugin from a ``DatabasePluginConfig``
+    * ``init_database`` — create schema, seed, and register with ``db_manager``
+
+    The plugin's ``__init__`` receives all connection parameters (URL,
+    credentials, schema/seed flags). ``init_database`` takes no arguments —
+    it simply activates the already-constructed plugin.
     """
 
     def sync_connection(self, datasource_name: str) -> AbstractContextManager[Any]:
@@ -99,15 +87,12 @@ class DataSourcePlugin(Protocol):
         """
         ...
 
-    def init_database(self, config: DatabasePluginConfig) -> None:
-        """Initialise the plugin from a config object.
+    def init_database(self) -> None:
+        """Activate the plugin: create schema, seed, register with db_manager.
 
-        Responsible for resolving the actual database URL (from
-        environment, config, or defaults), creating the schema via
-        ``create_all()``, seeding via ``seed()``, and registering
+        Called after construction. All connection parameters are already
+        resolved in ``__init__`` — this method only performs schema creation
+        (if enabled), seed data insertion (if enabled), and registration
         with the global ``db_manager``.
-
-        Args:
-            config: Configuration with ``plugin_type`` and ``db_url``.
         """
         ...

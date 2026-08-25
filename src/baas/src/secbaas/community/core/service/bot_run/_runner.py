@@ -268,6 +268,7 @@ class BotRunner:
             metadata=metadata,
         )
 
+        # TODO catch exception, update run status error
         route = await self._resolve_bot_route(bot_id, metadata)
 
         # eval 对话 session 日志与保护性校验 — 委托 Plugin
