@@ -11,16 +11,18 @@ from typing import Any, Dict, Optional
 
 from injector import inject
 
+from agentclaw.community.api.aicoding.bot_resolution_service import (
+    AicodingBotResolutionServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot.collaborator import (
     CollaboratorRepositoryProtocol,
 )
-from agentclaw.community.utils.env_utils import get_current_env
 
 log = logging.getLogger("aicoding-bot-resolution")
 
 
-class AicodingBotResolutionService:
+class AicodingBotResolutionService(AicodingBotResolutionServiceProtocol):
     """Resolve the real bot owner for AICoding workspace operations."""
 
     @inject
@@ -37,6 +39,7 @@ class AicodingBotResolutionService:
         bot_id: str,
         requested_owner_id: str,
         operator_id: str,
+        env: str,
     ) -> Optional[Dict[str, Any]]:
         """Return the bot record visible to the caller for DIMA workspace setup.
 
@@ -52,7 +55,7 @@ class AicodingBotResolutionService:
             if bot:
                 return bot
 
-        real_owner_id = self._resolve_owner_from_collaborators(bot_id, operator_id)
+        real_owner_id = self._resolve_owner_from_collaborators(bot_id, operator_id, env)
         if not real_owner_id:
             return None
 
@@ -69,9 +72,9 @@ class AicodingBotResolutionService:
             result.append(owner_id)
         return result
 
-    def _resolve_owner_from_collaborators(self, bot_id: str, operator_id: str) -> Optional[str]:
+    def _resolve_owner_from_collaborators(self, bot_id: str, operator_id: str, env: str) -> Optional[str]:
         try:
-            collaborators = self._collaborator_repo.list_by_user(operator_id, get_current_env())
+            collaborators = self._collaborator_repo.list_by_user(operator_id, env)
         except Exception as exc:
             log.warning(
                 "[resolve_bot_for_dima_workspace] failed to list collaborators: bot_id=%s operator_id=%s error=%s",

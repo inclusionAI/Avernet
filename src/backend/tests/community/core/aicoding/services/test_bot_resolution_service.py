@@ -23,6 +23,7 @@ class TestResolveBotForDimaWorkspace:
             bot_id="bot-001",
             requested_owner_id="owner-492928",
             operator_id="member-382716",
+            env="dev",
         )
 
         assert resolved == bot
@@ -32,7 +33,7 @@ class TestResolveBotForDimaWorkspace:
     def test_falls_back_to_collaborator_owner(self):
         svc = _make_service()
         bot = {"bot_id": "bot-001", "owner_id": "owner-492928", "id": 1}
-        svc._bot_repo.get_by_id_and_owner.side_effect = [None, None, bot]
+        svc._bot_repo.get_by_id_and_owner.side_effect = [None, bot]
         svc._collaborator_repo.list_by_user.return_value = [
             SimpleNamespace(bot_id="bot-001", owner_id="owner-492928"),
         ]
@@ -41,10 +42,11 @@ class TestResolveBotForDimaWorkspace:
             bot_id="bot-001",
             requested_owner_id="member-382716",
             operator_id="member-382716",
+            env="dev",
         )
 
         assert resolved == bot
         assert svc._bot_repo.get_by_id_and_owner.call_args_list[0].args == ("bot-001", "member-382716")
         svc._collaborator_repo.list_by_user.assert_called_once()
         assert svc._collaborator_repo.list_by_user.call_args.args == ("member-382716", "dev")
-        assert svc._bot_repo.get_by_id_and_owner.call_args_list[2].args == ("bot-001", "owner-492928")
+        assert svc._bot_repo.get_by_id_and_owner.call_args_list[1].args == ("bot-001", "owner-492928")
