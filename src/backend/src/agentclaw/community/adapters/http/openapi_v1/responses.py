@@ -189,6 +189,8 @@ from agentclaw.community.core.work_orders.errors import (
     WorkOrderApplicantAlreadyEditorError,
     WorkOrderApplicantAlreadyMemberError,
     WorkOrderBotEditorRequestNotAllowedError,
+    WorkOrderSkillEditorRequestNotAllowedError,
+    WorkOrderSkillApplicantAlreadyEditorError,
     WorkOrderInvalidReasonError,
     WorkOrderInvalidEventError,
     WorkOrderInvalidRemarkError,
@@ -444,6 +446,14 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     WorkOrderBotEditorRequestNotAllowedError: (
         409,
         WorkOrderPublicErrorMessage.BOT_EDITOR_REQUEST_NOT_ALLOWED,
+    ),
+    WorkOrderSkillEditorRequestNotAllowedError: (
+        409,
+        WorkOrderPublicErrorMessage.SKILL_EDITOR_REQUEST_NOT_ALLOWED,
+    ),
+    WorkOrderSkillApplicantAlreadyEditorError: (
+        409,
+        WorkOrderPublicErrorMessage.SKILL_APPLICANT_ALREADY_EDITOR,
     ),
     WorkOrderNoReviewerError: (
         409,
@@ -799,6 +809,8 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     WorkOrderNoReviewerError: WorkOrderErrorCode.NO_REVIEWER,
     WorkOrderJoinNotAllowedError: WorkOrderErrorCode.JOIN_NOT_ALLOWED,
     WorkOrderBotEditorRequestNotAllowedError: WorkOrderErrorCode.BOT_EDITOR_REQUEST_NOT_ALLOWED,
+    WorkOrderSkillEditorRequestNotAllowedError: WorkOrderErrorCode.SKILL_EDITOR_REQUEST_NOT_ALLOWED,
+    WorkOrderSkillApplicantAlreadyEditorError: WorkOrderErrorCode.SKILL_APPLICANT_ALREADY_EDITOR,
     LocalSkillOwnerAmbiguousError: 409104,
     LocalSkillInvalidPackageError: 400101,
     LocalSkillNotReadyError: 409101,

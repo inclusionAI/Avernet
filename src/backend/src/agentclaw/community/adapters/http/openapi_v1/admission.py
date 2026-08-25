@@ -634,6 +634,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/owner-transfer",
     ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-requests",
+    ): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.REFUSED,
     (
         "DELETE",

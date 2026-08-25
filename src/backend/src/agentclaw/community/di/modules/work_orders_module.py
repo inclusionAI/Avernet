@@ -13,6 +13,12 @@ from agentclaw.community.core.repository.protocols.work_orders import (
     WorkOrderRepositoryProtocol,
 )
 from agentclaw.community.core.work_orders.protocols import WorkOrderEventServiceProtocol
+from agentclaw.community.core.work_orders.protocols import (
+    SkillCollaboratorApprovalHandlerProtocol,
+)
+from agentclaw.community.core.skill_center.services.skill_collaborator_approval_handler import (
+    SkillCollaboratorApprovalHandler,
+)
 from agentclaw.community.core.work_orders.services import (
     WorkOrderNotificationService,
     WorkOrderService,
@@ -26,6 +32,11 @@ class WorkOrdersModule(Module):
         )
         binder.bind(WorkOrderServiceProtocol, to=WorkOrderService, scope=singleton)
         binder.bind(WorkOrderEventServiceProtocol, to=WorkOrderService, scope=singleton)
+        binder.bind(
+            SkillCollaboratorApprovalHandlerProtocol,
+            to=SkillCollaboratorApprovalHandler,
+            scope=singleton,
+        )
         binder.bind(
             WorkOrderNotificationServiceProtocol,
             to=WorkOrderNotificationService,

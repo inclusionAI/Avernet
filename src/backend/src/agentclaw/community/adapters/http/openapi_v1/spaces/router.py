@@ -48,6 +48,8 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     SkillGrantItem,
     SpaceSkillGrants,
     TransferSkillOwnerRequest,
+    CreateSkillEditorRequest,
+    SkillEditorRequestCreated,
     UpdateSpaceMemberRoleRequest,
 )
 from agentclaw.community.api.market_favorite_service import (
@@ -62,6 +64,9 @@ from agentclaw.community.api.space_skill_query_service import (
 )
 from agentclaw.community.api.space_skill_grant_service import (
     SpaceSkillGrantServiceProtocol,
+)
+from agentclaw.community.api.space_skill_editor_request_service import (
+    SpaceSkillEditorRequestServiceProtocol,
 )
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType as DomainFavoriteTargetType,
@@ -400,6 +405,39 @@ async def transfer_space_skill_owner(
         reason=body.reason,
     )
     return envelope(SpaceSkillGrants.model_validate(result), request)
+
+
+@router.post(
+    "/{space_id}/skills/{skill_id}/editor-requests",
+    status_code=201,
+    response_model=Envelope[SkillEditorRequestCreated],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def create_space_skill_editor_request(
+    body: CreateSkillEditorRequest,
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: SpaceSkillEditorRequestServiceProtocol = Injected(
+        SpaceSkillEditorRequestServiceProtocol
+    ),
+) -> Envelope[SkillEditorRequestCreated]:
+    result = service.create_request(
+        space_id=space_id,
+        skill_id=skill_id,
+        applicant_user_id=user_id,
+        reason=body.reason,
+    )
+    return created(
+        SkillEditorRequestCreated(
+            work_order_id=result.id,
+            work_order_no=result.work_order_no,
+            status=result.status,
+        ),
+        request,
+    )
 
 
 @router.post(

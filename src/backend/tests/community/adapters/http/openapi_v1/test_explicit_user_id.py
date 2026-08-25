@@ -398,7 +398,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: publish-to-users route moved from /bots/{bot_id}/public-bcs to the external
 #: /collaboration/bots/{bot_uuid}/public, so one path-addressed {bot_id}
 #: operation became a {bot_uuid}-named one: path -1, none +1.
-_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 66}
+_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 67}
 
 
 def _schema() -> dict:
@@ -521,8 +521,9 @@ def test_the_pinned_number_of_operations_take_it():
     # count: 182 → 181. execute/dashboard take no user_id at all — see
     # _NO_USER_DIMENSION.
     # Caller identity context and call-type update add two operations.
-    # Space Skill Grant management adds four Space-addressed operations.
-    assert len(taking) == 187
+    # Space Skill Grant management adds four Space-addressed operations,
+    # and the Skill editor-request command adds one more.
+    assert len(taking) == 188
 
 
 def test_the_exempt_operations_take_none():

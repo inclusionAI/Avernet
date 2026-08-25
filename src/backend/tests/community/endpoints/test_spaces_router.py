@@ -24,6 +24,9 @@ from agentclaw.community.api.space_skill_query_service import (
 from agentclaw.community.api.space_skill_grant_service import (
     SpaceSkillGrantServiceProtocol,
 )
+from agentclaw.community.api.space_skill_editor_request_service import (
+    SpaceSkillEditorRequestServiceProtocol,
+)
 from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
@@ -34,6 +37,7 @@ from agentclaw.community.core.market_favorites.models import (
 )
 from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
 from agentclaw.community.core.spaces.models import SpaceRole
+from agentclaw.community.core.work_orders.models import WorkOrderRecord, WorkOrderStatus
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
@@ -206,6 +210,34 @@ def _seed_space_skill_grants(world) -> None:
     )
 
 
+def _seed_space_skill_editor_request(world) -> None:
+    _enable_public_auth(world)
+
+    def _create_request(_self, **kwargs):
+        now = datetime(2026, 8, 26, 8, 0)
+        return WorkOrderRecord(
+            id=91,
+            work_order_no="WO-91",
+            biz_type="SKILL_COLLABORATOR",
+            biz_id=str(kwargs["skill_id"]),
+            applicant_user_id=kwargs["applicant_user_id"],
+            apply_reason=kwargs["reason"],
+            status=WorkOrderStatus.PENDING,
+            reviewer_user_id=None,
+            review_remark=None,
+            reviewed_at=None,
+            env="test",
+            gmt_created=now,
+            gmt_modified=now,
+        )
+
+    bind_overrides(
+        world,
+        SpaceSkillEditorRequestServiceProtocol,
+        {"create_request": _create_request},
+    )
+
+
 def _mismatched_user(path_params: dict | None = None, json_body: dict | None = None):
     """The uniform error case: naming someone other than the caller is a 403."""
     return CaseInput(
@@ -217,6 +249,41 @@ def _mismatched_user(path_params: dict | None = None, json_body: dict | None = N
 
 
 # ── Space Skill Grant management ─────────────────────────────────────────────
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-requests",
+    scenario="happy",
+    seed=_seed_space_skill_editor_request,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+        json_body={"reason": "maintain together"},
+    ),
+    expect=ExpectSuccess(
+        status=201,
+        json_contains={"data": {"work_order_id": 91, "status": "PENDING"}},
+    ),
+)
+def create_space_skill_editor_request_happy():
+    """An eligible member receives the pending Work Order identity."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-requests",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user(
+        {"space_id": 1, "skill_id": 9},
+        {"reason": "maintain together"},
+    ),
+    expect=ExpectError(status=403),
+)
+def create_space_skill_editor_request_wrong_user():
+    """A mismatched actor is refused before Skill policy executes."""
 
 
 @endpoint_test(
