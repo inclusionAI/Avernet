@@ -18,6 +18,26 @@ local time was judged NOT due by SQLite's UTC clock).
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+# Fixed pipeline clock domain (CR-01): Asia/Shanghai is +08:00 with no DST,
+# so every wall-clock value derived from this zone is host-timezone
+# independent.
+CST = ZoneInfo("Asia/Shanghai")
+
+
+def format_ttl_expiration_time(ts_ms: float) -> str:
+    """Epoch milliseconds → '%Y-%m-%d %H:%M:%S' in fixed Asia/Shanghai.
+
+    Host-timezone independent (always renders the +08:00 wall clock), and
+    byte-identical to the values the health_check scanners write
+    (_sandbox_device_router.py / _service_device_provider.py).
+    """
+    return (
+        datetime.fromtimestamp(ts_ms / 1000, tz=CST)
+        .replace(tzinfo=None)
+        .strftime("%Y-%m-%d %H:%M:%S")
+    )
 
 
 def naive_utc_now() -> datetime:

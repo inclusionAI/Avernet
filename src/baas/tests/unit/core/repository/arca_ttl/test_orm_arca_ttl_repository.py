@@ -438,6 +438,10 @@ class TestFindUnregistered:
 
         assert "LEFT OUTER JOIN baas_bot_ttl_renewal_schedule" in sql_text
         assert "provider_device_id AS sandbox_id" in sql_text
+        assert (
+            "json_unquote(json_extract(baas_device.provider_device_props, "
+            "'$.ttl_expiration_timestamp'))" in sql_text
+        )
         assert "baas_device.provider_type = %s" in sql_text
         assert "baas_device.is_deleted = %s" in sql_text
         assert "baas_device.env = %s" in sql_text
@@ -478,6 +482,10 @@ class TestFindUnregistered:
         assert (
             "json_unquote(json_extract(ac_entity_device_binding.device_props, "
             "'$.sandbox_id'))" in sql_text
+        )
+        assert (
+            "json_unquote(json_extract(ac_entity_device_binding.device_props, "
+            "'$.ttl_expiration_timestamp'))" in sql_text
         )
         assert "ac_entity_device_binding.env = %s" in sql_text
         assert "baas_bot_ttl_renewal_schedule.id IS NULL" in sql_text
@@ -614,6 +622,10 @@ class TestFindUnregistered:
         assert (
             "json_extract(ac_entity_device_binding.device_props, '$.sandbox_id')"
             in sql_text
+        )
+        assert (
+            "json_extract(ac_entity_device_binding.device_props, "
+            "'$.ttl_expiration_timestamp')" in sql_text
         )
         assert "json_unquote" not in sql_text
         assert "is_deleted" not in sql_text

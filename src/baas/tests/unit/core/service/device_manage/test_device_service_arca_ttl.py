@@ -103,8 +103,10 @@ def _response(
     provider_device_props is built from a real ArcaCreationResult.model_dump()
     — the exact payload shape the production chain persists (D-06: the
     community device service stores creation_result.model_dump() verbatim,
-    with props.sandbox_id mirroring provider_device_id). Use props_override
-    to simulate a props dict that lacks the ttl_expiration_time key
+    with props.sandbox_id mirroring provider_device_id, and the restored
+    field pair: the fixed +08:00 formatted string plus the ms-epoch
+    integer). Use props_override
+    to simulate a props dict that lacks the ttl_expiration_timestamp key
     entirely. status defaults to ACTIVE; pass "FAILED"/"PENDING" to
     simulate the destroy+create update outcomes.
     """
@@ -114,7 +116,8 @@ def _response(
             status="ACTIVE",
             template_id="tpl-test-001",
             sandbox_id=provider_device_id,
-            ttl_expiration_time=ttl,
+            ttl_expiration_time="2025-06-15 23:06:40",
+            ttl_expiration_timestamp=ttl,
         ).model_dump()
     else:
         props = props_override
@@ -263,7 +266,7 @@ class TestStartDeviceHook:
     async def test_arca_create_ttl_key_missing_skips_register_and_logs_warning(
         self, caplog
     ):
-        """WR-03: a props dict missing the ttl_expiration_time KEY (not just a
+        """WR-03: a props dict missing the ttl_expiration_timestamp KEY (not just a
         None value) must skip register and log a warning — never silently."""
         svc, mock_schedule_repo, _ = _make_service()
         response = _response(props_override={"platform": "arca", "status": "ACTIVE"})
@@ -282,7 +285,7 @@ class TestStartDeviceHook:
             r
             for r in caplog.records
             if r.levelno == logging.WARNING
-            and "missing ttl_expiration_time" in r.message
+            and "missing ttl_expiration_timestamp" in r.message
         ]
         assert len(warnings) == 1
 
