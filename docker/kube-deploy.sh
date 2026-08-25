@@ -68,36 +68,12 @@ declare -A DEFAULT_PORT=(
     [backend]=8090
 )
 
-# Assuming a 4-core 8GB node, assign roughly:
-#   baas/bcs:   1 CPU / 3Gi request, 3 CPU / 6Gi limit (main workloads)
-#   gateway/backend: 0.5 CPU / 1Gi request, 1 CPU / 2Gi limit (lighter)
-declare -A DEFAULT_CPU_REQ=(
-    [baas]="1000m"
-    [gateway]="500m"
-    [bcs]="1000m"
-    [backend]="500m"
-)
-
-declare -A DEFAULT_CPU_LIMIT=(
-    [baas]="3000m"
-    [gateway]="1000m"
-    [bcs]="3000m"
-    [backend]="1000m"
-)
-
-declare -A DEFAULT_MEM_REQ=(
-    [baas]="3Gi"
-    [gateway]="1Gi"
-    [bcs]="3Gi"
-    [backend]="1Gi"
-)
-
-declare -A DEFAULT_MEM_LIMIT=(
-    [baas]="6Gi"
-    [gateway]="2Gi"
-    [bcs]="6Gi"
-    [backend]="2Gi"
-)
+# All services default to 4 CPU / 8Gi spec, 2 replicas.
+DEFAULT_REPLICAS=2
+DEFAULT_CPU_REQUEST="4000m"
+DEFAULT_CPU_LIMIT="4000m"
+DEFAULT_MEM_REQUEST="8Gi"
+DEFAULT_MEM_LIMIT="8Gi"
 
 # --- Parse arguments ---
 
@@ -149,10 +125,11 @@ if [[ -z "${DEFAULT_PORT[$SERVICE]:-}" ]]; then
 fi
 
 PORT="${PORT:-${DEFAULT_PORT[$SERVICE]}}"
-CPU_REQUEST="${DEFAULT_CPU_REQ[$SERVICE]}"
-CPU_LIMIT="${DEFAULT_CPU_LIMIT[$SERVICE]}"
-MEMORY_REQUEST="${DEFAULT_MEM_REQ[$SERVICE]}"
-MEMORY_LIMIT="${DEFAULT_MEM_LIMIT[$SERVICE]}"
+REPLICAS="$DEFAULT_REPLICAS"
+CPU_REQUEST="$DEFAULT_CPU_REQUEST"
+CPU_LIMIT="$DEFAULT_CPU_LIMIT"
+MEMORY_REQUEST="$DEFAULT_MEM_REQUEST"
+MEMORY_LIMIT="$DEFAULT_MEM_LIMIT"
 
 # --- Load env vars from file (if --env-file given) ---
 
@@ -185,7 +162,7 @@ fi
 
 # --- Render template via envsubst ---
 
-export SERVICE NAMESPACE IMAGE PORT CPU_REQUEST CPU_LIMIT MEMORY_REQUEST MEMORY_LIMIT
+export SERVICE NAMESPACE IMAGE PORT REPLICAS CPU_REQUEST CPU_LIMIT MEMORY_REQUEST MEMORY_LIMIT
 
 RENDERED="$(cat "$TEMPLATE" | envsubst)"
 

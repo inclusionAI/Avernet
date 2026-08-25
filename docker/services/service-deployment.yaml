@@ -6,9 +6,12 @@
 #
 # Placeholders:
 #   SERVICE     — service name (baas | gateway | bcs | backend)
+#   SERVICE     — service name (baas | gateway | bcs | backend)
 #   NAMESPACE   — K8s namespace
 #   IMAGE       — container image with tag
 #   PORT        — container + service port
+#   REPLICAS    — number of pod replicas (default 2)
+#   CPU_REQUEST, CPU_LIMIT, MEMORY_REQUEST, MEMORY_LIMIT — resource spec
 #   ENV_VARS    — rendered env var entries (one "- name: ..." block per line)
 # ============================================================
 apiVersion: apps/v1
@@ -19,7 +22,7 @@ metadata:
   labels:
     app: ${SERVICE}
 spec:
-  replicas: 1
+  replicas: ${REPLICAS}
   selector:
     matchLabels:
       app: ${SERVICE}
