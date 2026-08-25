@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from urllib.parse import urlparse
 
 from injector import Binder, Injector, Module, inject, provider, singleton
@@ -43,6 +44,8 @@ from agentclaw.community.core.task.task_runner.integration.ports import (
 )
 from agentclaw.community.di.config import EconomyGovernanceConfig
 from agentclaw.community.di.profile import DeployProfile
+
+logger = logging.getLogger("task.module")
 
 
 class TaskModule(Module):
@@ -85,19 +88,38 @@ class TaskModule(Module):
         except Exception:  # noqa: BLE101 standalone/lightweight test injector
             pass
         bot, bcs = self._resolve_ports()
+        logger.info(
+            "[task][task-module] _resolve_ports → bot=%s bcs=%s",
+            type(bot).__name__ if bot is not None else "None",
+            type(bcs).__name__ if bcs is not None else "None",
+        )
         # 非 singlebox(corp/prod):corp overlay 经 DI 绑定 OpenApiBotPort/BcsClientPort(真实 BaaS/BCS
-        # 凭据),构造期取用。community 未绑 → None(与 BcnService 同款 try/except 降级),
+        # 凭据),构造期取用。community 未绑 → None(与 BcnService 同款 try/except 降级;失败打 WARNING),
         # 纯内核/HTTP-contract 测试不阻断。singlebox 已由 _resolve_ports 给出真实端口,跳过。
         if bot is None:
             try:
                 bot = injector.get(OpenApiBotPort)
-            except Exception:  # noqa: BLE001 未绑定 → 单 bot 派发端口缺省
+                logger.info("[task][task-module] OpenApiBotPort DI 注入=%s",
+                            type(bot).__name__ if bot is not None else "None(provider 返 None)")
+            except Exception as exc:  # noqa: BLE001 未绑定 → 单 bot 派发端口缺省(打 WARNING 暴露)
+                logger.warning("[task][task-module] OpenApiBotPort DI 未绑定/解析失败 → 单 bot 端口缺省:%s: %s",
+                               type(exc).__name__, exc)
                 bot = None
         if bcs is None:
             try:
                 bcs = injector.get(BcsClientPort)
-            except Exception:  # noqa: BLE001 未绑定 → 协作群协调端口缺省
+                logger.info("[task][task-module] BcsClientPort DI 注入=%s",
+                            type(bcs).__name__ if bcs is not None else "None(provider 返 None)")
+            except Exception as exc:  # noqa: BLE001 未绑定 → 协作群协调端口缺省(打 WARNING 暴露)
+                logger.warning("[task][task-module] BcsClientPort DI 未绑定/解析失败 → 协作群端口缺省:%s: %s",
+                               type(exc).__name__, exc)
                 bcs = None
+        logger.info(
+            "[task][task-module] 端口装配结果 bot=%s bcs=%s → execution_backend 将%s真装配",
+            type(bot).__name__ if bot is not None else "None",
+            type(bcs).__name__ if bcs is not None else "None",
+            "" if (bot is not None and bcs is not None) else "不(全退 Avernet 桩)",
+        )
         discover_port = self._resolve_discover(default=discover, bot_public=bot_public)
         # BBS 候选查询复用 BcnService 的统一 provider 身份(BcnConfig prod/pre,与 register/switch
         # provider-bot 同源)。任务模块作为普通消费方经 DI 注入 BcnService;纯内核/未装 BotManagement 的

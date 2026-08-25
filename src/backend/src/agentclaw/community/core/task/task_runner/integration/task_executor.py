@@ -60,6 +60,8 @@ class TaskExecutor:
 
     async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[bool]:
         sem = asyncio.Semaphore(_DISPATCH_CONCURRENCY)
+        logger.info("[task][task-executor] dispatch 入口 nodes=%s modes=%s",
+                    [n.node_id for n in toDoTaskList], [n.run_info.run_mode for n in toDoTaskList])
 
         async def _one(node: TaskNode) -> bool:
             mode = node.run_info.run_mode
@@ -68,9 +70,14 @@ class TaskExecutor:
                             node.task_id, node.node_id, node.run_info.assignee)
                 return True
             if mode == "single_bot":
+                logger.info("[task][task-executor] >>> 投递 single_bot task=%s node=%s bot=%s → ensure_grant+send_message",
+                            node.task_id, node.node_id, node.run_info.assignee)
                 return await self._dispatch_single_bot(node, sem)
             if mode == "coop_group":
+                logger.info("[task][task-executor] >>> 投递 coop_group task=%s node=%s → form_coop_group(create_group)",
+                            node.task_id, node.node_id)
                 return await self._dispatch_coop_group(node, sem)
+            logger.warning("[task][task-executor] node=%s 未知 run_mode=%s → 不投递", node.node_id, mode)
             return False
 
         return list(await asyncio.gather(*[_one(n) for n in toDoTaskList]))
@@ -90,7 +97,12 @@ class TaskExecutor:
                 )
                 run_id = sent.run_id
                 session_id = sent.session_id
-            except (OpenApiAuthError, OpenApiBadRequestError):
+            except (OpenApiAuthError, OpenApiBadRequestError) as exc:
+                logger.warning(
+                    "[task][task-executor] single_bot 派发失败(OpenAPI %s)task=%s node=%s bot=%s: %s "
+                    "→ 留 PENDING 交 harness;grep [task][openapi_bot] 看具体哪步(http)失败",
+                    type(exc).__name__, node.task_id, node.node_id, bot_id, exc,
+                )
                 return False
             self._poller.register(SingleBotHandle(
                 loop_task_id=loop_task_id, run_id=run_id, bot_id=bot_id,
