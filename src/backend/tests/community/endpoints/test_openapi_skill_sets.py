@@ -172,6 +172,7 @@ def _seed(world, *, member: bool = False) -> None:
         audit_log_repo=world.get(BotCollabLogRepositoryProtocol),
         mcp_center=world.get(MCPCenterPlugin),
         mcp_auth=world.get(MCPAuthPlugin),
+        ext_info_provider=lambda _bot_id: None,
     )
     world.injector.binder.bind(
         SkillSetManagementServiceProtocol, to=control_plane, scope=None

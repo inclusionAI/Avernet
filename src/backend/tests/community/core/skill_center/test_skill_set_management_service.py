@@ -683,6 +683,7 @@ async def test_collaborator_command_restores_desired_state_and_uses_true_owner()
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     with pytest.raises(SkillSetRuntimeReconcileError):
@@ -736,6 +737,7 @@ async def test_deactivate_retires_mappings_removed_from_the_runtime_projection()
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     await service.deactivate(
@@ -765,6 +767,7 @@ def test_create_rejects_missing_bot_instead_of_creating_orphan_set():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     # The control plane speaks one error vocabulary: an invisible Bot scope is
@@ -792,6 +795,7 @@ def test_default_create_rejects_missing_bot_instead_of_creating_orphan_set():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     with pytest.raises(SkillSetControlPlaneNotFoundError):
@@ -820,6 +824,7 @@ def test_default_create_uses_owner_qualified_bot_lookup():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     service.create_set(
@@ -851,6 +856,7 @@ def test_legacy_set_scope_recovers_persisted_bot_then_applies_actor_acl() -> Non
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     scope = service.resolve_legacy_set_scope(
@@ -884,6 +890,7 @@ def test_legacy_set_scope_rejects_conflicting_owner_hint() -> None:
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     with pytest.raises(SkillSetControlPlaneNotFoundError):
@@ -906,6 +913,7 @@ def test_addressed_create_persists_metadata_without_runtime_reconcile() -> None:
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     result = service.create_set(
@@ -940,6 +948,7 @@ def test_create_inactive_set_does_not_require_runtime_readiness() -> None:
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     result = service.create_set(
@@ -966,6 +975,7 @@ def test_inactive_set_metadata_updates_do_not_require_runtime_readiness() -> Non
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     updated = service.update_set(
@@ -1012,6 +1022,7 @@ async def test_inactive_set_membership_does_not_require_runtime_readiness(
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     result = await getattr(service, method_name)(
@@ -1041,6 +1052,7 @@ async def test_active_set_membership_still_requires_runtime_readiness() -> None:
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     with pytest.raises(LocalSkillNotReadyError):
@@ -1066,6 +1078,7 @@ def test_default_read_rejects_missing_bot():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     with pytest.raises(SkillSetControlPlaneNotFoundError):
@@ -1087,6 +1100,7 @@ async def test_legacy_sync_activates_additively_without_replacing_other_sets():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     await service.legacy_activate(
@@ -1123,6 +1137,7 @@ async def test_legacy_default_sync_uses_owner_qualified_bot_lookup():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     await service.legacy_activate(
@@ -1287,6 +1302,7 @@ def test_the_service_keeps_writing_its_own_audit_row_after_the_seam_took_over():
         audit_log_repo=_RecordingAudit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     # The owner acting on their own bot: the case the seam does not audit.
@@ -1320,6 +1336,7 @@ def test_resources_forwards_resolved_bot_owner_to_owner_scoped_set_listing():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     assert service.list_resources(
@@ -1347,6 +1364,7 @@ def test_list_sets_uses_aicoding_default_then_claude_code_fallback_for_coding_im
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     assert service.list_sets(
@@ -1372,6 +1390,7 @@ def test_update_set_uses_runtime_default_candidates_for_coding_image():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     service.update_set(
@@ -1407,6 +1426,7 @@ def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_sc
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     result = service.list_resources(
@@ -1438,6 +1458,7 @@ def test_resources_keeps_ordinary_mcp_membership_on_canonical_repository_path():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     result = service.list_resources(
@@ -1470,6 +1491,7 @@ async def test_existing_coding_bot_can_activate_skill_set(bots) -> None:
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     result = await service.activate(
@@ -1500,6 +1522,7 @@ async def test_existing_claude_code_skill_set_deactivate_uses_full_projection():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     await service.deactivate(
@@ -1543,6 +1566,7 @@ def test_existing_coding_bot_metadata_mutations_ignore_product_creation_matrix(
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     created = service.create_set(
@@ -1576,6 +1600,7 @@ def test_historical_bot_may_delete_an_inactive_skill_set_without_new_runtime_wri
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     service.delete_set(
@@ -1600,6 +1625,7 @@ def test_legacy_name_or_git_path_materializes_market_repo_skill_before_membershi
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     stable_id = service.resolve_legacy_skill_id(
@@ -2090,7 +2116,9 @@ class _ProjectionCountingRuntime(_SuccessfulRuntime):
         self.projections += 1
 
 
-def _default_wire_service(repository, runtime=None) -> SkillSetManagementService:
+def _default_wire_service(
+    repository, runtime=None, ext_info_provider=None
+) -> SkillSetManagementService:
     return SkillSetManagementService(
         repository=repository,
         bot_repo=_Bots(),
@@ -2101,6 +2129,11 @@ def _default_wire_service(repository, runtime=None) -> SkillSetManagementService
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=(
+            ext_info_provider
+            if ext_info_provider is not None
+            else lambda _bot_id: None
+        ),
     )
 
 
@@ -2160,8 +2193,7 @@ async def test_default_mcp_exclusion_passes_the_platform_default_policy():
         ext_calls.append(bot_id)
         return None
 
-    service = _default_wire_service(repository)
-    service._ext_info_provider = _ext
+    service = _default_wire_service(repository, ext_info_provider=_ext)
 
     await service.remove_mcp(
         bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
@@ -2174,6 +2206,32 @@ async def test_default_mcp_exclusion_passes_the_platform_default_policy():
     assert kwargs["platform_default_codes"] == frozenset(
         get_default_mcp_server_codes("openclaw", None, ext_info=None)
     )
+
+
+@pytest.mark.asyncio
+async def test_default_mcp_exclusion_propagates_a_template_context_failure():
+    """A failed ext lookup is an error, never a silently narrower gate.
+
+    Template presets can be the only place a default MCP exists (the
+    AICoding resolver merges them onto the engine defaults), so degrading
+    to base defaults on a transient template-service failure would make the
+    exclusion command mis-read that member as a stray and report the
+    removal as an unchanged no-op — persisting the wrong answer instead of
+    surfacing a retryable failure.
+    """
+    repository = _DefaultTargetRepository()
+
+    def _broken(_bot_id: str):
+        raise RuntimeError("template service unavailable")
+
+    service = _default_wire_service(repository, ext_info_provider=_broken)
+
+    with pytest.raises(RuntimeError, match="template service unavailable"):
+        await service.remove_mcp(
+            bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+            set_id="9", server_code="mcp.gone",
+        )
+    assert repository.exclusion_calls == []
 
 
 @pytest.mark.asyncio
@@ -2235,6 +2293,7 @@ async def test_unexcluding_a_default_mcp_still_requires_marketplace_permission()
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=False),
         mcp_auth=_McpAuth(allowed=False),
+        ext_info_provider=lambda _bot_id: None,
     )
 
     with pytest.raises(McpPermissionDeniedError):

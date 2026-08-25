@@ -57,7 +57,7 @@ class SkillSetManagementService:
         audit_log_repo: BotCollabLogRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
         mcp_auth: MCPAuthPlugin,
-        ext_info_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
+        ext_info_provider: Callable[[str], Mapping[str, Any] | None],
     ) -> None:
         self._repository = repository
         self._bot_repo = bot_repo
@@ -757,20 +757,18 @@ class SkillSetManagementService:
         """The unmaterialized half of Default-Set MCP membership (spec A.2).
 
         Resolved at write time with the same context the read-side union
-        uses — engine, template, best-effort ext info — so the exclusion
-        command can tell a platform-default code from a stray one.
+        uses — engine, template, ext info. A provider failure propagates
+        rather than degrading to base defaults: for a template-preset-only
+        default MCP, a silently narrowed set would make the exclusion
+        command mis-read the genuine member as a stray and no-op the
+        removal as ``changed=False`` — a wrong persisted answer, where an
+        error is merely a retry.
         """
-        ext_info = None
-        if self._ext_info_provider is not None:
-            try:
-                ext_info = self._ext_info_provider(bot_id)
-            except Exception:
-                ext_info = None
         return frozenset(
             get_default_mcp_server_codes(
                 self._engine(bot),
                 bot.get("template_type"),
-                ext_info=ext_info,
+                ext_info=self._ext_info_provider(bot_id),
             )
         )
 
