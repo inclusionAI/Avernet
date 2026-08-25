@@ -328,30 +328,41 @@ def test_row_to_task_invalid_acceptances_json(tmp_path):
 # ===========================================================================
 
 class TestCommunityNotifyModule:
-    """Cover the DI binding logic (both DingTalk and fallback branches)."""
+    """Cover the DI binding logic — always wraps DingTalkNotifySender."""
 
-    def test_binds_dingtalk_when_configured(self, monkeypatch):
-        monkeypatch.setenv("TASK_DISCOVERY_DINGTALK_AK_ID", "ak")
-        monkeypatch.setenv("TASK_DISCOVERY_DINGTALK_AK_SECRET", "sk")
-        monkeypatch.setenv("TASK_DISCOVERY_DINGTALK_ROBOT_CODE", "rc")
-        monkeypatch.setenv("TASK_DISCOVERY_CARD_TEMPLATE_ID", "tpl")
+    def test_always_wraps_dingtalk(self, monkeypatch):
+        """DI always returns DingTalkNotifySender(CommunityNotifySender) —
+        creds are checked at send time, not bind time."""
         from agentclaw.community.di.modules.infrastructure.community.notify import (
             CommunityNotifyModule,
         )
         mod = CommunityNotifyModule()
         sender = mod._notify_sender()
         assert isinstance(sender, DingTalkNotifySender)
+        # Inner is CommunityNotifySender.
+        assert isinstance(sender._inner, CommunityNotifySender)
 
-    def test_binds_community_when_not_configured(self, monkeypatch):
+    def test_dingtalk_configured_with_creds(self, monkeypatch):
+        """_configured() returns True when creds are available via env."""
+        monkeypatch.setenv("TASK_DISCOVERY_DINGTALK_AK_ID", "ak")
+        monkeypatch.setenv("TASK_DISCOVERY_DINGTALK_AK_SECRET", "sk")
+        monkeypatch.setenv("TASK_DISCOVERY_DINGTALK_ROBOT_CODE", "rc")
+        monkeypatch.setenv("TASK_DISCOVERY_CARD_TEMPLATE_ID", "tpl")
+        from agentclaw.community.plugins.community.notify_sender import (
+            DingTalkCredentialHolder,
+        )
+        DingTalkCredentialHolder.clear()
+        assert DingTalkNotifySender._configured() is True
+
+    def test_dingtalk_not_configured_without_creds(self, monkeypatch):
+        """_configured() returns False when no creds available."""
         monkeypatch.delenv("TASK_DISCOVERY_DINGTALK_AK_ID", raising=False)
         monkeypatch.delenv("SINGLEBOX_DINGTALK_AK_ID", raising=False)
-        from agentclaw.community.di.modules.infrastructure.community.notify import (
-            CommunityNotifyModule,
+        from agentclaw.community.plugins.community.notify_sender import (
+            DingTalkCredentialHolder,
         )
-        mod = CommunityNotifyModule()
-        sender = mod._notify_sender()
-        assert isinstance(sender, CommunityNotifySender)
-        assert not isinstance(sender, DingTalkNotifySender)
+        DingTalkCredentialHolder.clear()
+        assert DingTalkNotifySender._configured() is False
 
 
 # ===========================================================================
