@@ -28,6 +28,7 @@ provides:
 consumes:
   - "SpaceRepositoryProtocol (core.repository) — transactional persistence for spaces and members"
   - "SkillCenterClient (plugin_api) — mirrors a pending team-space creation to SC before local commit"
+  - "StaffDeptPlugin (plugin_api) — resolves trusted creator and member nickname snapshots"
 consumed_by:
   - "adapters/http/openapi_v1/spaces — public Space and member operations"
   - "core/market_favorites — Space membership authorization"
@@ -36,7 +37,9 @@ internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.repository
   - agentclaw.community.plugin_api.models
+  - agentclaw.community.log
   - agentclaw.community.plugin_api.skill_center_client
+  - agentclaw.community.plugin_api.staff_dept
   - agentclaw.community.utils.avernet_tenant_guard
   - agentclaw.community.utils.env_utils
 ```
