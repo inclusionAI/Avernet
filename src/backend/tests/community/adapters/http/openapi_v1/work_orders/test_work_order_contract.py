@@ -119,7 +119,9 @@ def test_create_join_request_uses_principal_and_returns_created(
     work_order_service.create_space_join_request.return_value = _work_order()
 
     response = client.post(
-        "/openapi/v1/bots/spaces/7/join-requests", json={"reason": "join"}
+        "/openapi/v1/bots/spaces/7/join-requests",
+        params={"user_id": None},
+        json={"reason": "join"},
     )
 
     assert response.status_code == 201
@@ -130,6 +132,25 @@ def test_create_join_request_uses_principal_and_returns_created(
     }
     work_order_service.create_space_join_request.assert_called_once_with(
         space_id=7, applicant_user_id="owner-1", reason="join"
+    )
+
+
+def test_create_join_request_ignores_forged_legacy_identity_query(
+    client, work_order_service
+):
+    work_order_service.create_space_join_request.return_value = _work_order()
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/join-requests",
+        params={"user_id": "someone-else", "user_name": "forged"},
+        json={"reason": "join"},
+    )
+
+    assert response.status_code == 201
+    work_order_service.create_space_join_request.assert_called_once_with(
+        space_id=7,
+        applicant_user_id="owner-1",
+        reason="join",
     )
 
 

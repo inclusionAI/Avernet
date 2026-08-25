@@ -1,5 +1,11 @@
 # Public API — Name the End User in the Request
 
+> **Amendment (2026-08-25):**
+> `POST /openapi/v1/bots/spaces/{space_id}/join-requests` is intentionally
+> non-delegable and derives the authenticated human from the verified Principal.
+> It therefore does not expose `user_id`. See
+> `../2026-08-25-space-join-request-principal-identity/spec.md`.
+
 ## Summary
 
 Every `/openapi/v1` operation that acts on a user's data currently works out
