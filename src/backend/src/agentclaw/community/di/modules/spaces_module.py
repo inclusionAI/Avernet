@@ -15,6 +15,9 @@ from agentclaw.community.api.space_service import (
 from agentclaw.community.api.space_skill_query_service import (
     SpaceSkillQueryServiceProtocol,
 )
+from agentclaw.community.api.space_skill_grant_service import (
+    SpaceSkillGrantServiceProtocol,
+)
 from agentclaw.community.core.bot_management.bot_space import (
     BotSpaceAccessProtocol,
 )
@@ -34,6 +37,9 @@ from agentclaw.community.core.spaces.services import (
 )
 from agentclaw.community.core.skill_center.services.space_skill_query_service import (
     SpaceSkillQueryService,
+)
+from agentclaw.community.core.skill_center.services.space_skill_grant_service import (
+    SpaceSkillGrantService,
 )
 from agentclaw.community.core.spaces.protocols import (
     SpaceAccessServiceProtocol as CoreSpaceAccessServiceProtocol,
@@ -69,6 +75,11 @@ class SpacesModule(Module):
         binder.bind(
             SpaceSkillQueryServiceProtocol,
             to=SpaceSkillQueryService,
+            scope=singleton,
+        )
+        binder.bind(
+            SpaceSkillGrantServiceProtocol,
+            to=SpaceSkillGrantService,
             scope=singleton,
         )
         binder.bind(

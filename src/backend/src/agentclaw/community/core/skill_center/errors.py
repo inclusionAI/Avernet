@@ -115,6 +115,26 @@ class RepositoryCatalogSyncFailedError(Exception):
     """The governed Repo synchronization could not finish successfully."""
 
 
+class SpaceSkillGrantNotFoundError(Exception):
+    """The addressed Skill is not owned by the addressed Space."""
+
+
+class SpaceSkillGrantForbiddenError(Exception):
+    """The actor lacks the live Skill/Space role required by the command."""
+
+
+class SpaceSkillGrantMemberRequiredError(Exception):
+    """A Grant target is not an active member of the owning Space."""
+
+
+class SpaceSkillGrantConflictError(Exception):
+    """The command conflicts with the current active Grant set."""
+
+
+class SpaceSkillGrantReasonRequiredError(Exception):
+    """A Space administrator transfer omitted its mandatory audit reason."""
+
+
 # ── SkillSet control plane ────────────────────────────────────────────────
 # These are ``DomainError`` subclasses so the SkillSet routers can raise the
 # situation and let the HTTP adapter decide the status: the mapping lives in

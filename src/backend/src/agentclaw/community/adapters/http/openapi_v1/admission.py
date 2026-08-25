@@ -618,6 +618,22 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # concrete space membership; this is deliberately not OPEN or
     # GRANT_FILTERED because the result is scoped by the path's space_id.
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"): AdmissionMode.USER_GATED,
+    (
+        "GET",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants",
+    ): AdmissionMode.USER_GATED,
+    (
+        "PUT",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "DELETE",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/owner-transfer",
+    ): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.REFUSED,
     (
         "DELETE",

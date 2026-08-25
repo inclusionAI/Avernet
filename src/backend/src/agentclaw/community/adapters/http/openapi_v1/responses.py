@@ -229,6 +229,11 @@ from agentclaw.community.core.skill_center.errors import (
     SkillEngineNotSupportedError,
     SkillParameterValidationError,
     SkillRuntimeNameConflictError,
+    SpaceSkillGrantConflictError,
+    SpaceSkillGrantForbiddenError,
+    SpaceSkillGrantMemberRequiredError,
+    SpaceSkillGrantNotFoundError,
+    SpaceSkillGrantReasonRequiredError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
     SkillSetControlPlaneNotFoundError,
@@ -367,6 +372,26 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     FavoriteNotFoundError: (404, "Not found"),
     SpaceAlreadyExistsError: (409, "Space already exists"),
     SpaceMemberAlreadyExistsError: (409, "Space member already exists"),
+    SpaceSkillGrantForbiddenError: (
+        403,
+        SpacePublicErrorMessage.SKILL_GRANT_FORBIDDEN,
+    ),
+    SpaceSkillGrantNotFoundError: (
+        404,
+        SpacePublicErrorMessage.SKILL_GRANT_NOT_FOUND,
+    ),
+    SpaceSkillGrantMemberRequiredError: (
+        409,
+        SpacePublicErrorMessage.SKILL_GRANT_MEMBER_REQUIRED,
+    ),
+    SpaceSkillGrantConflictError: (
+        409,
+        SpacePublicErrorMessage.SKILL_GRANT_CONFLICT,
+    ),
+    SpaceSkillGrantReasonRequiredError: (
+        422,
+        SpacePublicErrorMessage.SKILL_GRANT_REASON_REQUIRED,
+    ),
     SpaceCreatorInvariantError: (409, "Space creator cannot be removed or demoted"),
     PersonalSpaceInvariantError: (409, "Personal space membership is immutable"),
     SkillCenterTeamCreateError: (
@@ -756,6 +781,11 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
 # subcode without changing any existing public response.
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillCenterTeamCreateError: SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED,
+    SpaceSkillGrantForbiddenError: SpaceErrorCode.SKILL_GRANT_FORBIDDEN,
+    SpaceSkillGrantNotFoundError: SpaceErrorCode.SKILL_GRANT_NOT_FOUND,
+    SpaceSkillGrantMemberRequiredError: SpaceErrorCode.SKILL_GRANT_MEMBER_REQUIRED,
+    SpaceSkillGrantConflictError: SpaceErrorCode.SKILL_GRANT_CONFLICT,
+    SpaceSkillGrantReasonRequiredError: SpaceErrorCode.SKILL_GRANT_REASON_REQUIRED,
     WorkOrderInvalidEventError: WorkOrderErrorCode.INVALID_REASON,
     WorkOrderInvalidReasonError: WorkOrderErrorCode.INVALID_REASON,
     WorkOrderInvalidRemarkError: WorkOrderErrorCode.INVALID_REMARK,

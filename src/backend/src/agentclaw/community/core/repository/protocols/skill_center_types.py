@@ -80,6 +80,21 @@ class SpaceSkillGrantRecord(TypedDict):
     env: str
 
 
+class SpaceSkillGrantItem(TypedDict):
+    """Stable public-facing identity of one active Skill Grant."""
+
+    user_id: str
+    role: Literal["OWNER", "MANAGER"]
+
+
+class SpaceSkillGrantSetRecord(TypedDict):
+    """Current active grants plus the addressed actor's Skill role."""
+
+    owner: SpaceSkillGrantItem
+    managers: list[SpaceSkillGrantItem]
+    actor_role: Literal["OWNER", "MANAGER"] | None
+
+
 class SpaceSkillCreationRecord(TypedDict):
     skill: SpaceSkillIdentityRecord
     ownership: SpaceSkillOwnershipRecord

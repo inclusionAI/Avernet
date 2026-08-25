@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from injector import inject
@@ -22,6 +23,8 @@ from agentclaw.community.core.repository.protocols.skill_center_types import (
     SpaceSkillCreateData,
     SpaceSkillCreationRecord,
     SpaceSkillGrantRecord,
+    SpaceSkillGrantItem,
+    SpaceSkillGrantSetRecord,
     SpaceSkillIdentityRecord,
     SpaceSkillOwnerGrantData,
     SpaceSkillOwnershipData,
@@ -29,6 +32,12 @@ from agentclaw.community.core.repository.protocols.skill_center_types import (
     SpaceSkillQueryRecord,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.core.skill_center.errors import (
+    SpaceSkillGrantConflictError,
+    SpaceSkillGrantForbiddenError,
+    SpaceSkillGrantMemberRequiredError,
+    SpaceSkillGrantNotFoundError,
+)
 
 
 class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
@@ -197,6 +206,303 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                 .all()
             )
             return total, [self._skill_query_to_dict(*row) for row in rows]
+
+    def list_grants(
+        self, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> SpaceSkillGrantSetRecord:
+        with self._db.orm_session() as session:
+            self._require_binding(session, space_id=space_id, skill_id=skill_id, env=env)
+            return self._active_grant_set(
+                session, skill_id=skill_id, actor_id=actor_id, env=env
+            )
+
+    def get_active_role(
+        self, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> str | None:
+        with self._db.orm_session() as session:
+            self._require_binding(session, space_id=space_id, skill_id=skill_id, env=env)
+            grant = (
+                session.query(SkillGrant)
+                .filter(
+                    SkillGrant.skill_id == skill_id,
+                    SkillGrant.user_id == actor_id,
+                    SkillGrant.env == env,
+                    SkillGrant.status == "ACTIVE",
+                )
+                .one_or_none()
+            )
+            return grant.role if grant is not None else None
+
+    def add_manager(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        manager_user_id: str,
+        env: str,
+    ) -> SpaceSkillGrantItem:
+        with self._db.orm_session() as session:
+            self._lock_binding_and_require_owner(
+                session,
+                space_id=space_id,
+                skill_id=skill_id,
+                actor_id=actor_id,
+                env=env,
+            )
+            self._require_active_member(
+                session, space_id=space_id, user_id=manager_user_id, env=env
+            )
+            grant = (
+                session.query(SkillGrant)
+                .filter(
+                    SkillGrant.skill_id == skill_id,
+                    SkillGrant.user_id == manager_user_id,
+                    SkillGrant.env == env,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if grant is not None and grant.role == "OWNER" and grant.status == "ACTIVE":
+                raise SpaceSkillGrantConflictError("owner cannot also be manager")
+            if grant is None:
+                grant = SkillGrant(
+                    skill_id=skill_id,
+                    user_id=manager_user_id,
+                    role="MANAGER",
+                    status="ACTIVE",
+                    owner_slot=None,
+                    granted_by=actor_id,
+                    env=env,
+                )
+                session.add(grant)
+            else:
+                grant.role = "MANAGER"
+                grant.status = "ACTIVE"
+                grant.owner_slot = None
+                grant.granted_by = actor_id
+                grant.revoked_at = None
+                grant.revoked_by = None
+            session.flush()
+            return {"user_id": grant.user_id, "role": "MANAGER"}
+
+    def remove_manager(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        manager_user_id: str,
+        env: str,
+    ) -> SpaceSkillGrantItem:
+        with self._db.orm_session() as session:
+            self._lock_binding_and_require_owner(
+                session,
+                space_id=space_id,
+                skill_id=skill_id,
+                actor_id=actor_id,
+                env=env,
+            )
+            grant = (
+                session.query(SkillGrant)
+                .filter(
+                    SkillGrant.skill_id == skill_id,
+                    SkillGrant.user_id == manager_user_id,
+                    SkillGrant.env == env,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if grant is not None and grant.role == "OWNER" and grant.status == "ACTIVE":
+                raise SpaceSkillGrantConflictError("owner cannot be removed as manager")
+            if grant is not None and grant.status == "ACTIVE":
+                grant.status = "REVOKED"
+                grant.revoked_at = datetime.now(UTC).replace(tzinfo=None)
+                grant.revoked_by = actor_id
+                session.flush()
+            return {"user_id": manager_user_id, "role": "MANAGER"}
+
+    def transfer_owner(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        new_owner_user_id: str,
+        reason: str | None,
+        env: str,
+    ) -> SpaceSkillGrantSetRecord:
+        with self._db.orm_session() as session:
+            self._require_binding(
+                session, space_id=space_id, skill_id=skill_id, env=env, lock=True
+            )
+            space = (
+                session.query(SpaceModel)
+                .filter(
+                    SpaceModel.id == space_id,
+                    SpaceModel.env == env,
+                    SpaceModel.deleted_at.is_(None),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            current_owner = (
+                session.query(SkillGrant)
+                .filter(
+                    SkillGrant.skill_id == skill_id,
+                    SkillGrant.env == env,
+                    SkillGrant.status == "ACTIVE",
+                    SkillGrant.owner_slot == 1,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if space is None or current_owner is None:
+                raise SpaceSkillGrantConflictError("skill has no active owner")
+            actor_member = self._active_member(
+                session, space_id=space_id, user_id=actor_id, env=env, lock=True
+            )
+            is_admin = actor_id == space.created_by or (
+                actor_member is not None
+                and actor_member.role in {"ADMIN", "OWNER", "ADMINISTRATOR"}
+            )
+            if actor_id != current_owner.user_id and not is_admin:
+                raise SpaceSkillGrantForbiddenError("owner or space admin required")
+            self._require_active_member(
+                session, space_id=space_id, user_id=new_owner_user_id, env=env
+            )
+            if new_owner_user_id == current_owner.user_id:
+                return self._active_grant_set(
+                    session, skill_id=skill_id, actor_id=actor_id, env=env
+                )
+
+            target = (
+                session.query(SkillGrant)
+                .filter(
+                    SkillGrant.skill_id == skill_id,
+                    SkillGrant.user_id == new_owner_user_id,
+                    SkillGrant.env == env,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            current_owner.status = "REVOKED"
+            current_owner.owner_slot = None
+            current_owner.revoked_at = datetime.now(UTC).replace(tzinfo=None)
+            current_owner.revoked_by = actor_id
+            session.flush()
+
+            if target is None:
+                target = SkillGrant(
+                    skill_id=skill_id,
+                    user_id=new_owner_user_id,
+                    role="OWNER",
+                    status="ACTIVE",
+                    owner_slot=1,
+                    granted_by=actor_id,
+                    grant_reason=reason,
+                    env=env,
+                )
+                session.add(target)
+            else:
+                target.role = "OWNER"
+                target.status = "ACTIVE"
+                target.owner_slot = 1
+                target.granted_by = actor_id
+                target.grant_reason = reason
+                target.revoked_at = None
+                target.revoked_by = None
+            session.flush()
+            return self._active_grant_set(
+                session, skill_id=skill_id, actor_id=actor_id, env=env
+            )
+
+    @staticmethod
+    def _require_binding(session, *, space_id: int, skill_id: int, env: str, lock=False):
+        query = session.query(SkillSpaceBinding).filter(
+            SkillSpaceBinding.space_id == space_id,
+            SkillSpaceBinding.skill_id == skill_id,
+            SkillSpaceBinding.env == env,
+        )
+        if lock:
+            query = query.with_for_update()
+        binding = query.one_or_none()
+        if binding is None:
+            raise SpaceSkillGrantNotFoundError("space skill not found")
+        return binding
+
+    def _lock_binding_and_require_owner(
+        self, session, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> None:
+        self._require_binding(
+            session, space_id=space_id, skill_id=skill_id, env=env, lock=True
+        )
+        owner = (
+            session.query(SkillGrant)
+            .filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.user_id == actor_id,
+                SkillGrant.env == env,
+                SkillGrant.role == "OWNER",
+                SkillGrant.status == "ACTIVE",
+                SkillGrant.owner_slot == 1,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if owner is None:
+            raise SpaceSkillGrantForbiddenError("skill owner required")
+
+    @staticmethod
+    def _active_member(session, *, space_id: int, user_id: str, env: str, lock=False):
+        query = session.query(SpaceMemberModel).filter(
+            SpaceMemberModel.space_id == space_id,
+            SpaceMemberModel.user_id == user_id,
+            SpaceMemberModel.env == env,
+            SpaceMemberModel.status == "ACTIVE",
+        )
+        if lock:
+            query = query.with_for_update()
+        return query.one_or_none()
+
+    def _require_active_member(
+        self, session, *, space_id: int, user_id: str, env: str
+    ) -> SpaceMemberModel:
+        member = self._active_member(
+            session, space_id=space_id, user_id=user_id, env=env, lock=True
+        )
+        if member is None:
+            raise SpaceSkillGrantMemberRequiredError("active space member required")
+        return member
+
+    @staticmethod
+    def _active_grant_set(
+        session, *, skill_id: int, actor_id: str, env: str
+    ) -> SpaceSkillGrantSetRecord:
+        grants = (
+            session.query(SkillGrant)
+            .filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.env == env,
+                SkillGrant.status == "ACTIVE",
+            )
+            .order_by(SkillGrant.role.asc(), SkillGrant.user_id.asc())
+            .all()
+        )
+        owners = [grant for grant in grants if grant.role == "OWNER"]
+        if len(owners) != 1:
+            raise SpaceSkillGrantConflictError("skill must have one active owner")
+        owner = owners[0]
+        actor = next((grant for grant in grants if grant.user_id == actor_id), None)
+        return {
+            "owner": {"user_id": owner.user_id, "role": "OWNER"},
+            "managers": [
+                {"user_id": grant.user_id, "role": "MANAGER"}
+                for grant in grants
+                if grant.role == "MANAGER"
+            ],
+            "actor_role": actor.role if actor is not None else None,
+        }
 
     @staticmethod
     def _space_to_dict(space: SpaceModel) -> SpaceRecord:

@@ -184,6 +184,22 @@ def test_schema_rejects_empty_env_and_duplicate_active_owner(db):
         session.rollback()
 
     with db.orm_session() as session:
+        session.add(
+            SkillGrant(
+                skill_id=8,
+                user_id="owner-without-slot",
+                role="OWNER",
+                status="ACTIVE",
+                owner_slot=None,
+                granted_by="owner-without-slot",
+                env="dev",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.flush()
+        session.rollback()
+
+    with db.orm_session() as session:
         session.add_all(
             [
                 SkillGrant(
@@ -602,3 +618,157 @@ def test_list_space_skills_projects_space_type_and_only_the_actor_active_grant(d
         "Other User Skill": None,
     }
     assert {record["space_type"] for record in team_records} == {"TEAM"}
+
+
+def _grant_fixture(db):
+    repo = SpaceSkillRepository(db)
+    space = repo.create_space(
+        {
+            "space_code": "grant-team",
+            "space_type": "TEAM",
+            "name": "Grant Team",
+            "created_by": "space-admin",
+            "env": "dev",
+        }
+    )
+    with db.orm_session() as session:
+        session.add_all(
+            [
+                SpaceMember(
+                    space_id=space["id"],
+                    user_id=user_id,
+                    role=role,
+                    created_by="space-admin",
+                    env="dev",
+                )
+                for user_id, role in (
+                    ("space-admin", "ADMIN"),
+                    ("owner-1", "MEMBER"),
+                    ("manager-1", "MEMBER"),
+                    ("member-2", "MEMBER"),
+                )
+            ]
+        )
+    skill_id = _add_bound_skill(
+        db,
+        space_id=space["id"],
+        name="Grant Skill",
+        grant_user_id="owner-1",
+        grant_role="OWNER",
+    )
+    return repo, space["id"], skill_id
+
+
+def test_grant_repository_add_remove_manager_is_idempotent(db):
+    repo, space_id, skill_id = _grant_fixture(db)
+
+    first = repo.add_manager(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        manager_user_id="manager-1",
+        env="dev",
+    )
+    second = repo.add_manager(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        manager_user_id="manager-1",
+        env="dev",
+    )
+    removed = repo.remove_manager(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        manager_user_id="manager-1",
+        env="dev",
+    )
+    removed_again = repo.remove_manager(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        manager_user_id="manager-1",
+        env="dev",
+    )
+
+    assert first == second == removed == removed_again == {
+        "user_id": "manager-1",
+        "role": "MANAGER",
+    }
+    assert repo.list_grants(
+        space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
+    )["managers"] == []
+
+
+def test_grant_repository_rejects_non_member_without_partial_write(db):
+    from agentclaw.community.core.skill_center.errors import (
+        SpaceSkillGrantMemberRequiredError,
+    )
+
+    repo, space_id, skill_id = _grant_fixture(db)
+
+    with pytest.raises(SpaceSkillGrantMemberRequiredError):
+        repo.add_manager(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id="owner-1",
+            manager_user_id="outsider",
+            env="dev",
+        )
+
+    grants = repo.list_grants(
+        space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
+    )
+    assert grants["owner"]["user_id"] == "owner-1"
+    assert grants["managers"] == []
+
+
+def test_owner_transfer_atomically_keeps_exactly_one_owner(db):
+    repo, space_id, skill_id = _grant_fixture(db)
+    repo.add_manager(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        manager_user_id="member-2",
+        env="dev",
+    )
+
+    result = repo.transfer_owner(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        new_owner_user_id="member-2",
+        reason=None,
+        env="dev",
+    )
+
+    assert result["owner"] == {"user_id": "member-2", "role": "OWNER"}
+    assert result["managers"] == []
+    with db.orm_session() as session:
+        active = session.query(SkillGrant).filter_by(
+            skill_id=skill_id, status="ACTIVE", env="dev"
+        ).all()
+        assert [(grant.user_id, grant.role, grant.owner_slot) for grant in active] == [
+            ("member-2", "OWNER", 1)
+        ]
+
+
+def test_space_admin_owner_transfer_persists_the_audit_reason(db):
+    repo, space_id, skill_id = _grant_fixture(db)
+
+    repo.transfer_owner(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="space-admin",
+        new_owner_user_id="member-2",
+        reason="handover approved by the space administrator",
+        env="dev",
+    )
+
+    with db.orm_session() as session:
+        owner = session.query(SkillGrant).filter_by(
+            skill_id=skill_id, role="OWNER", status="ACTIVE", env="dev"
+        ).one()
+        assert owner.user_id == "member-2"
+        assert owner.granted_by == "space-admin"
+        assert owner.grant_reason == "handover approved by the space administrator"

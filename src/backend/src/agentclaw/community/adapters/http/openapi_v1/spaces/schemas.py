@@ -64,6 +64,70 @@ class SkillRole(_DocumentedEnum):
     }
 
 
+class SkillGrantItem(BaseModel):
+    """One active OWNER or MANAGER Grant."""
+
+    user_id: str = Field(description="User holding this active Skill Grant.")
+    role: SkillRole = Field(description="Role held by the user for this Skill.")
+
+
+class SkillActorPermissions(BaseModel):
+    """ACL/Grant qualifications; current command state is checked separately."""
+
+    edit_draft: bool = Field(description="Actor may request a Draft edit command.")
+    publish_draft: bool = Field(description="Actor may request Draft publication.")
+    delete_draft: bool = Field(description="Actor may request Draft deletion.")
+    create_upgrade_draft: bool = Field(
+        description="Actor may request creation of an upgrade Draft."
+    )
+    retire_skill: bool = Field(description="Actor may request Skill retirement.")
+    manage_grants: bool = Field(description="Actor may add or remove MANAGER Grants.")
+    transfer_owner: bool = Field(description="Actor may request OWNER transfer.")
+    request_edit_access: bool = Field(
+        description="Actor may apply for a MANAGER Grant in a Team Space."
+    )
+    takeover_lease: bool = Field(
+        description="Actor may request takeover of the current Draft edit Lease."
+    )
+
+
+class SkillGrantActor(BaseModel):
+    """Current caller's Grant role and command qualifications."""
+
+    skill_role: SkillRole | None = Field(
+        default=None, description="Current active Skill Grant role, or null."
+    )
+    permissions: SkillActorPermissions = Field(
+        description="ACL/Grant qualifications independent of current command state."
+    )
+
+
+class SpaceSkillGrants(BaseModel):
+    """Complete active Grant set for one Space Skill."""
+
+    owner: SkillGrantItem = Field(description="The unique active OWNER Grant.")
+    managers: list[SkillGrantItem] = Field(
+        description="All active MANAGER Grants, ordered by user identifier."
+    )
+    actor: SkillGrantActor = Field(description="Current caller role and permissions.")
+
+
+class TransferSkillOwnerRequest(BaseModel):
+    """Atomically move the unique OWNER slot to an active Space Member."""
+
+    new_owner_user_id: str = Field(
+        min_length=1,
+        max_length=128,
+        description="Active Space Member who will receive the unique OWNER Grant.",
+    )
+    reason: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=1024,
+        description="Required audit reason when a Space administrator transfers ownership.",
+    )
+
+
 class SpaceJoinStatus(_DocumentedEnum):
     """Current user's membership state for a Space."""
 
