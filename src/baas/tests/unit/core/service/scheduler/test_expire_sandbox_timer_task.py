@@ -96,9 +96,12 @@ class TestDefaults:
         assert cfg.modifier == "expire_sandbox_timer"
 
     def test_provider_is_aliyun_ack(self):
-        assert ExpireSandboxTimerTaskConfig(
-            arca_provider="aliyun_ack"
-        ).provider_is_aliyun_ack() is True
+        assert (
+            ExpireSandboxTimerTaskConfig(
+                arca_provider="aliyun_ack"
+            ).provider_is_aliyun_ack()
+            is True
+        )
         for variant in ("arca_sdk", "stub", "local_proc"):
             assert (
                 ExpireSandboxTimerTaskConfig(

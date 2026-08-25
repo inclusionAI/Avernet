@@ -129,7 +129,7 @@ class TestCreateSyncSandbox:
             )
         assert isinstance(sb, AliyunAckSandbox)
         assert h.create_from_yaml.called
-        assert sb._container_name == "openclaw"
+        assert sb._container_name == "avernet-agent"
 
     def test_create_timeout_cleans_up(self) -> None:
         with _CoreHarness() as h:

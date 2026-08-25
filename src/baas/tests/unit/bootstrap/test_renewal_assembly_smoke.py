@@ -39,24 +39,22 @@ from tests.utils import load_web_port
 # set the full services/repository chains resolve against.
 _PLUGINS = {
     "auth": "stub",
-    "crypto": "stub",
     "secret": "stub",
-    "scheduler": "stub",
     "cache": "stub",
     "bot_service": "stub",
     "engine_adapter": "stub",
     "file_transfer": "stub",
+    "database": "sqlite",
+    "eval_env": "stub",
     "sandbox": {
         "arca": "stub",
         "desktop": "stub",
-        "teclaw": "stub",
         "k8s": "stub",
         "docker": "stub",
         "poolab": "stub",
     },
-    "database": {
-        "plugin_database": "SQLITE_ORM",
-        "database_url": "sqlite:///:memory:",
+    "bot": {
+        "teclaw": "stub",
     },
 }
 
@@ -78,7 +76,16 @@ def _container_with(engine: str) -> ApplicationContainer:
     config = {
         "web_port": load_web_port(),
         "plugins": _PLUGINS,
+        "database": {
+            "database_url": "sqlite:///:memory:",
+            "create_schema": True,
+            "seed_data": True,
+        },
         "renewal_scheduler": {"engine": engine},
+        "bot_health_checker": {
+            "health_check": {"timeout_seconds": 10, "max_concurrent": 10},
+            "ttl": {"extend_when_remaining_hours": 16, "target_ttl_hours": 24},
+        },
     }
     container.config.from_dict(config)
     return container

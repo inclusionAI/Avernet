@@ -79,7 +79,7 @@ class CoreRepositoryContainer(containers.DeclarativeContainer):
         mariadb=_orm_repo(OrmAPIKeyRepository),
     )
     arca_ttl_schedule_repository = providers.Selector(
-        config.plugins.database.plugin_database,
+        config.plugins.database,
         zdas=_orm_repo(OrmTtlRenewalScheduleRepository),
         sqlite=_orm_repo(OrmTtlRenewalScheduleRepository),
         mariadb=_orm_repo(OrmTtlRenewalScheduleRepository),

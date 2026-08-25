@@ -199,9 +199,7 @@ class AliyunAckSandbox(ArcaSandbox):
             )
             resp.run_forever(timeout=timeout_in_millis / 1000.0)
         except ApiException as e:
-            raise RuntimeError(
-                f"exec_command failed ({e.status}): {e.body}"
-            ) from e
+            raise RuntimeError(f"exec_command failed ({e.status}): {e.body}") from e
 
         elapsed = time.monotonic() - started
         result = _ExecResult()

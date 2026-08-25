@@ -155,7 +155,7 @@ class TestBotRunInteractionMariadbSelector:
     resolution with ``Selector has no 'MARIADB_ORM' provider``."""
 
     def test_resolves_under_mariadb_orm(self):
-        """Resolving the repository with plugin_database=MARIADB_ORM succeeds.
+        """Resolving the repository with plugins.database=mariadb succeeds.
 
         Hermetic: only the CoreRepositoryContainer is built, not the global
         ApplicationContainer singleton, so the test cannot leak config state
@@ -169,9 +169,7 @@ class TestBotRunInteractionMariadbSelector:
         )
 
         container = CoreRepositoryContainer()
-        container.config.from_dict(
-            {"plugins": {"database": {"plugin_database": "MARIADB_ORM"}}}
-        )
+        container.config.from_dict({"plugins": {"database": "mariadb"}})
 
         repo = container.bot_run_interaction_repository()
 

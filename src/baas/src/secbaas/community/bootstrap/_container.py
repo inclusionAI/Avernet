@@ -8,17 +8,6 @@ from secbaas.community.core.service.paas import DeviceCallbackHandler
 from secbaas.community.core.service.paas.desktop import ConnectionManager
 from secbaas.community.logger import get_logger
 
-# ── Enterprise-only optional imports ─────────────────────────────────────
-try:
-    from secbaas.enterprise.core.arca_ttl_renewal import (
-        TtlRenewalScheduleRepository,
-    )
-
-    _HAS_ENTERPRISE_RENEWAL = True
-except ImportError:
-    _HAS_ENTERPRISE_RENEWAL = False
-
-from ._configs import ConfigError, ConfigKey
 from ._core_repository import CoreRepositoryContainer
 from ._core_services import CoreServiceContainer
 from ._core_tasks import CoreTaskContainer
@@ -180,7 +169,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
             DeviceCallbackHandler,
             publish_service_factory=_lazy_publish_service,
         ),
-eval_binding_resolver=plugins.eval_binding_resolver,
+        eval_binding_resolver=plugins.eval_binding_resolver,
         eval_consistency_check=plugins.eval_consistency_check,
         eval_session_log=plugins.eval_session_log,
     )
@@ -196,7 +185,6 @@ eval_binding_resolver=plugins.eval_binding_resolver,
         ticket_repository=repository.ticket_repository,
         paas_service_facade=services.paas_facade,
         file_transfer_backend=services.file_transfer_backend,
-        ttl_renewal_schedule_repository=ttl_renewal_schedule_repo,
         device_service=services.device_service,
         bot_manage_service=services.bot_management_service,
         bot_repo=repository.bot_repository,

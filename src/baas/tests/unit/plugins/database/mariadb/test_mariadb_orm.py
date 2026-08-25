@@ -35,13 +35,13 @@ class TestConstructor:
 
     def test_ignores_sqlite_database_url_env(self, monkeypatch) -> None:
         """WR-04: a SQLite DATABASE_URL (the exact env var the SQLite plugin
-        consumes) must not bypass the sqlite guard — fall through to the
-        structured mariadb settings instead of building a broken engine."""
+        consumes) must not be picked up by MariaDbOrmPlugin — the plugin only
+        uses the explicit ``database_url`` constructor arg, never the env var."""
         monkeypatch.setenv("DATABASE_URL", "sqlite:////tmp/leaked.db")
         p = MariaDbOrmPlugin()
-        url = p._resolve_url(_config())
-        assert url.startswith("mysql+aiomysql://")
-        assert "sqlite" not in url
+        assert p._database_url == ""
+        with pytest.raises(RuntimeError, match="database_url"):
+            p.init_database()
 
 
 class TestInitEngines:
