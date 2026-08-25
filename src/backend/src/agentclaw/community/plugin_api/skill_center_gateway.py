@@ -1,0 +1,317 @@
+"""Plugin API for the team-scoped Skill Center integration.
+
+This boundary is intentionally independent from ``SkillCenterClient``, whose
+legacy callers and untyped wire contract remain unchanged. Gateway request
+objects contain no endpoint, credential, tenant, or environment settings:
+deployment adapters obtain those from their composition-root configuration.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+from typing import Protocol, runtime_checkable
+
+from agentclaw.community.plugin_api.base import Plugin
+
+
+def _require(value: str, field: str) -> None:
+    if not value.strip():
+        raise ValueError(f"{field} is required")
+
+
+def _validate_page(page_num: int, page_size: int) -> None:
+    if page_num < 1:
+        raise ValueError("page_num must be at least 1")
+    if not 1 <= page_size <= 100:
+        raise ValueError("page_size must be between 1 and 100")
+
+
+class SkillCenterGatewayErrorCode(str, Enum):
+    """Stable failure categories exposed without leaking HTTP or an SC SDK."""
+
+    BUSINESS = "business_error"
+    TIMEOUT = "timeout"
+    UNKNOWN_RESPONSE = "unknown_response"
+    PROTOCOL = "protocol_error"
+    UNAVAILABLE = "unavailable"
+
+
+class SkillCenterGatewayError(RuntimeError):
+    """Normalized boundary failure; retry and Attempt policy stay upstream."""
+
+    def __init__(self, code: SkillCenterGatewayErrorCode, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class SkillCenterPublishSubmissionState(str, Enum):
+    """Normalized outcome of the one-shot publish submission call."""
+
+    ACCEPTED = "ACCEPTED"
+
+
+class SkillCenterPublishState(str, Enum):
+    """Normalized state returned by publish-status queries."""
+
+    PENDING = "PENDING"
+    PUBLISHED = "PUBLISHED"
+    FAILED = "FAILED"
+
+
+@dataclass(frozen=True)
+class SkillCenterTeamCreateRequest:
+    team_code: str
+    team_name: str
+    ref_source: str
+    ref_source_id: str
+    description: str | None = None
+    icon: str | None = None
+
+    def __post_init__(self) -> None:
+        _require(self.team_code, "team_code")
+        _require(self.team_name, "team_name")
+        _require(self.ref_source, "ref_source")
+        _require(self.ref_source_id, "ref_source_id")
+
+
+@dataclass(frozen=True)
+class SkillCenterTeamLookupRequest:
+    ref_source: str
+    ref_source_id: str
+
+    def __post_init__(self) -> None:
+        _require(self.ref_source, "ref_source")
+        _require(self.ref_source_id, "ref_source_id")
+
+
+@dataclass(frozen=True)
+class SkillCenterTeam:
+    team_id: str
+    team_code: str
+    team_name: str
+    ref_source: str
+    ref_source_id: str
+
+
+@dataclass(frozen=True)
+class SkillCenterPublicSkillSearchRequest:
+    keyword: str | None = None
+    page_num: int = 1
+    page_size: int = 20
+    tags: tuple[str, ...] = ()
+    official_only: bool | None = None
+    recommended_only: bool | None = None
+
+    def __post_init__(self) -> None:
+        _validate_page(self.page_num, self.page_size)
+
+
+@dataclass(frozen=True)
+class SkillCenterPublicSkillDetailRequest:
+    skill_code: str
+
+    def __post_init__(self) -> None:
+        _require(self.skill_code, "skill_code")
+
+
+@dataclass(frozen=True)
+class SkillCenterTeamSkillListRequest:
+    team_id: str
+    keyword: str | None = None
+    page_num: int = 1
+    page_size: int = 20
+
+    def __post_init__(self) -> None:
+        _require(self.team_id, "team_id")
+        _validate_page(self.page_num, self.page_size)
+
+
+@dataclass(frozen=True)
+class SkillCenterTeamSkillDetailRequest:
+    team_id: str
+    skill_code: str
+
+    def __post_init__(self) -> None:
+        _require(self.team_id, "team_id")
+        _require(self.skill_code, "skill_code")
+
+
+@dataclass(frozen=True)
+class SkillCenterSkill:
+    skill_code: str
+    skill_name: str
+    description: str
+    latest_version_number: str | None
+    team_id: str | None
+
+
+@dataclass(frozen=True)
+class SkillCenterSkillPage:
+    items: tuple[SkillCenterSkill, ...]
+    total: int
+    page_num: int
+    page_size: int
+
+
+@dataclass(frozen=True)
+class SkillCenterPublishSubmitRequest:
+    team_id: str
+    skill_code: str
+    skill_name: str
+    version_number: str
+    package_url: str
+    description: str | None = None
+
+    def __post_init__(self) -> None:
+        _require(self.team_id, "team_id")
+        _require(self.skill_code, "skill_code")
+        _require(self.skill_name, "skill_name")
+        _require(self.version_number, "version_number")
+        _require(self.package_url, "package_url")
+
+
+@dataclass(frozen=True)
+class SkillCenterPublishSubmission:
+    skill_code: str
+    version_number: str
+    status: SkillCenterPublishSubmissionState
+    external_request_id: str | None = None
+
+
+@dataclass(frozen=True)
+class SkillCenterPublishStatusRequest:
+    team_id: str
+    skill_code: str
+    version_number: str
+
+    def __post_init__(self) -> None:
+        _require(self.team_id, "team_id")
+        _require(self.skill_code, "skill_code")
+        _require(self.version_number, "version_number")
+
+
+@dataclass(frozen=True)
+class SkillCenterPublishStatus:
+    skill_code: str
+    version_number: str
+    status: SkillCenterPublishState
+    message: str | None = None
+
+    @property
+    def completed(self) -> bool:
+        return self.status is not SkillCenterPublishState.PENDING
+
+    @property
+    def succeeded(self) -> bool | None:
+        if self.status is SkillCenterPublishState.PENDING:
+            return None
+        return self.status is SkillCenterPublishState.PUBLISHED
+
+
+@dataclass(frozen=True)
+class SkillCenterVersionListRequest:
+    team_id: str
+    skill_code: str
+    page_num: int = 1
+    page_size: int = 20
+
+    def __post_init__(self) -> None:
+        _require(self.team_id, "team_id")
+        _require(self.skill_code, "skill_code")
+        _validate_page(self.page_num, self.page_size)
+
+
+@dataclass(frozen=True)
+class SkillCenterVersion:
+    version_number: str
+    version_id: str | None = None
+    sha256: str | None = None
+    released_at: str | None = None
+
+
+@dataclass(frozen=True)
+class SkillCenterVersionPage:
+    items: tuple[SkillCenterVersion, ...]
+    total: int
+    page_num: int
+    page_size: int
+
+
+@dataclass(frozen=True)
+class SkillCenterExactDownloadRequest:
+    team_id: str
+    skill_code: str
+    version_number: str
+
+    def __post_init__(self) -> None:
+        _require(self.team_id, "team_id")
+        _require(self.skill_code, "skill_code")
+        _require(self.version_number, "version_number")
+
+
+@dataclass(frozen=True)
+class SkillCenterExactDownload:
+    skill_code: str
+    version_number: str
+    download_url: str
+    sha256: str | None = None
+
+
+@runtime_checkable
+class SkillCenterGateway(Plugin, Protocol):
+    """Transport/config/auth adapter boundary for the new SC lifecycle.
+
+    Team Skill operations require a non-empty request-level ``team_id``. Public
+    market operations deliberately have no Team. Implementations issue at most
+    one publish submission; this contract never chooses retry, Attempt,
+    ``RESULT_UNKNOWN``, Version creation, or materialization policy.
+    """
+
+    def create_team(self, request: SkillCenterTeamCreateRequest) -> SkillCenterTeam:
+        ...
+
+    def get_team_by_ref(
+        self, request: SkillCenterTeamLookupRequest
+    ) -> SkillCenterTeam | None:
+        ...
+
+    def search_public_skills(
+        self, request: SkillCenterPublicSkillSearchRequest
+    ) -> SkillCenterSkillPage:
+        ...
+
+    def get_public_skill(
+        self, request: SkillCenterPublicSkillDetailRequest
+    ) -> SkillCenterSkill | None:
+        ...
+
+    def list_team_skills(
+        self, request: SkillCenterTeamSkillListRequest
+    ) -> SkillCenterSkillPage:
+        ...
+
+    def get_team_skill(
+        self, request: SkillCenterTeamSkillDetailRequest
+    ) -> SkillCenterSkill | None:
+        ...
+
+    def submit_publish(
+        self, request: SkillCenterPublishSubmitRequest
+    ) -> SkillCenterPublishSubmission:
+        ...
+
+    def get_publish_status(
+        self, request: SkillCenterPublishStatusRequest
+    ) -> SkillCenterPublishStatus:
+        ...
+
+    def list_versions(
+        self, request: SkillCenterVersionListRequest
+    ) -> SkillCenterVersionPage:
+        ...
+
+    def get_exact_download(
+        self, request: SkillCenterExactDownloadRequest
+    ) -> SkillCenterExactDownload:
+        ...

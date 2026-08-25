@@ -35,6 +35,7 @@ provides:
   - "SkillManifestErrorCode"
   - "SkillManifestValidationIssue"
   - "SkillManifestValidationResult"
+  - "SkillCenterGatewayService"
   - "enqueue_skill_activation_sync"
   - "build_skill_activation_sync_payload"
   - "parse_skill_activation_sync_payload"
@@ -53,6 +54,7 @@ consumes:
   - "ObjectStoragePlugin"
   - "SecretResolver"
   - "SkillCenterClient"
+  - "SkillCenterGateway"
   - "SkillRepoSyncPlugin"
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
@@ -102,6 +104,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.object_storage
   - agentclaw.community.plugin_api.secret_resolver
   - agentclaw.community.plugin_api.skill_center_client
+  - agentclaw.community.plugin_api.skill_center_gateway
   - agentclaw.community.plugin_api.skill_repo_sync
   - agentclaw.community.plugin_api.skill_scanner
   - agentclaw.community.utils
@@ -112,6 +115,11 @@ internal_dependencies:
 ### Change impact
 
 Capability activation is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols. Changes to `SkillMetadataParserProtocol`, `SkillMetadata`, or stable manifest error codes affect Local folder upload immediately and the shared fixtures consumed by Git import, Draft validation and publication validation; coordinate those consumers before changing fields, limits or codes. List/detail/market readers must continue consuming parser-derived projections rather than inventing a second name or description source.
+
+`SkillCenterGatewayService` is a typed consumer of the independent SC adapter
+boundary. It accepts already-resolved Team requests and does not modify
+`ac_skill`, create Versions, select an Attempt result, retry publication, or
+materialize runtime content.
 
 ### One writer, one flush, one reader, one rule book
 
