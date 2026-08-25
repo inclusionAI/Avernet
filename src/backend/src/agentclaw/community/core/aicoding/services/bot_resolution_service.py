@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 
 from injector import inject
 
-from agentclaw.community.api.aicoding.bot_resolution_service import (
+from agentclaw.community.core.aicoding.protocols import (
     AicodingBotResolutionServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository

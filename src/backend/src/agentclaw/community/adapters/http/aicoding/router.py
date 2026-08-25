@@ -26,7 +26,7 @@ from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.baas_service import BaasServiceProtocol
-from agentclaw.community.api.aicoding.bot_resolution_service import (
+from agentclaw.community.core.aicoding.protocols import (
     AicodingBotResolutionServiceProtocol,
 )
 from agentclaw.community.api.device_service import DeviceServiceProtocol

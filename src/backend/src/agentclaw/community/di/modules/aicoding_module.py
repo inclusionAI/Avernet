@@ -22,7 +22,7 @@ from agentclaw.community.core.aicoding.services.workspace_hosting_workitem_servi
     WorkspaceHostingWorkItemService,
 )
 from agentclaw.community.core.aicoding.services.workspace_service import WorkspaceService
-from agentclaw.community.api.aicoding.bot_resolution_service import (
+from agentclaw.community.core.aicoding.protocols import (
     AicodingBotResolutionServiceProtocol,
 )
 from agentclaw.community.core.aicoding.services.bot_resolution_service import (

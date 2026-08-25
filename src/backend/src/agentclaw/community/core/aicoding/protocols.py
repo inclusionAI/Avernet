@@ -1,7 +1,7 @@
-"""Service API Protocol for AICoding DIMA bot resolution."""
+"""Protocols for AICoding-specific services."""
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -14,4 +14,4 @@ class AicodingBotResolutionServiceProtocol(Protocol):
         requested_owner_id: str,
         operator_id: str,
         env: str,
-    ) -> Optional[Dict[str, Any]]: ...
+    ) -> Dict[str, Any] | None: ...
