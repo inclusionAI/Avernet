@@ -197,9 +197,12 @@ def test_a_direct_installation_appears_with_minimal_metadata(tmp_path):
 
     assert result == [
         {
+            "id": None,
             "server_code": "mcp.direct",
             "name": "mcp.direct",
             "description": "",
+            "icon": None,
             "status": "ONLINE",
+            "is_default": False,
         }
     ]

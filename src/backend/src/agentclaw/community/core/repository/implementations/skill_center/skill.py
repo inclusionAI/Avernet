@@ -1681,7 +1681,10 @@ class SkillSetRepository(
                     description=description,
                     icon=icon,
                     user_id=user_id,
-                    env=env,
+                    # The row must carry the resolved env, not the raw
+                    # parameter: a None here wrote env-less rows that every
+                    # env-scoped read — the flush included — cannot see.
+                    env=target_env,
                 )
             )
             db.flush()

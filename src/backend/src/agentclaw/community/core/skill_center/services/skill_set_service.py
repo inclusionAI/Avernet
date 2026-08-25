@@ -2247,14 +2247,24 @@ class SkillSetService:
                 bot_id=bot_id, owner_id=user_id
             )
         except LocalSkillNotFoundError:
-            # A mismatched identity never reached ordinary-Set rows in the
-            # legacy walk either; keep the default half and answer.
-            logger.warning(
-                "[collect_bot_active_mcps] Bot not found: user_id=%s, bot_id=%s",
-                user_id,
-                bot_id,
-            )
-            installed_codes = frozenset()
+            # Entity-keyed callers (the device-alive MCP sync, diagnostics)
+            # land here when ``user_id`` is the Bot's entity, not its owner —
+            # Installation is owner-keyed, so resolve the owner and retry
+            # before giving the installed half up.
+            bot = self._bot_repo.get_by_id_and_entity(bot_id, entity_id)
+            owner = str(bot.get("owner_id") or "") if bot else ""
+            if bot is not None and owner and owner != user_id:
+                installed_codes = self._reader.active_mcp_server_codes(
+                    bot_id=bot_id, owner_id=owner, bot=bot
+                )
+            else:
+                logger.warning(
+                    "[collect_bot_active_mcps] Bot not found: user_id=%s, "
+                    "bot_id=%s",
+                    user_id,
+                    bot_id,
+                )
+                installed_codes = frozenset()
 
         missing_codes = [
             code for code in sorted(installed_codes)
@@ -2272,11 +2282,19 @@ class SkillSetService:
                     if code and code not in membership_metadata:
                         membership_metadata[code] = assoc
             for code in missing_codes:
-                entry = membership_metadata.get(code) or {
+                assoc = membership_metadata.get(code)
+                # One shape for every union entry, matching
+                # ``get_set_mcp_servers``'s normalization.
+                entry = {
+                    "id": assoc.get("id") if assoc else None,
                     "server_code": code,
-                    "name": code,
-                    "description": "",
+                    "name": (assoc.get("name") if assoc else None) or code,
+                    "description": (
+                        assoc.get("description") if assoc else None
+                    ) or "",
+                    "icon": assoc.get("icon") if assoc else None,
                     "status": "ONLINE",
+                    "is_default": False,
                 }
                 seen_server_codes.add(code)
                 active_mcps.append(entry)
