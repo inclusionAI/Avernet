@@ -27,6 +27,32 @@ from agentclaw.community.plugin_api.notify_sender import (
 log = get_logger(__name__)
 
 
+class DingTalkCredentialHolder:
+    """运行时钉钉凭证 holder — 允许通过 API 动态注入凭证，无需重启 backend。
+
+    优先级：holder > env > 空（skip）。
+    """
+    _creds: dict[str, str] = {}
+
+    @classmethod
+    def set(cls, ak_id: str, ak_secret: str, robot_code: str, card_template_id: str) -> None:
+        cls._creds = {
+            "ak_id": ak_id,
+            "ak_secret": ak_secret,
+            "robot_code": robot_code,
+            "card_template_id": card_template_id,
+        }
+        log.info("[DingTalkCredentialHolder] credentials injected at runtime")
+
+    @classmethod
+    def get(cls, key: str) -> str:
+        return cls._creds.get(key, "")
+
+    @classmethod
+    def clear(cls) -> None:
+        cls._creds = {}
+
+
 def _env(name: str, fallback: str = "") -> str:
     """读取 env，带 SINGLEBOX_* 兼容回退（便于复用 e2e 既有的钉钉凭证）。"""
     return (os.environ.get(name) or os.environ.get(fallback) or "").strip()
@@ -110,38 +136,31 @@ class DingTalkNotifySender(NotifySenderPlugin):
         return msg_id
 
     @staticmethod
-    def _configured() -> bool:
+    def _resolve(key: str, env_name: str, env_fallback: str) -> str:
+        """优先从 holder 读，回退到 env。"""
+        val = DingTalkCredentialHolder.get(key)
+        if val:
+            return val
+        return _env(env_name, env_fallback)
+
+    @classmethod
+    def _configured(cls) -> bool:
         return all(
             [
-                _env("TASK_DISCOVERY_DINGTALK_AK_ID", "SINGLEBOX_DINGTALK_AK_ID"),
-                _env(
-                    "TASK_DISCOVERY_DINGTALK_AK_SECRET",
-                    "SINGLEBOX_DINGTALK_AK_SECRET",
-                ),
-                _env(
-                    "TASK_DISCOVERY_DINGTALK_ROBOT_CODE",
-                    "SINGLEBOX_DINGTALK_ROBOT_CODE",
-                ),
-                _env(
-                    "TASK_DISCOVERY_CARD_TEMPLATE_ID",
-                    "SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID",
-                ),
+                cls._resolve("ak_id", "TASK_DISCOVERY_DINGTALK_AK_ID", "SINGLEBOX_DINGTALK_AK_ID"),
+                cls._resolve("ak_secret", "TASK_DISCOVERY_DINGTALK_AK_SECRET", "SINGLEBOX_DINGTALK_AK_SECRET"),
+                cls._resolve("robot_code", "TASK_DISCOVERY_DINGTALK_ROBOT_CODE", "SINGLEBOX_DINGTALK_ROBOT_CODE"),
+                cls._resolve("card_template_id", "TASK_DISCOVERY_CARD_TEMPLATE_ID", "SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID"),
             ]
         )
 
     def _send_dingtalk_card(self, message: NotifyMessage) -> None:
         if not self._configured():
             return  # 未配置凭证 → 跳过，仅 inner 通道（ CommunityNotifySender 日志）
-        ak_id = _env("TASK_DISCOVERY_DINGTALK_AK_ID", "SINGLEBOX_DINGTALK_AK_ID")
-        ak_secret = _env(
-            "TASK_DISCOVERY_DINGTALK_AK_SECRET", "SINGLEBOX_DINGTALK_AK_SECRET"
-        )
-        robot_code = _env(
-            "TASK_DISCOVERY_DINGTALK_ROBOT_CODE", "SINGLEBOX_DINGTALK_ROBOT_CODE"
-        )
-        template_id = _env(
-            "TASK_DISCOVERY_CARD_TEMPLATE_ID", "SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID"
-        )
+        ak_id = self._resolve("ak_id", "TASK_DISCOVERY_DINGTALK_AK_ID", "SINGLEBOX_DINGTALK_AK_ID")
+        ak_secret = self._resolve("ak_secret", "TASK_DISCOVERY_DINGTALK_AK_SECRET", "SINGLEBOX_DINGTALK_AK_SECRET")
+        robot_code = self._resolve("robot_code", "TASK_DISCOVERY_DINGTALK_ROBOT_CODE", "SINGLEBOX_DINGTALK_ROBOT_CODE")
+        template_id = self._resolve("card_template_id", "TASK_DISCOVERY_CARD_TEMPLATE_ID", "SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID")
         extra = message.extra or {}
         # account_id 默认用 recipient（owner），可用 env 单独覆盖
         account_id = _env(
@@ -162,6 +181,10 @@ class DingTalkNotifySender(NotifySenderPlugin):
         from alipay_antdingopensdk_client.client import (  # type: ignore[import-not-found]
             Client as AntDingClient,
         )
+        # alibabacloud-tea 包不提供 Tea.__version__，但 UtilClient 拼 User-Agent 时读它
+        import Tea  # type: ignore[import-not-found]
+        if not hasattr(Tea, "__version__"):
+            Tea.__version__ = "0.4.3"
 
         config = open_api_models.Config()
         config.access_key_id = ak_id

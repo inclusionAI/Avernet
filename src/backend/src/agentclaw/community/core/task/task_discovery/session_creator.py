@@ -78,6 +78,13 @@ class HttpSessionCreator:
             "FRONTEND_URL",
             f"http://localhost:{_DEFAULT_FRONTEND_PORT}",
         )
+        # 运行时 holder 优先（API 注入）
+        from agentclaw.community.core.task.task_discovery.session_initiator import (
+            FrontendUrlHolder,
+        )
+        holder_url = FrontendUrlHolder.get()
+        if holder_url:
+            self._frontend_url = holder_url
 
     async def _resolve_engine_target(
         self, bot_id: str, owner_id: str, user_id: str,
@@ -199,13 +206,20 @@ class HttpSessionCreator:
     def _build_session_url(self, session_id: str, agent_id: str) -> str:
         """构建用户可访问的前端 workbench session URL。
 
-        格式: ``{frontend_url}/bcn/chat/session?bot_uuid={agent_id}&id={agent_id}&session={session_id}``
+        格式: ``{frontend_url}/assistant?botId={bot_id}&sessionId={session_key}``
+        其中 session_key 为 ``agent:main:{raw_session_id}`` URL-encoded。
+
+        动态解析 frontend URL — 支持运行时 API 注入（FrontendUrlHolder）。
         """
-        base = self._frontend_url.rstrip("/")
-        return (
-            f"{base}/bcn/chat/session"
-            f"?bot_uuid={agent_id}&id={agent_id}&session={session_id}"
+        from urllib.parse import quote
+
+        from agentclaw.community.core.task.task_discovery.session_initiator import (
+            FrontendUrlHolder,
         )
+        base = (FrontendUrlHolder.get() or self._frontend_url).rstrip("/")
+        full_session_key = f"agent:main:{session_id}"
+        encoded_sid = quote(full_session_key, safe="")
+        return f"{base}/assistant?botId={agent_id}&sessionId={encoded_sid}"
 
 
 __all__ = ["SessionCreator", "HttpSessionCreator"]

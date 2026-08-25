@@ -35,7 +35,7 @@ import httpx
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
@@ -443,6 +443,48 @@ async def reschedule_cron(
         "timezone": status.get("timezone"),
         "next_run_time": next_run,
     }
+
+
+@router.post("/discovery/dingtalk-config")
+async def set_dingtalk_config(
+    body: dict = Body(...),
+) -> dict[str, Any]:
+    """运行时注入钉钉凭证 + 前端 URL — 无需重启 backend。
+
+    测试/e2e 可通过本端点注入 AK/Robot/Template 和可选的 frontend_url，
+    随后的 cron fire 即用这些凭证投递卡片，card_data 内的 session_url 也用注入的 frontend_url。
+    凭证仅存于进程内存，重启后失效。
+    """
+    from agentclaw.community.plugins.community.notify_sender import (
+        DingTalkCredentialHolder,
+    )
+
+    ak_id = (body.get("ak_id") or "").strip()
+    ak_secret = (body.get("ak_secret") or "").strip()
+    robot_code = (body.get("robot_code") or "").strip()
+    card_template_id = (body.get("card_template_id") or "").strip()
+    frontend_url = (body.get("frontend_url") or "").strip()
+
+    if not all([ak_id, ak_secret, robot_code, card_template_id]):
+        return {"success": False, "message": "钉钉字段必填: ak_id, ak_secret, robot_code, card_template_id"}
+
+    DingTalkCredentialHolder.set(ak_id, ak_secret, robot_code, card_template_id)
+    injected = ["dingtalk credentials"]
+
+    if frontend_url:
+        from agentclaw.community.core.task.task_discovery.session_initiator import (
+            FrontendUrlHolder,
+        )
+        FrontendUrlHolder.set(frontend_url)
+        injected.append(f"frontend_url={frontend_url}")
+
+    logger.info(
+        "[task_discovery] injected via API: %s (robot=%s, template=%s)",
+        ", ".join(injected),
+        robot_code,
+        card_template_id,
+    )
+    return {"success": True, "message": "; ".join(injected) + " injected"}
 
 
 # ===== task_loop inbound PUSH callback router(单 bot workflow / bcn 协作群)=====

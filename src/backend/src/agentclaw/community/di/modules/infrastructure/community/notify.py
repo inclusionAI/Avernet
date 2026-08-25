@@ -18,7 +18,10 @@ logger = get_logger(__name__)
 
 
 class CommunityNotifyModule(Module):
-    """community: log-only sender, or DingTalk-wrapped when creds are configured."""
+    """community: 始终包裹 DingTalkNotifySender — 凭证就绪时投递卡片，否则跳过。
+
+    钉钉凭证来源优先级：运行时 holder（API 注入）> env 启动变量 > 空（skip）。
+    """
 
     @singleton
     @provider
@@ -29,14 +32,8 @@ class CommunityNotifyModule(Module):
         )
 
         inner = CommunityNotifySender()
-        if DingTalkNotifySender._configured():
-            logger.info(
-                "[community.notify] Binding DingTalkNotifySender(CommunityNotifySender) "
-                "(log + dingtalk interactive card)",
-            )
-            return DingTalkNotifySender(inner)
         logger.info(
-            "[community.notify] Binding CommunityNotifySender "
-            "(log-only; no real delivery)",
+            "[community.notify] Binding DingTalkNotifySender(CommunityNotifySender) "
+            "(log + dingtalk interactive card if creds available)",
         )
-        return inner
+        return DingTalkNotifySender(inner)

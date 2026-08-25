@@ -33,6 +33,8 @@ openclaw + engine + backend）。
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import time
 import unittest
 import warnings
@@ -46,12 +48,53 @@ from agentclaw.community.core.task.task_discovery.task_reader import (
 )
 
 # ---------------------------------------------------------------------------
+# 钉钉 SDK 依赖自检安装
+# ---------------------------------------------------------------------------
+
+_DINGTALK_DEPS = [
+    "alibabacloud_tea_openapi==0.3.10",
+    "alibabacloud_endpoint_util==0.0.3",
+]
+_DINGTALK_SDK = "antdingopensdk==1.0.47"
+_PIP_INDEX_DEV = "https://pypi.antfin-inc.com/simple-dev/"
+_PIP_INDEX = "https://pypi.antfin-inc.com/simple/"
+
+
+def _ensure_dingtalk_sdk() -> None:
+    """惰性安装钉钉 SDK 依赖；仅在 _LIVE 且需钉钉凭证时触发。"""
+    try:
+        import alipay_antdingopensdk_client  # noqa: F401
+        return
+    except ImportError:
+        pass
+    venv_python = sys.executable
+    for dep in _DINGTALK_DEPS:
+        subprocess.check_call(
+            [venv_python, "-m", "pip", "install", dep],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    # antdingopensdk 仅在 pypi.antfin-inc.com 有
+    for index in (_PIP_INDEX_DEV, _PIP_INDEX):
+        try:
+            subprocess.check_call(
+                [venv_python, "-m", "pip", "install", _DINGTALK_SDK, "-i", index],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            break
+        except subprocess.CalledProcessError:
+            continue
+
+# ---------------------------------------------------------------------------
 # 配置
 # ---------------------------------------------------------------------------
 
 _LIVE = os.environ.get("SINGLEBOX_CRON_E2E", "").strip() in {"1", "true"}
 _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://agentclaw-local.stable.alipay.net:8888")
 _USER_ID = os.environ.get("SINGLEBOX_USER_ID", "440718")
+
+# 运行前惰性安装钉钉 SDK 依赖
+if _LIVE:
+    _ensure_dingtalk_sdk()
 
 _SHANGHAI_TZ = timezone(timedelta(hours=8))
 _TODAY = datetime.now(_SHANGHAI_TZ).strftime("%Y-%m-%d")
@@ -172,6 +215,40 @@ def _find_bot() -> tuple[str, str]:
     raise RuntimeError("无法获取存活 bot — 请先 ./scripts/singlebox.sh start all")
 
 
+def _inject_dingtalk_creds() -> None:
+    """通过 API 注入钉钉凭证 + 前端 URL 到运行中的 backend — 无需重启。"""
+    ak_id = os.environ.get("SINGLEBOX_DINGTALK_AK_ID", "")
+    ak_secret = os.environ.get("SINGLEBOX_DINGTALK_AK_SECRET", "")
+    robot_code = os.environ.get("SINGLEBOX_DINGTALK_ROBOT_CODE", "")
+    card_template_id = os.environ.get("SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID", "")
+    frontend_url = os.environ.get("SINGLEBOX_FRONTEND_URL", "")
+    if not all([ak_id, ak_secret, robot_code, card_template_id]):
+        print("[setUpClass] 钉钉凭证未配置 (SINGLEBOX_DINGTALK_*)，跳过钉钉卡片投递")
+        return
+    payload = {
+        "ak_id": ak_id,
+        "ak_secret": ak_secret,
+        "robot_code": robot_code,
+        "card_template_id": card_template_id,
+    }
+    if frontend_url:
+        payload["frontend_url"] = frontend_url
+    r = httpx.post(
+        f"{_BACKEND}/api/v1/collaboration/tasks/discovery/dingtalk-config",
+        json=payload,
+        timeout=10.0,
+        headers=_HDRS,
+    )
+    if r.status_code == 200 and r.json().get("success"):
+        parts = []
+        if frontend_url:
+            parts.append(f"frontend_url={frontend_url}")
+        parts.append("钉钉凭证")
+        print(f"[setUpClass] {' + '.join(parts)} 已注入 backend")
+    else:
+        print(f"[setUpClass] 凭证注入失败: {r.status_code} {r.text}")
+
+
 # ---------------------------------------------------------------------------
 # 测试
 # ---------------------------------------------------------------------------
@@ -193,6 +270,9 @@ class TestCronTimedFireE2E(unittest.TestCase):
         cls._bot_id, cls._owner_id = _find_bot()
         print(f"[setUpClass] bot_id={cls._bot_id} owner_id={cls._owner_id}")
         _write_mock_data(cls._bot_id, cls._owner_id)
+
+        # 运行时注入钉钉凭证 — 无需重启 backend
+        _inject_dingtalk_creds()
 
         # 记录原始 cron（tearDown 恢复）
         try:
