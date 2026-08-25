@@ -32,11 +32,21 @@ What one line carries, and why each field earns its place:
     verified set (``user:u-42+app:7``). A request whose principal did not verify
     logs ``tenant=- caller=-``: it is about to be answered ``401``, and *why* it
     failed is already on its own line from the verifier.
-``trace_id`` / ``request_id``
-    The correlation handles. ``trace_id`` ties this line to the rest of the
-    request's logs and to the ``X-Trace-ID`` the client got back; ``request_id``
-    is the caller's own ``X-Request-ID``, which is what a client can quote in a
-    bug report.
+``request_id`` / ``trace_id``
+    The handle a caller can quote back, under the name they know it by. Every
+    public response carries ``request_id`` in its envelope and ``X-Trace-ID`` in
+    its headers, and both are the server's trace id — so this line writes that
+    one value twice, once under each name. That redundancy is the point: the
+    question this middleware exists to answer is "a caller sent me a
+    ``request_id``, which endpoint did it hit?", and the answer has to be a grep
+    for whichever field name the person asking already has in front of them.
+    Reading the two side by side is also how an operator learns they are the
+    same id.
+``client_request_id``
+    The caller's own ``X-Request-ID``, echoed back untouched. A *different* id
+    from the one above — the client's, not ours — which is why it does not share
+    the ``request_id`` name: a line that called this one ``request_id`` would
+    answer the question above with the wrong request, silently.
 ``client`` / ``ua``
     Which peer and which client build. Behind the gateway the peer is the
     gateway, so ``ua`` is usually the more informative of the two.
@@ -114,7 +124,7 @@ _MAX_QUERY = 512
 #: cheapest to reach: the header is caller-supplied, the line is written even for
 #: a request answered ``401``, and a correlation handle that does not fit a uuid
 #: several times over is not a correlation handle.
-_MAX_REQUEST_ID = 128
+_MAX_CLIENT_REQUEST_ID = 128
 
 
 def redact_query(raw: str) -> str:
@@ -187,9 +197,25 @@ def _header(scope: Scope, name: str) -> str:
     return ""
 
 
-def _request_id(scope: Scope) -> str:
+def _client_request_id(scope: Scope) -> str:
     """The caller's ``X-Request-ID``, capped."""
-    return _header(scope, "x-request-id")[:_MAX_REQUEST_ID]
+    return _header(scope, "x-request-id")[:_MAX_CLIENT_REQUEST_ID]
+
+
+def _trace_id(scope: Scope) -> str:
+    """The server's trace id — the same value the envelope calls ``request_id``.
+
+    Read off the ASGI scope's ``state``, where ``TraceIdMappingMiddleware``
+    stashed it and where ``responses._trace_id`` reads it to stamp the envelope.
+    One source, so the line and the body cannot name different ids for the same
+    request.
+
+    Empty until that middleware has run. This middleware is installed *outside*
+    it — it has to be, to see the status that reaches the wire — so the value
+    exists on the way out and not on the way in, which is why only the
+    completion line carries it.
+    """
+    return (scope.get("state") or {}).get("trace_id") or ""
 
 
 def _client(scope: Scope) -> str:
@@ -311,7 +337,11 @@ class PublicApiAccessLogMiddleware:
             _kv("query", _query(scope)),
             _kv("client", _client(scope)),
             _kv("ua", _header(scope, "user-agent")[:_MAX_UA]),
-            _kv("request_id", _request_id(scope)),
+            # No ``request_id``: the tracer runs *inside* this middleware, so
+            # the trace id does not exist yet on the way in. An arrival line is
+            # correlated by its ``client_request_id``, or by the completion line
+            # that follows it.
+            _kv("client_request_id", _client_request_id(scope)),
         ]
 
     def _log_completion(
@@ -328,7 +358,7 @@ class PublicApiAccessLogMiddleware:
         """
         duration_ms = (time.perf_counter() - started) * 1000
         try:
-            state = scope.get("state") or {}
+            trace_id = _trace_id(scope)
             # Self-sufficient on purpose: the start line above is DEBUG and off
             # in every normal deployment, so this line repeats what it said
             # rather than being readable only next to it.
@@ -340,8 +370,11 @@ class PublicApiAccessLogMiddleware:
                 _kv("duration_ms", f"{duration_ms:.1f}"),
                 *_identity_fields(scope),
                 _kv("query", _query(scope)),
-                _kv("trace_id", state.get("trace_id") or ""),
-                _kv("request_id", _request_id(scope)),
+                # Same value, twice, under both names a caller may hold it by.
+                # See the module docstring.
+                _kv("request_id", trace_id),
+                _kv("trace_id", trace_id),
+                _kv("client_request_id", _client_request_id(scope)),
                 _kv("client", _client(scope)),
                 _kv("ua", _header(scope, "user-agent")[:_MAX_UA]),
             ]

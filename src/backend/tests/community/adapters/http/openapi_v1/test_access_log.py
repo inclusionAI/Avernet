@@ -11,6 +11,11 @@ operator actually reads the line for:
   rather than guessing a tenant;
 - an unhandled exception produces a line too, and does not change what the
   request answers;
+- the line names the route the request matched, under the same ``request_id``
+  the caller was handed in the response envelope — the property that makes
+  "a caller quoted this id, which endpoint did they hit?" a single grep;
+- the caller's own ``X-Request-ID`` is logged as ``client_request_id``, never as
+  ``request_id``, so the two ids cannot be confused for one another;
 - the internal ``/api`` surface is untouched;
 - a credential in the query string never reaches the log.
 
@@ -184,6 +189,151 @@ def test_unhandled_exception_is_logged_and_still_raised(client, caplog):
     assert field(line, "tenant") == TENANT
 
 
+@pytest.fixture
+def traced_app() -> FastAPI:
+    """The same probe routes, with the trace-id stack wired in production order.
+
+    The default ``app`` fixture omits the tracer, so ``request.state.trace_id``
+    is never set there and every id below would be empty. This one adds the
+    pieces the real ``install_middleware`` adds, in the order it adds them:
+    ``TraceIdMappingMiddleware`` reads the tracer and stashes the id, the
+    tracer's own middleware is installed after it (so it runs *outside*, minting
+    the id first), and the access log is added last of all so it is outside both
+    — which is exactly why it can read the id on the way out.
+
+    ``CommunityTracer`` is the real community binding, not a stub: the id this
+    test correlates on is the one a community deployment actually mints.
+    """
+    from agentclaw.community.adapters.http.app import (
+        _principal_error_handler,
+        _unhandled_exception_handler,
+    )
+    from agentclaw.community.adapters.http.middleware import TraceIdMappingMiddleware
+    from agentclaw.community.core.gateway_principal import PrincipalVerificationError
+    from agentclaw.community.plugins.community.tracer import CommunityTracer
+
+    app = FastAPI()
+    tracer = CommunityTracer()
+    app.add_middleware(AvernetTenantMiddleware)
+    app.add_middleware(TraceIdMappingMiddleware, tracer=tracer)
+    tracer.install(app)
+    app.add_middleware(PublicApiAccessLogMiddleware)
+    # The same handlers, in the same places, as the ``app`` fixture above — a
+    # 401 has to be a *response* here, not an escaping exception, or the error
+    # envelope whose ``request_id`` the last test correlates on is never built.
+    app.add_exception_handler(MissingPrincipalError, _principal_error_handler)
+    app.add_exception_handler(PrincipalVerificationError, _principal_error_handler)
+    app.add_exception_handler(Exception, _unhandled_exception_handler)
+
+    @app.get("/openapi/v1/bots/{bot_id}")
+    @envelope_errors
+    async def get_bot(
+        request: Request,
+        bot_id: str,
+        principal: Principal = Depends(require_principal),
+    ):
+        return envelope({"bot_id": bot_id}, request)
+
+    return app
+
+
+@pytest.fixture
+def traced_client(traced_app: FastAPI) -> TestClient:
+    return TestClient(traced_app, raise_server_exceptions=False)
+
+
+def test_request_id_in_the_line_is_the_one_the_caller_was_given(
+    traced_client, caplog
+):
+    """The whole point: an id from a response envelope finds its endpoint.
+
+    A caller quotes the ``request_id`` their response carried. That one string
+    has to appear on the access line, under that name, next to the route it
+    matched — otherwise answering "which endpoint was this?" means knowing that
+    the envelope's ``request_id`` is really the trace id and searching for a
+    field with a different name, which is knowledge nobody reading a bug report
+    has.
+    """
+    with caplog.at_level(logging.INFO):
+        response = traced_client.get(
+            "/openapi/v1/bots/bot-7", headers={PRINCIPAL_HEADER: mint()}
+        )
+
+    quoted = response.json()["request_id"]
+    assert quoted  # the tracer is wired; an empty id would make this vacuous
+
+    line = access_lines(caplog)[0]
+    assert field(line, "request_id") == quoted
+    assert field(line, "route") == "/openapi/v1/bots/{bot_id}"
+    assert field(line, "method") == "GET"
+
+
+def test_the_three_names_for_the_id_agree(traced_client, caplog):
+    """Envelope body, ``X-Trace-ID`` header, and both log fields: one value.
+
+    A caller may quote any of the three, and each is produced by a different
+    piece of code — the envelope builder, the trace middleware's response
+    header, and this log line. Pinned together because a drift between any two
+    of them is invisible until an incident, when the id someone quotes matches
+    nothing.
+    """
+    with caplog.at_level(logging.INFO):
+        response = traced_client.get(
+            "/openapi/v1/bots/bot-7", headers={PRINCIPAL_HEADER: mint()}
+        )
+
+    line = access_lines(caplog)[0]
+    assert (
+        response.json()["request_id"]
+        == response.headers["X-Trace-ID"]
+        == field(line, "request_id")
+        == field(line, "trace_id")
+    )
+
+
+def test_client_request_id_is_the_callers_header_and_not_the_trace_id(
+    traced_client, caplog
+):
+    """The caller's ``X-Request-ID`` is logged, and kept distinct.
+
+    Both ids are worth having — ours answers "which endpoint", theirs is what a
+    client quotes from its *own* logs — but they are different ids, and the
+    regression this guards is the one where the caller's value occupies the
+    ``request_id`` field: a search for an envelope's id would then either miss
+    the line or, if a client ever sent that string, hit the wrong request.
+    """
+    with caplog.at_level(logging.INFO):
+        response = traced_client.get(
+            "/openapi/v1/bots/bot-7",
+            headers={PRINCIPAL_HEADER: mint(), "X-Request-ID": "caller-abc-123"},
+        )
+
+    line = access_lines(caplog)[0]
+    assert field(line, "client_request_id") == "caller-abc-123"
+    assert field(line, "request_id") == response.json()["request_id"]
+    assert field(line, "request_id") != "caller-abc-123"
+
+
+def test_a_failed_request_is_searchable_by_its_error_envelopes_request_id(
+    traced_client, caplog
+):
+    """An error envelope's ``request_id`` finds its line too.
+
+    The failing call is the one anyone actually quotes an id from, and an error
+    body is built by a different path (``_error_response``) than a success. If
+    only the success path stamped the id the correlation would work for exactly
+    the requests nobody needs to look up.
+    """
+    with caplog.at_level(logging.INFO):
+        response = traced_client.get("/openapi/v1/bots/bot-7")  # no principal
+
+    assert response.status_code == 401
+    line = access_lines(caplog)[0]
+    assert field(line, "request_id") == response.json()["request_id"]
+    assert field(line, "route") == "/openapi/v1/bots/{bot_id}"
+    assert field(line, "status") == "401"
+
+
 def test_internal_api_is_not_logged(client, caplog):
     with caplog.at_level(logging.INFO):
         assert client.get("/api/bots/internal").status_code == 200
@@ -210,7 +360,7 @@ def test_caller_controlled_fields_are_capped(client, caplog):
     having verified anyone first.
     """
     from agentclaw.community.adapters.http.openapi_v1.access_log import (
-        _MAX_REQUEST_ID,
+        _MAX_CLIENT_REQUEST_ID,
         _MAX_UA,
     )
 
@@ -222,7 +372,7 @@ def test_caller_controlled_fields_are_capped(client, caplog):
 
     assert response.status_code == 401  # no principal: the line still gets written
     line = access_lines(caplog)[0]
-    assert len(field(line, "request_id")) == _MAX_REQUEST_ID
+    assert len(field(line, "client_request_id")) == _MAX_CLIENT_REQUEST_ID
     assert len(field(line, "ua")) == _MAX_UA
 
 

@@ -546,6 +546,57 @@ wrong half of the system.
 
 ---
 
+## Tracing one request from a caller's `request_id`
+
+Every response on this surface carries a `request_id` in its envelope and the
+same value in an `X-Trace-ID` header. It is the **server's** trace id — minted
+per request by the bound `TracerPlugin` (community: a uuid4; corp: the tracing
+system's id), never an echo of anything the caller sent. That id is the handle a
+bug report quotes, so the access log writes it under exactly that name:
+
+```text
+openapi_access method=GET path=/openapi/v1/bots/b-42 route=/openapi/v1/bots/{bot_id}
+  status=200 duration_ms=31.4 tenant=acme caller=user:u-1+app:7 query=page=2
+  request_id=b0a6d2f4e8c94b1a9f3d5e7c60218a4d trace_id=b0a6d2f4e8c94b1a9f3d5e7c60218a4d
+  client_request_id=- client=10.0.0.9 ua=acme-sdk/1.2
+```
+
+So the whole diagnosis is one grep for the id the caller quoted, and `route=` is
+the answer to "which endpoint was this against?" — the **template**, not the
+concrete path, so a thousand bot ids aggregate to one line shape. `route` is
+absent (`-`) exactly when nothing matched, which is itself the finding.
+
+One line is emitted per request, on success and on failure alike, including a
+request that left the layer as an exception (`status=-` plus an `error=` field).
+There is a matching `openapi_request_start` at DEBUG, which carries no
+`request_id`: the tracer runs *inside* the access-log middleware — it has to,
+so the log can see the status that actually reached the wire — so the id does
+not exist yet on the way in.
+
+**`request_id` and `client_request_id` are different ids; do not mix them up.**
+
+| Field | Whose id | Where the caller sees it |
+| --- | --- | --- |
+| `request_id` / `trace_id` | ours, server-minted | the response envelope's `request_id`, and the `X-Trace-ID` header |
+| `client_request_id` | the caller's, echoed | the `X-Request-ID` header they sent us |
+
+`request_id` and `trace_id` are deliberately the same value written twice, one
+per name a reader may already hold it by; a search for either finds the line.
+`client_request_id` is a *different* id and never occupies the `request_id`
+field — a line that spelled it `request_id` would answer "which endpoint did
+this id hit?" with the wrong request, and do it silently.
+
+Not logged, on purpose: request and response bodies. They carry bot
+configuration, skill payloads and user content, they are unbounded, and nothing
+about "which endpoint was this" needs them. Query strings *are* logged, with any
+credential-looking parameter's value replaced — see `redact_query` in
+`openapi_v1/access_log.py`.
+
+Scope: `/openapi/v1` only. The internal `/api` surface has its own clients and
+no principal for this line to name.
+
+---
+
 ## Recipe — extend Track A to a new data category (e.g. resources)
 
 1. Find the model(s)/table(s) (e.g. `ResourceModel`, `ac_resource`) and every

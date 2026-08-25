@@ -193,11 +193,16 @@ class TraceIdMappingMiddleware(BaseHTTPMiddleware):
         trace_id = self._tracer.current_trace_id()
         request.state.trace_id = trace_id
 
-        request_id = request.headers.get("X-Request-ID")
-        if trace_id and request_id:
+        # ``client_request_id``, not ``request_id``: the caller's header is a
+        # different id from the trace id, and the trace id is what every public
+        # envelope calls ``request_id``. Naming the header field ``request_id``
+        # here would make a search for an envelope's ``request_id`` land on a
+        # line about some other request. Same naming as the public access log.
+        client_request_id = request.headers.get("X-Request-ID")
+        if trace_id and client_request_id:
             logger.info(
-                "trace_mapping request_id=%s trace_id=%s path=%s",
-                request_id, trace_id, request.url.path,
+                "trace_mapping client_request_id=%s trace_id=%s path=%s",
+                client_request_id, trace_id, request.url.path,
             )
 
         response = await call_next(request)
