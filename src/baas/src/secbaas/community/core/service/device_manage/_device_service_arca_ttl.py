@@ -72,7 +72,7 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
     def _try_register_schedule(self, response, device_uuid) -> None:
         """Best-effort register/re-register of the ARCA schedule row.
 
-        Reads ttl_expiration_time from provider_device_props — the exact
+        Reads ttl_expiration_timestamp (ms epoch) from provider_device_props — the exact
         creation_result.model_dump() payload the community device service
         persists (D-06). A missing key logs a warning and defers
         registration to the discovery scan; any repository failure only
@@ -82,10 +82,10 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
         """
         try:
             props = response.provider_device_props or {}
-            ttl_ms = props.get("ttl_expiration_time")
+            ttl_ms = props.get("ttl_expiration_timestamp")
             if ttl_ms is None:
                 log.warning(
-                    "[arca_ttl] provider_device_props missing ttl_expiration_time "
+                    "[arca_ttl] provider_device_props missing ttl_expiration_timestamp "
                     "for device %s — registration deferred to discovery scan",
                     device_uuid,
                 )
