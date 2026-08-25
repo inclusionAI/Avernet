@@ -70,7 +70,7 @@ lands in the same group as the migration of its last caller.
 - [x] 3.2 New `tests/community/core/skill_center/
       test_bot_capability_state_reader.py`: flush-then-read for skills and
       MCPs, missing-Bot error, `bot` passed vs looked up.
-- [ ] 3.3 Repurpose `SkillRepository.list_bot_active_assets` → pure
+- [x] 3.3 Repurpose `SkillRepository.list_bot_active_assets` → pure
       Installation join renamed `list_bot_installed_assets` (drop merge and
       the `engine` read parameter; dedup by id); update
       `core/repository/protocols/skills_pool.py`.

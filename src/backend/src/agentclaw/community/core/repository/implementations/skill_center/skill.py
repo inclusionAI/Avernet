@@ -581,6 +581,53 @@ class SkillRepository(
                 for row in rows
             ]
 
+    def list_bot_installed_assets(
+        self,
+        *,
+        env: str,
+        bot_id: str,
+        owner_id: str,
+    ):
+        """The Installation→``ac_skill`` join, shaped for the runtime boundary.
+
+        The reader's only backing read: a Skill is active because an
+        Installation row says so — no Set walk, no exclusion read, no engine
+        filter. The flush has already folded Set configuration into those
+        rows.
+        """
+
+        from agentclaw.community.core.skills_pool.models import (
+            RegisteredSkillAsset,
+        )
+
+        seen: set[int] = set()
+        assets: list[RegisteredSkillAsset] = []
+        for row in self.list_bot_installed_skills(
+            env=env, owner_id=owner_id, bot_id=bot_id
+        ):
+            skill_id = int(row["id"])
+            git_path = str(row.get("git_path") or "")
+            if not git_path or skill_id in seen:
+                continue
+            seen.add(skill_id)
+            assets.append(
+                RegisteredSkillAsset(
+                    skill_id=skill_id,
+                    name=str(row["name"]),
+                    git_path=git_path,
+                    skill_uuid=(
+                        str(row["skill_uuid"]) if row.get("skill_uuid") else None
+                    ),
+                    sc_version_number=(
+                        str(row["sc_version_number"])
+                        if row.get("sc_version_number") is not None
+                        else None
+                    ),
+                    mcp_dependencies=tuple(row.get("mcp_dependencies") or ()),
+                )
+            )
+        return assets
+
     def list_bot_active_assets(
         self,
         *,
