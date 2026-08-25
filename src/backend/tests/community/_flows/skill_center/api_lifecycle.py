@@ -478,14 +478,6 @@ API_LIFECYCLE_FLOWS: list[FlowCase] = [
             ),
             FlowStep(
                 method="POST",
-                path="/api/skills/{uploaded_skill_id}/activate",
-                query={"entity_id": "{user_id}", "bot_id": "{bot_id}", "engine_type": "openclaw"},
-                body={"source_path": "{uploaded_git_path}", "relative_path": "{uploaded_git_path}"},
-                expect_status=200,
-                expect={"success": True},
-            ),
-            FlowStep(
-                method="POST",
                 path="/api/skills/market/activate-batch",
                 query={"entity_id": "{user_id}", "bot_id": "{bot_id}", "engine_type": "openclaw"},
                 body={"skill_paths": ["{uploaded_git_path}"]},
