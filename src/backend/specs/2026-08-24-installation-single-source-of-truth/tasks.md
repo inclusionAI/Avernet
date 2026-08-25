@@ -176,7 +176,7 @@ lands in the same group as the migration of its last caller.
       (`_activate_and_sync_skill_sets` call site + method + activator ctor
       param + DI arg in `bot_management_module.py`) — no migration, dead
       feature.
-- [ ] 9.4 Delete `SkillSetActivator`, `SkillSetSwitcher`, factories,
+- [x] 9.4 Delete `SkillSetActivator`, `SkillSetSwitcher`, factories,
       `_DeviceSyncMixin`, result dataclasses (if unreferenced),
       `api/skill_set_{activator,switcher}_factory.py`, DI providers, and
       `CURRENT_SET_FILE` plumbing only they used; migrate or delete their

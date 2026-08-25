@@ -98,9 +98,6 @@ from agentclaw.community.core.repository.protocols.capability_desired_state impo
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
 )
-from agentclaw.community.core.repository.protocols.skills_pool import (
-    SkillsPoolSkillRepositoryProtocol,
-)
 from agentclaw.community.core.skill_center.authorization_hook import (
     BotCapabilityAuthorizationHookProtocol,
     CollaboratorBotCapabilityAuthorizationHook,
@@ -173,10 +170,6 @@ from agentclaw.community.core.skill_center.services.direct_activation_service im
 )
 from agentclaw.community.core.skill_center.services.skill_set_management_service import (
     SkillSetManagementService,
-)
-from agentclaw.community.core.skill_center.services.skill_set_service import (
-    SkillSetActivatorFactory,
-    SkillSetSwitcherFactory,
 )
 from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
     SkillSymlinkListener,
@@ -851,60 +844,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             resolver=resolver,
             device_sync_dispatcher=device_sync_dispatcher,
             skill_set_service_factory=skill_set_service_factory,
-        )
-
-    @singleton
-    @provider
-    def skill_set_activator_factory(
-        self,
-        skill_set_factory: SkillSetServiceFactory,
-        resolver: DeviceContextResolver,
-        device_sync_dispatcher: DeviceSyncDispatcher,
-        device_plugin: DeviceAccessor,
-        path_factory: WorkspacePathFactory,
-        edit_guard: SkillsPoolEditGuard,
-    ) -> SkillSetActivatorFactory:
-        """Construct the per-request ``SkillSetActivator`` factory."""
-        return SkillSetActivatorFactory(
-            skill_set_factory=skill_set_factory,
-            resolver=resolver,
-            device_sync_dispatcher=device_sync_dispatcher,
-            device_plugin=device_plugin,
-            path_factory=path_factory,
-            edit_guard=edit_guard,
-        )
-
-    @singleton
-    @provider
-    @inject
-    def skill_set_switcher_factory(
-        self,
-        skill_set_factory: SkillSetServiceFactory,
-        resolver: DeviceContextResolver,
-        device_sync_dispatcher: DeviceSyncDispatcher,
-        device_plugin: DeviceAccessor,
-        path_factory: WorkspacePathFactory,
-        device_fs_dispatcher: DeviceFilesystemDispatcher,
-        edit_guard: SkillsPoolEditGuard,
-    ) -> SkillSetSwitcherFactory:
-        """Construct the per-request ``SkillSetSwitcher`` factory.
-
-        Wired via ``@provider`` because ``SkillSetSwitcherFactory``
-        types its deps as TYPE_CHECKING forward refs.
-
-        ``device_fs_dispatcher`` (added plan-05) routes
-        ``SkillSetSwitcher._cleanup_all_non_reserved_items`` via the
-        DeviceFileSystem (singlebox → BaaS, contract tests →
-        pathlib) instead of direct ``shutil.rmtree``.
-        """
-        return SkillSetSwitcherFactory(
-            skill_set_factory=skill_set_factory,
-            resolver=resolver,
-            device_sync_dispatcher=device_sync_dispatcher,
-            device_plugin=device_plugin,
-            path_factory=path_factory,
-            device_fs_dispatcher=device_fs_dispatcher,
-            edit_guard=edit_guard,
         )
 
     @singleton

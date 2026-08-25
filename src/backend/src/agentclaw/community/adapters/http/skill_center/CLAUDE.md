@@ -218,7 +218,7 @@ device 层正处于 agentbox/arca 双链路拆分迁移中（背景见 `docs/sup
 |---|---|
 | `api/skill_center/skills.py` | skill CRUD 路由 |
 | `api/skill_center/skillsets.py` | skill_set CRUD 路由 |
-| `core/skill_center/services/skill_set_service.py` | `get_symlink_mappings()`、`SkillSetActivator`、`SkillSetSwitcher` |
+| `core/skill_center/services/skill_set_service.py` | `get_symlink_mappings()`（激活写路径已收敛到 desired-state 控制面） |
 | `core/skill_center/services/skill_service.py` | `upload_skill()`、`activate_skill()` 单个软链操作 |
 | `core/skill_center/services/skill_symlink_listener.py` | `SkillSymlinkListener` — 订阅 `DeviceActivatedEvent`，VM 激活后自动全量下发软链 |
 | `core/skill_center/services/git_sync.py` | `GitSyncService` — git 来源同步（startup / sync_bootstrap / periodic / OSS） |

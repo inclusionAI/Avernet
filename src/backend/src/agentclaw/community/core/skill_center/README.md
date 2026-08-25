@@ -8,8 +8,6 @@ Skill Center domain — skill set switching, market sync, repository sync, skill
 purpose: "Skill Center domain — skill set switching, market sync, repository sync, skill auth, propagation logging."
 provides:
   - "SkillSetService"
-  - "SkillSetActivator"
-  - "SkillSetSwitcher"
   - "MarketSyncService"
   - "RepositoryCatalogService"
   - "GitSyncService"

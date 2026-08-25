@@ -1,7 +1,7 @@
 """LocalDeviceSyncPlugin -- local-mode implementation of DeviceSyncPlugin.
 
 Creates/removes symlinks in ~/.openclaw/workspace/skills/ based on the
-symlink mappings received from SkillSetActivator/SkillSetSwitcher.
+symlink mappings received from the runtime projection.
 """
 
 import shutil
