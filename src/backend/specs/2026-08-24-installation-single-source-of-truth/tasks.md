@@ -134,7 +134,7 @@ lands in the same group as the migration of its last caller.
 - [x] 7.2 Add UoW commands `install_skill` / `uninstall_skill` (mirror of
       the renamed `install_mcp` / `uninstall_mcp`: snapshot, R1 facts read
       under the transaction, write, `DesiredStateMutation` return).
-- [ ] 7.3 Extract the shared mutate-reconcile-compensate helper from
+- [x] 7.3 Extract the shared mutate-reconcile-compensate helper from
       `SkillSetManagementService._mutate/_reconcile` (module-private, used by
       both command services).
 - [ ] 7.4 Create `core/skill_center/services/direct_activation_service.py`

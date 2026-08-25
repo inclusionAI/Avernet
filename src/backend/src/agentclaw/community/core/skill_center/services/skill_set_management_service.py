@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 from injector import inject
 
 from agentclaw.community.core.skill_center.authorization_hook import (
@@ -16,19 +14,13 @@ from agentclaw.community.core.repository.protocols.bot import (
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
 )
-from agentclaw.community.core.repository.capability_desired_state_types import (
-    DesiredStateMutation,
-)
 from agentclaw.community.core.skill_center.errors import (
-    LocalSkillNotReadyError,
     McpPermissionDeniedError,
     SkillSetControlPlaneNotFoundError,
     SkillSetAccessDeniedError,
-    SkillSetRuntimeReconcileError,
 )
 from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
-from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
     LegacySkillSetCompatibilityFactoryProtocol,
     LegacySkillSetScope,
@@ -36,13 +28,12 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
 )
+from agentclaw.community.core.skill_center.services._mutation_flow import (
+    MutationProjectionFlow,
+)
 from agentclaw.community.core.workspace.skill_layout import (
     runtime_layout_engine_for_bot,
 )
-from agentclaw.community.core.skills_pool.mapping_intent import (
-    retired_logical_skill_mappings,
-)
-from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
@@ -63,6 +54,7 @@ class SkillSetManagementService:
         self._repository = repository
         self._bot_repo = bot_repo
         self._runtime = runtime
+        self._flow = MutationProjectionFlow(repository=repository, runtime=runtime)
         self._legacy_factory = legacy_factory
         self._passport = passport
         self._authorization = authorization
@@ -638,34 +630,20 @@ class SkillSetManagementService:
         mutation,
         runtime_required: bool = True,
     ) -> dict:
-        """Apply one desired-state mutation and synchronously reconcile runtime."""
-        if runtime_required:
-            self._require_mutable_bot(bot)
-        previous_mappings: Sequence[PoolSkillMapping] = ()
-        if runtime_required:
-            previous_mappings = await self._runtime.snapshot_skill_mappings(
-                bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
-            )
-        mutation_result = mutation()
-        # An inactive-set membership change has no runtime projection
-        # to apply.  Reconcile only becomes a required side effect
-        # when that membership is active (or for all lifecycle/sync
-        # commands), preserving the legacy inactive draft contract.
-        if not runtime_required:
-            result = {
-                **mutation_result.item,
-                "changed": mutation_result.changed,
-                **mutation_result.details,
-            }
-        else:
-            result = await self._reconcile(
-                bot=bot,
-                bot_id=bot_id,
-                actor_id=actor_id,
-                mutation=mutation_result,
-                previous_mappings=previous_mappings,
-            )
+        """Apply one desired-state mutation and synchronously reconcile runtime.
+
+        ``runtime_required=False`` preserves the legacy inactive draft
+        contract: an inactive-set membership change has no runtime projection
+        to apply. The mutate-project-compensate orchestration itself is the
+        shared :class:`MutationProjectionFlow`.
+        """
+        result = await self._flow.apply(
+            bot=bot,
+            bot_id=bot_id,
+            engine_type=self._engine(bot),
+            mutation=mutation,
+            runtime_required=runtime_required,
+        )
         self._audit(
             bot_id=bot_id,
             owner_id=str(bot["owner_id"]),
@@ -673,51 +651,6 @@ class SkillSetManagementService:
             action=action,
         )
         return result
-
-    async def _reconcile(
-        self,
-        *,
-        bot: dict,
-        bot_id: str,
-        actor_id: str,
-        mutation: DesiredStateMutation,
-        previous_mappings: Sequence[PoolSkillMapping],
-    ) -> dict:
-        owner_id = str(bot["owner_id"])
-        current_mappings: Sequence[PoolSkillMapping] = ()
-        try:
-            current_mappings = await self._runtime.snapshot_skill_mappings(
-                bot_id=bot_id,
-                owner_id=owner_id,
-            )
-            await self._reconcile_runtime(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                retired_mappings=retired_logical_skill_mappings(
-                    list(previous_mappings),
-                    list(current_mappings),
-                ),
-            )
-        except Exception as exc:
-            self._repository.restore_desired_state(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                state=mutation.previous_state,
-                engine_type=self._engine(bot),
-            )
-            try:
-                await self._reconcile_runtime(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    retired_mappings=retired_logical_skill_mappings(
-                        list(current_mappings),
-                        list(previous_mappings),
-                    ),
-                )
-            except Exception as restore_error:
-                raise SkillSetRuntimeReconcileError() from restore_error
-            raise SkillSetRuntimeReconcileError() from exc
-        return {**mutation.item, "changed": mutation.changed, **mutation.details}
 
     def _audit(self, *, bot_id: str, owner_id: str, actor_id: str, action: str) -> None:
         self._audit_log_repo.insert(
@@ -780,21 +713,3 @@ class SkillSetManagementService:
             default_engine_types=self._default_engine_types(bot),
         )
         return bool(item.get("is_active"))
-
-    @staticmethod
-    def _require_mutable_bot(bot: dict) -> None:
-        if not is_bot_ready(bot):
-            raise LocalSkillNotReadyError()
-
-    async def _reconcile_runtime(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        retired_mappings: Sequence[PoolSkillMapping] = (),
-    ) -> None:
-        await self._runtime.project(
-            bot_id=bot_id,
-            owner_id=owner_id,
-            retired_mappings=retired_mappings,
-        )
