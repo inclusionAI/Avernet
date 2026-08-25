@@ -113,6 +113,12 @@ def test_list_inventory_combines_personal_cloud_and_local(client):
     assert ids == {"c1", "l1"}
 
 
+def test_inventory_openapi_declares_upgrade_action(client):
+    schema = client.app.openapi()["components"]["schemas"]["BotInventoryItem"]
+
+    assert "upgrade" in schema["properties"]["actions"]["items"]["enum"]
+
+
 def test_list_inventory_filters_non_service_bots(client):
     data = _ok(
         client.get("/openapi/v1/bots/all", params={"is_service": "false"})
