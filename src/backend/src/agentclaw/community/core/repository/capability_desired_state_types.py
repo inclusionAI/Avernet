@@ -11,7 +11,13 @@ class CapabilityDesiredState:
     set_active: dict[int, bool]
     memberships: dict[int, tuple[tuple[int, str | None, str | None], ...]]
     mcp_installations: set[str] = field(default_factory=set)
-    mcp_memberships: dict[int, tuple[str, ...]] = field(default_factory=dict)
+    #: Complete association rows, ``(server_code, name, description, icon,
+    #: user_id)`` — not bare codes: a compensation recreates these rows, and a
+    #: lossy snapshot would trade a transient projection failure for permanent
+    #: metadata corruption on memberships the mutation never touched.
+    mcp_memberships: dict[
+        int, tuple[tuple[str, str, str | None, str | None, str | None], ...]
+    ] = field(default_factory=dict)
     # The Bot's Default-Set exclusion rows, ``(set_id, member)``-keyed. Part
     # of the snapshot so a compensation can restore what the exclusion
     # commands wrote — the flush treats these rows as authoritative, so a

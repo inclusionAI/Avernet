@@ -192,7 +192,9 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.impl_registry import IMPL_REGISTRY, Mode
+from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
+from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
@@ -307,11 +309,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             scope=singleton,
         )
         binder.bind(
-            SkillSetManagementServiceProtocol,
-            to=SkillSetManagementService,
-            scope=singleton,
-        )
-        binder.bind(
             DirectActivationServiceProtocol,
             to=DirectActivationService,
             scope=singleton,
@@ -423,6 +420,41 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             skill_service_factory,
             parameter_service_factory,
             lambda: injector.get(DeviceContextResolver),
+        )
+
+    @singleton
+    @provider
+    @inject
+    def skill_set_management_service(
+        self,
+        repository: CapabilityDesiredStateRepositoryProtocol,
+        bot_repo: BotRepository,
+        runtime: CoreBotRuntimeProjectorProtocol,
+        legacy_factory: LegacySkillSetCompatibilityFactoryProtocol,
+        passport: PassportPlugin,
+        authorization: BotCapabilityAuthorizationHookProtocol,
+        audit_log_repo: BotCollabLogRepositoryProtocol,
+        mcp_center: MCPCenterPlugin,
+        mcp_auth: MCPAuthPlugin,
+        injector: Injector,
+    ) -> SkillSetManagementServiceProtocol:
+        """Bind the Set-scoped command service with the template ext seam.
+
+        A provider rather than a class binding because the ext-info provider
+        is a plain callable, not an injectable key — it carries the same
+        best-effort template context the read-side default-MCP union uses.
+        """
+        return SkillSetManagementService(
+            repository,
+            bot_repo,
+            runtime,
+            legacy_factory,
+            passport,
+            authorization,
+            audit_log_repo,
+            mcp_center,
+            mcp_auth,
+            ext_info_provider=_build__ext_info_provider(injector),
         )
 
     @singleton

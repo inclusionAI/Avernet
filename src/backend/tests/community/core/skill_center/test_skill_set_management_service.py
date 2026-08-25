@@ -2140,6 +2140,43 @@ async def test_adding_back_an_excluded_default_member_unexcludes():
 
 
 @pytest.mark.asyncio
+async def test_default_mcp_exclusion_passes_the_platform_default_policy():
+    """The service resolves the unmaterialized half and hands it to the UoW.
+
+    The exclusion command can read association rows itself, but the
+    engine/template default codes are read-time policy (spec A.2) — the
+    service resolves them with the same context the read-side union uses,
+    ext info included, so the command's stray-code gate cannot refuse a
+    genuine platform default.
+    """
+    from agentclaw.community.core.mcp.services._defaults import (
+        get_default_mcp_server_codes,
+    )
+
+    repository = _DefaultTargetRepository()
+    ext_calls: list[str] = []
+
+    def _ext(bot_id: str):
+        ext_calls.append(bot_id)
+        return None
+
+    service = _default_wire_service(repository)
+    service._ext_info_provider = _ext
+
+    await service.remove_mcp(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+        set_id="9", server_code="mcp.gone",
+    )
+
+    assert ext_calls == ["bot-1"]
+    name, kwargs = repository.exclusion_calls[0]
+    assert name == "exclude_default_mcp"
+    assert kwargs["platform_default_codes"] == frozenset(
+        get_default_mcp_server_codes("openclaw", None, ext_info=None)
+    )
+
+
+@pytest.mark.asyncio
 async def test_adding_a_new_member_to_the_default_stays_immutable():
     repository = _DefaultTargetRepository()
     service = _default_wire_service(repository)

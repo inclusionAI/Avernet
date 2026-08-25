@@ -147,9 +147,20 @@ class McpSkillSetControlPlaneCommands:
         self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
+        platform_default_codes: frozenset[str] = frozenset(),
     ) -> DesiredStateMutation:
         """The MCP twin of ``exclude_default_skill``: exclusion row +
-        Installation delta in one transaction."""
+        Installation delta in one transaction.
+
+        A Default Set's effective MCP membership has two halves: the
+        association rows this transaction can read, and the platform's
+        engine/template default codes — a read-time policy input the caller
+        resolves and passes in as ``platform_default_codes`` (spec A.2 keeps
+        that config unmaterialized). A code in neither half is the MCP twin
+        of the skill command's never-member gate: refused without writing,
+        because a stray code must not leave a dangling row that would
+        pre-exclude the server if the platform ever adds it.
+        """
         with self._db.transactional_orm_session() as session:
             row = self._default_set(
                 session, bot_id=bot_id, owner_id=owner_id, set_id=set_id,
@@ -157,15 +168,21 @@ class McpSkillSetControlPlaneCommands:
                 default_engine_types=default_engine_types,
             )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
+            member_codes = set_member_mcp_codes(
+                self._scope, session, skill_set_id=int(row.id)
+            )
+            if (
+                server_code not in member_codes
+                and server_code not in platform_default_codes
+            ):
+                return DesiredStateMutation(self._as_item(row), False, old)
             created = default_exclusions.exclude_mcp(
                 session, bot_id=bot_id, owner_id=owner_id,
                 set_id=int(row.id), server_code=server_code,
             )
             if not created:
                 return DesiredStateMutation(self._as_item(row), False, old)
-            if server_code in set_member_mcp_codes(
-                self._scope, session, skill_set_id=int(row.id)
-            ):
+            if server_code in member_codes:
                 mcp_installations.uninstall(
                     session, bot_id=bot_id, owner_id=owner_id,
                     env=get_current_env(), server_codes={server_code},

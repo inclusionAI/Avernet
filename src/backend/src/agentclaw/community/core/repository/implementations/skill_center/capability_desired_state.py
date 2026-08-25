@@ -644,17 +644,19 @@ class CapabilityDesiredStateRepository(
                             avernet_tenant=get_current_avernet_tenant(),
                         )
                     )
-            for set_id, server_codes in state.mcp_memberships.items():
+            for set_id, members in state.mcp_memberships.items():
                 set_row = next((row for row in current_sets if int(row.id) == set_id), None)
                 if set_row is None:
                     continue
-                for server_code in server_codes:
+                for server_code, name, description, icon, member_user_id in members:
                     session.add(
                         SkillSetMCPServer(
                             skill_set_id=set_id,
                             server_code=server_code,
-                            name=server_code,
-                            user_id=set_row.user_id,
+                            name=name,
+                            description=description,
+                            icon=icon,
+                            user_id=member_user_id,
                             env=get_current_env(),
                             avernet_tenant=get_current_avernet_tenant(),
                         )
@@ -855,7 +857,9 @@ class CapabilityDesiredStateRepository(
                 memberships[int(member.skill_set_id)].append(
                     (int(member.skill_id), member.user_id, member.skill_uuid)
                 )
-        mcp_memberships: dict[int, list[str]] = {set_id: [] for set_id in set_ids}
+        mcp_memberships: dict[
+            int, list[tuple[str, str, str | None, str | None, str | None]]
+        ] = {set_id: [] for set_id in set_ids}
         if set_ids:
             mcp_rows = (
                 self._scope(
@@ -867,7 +871,13 @@ class CapabilityDesiredStateRepository(
             )
             for member in mcp_rows:
                 mcp_memberships[int(member.skill_set_id)].append(
-                    str(member.server_code)
+                    (
+                        str(member.server_code),
+                        str(member.name),
+                        member.description,
+                        member.icon,
+                        member.user_id,
+                    )
                 )
         return CapabilityDesiredState(
             installations=self._installations(session, bot_id, owner_id),

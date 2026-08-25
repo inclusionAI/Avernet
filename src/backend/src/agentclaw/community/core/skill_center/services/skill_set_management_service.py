@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
+from typing import Any
+
 from injector import inject
 
 from agentclaw.community.core.skill_center.authorization_hook import (
@@ -19,6 +22,9 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
     SkillSetAccessDeniedError,
+)
+from agentclaw.community.core.mcp.services._defaults import (
+    get_default_mcp_server_codes,
 )
 from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
@@ -51,6 +57,7 @@ class SkillSetManagementService:
         audit_log_repo: BotCollabLogRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
         mcp_auth: MCPAuthPlugin,
+        ext_info_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
     ) -> None:
         self._repository = repository
         self._bot_repo = bot_repo
@@ -62,6 +69,7 @@ class SkillSetManagementService:
         self._audit_log_repo = audit_log_repo
         self._mcp_center = mcp_center
         self._mcp_auth = mcp_auth
+        self._ext_info_provider = ext_info_provider
 
     def _bot(self, *, bot_id: str, owner_id: str, user_id: str) -> dict:
         """Resolve the exact addressed Bot before applying caller policy."""
@@ -500,6 +508,9 @@ class SkillSetManagementService:
                     server_code=server_code,
                     engine_type=self._engine(bot),
                     default_engine_types=self._default_engine_types(bot),
+                    platform_default_codes=self._platform_default_mcp_codes(
+                        bot, bot_id
+                    ),
                 ),
             )
         return await self._mutate(
@@ -741,6 +752,27 @@ class SkillSetManagementService:
             self._require_mcp_permission(
                 actor_id=actor_id, server_code=str(mcp["server_code"])
             )
+
+    def _platform_default_mcp_codes(self, bot: dict, bot_id: str) -> frozenset[str]:
+        """The unmaterialized half of Default-Set MCP membership (spec A.2).
+
+        Resolved at write time with the same context the read-side union
+        uses — engine, template, best-effort ext info — so the exclusion
+        command can tell a platform-default code from a stray one.
+        """
+        ext_info = None
+        if self._ext_info_provider is not None:
+            try:
+                ext_info = self._ext_info_provider(bot_id)
+            except Exception:
+                ext_info = None
+        return frozenset(
+            get_default_mcp_server_codes(
+                self._engine(bot),
+                bot.get("template_type"),
+                ext_info=ext_info,
+            )
+        )
 
     @staticmethod
     def _engine(bot: dict) -> str:

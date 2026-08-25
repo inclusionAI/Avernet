@@ -162,7 +162,13 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
-    ) -> DesiredStateMutation: ...
+        platform_default_codes: frozenset[str] = frozenset(),
+    ) -> DesiredStateMutation:
+        """``platform_default_codes`` is the caller-resolved engine/template
+        default policy — the unmaterialized half of Default-Set MCP
+        membership. A code in neither it nor the association rows is refused
+        as ``changed=False`` without writing an exclusion row."""
+        ...
     @abstractmethod
     def unexclude_default_mcp(
         self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,

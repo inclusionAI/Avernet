@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine, event
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
@@ -2445,6 +2445,100 @@ def test_restore_desired_state_compensates_exclusion_commands():
     assert repository.unexclude_default_skill(
         set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
     ).changed
+
+
+def test_excluding_a_stray_mcp_code_owns_neither_half():
+    """The MCP twin of the skill never-member gate: no dangling row.
+
+    A code that is neither an association row nor a platform default is a
+    stray — a typo or stale UI state. Writing its exclusion anyway would
+    pre-exclude the server for this Bot if the platform ever adds it to the
+    shared Default Set.
+    """
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, _skill = _seed_default_with_member(db)
+
+    refused = repository.exclude_default_mcp(
+        set_id=str(default.id), server_code="mcp.stray", **_DEFAULT_SCOPE
+    )
+
+    assert refused.changed is False
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetMcpExclusion).count() == 0
+        assert session.query(BotMCPInstallation).count() == 1
+
+
+def test_excluding_a_platform_default_mcp_without_membership_writes_the_row():
+    """The half a membership-only guard would break (spec A.2).
+
+    Engine/template default MCPs are policy, not association rows, so the
+    caller names them; excluding one writes the exclusion row — that row is
+    exactly how a Bot opts out of a platform default — with no Installation
+    delta, because policy defaults were never installed rows.
+    """
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, _skill = _seed_default_with_member(db)
+
+    excluded = repository.exclude_default_mcp(
+        set_id=str(default.id), server_code="mcp.platform",
+        platform_default_codes=frozenset({"mcp.platform"}), **_DEFAULT_SCOPE
+    )
+
+    assert excluded.changed is True
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetMcpExclusion).count() == 1
+        assert session.query(BotMCPInstallation).count() == 1
+    assert repository.excluded_default_mcp_codes(
+        bot_id="bot", owner_id="owner", set_id=str(default.id)
+    ) == {"mcp.platform"}
+
+
+def test_restore_desired_state_preserves_mcp_membership_metadata():
+    """Compensation recreates the association row, not a husk of it.
+
+    A failed projection triggers restore for every ordinary Set the Bot has;
+    losing name/description/icon there would turn a transient runtime
+    failure into permanent metadata corruption on memberships the mutation
+    never touched.
+    """
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        ordinary = SkillSet(
+            name="tools", user_id="owner", bolt_id="bot",
+            engine_type="openclaw", is_active=True, env="dev",
+        )
+        session.add(ordinary)
+        session.flush()
+        session.add(
+            SkillSetMCPServer(
+                skill_set_id=ordinary.id, server_code="mcp.rich",
+                name="Rich MCP", description="does rich things",
+                icon="https://icons.example/rich.png", user_id="owner",
+                env="dev",
+            )
+        )
+
+    removed = repository.remove_mcp(
+        set_id=str(ordinary.id), server_code="mcp.rich", **_DEFAULT_SCOPE
+    )
+    assert removed.changed is True
+    repository.restore_desired_state(
+        bot_id="bot", owner_id="owner", state=removed.previous_state,
+        engine_type="openclaw",
+    )
+
+    with db.orm_session() as session:
+        row = session.query(SkillSetMCPServer).one()
+        assert (row.server_code, row.name, row.description, row.icon, row.user_id) == (
+            "mcp.rich",
+            "Rich MCP",
+            "does rich things",
+            "https://icons.example/rich.png",
+            "owner",
+        )
 
 
 def test_restore_desired_state_compensates_mcp_exclusion_commands():
