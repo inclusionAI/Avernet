@@ -148,6 +148,10 @@ if [[ -n "$ENV_FILE" ]]; then
     echo "==> Loaded ${#ENV_VARS[@]} env vars from $ENV_FILE" >&2
 fi
 
+# --- Always add deploy_time env var ---
+
+ENV_VARS+=("DEPLOY_TIME=$(date '+%Y-%m-%dT%H:%M:%S%z')"
+
 # --- Render env vars into YAML ---
 
 ENV_YAML=""
