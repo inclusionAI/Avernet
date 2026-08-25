@@ -8,6 +8,7 @@ use bcs_service_api::port::{
 };
 use bcs_service_api::{ServiceError, ServiceResult};
 use serde::Serialize;
+use tracing::warn;
 
 const WORK_ORDER_PATH: &str = "/openapi/v1/bots/work-orders/events";
 
@@ -142,6 +143,10 @@ fn notification_kind_label(kind: FriendConnectNotificationKind) -> &'static str 
     }
 }
 
+fn backend_auth_rejection(status: reqwest::StatusCode) -> bool {
+    matches!(status, reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN)
+}
+
 fn title_for(kind: FriendConnectNotificationKind) -> &'static str {
     match kind {
         FriendConnectNotificationKind::ApprovalRequested => "好友添加申请待审批",
@@ -235,6 +240,14 @@ impl FriendConnectNotificationPort for HttpFriendConnectNotificationPort {
         }
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
+        if backend_auth_rejection(status) {
+            warn!(
+                status = %status,
+                body = %body,
+                "friend work-order backend rejected the request; treating notification as no-op"
+            );
+            return Ok(());
+        }
         Err(ServiceError::InternalError(format!(
             "friend work-order create request returned {status}: {body}"
         )))
@@ -270,14 +283,8 @@ mod tests {
 
     #[tokio::test]
     async fn notify_returns_internal_error_when_backend_is_unavailable() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind unavailable backend");
-        let mut adapter = HttpFriendConnectNotificationPort::new(&format!(
-            "http://{}",
-            listener.local_addr().expect("backend address")
-        ))
-        .expect("valid url");
+        let mut adapter = HttpFriendConnectNotificationPort::new("http://127.0.0.1:9")
+            .expect("valid url");
         adapter.client = reqwest::Client::builder()
             .no_proxy()
             .timeout(std::time::Duration::from_millis(100))
@@ -295,6 +302,13 @@ mod tests {
             })
             .await;
         assert!(matches!(result, Err(ServiceError::InternalError(message)) if message.contains("friend work-order create request failed")));
+    }
+
+    #[test]
+    fn backend_unauthorized_and_forbidden_are_treated_as_noop() {
+        assert!(backend_auth_rejection(reqwest::StatusCode::UNAUTHORIZED));
+        assert!(backend_auth_rejection(reqwest::StatusCode::FORBIDDEN));
+        assert!(!backend_auth_rejection(reqwest::StatusCode::BAD_REQUEST));
     }
 
     #[test]
