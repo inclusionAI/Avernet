@@ -1342,7 +1342,7 @@ class SkillSetService:
 
         return resolved_mappings
 
-    # ====== MCP Server Management in SkillSet ======
+    # ====== MCP Server reads (mutations live on the control plane) ======
 
     def get_set_mcp_servers(
         self,

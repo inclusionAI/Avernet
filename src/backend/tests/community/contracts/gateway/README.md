@@ -286,7 +286,6 @@ svc.get_engine_paths.return_value = {"openclaw": "/tmp/test/openclaw"}
 - Service 方法返回**原始数据**（列表或 bool），非 `{"success": True, "data": [...]}` 包装
 - `dict` 中字段名是 `bolt_id`（Handler 内部映射为 `bot_id`）
 - `id` 字段类型为 `str`（Pydantic `SkillSetResponse.id` 要求 string）
-- 异步方法 `add_skills_to_set`、`remove_skill_from_set` 等需用 `AsyncMock`
 - 所有断言使用 `assert_success` + 直接 `body["data"]`，不再使用 `if body.get("success")` 或 `if isinstance(data, list)` 防御性守卫
 
 ### Rule #16 — MCP 市场 (`test_rule16_mcp.py`)
