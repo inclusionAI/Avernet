@@ -1187,6 +1187,112 @@ async fn bot_final_event_relays_through_bot_delivery_port() {
 }
 
 #[tokio::test]
+async fn bot_final_event_relay_uses_each_provider_targets_session_tags() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    support
+        .registry
+        .insert_named_actor("bot-consultant", "Consultant")
+        .await;
+    support
+        .registry
+        .set_delivery_target(
+            "bot-driver",
+            support::FakeRegistryService::provider_target("bot-driver"),
+        )
+        .await;
+    support
+        .registry
+        .set_delivery_target(
+            "bot-consultant",
+            support::FakeRegistryService::provider_target("bot-consultant"),
+        )
+        .await;
+
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.routing_policy = Some(RoutingPolicy {
+        mode: RoutingMode::Structured,
+        default_bot_final_delivery: DefaultDelivery::SendToDriver,
+        ..RoutingPolicy::default()
+    });
+    let mut stale_consultant =
+        Participant::bot("bot-consultant", ParticipantRole::Consultant);
+    stale_consultant.tags = vec!["stale-consultant".to_string()];
+    group.participants.push(stale_consultant);
+    group
+        .participants
+        .iter_mut()
+        .find(|participant| participant.bot_uuid == "bot-driver")
+        .expect("driver participant")
+        .tags = vec!["stale-driver".to_string()];
+    support.group.upsert(group).await.unwrap();
+
+    let mut driver = Participant::bot("bot-driver", ParticipantRole::Driver);
+    driver.tags = vec!["draft".to_string(), "driver-only".to_string()];
+    let mut sender = Participant::bot("bot-observer", ParticipantRole::Observer);
+    sender.tags = vec!["sender-tag".to_string()];
+    let mut consultant = Participant::bot("bot-consultant", ParticipantRole::Consultant);
+    consultant.tags = vec!["online".to_string(), "consultant-only".to_string()];
+    let mut session = test_session(
+        "group-1:abcdef12",
+        "group-1",
+        SessionKind::ServiceInvocation,
+    );
+    session.participants = vec![driver, sender, consultant];
+    let session_management = Arc::new(RecordingSessionManagement::new(vec![session]));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_session_management(session_management);
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "run-provider-tags".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({
+            "state": "final",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "done with tags"}],
+            },
+        }),
+        state: ChatEventState::Final,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    let frames = support.bot_delivery.frames().await;
+    assert_eq!(frames.len(), 2);
+    assert!(support
+        .bot_delivery
+        .targets()
+        .await
+        .iter()
+        .all(BotDeliveryTarget::is_http_provider));
+    let send = frames
+        .iter()
+        .find(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.send"))
+        .expect("driver chat.send frame");
+    assert_eq!(
+        request_params(send)["tags"],
+        json!(["draft", "driver-only"])
+    );
+    let inject = frames
+        .iter()
+        .find(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.inject"))
+        .expect("consultant chat.inject frame");
+    assert_eq!(
+        request_params(inject)["tags"],
+        json!(["online", "consultant-only"])
+    );
+}
+
+#[tokio::test]
 async fn bot_final_event_relay_preserves_session_id_for_legacy_target() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();

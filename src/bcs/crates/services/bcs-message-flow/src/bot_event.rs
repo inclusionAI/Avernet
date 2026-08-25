@@ -696,6 +696,16 @@ async fn relay_final_chat_event(
             flow.registry.get_protocol_version(&target.bot_uuid).await,
             &delivery_target,
         );
+        let provider_tags = if delivery_target.is_http_provider() {
+            group
+                .participants
+                .iter()
+                .find(|participant| participant.bot_uuid == target.bot_uuid)
+                .map(|participant| participant.tags.as_slice())
+                .unwrap_or(&[])
+        } else {
+            &[]
+        };
         let mut frame = match target.delivery_type {
             DeliveryType::Send => build_send_frame(
                 &cmd.group_id,
@@ -704,6 +714,7 @@ async fn relay_final_chat_event(
                 &sender_display_name,
                 &outbound_message.content,
                 &group_context,
+                provider_tags,
                 protocol_version,
                 None,
             ),
@@ -714,6 +725,7 @@ async fn relay_final_chat_event(
                 &sender_display_name,
                 &outbound_message.content,
                 &group_context,
+                provider_tags,
                 protocol_version,
                 None,
             ),
@@ -1937,6 +1949,7 @@ fn build_send_frame(
     from_bot_name: &str,
     message: &str,
     group_context: &GroupContext,
+    tags: &[String],
     protocol_version: u32,
     message_id: Option<&str>,
 ) -> BcsFrame {
@@ -1949,6 +1962,7 @@ fn build_send_frame(
         from_bot_name,
         message,
         group_context,
+        tags,
         protocol_version,
         message_id,
     )
@@ -1961,6 +1975,7 @@ fn build_inject_frame(
     from_bot_name: &str,
     message: &str,
     group_context: &GroupContext,
+    tags: &[String],
     protocol_version: u32,
     message_id: Option<&str>,
 ) -> BcsFrame {
@@ -1973,6 +1988,7 @@ fn build_inject_frame(
         from_bot_name,
         message,
         group_context,
+        tags,
         protocol_version,
         message_id,
     )
@@ -1987,6 +2003,7 @@ fn build_bot_relay_frame(
     from_bot_name: &str,
     message: &str,
     group_context: &GroupContext,
+    tags: &[String],
     protocol_version: u32,
     message_id: Option<&str>,
 ) -> BcsFrame {
@@ -2017,6 +2034,10 @@ fn build_bot_relay_frame(
         "from": from_bot,
         "deliver": deliver,
     });
+
+    if !tags.is_empty() {
+        params["tags"] = serde_json::json!(tags);
+    }
 
     if supports_session_field {
         if let Some(session_id) = bcs_session_id {
