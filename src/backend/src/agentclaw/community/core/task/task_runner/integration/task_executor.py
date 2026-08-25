@@ -265,11 +265,14 @@ class TaskExecutor:
             # state_machine 群需 opening_message(task-loop panel),taskId = 任务ID
             _task_id = gf.extend_props.get("task_id")
             if _task_id:
-                import json as _json
+                # BCS 契约:opening_message.params 必须是 JSON object,不能字符串化
+                # (见 ocb-public/src/bcs/docs/custom-collaboration-opening-message-integration-guide.md §4:
+                # params = 传给业务组件的 JSON object)。字符串化会被真实 BCS 判
+                # "data did not match any variant of untagged enum OpeningMessage" 422。
                 req_kwargs["opening_message"] = {
                     "type": "panel",
                     "component": "partnerPanel.CollaborationRunView",
-                    "params": _json.dumps({
+                    "params": {
                         "groupId": "{{bcs.group_id}}",
                         "sessionId": "{{bcs.session_id}}",
                         "runId": "{{bcs.run_id}}",
@@ -278,7 +281,7 @@ class TaskExecutor:
                         "businessScene": "release_review",
                         "taskId": _task_id,
                         "apiBaseUrl": gf.extend_props.get("api_base_url") or "",
-                    }),
+                    },
                 }
         if originator_bot_id:
             req_kwargs["originator"] = bcs_uuid(str(originator_bot_id))

@@ -96,6 +96,7 @@ under `legacy_value` so the response remains object-shaped without losing data.
 | Approved | `SPACE_JOIN_REVIEWED` | `NOTICE` | `SPACE_JOIN_APPROVED` | `空间加入申请已通过` | `你加入空间「{space_name}」的申请已通过。` |
 | Rejected | `SPACE_JOIN_REVIEWED` | `NOTICE` | `SPACE_JOIN_REJECTED` | `空间加入申请未通过` | `你加入空间「{space_name}」的申请未通过。拒绝原因：{review_remark}` |
 | Added directly | `SPACE_MEMBER_ADDED` | `NOTICE` | `你已被添加到空间` | `你已被添加到空间` | `你已被添加到空间「{space_name}」。` |
+| Removed from Space | `SPACE_MEMBER_REMOVED` | `NOTICE` | `你已被移出空间` | `你已被移出空间` | `你已被移出空间「{space_name}」。` |
 
 `SPACE_JOIN_REVIEWED` deliberately uses one event value for both outcomes;
 the associated work-order status selects the approved or rejected template.

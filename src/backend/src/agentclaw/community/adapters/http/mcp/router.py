@@ -88,6 +88,7 @@ async def list_mcp_servers(
     network_types: Optional[list[str]] = Query(None, description="网络类型列表，默认只允许 INTERNET/OFFICE"),
     categories: Optional[list[str]] = Query(None, description="类目列表"),
     tenants: Optional[list[str]] = Query(None, description="租户列表"),
+    tags: Optional[list[str]] = Query(None, description="标签列表"),
     market_service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
 ) -> MCPListResponse:
     """Get MCP list from market."""
@@ -114,6 +115,7 @@ async def list_mcp_servers(
         network_types=effective_network_types,
         categories=categories,
         tenants=tenants,
+        tags=tags,
     )
     if not result.get("success"):
         raise HTTPException(status_code=500, detail=result.get("message", "Failed to fetch MCP list"))

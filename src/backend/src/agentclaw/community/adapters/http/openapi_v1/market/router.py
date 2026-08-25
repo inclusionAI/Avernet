@@ -9,7 +9,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
-from agentclaw.community.adapters.http.openapi_v1.mcp.router import _to_server
+from agentclaw.community.adapters.http.openapi_v1.mcp.router import _to_server_detail
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -22,6 +22,7 @@ from agentclaw.community.api.skill_market_service import (
 )
 from agentclaw.community.core.mcp.config_flow import list_marketplace_servers
 from agentclaw.community.core.mcp.presentation import ALLOWED_NETWORK_TYPES
+from agentclaw.community.core.mcp.presentation import strip_ext_info
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,
@@ -69,6 +70,7 @@ async def search_skills(
 @router.post(
     "/mcp-servers",
     response_model=Envelope[Page[McpMarketItem]],
+    response_model_exclude_unset=True,
     dependencies=_AUTH,
 )
 @envelope_errors
@@ -77,16 +79,37 @@ async def search_mcp_servers(
     request: Request,
     service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
 ) -> Envelope[Page[McpMarketItem]]:
-    """Search the MCP marketplace without changing the existing MCP API."""
+    """Search the MCP marketplace with the legacy catalogue filters."""
+    requested_network_types = body.network_types or list(ALLOWED_NETWORK_TYPES)
+    effective_network_types = tuple(
+        network_type
+        for network_type in requested_network_types
+        if network_type in ALLOWED_NETWORK_TYPES
+    )
+    if not effective_network_types:
+        return page(0, [], request)
+
     result = list_marketplace_servers(
         page=body.page_num,
         page_size=body.page_size,
         keyword=body.keyword,
-        network_types=ALLOWED_NETWORK_TYPES,
+        network_types=effective_network_types,
         market_service=service,
+        server_codes=body.server_codes,
+        platform_server_codes=body.platform_server_codes,
+        run_modes=body.run_modes,
+        statuses=body.statuses,
+        transport_protocols=body.transport_protocols,
+        host_platforms=body.host_platforms,
+        owners=body.owners,
+        categories=body.categories,
+        tenants=body.tenants,
+        tags=body.tags,
     )
     items = [
-        McpMarketItem.model_validate(_to_server(item).model_dump())
+        McpMarketItem.model_validate(
+            _to_server_detail(strip_ext_info(item)).model_dump(exclude_unset=True)
+        )
         for item in (result.get("data") or [])
         if isinstance(item, dict)
     ]

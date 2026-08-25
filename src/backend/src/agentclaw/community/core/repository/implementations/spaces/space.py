@@ -150,6 +150,21 @@ class SpaceRepository(SpaceRepositoryProtocol):
             space.sc_team_id = record.sc_team_id
             db.flush()
 
+    def get_team_space_by_name(self, *, creator_id: str, name: str, env: str):
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self._Space)
+                .filter(
+                    self._Space.created_by == creator_id,
+                    self._Space.name == name,
+                    self._Space.space_type == SpaceType.TEAM.value,
+                    self._Space.env == env,
+                    self._Space.deleted_at.is_(None),
+                )
+                .first()
+            )
+            return row.to_record() if row is not None else None
+
     @contextmanager
     def create_team_transaction(
         self,
