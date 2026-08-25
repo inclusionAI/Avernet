@@ -31,6 +31,10 @@ from agentclaw.community.core.mcp.services._defaults import (
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 from agentclaw.community.core.repository.protocols.skill_installation import (
     SkillInstallationRepositoryProtocol,
 )
@@ -174,6 +178,7 @@ class SkillSetService:
         ]
         | None = None,
         installations: SkillInstallationRepositoryProtocol | None = None,
+        reader: BotCapabilityStateReaderProtocol | None = None,
     ):
         """
         Args:
@@ -201,6 +206,7 @@ class SkillSetService:
         self.mcp_config_service = mcp_config_service
         self.skill_service = skill_service
         self._bot_repo = bot_repo
+        self._reader = reader
 
         self.bot_id = bot_id or "default"
         self.user_id = user_id
@@ -1519,60 +1525,48 @@ class SkillSetService:
     ) -> list[dict]:
         """The bot's active, de-duped skill DB records.
 
-        Each record carries ``git_path`` — the source of truth for the skill's actual
-        location (``git://<repo-rel>`` for shared market skills, ``local://<abs host
-        path>`` for user uploads). Collects skills across all active skill sets
-        (including the per-engine default set), drops default-set user exclusions, and
-        de-dups by ``git_path``.
+        Each record carries ``git_path`` — the source of truth for the skill's
+        actual location (``git://<repo-rel>`` for shared market skills,
+        ``local://<abs host path>`` for user uploads). Installation is the
+        single source of truth: the reader flushes Set configuration
+        (activation, Default membership, exclusions) into Installation, then
+        answers from it alone.
 
         Used by both ``get_symlink_mappings`` (ARCA container symlinks) and the
         config-compose collector (teclaw — which reads ``git_path`` directly, no
-        container round-trip).
+        container round-trip); both consume only the published keys ``id``,
+        ``name``, ``git_path``, ``skill_uuid``, ``sc_version_number``.
         """
         effective_bolt_id = bolt_id if bolt_id else self.bot_id
         effective_user_id = user_id if user_id else self.entity_id
-        from agentclaw.community.utils.env_utils import get_current_env
-
-        installed_skills = self.skill_repo.list_bot_installed_skills(
-            env=get_current_env(),
-            owner_id=effective_user_id,
-            bot_id=effective_bolt_id,
-        )
-        # 1. 查询所有激活的技能集（包含默认能力集）
-        active_skill_sets = self.list_active_skill_sets(
-            user_id=effective_user_id,
-            bolt_id=effective_bolt_id,
-        )
-        if not active_skill_sets and not installed_skills:
-            logger.warning(f"[get_active_skills] 未找到激活的技能集: user_id={effective_user_id}, bolt_id={effective_bolt_id}")
+        if self._reader is None:
+            raise RuntimeError(
+                "SkillSetService.get_active_skills requires the capability "
+                "state reader; construct through SkillSetServiceFactory"
+            )
+        try:
+            assets = self._reader.active_skill_assets(
+                bot_id=effective_bolt_id, owner_id=effective_user_id
+            )
+        except LocalSkillNotFoundError:
+            # The legacy merge tolerated an unknown Bot by answering empty;
+            # BFF display callers keep that grace.
+            logger.warning(
+                "[get_active_skills] Bot not found: user_id=%s, bolt_id=%s",
+                effective_user_id,
+                effective_bolt_id,
+            )
             return []
-
-        # 2. 遍历每个能力集，收集所有技能
-        all_skills = []
-        for skill_set in active_skill_sets:
-            skill_set_id = skill_set.get('id')
-            skills = self.skill_set_repo.get_skills_in_set(str(skill_set_id))
-
-            if skill_set.get('is_default'):
-                # Desired Local state is the active-only Installation fact.
-                # Never recover it from the legacy Default exclusion table.
-                skills = [
-                    skill
-                    for skill in skills
-                    if not str(skill.get("git_path") or "").startswith("local://")
-                ]
-            all_skills.extend(skills)
-        all_skills.extend(installed_skills)
-
-        # 3. 根据 git_path 去重
-        seen_git_paths = set()
-        unique_skills = []
-        for skill in all_skills:
-            git_path = skill.get('git_path', '')
-            if git_path and git_path not in seen_git_paths:
-                seen_git_paths.add(git_path)
-                unique_skills.append(skill)
-        return unique_skills
+        return [
+            {
+                "id": str(asset.skill_id),
+                "name": asset.name,
+                "git_path": asset.git_path,
+                "skill_uuid": asset.skill_uuid,
+                "sc_version_number": asset.sc_version_number,
+            }
+            for asset in assets
+        ]
 
     # ====== Symlink Activation Config ======
 

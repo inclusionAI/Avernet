@@ -87,7 +87,7 @@ lands in the same group as the migration of its last caller.
 
 ## Group 4 — Symlink/compose projection converges
 
-- [ ] 4.1 Inject the reader into `SkillSetService` (factory); replace the
+- [x] 4.1 Inject the reader into `SkillSetService` (factory); replace the
       `get_active_skills` merge body with delegation (keys preserved: `id`,
       `name`, `git_path`, `skill_uuid`, `sc_version_number`).
 - [ ] 4.2 Update `test_skill_set_service_symlink_mappings.py`; add the

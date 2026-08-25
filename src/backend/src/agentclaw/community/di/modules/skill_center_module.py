@@ -747,6 +747,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         bot_repo: BotRepository,
         device_plugin: DeviceAccessor,
         path_factory: WorkspacePathFactory,
+        reader: CoreBotCapabilityStateReaderProtocol,
         injector: Injector,
     ) -> SkillSetServiceFactory:
         return SkillSetServiceFactory(
@@ -764,6 +765,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             pool_layout_paths=skill_service_factory.resolve_pool_paths,
             ext_info_provider=_build__ext_info_provider(injector),
             installations=installations,
+            reader=reader,
         )
 
     @singleton
