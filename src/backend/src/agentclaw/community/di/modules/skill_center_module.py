@@ -39,7 +39,9 @@ from agentclaw.community.api.skill_query_service import (
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
 )
-from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
+from agentclaw.community.api.skill_set_service_factory import (
+    SkillSetServiceFactoryProtocol,
+)
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
@@ -56,21 +58,27 @@ from agentclaw.community.plugin_api.device_sync_dispatcher import (
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
-from agentclaw.community.core.repository.implementations.skill_center.propagation_log import \
-    SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository
+from agentclaw.community.core.repository.implementations.skill_center.propagation_log import (
+    SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository,
+)
 from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
     CapabilityDesiredStateRepository,
 )
 from agentclaw.community.core.repository.implementations.skill_center.space_skill import (
     SpaceSkillRepository as UnifiedSpaceSkillRepository,
 )
-from agentclaw.community.core.repository.implementations.skill_center.sync_log import \
-    SkillCenterSyncLogRepository as UnifiedSkillCenterSyncLogRepository
+from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
+    SkillEditorRequestRepository,
+)
+from agentclaw.community.core.repository.implementations.skill_center.sync_log import (
+    SkillCenterSyncLogRepository as UnifiedSkillCenterSyncLogRepository,
+)
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillEditorRequestRepositoryProtocol,
     SkillCategoryRepository,
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
@@ -253,7 +261,9 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         # injection returns the same instance.
         binder.bind(MarketCache, to=MarketCache, scope=singleton)
         binder.bind(SkillMarketService, to=SkillMarketService, scope=singleton)
-        binder.bind(RepositoryCatalogService, to=RepositoryCatalogService, scope=singleton)
+        binder.bind(
+            RepositoryCatalogService, to=RepositoryCatalogService, scope=singleton
+        )
         # ``GitSyncConfig.__init__`` reads YAML + env vars; bind as a
         # singleton so the file/env scan happens once.
         binder.bind(GitSyncConfig, to=GitSyncConfig, scope=singleton)
@@ -289,6 +299,11 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         binder.bind(
             SpaceSkillRepository,
             to=UnifiedSpaceSkillRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            SkillEditorRequestRepositoryProtocol,
+            to=SkillEditorRequestRepository,
             scope=singleton,
         )
         binder.bind(
@@ -375,10 +390,13 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         self, service: SkillMarketService
     ) -> SkillMarketServiceProtocol:
         return service
+
     @singleton
     @provider
     @inject
-    def repository_catalog_service(self, service: RepositoryCatalogService) -> RepositoryCatalogServiceProtocol:
+    def repository_catalog_service(
+        self, service: RepositoryCatalogService
+    ) -> RepositoryCatalogServiceProtocol:
         return service
 
     @singleton

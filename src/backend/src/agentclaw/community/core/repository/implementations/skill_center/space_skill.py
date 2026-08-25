@@ -13,14 +13,12 @@ from agentclaw.community.core.models.space_skill import (
     SkillGrant,
     SkillSpaceBinding,
 )
-from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
-    SkillEditorRequestRepository,
-)
 from agentclaw.community.core.spaces.repository.models import (
     SpaceMemberModel,
     SpaceModel,
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillEditorRequestRepositoryProtocol,
     SpaceSkillRepository as SpaceSkillRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.skill_center_types import (
@@ -56,8 +54,13 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
     """
 
     @inject
-    def __init__(self, db: DatabasePlugin):
+    def __init__(
+        self,
+        db: DatabasePlugin,
+        skill_editor_requests: SkillEditorRequestRepositoryProtocol,
+    ):
         self._db = db
+        self._skill_editor_requests = skill_editor_requests
 
     def create_space(self, data: SpaceCreateData) -> SpaceRecord:
         with self._db.orm_session() as session:
@@ -343,7 +346,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
         reason: str | None,
         env: str,
     ) -> SpaceSkillGrantSetRecord:
-        with self._db.orm_session() as session:
+        with self._db.transactional_orm_session() as session:
             self._require_binding(
                 session, space_id=space_id, skill_id=skill_id, env=env, lock=True
             )
@@ -427,7 +430,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                 target.revoked_at = None
                 target.revoked_by = None
             session.flush()
-            SkillEditorRequestRepository.reroute_pending_reviewer(
+            self._skill_editor_requests.reroute_pending_reviewer(
                 session,
                 skill_id=skill_id,
                 previous_owner_user_id=current_owner.user_id,
