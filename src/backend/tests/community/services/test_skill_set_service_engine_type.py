@@ -197,17 +197,6 @@ class TestSkillSetServiceEngineTypeThreading:
         )
         assert service.engine_type == "openclaw"
 
-    async def test_remove_skill_from_set_passes_engine_type(self, skill_set_service, mock_skill_set_repo):
-        """remove_skill_from_set should pass engine_type to repo.get_all_active_skill_sets."""
-        mock_skill_set_repo.get_by_id.return_value = {"id": "1", "is_default": False, "bolt_id": "b1"}
-        mock_skill_set_repo.remove_skill_from_set.return_value = True
-        mock_skill_set_repo.get_all_active_skill_sets.return_value = []
-        await skill_set_service.remove_skill_from_set("1", "s1")
-        mock_skill_set_repo.get_all_active_skill_sets.assert_called_once()
-        call_kwargs = mock_skill_set_repo.get_all_active_skill_sets.call_args.kwargs
-        assert call_kwargs.get("engine_type") == "claude-code"
-
-
 def _make_skill_set_service_for_default_selection(
     tmp_path, *, engine_type, runtime_engine_type, default_skill_set_selection_policy=None
 ):

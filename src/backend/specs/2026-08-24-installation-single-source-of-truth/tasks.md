@@ -204,7 +204,7 @@ lands in the same group as the migration of its last caller.
 - [x] 11.1 Delete `core/skill_center/installation_compatibility.py`.
 - [x] 11.2 Delete `_ensure_default_set` / `_ensure_default_set_membership`
       from `local_skill_upload_service.py` (+ tests).
-- [ ] 11.3 Verify zero callers by search, then delete legacy
+- [x] 11.3 Verify zero callers by search, then delete legacy
       `SkillSetService` methods: `add_skills_to_set`,
       `remove_skill_from_set`, `add_mcp_to_skill_set`,
       `remove_mcp_from_skill_set` (keep any still reached; record in PR).

@@ -320,27 +320,6 @@ class SkillSetRepository(Protocol):
         ...
 
     @abstractmethod
-    def exclude_default_set_skill(
-        self,
-        *,
-        owner_id: str,
-        bot_id: str,
-        skill_set_id: int,
-        skill_id: int,
-        env: str,
-    ) -> tuple[bool, bool]:
-        """Exclude a Skill from a Default Set and retire its Installation.
-
-        ``owner_id`` is the Bot owner, not the acting caller: both the
-        exclusion and the Installation row are the Bot's persisted state, and
-        every reader of either keys it that way.
-
-        Returns ``(created, uninstalled)``: whether this call is the one that
-        recorded the exclusion, and whether it removed an Installation row.
-        """
-        ...
-
-    @abstractmethod
     def remove_default_skill_exclusion(
         self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
     ) -> bool:

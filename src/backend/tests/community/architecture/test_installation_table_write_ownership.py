@@ -40,13 +40,6 @@ _TABLES_DIR = (
 _WRITE_ALLOWLIST: dict[str, str] = {
     "community/core/models/skill.py": "Model definition module.",
     "community/core/models/mcp.py": "Model definition module.",
-    "community/core/repository/implementations/skill_center/skill.py": (
-        "exclude_default_set_skill still deletes the Installation row with "
-        "its exclusion write. Its only caller is the G.16-dead legacy "
-        "SkillSetService.remove_skill_from_set; the UoW exclusion commands "
-        "replace the flow and the cleanup group deletes both, removing this "
-        "entry (specs/2026-08-24-installation-single-source-of-truth)."
-    ),
 }
 
 #: Modules allowed to import the ``tables`` command modules — the UoW and

@@ -128,7 +128,7 @@ def test_lock_unavailable_is_a_conflict_not_a_service_outage(
 def test_a_raise_site_may_say_more_than_the_default_detail(
     client: TestClient,
 ) -> None:
-    """``remove_skill_from_set`` relies on this to keep its own 404 wording."""
+    """Handlers rely on this to keep their own spelled-out 404 wording."""
     response = client.get("/api/skillsets/raise-detail/notfound")
 
     assert response.status_code == 404
