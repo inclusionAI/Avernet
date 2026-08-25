@@ -14,6 +14,7 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogMetadata,
     BotCatalogMetadataServiceProtocol,
     BotCatalogMetadataUnavailableError,
+    BotCatalogMetadataPage,
     BotCatalogSearchFilters,
 )
 from agentclaw.community.di.container import build_injector
@@ -71,14 +72,17 @@ def test_bcs_catalog_search_maps_current_page_and_parses_exact_address() -> None
         search="agent", page=2, page_size=20, caller=_caller(), request_id="trace-1"
     )
 
-    assert result == [
-        BotCatalogMetadata(
-            BotCatalogAddress("bot-1", "owner-1"),
-            "bot",
-            bot_uuid=" bot-1 : owner-1 ",
-            actor_kind="bot",
-        )
-    ]
+    assert result == BotCatalogMetadataPage(
+        total=21,
+        items=[
+            BotCatalogMetadata(
+                BotCatalogAddress("bot-1", "owner-1"),
+                "bot",
+                bot_uuid=" bot-1 : owner-1 ",
+                actor_kind="bot",
+            )
+        ],
+    )
     call = http.calls_to("get")[0]
     assert call.args[0] == "/bots/search"
     assert call.kwargs["params"] == {
@@ -96,9 +100,10 @@ def test_bcs_catalog_search_preserves_optional_is_friend_false() -> None:
     http.set_response(
         "get",
         _response(
-            200,
-            {
-                "items": [
+                200,
+                {
+                    "total": 1,
+                    "items": [
                     {
                         "bot_uuid": "bot-1:owner-1",
                         "actor_kind": "bot",
@@ -113,7 +118,8 @@ def test_bcs_catalog_search_preserves_optional_is_friend_false() -> None:
         search=None, page=1, page_size=20, caller=_caller(), request_id="trace-friend"
     )
 
-    assert getattr(result[0], "is_friend", None) is False
+    assert result.total == 1
+    assert getattr(result.items[0], "is_friend", None) is False
 
 
 def test_bcs_catalog_search_preserves_requested_optional_metadata_fields() -> None:
@@ -129,9 +135,10 @@ def test_bcs_catalog_search_preserves_requested_optional_metadata_fields() -> No
     http.set_response(
         "get",
         _response(
-            200,
-            {
-                "items": [
+                200,
+                {
+                    "total": 1,
+                    "items": [
                     {
                         "bot_uuid": "bot-1:owner-1",
                         "actor_kind": "bot",
@@ -151,20 +158,23 @@ def test_bcs_catalog_search_preserves_requested_optional_metadata_fields() -> No
         search=None, page=1, page_size=20, caller=_caller(), request_id="trace-metadata"
     )
 
-    assert result == [
-        BotCatalogMetadata(
-            BotCatalogAddress("bot-1", "owner-1"),
-            "bot",
-            bot_uuid="bot-1:owner-1",
-            is_friend=False,
-            visibility="protected",
-            is_online=False,
-            actor_kind="bot",
-            friend_ext=friend_ext,
-            friend_check_in_strategy=friend_check_in_strategy,
-            user_visibility="private",
-        )
-    ]
+    assert result == BotCatalogMetadataPage(
+        total=1,
+        items=[
+            BotCatalogMetadata(
+                BotCatalogAddress("bot-1", "owner-1"),
+                "bot",
+                bot_uuid="bot-1:owner-1",
+                is_friend=False,
+                visibility="protected",
+                is_online=False,
+                actor_kind="bot",
+                friend_ext=friend_ext,
+                friend_check_in_strategy=friend_check_in_strategy,
+                user_visibility="private",
+            )
+        ],
+    )
 
 
 def test_bcs_catalog_search_omits_blank_query_and_keeps_page_boundary() -> None:
@@ -176,12 +186,23 @@ def test_bcs_catalog_search_omits_blank_query_and_keeps_page_boundary() -> None:
         search=" ", page=3, page_size=10, caller=_caller(), request_id="trace-2"
     )
 
-    assert result == []
+    assert result == BotCatalogMetadataPage(total=0, items=[])
     assert http.calls_to("get")[0].kwargs["params"] == {
         "offset": 20,
         "limit": 10,
         "tc_bot": True,
     }
+
+
+@pytest.mark.parametrize("total", [True, -1, "1", None])
+def test_bcs_catalog_search_rejects_invalid_total(total: object) -> None:
+    service, http = _make_service()
+    http.set_response("get", _response(200, {"total": total, "items": []}))
+
+    with pytest.raises(BotCatalogMetadataUnavailableError):
+        service.search_public_bot_metadata(
+            search=None, page=1, page_size=20, caller=_caller(), request_id="trace-total"
+        )
 
 
 def test_bcs_catalog_search_forwards_only_supplied_frontend_filters() -> None:
@@ -205,7 +226,7 @@ def test_bcs_catalog_search_forwards_only_supplied_frontend_filters() -> None:
         request_id="trace-filters",
     )
 
-    assert result == []
+    assert result == BotCatalogMetadataPage(total=0, items=[])
     call = http.calls_to("get")[0]
     assert call.args[0] == "/bots/search"
     assert call.kwargs["params"] == {

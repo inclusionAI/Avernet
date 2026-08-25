@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 
 import httpx
 
@@ -11,6 +11,7 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogCaller,
     BotCatalogMetadata,
     BotCatalogMetadataUnavailableError,
+    BotCatalogMetadataPage,
     BotCatalogSearchFilters,
 )
 from agentclaw.community.log import get_logger
@@ -35,7 +36,7 @@ class BcsBotCatalogMetadataService:
         filters: BotCatalogSearchFilters | None = None,
         caller: BotCatalogCaller,
         request_id: str,
-    ) -> Sequence[BotCatalogMetadata]:
+    ) -> BotCatalogMetadataPage:
         """Read one BCS result page without exposing BCS response data."""
         del caller
         params: dict[str, str | int] = {
@@ -69,6 +70,9 @@ class BcsBotCatalogMetadataService:
             if not isinstance(payload, Mapping) or not isinstance(
                 payload.get("items"), list
             ):
+                raise BotCatalogMetadataUnavailableError()
+            total = payload.get("total")
+            if isinstance(total, bool) or not isinstance(total, int) or total < 0:
                 raise BotCatalogMetadataUnavailableError()
 
             seen: set[BotCatalogAddress] = set()
@@ -133,7 +137,7 @@ class BcsBotCatalogMetadataService:
             self._filter_count(filters),
             filters is not None and filters.viewer_actor_id is not None,
         )
-        return metadata
+        return BotCatalogMetadataPage(total=total, items=metadata)
 
     @staticmethod
     def _filter_count(filters: BotCatalogSearchFilters | None) -> int:
