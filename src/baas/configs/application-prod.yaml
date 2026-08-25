@@ -10,7 +10,7 @@ log_config:
 # 中间件配置总览
 module_config:
   web:
-    port: 8888 # 修改端口需要同步修改nginx.conf内配置
+    port: 80
 
 user_config:
   # 插件配置
