@@ -18,7 +18,7 @@
 - A preparatory V1 Gateway wire projection and HS256 token verifier that
   returns a complete, secret-free authenticated caller.
 - The caller-agnostic public Group catalog at
-  `GET /openapi/v1/collaboration/groups/public`, which lists all
+  `GET /openapi/v1/collaboration/public-groups`, which lists all
   `visibility=public` Groups without participant scoping. The Gateway
   Principal boundary still requires an authenticated User; the catalog
   emits `membership=none` because no per-caller participation is
