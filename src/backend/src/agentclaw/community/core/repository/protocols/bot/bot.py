@@ -560,7 +560,12 @@ class RenderScreenRepository(Protocol):
         ...
 
     @abstractmethod
-    def list_by_bot_id(self, *, bot_id: str, owner_id: str) -> list[RenderScreenRecord]:
+    def list_by_bot_id(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str | None = None,
+    ) -> list[RenderScreenRecord]:
         """查询某 Bot 下所有未删除的 CDN 配置。"""
         ...
 

@@ -678,6 +678,24 @@ def test_create_rejects_unknown_engine_properties_fields(client, svc):
     svc.create_bot.assert_not_called()
 
 
+def test_create_engine_properties_for_non_coding_engine_is_combination_error(
+    client, svc
+):
+    # openclaw + application-coding intent answers 409 (combination
+    # unsupported), not a template-invalid 422 — the mapping the routing
+    # through the default engine strategy preserves.
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine_properties": {"template": {"devflow_workflow": "x"}},
+        },
+    )
+    assert response.status_code == 409, response.json()
+    assert response.json()["code"] == 409000
+    svc.create_bot.assert_not_called()
+
+
 def test_create_bot_cluster_mismatch_400(client, svc):
     bad = {**_CREATE_BODY, "cluster_name": "ANDC"}  # openclaw must be ACRA
     with patch.object(bots_router, "generate_bot_id", return_value="default"):

@@ -7,6 +7,7 @@ Step2 改造:plan 接**显式 target_node_id**(on_fail/on_miss→失败/miss 叶
 """
 from __future__ import annotations
 
+import logging
 from agentclaw.community.core.task.domain.models import (
     PlanResult,
     RelationType,
@@ -19,6 +20,9 @@ from agentclaw.community.core.task.task_plan.strategies import (
     PlanningStrategy,
     WorkflowPlanningStrategy,
 )
+
+
+logger = logging.getLogger("task.planner")
 
 
 class TaskPlanner:
@@ -49,19 +53,28 @@ class TaskPlanner:
         零 case 知识:不依赖节点名。协程化:策略 apply 在 corp 是 LLM 耗时 IO,await 不阻塞(锁内 await,同 task 串行是设计意图)。
         """
         target = self._resolve_target(graph, target_node_id)
+        logger.info("[task][planning] plan 入口 target=%s strategies=%s",
+                    target.node_id if target else "None",
+                    [type(s_).__name__ for s_ in self._strategies])
         if target is None:
+            logger.info("[task][planning] plan 无可规划 target → no_target")
             return PlanResult(children=[], has_gap=False, gap_detail="no_target")
         for strategy in sorted(self._strategies, key=lambda r: r.priority):
             if await strategy.matches(graph):
+                logger.info("[task][planning] plan 命中策略 %s → apply…", type(strategy).__name__)
                 pr = await strategy.apply(graph, target)
                 existing_ids = {n.node_id for n in graph.tasks}
-                strategy_had_children = len(pr.children) > 0
+                produced = len(pr.children)
+                strategy_had_children = produced > 0
                 pr.children = [n for n in pr.children if n.node_id not in existing_ids]
                 # 仅「策略产了子但全被去重掉(=已存在)」才视 gap 闭(无新增 actionable);
                 # 策略本身返空 + has_gap=True(有 gap 拆不出 / 无规划端口)→ 保留,编排核走深度闸门 HUNG(不假 done)。
                 if not pr.children and strategy_had_children:
                     pr.has_gap = False
+                logger.info("[task][planning] plan 策略=%s 产子=%d 去重后=%d has_gap=%s gap_detail=%s",
+                            type(strategy).__name__, produced, len(pr.children), pr.has_gap, pr.gap_detail)
                 return pr
+        logger.warning("[task][planning] plan 无策略命中 → no_strategy_hit(不应发生,GapBased 兜底)")
         return PlanResult(children=[], has_gap=False, gap_detail="no_strategy_hit")  # 兜底(不应发生:GapBased 兜底)
 
     def _resolve_target(self, graph: TaskExecutionGraph, target_node_id: str | None) -> TaskNode | None:

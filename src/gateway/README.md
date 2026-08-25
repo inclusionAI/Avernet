@@ -18,7 +18,7 @@ which exposes 6 **Selectors** that resolve the active implementation at runtime:
 
 | Selector              | Config Key                   | Bare Default              | Purpose                                  |
 |-----------------------|------------------------------|---------------------------|------------------------------------------|
-| `database`            | `plugins.database.plugin_database` | `SQLITE_ORM`        | Database access (sync + async ORM)       |
+| `database`            | `plugins.database`            | `sqlite`            | Database access (sync + async ORM; `mariadb` opts into the MariaDB backend) |
 | `forwarder`           | `plugins.forwarder`          | `bare`                    | Upstream HTTP request forwarding         |
 | `schema_catalog`      | `plugins.schema_catalog`     | `bare`                    | Upstream schema discovery and caching    |
 | `cache_plugin`        | `plugins.cache`              | `stub`                    | Distributed cache abstraction            |
@@ -37,8 +37,42 @@ application.yaml
                     ├── cache: "stub"           → InMemoryCachePlugin
                     ├── authn.app_token: "bare"    → StubAppTokenValidator
                     ├── authn.tenant: "bare"       → StubTenantResolver
-                    └── database.plugin_database: "SQLITE_ORM" → SqliteDatabasePlugin
+└── database: "sqlite" → SqliteDatabasePlugin
+                                     ("mariadb" → MariaDbOrmPlugin)
 ```
+
+<details>
+<summary>Database backends</summary>
+
+The `database` selector supports two community backends:
+
+- **`sqlite`** (default) — in-memory/file SQLite via `aiosqlite`. Used for
+  bare/test mode; schema is created from ORM metadata by `create_all()`.
+- **`mariadb`** — self-managed MariaDB (MySQL-wire compatible). Uses
+  `aiomysql` (async) + `mysql-connector-python` (sync ORM) drivers.
+
+MariaDB is configured with a single `database_url` under the top-level
+`database` section (matching the BaaS backend contract):
+
+```yaml
+plugins:
+  database: "mariadb"
+database:
+  database_url: "mysql+aiomysql://gateway:gatewaypass@127.0.0.1:33306/gateway_test?charset=utf8mb4"
+  create_schema: true
+  seed_data: true
+```
+
+`create_schema` / `seed_data` default to `false`; enable them only in the E2E
+overlays. The E2E test overlay `configs/overlays/e2e-mariadb.yaml` is selected
+with `SOFAPY_CONFIG_OVERLAY=e2e-mariadb` and targets a local devbox container:
+
+```bash
+docker run -d -p 33306:3306 -e MARIADB_DATABASE=gateway_test \
+  -e MARIADB_USER=gateway -e MARIADB_PASSWORD=gatewaypass mariadb:11
+```
+
+</details>
 
 ### Bootstrap Flow
 

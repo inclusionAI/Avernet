@@ -1118,6 +1118,40 @@ async fn interaction_resolve_returns_accepted_and_structured_failures() {
     assert_eq!(error.code, "interaction_resolve_failed");
     assert!(!error.retryable);
     assert_eq!(error.details.unwrap()["interactionStatus"], "invalidated");
+
+    *state.interactions.next_result.lock().await =
+        Some(Err(InteractionServiceError::InvalidRequest(
+            "ask_user question target does not allow custom answers; select one of the provided options"
+                .to_string(),
+        )));
+    let invalid_custom_answer = BcsFrame::Request(RequestFrame::new(
+        "resolve-4",
+        "interaction.resolve",
+        Some(serde_json::json!({
+            "bcsRunId":"bcs-run-1",
+            "interactionId":"interaction-1",
+            "idempotencyKey":"idem-3",
+            "action":"submit",
+            "answers":{"target":{"values":["private cloud"]}}
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&invalid_custom_answer).unwrap(),
+        &tx,
+        &mut connection_state,
+        &session_bound_auth(),
+    )
+    .await
+    .unwrap();
+    let response = recv_response(&mut rx).await;
+    assert!(!response.ok);
+    let error = response.error.unwrap();
+    assert_eq!(error.code, "invalid_request");
+    assert_eq!(
+        error.message,
+        "ask_user question target does not allow custom answers; select one of the provided options"
+    );
 }
 
 #[tokio::test]

@@ -18,6 +18,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     generate_bot_id,
 )
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 
 
@@ -194,6 +195,35 @@ class TestGetBot:
         assert "tenant" not in props
         assert "tenant_idx" not in props
         assert props["sandbox_id"] == "arca-raw-id@2"
+
+
+class TestGetBotClassification:
+    def test_returns_only_public_classification_fields(self):
+        svc = _make_service()
+        svc._repository.get_unique_by_id.return_value = {
+            **_make_bot(bot_id="service-bot", bot_type="service"),
+            "owner_name": "Sensitive Owner",
+            "template_config": {"token": "must-not-leak"},
+        }
+
+        assert svc.get_bot_classification("service-bot") == {
+            "bot_id": "service-bot",
+            "bot_type": "service",
+        }
+        svc._repository.get_unique_by_id.assert_called_once_with("service-bot")
+
+    def test_returns_none_when_bot_does_not_exist(self):
+        svc = _make_service()
+        svc._repository.get_unique_by_id.return_value = None
+
+        assert svc.get_bot_classification("missing") is None
+
+    def test_fails_closed_when_bot_id_is_ambiguous(self):
+        svc = _make_service()
+        svc._repository.get_unique_by_id.side_effect = BotLookupAmbiguousError
+
+        with pytest.raises(BotLookupAmbiguousError):
+            svc.get_bot_classification("default")
 
     def test_device_summary_for_arca_bot_no_sandbox_id(self):
         """device_props without sandbox_id → no enrichment."""

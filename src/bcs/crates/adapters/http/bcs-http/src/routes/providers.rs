@@ -287,16 +287,44 @@ pub async fn list_provider_bots(
 }
 
 /// `GET /providers/{provider_id}/bots/by-task-modes` — internal (non-OpenAPI)
-/// roster consumed by backend task discovery/dispatch. Mirrors
-/// `list_provider_bots` admin-token validation, then intersects the provider's
-/// bot bindings with bots whose control-plane toggles satisfy the filter.
+/// roster consumed by backend task discovery/dispatch. Admission mirrors
+/// `switch_bot_delivery`: the Bearer must authenticate the path provider admin
+/// and that `provider_id` must be in `allowed_switch_provider_ids`. The roster
+/// is env-scoped — it returns all current-env bots whose control-plane toggles
+/// satisfy the filter, and is intentionally not intersected with provider bot
+/// bindings.
 pub async fn list_provider_bots_by_task_modes(
     State(state): State<HttpAppState>,
     Path(provider_id): Path<String>,
     headers: HeaderMap,
     Query(params): Query<TaskModesQueryParams>,
 ) -> Result<Json<Value>, ProviderRouteError> {
-    let provider_admin_token = bearer_token(&headers)?;
+    let token = bearer_token(&headers)?;
+
+    let provider = state
+        .services
+        .provider_core
+        .authenticate_provider_admin(&token)
+        .await
+        .map_err(provider_error)?;
+
+    if provider.provider_id != provider_id {
+        return Err(ProviderRouteError {
+            status: StatusCode::FORBIDDEN,
+            message: "provider_id_mismatch".to_string(),
+        });
+    }
+
+    if !state.allowed_switch_provider_ids.contains(&provider_id) {
+        return Err(ProviderRouteError {
+            status: StatusCode::FORBIDDEN,
+            message: format!(
+                "provider '{}' is not allowed to access the task-mode roster",
+                provider_id
+            ),
+        });
+    }
+
     let filter = ProviderBotTaskModesFilter {
         task_claim_mode: parse_task_mode_toggle("task_claim_mode", &params.task_claim_mode)?,
         task_dream_mode: parse_task_mode_toggle("task_dream_mode", &params.task_dream_mode)?,
@@ -313,7 +341,7 @@ pub async fn list_provider_bots_by_task_modes(
     let items = state
         .services
         .provider_management
-        .list_provider_bots_by_task_modes(&provider_id, &provider_admin_token, filter)
+        .list_provider_bots_by_task_modes(filter)
         .await
         .map_err(provider_error)?;
     let items: Vec<Value> = items.into_iter().map(roster_item_to_json).collect();

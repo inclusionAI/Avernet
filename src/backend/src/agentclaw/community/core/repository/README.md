@@ -134,6 +134,8 @@ provides:
   - TaskQueueRepositoryProtocol
   # task
   - TaskInfoRepositoryProtocol
+  - TaskGraphRepositoryProtocol
+  - TaskActionLogRepositoryProtocol
   - TaskNodeRepositoryProtocol
   - TaskNodeRunInfoRepositoryProtocol
   - TaskNodeRelationRepositoryProtocol
@@ -198,6 +200,8 @@ provides:
   - SkillsPoolRolloutRepository
   # task
   - TaskInfoRepository
+  - TaskGraphRepository
+  - TaskActionLogRepository
   - TaskNodeRepository
   - TaskNodeRunInfoRepository
   - TaskNodeRelationRepository

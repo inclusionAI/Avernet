@@ -302,7 +302,6 @@ async def add_space_member(
         space_id=space_id,
         actor_id=user_id,
         user_id=body.member_user_id,
-        user_name=body.member_user_name,
         role=DomainSpaceRole(body.role),
     )
     return created(

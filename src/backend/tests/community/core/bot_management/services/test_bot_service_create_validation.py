@@ -130,6 +130,32 @@ class TestValidateBotName:
         # 若未来想收紧到仅 ASCII 数字，需先评估并修改测试。
         assert validate_bot_name("Bot１２３") == "Bot１２３"
 
+    # ---------- whitelist extension: + ( ) ----------
+
+    def test_plus_sign_accepted(self):
+        # 产品名中的 + 应放行（如 "Rp+"）
+        assert validate_bot_name("Rp+ Bot") == "Rp+ Bot"
+
+    def test_parens_accepted(self):
+        # 版本说明中的括号应放行（如 "(claude code版本)"）
+        assert validate_bot_name("Bot (claude code版本)") == "Bot (claude code版本)"
+
+    def test_plus_and_parens_combined_accepted(self):
+        # 复合用例：产品名 RP+ 与版本说明
+        assert validate_bot_name("Rp+ Bot (claude code版本)") == "Rp+ Bot (claude code版本)"
+
+    def test_plus_only_name_accepted(self):
+        assert validate_bot_name("a+b") == "a+b"
+
+    def test_parens_only_name_accepted(self):
+        assert validate_bot_name("a(b)c") == "a(b)c"
+
+    def test_still_rejected_chars_not_in_whitelist(self):
+        # 未加入白名单的字符仍被拒：@ # < > " ' ` \
+        for n in ["a@b", "a#b", "a<b", "a>b", 'a"b', "a'b", "a`b", "a\\b"]:
+            with pytest.raises(BotNameInvalidError):
+                validate_bot_name(n)
+
 
 # ---------------------------------------------------------------------------
 # BotService.create_bot — validation paths

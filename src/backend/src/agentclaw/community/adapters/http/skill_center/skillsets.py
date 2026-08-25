@@ -78,9 +78,7 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
-from agentclaw.community.core.devices.services.device_sync_dispatcher import (
-    DeviceSyncDispatcher,
-)
+from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.log import get_logger
 
@@ -2056,9 +2054,8 @@ async def sync_skills_to_device(
 ):
     """切换 Bot 时触发 skill symlink 同步。
 
-    Local 环境：调用 LocalDeviceSyncPlugin.sync_symlinks() 将新 bot 的
-    active skill sets 的 symlink 写到 ~/.openclaw/workspace/skills/（full-sync 语义）。
-    Arca 环境：调用 ArcaDeviceSyncPlugin 推送到容器。
+    Dispatcher 根据设备上下文选择 Core ``DeviceSync`` 服务，并以 full-sync
+    语义将当前 bot 的 active skill-set 软链接同步到目标运行时。
     """
     try:
         (
@@ -2089,7 +2086,7 @@ async def sync_skills_to_device(
         )
         symlinks_dict = [sm.to_dict() for sm in symlinks]
 
-        # 通过 DeviceSyncPlugin 同步到设备
+        # 通过 provider-specific DeviceSync 服务同步到设备。
         ctx_dev = resolver.resolve_for_bot(effective_bot_id, user_id)
         device_sync = device_sync_dispatcher.dispatch(ctx_dev)
         sync_result = device_sync.sync_symlinks(symlinks_dict)

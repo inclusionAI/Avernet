@@ -12,6 +12,7 @@ from agentclaw.community.adapters.http.bot_collaborator.schemas import (
     AddCollaboratorRequest,
     AddCollaboratorResponse,
     CollaboratorInfo,
+    BatchListCollaboratorsRequest,
     ListCollaboratorsResponse,
     UpdateCollaboratorRequest,
     UpdateCollaboratorResponse,
@@ -360,6 +361,69 @@ async def list_collaborators(
     except Exception as e:
         logger.error(f"[list_collaborators] Unexpected error: {e}")
         return ApiResponse(success=False, message=f"查询协作者失败: {str(e)}", error_code=500, data=None)
+
+
+@router.post(
+    "/batch-list",
+    response_model=ApiResponse,
+    summary="批量获取协作者列表",
+)
+async def batch_list_collaborators(
+    request: BatchListCollaboratorsRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
+) -> ApiResponse:
+    """批量查询候选 Bot 的协作者，供 accservice 当前协作授权使用。"""
+    try:
+        user_id = user.staffId
+        if not user_id or user_id == "anonymous":
+            return ApiResponse(success=False, message="无法获取用户信息", error_code=400, data=None)
+
+        bot_ids = list(dict.fromkeys(
+            bot_id.strip() for bot_id in request.bot_ids if bot_id.strip()
+        ))
+        if not bot_ids:
+            return ApiResponse(success=False, message="bot_ids 不能为空", error_code=400, data=None)
+        if len(bot_ids) > 100:
+            return ApiResponse(success=False, message="单次最多查询 100 个 bot_id", error_code=400, data=None)
+
+        logger.info(
+            "[batch_list_collaborators] Listing: bot_count=%s, user=%s",
+            len(bot_ids), user_id
+        )
+        records = service.batch_list_collaborators(
+            bot_ids=bot_ids,
+            user_id=user_id,
+            role=request.role,
+        )
+        collaborators = [
+            CollaboratorInfo(
+                id=r.id,
+                bot_pk=r.bot_pk,
+                bot_id=r.bot_id,
+                owner_id=r.owner_id,
+                user_id=r.user_id,
+                user_name=r.user_name,
+                role=r.role,
+                operator_id=r.operator_id,
+                gmt_create=r.gmt_create,
+                gmt_modified=r.gmt_modified,
+            )
+            for r in records
+        ]
+        return ApiResponse(
+            success=True,
+            data=ListCollaboratorsResponse(collaborators=collaborators).model_dump(),
+            message="查询成功",
+        )
+
+    except CollaboratorServiceError as e:
+        logger.error(f"[batch_list_collaborators] Service error: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=500, data=None)
+
+    except Exception as e:
+        logger.error(f"[batch_list_collaborators] Unexpected error: {e}")
+        return ApiResponse(success=False, message=f"批量查询协作者失败: {str(e)}", error_code=500, data=None)
 
 
 @router.post(

@@ -51,7 +51,7 @@ from agentclaw.community.core.devices.services.device_filesystem_dispatcher impo
     DeviceFilesystemDispatcher,
     DeviceFileSystemResolver,
 )
-from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+from agentclaw.community.plugin_api.device_sync_dispatcher import (
     DeviceSyncDispatcher,
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
@@ -504,8 +504,8 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         ``oss_provider`` and ``composer_provider`` are lazy thunks: only teclaw bots
         resolve them, so local/dev boots that never hit teclaw don't trigger the OSS
         client's remote secret fetch or build the composer.
-        ``device_sync_dispatcher_provider`` resolves the prod ``DeviceSyncDispatcher``
-        to build the ``TeclawDeviceSyncPlugin`` for the whole-artifact redeliver;
+        ``device_sync_dispatcher_provider`` resolves ``DeviceSyncDispatcher``
+        for whole-artifact Teclaw redelivery;
         ``composer_provider`` yields the composer whose ``oss_location`` derives
         the OSS write key (== the artifact ref). All cycle-safe — the
         composer/oss are resolved lazily on first teclaw edit, not at construction."""
@@ -603,8 +603,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         return svc
 
     # ``MCPConfigService`` and ``MCPAuthService`` are owned by
-    # :class:`McpModule` (Task 16); skill_center services receive them
-    # via @inject from the injector, no transitional bridge needed.
+    # :class:`McpModule`; skill-center services receive them through DI.
 
     # ── Service factories & stateless services ──────────────────────
     # ``SkillServiceFactory`` / ``SkillSetServiceFactory`` /
@@ -617,8 +616,8 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
 
     # ``device_sync_dispatcher`` is bound by the per-profile infrastructure
     # column (``infrastructure/{corp,test,community}/device_sync.py``) under the
-    # neutral ``DeviceSyncDispatcher`` key (B6 T24) — corp/test build the
-    # prod ``DeviceSyncDispatcher``, community a no-op. This business module no
+    # neutral ``DeviceSyncDispatcher`` key — corp/corp_test bind the prod
+    # dispatcher, while community/test/singlebox bind the no-op dispatcher. This module no
     # longer imports ``plugins.prod`` for it; consumers below resolve the key.
 
     @singleton

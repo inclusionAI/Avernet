@@ -11,10 +11,6 @@ from secbaas.community.api.device_manage import ArcaCredentials
 from secbaas.community.plugins.sandbox.arca.aliyun_ack._client_manager import (
     AliyunAckClientManager,
 )
-from secbaas.community.plugins.sandbox.arca.aliyun_ack._config_type import (
-    AliyunAckTemplateConfig,
-    build_aliyun_ack_template,
-)
 from secbaas.community.plugins.sandbox.arca.aliyun_ack._sandbox import AliyunAckSandbox
 from secbaas.community.plugins.sandbox.arca.aliyun_ack._sandbox_plugin import (
     AliyunAckSandboxPlugin,
@@ -26,43 +22,7 @@ _SANDBOX = "secbaas.community.plugins.sandbox.arca.aliyun_ack._sandbox"
 _PLUGIN = "secbaas.community.plugins.sandbox.arca.aliyun_ack._sandbox_plugin"
 _MGR = "secbaas.community.plugins.sandbox.arca.aliyun_ack._client_manager"
 
-TEMPLATE_ID = "ALIYUN_ACK_TEMPLATE_default"
-
-
-@pytest.fixture(autouse=True)
-def _k8s_loaded() -> None:
-    import importlib
-
-    for mod_name in (_SANDBOX, _PLUGIN):
-        importlib.import_module(mod_name)._import_k8s()
-
-
-def _template() -> AliyunAckTemplateConfig:
-    return build_aliyun_ack_template(
-        TEMPLATE_ID,
-        {
-            "cluster": {
-                "endpoint": "https://ack.example.com",
-                "region": "cn-hangzhou",
-                "cluster_name": "ack-test",
-                "kubeconfig": "apiVersion: v1\nkind: Config\n",
-                "context": "dummy-context",
-                "access_key_id": "dummy-ak",
-                "access_key_secret": "dummy-sk",
-            },
-            "pod": {
-                "image": "test:latest",
-                "namespace": "sandbox-ns",
-                "service_account": "dummy-sa",
-                "cpu_request": "500m",
-                "cpu_limit": "1",
-                "memory_request": "512Mi",
-                "memory_limit": "1Gi",
-                "storage_class": "dummy-sc",
-                "envs": {"FOO": "bar"},
-            },
-        },
-    )
+TEMPLATE_ID = "ALIYUN_ACK_DEFAULT"
 
 
 def _creds(arca_template_id: str = TEMPLATE_ID) -> ArcaCredentials:
@@ -77,17 +37,51 @@ def _creds(arca_template_id: str = TEMPLATE_ID) -> ArcaCredentials:
 
 def _plugin(**kw) -> AliyunAckSandboxPlugin:
     kw.setdefault("config", _creds())
-    kw.setdefault("ack_templates", {TEMPLATE_ID: _template()})
+    kw.setdefault("api_server", "https://ack.example.com")
+    kw.setdefault("token", "dummy-token")
+    kw.setdefault("namespace", "sandbox-ns")
     kw.setdefault("arca_utils", MagicMock())
     return AliyunAckSandboxPlugin(**kw)
 
 
+class _FakeOwnerRef:
+    def __init__(
+        self, kind: str = "ReplicaSet", name: str = "openclaw-ack-uid-abcd"
+    ) -> None:
+        self.kind = kind
+        self.name = name
+
+
+class _FakeContainer:
+    def __init__(self, name: str = "openclaw") -> None:
+        self.name = name
+
+
+class _FakePodSpec:
+    def __init__(self, containers: list | None = None) -> None:
+        self.containers = containers if containers is not None else [_FakeContainer()]
+
+
 class _FakePod:
-    def __init__(self, phase: str = "Running") -> None:
+    def __init__(
+        self,
+        phase: str = "Running",
+        name: str = "openclaw-ack-test-pod",
+    ) -> None:
         self.status = MagicMock()
         self.status.phase = phase
         self.metadata = MagicMock()
+        self.metadata.name = name
         self.metadata.labels = {"avernet.arcasandbox/template": TEMPLATE_ID}
+        self.metadata.owner_references = [_FakeOwnerRef()]
+        self.metadata.creation_timestamp = None
+        self.metadata.annotations = {}
+        self.spec = _FakePodSpec()
+
+
+class _FakePodList:
+    def __init__(self, pods: list | None = None) -> None:
+        self.items = pods if pods is not None else [_FakePod()]
 
 
 class _CoreHarness:
@@ -96,7 +90,10 @@ class _CoreHarness:
     def __init__(self) -> None:
         self.core = MagicMock()
         self.core.read_namespaced_pod.return_value = _FakePod()
+        self.core.list_namespaced_pod.return_value = _FakePodList()
+        self.apps = MagicMock()
         self.client = MagicMock()
+        self.create_from_yaml = MagicMock()
         self._stack: ExitStack | None = None
 
     def __enter__(self) -> _CoreHarness:
@@ -106,6 +103,12 @@ class _CoreHarness:
         )
         self._stack.enter_context(
             patch(f"{_SANDBOX}.CoreV1Api", MagicMock(return_value=self.core))
+        )
+        self._stack.enter_context(
+            patch(f"{_PLUGIN}.create_from_yaml", self.create_from_yaml)
+        )
+        self._stack.enter_context(
+            patch(f"{_SANDBOX}.AppsV1Api", MagicMock(return_value=self.apps))
         )
         self._stack.enter_context(
             patch.object(AliyunAckClientManager, "get_client", return_value=self.client)
@@ -118,19 +121,6 @@ class _CoreHarness:
         return False
 
 
-class TestTemplateResolution:
-    def test_resolve_by_template_id(self) -> None:
-        assert _plugin()._resolve_template(TEMPLATE_ID).template_id == TEMPLATE_ID
-
-    def test_resolve_missing_raises(self) -> None:
-        with pytest.raises(ValueError, match="No AliyunAckTemplate"):
-            _plugin()._resolve_template("ALIYUN_ACK_TEMPLATE_missing")
-
-    def test_resolve_requires_id(self) -> None:
-        with pytest.raises(ValueError, match="arca_template_id"):
-            AliyunAckSandboxPlugin(config=None)._resolve_template(None)
-
-
 class TestCreateSyncSandbox:
     def test_create_success(self) -> None:
         with _CoreHarness() as h:
@@ -138,18 +128,20 @@ class TestCreateSyncSandbox:
                 template_id=TEMPLATE_ID, ready_timeout_in_seconds=1
             )
         assert isinstance(sb, AliyunAckSandbox)
-        assert h.core.create_namespaced_pod.called
-        assert h.core.create_namespaced_service.called
+        assert h.create_from_yaml.called
+        assert sb._container_name == "avernet-agent"
 
     def test_create_timeout_cleans_up(self) -> None:
         with _CoreHarness() as h:
-            h.core.read_namespaced_pod.side_effect = lambda *a, **k: _FakePod("Pending")
+            h.core.list_namespaced_pod.return_value = _FakePodList(
+                [_FakePod("Pending")]
+            )
             with patch(f"{_PLUGIN}.time.sleep"):
                 with pytest.raises(RuntimeError, match="did not become ready"):
                     _plugin().create_sync_sandbox(
                         template_id=TEMPLATE_ID, ready_timeout_in_seconds=1
                     )
-            h.core.delete_namespaced_pod.assert_called()
+            h.core.delete_namespaced_deployment.assert_called()
 
 
 class TestConnect:
@@ -159,15 +151,27 @@ class TestConnect:
         assert isinstance(sb, AliyunAckSandbox)
         assert sb.sandbox_id == "aliyun-ack-abc123"
 
-    def test_connect_not_found(self) -> None:
-        class _ApiClientException(Exception):
-            status = 404
-
+    def test_connect_reads_ttl_annotation(self) -> None:
         with _CoreHarness() as h:
-            h.core.read_namespaced_pod.side_effect = _ApiClientException()
-            with patch(f"{_PLUGIN}.ApiException", _ApiClientException):
-                with pytest.raises(RuntimeError, match="not found"):
-                    _plugin().connect_sync_sandbox("aliyun-ack-missing")
+            pod = _FakePod()
+            pod.metadata.annotations = {"avernet.arcasandbox/ttl-minutes": "10080"}
+            h.core.list_namespaced_pod.return_value = _FakePodList([pod])
+            sb = _plugin().connect_sync_sandbox("aliyun-ack-abc123")
+        assert sb._ttl_in_minutes == 10080.0
+
+    def test_connect_ignores_invalid_ttl_annotation(self) -> None:
+        with _CoreHarness() as h:
+            pod = _FakePod()
+            pod.metadata.annotations = {"avernet.arcasandbox/ttl-minutes": "bad"}
+            h.core.list_namespaced_pod.return_value = _FakePodList([pod])
+            sb = _plugin().connect_sync_sandbox("aliyun-ack-abc123")
+        assert sb._ttl_in_minutes is None
+
+    def test_connect_not_found(self) -> None:
+        with _CoreHarness() as h:
+            h.core.list_namespaced_pod.return_value = _FakePodList([])
+            with pytest.raises(RuntimeError, match="not found"):
+                _plugin().connect_sync_sandbox("aliyun-ack-missing")
 
 
 class TestConnectionInfo:
@@ -233,33 +237,135 @@ class TestSandbox:
         assert info.sandbox_id == "aliyun-ack-1"
         assert info.status == "Running"
 
+    def test_get_info_echoes_ttl_in_minutes(self) -> None:
+        with _CoreHarness() as h:
+            sb = AliyunAckSandbox(
+                "aliyun-ack-1",
+                "ns",
+                TEMPLATE_ID,
+                MagicMock(),
+                pod_name="aliyun-ack-1",
+                ttl_in_minutes=10080,
+            )
+            info = sb.get_info()
+        assert info.ttl_in_minutes == 10080
+
+    def test_get_info_ttl_none_by_default(self) -> None:
+        with _CoreHarness() as h:
+            sb = AliyunAckSandbox(
+                "aliyun-ack-1", "ns", TEMPLATE_ID, MagicMock(), pod_name="aliyun-ack-1"
+            )
+            info = sb.get_info()
+        assert info.ttl_in_minutes is None
+
+    def test_get_info_derives_ttl_timestamp_from_pod(self) -> None:
+        from datetime import UTC, datetime
+
+        created = datetime(2026, 8, 1, 0, 0, 0, tzinfo=UTC)
+        with _CoreHarness() as h:
+            pod = _FakePod()
+            pod.metadata.creation_timestamp = created
+            pod.metadata.annotations = {"avernet.arcasandbox/ttl-minutes": "10080"}
+            h.core.read_namespaced_pod.return_value = pod
+            sb = AliyunAckSandbox(
+                "aliyun-ack-1", "ns", TEMPLATE_ID, MagicMock(), pod_name="aliyun-ack-1"
+            )
+            info = sb.get_info()
+        # 10080 minutes after 2026-08-01T00:00:00Z = 2026-08-08T00:00:00Z
+        expected_ms = int(created.timestamp() * 1000) + 10080 * 60 * 1000
+        assert info.ttl_timestamp == expected_ms
+
+    def test_get_info_ttl_timestamp_none_without_creation(self) -> None:
+        with _CoreHarness() as h:
+            sb = AliyunAckSandbox(
+                "aliyun-ack-1",
+                "ns",
+                TEMPLATE_ID,
+                MagicMock(),
+                pod_name="aliyun-ack-1",
+                ttl_in_minutes=10080,
+            )
+            info = sb.get_info()
+        assert info.ttl_timestamp is None
+
+    def test_get_info_ttl_timestamp_none_with_invalid_annotation(self) -> None:
+        from datetime import UTC, datetime
+
+        created = datetime(2026, 8, 1, 0, 0, 0, tzinfo=UTC)
+        with _CoreHarness() as h:
+            pod = _FakePod()
+            pod.metadata.creation_timestamp = created
+            pod.metadata.annotations = {
+                "avernet.arcasandbox/ttl-minutes": "not-a-number"
+            }
+            h.core.read_namespaced_pod.return_value = pod
+            sb = AliyunAckSandbox(
+                "aliyun-ack-1", "ns", TEMPLATE_ID, MagicMock(), pod_name="aliyun-ack-1"
+            )
+            info = sb.get_info()
+        assert info.ttl_timestamp is None
+
+    def test_get_info_ttl_timestamp_none_without_ttl(self) -> None:
+        from datetime import UTC, datetime
+
+        created = datetime(2026, 8, 1, 0, 0, 0, tzinfo=UTC)
+        with _CoreHarness() as h:
+            pod = _FakePod()
+            pod.metadata.creation_timestamp = created
+            pod.metadata.annotations = {}
+            h.core.read_namespaced_pod.return_value = pod
+            sb = AliyunAckSandbox(
+                "aliyun-ack-1", "ns", TEMPLATE_ID, MagicMock(), pod_name="aliyun-ack-1"
+            )
+            info = sb.get_info()
+        assert info.ttl_timestamp is None
+
     def test_destroy_idempotent(self) -> None:
         class _ApiClientException(Exception):
             status = 404
 
         with _CoreHarness() as h:
-            h.core.delete_namespaced_pod.side_effect = _ApiClientException()
+            h.apps.delete_namespaced_deployment.side_effect = _ApiClientException()
             with patch(f"{_SANDBOX}.ApiException", _ApiClientException):
                 sb = AliyunAckSandbox(
-                    "aliyun-ack-1", "ns", TEMPLATE_ID, MagicMock(), pod_name="p"
+                    "aliyun-ack-1",
+                    "ns",
+                    TEMPLATE_ID,
+                    MagicMock(),
+                    pod_name="openclaw-ack-uid-abcd",
+                    deployment_name="openclaw-ack-uid",
                 )
                 assert sb.destroy() is True
 
 
 class TestClientManager:
-    def test_validate_missing_kubeconfig(self) -> None:
-        with pytest.raises(ValueError, match="kubeconfig"):
+    def test_validate_missing_api_server(self) -> None:
+        with pytest.raises(ValueError, match="api_server"):
             AliyunAckClientManager(cluster=None).validate()
 
     def test_get_client_lazy_builds(self) -> None:
-        mgr = AliyunAckClientManager(_template().cluster)
+        from secbaas.community.plugins.sandbox.arca.aliyun_ack._client_manager import (
+            AliyunAckClusterConfig,
+        )
+
+        cfg = AliyunAckClusterConfig(
+            "https://ack.example.com", "dummy-token", "default"
+        )
+        mgr = AliyunAckClientManager(cfg)
         fake = MagicMock()
         mgr.build_client = MagicMock(return_value=fake)
         assert mgr.get_client() is fake
         mgr.build_client.assert_called_once()
 
     def test_close_noop(self) -> None:
-        AliyunAckClientManager(_template().cluster).close()
+        from secbaas.community.plugins.sandbox.arca.aliyun_ack._client_manager import (
+            AliyunAckClusterConfig,
+        )
+
+        cfg = AliyunAckClusterConfig(
+            "https://ack.example.com", "dummy-token", "default"
+        )
+        AliyunAckClientManager(cfg).close()
 
 
 class TestSanitizePodName:

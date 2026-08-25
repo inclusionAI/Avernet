@@ -26,15 +26,11 @@ async fn list_provider_bots_by_task_modes_errors_when_control_plane_not_configur
     );
 
     let result = management
-        .list_provider_bots_by_task_modes(
-            "provider-id",
-            "admin-token",
-            ProviderBotTaskModesFilter {
-                task_claim_mode: None,
-                task_dream_mode: None,
-                match_mode: TaskModeMatch::Any,
-            },
-        )
+        .list_provider_bots_by_task_modes(ProviderBotTaskModesFilter {
+            task_claim_mode: None,
+            task_dream_mode: None,
+            match_mode: TaskModeMatch::Any,
+        })
         .await;
 
     assert!(

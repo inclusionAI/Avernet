@@ -6,7 +6,7 @@ Tests all methods raise NotImplementedError with the correct message.
 import pytest
 
 from secbaas.community.plugins.file_transfer._noop import NoopFileTransferBackend
-from secbaas.community.spi.file_transfer import PartInfo
+from secbaas.community.spi.file_transfer import FileTransferBackend, PartInfo
 
 
 @pytest.fixture
@@ -14,10 +14,29 @@ def backend():
     return NoopFileTransferBackend()
 
 
-_EXPECTED_MSG = (
-    "File transfer is not configured. "
-    "Set config.plugins.file_transfer to 'real' to enable."
-)
+class _RealBackend(FileTransferBackend):
+    """A minimal real backend that does not override ``disabled``.
+
+    Exercises the protocol's default ``disabled`` implementation
+    (a real backend is enabled unless it says otherwise).
+    """
+
+    def generate_upload_url(
+        self, staging_path: str, expire_seconds: int, content_type: str | None = None
+    ) -> str:
+        return ""
+
+
+def test_real_backend_reports_enabled_by_default():
+    """A backend that does not override ``disabled`` is enabled by default."""
+    assert _RealBackend().disabled is False
+
+
+_EXPECTED_MSG = "file_transfer is disabled in this deployment"
+
+
+def test_noop_reports_disabled(backend):
+    assert backend.disabled is True
 
 
 def test_generate_upload_url_raises(backend):
@@ -64,3 +83,8 @@ def test_delete_object_raises(backend):
 def test_build_staging_path_raises(backend):
     with pytest.raises(NotImplementedError, match=_EXPECTED_MSG):
         backend.build_staging_path("tenant", "tf-001", "file.txt")
+
+
+def test_build_session_staging_path_raises(backend):
+    with pytest.raises(NotImplementedError, match=_EXPECTED_MSG):
+        backend.build_session_staging_path("tenant", "session-1", "tf-001", "file.txt")

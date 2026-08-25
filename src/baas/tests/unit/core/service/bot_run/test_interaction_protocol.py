@@ -348,6 +348,41 @@ def test_build_ask_user_submit_request_preserves_complete_answer() -> None:
     }
 
 
+def test_build_ask_user_submit_request_uses_synthetic_other_for_custom_input() -> None:
+    request = build_interaction_resolve_request(
+        request_id="engine-ask-custom",
+        interaction_id="int-ask-custom",
+        resolution=InteractionResolution(
+            kind="ask_user",
+            decision="submit",
+            answer="Components: web，自定义输入: scheduler",
+            message="Components: web，自定义输入: scheduler",
+            values={"Components": "web，自定义输入: scheduler"},
+            answers={
+                "Which components?": "web，自定义输入: scheduler",
+            },
+            selected_options=(("other",),),
+        ),
+    )
+
+    assert request == {
+        "type": "req",
+        "id": "engine-ask-custom",
+        "method": "interaction.resolve",
+        "params": {
+            "interactionId": "int-ask-custom",
+            "decision": "submit",
+            "answer": "Components: web，自定义输入: scheduler",
+            "message": "Components: web，自定义输入: scheduler",
+            "values": {"Components": "web，自定义输入: scheduler"},
+            "answers": {
+                "Which components?": "web，自定义输入: scheduler",
+            },
+            "selectedOptions": [["other"]],
+        },
+    }
+
+
 def test_build_ask_user_submit_request_preserves_skipped_values() -> None:
     request = build_interaction_resolve_request(
         request_id="engine-ask-skip",

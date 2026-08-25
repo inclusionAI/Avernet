@@ -88,6 +88,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.devices
+  - agentclaw.community.plugin_api.device_sync_dispatcher
   - agentclaw.community.plugin_api.mcp_center
   - agentclaw.community.plugin_api.mcp_auth
   - agentclaw.community.plugin_api.passport

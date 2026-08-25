@@ -1,24 +1,17 @@
-"""Golden-master device-push tests for bot publicity (Task 14c).
+"""Golden-master tests for bot-publicity DeviceSync calls.
 
-``test_bot_public_router.py`` already pins the permission/404 envelope of
-``POST /api/bots/{bot_id}/public``. This file pins the **device
-sync_bot_config call** the publish path makes — the behavior Task 14c
-relocates into the notify layer and promises to keep ARCA-equivalent.
-
-The device boundary is the **real** local plugin (``LocalDeviceSyncPlugin``
-carrying the ``MockSeam``). Phase 2 Task 6 收口后 ``DeviceSyncPluginSupplier``
-已删,改注入 ``DeviceContextResolver`` + ``DeviceSyncDispatcher``。本测试通过
-monkey-patch dispatcher.dispatch 让其返回一个 recording ``LocalDeviceSyncPlugin``
-(skills_dir=None → noop),再读其 ``calls``。
+The HTTP contract is covered separately; these tests record the
+``sync_bot_config`` call selected through ``DeviceContextResolver`` and
+``DeviceSyncDispatcher`` without contacting a device.
 """
 from __future__ import annotations
 
-from agentclaw.community.plugins.local.device_sync import LocalDeviceSyncPlugin
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot
 from tests.community.factories.devices import make_active_local_device
 from tests.community.framework import CaseInput, ExpectSuccess, endpoint_test
 from tests.community.framework.device_seams import (
+    RecordingDeviceSync,
     install_fake_resolver,
     install_fake_sync_dispatcher,
 )
@@ -28,10 +21,9 @@ _OWNER = "u_owner"
 _OWNER_NAME = "Owner U"
 
 
-def _record_dispatch(world) -> LocalDeviceSyncPlugin:
-    """Wire dispatcher + resolver to a recording local plugin via the framework
-    seam helper (out of scope for the ``no-mock-on-world-get`` scanner)."""
-    rec = LocalDeviceSyncPlugin(skills_dir=None)  # real impl, noop + records
+def _record_dispatch(world) -> RecordingDeviceSync:
+    """Wire the resolver and dispatcher to a recording DeviceSync service."""
+    rec = RecordingDeviceSync()
     install_fake_resolver(
         world,
         provider="baas",

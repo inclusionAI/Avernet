@@ -11,12 +11,11 @@ _SPI_DIR = pathlib.Path(__file__).resolve().parents[1] / "contract" / "spi"
 
 _EXPECTED_CONTRACT_FILES: set[str] = {
     "test_cache_plugin.py",
-    "test_crypto_plugin.py",
     "test_database_plugin.py",
     "test_docker_sandbox_plugin.py",
     "test_k8s_sandbox_plugin.py",
     "test_poolab_sandbox_plugin.py",
-    "test_scheduler_plugin.py",
+    "test_secret_plugin.py",
 }
 
 

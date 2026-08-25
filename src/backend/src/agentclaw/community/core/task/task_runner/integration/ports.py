@@ -8,7 +8,6 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import TaskCallbackData, TaskNode
     from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
         BcsCreateGroupRequest as BcsCreateGroupRequest, BcsCreateGroupResult as BcsCreateGroupResult,
-        BotTaskModeRoster as BotTaskModeRoster,
     )
 
 
@@ -19,7 +18,6 @@ class BotSendResult:
     task_type path)."""
     run_id: str
     session_id: str | None = None
-
 
 @runtime_checkable
 class OpenApiBotPort(Protocol):
@@ -42,12 +40,6 @@ class BcsBotIdentityResolver(Protocol):
 
 @runtime_checkable
 class BcsClientPort(Protocol):
-    # 任务模式 roster 圈定的 BCS provider(复用点):由实现自带凭据注入(singlebox:token 的
-    # SINGLEBOX_BCS_PROVIDER_ID;corp overlay:BcnConfig)。空=圈定关闭(沿用全部候选,旧行为)。
-    # 不作为 list_bots_by_task_modes 的入参暴露——方法内部读此属性(零入参复制)。
-    @property
-    def provider_id(self) -> str: ...
-
     async def create_group(self, req: "BcsCreateGroupRequest") -> "BcsCreateGroupResult": ...
     async def create_session(self, group_id: str, *, bootstrap_prompt: str | None = None,
                              idempotency_key: str | None = None) -> str: ...
@@ -59,10 +51,6 @@ class BcsClientPort(Protocol):
                                       input: dict[str, Any]) -> str: ...
     async def get_state_machine_run(self, run_id: str) -> dict[str, Any]: ...
     async def validate_definition(self, definition_yaml: str) -> None: ...
-    async def list_bots_by_task_modes(self, *, claim: bool | None = None,
-                                      dream: bool | None = None, match: str = "any") -> list["BotTaskModeRoster"]: ...
-
-
 @runtime_checkable
 class ApiKeyProvider(Protocol):
     @property

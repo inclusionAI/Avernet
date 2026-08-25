@@ -54,15 +54,18 @@ def require_scoped_record(
     record_id: int,
     bot_id: str,
     owner_id: str,
+    actor_id: str,
 ) -> RenderScreenRecord:
     """Bind a public record id back to the addressed Bot before mutation."""
-    record = service.get_render_screen(record_id)
+    try:
+        record = service.authorize_render_screen_record(record_id=record_id, user_id=actor_id)
+    except (PermissionError, ValueError):
+        raise RenderScreenNotFoundError("render screen not found") from None
     # COSEC: a numeric render-screen id is never authority. Rebind it to the
-    # addressed Bot, owner and environment so guessed ids cannot cross scopes.
+    # addressed Bot and environment so guessed ids cannot cross scopes.
     if (
         record is None
         or record.bot_id != bot_id
-        or record.owner_id != owner_id
         or record.env != get_current_env()
     ):
         raise RenderScreenNotFoundError("render screen not found")

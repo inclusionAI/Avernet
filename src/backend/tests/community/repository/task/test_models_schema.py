@@ -22,7 +22,7 @@ def test_five_tables_build_with_key_columns():
     inspector = inspect(_engine())
     for table in (
         "task_info", "task_node", "task_node_run_info",
-        "task_node_relation", "task_callback",
+        "task_node_relation", "task_callback", "task_action_log",
     ):
         assert inspector.has_table(table), f"missing table {table}"
 
@@ -45,5 +45,7 @@ def test_five_tables_build_with_key_columns():
         return cols
     assert ("task_id",) in uniques("task_info")
     assert ("task_id", "node_id", "retry") in uniques("task_node_run_info")
-    assert ("src_node_id", "dst_node_id") in uniques("task_node_relation")
+    assert ("task_id", "src_node_id", "dst_node_id") in uniques("task_node_relation")
     assert ("run_id", "node_id") in uniques("task_callback")
+    assert ("event_id",) in uniques("task_action_log")
+    assert ("task_id", "node_id", "seq") in uniques("task_action_log")

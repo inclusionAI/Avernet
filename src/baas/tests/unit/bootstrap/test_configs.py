@@ -18,12 +18,10 @@ class TestConfigKeyConstants:
     @pytest.mark.parametrize(
         "key, expected",
         [
-            (ConfigKey.PLUGIN_CRYPTO, "plugins.crypto"),
             (ConfigKey.PLUGIN_SECRET, "plugins.secret"),
             (ConfigKey.PLUGIN_AUTH, "plugins.auth"),
-            (ConfigKey.PLUGIN_SCHEDULER, "plugins.scheduler"),
             (ConfigKey.PLUGIN_CACHE, "plugins.cache"),
-            (ConfigKey.PLUGIN_DATABASE, "plugins.database.plugin_database"),
+            (ConfigKey.PLUGIN_DATABASE, "plugins.database"),
             (ConfigKey.BOT_SERVICE_PROXY_BASE_URL, "bot_service.proxy_base_url"),
             (ConfigKey.BOT_SERVICE_PROXY_WS_BASE_URL, "bot_service.proxy_ws_base_url"),
             (ConfigKey.BOT_SERVICE_ADAPTER_PORT, "bot_service.adapter_port"),
@@ -42,7 +40,6 @@ class TestConfigKeyConstants:
                 "bot_health_checker.ttl.extend_when_remaining_hours",
             ),
             (ConfigKey.TTL_TARGET, "bot_health_checker.ttl.target_ttl_hours"),
-            (ConfigKey.ARCA_ENABLED, "arca.enabled"),
             (
                 ConfigKey.CHAT_CLIENT_POOL_MAX_SIZE,
                 "chat_client_pool.max_size",
@@ -86,29 +83,24 @@ class TestPluginConfigDataclass:
 
     def test_defaults_all_stub(self):
         cfg = PluginConfig()
-        assert cfg.crypto == "stub"
         assert cfg.secret == "stub"
         assert cfg.auth == "stub"
-        assert cfg.scheduler == "stub"
         # engine_adapter 默认 stub —— 缺失该键的配置(如 singlebox)靠此默认兜底,
         # 否则 bootstrap 的 providers.Selector(config.plugins.engine_adapter) 装配失败。
         assert cfg.engine_adapter == "stub"
 
     def test_partial_override(self):
-        cfg = PluginConfig(crypto="real")
-        assert cfg.crypto == "real"
-        assert cfg.secret == "stub"
+        cfg = PluginConfig(secret="env")
+        assert cfg.secret == "env"
+        assert cfg.auth == "stub"
 
     def test_full_override(self):
         cfg = PluginConfig(
-            crypto="real",
             secret="real",
             auth="buservice",
-            scheduler="real",
             engine_adapter="real",
         )
         assert cfg.auth == "buservice"
-        assert cfg.scheduler == "real"
         assert cfg.engine_adapter == "real"
 
     def test_engine_adapter_invalid_value_rejected(self):

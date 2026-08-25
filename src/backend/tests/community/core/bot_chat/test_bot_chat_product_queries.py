@@ -340,6 +340,7 @@ def test_session_group_and_detail_names_use_each_trace_owner():
         to_ms=2_000,
         page=1,
         limit=20,
+        bot_id="default",
         group_id="group_fixture",
         query_scope=QueryScope.OPEN,
     )

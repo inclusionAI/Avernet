@@ -56,6 +56,26 @@ class TestCronLifecycleStart:
         cl = _make_cron_lifecycle(app_scheduler=mock_scheduler)
         await cl.start()  # Should not raise
 
+    @pytest.mark.asyncio
+    async def test_skips_disabled_tasks(self):
+        """Tasks reporting ``enabled = False`` are not added to the scheduler."""
+        mock_scheduler = MagicMock()
+        task_a = MagicMock()
+        task_a.enabled = True
+        task_b = MagicMock()
+        task_b.enabled = False  # e.g. FileTransferPoller with a no-op backend
+        task_c = MagicMock()  # no ``enabled`` attribute -> scheduled
+        cl = _make_cron_lifecycle(
+            app_scheduler=mock_scheduler,
+            tasks=[task_a, task_b, task_c],
+        )
+        await cl.start()
+
+        added = [c.args[0] for c in mock_scheduler.add_task.call_args_list]
+        assert task_a in added
+        assert task_c in added
+        assert task_b not in added
+
 
 # ---------------------------------------------------------------------------
 # CronLifecycle.stop

@@ -8,8 +8,8 @@ from __future__ import annotations
 from typing import Any
 
 from secbaas.community.api.eval_env import DYNAMIC_ENV_TAG_KEY
-from secbaas.community.spi.eval_env import EvalConsistencyCheckProtocol
 from secbaas.community.logger import get_logger
+from secbaas.community.spi.eval_env import EvalConsistencyCheckProtocol
 
 logger = get_logger("core-bot-run")
 

@@ -2760,25 +2760,38 @@ fn sorted_ids(mut ids: Vec<String>) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn list_provider_bots_by_task_modes_filters_and_scopes_to_provider() {
+async fn list_provider_bots_by_task_modes_is_env_scoped_for_allow_listed_provider() {
+    // The roster is admission-gated by `allowed_switch_provider_ids` and
+    // env-scoped: it returns every current-env bot whose task-mode toggles
+    // satisfy the filter, regardless of which provider a bot is bound to.
+    let provider_id = "prv_task_modes".to_string();
+    let admin_token = "admin-token";
     let TestApp {
-        app, control_plane, ..
-    } = test_app();
+        app,
+        control_plane,
+        provider_repo,
+        provider_credentials,
+        ..
+    } = test_app_with_allowed_switch_provider_ids(vec![provider_id.clone()]);
+    seed_provider_admin(
+        &provider_repo,
+        &provider_credentials,
+        &provider_id,
+        admin_token,
+        "11111111",
+    )
+    .await;
 
-    let provider = register_provider(&app, json!({ "mode": "static_bearer" })).await;
-    let provider_id = provider["provider_id"].as_str().unwrap();
-    let admin_token = provider["provider_admin_token"].as_str().unwrap();
-
-    // A second provider whose bots must NOT appear in provider_id's roster
-    // (provider-scoped intersect).
+    // A second provider (NOT in the allow-list) hosts bot-d. Under the new
+    // env-scoped semantics d must still appear in provider_id's roster.
     let other = register_provider(&app, json!({ "mode": "static_bearer" })).await;
-    let other_provider_id = other["provider_id"].as_str().unwrap();
-    let other_token = other["provider_admin_token"].as_str().unwrap();
+    let other_provider_id = other["provider_id"].as_str().unwrap().to_string();
+    let other_token = other["provider_admin_token"].as_str().unwrap().to_string();
 
-    let bot_a = register_provider_bot(&app, provider_id, admin_token, "bot-a").await;
-    let bot_b = register_provider_bot(&app, provider_id, admin_token, "bot-b").await;
-    let bot_c = register_provider_bot(&app, provider_id, admin_token, "bot-c").await;
-    let bot_d = register_provider_bot(&app, other_provider_id, other_token, "bot-d").await;
+    let bot_a = register_provider_bot(&app, &provider_id, admin_token, "bot-a").await;
+    let bot_b = register_provider_bot(&app, &provider_id, admin_token, "bot-b").await;
+    let bot_c = register_provider_bot(&app, &provider_id, admin_token, "bot-c").await;
+    let bot_d = register_provider_bot(&app, &other_provider_id, &other_token, "bot-d").await;
     let uuid_a = bot_a["bot_uuid"].as_str().unwrap().to_string();
     let uuid_b = bot_b["bot_uuid"].as_str().unwrap().to_string();
     let uuid_c = bot_c["bot_uuid"].as_str().unwrap().to_string();
@@ -2791,20 +2804,23 @@ async fn list_provider_bots_by_task_modes_filters_and_scopes_to_provider() {
     set_task_modes(&control_plane, &uuid_c, &env, Some(true), Some(true)).await;
     set_task_modes(&control_plane, &uuid_d, &env, Some(true), Some(true)).await;
 
-    // No toggles => all bots bound to provider_id (d excluded by provider scoping).
-    let (status, body) =
-        task_mode_roster(&app, provider_id, Some(admin_token), "").await;
+    // No toggles => all current-env bots (d included; binding scoping removed).
+    let (status, body) = task_mode_roster(&app, &provider_id, Some(admin_token), "").await;
     assert_eq!(status, StatusCode::OK, "no-filter roster failed: {body}");
     assert_eq!(
         sorted_ids(roster_bot_ids(&body)),
-        sorted_ids(vec![uuid_a.clone(), uuid_b.clone(), uuid_c.clone()])
+        sorted_ids(vec![
+            uuid_a.clone(),
+            uuid_b.clone(),
+            uuid_c.clone(),
+            uuid_d.clone()
+        ])
     );
-    assert!(!body.to_string().contains(&uuid_d));
 
-    // claim_mode=true, match=any => a, c.
+    // claim_mode=true, match=any => a, c, d (every env bot with claim on).
     let (status, body) = task_mode_roster(
         &app,
-        provider_id,
+        &provider_id,
         Some(admin_token),
         "?task_claim_mode=true&match=any",
     )
@@ -2812,24 +2828,27 @@ async fn list_provider_bots_by_task_modes_filters_and_scopes_to_provider() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         sorted_ids(roster_bot_ids(&body)),
-        sorted_ids(vec![uuid_a.clone(), uuid_c.clone()])
+        sorted_ids(vec![uuid_a.clone(), uuid_c.clone(), uuid_d.clone()])
     );
 
-    // claim=true AND dream=true, match=all => c only.
+    // claim=true AND dream=true, match=all => c, d.
     let (status, body) = task_mode_roster(
         &app,
-        provider_id,
+        &provider_id,
         Some(admin_token),
         "?task_claim_mode=true&task_dream_mode=true&match=all",
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(roster_bot_ids(&body), vec![uuid_c.clone()]);
+    assert_eq!(
+        sorted_ids(roster_bot_ids(&body)),
+        sorted_ids(vec![uuid_c.clone(), uuid_d.clone()])
+    );
 
-    // claim=true OR dream=true, match=any => a, b, c.
+    // claim=true OR dream=true, match=any => a, b, c, d.
     let (status, body) = task_mode_roster(
         &app,
-        provider_id,
+        &provider_id,
         Some(admin_token),
         "?task_claim_mode=true&task_dream_mode=true&match=any",
     )
@@ -2837,13 +2856,18 @@ async fn list_provider_bots_by_task_modes_filters_and_scopes_to_provider() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         sorted_ids(roster_bot_ids(&body)),
-        sorted_ids(vec![uuid_a.clone(), uuid_b.clone(), uuid_c.clone()])
+        sorted_ids(vec![
+            uuid_a.clone(),
+            uuid_b.clone(),
+            uuid_c.clone(),
+            uuid_d.clone()
+        ])
     );
 
-    // dream=true, match=any => b, c.
+    // dream=true, match=any => b, c, d.
     let (status, body) = task_mode_roster(
         &app,
-        provider_id,
+        &provider_id,
         Some(admin_token),
         "?task_dream_mode=true&match=any",
     )
@@ -2851,25 +2875,53 @@ async fn list_provider_bots_by_task_modes_filters_and_scopes_to_provider() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         sorted_ids(roster_bot_ids(&body)),
-        sorted_ids(vec![uuid_b.clone(), uuid_c.clone()])
+        sorted_ids(vec![uuid_b.clone(), uuid_c.clone(), uuid_d.clone()])
     );
 
     // Missing token => 401.
     let (status, body) =
-        task_mode_roster(&app, provider_id, None, "?task_claim_mode=true").await;
+        task_mode_roster(&app, &provider_id, None, "?task_claim_mode=true").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["status"], 401);
 
     // Wrong token => 401.
     let (status, body) = task_mode_roster(
         &app,
-        provider_id,
+        &provider_id,
         Some("not-the-admin-token"),
         "?task_claim_mode=true",
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["status"], 401);
+
+    // Token that authenticates a different provider than the path => 403.
+    let (status, body) = task_mode_roster(
+        &app,
+        &provider_id,
+        Some(other_token.as_str()),
+        "?task_claim_mode=true",
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["error"], "provider_id_mismatch");
+
+    // Provider admin token valid, but the path provider is not allow-listed.
+    let (status, body) = task_mode_roster(
+        &app,
+        &other_provider_id,
+        Some(other_token.as_str()),
+        "?task_claim_mode=true",
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        body["error"],
+        format!(
+            "provider '{}' is not allowed to access the task-mode roster",
+            other_provider_id
+        )
+    );
 }
 
 async fn register_provider(app: &Router, auth: Value) -> Value {
@@ -2894,6 +2946,46 @@ async fn register_provider(app: &Router, auth: Value) -> Value {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     response_json(response).await
+}
+async fn seed_provider_admin(
+    provider_repo: &Arc<dyn ProviderRepoPort>,
+    provider_credentials: &Arc<dyn ProviderCredentialRepoPort>,
+    provider_id: &str,
+    admin_token: &str,
+    created_by: &str,
+) {
+    provider_repo
+        .insert_provider(ProviderRecord {
+            provider_id: provider_id.to_string(),
+            name: "Provider".to_string(),
+            config: json!({
+                "downlink": {
+                    "enabled": true,
+                    "webhook_url": "https://provider.example.com/bcs/webhook",
+                    "auth_mode": "static_bearer",
+                    "protocol_version": "1.0"
+                }
+            })
+            .to_string(),
+            created_by: created_by.to_string(),
+            owners: format!("[\"{created_by}\"]"),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed provider");
+    provider_credentials
+        .insert_credential(ProviderCredential {
+            provider_id: provider_id.to_string(),
+            credential_kind: "provider_admin".to_string(),
+            secret_value: admin_token.to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed provider admin credential");
 }
 
 async fn register_provider_as(app: &Router, staff_no: &str) -> Value {
@@ -3077,27 +3169,40 @@ async fn response_json(response: axum::response::Response) -> Value {
 
 #[tokio::test]
 async fn list_provider_bots_by_task_modes_rejects_invalid_toggle_and_accepts_false() {
-    let TestApp { app, .. } = test_app();
-    let provider = register_provider(&app, json!({ "mode": "static_bearer" })).await;
-    let provider_id = provider["provider_id"].as_str().unwrap();
-    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+    let provider_id = "prv_task_modes_toggle".to_string();
+    let admin_token = "admin-token";
+    let TestApp {
+        app,
+        provider_repo,
+        provider_credentials,
+        ..
+    } = test_app_with_allowed_switch_provider_ids(vec![provider_id.clone()]);
+    seed_provider_admin(
+        &provider_repo,
+        &provider_credentials,
+        &provider_id,
+        admin_token,
+        "11111111",
+    )
+    .await;
 
     // `false` parses to Some(false) — exercises the false/0 arm of
-    // parse_task_mode_toggle. With no bots bound the roster is empty but 200.
+    // parse_task_mode_toggle. With no current-env bots the roster is empty
+    // but 200.
     let (status, body) =
-        task_mode_roster(&app, provider_id, Some(admin_token), "?task_claim_mode=false").await;
+        task_mode_roster(&app, &provider_id, Some(admin_token), "?task_claim_mode=false").await;
     assert_eq!(status, StatusCode::OK, "false toggle failed: {body}");
     assert!(body["items"].is_array(), "false toggle response missing items: {body}");
 
     // `0` is the other accepted false spelling (same parse arm).
     let (status, _body) =
-        task_mode_roster(&app, provider_id, Some(admin_token), "?task_dream_mode=0").await;
+        task_mode_roster(&app, &provider_id, Some(admin_token), "?task_dream_mode=0").await;
     assert_eq!(status, StatusCode::OK, "0 toggle failed");
 
     // An unrecognized toggle value surfaces as 400 bad_request from the handler
     // (parse_task_mode_toggle error arm), before the service is consulted.
     let (status, body) =
-        task_mode_roster(&app, provider_id, Some(admin_token), "?task_claim_mode=maybe").await;
+        task_mode_roster(&app, &provider_id, Some(admin_token), "?task_claim_mode=maybe").await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "invalid toggle not rejected: {body}");
     assert_eq!(body["status"], 400);
 }

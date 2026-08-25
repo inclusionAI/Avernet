@@ -1,0 +1,107 @@
+#!/usr/bin/env just --justfile
+
+# ── Kubernetes deployment demo tests ─────────────────────────────────────
+#
+# Exercises the per-service k8s deploy scripts under scripts/k8s-tests/ and
+# the combined `avernet` stack. Each recipe shells out to the corresponding
+# script; prerequisites (kubectl reaching a cluster, docker) match the scripts.
+
+# Per-service scripts (relative to this justfile).
+baas-script := 'baas/test-k8s-baas.sh'
+gateway-script := 'gateway/test-k8s-gateway.sh'
+proxy-script := 'proxy/test-k8s-proxy.sh'
+avernet-script := 'avernet/deploy-avernet.sh'
+
+_default:
+    @just --list --list-prefix '==> '
+
+# ── Individual services ───────────────────────────────────────────────────
+
+# Build + deploy baas to k8s and wait for /health. Pass extra args (build/down/status).
+k8s-baas *args='':
+    @./{{baas-script}} {{args}}
+
+# Build only the baas image.
+k8s-baas-build:
+    @./{{baas-script}} build
+
+# Deploy baas and wait for /health.
+k8s-baas-up:
+    @./{{baas-script}} up
+
+# Tear down baas from k8s.
+k8s-baas-down:
+    @./{{baas-script}} down
+
+# Build + deploy gateway to k8s and wait for /health.
+k8s-gateway *args='':
+    @./{{gateway-script}} {{args}}
+
+# Build only the gateway image.
+k8s-gateway-build:
+    @./{{gateway-script}} build
+
+# Deploy gateway and wait for /health.
+k8s-gateway-up:
+    @./{{gateway-script}} up
+
+# Tear down gateway from k8s.
+k8s-gateway-down:
+    @./{{gateway-script}} down
+
+# Build + deploy proxy to k8s and wait for /health.
+k8s-proxy *args='':
+    @./{{proxy-script}} {{args}}
+
+# Build only the proxy image.
+k8s-proxy-build:
+    @./{{proxy-script}} build
+
+# Deploy proxy and wait for /health.
+k8s-proxy-up:
+    @./{{proxy-script}} up
+
+# Tear down proxy from k8s.
+k8s-proxy-down:
+    @./{{proxy-script}} down
+
+# ── Combined avernet stack (all services + shared mariadb/redis) ─────────
+
+# Build all images, apply shared infra, deploy all services, wait healthy.
+k8s-avernet *args='':
+    @./{{avernet-script}} {{args}}
+
+# Bring up the full avernet stack (build + infra + services + health).
+k8s-avernet-up:
+    @./{{avernet-script}} up
+
+# Build the three service images only.
+k8s-avernet-build:
+    @./{{avernet-script}} build
+
+# Apply/refresh the shared MariaDB + Redis only.
+k8s-avernet-infra:
+    @./{{avernet-script}} infra
+
+# Deploy the three app services only (assumes infra is up).
+k8s-avernet-services:
+    @./{{avernet-script}} services
+
+# Tear down the full avernet stack (services + shared infra).
+k8s-avernet-down:
+    @./{{avernet-script}} down
+
+# Show avernet resources.
+k8s-avernet-status:
+    @./{{avernet-script}} status
+
+# ── Everything ────────────────────────────────────────────────────────────
+
+# Build all three service images (no cluster needed).
+k8s-test-all-build: k8s-baas-build k8s-gateway-build k8s-proxy-build
+
+# Bring up the full avernet stack and wait for every service's /health.
+k8s-test-all: k8s-avernet-up
+
+# Tear everything down.
+k8s-test-all-down: k8s-avernet-down

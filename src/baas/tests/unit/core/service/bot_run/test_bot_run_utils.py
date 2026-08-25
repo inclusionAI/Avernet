@@ -632,7 +632,9 @@ class TestBuildChatMetadataEval:
             "biz_scene": "eval:staging",
             "default_tag": "staging",
         }
-        result = build_chat_metadata(metadata, run_id="run-1", eval_session_log=mock_log)
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=mock_log
+        )
         assert result["default_tag"] == "staging"
         mock_log.enrich_chat_metadata.assert_called_once()
 
@@ -645,7 +647,9 @@ class TestBuildChatMetadataEval:
             "biz_scene": "eval:eval",
             "eval_id": "eval:eval:bot-1",
         }
-        result = build_chat_metadata(metadata, run_id="run-1", eval_session_log=mock_log)
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=mock_log
+        )
         assert result["eval_id"] == "eval:eval:bot-1"
         mock_log.enrich_chat_metadata.assert_called_once()
 

@@ -23,11 +23,11 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 from agentclaw.community.di.modules.skill_center_module import (
     DeviceFilesystemDispatcher,
 )
-from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
-from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.device_sync import (
+from agentclaw.community.core.devices.services.device_sync import (
     DeviceSyncUnavailableError,
 )
+from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
+from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
@@ -181,7 +181,7 @@ class ChannelService:
                 channel.bind_bot_id, e,
             )
             return
-        # sync_symlinks([]) → TeclawDeviceSyncPlugin recomposes + POSTs the
+        # sync_symlinks([]) → the Teclaw DeviceSync service recomposes and posts the
         # artifact; the list arg is ignored (whole-artifact delivery). Run off the
         # event loop — the plugin's transport is synchronous httpx. The teclaw
         # plugin already catches transport/compose errors and returns a result

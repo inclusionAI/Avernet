@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+    from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.core.mcp.services._defaults import (
     get_default_mcp_config,
     get_default_mcp_server_codes,
@@ -461,7 +461,7 @@ class SkillSetService:
                 mapping_kwargs["desired_skills"] = desired_skills
             symlinks = self.get_symlink_mappings(**mapping_kwargs)
 
-            # 通过 DeviceSyncPlugin 同步到设备 — 经 resolver + dispatcher 收口
+            # Resolve and invoke the provider-specific DeviceSync service.
             effective_user_id = user_id or self.entity_id or "default"
             ctx = self._resolver.resolve_for_bot(self.bot_id, effective_user_id)
             device_sync = self._device_sync_dispatcher.dispatch(ctx)
@@ -1837,8 +1837,3 @@ class SkillSetService:
             entity_type=self.entity_type,
             engine_type=effective_engine,
         )
-
-
-# ======
-# SkillSet Switcher - 技能集切换功能
-# ======

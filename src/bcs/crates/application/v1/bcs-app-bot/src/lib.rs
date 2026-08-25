@@ -234,6 +234,9 @@ impl BotServiceImpl {
                         status,
                         env: record.env,
                         created_by: record.created_by,
+                        user_visibility: record.user_visibility,
+                        friend_ext: record.friend_ext,
+                        friend_check_in_strategy: record.friend_check_in_strategy,
                         created_at: record.created_at,
                         updated_at: record.updated_at,
                     }));
@@ -277,6 +280,9 @@ impl BotServiceImpl {
                     agent_code: record.agent_code,
                     task_claim_mode: record.task_claim_mode,
                     task_dream_mode: record.task_dream_mode,
+                    user_visibility: record.user_visibility,
+                    friend_ext: record.friend_ext,
+                    friend_check_in_strategy: record.friend_check_in_strategy,
                     created_at: record.created_at,
                     updated_at: record.updated_at,
                 }))
@@ -565,6 +571,9 @@ impl BotService for BotServiceImpl {
                     descriptor,
                     task_claim_mode: command.patch.task_claim_mode,
                     task_dream_mode: command.patch.task_dream_mode,
+                    user_visibility: command.patch.user_visibility,
+                    friend_ext: command.patch.friend_ext,
+                    friend_check_in_strategy: command.patch.friend_check_in_strategy,
                     ..Default::default()
                 },
             )

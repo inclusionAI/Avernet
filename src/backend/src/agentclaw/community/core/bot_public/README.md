@@ -29,7 +29,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.approval_workflow
   - agentclaw.community.plugin_api.auth_relationship
   - agentclaw.community.plugin_api.bot_publish_approval
-  - agentclaw.community.plugin_api.device_sync
+  - agentclaw.community.plugin_api.device_sync_dispatcher
   - agentclaw.community.plugin_api.http_client
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.passport

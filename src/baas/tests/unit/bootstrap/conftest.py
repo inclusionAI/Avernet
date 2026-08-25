@@ -1,6 +1,6 @@
 """Bootstrap DI container test fixtures.
 
-Sets PLUGIN_DATABASE=SQLITE_ORM and initialises an in-memory SQLite
+Sets PLUGIN_DATABASE=sqlite and initialises an in-memory SQLite
 database so that the container chain resolves to ORM repository
 variants without any external ZDAS/Layotto dependency.
 """
@@ -14,7 +14,7 @@ import pytest
 
 # Set the env var so init_database() and containers resolve to
 # SQLite ORM in tests.
-os.environ["PLUGIN_DATABASE"] = "SQLITE_ORM"
+os.environ["PLUGIN_DATABASE"] = "sqlite"
 
 # All 17 ORM model modules must be imported so that
 # SqliteOrmPlugin.create_all() discovers every table.
@@ -58,9 +58,7 @@ def _inject_db_config() -> None:
     get_container().config.from_dict(
         {
             "plugins": {
-                "database": {
-                    "plugin_database": os.environ.get("PLUGIN_DATABASE", "ZDAS_ORM"),
-                },
+                "database": os.environ.get("PLUGIN_DATABASE", "sqlite"),
             },
         }
     )

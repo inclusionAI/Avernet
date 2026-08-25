@@ -1,17 +1,15 @@
-"""Contract tests — http adapter 16 endpoint caller 走 resolver + dispatcher.
+"""Contract tests for HTTP callers using resolver + dispatcher boundaries.
 
-Task 3 of `docs/superpowers/plans/2026-06-15-device-sync-supplier-for-bot-cleanup.md`:
-确认 ``adapters/http`` 下的 device_sync / device_fs caller 都通过
-``DeviceContextResolver.resolve_for_bot(bot_id, user_id) → dispatcher.dispatch(ctx)``,
-不再走旧的 ``supplier.for_bot`` / ``dispatcher.for_bot`` 闭包模式。
+The covered device-sync and device-filesystem endpoints resolve a
+``DeviceContext`` and then invoke the corresponding dispatcher.
 
 9 个核心 endpoint case 覆盖 16 caller(file_router 8 caller 选 2 代表性即可):
-- A 组(device_sync_supplier → resolver + device_sync_dispatcher):
+- A 组(device sync resolver + dispatcher):
   * skills.py:867 activate_skill
   * skills.py:937 deactivate_skill
   * skills.py:1281 activate_skills_batch
   * skillsets.py:1378 sync_skills_to_device
-- B 组(device_fs_dispatcher.for_bot → resolver + dispatch(ctx)):
+- B 组(device filesystem resolver + dispatcher):
   * identity/router.py:249 (_write_file_safely 经 endpoint 触发)
   * resources/router.py:587 delete_resource
   * resources/router.py:631 upload_files_legacy
@@ -97,7 +95,7 @@ def _skills_router_app(mock_ctx, tmp_path):
     from agentclaw.community.di.modules.skill_center_module import (
         SkillSetServiceFactory,
     )
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+    from agentclaw.community.plugin_api.device_sync_dispatcher import (
         DeviceSyncDispatcher,
     )
     from agentclaw.community.api.skill_service_factory import (
@@ -214,7 +212,7 @@ def _skillsets_router_app(mock_ctx, tmp_path):
     from agentclaw.community.di.modules.skill_center_module import (
         SkillSetServiceFactory,
     )
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+    from agentclaw.community.plugin_api.device_sync_dispatcher import (
         DeviceSyncDispatcher,
     )
     from agentclaw.community.api.skill_set_service_factory import (

@@ -282,13 +282,12 @@ pub trait ProviderManagementService: Send + Sync {
         provider_admin_token: &str,
     ) -> ServiceResult<Vec<ProviderBotBinding>>;
 
-    /// List the provider's bots whose control-plane toggles satisfy `filter`.
-    /// Mirrors `list_provider_bots` admin-token validation, then intersects the
-    /// provider's bot bindings with the task-mode matches resolved server-side.
+    /// List the current-env bots whose control-plane toggles satisfy `filter`.
+    /// Admission (provider admin token + `allowed_switch_provider_ids`) is
+    /// enforced by the route; this use case performs the env-scoped task-mode
+    /// query and does not intersect with provider bot bindings.
     async fn list_provider_bots_by_task_modes(
         &self,
-        provider_id: &str,
-        provider_admin_token: &str,
         filter: ProviderBotTaskModesFilter,
     ) -> ServiceResult<Vec<ProviderBotRosterItem>>;
 

@@ -41,16 +41,16 @@ class TestLoad:
         assert config.app_name == "custom_app"
         assert config.user_config["key"] == "val"
 
-    def test_not_set_falls_back_to_base_yaml(self, tmp_path):
+    def test_not_set_falls_back_to_base_yaml(self, monkeypatch, tmp_path):
         config_dir = tmp_path / "configs"
         config_dir.mkdir()
         (config_dir / "application.yaml").write_text(
             "app_name: default_app\nworkers: 1\nuser_config: {}\n"
         )
-        import os as _os
-
-        _os.environ.pop("SOFAPY_CONFIG_OVERLAY", None)
-        _os.environ["SOFAPY_CONFIG_PATH"] = str(config_dir)
+        # Use monkeypatch so SOFAPY_CONFIG_PATH is restored after the test,
+        # avoiding leaking config-path state into subsequent tests.
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
         from secbaas.community.config import ConfigLoader
 
         config = ConfigLoader.load()
@@ -92,3 +92,142 @@ class TestLoad:
         assert config.workers == 8
         assert config.user_config["base_key"] == "base_value"
         assert config.user_config["extra_key"] == "extra_value"
+
+
+class TestEnvInterpolation:
+    """Tests for `${NAME}` (and `${NAME:-default}`) placeholder expansion."""
+
+    def test_expands_whole_value(self, monkeypatch):
+        from secbaas.community.config import ConfigLoader
+
+        monkeypatch.setenv("SECRET", "s3-cr-3t")
+        out = ConfigLoader._expand_env_placeholders({"key": "${SECRET}"})
+        assert out == {"key": "s3-cr-3t"}
+
+    def test_expands_substring(self, monkeypatch):
+        from secbaas.community.config import ConfigLoader
+
+        monkeypatch.setenv("REGION", "cn-hangzhou")
+        out = ConfigLoader._expand_env_placeholders(
+            {"endpoint": "wss://${REGION}.example.com/ws"}
+        )
+        assert out == {"endpoint": "wss://cn-hangzhou.example.com/ws"}
+
+    def test_recursive_into_dict_and_list(self, monkeypatch):
+        from secbaas.community.config import ConfigLoader
+
+        monkeypatch.setenv("V", "ok")
+        data = {
+            "a": "${V}",
+            "nested": {"b": "pre-${V}-post"},
+            "list": ["${V}", "literal", {"deep": "${V}"}],
+        }
+        assert ConfigLoader._expand_env_placeholders(data) == {
+            "a": "ok",
+            "nested": {"b": "pre-ok-post"},
+            "list": ["ok", "literal", {"deep": "ok"}],
+        }
+
+    def test_non_string_values_left_untouched(self):
+        from secbaas.community.config import ConfigLoader
+
+        data = {"port": 8888, "flag": True, "items": [1, 2], "none": None}
+        assert ConfigLoader._expand_env_placeholders(data) == data
+
+    def test_default_when_unset(self, monkeypatch):
+        from secbaas.community.config import ConfigLoader
+
+        monkeypatch.delenv("MISSING_VAR", raising=False)
+        out = ConfigLoader._expand_env_placeholders({"a": "${MISSING_VAR:-fallback}"})
+        assert out == {"a": "fallback"}
+
+    def test_empty_default_when_unset(self, monkeypatch):
+        from secbaas.community.config import ConfigLoader
+
+        monkeypatch.delenv("MISSING_VAR", raising=False)
+        out = ConfigLoader._expand_env_placeholders({"a": "${MISSING_VAR:-}"})
+        assert out == {"a": ""}
+
+    def test_empty_string_env_value_is_used(self, monkeypatch):
+        from secbaas.community.config import ConfigLoader
+
+        # An explicitly-set empty env var is a real value, not "unset".
+        monkeypatch.setenv("EMPTY_SET", "")
+        out = ConfigLoader._expand_env_placeholders({"a": "${EMPTY_SET}"})
+        assert out == {"a": ""}
+
+    def test_missing_without_default_raises(self, monkeypatch):
+        from secbaas.community.config import ConfigLoader
+
+        # BaaS defaults to strict: an unresolvable, un-defaulted placeholder
+        # raises rather than passing through.
+        monkeypatch.delenv("NOPE_MISSING", raising=False)
+        with pytest.raises(KeyError, match="NOPE_MISSING"):
+            ConfigLoader._expand_env_placeholders({"a": "${NOPE_MISSING}"})
+
+    def test_backward_compatible_mode_left_unchanged(self, monkeypatch):
+        from secbaas.community.config import ConfigLoader
+
+        monkeypatch.delenv("NOPE_MISSING", raising=False)
+        out = ConfigLoader._expand_env_placeholders(
+            {"a": "${NOPE_MISSING}"}, strict=False
+        )
+        assert out == {"a": "${NOPE_MISSING}"}
+
+    def test_does_not_mutate_input(self, monkeypatch):
+        from secbaas.community.config import ConfigLoader
+
+        monkeypatch.setenv("V", "ok")
+        data = {"nested": {"a": "${V}"}}
+        ConfigLoader._expand_env_placeholders(data)
+        assert data == {"nested": {"a": "${V}"}}
+
+    def test_load_expands_placeholders_and_coerces_type(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "user_config:\n  secret: ${MY_SECRET}\n"
+            "module_config:\n  web:\n    port: ${WEB_PORT}\n"
+        )
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.setenv("MY_SECRET", "topsecret")
+        monkeypatch.setenv("WEB_PORT", "9999")
+        from secbaas.community.config import ConfigLoader
+
+        config = ConfigLoader.load()
+        assert config.user_config["secret"] == "topsecret"
+        assert config.module_config.web.port == 9999  # pydantic coerced str->int
+
+
+class TestGetConfig:
+    """End-to-end: get_config() strict passthrough and BaaS defaults."""
+
+    def test_get_config_strict_default_raises(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "user_config:\n  secret: ${REQUIRED_VAR}\n"
+        )
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("REQUIRED_VAR", raising=False)
+        from secbaas.community.config import get_config, reset_config
+
+        reset_config()
+        with pytest.raises(KeyError, match="REQUIRED_VAR"):
+            get_config()
+
+    def test_get_config_backward_compatible_mode(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "user_config:\n  secret: ${REQUIRED_VAR}\n"
+        )
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("REQUIRED_VAR", raising=False)
+        from secbaas.community.config import get_config
+
+        config = get_config(strict=False)
+        assert config.user_config["secret"] == "${REQUIRED_VAR}"

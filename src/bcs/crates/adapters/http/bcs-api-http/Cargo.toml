@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 async-trait = { workspace = true }
 axum = { workspace = true }
+bcs-config-api = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-storage-api = { workspace = true }
@@ -25,9 +26,11 @@ serde_path_to_error = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true, features = ["parsing"] }
+tokio = { workspace = true }
 tracing = { workspace = true }
 ulid = { workspace = true }
 url = { workspace = true }
+urlencoding = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

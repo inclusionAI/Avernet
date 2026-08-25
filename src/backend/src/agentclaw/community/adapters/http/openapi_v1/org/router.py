@@ -112,9 +112,10 @@ async def get_user_identity(
     """Return the end user the caller's credential names.
 
     The identity the gateway resolved and signed: the id to use as `user_id`
-    on every user-scoped operation, plus the profile attributes the identity
-    provider supplied. Call it once per session and cache the result — the
-    values only change when the session's credential does.
+    on delegable user-scoped operations, and the identity non-delegable
+    self-service operations derive directly. Call it once per session and
+    cache the result — the values only change when the session's credential
+    does.
 
     Department attributes are not in that identity; they are looked up by the
     caller's work number through the staff-dept service. A reader that is not
@@ -191,5 +192,4 @@ async def search_depts(
         return envelope([], request)
     items = await asyncio.to_thread(reader.search_depts, keyword=keyword)
     return envelope(items, request)
-
 
