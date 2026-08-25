@@ -894,6 +894,28 @@ Bot 范围的 draft 钉钉渠道配置。每个操作都显式要求 `user_id`�
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | 读取调用者的统一服务器配置 | `Envelope[McpConfig]` |
 | PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | 写入配置（下发到设备） | `Envelope[McpConfig]` |
 
+统一市场搜索还提供 `POST /openapi/v1/bots/market/mcp-servers`。JSON 请求支持老市场
+列表的完整筛选集合：`keyword`、`page_num`、`page_size`、`server_codes`、
+`platform_server_codes`、`run_modes`、`statuses`、`transport_protocols`、
+`host_platforms`、`owners`、`network_types`、`categories`、`tenants` 和 `tags`。
+请求的网络类型会与公共允许范围（`INTERNET`、`OFFICE`）取交集；如果只请求不可见网络，
+直接返回空页。每个 `McpMarketItem` 都是老接口 `GET /api/mcp/market/list` 对应条目的
+无损 snake_case 等价数据，标签和未来市场扩展字段均保留，同时继续执行相同的 `extInfo`
+删除规则。
+
+`McpServerDetail` 是老接口 `GET /api/mcp/market/detail` 业务数据的 snake_case
+等价响应。除轻量列表字段和 `tools` 外，显式契约覆盖老市场详情的 `source`、`icon`、
+`docs`、`endpoints`、`vendor`、`status`、`run_mode`、`host_platform`、
+`platform_server_code`、`host_app_name`、`category`、`site`、市场 `tenant`、
+`access_level`、`stdio_configs`、业务/架构编码、负责人、标签、代码仓库和启动渠道等字段。
+
+兼容要求是不丢业务内容：endpoint `headers`、人员 `user_id`、可见 MCP 中的所有 endpoint、
+历史异常值以及未来市场扩展字段都会保留。已知市场对象字段从 camelCase 转为 snake_case；
+endpoint header 名、环境变量名和 tool 声明等不透明映射保持原始 key。与老接口一致，tool
+input schema 中的 `extInfo` 仍会删除；如果 MCP 声明的所有网络类型均不在允许范围内，详情
+仍按不存在处理。permissions 操作仍是调用者权限判断的权威接口，但为保持老详情数据兼容，
+市场记录中的 `access_level` 也会在详情中保留。
+
 _已定案的决策（PR #610）：路径保持嵌套（`/openapi/v1/bots/mcp/...`）；写入体去掉了
 `sync_mode`（不存在单设备下发路径 —— `extra="forbid"` 让它变成 422）；下发设备失败会回滚
 写入并返回 502（与内部界面一致）；`endpoint_env`/`transport_protocol` 为严格枚举

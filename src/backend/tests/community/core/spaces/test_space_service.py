@@ -34,6 +34,8 @@ def _make_service(repository, skill_center, staff_dept=None):
         staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
             work_no="owner-1", nick_name=None
         )
+    if isinstance(repository, MagicMock):
+        repository.get_team_space_by_name.return_value = None
     return SpaceService(repository, skill_center, staff_dept)
 
 
@@ -64,6 +66,11 @@ class _TransactionRepository:
         self.committed = False
         self.rolled_back = False
         self.arguments: dict[str, str] = {}
+
+    def get_team_space_by_name(
+        self, *, creator_id: str, name: str, env: str
+    ) -> SpaceRecord | None:
+        return None
 
     @contextmanager
     def create_team_transaction(
@@ -106,6 +113,39 @@ def test_create_team_pushes_to_sc_before_transaction_commit() -> None:
     assert record.sc_team_id == "sc-team-9001"
     assert repository.committed is True
     assert repository.rolled_back is False
+
+
+def test_create_team_rejects_same_creator_and_name() -> None:
+    repository = MagicMock()
+    skill_center = MagicMock()
+    service = _make_service(repository, skill_center)
+    repository.get_team_space_by_name.return_value = _space()
+
+    with pytest.raises(SpaceAlreadyExistsError, match="same name"):
+        service.create_team(name="  Demo Team  ", creator_id="owner-1")
+
+    repository.get_team_space_by_name.assert_called_once_with(
+        creator_id="owner-1", name="Demo Team", env="dev"
+    )
+    repository.create_team_transaction.assert_not_called()
+    skill_center.create_team.assert_not_called()
+
+
+def test_create_team_allows_same_name_for_different_creator() -> None:
+    repository = _TransactionRepository(_space())
+    repository.get_team_space_by_name = MagicMock(return_value=None)
+    skill_center = MagicMock()
+    skill_center.create_team.return_value = SkillCenterTeamCreateResult(
+        team_id="sc-team-9001"
+    )
+    service = _make_service(repository, skill_center)
+
+    service.create_team(name="Demo Team", creator_id="owner-2")
+
+    repository.get_team_space_by_name.assert_called_once_with(
+        creator_id="owner-2", name="Demo Team", env="dev"
+    )
+    assert repository.arguments["creator_id"] == "owner-2"
 
 
 def test_create_team_rolls_back_when_sc_creation_fails() -> None:

@@ -74,43 +74,152 @@ class McpServer(BaseModel):
     )
 
 
+class McpDocs(BaseModel):
+    """Marketplace documentation, preserving legacy detail fields."""
+
+    model_config = ConfigDict(extra="allow")
+
+    overview: Any | None = Field(
+        default=None,
+        description="The server overview as published by the marketplace.",
+    )
+
+
+class McpVendor(BaseModel):
+    """Marketplace vendor object, preserving legacy extension fields."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Any | None = Field(default=None, description="The vendor display name.")
+
+
+class McpEndpoint(BaseModel):
+    """A marketplace endpoint equivalent to the legacy detail response."""
+
+    model_config = ConfigDict(extra="allow")
+
+    network_type: Any | None = Field(
+        default=None, description="The endpoint network type."
+    )
+    network_types: Any | None = Field(
+        default=None, description="All endpoint network types when supplied."
+    )
+    transport_protocol: Any | None = Field(
+        default=None, description=_TRANSPORT_RESPONSE_DESC
+    )
+    env: Any | None = Field(default=None, description="The endpoint environment.")
+    url: Any | None = Field(default=None, description="The endpoint URL.")
+    headers: Any | None = Field(
+        default=None,
+        description="Endpoint headers exactly as returned by the legacy market detail.",
+    )
+
+
+class McpPerson(BaseModel):
+    """Marketplace identity equivalent to the legacy detail response."""
+
+    model_config = ConfigDict(extra="allow")
+
+    user_id: Any | None = Field(default=None, description="Marketplace user id.")
+    user_name: Any | None = Field(default=None, description="Marketplace display name.")
+
+
 class McpServerDetail(McpServer):
-    """An MCP server's detail, including its tools."""
+    """MCP marketplace detail preserving legacy business content."""
 
     model_config = ConfigDict(
+        extra="allow",
         json_schema_extra={
             "example": {
                 "server_code": "mcp.example.weather",
+                "source": "internal",
                 "name": "Weather",
+                "icon": "",
                 "description": "Forecasts and current conditions.",
+                "status": "ONLINE",
+                "run_mode": "remote",
+                "host_platform": "",
+                "platform_server_code": "",
+                "host_app_name": "",
+                "site": "",
+                "tenant": "",
+                "category": "",
+                "access_level": "PUBLIC",
                 "network_types": ["INTERNET"],
                 "transport_protocol": "STREAMABLE_HTTP",
-                "tools": [
+                "docs": {"overview": "# Weather"},
+                "endpoints": [
                     {
-                        "name": "getForecast",
-                        "description": "Forecast for a city and date range",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "city": {"type": "string"},
-                                "days": {"type": "integer"},
-                            },
-                            "required": ["city"],
-                        },
+                        "network_type": "INTERNET",
+                        "transport_protocol": "STREAMABLE_HTTP",
+                        "env": "PROD",
+                        "url": "https://mcp.example.invalid/mcp",
+                        "headers": {},
                     }
                 ],
+                "stdio_configs": None,
+                "bu_code": "",
+                "product_code": "",
+                "arch_domain_code": "",
+                "creator": {"user_id": "1001", "user_name": "Creator"},
+                "owner": {"user_id": "1002", "user_name": "Owner"},
+                "owners_info": [],
+                "tools": [],
+                "tags": [],
+                "code_repo_url": "",
+                "launch_channels": [],
+                "vendor": "",
             }
-        }
+        },
     )
 
-    tools: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="The server's tools as the catalogue publishes them. Each "
-        "entry is one MCP tool declaration — typically 'name' (the callable "
-        "name), 'description', and 'inputSchema' (a JSON Schema for the "
-        "tool's arguments); any further catalogue keys pass through "
-        "unchanged.",
+    server_code: Any = Field(default="", description=_SERVER_CODE_DESC)
+    name: Any = Field(default="", description="The server display name.")
+    description: Any | None = Field(
+        default=None, description="The marketplace server description."
     )
+    network_types: Any = Field(
+        default_factory=list, description="The legacy marketplace network types."
+    )
+    transport_protocol: Any | None = Field(
+        default=None, description=_TRANSPORT_RESPONSE_DESC
+    )
+    source: Any | None = None
+    icon: Any | None = None
+    status: Any | None = None
+    run_mode: Any | None = None
+    host_platform: Any | None = None
+    platform_server_code: Any | None = None
+    host_app_name: Any | None = None
+    site: Any | None = None
+    tenant: Any | None = None
+    category: Any | None = None
+    access_level: Any | None = None
+    docs: McpDocs | str | list[Any] | int | float | bool | None = None
+    endpoints: (
+        list[McpEndpoint | str | int | float | bool | None]
+        | dict[str, Any]
+        | str
+        | int
+        | float
+        | bool
+        | None
+    ) = Field(default_factory=list)
+    stdio_configs: Any | None = None
+    bu_code: Any | None = None
+    product_code: Any | None = None
+    arch_domain_code: Any | None = None
+    creator: McpPerson | str | list[Any] | int | float | bool | None = None
+    owner: McpPerson | str | list[Any] | int | float | bool | None = None
+    owners_info: Any | None = None
+    tools: Any = Field(
+        default_factory=list,
+        description="Legacy tool declarations with internal extInfo removed.",
+    )
+    tags: Any = Field(default_factory=list)
+    code_repo_url: Any | None = None
+    launch_channels: Any = Field(default_factory=list)
+    vendor: McpVendor | str | list[Any] | int | float | bool | None = None
 
 
 class McpPermission(BaseModel):
@@ -278,4 +387,6 @@ class BotMcpItem(BaseModel):
     """An MCP server in one Bot's desired-state projection."""
 
     server_code: str = Field(description=_SERVER_CODE_DESC)
-    active: bool = Field(description="Whether the MCP has a desired-state installation.")
+    active: bool = Field(
+        description="Whether the MCP has a desired-state installation."
+    )

@@ -1585,6 +1585,36 @@ internal router so both surfaces answer identically); owner-scoped via
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Read caller's unified server config | `Envelope[McpConfig]` |
 | PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Write config (pushed to devices) | `Envelope[McpConfig]` |
 
+The unified marketplace search also exposes
+`POST /openapi/v1/bots/market/mcp-servers`. Its JSON request supports the full
+legacy catalogue filter set: `keyword`, `page_num`, `page_size`, `server_codes`,
+`platform_server_codes`, `run_modes`, `statuses`, `transport_protocols`,
+`host_platforms`, `owners`, `network_types`, `categories`, `tenants`, and
+`tags`. Requested network types are intersected with the public allowlist
+(`INTERNET`, `OFFICE`); a request containing only hidden network types returns
+an empty page. Each `McpMarketItem` is a lossless snake-case equivalent of the
+corresponding legacy `GET /api/mcp/market/list` item, including tags and future
+catalogue extension fields, while retaining the same `extInfo` removal rule.
+
+`McpServerDetail` is the snake-case equivalent of the legacy
+`GET /api/mcp/market/detail` business payload. In addition to the lightweight
+list fields and `tools`, its explicit schema covers the legacy catalogue fields,
+including `source`, `icon`, `docs`, `endpoints`, `vendor`, `status`, `run_mode`,
+`host_platform`, `platform_server_code`, `host_app_name`, `category`, `site`,
+marketplace `tenant`, `access_level`, `stdio_configs`, business/domain codes,
+ownership records, tags, repository metadata, and launch channels.
+
+Compatibility is lossless: endpoint `headers`, identity `user_id`, endpoint
+records on every network present in an otherwise visible server, malformed
+legacy values, and future catalogue extension fields are retained. Known
+catalogue object keys are translated from camelCase to snake_case; opaque maps
+such as endpoint headers, environment-variable names, and tool declarations keep
+their original keys. As on the legacy route, tool input-schema `extInfo` is
+removed, and a server whose declared network types are all outside the API's
+allowlist still resolves as not found. The permissions operation remains the
+authoritative caller-specific permission check even though catalogue
+`access_level` is also retained in detail for legacy payload compatibility.
+
 _Delivered decisions (PR #610): paths stay nested (`/openapi/v1/bots/mcp/...`);
 `sync_mode` dropped from the write body (no single-device push path — `extra=
 "forbid"` makes it a 422); a failed device push rolls the write back and answers
