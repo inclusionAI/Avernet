@@ -107,7 +107,8 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillRuntimeSyncError,
     SkillDeleteConsistencyError,
     SkillReferencedBySkillSetError,
-    SkillSetManagedResourceError,
+    SkillRuntimeNameConflictError,
+    SkillSetControlPlaneConflictError,
 )
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.skills_pool.edit_guard import (
@@ -2164,7 +2165,14 @@ async def activate_skills_batch(
                     "path": str(item.get("git_path") or path),
                 }
             )
-        except (LocalSkillNotFoundError, SkillSetManagedResourceError) as exc:
+        except (
+            LocalSkillNotFoundError,
+            # The R1 refusal (Set-managed capability) and the one-name-per-
+            # active invariant now surface from the UoW as the control-plane
+            # conflict family; each is one item's failure, never the batch's.
+            SkillSetControlPlaneConflictError,
+            SkillRuntimeNameConflictError,
+        ) as exc:
             results["failed"].append(
                 {"path": path, "error": str(exc) or type(exc).__name__}
             )

@@ -41,6 +41,8 @@ from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetService
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     LocalSkillRuntimeSyncError,
+    SkillRuntimeNameConflictError,
+    SkillSetControlPlaneConflictError,
 )
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     LAYOUT_CONTRACT_VERSION,
@@ -1131,6 +1133,53 @@ class TestActivateSkillsBatchAsyncAwait:
             assert len(response.json()["data"]["success"]) == 1
             assert response.json()["data"]["failed"][0]["path"] == "git://path/b"
             mock_svc.asset_service.set_active.assert_awaited_once()
+
+    def test_batch_keeps_refused_items_as_partial_success(self, mock_ctx):
+        """R1 refusals and the one-name invariant fail one item, never the batch.
+
+        The Direct control plane surfaces both as raises; the historical batch
+        wire promises the success/failed lists for exactly these outcomes.
+        """
+        with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
+            ids = {"git://path/a": "1", "git://path/b": "2", "git://path/c": "3"}
+            mock_svc.asset_service.resolve_legacy_skill_id.side_effect = (
+                lambda **kwargs: ids[kwargs["skill_reference"]]
+            )
+
+            async def _set_active(**kwargs):
+                if kwargs["skill_id"] == "2":
+                    raise SkillSetControlPlaneConflictError(
+                        "RESOURCE_MANAGED_BY_SKILL_SET"
+                    )
+                if kwargs["skill_id"] == "3":
+                    raise SkillRuntimeNameConflictError()
+                return {
+                    "id": kwargs["skill_id"],
+                    "name": "path-a",
+                    "git_path": "git://path/a",
+                }
+
+            mock_svc.asset_service.set_active.side_effect = _set_active
+
+            response = client.post(
+                "/api/skills/market/activate-batch",
+                json={
+                    "skill_paths": [
+                        "git://path/a",
+                        "git://path/b",
+                        "git://path/c",
+                    ]
+                },
+            )
+
+            assert response.status_code == 200, response.text
+            data = response.json()["data"]
+            assert [item["id"] for item in data["success"]] == ["1"]
+            assert [item["path"] for item in data["failed"]] == [
+                "git://path/b",
+                "git://path/c",
+            ]
+            assert data["failed"][0]["error"] == "RESOURCE_MANAGED_BY_SKILL_SET"
 
     def test_activate_skills_batch_fails_when_runtime_mapping_sync_fails(
         self, mock_ctx
