@@ -47,7 +47,7 @@ impl SystemMessageService for RecordingSystemMessage {
 
 /// Test no-auth shared-content URL projector for upload-completion notifications.
 struct CompletionShareProjector;
-impl bcs_service_api::application::v1::SessionFileSharedContentUrlProjector
+impl bcs_service_api::application::v1::SessionFileInternalContentUrlProjector
     for CompletionShareProjector
 {
     fn shared_content_url(&self, token: &str) -> String {
