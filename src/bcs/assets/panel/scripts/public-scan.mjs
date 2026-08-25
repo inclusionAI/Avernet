@@ -10,6 +10,7 @@ const targets = [
   'vite.config.ts',
   'tsconfig.json',
   'tsconfig.build.json',
+  'dist/index.umd.js',
 ];
 const deniedPatterns = [
   /alipay/i,
