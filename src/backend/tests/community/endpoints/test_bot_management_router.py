@@ -159,6 +159,78 @@ def _assert_response_has_total_and_items(response, world):
 
 
 # ============================================================================
+# GET /api/bots/{bot_id}/classification
+# ============================================================================
+
+
+def _seed_cross_owner_service_bot(world):
+    """Seed an authenticated caller and a service Bot owned by another user."""
+    make_staff_user(world, user_id="u_requester")
+    make_staff_user(world, user_id="u_owner")
+    make_bot(
+        world,
+        bot_id="bot_cross_owner_service",
+        owner_id="u_owner",
+        bot_type="service",
+        status="ACTIVE",
+    )
+
+
+def _seed_classification_requester(world):
+    """Seed an authenticated caller without creating the requested Bot."""
+    make_staff_user(world, user_id="u_requester")
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/bots/{bot_id}/classification",
+    scenario="ok_cross_owner_service_bot",
+    input=CaseInput(
+        path_params={"bot_id": "bot_cross_owner_service"},
+        headers={"x-user-id": "u_requester"},
+    ),
+    seed=_seed_cross_owner_service_bot,
+    expect=ExpectSuccess(
+        status=200,
+        json_equals={
+            "success": True,
+            "message": "OK",
+            "error_code": 200,
+            "data": {
+                "bot_id": "bot_cross_owner_service",
+                "bot_type": "service",
+            },
+        },
+    ),
+)
+def get_bot_classification_cross_owner():
+    """Any authenticated user can read only a Bot's public classification."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/bots/{bot_id}/classification",
+    scenario="error_bot_not_found",
+    input=CaseInput(
+        path_params={"bot_id": "missing_bot"},
+        headers={"x-user-id": "u_requester"},
+    ),
+    seed=_seed_classification_requester,
+    expect=ExpectError(
+        status=200,
+        json_contains={
+            "success": False,
+            "message": "Bot不存在: missing_bot",
+            "error_code": 404,
+            "data": None,
+        },
+    ),
+)
+def get_bot_classification_not_found():
+    """An authenticated lookup of an unknown Bot returns the 404 envelope."""
+
+
+# ============================================================================
 # GET /api/bots/by-owner-or-collaborator
 # ============================================================================
 
