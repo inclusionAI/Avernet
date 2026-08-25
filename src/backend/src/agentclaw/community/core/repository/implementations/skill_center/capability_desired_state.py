@@ -10,18 +10,20 @@ from __future__ import annotations
 from injector import inject
 from sqlalchemy import and_, or_
 from agentclaw.community.core.models.skill import (
-    BotSkillInstallation,
     Skill,
     SkillSet,
     SkillSetSkill,
 )
 from agentclaw.community.core.models.mcp import (
-    BotMCPInstallation,
     SkillSetMCPServer,
 )
 from agentclaw.community.core.repository.implementations.skill_center.default_skillset_projection import (
-    excluded_skill_ids,
     global_default_scope,
+)
+from agentclaw.community.core.repository.implementations.skill_center.tables import (
+    default_exclusions,
+    mcp_installations,
+    skill_installations,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_set_projection import (
     skill_set_item as _item,
@@ -239,7 +241,7 @@ class CapabilityDesiredStateRepository(
                 .all()
             )
             if row.is_default:
-                excluded = excluded_skill_ids(
+                excluded = default_exclusions.excluded_skill_ids(
                     session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
                 )
                 rows = [skill for skill in rows if int(skill.id) not in excluded]
@@ -373,14 +375,12 @@ class CapabilityDesiredStateRepository(
                 )
             )
             if row.is_active:
-                session.add(
-                    BotSkillInstallation(
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        skill_id=skill.id,
-                        env=get_current_env(),
-                        avernet_tenant=get_current_avernet_tenant(),
-                    )
+                skill_installations.install(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    env=get_current_env(),
+                    skill_id=int(skill.id),
                 )
             session.flush()
             return DesiredStateMutation(_item(row), True, old)
@@ -425,14 +425,13 @@ class CapabilityDesiredStateRepository(
             session.flush()
             if row.is_active:
                 retired = before - self._teardown_ids(session, {int(row.id)})
-                if retired:
-                    self._scope(
-                        session.query(BotSkillInstallation), BotSkillInstallation
-                    ).filter(
-                        BotSkillInstallation.owner_id == owner_id,
-                        BotSkillInstallation.bot_id == bot_id,
-                        BotSkillInstallation.skill_id.in_(sorted(retired)),
-                    ).delete(synchronize_session=False)
+                skill_installations.uninstall(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    env=get_current_env(),
+                    skill_ids=retired,
+                )
             session.flush()
             return DesiredStateMutation(_item(row), True, old)
 
@@ -490,44 +489,37 @@ class CapabilityDesiredStateRepository(
                 self._require_unique_runtime_names(
                     session, bot_id=bot_id, owner_id=owner_id, candidate_ids=ids
                 )
-                existing = self._installations(session, bot_id, owner_id)
-                for skill_id in ids - existing:
-                    session.add(
-                        BotSkillInstallation(
-                            bot_id=bot_id,
-                            owner_id=owner_id,
-                            skill_id=skill_id,
-                            env=get_current_env(),
-                            avernet_tenant=get_current_avernet_tenant(),
-                        )
+                for skill_id in sorted(ids):
+                    skill_installations.install(
+                        session,
+                        bot_id=bot_id,
+                        owner_id=owner_id,
+                        env=get_current_env(),
+                        skill_id=skill_id,
                     )
-                existing_mcps = self._mcp_installations(session, bot_id, owner_id)
-                for server_code in mcp_codes - existing_mcps:
-                    session.add(
-                        BotMCPInstallation(
-                            bot_id=bot_id,
-                            owner_id=owner_id,
-                            server_code=server_code,
-                            env=get_current_env(),
-                            avernet_tenant=get_current_avernet_tenant(),
-                        )
+                for server_code in sorted(mcp_codes):
+                    mcp_installations.install(
+                        session,
+                        bot_id=bot_id,
+                        owner_id=owner_id,
+                        env=get_current_env(),
+                        server_code=server_code,
                     )
-            elif retired:
-                self._scope(
-                    session.query(BotSkillInstallation), BotSkillInstallation
-                ).filter(
-                    BotSkillInstallation.owner_id == owner_id,
-                    BotSkillInstallation.bot_id == bot_id,
-                    BotSkillInstallation.skill_id.in_(sorted(retired)),
-                ).delete(synchronize_session=False)
-            if not active and mcp_codes:
-                self._scope(
-                    session.query(BotMCPInstallation), BotMCPInstallation
-                ).filter(
-                    BotMCPInstallation.bot_id == bot_id,
-                    BotMCPInstallation.owner_id == owner_id,
-                    BotMCPInstallation.server_code.in_(mcp_codes),
-                ).delete(synchronize_session=False)
+            else:
+                skill_installations.uninstall(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    env=get_current_env(),
+                    skill_ids=retired,
+                )
+                mcp_installations.uninstall(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    env=get_current_env(),
+                    server_codes=mcp_codes,
+                )
             session.flush()
             return DesiredStateMutation(_item(row), changed, old)
 
@@ -588,42 +580,28 @@ class CapabilityDesiredStateRepository(
                             avernet_tenant=get_current_avernet_tenant(),
                         )
                     )
-            self._scope(
-                session.query(BotSkillInstallation), BotSkillInstallation
-            ).filter(
-                BotSkillInstallation.owner_id == owner_id,
-                BotSkillInstallation.bot_id == bot_id,
-            ).delete(
-                synchronize_session=False
+            skill_installations.uninstall_all(
+                session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
             )
             session.flush()
-            for skill_id in state.installations:
-                session.add(
-                    BotSkillInstallation(
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        skill_id=skill_id,
-                        env=get_current_env(),
-                        avernet_tenant=get_current_avernet_tenant(),
-                    )
+            for skill_id in sorted(state.installations):
+                skill_installations.install(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    env=get_current_env(),
+                    skill_id=skill_id,
                 )
-            self._scope(
-                session.query(BotMCPInstallation), BotMCPInstallation
-            ).filter(
-                BotMCPInstallation.bot_id == bot_id,
-                BotMCPInstallation.owner_id == owner_id,
-            ).delete(
-                synchronize_session=False
+            mcp_installations.uninstall_all(
+                session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
             )
-            for server_code in state.mcp_installations:
-                session.add(
-                    BotMCPInstallation(
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        server_code=server_code,
-                        env=get_current_env(),
-                        avernet_tenant=get_current_avernet_tenant(),
-                    )
+            for server_code in sorted(state.mcp_installations):
+                mcp_installations.install(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    env=get_current_env(),
+                    server_code=server_code,
                 )
             session.flush()
 
@@ -716,31 +694,17 @@ class CapabilityDesiredStateRepository(
             .all()
         }
 
-    def _installations(self, session, bot_id: str, owner_id: str) -> set[int]:
-        return {
-            int(value[0])
-            for value in self._scope(
-                session.query(BotSkillInstallation.skill_id), BotSkillInstallation
-            )
-            .filter(
-                BotSkillInstallation.owner_id == owner_id,
-                BotSkillInstallation.bot_id == bot_id,
-            )
-            .all()
-        }
+    @staticmethod
+    def _installations(session, bot_id: str, owner_id: str) -> set[int]:
+        return skill_installations.installed_ids(
+            session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
+        )
 
-    def _mcp_installations(self, session, bot_id: str, owner_id: str) -> set[str]:
-        return {
-            str(value[0])
-            for value in self._scope(
-                session.query(BotMCPInstallation.server_code), BotMCPInstallation
-            )
-            .filter(
-                BotMCPInstallation.bot_id == bot_id,
-                BotMCPInstallation.owner_id == owner_id,
-            )
-            .all()
-        }
+    @staticmethod
+    def _mcp_installations(session, bot_id: str, owner_id: str) -> set[str]:
+        return mcp_installations.installed_codes(
+            session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
+        )
 
     def _mcp_has_ordinary_membership(
         self, session, bot_id: str, owner_id: str, server_code: str

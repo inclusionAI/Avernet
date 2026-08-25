@@ -7,24 +7,24 @@ range over every Set a Bot has and answer what its Installation table should say
 from __future__ import annotations
 
 from sqlalchemy import and_, func
-from sqlalchemy.exc import IntegrityError
 
-from agentclaw.community.core.models.mcp import BotMCPInstallation, SkillSetMCPServer
+from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill import (
-    BotSkillInstallation,
     Skill,
     SkillSet,
     SkillSetSkill,
 )
 from agentclaw.community.core.repository.implementations.skill_center.default_skillset_projection import (
-    excluded_mcp_codes,
-    excluded_skill_ids,
     global_default_scope,
+)
+from agentclaw.community.core.repository.implementations.skill_center.tables import (
+    default_exclusions,
+    mcp_installations,
+    skill_installations,
 )
 from agentclaw.community.core.repository.capability_desired_state_types import (
     InstallationFlushPlan,
 )
-from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -118,10 +118,10 @@ class BotSkillSetInstallations:
                 engine_type=engine_type,
                 default_engine_types=default_engine_types,
             )
-            installed = self._installed_skill_ids(
+            installed = skill_installations.installed_ids(
                 session, bot_id=bot_id, owner_id=owner_id, env=env
             )
-            installed_mcps = self._installed_mcp_codes(
+            installed_mcps = mcp_installations.installed_codes(
                 session, bot_id=bot_id, owner_id=owner_id, env=env
             )
         if (
@@ -143,141 +143,31 @@ class BotSkillSetInstallations:
                 default_engine_types=default_engine_types,
                 locked=True,
             )
-            rows = self._installation_rows(
-                session, bot_id=bot_id, owner_id=owner_id, env=env
-            ).with_for_update()
-            installed = {int(row.skill_id) for row in rows.all()}
+            installed = skill_installations.installed_ids(
+                session, bot_id=bot_id, owner_id=owner_id, env=env, locked=True
+            )
             for skill_id in sorted(plan.skills_to_install - installed):
-                self._install_one(
+                skill_installations.install(
                     session, bot_id=bot_id, owner_id=owner_id, env=env,
                     skill_id=skill_id,
                 )
-            stale = sorted(plan.skills_to_uninstall & installed)
-            if stale:
-                rows.filter(BotSkillInstallation.skill_id.in_(stale)).delete(
-                    synchronize_session=False
-                )
-            mcp_rows = self._mcp_installation_rows(
-                session, bot_id=bot_id, owner_id=owner_id, env=env
-            ).with_for_update()
-            installed_mcps = {str(row.server_code) for row in mcp_rows.all()}
+            skill_installations.uninstall(
+                session, bot_id=bot_id, owner_id=owner_id, env=env,
+                skill_ids=plan.skills_to_uninstall & installed,
+            )
+            installed_mcps = mcp_installations.installed_codes(
+                session, bot_id=bot_id, owner_id=owner_id, env=env, locked=True
+            )
             for server_code in sorted(plan.mcps_to_install - installed_mcps):
-                self._install_one_mcp(
+                mcp_installations.install(
                     session, bot_id=bot_id, owner_id=owner_id, env=env,
                     server_code=server_code,
                 )
-            stale_mcps = sorted(plan.mcps_to_uninstall & installed_mcps)
-            if stale_mcps:
-                mcp_rows.filter(
-                    BotMCPInstallation.server_code.in_(stale_mcps)
-                ).delete(synchronize_session=False)
+            mcp_installations.uninstall(
+                session, bot_id=bot_id, owner_id=owner_id, env=env,
+                server_codes=plan.mcps_to_uninstall & installed_mcps,
+            )
             return plan
-
-    def _install_one(
-        self, session, *, bot_id: str, owner_id: str, env: str, skill_id: int
-    ) -> None:
-        """Insert one Installation row, tolerating a concurrent winner.
-
-        Each insert gets its own SAVEPOINT so a lost race rolls back that row
-        alone. A losing insert is the only recoverable ``IntegrityError``, so
-        anything the re-read cannot find is re-raised rather than swallowed —
-        a deleted Skill, say. The re-read locks because InnoDB would otherwise
-        answer it from this transaction's pre-race snapshot.
-        """
-        try:
-            with session.begin_nested():
-                session.add(
-                    BotSkillInstallation(
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        skill_id=skill_id,
-                        env=env,
-                        avernet_tenant=get_current_avernet_tenant(),
-                    )
-                )
-        except IntegrityError:
-            winner = (
-                self._installation_rows(
-                    session, bot_id=bot_id, owner_id=owner_id, env=env
-                )
-                .filter(BotSkillInstallation.skill_id == skill_id)
-                .with_for_update()
-                .first()
-            )
-            if not winner:
-                raise
-
-    def _install_one_mcp(
-        self, session, *, bot_id: str, owner_id: str, env: str, server_code: str
-    ) -> None:
-        """Insert one MCP Installation row, tolerating a concurrent winner.
-
-        The same SAVEPOINT-per-row contract as :meth:`_install_one`.
-        """
-        try:
-            with session.begin_nested():
-                session.add(
-                    BotMCPInstallation(
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        server_code=server_code,
-                        env=env,
-                        avernet_tenant=get_current_avernet_tenant(),
-                    )
-                )
-        except IntegrityError:
-            winner = (
-                self._mcp_installation_rows(
-                    session, bot_id=bot_id, owner_id=owner_id, env=env
-                )
-                .filter(BotMCPInstallation.server_code == server_code)
-                .with_for_update()
-                .first()
-            )
-            if not winner:
-                raise
-
-    @staticmethod
-    def _installation_rows(session, *, bot_id: str, owner_id: str, env: str):
-        # ``env`` comes from the Bot, not the process: every other reader keys
-        # Installation on the Bot's env.
-        return session.query(BotSkillInstallation).filter(
-            BotSkillInstallation.avernet_tenant == get_current_avernet_tenant(),
-            BotSkillInstallation.env == env,
-            BotSkillInstallation.owner_id == owner_id,
-            BotSkillInstallation.bot_id == bot_id,
-        )
-
-    @staticmethod
-    def _mcp_installation_rows(session, *, bot_id: str, owner_id: str, env: str):
-        return session.query(BotMCPInstallation).filter(
-            BotMCPInstallation.avernet_tenant == get_current_avernet_tenant(),
-            BotMCPInstallation.env == env,
-            BotMCPInstallation.owner_id == owner_id,
-            BotMCPInstallation.bot_id == bot_id,
-        )
-
-    @classmethod
-    def _installed_mcp_codes(
-        cls, session, *, bot_id: str, owner_id: str, env: str
-    ) -> set[str]:
-        return {
-            str(row.server_code)
-            for row in cls._mcp_installation_rows(
-                session, bot_id=bot_id, owner_id=owner_id, env=env
-            ).all()
-        }
-
-    @classmethod
-    def _installed_skill_ids(
-        cls, session, *, bot_id: str, owner_id: str, env: str
-    ) -> set[int]:
-        return {
-            int(row.skill_id)
-            for row in cls._installation_rows(
-                session, bot_id=bot_id, owner_id=owner_id, env=env
-            ).all()
-        }
 
     def _resolve_flush_plan(
         self,
@@ -313,7 +203,7 @@ class BotSkillSetInstallations:
             is_default = bool(row.is_default)
             set_is_active = is_default or bool(row.is_active)
             excluded = (
-                excluded_skill_ids(
+                default_exclusions.excluded_skill_ids(
                     session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
                 )
                 if is_default
@@ -331,7 +221,7 @@ class BotSkillSetInstallations:
                 members.add(member_id)
                 (active_skills if set_is_active else inactive_skills).add(member_id)
             excluded_mcps = (
-                excluded_mcp_codes(
+                default_exclusions.excluded_mcp_codes(
                     session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
                 )
                 if is_default

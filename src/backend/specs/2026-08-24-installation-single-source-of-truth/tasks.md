@@ -126,7 +126,7 @@ lands in the same group as the migration of its last caller.
 
 ## Group 7 — DirectActivationService (one direct write path, skills ≡ MCPs)
 
-- [ ] 7.1 Extract per-table command modules
+- [x] 7.1 Extract per-table command modules
       `core/repository/implementations/skill_center/tables/
       {skill_installations,mcp_installations,default_exclusions}.py`
       (session-in functions); the UoW and the flush use them — each table's

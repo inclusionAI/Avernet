@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from agentclaw.community.core.models.mcp import (
-    BotMCPInstallation,
-    SkillSetMCPServer,
+from agentclaw.community.core.models.mcp import SkillSetMCPServer
+from agentclaw.community.core.repository.implementations.skill_center.tables import (
+    mcp_installations,
 )
-from agentclaw.community.core.models.skill import SkillSet
-from agentclaw.community.core.repository.implementations.skill_center.default_skillset_projection import (
+from agentclaw.community.core.repository.implementations.skill_center.tables.default_exclusions import (
     excluded_mcp_codes,
 )
 from agentclaw.community.core.repository.capability_desired_state_types import (
@@ -111,10 +110,10 @@ class McpSkillSetControlPlaneCommands:
                 avernet_tenant=get_current_avernet_tenant(),
             ))
             if row.is_active:
-                session.add(BotMCPInstallation(
-                    bot_id=bot_id, owner_id=owner_id, server_code=server_code, env=get_current_env(),
-                    avernet_tenant=get_current_avernet_tenant(),
-                ))
+                mcp_installations.install(
+                    session, bot_id=bot_id, owner_id=owner_id,
+                    env=get_current_env(), server_code=server_code,
+                )
             session.flush()
             return DesiredStateMutation(self._as_item(row), True, old)
 
@@ -136,11 +135,10 @@ class McpSkillSetControlPlaneCommands:
                 return DesiredStateMutation(self._as_item(row), False, old)
             session.delete(membership)
             if row.is_active:
-                self._scope(session.query(BotMCPInstallation), BotMCPInstallation).filter(
-                    BotMCPInstallation.bot_id == bot_id,
-                    BotMCPInstallation.owner_id == owner_id,
-                    BotMCPInstallation.server_code == server_code,
-                ).delete(synchronize_session=False)
+                mcp_installations.uninstall(
+                    session, bot_id=bot_id, owner_id=owner_id,
+                    env=get_current_env(), server_codes={server_code},
+                )
             session.flush()
             return DesiredStateMutation(self._as_item(row), True, old)
 
@@ -153,10 +151,10 @@ class McpSkillSetControlPlaneCommands:
                 raise SkillSetControlPlaneConflictError("RESOURCE_MANAGED_BY_SKILL_SET")
             if server_code in old.mcp_installations:
                 return DesiredStateMutation({}, False, old)
-            session.add(BotMCPInstallation(
-                bot_id=bot_id, owner_id=owner_id, server_code=server_code, env=get_current_env(),
-                avernet_tenant=get_current_avernet_tenant(),
-            ))
+            mcp_installations.install(
+                session, bot_id=bot_id, owner_id=owner_id,
+                env=get_current_env(), server_code=server_code,
+            )
             session.flush()
             return DesiredStateMutation({}, True, old)
 
@@ -167,11 +165,10 @@ class McpSkillSetControlPlaneCommands:
                 session, bot_id, owner_id, server_code
             ):
                 raise SkillSetControlPlaneConflictError("RESOURCE_MANAGED_BY_SKILL_SET")
-            changed = self._scope(session.query(BotMCPInstallation), BotMCPInstallation).filter(
-                BotMCPInstallation.bot_id == bot_id,
-                BotMCPInstallation.owner_id == owner_id,
-                BotMCPInstallation.server_code == server_code,
-            ).delete(synchronize_session=False) > 0
+            changed = mcp_installations.uninstall(
+                session, bot_id=bot_id, owner_id=owner_id,
+                env=get_current_env(), server_codes={server_code},
+            ) > 0
             session.flush()
             return DesiredStateMutation({}, changed, old)
 
