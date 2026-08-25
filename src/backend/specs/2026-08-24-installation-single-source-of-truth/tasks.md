@@ -161,7 +161,7 @@ lands in the same group as the migration of its last caller.
       `add_skill`/`add_mcp` on the Default Set removes an existing exclusion,
       else `SYSTEM_DEFAULT_IMMUTABLE`. Runtime reconciled like every
       mutation.
-- [ ] 8.3 Tests: exclude → inactive everywhere (listing, reader, runtime
+- [x] 8.3 Tests: exclude → inactive everywhere (listing, reader, runtime
       snapshot); un-exclude → active again; MCP cases mirror skill cases;
       adapter tests for the restored wire semantics on both HTTP surfaces.
 

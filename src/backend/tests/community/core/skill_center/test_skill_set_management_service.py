@@ -20,6 +20,7 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
+    SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
     McpPermissionDeniedError,
@@ -2033,3 +2034,175 @@ async def test_non_skill_projection_never_writes_skill_mappings():
     assert factory.service.mcp_codes is not None
     assert pool.publish_calls == []
     assert pool.verify_calls == []
+
+
+# ── Default-Set exclusion wire (restored opt-out, spec E.11) ─────────
+
+
+class _DefaultTargetRepository(_Repository):
+    """The addressed Set resolves to the Bot's Default."""
+
+    def __init__(self, excluded_ids=(), excluded_codes=()) -> None:
+        super().__init__()
+        self.exclusion_calls: list[tuple[str, dict]] = []
+        self._excluded_ids = set(excluded_ids)
+        self._excluded_codes = set(excluded_codes)
+
+    def get_set(self, **_kwargs):
+        return {"id": "9", "is_default": True, "is_active": True}
+
+    def excluded_default_skill_ids(self, **_kwargs) -> set[int]:
+        return set(self._excluded_ids)
+
+    def excluded_default_mcp_codes(self, **_kwargs) -> set[str]:
+        return set(self._excluded_codes)
+
+    @staticmethod
+    def _mutation() -> DesiredStateMutation:
+        return DesiredStateMutation(
+            {"id": "9", "is_default": True},
+            True,
+            CapabilityDesiredState(set(), {}, {}),
+        )
+
+    def exclude_default_skill(self, **kwargs) -> DesiredStateMutation:
+        self.exclusion_calls.append(("exclude_default_skill", kwargs))
+        return self._mutation()
+
+    def unexclude_default_skill(self, **kwargs) -> DesiredStateMutation:
+        self.exclusion_calls.append(("unexclude_default_skill", kwargs))
+        return self._mutation()
+
+    def exclude_default_mcp(self, **kwargs) -> DesiredStateMutation:
+        self.exclusion_calls.append(("exclude_default_mcp", kwargs))
+        return self._mutation()
+
+    def unexclude_default_mcp(self, **kwargs) -> DesiredStateMutation:
+        self.exclusion_calls.append(("unexclude_default_mcp", kwargs))
+        return self._mutation()
+
+
+class _ProjectionCountingRuntime(_SuccessfulRuntime):
+    def __init__(self) -> None:
+        self.projections = 0
+
+    async def project(self, **_kwargs) -> None:
+        self.projections += 1
+
+
+def _default_wire_service(repository, runtime=None) -> SkillSetManagementService:
+    return SkillSetManagementService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=runtime if runtime is not None else _SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+
+@pytest.mark.asyncio
+async def test_removing_a_default_member_performs_the_exclusion_and_reconciles():
+    repository = _DefaultTargetRepository()
+    runtime = _ProjectionCountingRuntime()
+    service = _default_wire_service(repository, runtime)
+
+    result = await service.remove_skill(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+        set_id="9", skill_id="7",
+    )
+
+    assert result["changed"] is True
+    assert [name for name, _ in repository.exclusion_calls] == [
+        "exclude_default_skill"
+    ]
+    assert repository.exclusion_calls[0][1]["skill_id"] == "7"
+    assert runtime.projections == 1
+
+
+@pytest.mark.asyncio
+async def test_adding_back_an_excluded_default_member_unexcludes():
+    repository = _DefaultTargetRepository(excluded_ids={7})
+    service = _default_wire_service(repository)
+
+    result = await service.add_skill(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+        set_id="9", skill_id="7",
+    )
+
+    assert result["changed"] is True
+    assert [name for name, _ in repository.exclusion_calls] == [
+        "unexclude_default_skill"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_adding_a_new_member_to_the_default_stays_immutable():
+    repository = _DefaultTargetRepository()
+    service = _default_wire_service(repository)
+
+    with pytest.raises(
+        SkillSetControlPlaneConflictError, match="SYSTEM_DEFAULT_IMMUTABLE"
+    ):
+        await service.add_skill(
+            bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+            set_id="9", skill_id="7",
+        )
+    assert repository.exclusion_calls == []
+
+
+@pytest.mark.asyncio
+async def test_default_mcp_exclusion_wire_mirrors_the_skill_wire():
+    repository = _DefaultTargetRepository(excluded_codes={"mcp.back"})
+    runtime = _ProjectionCountingRuntime()
+    service = _default_wire_service(repository, runtime)
+
+    removed = await service.remove_mcp(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+        set_id="9", server_code="mcp.gone",
+    )
+    added = await service.add_mcp(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+        set_id="9", server_code="mcp.back",
+    )
+
+    assert removed["changed"] is True and added["changed"] is True
+    assert [name for name, _ in repository.exclusion_calls] == [
+        "exclude_default_mcp",
+        "unexclude_default_mcp",
+    ]
+    assert runtime.projections == 2
+
+    with pytest.raises(
+        SkillSetControlPlaneConflictError, match="SYSTEM_DEFAULT_IMMUTABLE"
+    ):
+        await service.add_mcp(
+            bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+            set_id="9", server_code="mcp.never-member",
+        )
+
+
+@pytest.mark.asyncio
+async def test_unexcluding_a_default_mcp_still_requires_marketplace_permission():
+    repository = _DefaultTargetRepository(excluded_codes={"mcp.back"})
+    service = SkillSetManagementService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=False),
+        mcp_auth=_McpAuth(allowed=False),
+    )
+
+    with pytest.raises(McpPermissionDeniedError):
+        await service.add_mcp(
+            bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+            set_id="9", server_code="mcp.back",
+        )
+    assert repository.exclusion_calls == []

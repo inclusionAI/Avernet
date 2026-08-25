@@ -606,3 +606,48 @@ async def test_legacy_default_detail_projects_historical_false_as_active() -> No
     )
 
     assert response.data.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_legacy_remove_reaches_the_default_set_exclusion_wire() -> None:
+    """The legacy DELETE has no default pre-refusal: the control plane's
+    restored opt-out (remove on a Default = per-Bot exclusion) flows through
+    the seam, and the historical wire shape is preserved."""
+    from agentclaw.community.adapters.http.skill_center.skillsets import (
+        remove_skill_from_set,
+    )
+
+    class _ControlPlane(_LegacySetScopeControlPlane):
+        def get_set(self, **kwargs):
+            self.calls.append(("get_set", kwargs))
+            return {"id": "set-1", "is_default": True}
+
+        async def remove_skill(self, **kwargs):
+            self.calls.append(("remove_skill", kwargs))
+            return {"id": "set-1", "is_default": True, "changed": True}
+
+    control_plane = _ControlPlane()
+    response = await remove_skill_from_set(
+        "set-1",
+        "7",
+        user_id="owner",
+        entity_id=None,
+        entity_type=None,
+        bot_id=None,
+        engine_type=None,
+        ctx=SimpleNamespace(user_id="owner", bot_id="default"),
+        bot_repo=_AddressedBots(),
+        control_plane=control_plane,
+    )
+
+    assert response.model_dump() == {
+        "success": True,
+        "message": "Skill removed from skill set",
+    }
+    assert ("remove_skill", {
+        "bot_id": "persisted-bot",
+        "owner_id": "owner",
+        "user_id": "owner",
+        "set_id": "set-1",
+        "skill_id": "7",
+    }) in control_plane.calls
