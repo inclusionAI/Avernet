@@ -6,7 +6,6 @@ from injector import inject
 
 from agentclaw.community.core.bot_management.render_screen.models import RenderScreenRecord
 from agentclaw.community.core.bot_management.render_screen.scope import resolve_render_screen_scope
-from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.repository.protocols.bot import (
     BotRepository,
     CollaboratorRepositoryProtocol,
@@ -28,12 +27,10 @@ class RenderScreenService:
         repository: RenderScreenRepository,
         bot_repository: BotRepository,
         collaborator_repository: CollaboratorRepositoryProtocol,
-        template_service: TemplateService,
     ) -> None:
         self._repo = repository
         self._bot_repo = bot_repository
         self._collaborator_repo = collaborator_repository
-        self._template_service = template_service
 
     def _require_bot(self, bot_id: str) -> dict:
         try:
@@ -43,20 +40,6 @@ class RenderScreenService:
             raise PermissionError(f"无权操作此 Bot 的 CDN 配置: {bot_id}") from exc
         if not bot:
             raise PermissionError(f"无权操作此 Bot 的 CDN 配置: {bot_id}")
-
-        # Enrich bot with template_config from template service, so scope
-        # resolution can detect member-management capability.
-        try:
-            template_config = self._template_service.get_template_config(bot_id)
-            if template_config:
-                bot["template_config"] = template_config
-        except Exception as exc:  # pragma: no cover - defensive fallback
-            logger.warning(
-                "[RenderScreen] failed to load template config bot_id=%s err=%s",
-                bot_id,
-                exc,
-            )
-
         return bot
 
     def _bot_has_collaborative_access(self, bot_id: str, user_id: str) -> bool:
