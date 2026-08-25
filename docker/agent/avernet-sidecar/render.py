@@ -105,7 +105,13 @@ def escape_lua_string(s: str) -> str:
 
 def escape_lua_pattern(s: str) -> str:
     """Escape Lua pattern special chars (^$()%.[]*+-?) with % prefix."""
-    return re.sub(r'([%^%$%(%)%%%.%[%]%*%+%-%?])', r'%\1', s)
+    special = set('^$().%[]*+-?')
+    result = []
+    for c in s:
+        if c in special:
+            result.append('%')
+        result.append(c)
+    return ''.join(result)
 
 
 def render_lua_code(rules: list[OutboundRule]) -> str:
@@ -172,7 +178,6 @@ def render_lua_filter_config(lua_code: str) -> str:
         f'{indent}  typed_config:\n'
         f'{indent}    "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua\n'
         f'{indent}    inline_code: {code_json}\n'
-        f'{indent}'
     )
 
 
@@ -220,9 +225,15 @@ def render_virtual_host(rule: OutboundRule, idx: int, cluster: str = "outbound_o
 
 
 def render_virtual_hosts(rules: list[OutboundRule], cluster: str = "outbound_original_dst") -> str:
-    """Render all VirtualHosts, merging rules with identical domain sets."""
+    """Render all VirtualHosts, merging rules with identical domain sets.
+
+    When no rules exist, emit a default catch-all VirtualHost (domain '*')
+    that routes all traffic to the original destination without modifying
+    headers. This ensures Envoy passes traffic through instead of 404.
+    """
     if not rules:
-        return "[]"
+        # Default catch-all: no header ops, just pass-through
+        return "\n" + render_default_virtual_host(cluster)
 
     groups: dict[tuple[str, ...], OutboundRule] = {}
     order: list[tuple[str, ...]] = []
@@ -239,6 +250,29 @@ def render_virtual_hosts(rules: list[OutboundRule], cluster: str = "outbound_ori
 
     merged = [groups[k] for k in order]
     return "\n" + "\n".join(render_virtual_host(r, i, cluster) for i, r in enumerate(merged))
+
+
+def render_default_virtual_host(cluster: str = "outbound_original_dst_http") -> str:
+    """Render a default catch-all VirtualHost with no header operations.
+
+    Used when no rules exist — allows Envoy to pass traffic through
+    to the original destination instead of returning 404.
+    """
+    item = "                    "   # 20 spaces
+    prop = item + "  "             # 22 spaces
+    child = prop + "  "            # 24 spaces
+
+    return (
+        f"{item}- name: default_pass_through\n"
+        f"{prop}domains:\n"
+        f'{child}- "*"\n'
+        f"{prop}routes:\n"
+        f'{child}- match:\n'
+        f'{child}    prefix: "/"\n'
+        f'{child}  route:\n'
+        f'{child}    cluster: {cluster}\n'
+        f'{child}    timeout: 0s'
+    )
 
 
 def extract_sni_domains(rules: list[OutboundRule]) -> list[str]:

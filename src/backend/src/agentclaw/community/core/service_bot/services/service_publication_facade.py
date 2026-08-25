@@ -59,6 +59,10 @@ from agentclaw.community.core.service_bot.errors import (
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     BotPublishService,
 )
+from agentclaw.community.core.service_bot.services.publish_exceptions import (
+    PublishNotFoundError,
+    PublishStatusInvalidError,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 from agentclaw.community.core.service_bot.services.publish_approval_service import (
     PublishApprovalService,
@@ -282,10 +286,27 @@ class ServicePublicationFacade:
         elif record.status == PublishStatus.VALIDATING.value:
             actions.extend(("publish_online", "restart_publish", "cancel_staging"))
         elif record.status == PublishStatus.SUCCESS.value:
+            if level >= PermissionLevel.ADMIN and self._can_upgrade_from_records(
+                record, all_records
+            ):
+                actions.append("upgrade")
             actions.extend(("restart_publish", "offline"))
         elif record.status == PublishStatus.FAILED.value:
             actions.append("retry")
         return actions
+
+    @staticmethod
+    def _can_upgrade_from_records(
+        record: BotPublishRecord,
+        all_records: Iterable[BotPublishRecord],
+    ) -> bool:
+        """Project the legacy can-upgrade rule without per-card repository reads."""
+        if record.status != PublishStatus.SUCCESS.value:
+            return False
+        successors = [item for item in all_records if item.last_pub_id == record.id]
+        return not successors or all(
+            item.status == PublishStatus.FAILED.value for item in successors
+        )
 
     def _project(
         self,
@@ -484,6 +505,47 @@ class ServicePublicationFacade:
         return self.get_publication(
             bot_id,
             record.id,
+            actor_id=actor_id,
+            owner_id=owner_id,
+        )
+
+    def upgrade_publication(
+        self,
+        bot_id: str,
+        publication_id: int,
+        *,
+        actor_id: str,
+        owner_id: str,
+    ) -> dict[str, Any]:
+        """Create the next draft from one live service-Bot publication."""
+        bot, record, _ = self._resolve_publication(
+            bot_id,
+            publication_id,
+            actor_id=actor_id,
+            owner_id=owner_id,
+            required_level=PermissionLevel.ADMIN,
+        )
+        if (
+            record.status != PublishStatus.SUCCESS.value
+            or not self._publish_service.can_upgrade_publish(record.id)
+        ):
+            raise ServicePublicationConflictError("publication cannot be upgraded")
+
+        try:
+            created = self._publish_service.upgrade_publish(
+                publish_id=record.id,
+                owner_id=bot["owner_id"],
+            )
+        except (PublishNotFoundError, PublishStatusInvalidError) as exc:
+            # The record may have changed between the projection check and the
+            # domain write. Expose that race as the same stable state conflict.
+            raise ServicePublicationConflictError(
+                "publication cannot be upgraded"
+            ) from exc
+
+        return self.get_publication(
+            bot_id,
+            created.id,
             actor_id=actor_id,
             owner_id=owner_id,
         )

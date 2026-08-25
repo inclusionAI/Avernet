@@ -7,6 +7,7 @@ from agentclaw.community.core.bot_public.services.bot_public_service import (
     BotNotFoundError,
     BotPublicServiceError,
 )
+from agentclaw.community.plugin_api.approval_workflow import NO_WORKFLOW_MARKER
 from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogAddress,
     BotCatalogCaller,
@@ -210,6 +211,46 @@ class TestPublicBcsBot:
                 bot_uid="b1", owner_id="u1", public_scope="user",
                 operator=_make_operator(),
             )
+
+    def test_no_workflow_falls_through_to_skipped_with_agree_callback(self):
+        # community/local NoApprovalWorkflow reports "no approval capability"
+        # (NO_WORKFLOW_MARKER prefix) rather than a real rejection. The protocol
+        # promises callers fall through to direct publish, NOT fail — and the
+        # fall-through is treated as auto-approved (AGREE): public_bcs_bot runs
+        # the same persist + inline-callback path as corp's COMPLETED tenant so
+        # BCS friend_ext still gets an AGREE update, surfacing the *approval*
+        # outcome as state=SKIPPED (no approval step ran) instead of raising
+        # (which the old code did for any success=False — a 500 every community
+        # publish).
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": False,
+            "error_msg": NO_WORKFLOW_MARKER + "no approval workflow in the community build",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+        svc = _make_service(process_service=process, bot_repository=bot_repo)
+
+        with patch.object(svc, "handle_public_approval_callback") as cb:
+            result = svc.public_bcs_bot(
+                bot_uid="b1", owner_id="u1", public_scope="user",
+                operator=_make_operator(staff_id="op_user"),
+            )
+
+        process.start_approval.assert_called_once()
+        # Fall-through (NOT raise): approval step skipped, AGREE callback fired.
+        assert result["success"] is True
+        assert result["state"] == "SKIPPED"
+        assert result["puid"] is None
+        assert result["last_operate"] == "agree"
+        assert result["error_msg"].startswith(NO_WORKFLOW_MARKER)
+        cb.assert_called_once()
+        ckw = cb.call_args.kwargs
+        assert ckw["bot_id"] == "b1"
+        assert ckw["owner_id"] == "u1"
+        assert ckw["puid"] is None
+        assert ckw["last_operate"] == "agree"
+        assert ckw["public_scope"] == "user"
 
     def test_rejects_empty_owner_id(self):
         svc = _make_service()

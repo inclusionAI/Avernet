@@ -611,6 +611,13 @@ mod tests {
                 nick_name: Some("test-user".to_string()),
             }))
         }
+
+        async fn lookup_department_by_staff_no(
+            &self,
+            _staff_no: &str,
+        ) -> Result<Option<String>, bcs_user_directory_api::UserDirectoryError> {
+            Ok(None)
+        }
     }
 
     fn test_user_directory_factory(

@@ -161,16 +161,12 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         self,
         config: ArcaCredentials | None = None,
         *,
-        api_server: str = "",
-        token: str = "",
         namespace: str = "default",
         default_images: dict[str, str] | None = None,
         arca_utils: ArcaUtils | None = None,
     ) -> None:
         self._config = config
-        self._api_server = api_server
-        self._token = token
-        self._namespace = namespace
+        self._namespace = config.app_name if config else namespace
         self._default_images = default_images or {}
         self._arca_utils = arca_utils
         self._client_manager: AliyunAckClientManager | None = None
@@ -189,8 +185,10 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
 
     def _client(self) -> Any:
         if self._client_manager is None:
+            api_server = self._config.base_url if self._config else ""
+            token = self._config.api_key if self._config else ""
             self._client_manager = AliyunAckClientManager(
-                AliyunAckClusterConfig(self._api_server, self._token, self._namespace)
+                AliyunAckClusterConfig(api_server, token, self._namespace)
             )
             self._client_manager.validate()
         return self._client_manager.get_client()
@@ -225,14 +223,16 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         docs = list(yaml.safe_load_all(rendered))
         deployment_name = ""
         container_name = ""
+        resource_kinds = []
         for doc in docs:
             if not doc:
                 continue
-            if doc.get("kind") == "Deployment":
+            kind = doc.get("kind", "")
+            resource_kinds.append(f"{kind}/{doc.get('metadata', {}).get('name', '')}")
+            if kind == "Deployment":
                 deployment_name = doc["metadata"]["name"]
                 containers = doc["spec"]["template"]["spec"]["containers"]
                 container_name = containers[0]["name"]
-                break
 
         client = self._client()
         create_from_yaml(
@@ -242,10 +242,11 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         )
 
         logger.info(
-            "[aliyun_ack] template applied uid=%s namespace=%s deployment=%s",
+            "[aliyun_ack] template applied uid=%s namespace=%s deployment=%s resources=[%s]",
             uid,
             namespace,
             deployment_name,
+            ", ".join(resource_kinds),
         )
         return deployment_name, container_name
 
@@ -436,9 +437,6 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
 def aliyun_ack_plugin_factory(
     _credentials=None,
     *,
-    api_server: str = "",
-    token: str = "",
-    namespace: str = "default",
     default_images: dict[str, str] | None = None,
     arca_utils: ArcaUtils | None = None,
 ):
@@ -448,14 +446,15 @@ def aliyun_ack_plugin_factory(
     dependency_injector may pass when the provider is called with args.
     In normal flow, Singleton calls this with keyword args only, returning
     the inner ``_build`` function.
+
+    ``api_server``, ``token``, and ``namespace`` are sourced from the
+    ``ArcaCredentials`` passed to ``_build`` (``base_url``, ``api_key``,
+    and ``app_name`` respectively).
     """
 
     def _build(credentials=None):
         return AliyunAckSandboxPlugin(
             config=credentials,
-            api_server=api_server,
-            token=token,
-            namespace=namespace,
             default_images=default_images,
             arca_utils=arca_utils,
         )

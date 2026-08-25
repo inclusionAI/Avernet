@@ -30,6 +30,11 @@ pub trait UserDirectoryPlugin: Send + Sync {
         &self,
         staff_no: &str,
     ) -> Result<Option<UserDirectoryProfile>, UserDirectoryError>;
+
+    async fn lookup_department_by_staff_no(
+        &self,
+        staff_no: &str,
+    ) -> Result<Option<String>, UserDirectoryError>;
 }
 
 #[cfg(test)]
