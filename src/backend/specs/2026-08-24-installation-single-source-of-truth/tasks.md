@@ -107,7 +107,7 @@ lands in the same group as the migration of its last caller.
 
 ## Group 6 — CapabilityOwnershipPolicy
 
-- [ ] 6.1 Add `core/skill_center/policies/capability_ownership.py` (R1–R3
+- [x] 6.1 Add `core/skill_center/policies/capability_ownership.py` (R1–R3
       docstring; `is_set_managed` — **no exclusion carve-out** — over the
       private `_set_belongs_to_bot`, moved from
       `local_skill_state_service.skill_set_reaches_bot`;
