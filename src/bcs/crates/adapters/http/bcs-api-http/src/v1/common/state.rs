@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
+use bcs_config_api::ManifestConfig;
 use bcs_service_api::application::v1::{
     BotService, CollaborationDefinitionService, CollaborationTemplateService, EventSubscriptionService, FriendConnectionService, FriendshipService, GroupService, InvitationService,
     SessionFileApplicationService, SessionMessageService, SessionService,
 };
 use bcs_service_api::application::channel::ChannelService;
+use bcs_service_api::application::CollaborationRuntimeService;
 
 use crate::v1::openapi::SessionFileUrlProjector;
 
@@ -29,6 +31,9 @@ pub struct ApiState {
     pub session_file_url_projector: Option<SessionFileUrlProjector>,
     pub collaboration_template_service: Option<Arc<dyn CollaborationTemplateService>>,
     pub collaboration_definition_service: Option<Arc<dyn CollaborationDefinitionService>>,
+    pub collaboration_runtime_service: Option<Arc<dyn CollaborationRuntimeService>>,
+    pub manifest: ManifestConfig,
+    pub manifest_env: String,
     pub principal_verifier: Arc<dyn PrincipalVerifier>,
 }
 
@@ -55,6 +60,9 @@ impl ApiState {
             session_file_url_projector: None,
             collaboration_template_service: None,
             collaboration_definition_service: None,
+            collaboration_runtime_service: None,
+            manifest: ManifestConfig::default(),
+            manifest_env: "local".to_string(),
             principal_verifier,
         }
     }
@@ -123,6 +131,26 @@ impl ApiState {
         service: Arc<dyn CollaborationDefinitionService>,
     ) -> Self {
         self.collaboration_definition_service = Some(service);
+        self
+    }
+
+    /// Add the legacy CollaborationRuntime service for the v1 state-machine-run
+    /// endpoints. Auth is performed in the HTTP layer; this service is reused
+    /// verbatim. Fail-closed (handler returns `internal` if None) until
+    /// bootstrap mounts it.
+    pub fn with_collaboration_runtime_service(
+        mut self,
+        service: Arc<dyn CollaborationRuntimeService>,
+    ) -> Self {
+        self.collaboration_runtime_service = Some(service);
+        self
+    }
+
+    /// Provide the bundle manifest config served by the public v1
+    /// `/api/v1/collaboration/manifest` route.
+    pub fn with_manifest_config(mut self, env: String, manifest: ManifestConfig) -> Self {
+        self.manifest_env = env;
+        self.manifest = manifest;
         self
     }
 }

@@ -1,0 +1,105 @@
+ManifestBundle:
+  type: object
+  additionalProperties: false
+  required: [name, url]
+  properties:
+    name:
+      type: string
+      minLength: 1
+    url:
+      type: string
+      minLength: 1
+
+ManifestData:
+  type: object
+  additionalProperties: false
+  required: [schema_version, env, bundles]
+  properties:
+    schema_version:
+      type: integer
+      minimum: 0
+    env:
+      type: string
+      minLength: 1
+    bundles:
+      type: array
+      items:
+        $ref: "#/ManifestBundle"
+
+ManifestEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      $ref: "#/ManifestData"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+BundleNamePath:
+  name: bundle_name
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+ManifestFileNamePath:
+  name: file_name
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+ManifestAssetNotFoundResponse:
+  description: The requested bundle or asset file was not found.
+  x-error-codes: [asset_not_found]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+ManifestPath:
+  get:
+    operationId: get_manifest
+    tags: ["Collaboration / Manifest"]
+    summary: Return the BCN collaboration runtime manifest.
+    x-avernet-security: {}
+    responses:
+      "200":
+        description: Manifest schema version, environment, and bundle URLs.
+        content:
+          application/json:
+            schema:
+              $ref: "#/ManifestEnvelope"
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+ManifestAssetPath:
+  get:
+    operationId: download_manifest_asset
+    tags: ["Collaboration / Manifest"]
+    summary: Stream a single manifest bundle asset (CSS, JS, JSON, SVG, etc.).
+    x-avernet-security: {}
+    x-avernet-raw-response: true
+    parameters:
+      - $ref: "#/BundleNamePath"
+      - $ref: "#/ManifestFileNamePath"
+    responses:
+      "200":
+        description: >-
+          Bundle asset bytes streamed by BCN. The actual Content-Type varies
+          by extension (text/css, text/html, application/javascript,
+          application/json, image/svg+xml, or application/octet-stream); the
+          contract documents a single binary body shape.
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      "404": { $ref: "#/ManifestAssetNotFoundResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }

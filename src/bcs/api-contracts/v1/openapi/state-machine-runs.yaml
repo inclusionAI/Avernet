@@ -1,0 +1,635 @@
+StateMachineRunStatus:
+  type: string
+  enum: [pending, running, completed, failed, aborted]
+
+StateMachineNodeStatus:
+  type: string
+  enum:
+    - pending
+    - ready
+    - running
+    - completed
+    - failed
+    - retry_scheduled
+    - skipped
+
+StateMachineNodeSubStatus:
+  type: string
+  enum: [awaiting_response, judging]
+
+StateMachineGraphMode:
+  type: string
+  enum: [acyclic, cyclic, event_driven, hierarchical]
+
+StateMachineNodeKind:
+  type: string
+  enum: [bot_task, group_chat, human_input, tool_action, sub_state_machine]
+
+StateMachineAssignee:
+  type: object
+  additionalProperties: false
+  required: [type]
+  properties:
+    type:
+      type: string
+      enum: [bot_binding, runtime_actor]
+    binding:
+      type: string
+      minLength: 1
+    actor:
+      type: string
+      minLength: 1
+
+StateMachineRun:
+  type: object
+  additionalProperties: false
+  required:
+    - run_id
+    - definition_id
+    - definition_version
+    - group_id
+    - group_version
+    - session_id
+    - status
+    - input
+    - created_at
+    - updated_at
+  properties:
+    run_id:
+      type: string
+      minLength: 1
+    definition_id:
+      type: string
+      minLength: 1
+    definition_version:
+      type: integer
+      minimum: 0
+    group_id:
+      type: string
+      minLength: 1
+    group_version:
+      type: integer
+      minimum: 0
+    session_id:
+      type: string
+      minLength: 1
+    created_by:
+      type: [string, "null"]
+    status:
+      $ref: "#/StateMachineRunStatus"
+    input: {}
+    output:
+      type: [string, "null"]
+    error:
+      type: [string, "null"]
+    created_at:
+      type: integer
+      format: int64
+      minimum: 0
+    updated_at:
+      type: integer
+      format: int64
+      minimum: 0
+    completed_at:
+      type: [integer, "null"]
+      format: int64
+      minimum: 0
+
+StateMachineNodeRun:
+  type: object
+  additionalProperties: false
+  required:
+    - run_id
+    - node_id
+    - status
+    - attempt
+    - max_attempts
+  properties:
+    run_id:
+      type: string
+      minLength: 1
+    node_id:
+      type: string
+      minLength: 1
+    status:
+      $ref: "#/StateMachineNodeStatus"
+    attempt:
+      type: integer
+      minimum: 0
+    node_timeout_ms:
+      type: [integer, "null"]
+      format: int64
+      minimum: 0
+    timeout_deadline_ms:
+      type: [integer, "null"]
+      format: int64
+      minimum: 0
+    max_attempts:
+      type: integer
+      minimum: 0
+    assignee_bot_id:
+      type: [string, "null"]
+    outcome:
+      type: [string, "null"]
+    responded_by:
+      type: [string, "null"]
+    delivery_request_id:
+      type: [string, "null"]
+    bot_delivery_run_id:
+      type: [string, "null"]
+    artifact_text:
+      type: [string, "null"]
+    error:
+      type: [string, "null"]
+    started_at:
+      type: [integer, "null"]
+      format: int64
+      minimum: 0
+    completed_at:
+      type: [integer, "null"]
+      format: int64
+      minimum: 0
+
+StateMachineJudgeOutputView:
+  type: object
+  additionalProperties: false
+  required: [node_id, attempt, created_at, decision]
+  properties:
+    node_id:
+      type: string
+      minLength: 1
+    attempt:
+      type: integer
+      minimum: 0
+    created_at:
+      type: integer
+      format: int64
+      minimum: 0
+    decision:
+      type: string
+      minLength: 1
+
+StateMachineRunView:
+  type: object
+  additionalProperties: false
+  required: [run, nodes]
+  properties:
+    run:
+      $ref: "#/StateMachineRun"
+    nodes:
+      type: array
+      items:
+        $ref: "#/StateMachineNodeRun"
+    judge_outputs:
+      type: array
+      items:
+        $ref: "#/StateMachineJudgeOutputView"
+
+StateMachineNodeRunView:
+  type: object
+  additionalProperties: false
+  required: [node]
+  properties:
+    node:
+      $ref: "#/StateMachineNodeRun"
+    sub_status:
+      $ref: "#/StateMachineNodeSubStatus"
+    judge_outputs:
+      type: array
+      items:
+        $ref: "#/StateMachineJudgeOutputView"
+
+StateMachineGraphDefinitionView:
+  type: object
+  additionalProperties: false
+  required: [id, version, name, graph_mode, initial_nodes]
+  properties:
+    id:
+      type: string
+      minLength: 1
+    version:
+      type: integer
+      minimum: 0
+    name:
+      type: string
+      minLength: 1
+    graph_mode:
+      $ref: "#/StateMachineGraphMode"
+    initial_node:
+      type: [string, "null"]
+    initial_nodes:
+      type: array
+      items:
+        type: string
+        minLength: 1
+
+StateMachineGraphNodeView:
+  type: object
+  additionalProperties: false
+  required: [node_id, display_name, kind, final_output]
+  properties:
+    node_id:
+      type: string
+      minLength: 1
+    display_name:
+      type: string
+      minLength: 1
+    kind:
+      $ref: "#/StateMachineNodeKind"
+    assignee:
+      $ref: "#/StateMachineAssignee"
+    final_output:
+      type: boolean
+    status:
+      $ref: "#/StateMachineNodeStatus"
+    attempt:
+      type: [integer, "null"]
+      minimum: 0
+    assignee_bot_id:
+      type: [string, "null"]
+    started_at:
+      type: [integer, "null"]
+      format: int64
+      minimum: 0
+    completed_at:
+      type: [integer, "null"]
+      format: int64
+      minimum: 0
+    sub_status:
+      $ref: "#/StateMachineNodeSubStatus"
+
+StateMachineGraphEdgeView:
+  type: object
+  additionalProperties: false
+  required: [source, outcome, target]
+  properties:
+    source:
+      type: string
+      minLength: 1
+    outcome:
+      type: string
+      minLength: 1
+    target:
+      type: string
+      minLength: 1
+    guard:
+      type: [string, "null"]
+
+StateMachineRunGraphView:
+  type: object
+  additionalProperties: false
+  required: [run, definition, nodes, edges]
+  properties:
+    run:
+      $ref: "#/StateMachineRun"
+    definition:
+      $ref: "#/StateMachineGraphDefinitionView"
+    nodes:
+      type: array
+      items:
+        $ref: "#/StateMachineGraphNodeView"
+    edges:
+      type: array
+      items:
+        $ref: "#/StateMachineGraphEdgeView"
+
+RespondHumanNodeOutcome:
+  type: object
+  additionalProperties: false
+  required: [node, run]
+  properties:
+    node:
+      $ref: "#/StateMachineNodeRun"
+    run:
+      $ref: "#/StateMachineRun"
+
+PendingHumanNodeView:
+  type: object
+  additionalProperties: false
+  required:
+    - node_id
+    - display_name
+    - instruction
+    - response_ref
+    - judge_outcomes
+    - upstream_artifacts
+  properties:
+    node_id:
+      type: string
+      minLength: 1
+    display_name:
+      type: string
+      minLength: 1
+    instruction:
+      type: string
+    response_ref:
+      type: string
+      minLength: 1
+    judge_outcomes:
+      type: array
+      items:
+        type: string
+    timeout_deadline_ms:
+      type: [integer, "null"]
+      format: int64
+      minimum: 0
+    upstream_artifacts:
+      type: array
+      items:
+        type: object
+        additionalProperties: true
+
+StateMachineRunViewEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      $ref: "#/StateMachineRunView"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+StateMachineRunGraphViewEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      $ref: "#/StateMachineRunGraphView"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+StateMachineNodeRunViewEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      $ref: "#/StateMachineNodeRunView"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+RespondHumanNodeOutcomeEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      $ref: "#/RespondHumanNodeOutcome"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+PendingHumanNodesEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      type: array
+      items:
+        $ref: "#/PendingHumanNodeView"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+RunIdPath:
+  name: run_id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+NodeIdPath:
+  name: node_id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+BadRequestResponse:
+  description: Invalid path, query, or body request.
+  x-error-codes: [invalid_request]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+UnauthenticatedResponse:
+  description: Gateway Principal is missing or invalid.
+  x-error-codes: [unauthenticated]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+ForbiddenResponse:
+  description: The effective Actor cannot access or mutate this run.
+  x-error-codes: [forbidden]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+NotFoundResponse:
+  description: State machine run or node was not found.
+  x-error-codes: [not_found]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+ConflictResponse:
+  description: The operation conflicts with the current run lifecycle state.
+  x-error-codes: [conflict]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+JudgeUnavailableResponse:
+  description: The configured judge is unavailable for this operation.
+  x-error-codes: [judge_unavailable]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+StateMachineRunPath:
+  get:
+    operationId: get_state_machine_run
+    tags: ["Collaboration / State Machine Runs"]
+    summary: Get a state machine run and its node/judge snapshot.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: "#/RunIdPath"
+    responses:
+      "200":
+        description: State machine run view.
+        content:
+          application/json:
+            schema:
+              $ref: "#/StateMachineRunViewEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "403": { $ref: "#/ForbiddenResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+StateMachineRunGraphPath:
+  get:
+    operationId: get_state_machine_run_graph
+    tags: ["Collaboration / State Machine Runs"]
+    summary: Get the definition graph and runtime node statuses for a run.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: "#/RunIdPath"
+    responses:
+      "200":
+        description: State machine run graph view.
+        content:
+          application/json:
+            schema:
+              $ref: "#/StateMachineRunGraphViewEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "403": { $ref: "#/ForbiddenResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+StateMachineNodeRunPath:
+  get:
+    operationId: get_state_machine_node_run
+    tags: ["Collaboration / State Machine Runs"]
+    summary: Get a single node run with its sub-status and judge outputs.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: "#/RunIdPath"
+      - $ref: "#/NodeIdPath"
+    responses:
+      "200":
+        description: State machine node run view.
+        content:
+          application/json:
+            schema:
+              $ref: "#/StateMachineNodeRunViewEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "403": { $ref: "#/ForbiddenResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+RespondHumanNodePath:
+  post:
+    operationId: respond_human_node
+    tags: ["Collaboration / State Machine Runs"]
+    summary: Submit a Human response for a pending human-input node.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: "#/RunIdPath"
+      - $ref: "#/NodeIdPath"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [content]
+            properties:
+              content:
+                type: string
+                minLength: 1
+    responses:
+      "200":
+        description: The updated node and run state after the response.
+        content:
+          application/json:
+            schema:
+              $ref: "#/RespondHumanNodeOutcomeEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "403": { $ref: "#/ForbiddenResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "409": { $ref: "#/ConflictResponse" }
+      "502": { $ref: "#/JudgeUnavailableResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+PendingHumanNodesPath:
+  get:
+    operationId: list_pending_human_nodes
+    tags: ["Collaboration / State Machine Runs"]
+    summary: List human-input nodes that are still awaiting a response.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: "#/RunIdPath"
+    responses:
+      "200":
+        description: Pending human-input nodes for the run.
+        content:
+          application/json:
+            schema:
+              $ref: "#/PendingHumanNodesEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "403": { $ref: "#/ForbiddenResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+CancelStateMachineRunPath:
+  post:
+    operationId: cancel_state_machine_run
+    tags: ["Collaboration / State Machine Runs"]
+    summary: Cancel a state machine run and return the resulting run view.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: "#/RunIdPath"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              reason:
+                type: string
+    responses:
+      "200":
+        description: The cancelled state machine run view.
+        content:
+          application/json:
+            schema:
+              $ref: "#/StateMachineRunViewEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "403": { $ref: "#/ForbiddenResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "409": { $ref: "#/ConflictResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
