@@ -276,12 +276,19 @@ pub struct CollaborationConfig {
 pub struct OpenApiV1Config {
     #[serde(default = "default_openapi_v1_public_collaboration_base_url")]
     pub public_collaboration_base_url: String,
+    /// Base URL for internal-collaboration endpoints that live under a
+    /// different gateway path than the public openapi prefix (e.g. the no-auth
+    /// shared-file download at `/api/v1/collaboration/sessions/shared-file/content`).
+    /// Defaults to `public_collaboration_base_url` when unset.
+    #[serde(default)]
+    pub internal_collaboration_base_url: Option<String>,
 }
 
 impl Default for OpenApiV1Config {
     fn default() -> Self {
         Self {
             public_collaboration_base_url: default_openapi_v1_public_collaboration_base_url(),
+            internal_collaboration_base_url: None,
         }
     }
 }
@@ -309,6 +316,44 @@ impl OpenApiV1Config {
         if url.query().is_some() || url.fragment().is_some() {
             return Err(
                 "openapi_v1.public_collaboration_base_url must not contain query or fragment"
+                    .to_string(),
+            );
+        }
+        let normalized_path = url.path().trim_end_matches('/').to_string();
+        url.set_path(&normalized_path);
+        Ok(url.to_string().trim_end_matches('/').to_string())
+    }
+
+    /// Returns the validated internal-collaboration base URL, falling back to
+    /// `public_collaboration_base_url` when `internal_collaboration_base_url`
+    /// is not set.
+    pub fn validated_internal_collaboration_base_url(&self) -> Result<String, String> {
+        let raw = self
+            .internal_collaboration_base_url
+            .as_deref()
+            .map(|v| v.trim())
+            .unwrap_or("");
+        if raw.is_empty() {
+            return self.validated_public_collaboration_base_url();
+        }
+        let mut url = url::Url::parse(raw).map_err(|_| {
+            "openapi_v1.internal_collaboration_base_url must be an absolute HTTP(S) URL"
+                .to_string()
+        })?;
+        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+            return Err(
+                "openapi_v1.internal_collaboration_base_url must be an absolute HTTP(S) URL"
+                    .to_string(),
+            );
+        }
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(
+                "openapi_v1.internal_collaboration_base_url must not contain userinfo".to_string(),
+            );
+        }
+        if url.query().is_some() || url.fragment().is_some() {
+            return Err(
+                "openapi_v1.internal_collaboration_base_url must not contain query or fragment"
                     .to_string(),
             );
         }
@@ -2422,9 +2467,55 @@ tenant = "teamclaw"
         ] {
             let cfg = OpenApiV1Config {
                 public_collaboration_base_url: value.to_string(),
+                ..Default::default()
             };
             assert!(
                 cfg.validated_public_collaboration_base_url().is_err(),
+                "expected invalid URL: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn internal_collaboration_base_url_falls_back_to_collaboration_base_url() {
+        let cfg = OpenApiV1Config::default();
+        assert_eq!(
+            cfg.validated_internal_collaboration_base_url().unwrap(),
+            cfg.validated_public_collaboration_base_url().unwrap(),
+        );
+    }
+
+    #[test]
+    fn internal_collaboration_base_url_uses_independent_value_when_set() {
+        let cfg: OpenApiV1Config = toml::from_str(
+            r#"public_collaboration_base_url = "https://gw.example.com/openapi/v1/collaboration"
+            internal_collaboration_base_url = "https://gw.example.com/api/v1/collaboration""#,
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.validated_public_collaboration_base_url().unwrap(),
+            "https://gw.example.com/openapi/v1/collaboration",
+        );
+        assert_eq!(
+            cfg.validated_internal_collaboration_base_url().unwrap(),
+            "https://gw.example.com/api/v1/collaboration",
+        );
+    }
+
+    #[test]
+    fn internal_collaboration_base_url_rejects_unsafe_values() {
+        for value in [
+            "/api/v1/collaboration",
+            "ftp://gw.example.com/api/v1/collaboration",
+            "https://user@gw.example.com/api/v1/collaboration",
+            "https://gw.example.com/api/v1/collaboration?tenant=x",
+        ] {
+            let cfg = OpenApiV1Config {
+                internal_collaboration_base_url: Some(value.to_string()),
+                ..Default::default()
+            };
+            assert!(
+                cfg.validated_internal_collaboration_base_url().is_err(),
                 "expected invalid URL: {value}"
             );
         }
