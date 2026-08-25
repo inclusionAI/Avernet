@@ -22,6 +22,9 @@ from agentclaw.community.core.repository.implementations.work_orders.work_order 
 from agentclaw.community.core.repository.implementations.skill_center.space_skill import (
     SpaceSkillRepository,
 )
+from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
+    SkillEditorRequestRepository,
+)
 from agentclaw.community.core.models.space_skill import SkillGrant
 from agentclaw.community.core.spaces.models import SpaceJoinStatus, SpaceRole, SpaceType
 from agentclaw.community.core.spaces.repository.models import (
@@ -75,6 +78,18 @@ def _team(spaces: SpaceRepository, name="Team", creator="owner-1"):
         return row
 
 
+def _skill_editor_requests(db) -> SkillEditorRequestRepository:
+    return SkillEditorRequestRepository(db)
+
+
+def _work_orders(db) -> WorkOrderRepository:
+    return WorkOrderRepository(db, _skill_editor_requests(db))
+
+
+def _space_skills(db) -> SpaceSkillRepository:
+    return SpaceSkillRepository(db, _skill_editor_requests(db))
+
+
 def _review_notification(
     *, applicant_user_id: str, space_id: int, title: str, content: str
 ) -> WorkOrderNotificationDraft:
@@ -126,7 +141,7 @@ def _space_skill(db, spaces: SpaceRepository):
         creator_id="owner-1",
         env="dev",
     )
-    created = SpaceSkillRepository(db).create_space_skill(
+    created = _space_skills(db).create_space_skill(
         skill_data={"name": "review-skill", "env": "dev"},
         ownership_data={
             "space_id": team.id,
@@ -152,7 +167,7 @@ def test_skill_editor_review_atomically_controls_manager_grant(
 ) -> None:
     spaces = SpaceRepository(db)
     team, skill_id = _space_skill(db, spaces)
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
     order = repository.create_skill_editor_request(
         space_id=team.id,
         skill_id=skill_id,
@@ -205,7 +220,7 @@ def test_skill_editor_request_rejects_personal_space(db) -> None:
     with spaces.create_personal_transaction(
         user_id="owner-1", creator_user_name=None, env="dev"
     ) as personal:
-        created = SpaceSkillRepository(db).create_space_skill(
+        created = _space_skills(db).create_space_skill(
             skill_data={"name": "personal-skill", "env": "dev"},
             ownership_data={
                 "space_id": personal.id,
@@ -221,7 +236,7 @@ def test_skill_editor_request_rejects_personal_space(db) -> None:
         )
 
     with pytest.raises(WorkOrderSkillEditorRequestNotAllowedError):
-        WorkOrderRepository(db).create_skill_editor_request(
+        _work_orders(db).create_skill_editor_request(
             space_id=personal.id,
             skill_id=created["skill"]["id"],
             applicant_user_id="owner-1",
@@ -236,7 +251,7 @@ def test_skill_editor_request_rejects_non_member(db) -> None:
     team, skill_id = _space_skill(db, spaces)
 
     with pytest.raises(WorkOrderAccessDeniedError):
-        WorkOrderRepository(db).create_skill_editor_request(
+        _work_orders(db).create_skill_editor_request(
             space_id=team.id,
             skill_id=skill_id,
             applicant_user_id="outsider-1",
@@ -251,7 +266,7 @@ def test_skill_editor_approval_is_idempotent_when_manager_grant_already_exists(
 ) -> None:
     spaces = SpaceRepository(db)
     team, skill_id = _space_skill(db, spaces)
-    work_orders = WorkOrderRepository(db)
+    work_orders = _work_orders(db)
     order = work_orders.create_skill_editor_request(
         space_id=team.id,
         skill_id=skill_id,
@@ -260,7 +275,7 @@ def test_skill_editor_approval_is_idempotent_when_manager_grant_already_exists(
         apply_reason="maintain together",
         env="dev",
     )
-    SpaceSkillRepository(db).add_manager(
+    _space_skills(db).add_manager(
         space_id=team.id,
         skill_id=skill_id,
         actor_id="owner-1",
@@ -305,7 +320,7 @@ def test_skill_editor_pending_reviewer_follows_current_owner(db) -> None:
         creator_id="owner-1",
         env="dev",
     )
-    work_orders = WorkOrderRepository(db)
+    work_orders = _work_orders(db)
     order = work_orders.create_skill_editor_request(
         space_id=team.id,
         skill_id=skill_id,
@@ -315,7 +330,7 @@ def test_skill_editor_pending_reviewer_follows_current_owner(db) -> None:
         env="dev",
     )
 
-    SpaceSkillRepository(db).transfer_owner(
+    _space_skills(db).transfer_owner(
         space_id=team.id,
         skill_id=skill_id,
         actor_id="owner-1",
@@ -352,7 +367,7 @@ def test_skill_editor_pending_reviewer_follows_current_owner(db) -> None:
 def test_skill_editor_approval_rechecks_active_membership_and_rolls_back(db) -> None:
     spaces = SpaceRepository(db)
     team, skill_id = _space_skill(db, spaces)
-    work_orders = WorkOrderRepository(db)
+    work_orders = _work_orders(db)
     order = work_orders.create_skill_editor_request(
         space_id=team.id,
         skill_id=skill_id,
@@ -429,7 +444,7 @@ def test_bot_editor_request_approval_creates_member_collaborator(db) -> None:
         session.refresh(bot)
         bot_pk = bot.id
 
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
     record = repository.create_bot_editor_request(
         bot_pk=bot_pk,
         bot_id="bot-editor-1",
@@ -497,7 +512,7 @@ def test_bot_editor_request_approval_creates_member_collaborator(db) -> None:
 
 
 def test_unified_work_order_create_and_approval_lifecycle(db) -> None:
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
 
     record = repository.create_work_order(
         biz_type="BOT_COLLABORATOR",
@@ -592,7 +607,7 @@ def test_unified_work_order_create_and_approval_lifecycle(db) -> None:
 
 def test_unified_space_join_approval_adds_member_in_same_transaction(db) -> None:
     spaces = SpaceRepository(db)
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
     team = _team(spaces, name="Unified Join Team", creator="owner-unified")
 
     record = repository.create_space_join_request(
@@ -659,7 +674,7 @@ def test_unified_space_join_approval_adds_member_in_same_transaction(db) -> None
 
 def test_unified_space_join_rejection_does_not_add_member(db) -> None:
     spaces = SpaceRepository(db)
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
     team = _team(spaces, name="Unified Reject Team", creator="owner-reject")
     record = repository.create_space_join_request(
         space_id=team.id,
@@ -696,7 +711,7 @@ def test_unified_space_join_rejection_does_not_add_member(db) -> None:
 
 def test_unified_space_join_approval_rolls_back_when_member_already_exists(db) -> None:
     spaces = SpaceRepository(db)
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
     team = _team(spaces, name="Unified Rollback Team", creator="owner-rollback")
     record = repository.create_space_join_request(
         space_id=team.id,
@@ -744,7 +759,7 @@ def test_unified_space_join_approval_rolls_back_when_member_already_exists(db) -
 
 
 def test_unified_space_join_approval_rejects_missing_space_and_rolls_back(db) -> None:
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
     with db.transactional_orm_session() as session:
         order = WorkOrderModel(
             work_order_no=repository._new_no(),
@@ -798,7 +813,7 @@ def test_unified_space_join_approval_rejects_missing_space_and_rolls_back(db) ->
 
 
 def test_unified_notice_work_order_does_not_create_approvers(db) -> None:
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
 
     record = repository.create_work_order(
         biz_type="SPACE_MEMBER_ADDED",
@@ -916,7 +931,7 @@ def test_market_favorite_repository_is_idempotent_and_searchable(db) -> None:
 def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     spaces = SpaceRepository(db)
     space = _team(spaces)
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
 
     record = repository.create_space_join_request(
         space_id=space.id,
@@ -1185,7 +1200,7 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
         session.flush()
         session.refresh(no_owner)
         no_owner_id = no_owner.id
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
     with pytest.raises(WorkOrderNoReviewerError):
         repository.create_space_join_request(
             space_id=no_owner_id,
@@ -1248,7 +1263,7 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
 def test_badge_counts_distinct_pending_work_orders(db) -> None:
     spaces = SpaceRepository(db)
     space = _team(spaces, name="Badge Team")
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
     record = repository.create_space_join_request(
         space_id=space.id,
         applicant_user_id="applicant-badge",

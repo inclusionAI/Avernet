@@ -15,8 +15,8 @@ from agentclaw.community.core.repository.implementations.work_orders.bot_editor 
 from agentclaw.community.core.repository.implementations.work_orders.creation import (
     _WorkOrderCreationRepository,
 )
-from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
-    SkillEditorRequestRepository,
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillEditorRequestRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.work_orders import (
     WorkOrderRepositoryProtocol,
@@ -62,7 +62,11 @@ _ADMINISTRATOR_ROLES = ("ADMIN", "ADMINISTRATOR")
 
 class WorkOrderRepository(WorkOrderRepositoryProtocol):
     @inject
-    def __init__(self, db: DatabasePlugin) -> None:
+    def __init__(
+        self,
+        db: DatabasePlugin,
+        skill_editor_requests: SkillEditorRequestRepositoryProtocol,
+    ) -> None:
         self._db = db
         self._WorkOrder = WorkOrderModel
         self._Notification = WorkOrderNotificationModel
@@ -70,7 +74,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         self._Space = SpaceModel
         self._Member = SpaceMemberModel
         self._bot_editor = _BotEditorWorkOrderRepository(db)
-        self._skill_editor = SkillEditorRequestRepository(db)
+        self._skill_editor = skill_editor_requests
         self._creation = _WorkOrderCreationRepository(db)
 
     @staticmethod

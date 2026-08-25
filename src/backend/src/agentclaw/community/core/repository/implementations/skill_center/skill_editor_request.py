@@ -6,6 +6,8 @@ import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from injector import inject
+
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import SkillGrant, SkillSpaceBinding
 from agentclaw.community.core.spaces.models import SpaceType
@@ -47,6 +49,7 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
     """Skill-owned integration UoW for editor requests and Work Orders."""
 
+    @inject
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
 

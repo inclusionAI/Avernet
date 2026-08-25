@@ -17,6 +17,9 @@ from agentclaw.community.core.base import Base
 from agentclaw.community.core.repository.implementations.skill_center.space_skill import (
     SpaceSkillRepository,
 )
+from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
+    SkillEditorRequestRepository,
+)
 from agentclaw.community.core.models.space_skill import (
     SkillGrant,
     SkillPublicationAttempt,
@@ -58,6 +61,10 @@ class _Database:
 @pytest.fixture
 def db() -> _Database:
     return _Database()
+
+
+def _space_skills(db: _Database) -> SpaceSkillRepository:
+    return SpaceSkillRepository(db, SkillEditorRequestRepository(db))
 
 
 def test_additive_schema_registers_space_and_skill_fact_scope(db):
@@ -127,7 +134,7 @@ def test_additive_orm_contract_extends_only_the_documented_legacy_tables(db):
 
 
 def test_space_repository_is_tenant_env_scoped_and_unique(db):
-    repo = SpaceSkillRepository(db)
+    repo = _space_skills(db)
     created = repo.create_space(
         {
             "space_code": "team-a",
@@ -155,7 +162,7 @@ def test_space_repository_is_tenant_env_scoped_and_unique(db):
 
 
 def test_space_repository_scope_is_env_only(db):
-    repo = SpaceSkillRepository(db)
+    repo = _space_skills(db)
     with avernet_tenant_scope("tenant-a"):
         created = repo.create_space(
             {
@@ -230,7 +237,7 @@ def test_schema_rejects_empty_env_and_duplicate_active_owner(db):
 
 
 def test_repository_creates_stable_identity_ownership_and_owner_grant_atomically(db):
-    repo = SpaceSkillRepository(db)
+    repo = _space_skills(db)
     space = repo.create_space(
         {
             "space_code": "team-b",
@@ -274,7 +281,7 @@ def test_repository_creates_stable_identity_ownership_and_owner_grant_atomically
 
 
 def test_repository_rejects_space_skill_without_an_active_owner_membership(db):
-    repo = SpaceSkillRepository(db)
+    repo = _space_skills(db)
     space = repo.create_space(
         {
             "space_code": "team-c",
@@ -394,7 +401,7 @@ def _add_bound_skill(
 def test_list_space_skills_filters_scope_env_and_retired_rows(db):
     from datetime import datetime, timedelta
 
-    repo = SpaceSkillRepository(db)
+    repo = _space_skills(db)
     space = repo.create_space(
         {
             "space_code": "list-a",
@@ -446,7 +453,7 @@ def test_list_space_skills_filters_scope_env_and_retired_rows(db):
 
 
 def test_list_space_skills_searches_name_and_description_case_insensitively(db):
-    repo = SpaceSkillRepository(db)
+    repo = _space_skills(db)
     space = repo.create_space(
         {
             "space_code": "search-a",
@@ -509,7 +516,7 @@ def test_list_space_skills_searches_name_and_description_case_insensitively(db):
 def test_list_space_skills_uses_stable_database_pagination(db):
     from datetime import datetime
 
-    repo = SpaceSkillRepository(db)
+    repo = _space_skills(db)
     space = repo.create_space(
         {
             "space_code": "page-a",
@@ -544,7 +551,7 @@ def test_list_space_skills_uses_stable_database_pagination(db):
 
 
 def test_list_space_skills_projects_space_type_and_only_the_actor_active_grant(db):
-    repo = SpaceSkillRepository(db)
+    repo = _space_skills(db)
     personal = repo.create_space(
         {
             "space_code": "personal-list",
@@ -625,7 +632,7 @@ def test_list_space_skills_projects_space_type_and_only_the_actor_active_grant(d
 
 
 def _grant_fixture(db):
-    repo = SpaceSkillRepository(db)
+    repo = _space_skills(db)
     space = repo.create_space(
         {
             "space_code": "grant-team",
