@@ -105,7 +105,13 @@ def escape_lua_string(s: str) -> str:
 
 def escape_lua_pattern(s: str) -> str:
     """Escape Lua pattern special chars (^$()%.[]*+-?) with % prefix."""
-    return re.sub(r'([%^%$%(%)%%%.%[%]%*%+%-%?])', r'%\1', s)
+    special = set('^$().%[]*+-?')
+    result = []
+    for c in s:
+        if c in special:
+            result.append('%')
+        result.append(c)
+    return ''.join(result)
 
 
 def render_lua_code(rules: list[OutboundRule]) -> str:
