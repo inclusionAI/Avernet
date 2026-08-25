@@ -38,11 +38,13 @@ cleanup() {
 setup_chains() {
     log "Setting up iptables chains..."
 
-    # 出站重定向链: 只劫持 80/443 端口 (HTTP/HTTPS)
+    # 出站重定向链: 80/443 放行到 Envoy, 其余端口 REJECT
     iptables -t nat -N ${ISTIO_REDIRECT} 2>/dev/null || true
     iptables -t nat -F ${ISTIO_REDIRECT}
     iptables -t nat -A ${ISTIO_REDIRECT} -p tcp --dport 80 -j REDIRECT --to-port ${SIDECAR_PROXY_PORT}
     iptables -t nat -A ${ISTIO_REDIRECT} -p tcp --dport 443 -j REDIRECT --to-port ${SIDECAR_PROXY_PORT}
+    # 其他端口: REJECT (发送 RST, 阻止主容器直连非 HTTP/HTTPS 服务)
+    iptables -t nat -A ${ISTIO_REDIRECT} -p tcp -j REJECT --reject-with tcp-reset
 
     # OUTPUT 过滤链
     iptables -t nat -N ${ISTIO_OUTPUT} 2>/dev/null || true
@@ -57,8 +59,8 @@ setup_chains() {
     # 排除 localhost
     iptables -t nat -A ${ISTIO_OUTPUT} -d 127.0.0.1/32 -j RETURN
 
-    # 只劫持目标端口 80/443 的出站 TCP → 重定向到 sidecar
-    iptables -t nat -A ${ISTIO_OUTPUT} -p tcp -m multiport --dports 80,443 -j ${ISTIO_REDIRECT}
+    # 所有其他出站 TCP → 进入重定向链 (80/443 放行, 其余 REJECT)
+    iptables -t nat -A ${ISTIO_OUTPUT} -p tcp -j ${ISTIO_REDIRECT}
 }
 
 # ---- 挂载规则 ----
