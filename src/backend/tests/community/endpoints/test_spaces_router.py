@@ -21,6 +21,9 @@ from agentclaw.community.api.market_favorite_service import (
 from agentclaw.community.api.space_skill_query_service import (
     SpaceSkillQueryServiceProtocol,
 )
+from agentclaw.community.api.space_skill_grant_service import (
+    SpaceSkillGrantServiceProtocol,
+)
 from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
@@ -160,6 +163,49 @@ def _seed_space_skill_error(world) -> None:
     )
 
 
+def _seed_space_skill_grants(world) -> None:
+    _enable_public_auth(world)
+
+    def _grants(owner_id: str = _USER_ID):
+        return {
+            "owner": {"user_id": owner_id, "role": "OWNER"},
+            "managers": [],
+            "actor": {
+                "skill_role": "OWNER" if owner_id == _USER_ID else None,
+                "permissions": {
+                    "edit_draft": owner_id == _USER_ID,
+                    "publish_draft": owner_id == _USER_ID,
+                    "delete_draft": owner_id == _USER_ID,
+                    "create_upgrade_draft": owner_id == _USER_ID,
+                    "retire_skill": owner_id == _USER_ID,
+                    "manage_grants": owner_id == _USER_ID,
+                    "transfer_owner": owner_id == _USER_ID,
+                    "request_edit_access": owner_id != _USER_ID,
+                    "takeover_lease": owner_id == _USER_ID,
+                },
+            },
+        }
+
+    bind_overrides(
+        world,
+        SpaceSkillGrantServiceProtocol,
+        {
+            "list_grants": lambda _self, **_kwargs: _grants(),
+            "add_manager": lambda _self, **kwargs: {
+                "user_id": kwargs["manager_user_id"],
+                "role": "MANAGER",
+            },
+            "remove_manager": lambda _self, **kwargs: {
+                "user_id": kwargs["manager_user_id"],
+                "role": "MANAGER",
+            },
+            "transfer_owner": lambda _self, **kwargs: _grants(
+                kwargs["new_owner_user_id"]
+            ),
+        },
+    )
+
+
 def _mismatched_user(path_params: dict | None = None, json_body: dict | None = None):
     """The uniform error case: naming someone other than the caller is a 403."""
     return CaseInput(
@@ -168,6 +214,149 @@ def _mismatched_user(path_params: dict | None = None, json_body: dict | None = N
         json_body=json_body,
         headers=_principal_headers(),
     )
+
+
+# ── Space Skill Grant management ─────────────────────────────────────────────
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants",
+    scenario="happy",
+    seed=_seed_space_skill_grants,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"owner": {"user_id": _USER_ID}}},
+    ),
+)
+def list_space_skill_grants_happy():
+    """An active Space member receives the current Grant set."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user({"space_id": 1, "skill_id": 9}),
+    expect=ExpectError(status=403),
+)
+def list_space_skill_grants_wrong_user():
+    """The explicit acting user remains bound to the verified principal."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
+    scenario="happy",
+    seed=_seed_space_skill_grants,
+    input=CaseInput(
+        path_params={
+            "space_id": 1,
+            "skill_id": 9,
+            "manager_user_id": _MEMBER_ID,
+        },
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"user_id": _MEMBER_ID, "role": "MANAGER"}},
+    ),
+)
+def add_space_skill_manager_happy():
+    """The Owner command returns the resulting MANAGER Grant."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user(
+        {"space_id": 1, "skill_id": 9, "manager_user_id": _MEMBER_ID}
+    ),
+    expect=ExpectError(status=403),
+)
+def add_space_skill_manager_wrong_user():
+    """A mismatched actor is refused before Grant policy executes."""
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
+    scenario="happy",
+    seed=_seed_space_skill_grants,
+    input=CaseInput(
+        path_params={
+            "space_id": 1,
+            "skill_id": 9,
+            "manager_user_id": _MEMBER_ID,
+        },
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"user_id": _MEMBER_ID, "role": "MANAGER"}},
+    ),
+)
+def remove_space_skill_manager_happy():
+    """An idempotent removal returns the addressed MANAGER Grant identity."""
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user(
+        {"space_id": 1, "skill_id": 9, "manager_user_id": _MEMBER_ID}
+    ),
+    expect=ExpectError(status=403),
+)
+def remove_space_skill_manager_wrong_user():
+    """A mismatched actor cannot remove a Grant."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/owner-transfer",
+    scenario="happy",
+    seed=_seed_space_skill_grants,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+        json_body={"new_owner_user_id": _MEMBER_ID},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"owner": {"user_id": _MEMBER_ID}}},
+    ),
+)
+def transfer_space_skill_owner_happy():
+    """The transfer response identifies the new unique Owner."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/owner-transfer",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user(
+        {"space_id": 1, "skill_id": 9},
+        {"new_owner_user_id": _MEMBER_ID},
+    ),
+    expect=ExpectError(status=403),
+)
+def transfer_space_skill_owner_wrong_user():
+    """A mismatched actor cannot transfer ownership."""
 
 
 # ── GET /openapi/v1/bots/spaces/{space_id}/skills ────────────────────────────────

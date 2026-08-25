@@ -19,6 +19,8 @@ from .skill_center_types import (
     SpaceSkillOwnerGrantData,
     SpaceSkillOwnershipData,
     SpaceSkillQueryRecord,
+    SpaceSkillGrantItem,
+    SpaceSkillGrantSetRecord,
 )
 
 
@@ -58,6 +60,50 @@ class SpaceSkillRepository(Protocol):
     ) -> tuple[int, list[SpaceSkillQueryRecord]]:
         """Return a stable, database-paginated Space Skill projection."""
         ...
+
+    @abstractmethod
+    def list_grants(
+        self, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> SpaceSkillGrantSetRecord: ...
+
+    @abstractmethod
+    def get_active_role(
+        self, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> str | None: ...
+
+    @abstractmethod
+    def add_manager(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        manager_user_id: str,
+        env: str,
+    ) -> SpaceSkillGrantItem: ...
+
+    @abstractmethod
+    def remove_manager(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        manager_user_id: str,
+        env: str,
+    ) -> SpaceSkillGrantItem: ...
+
+    @abstractmethod
+    def transfer_owner(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        new_owner_user_id: str,
+        reason: str | None,
+        env: str,
+    ) -> SpaceSkillGrantSetRecord: ...
 
 
 @runtime_checkable

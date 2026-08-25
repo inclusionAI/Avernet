@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS ac_skill_grant (
   status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/REVOKED',
   owner_slot TINYINT NULL COMMENT 'ACTIVE OWNER 固定为 1，其余 NULL',
   granted_by VARCHAR(128) NOT NULL,
+  grant_reason VARCHAR(1024) NULL COMMENT '授权或 Owner 转移的审计原因',
   revoked_at TIMESTAMP NULL,
   revoked_by VARCHAR(128) NULL,
   avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw',
@@ -61,7 +62,10 @@ CREATE TABLE IF NOT EXISTS ac_skill_grant (
   KEY idx_skill_grant_user (avernet_tenant, env, user_id, status),
   CONSTRAINT ck_skill_grant_role CHECK (role IN ('OWNER', 'MANAGER')),
   CONSTRAINT ck_skill_grant_status CHECK (status IN ('ACTIVE', 'REVOKED')),
-  CONSTRAINT ck_skill_active_owner_slot CHECK (owner_slot IS NULL OR (owner_slot = 1 AND role = 'OWNER' AND status = 'ACTIVE')),
+  CONSTRAINT ck_skill_active_owner_slot CHECK (
+    (role = 'OWNER' AND status = 'ACTIVE' AND owner_slot IS NOT NULL AND owner_slot = 1)
+    OR ((role <> 'OWNER' OR status <> 'ACTIVE') AND owner_slot IS NULL)
+  ),
   CONSTRAINT ck_skill_grant_env_not_empty CHECK (env <> '')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

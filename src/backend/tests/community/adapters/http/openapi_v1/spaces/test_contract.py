@@ -26,6 +26,9 @@ from agentclaw.community.api.space_service import (
 from agentclaw.community.api.space_skill_query_service import (
     SpaceSkillQueryServiceProtocol,
 )
+from agentclaw.community.api.space_skill_grant_service import (
+    SpaceSkillGrantServiceProtocol,
+)
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
     MarketFavoriteRecord,
@@ -43,6 +46,13 @@ from agentclaw.community.core.spaces.models import (
 from agentclaw.community.core.spaces.errors import (
     SpaceAccessDeniedError,
     SpaceNotFoundError,
+)
+from agentclaw.community.core.skill_center.errors import (
+    SpaceSkillGrantConflictError,
+    SpaceSkillGrantForbiddenError,
+    SpaceSkillGrantMemberRequiredError,
+    SpaceSkillGrantNotFoundError,
+    SpaceSkillGrantReasonRequiredError,
 )
 from tests.community.adapters.http.openapi_v1.conftest import (
     mount_public_error_handlers,
@@ -83,13 +93,25 @@ def skill_query_service():
 
 
 @pytest.fixture
-def client(member_service, space_service, favorite_service, skill_query_service):
+def skill_grant_service():
+    return MagicMock()
+
+
+@pytest.fixture
+def client(
+    member_service,
+    space_service,
+    favorite_service,
+    skill_query_service,
+    skill_grant_service,
+):
     class _Bindings(Module):
         def configure(self, binder):
             binder.bind(SpaceMemberServiceProtocol, to=member_service)
             binder.bind(SpaceServiceProtocol, to=space_service)
             binder.bind(MarketFavoriteServiceProtocol, to=favorite_service)
             binder.bind(SpaceSkillQueryServiceProtocol, to=skill_query_service)
+            binder.bind(SpaceSkillGrantServiceProtocol, to=skill_grant_service)
 
     app = FastAPI()
     app.include_router(router)
@@ -97,6 +119,118 @@ def client(member_service, space_service, favorite_service, skill_query_service)
     attach_injector(app, Injector([_Bindings()]))
     mount_public_error_handlers(app)
     return user_scoped_client(app, "owner-1")
+
+
+def test_grant_endpoints_publish_stable_wire_and_delegate_actor(
+    client, skill_grant_service
+):
+    skill_grant_service.list_grants.return_value = {
+        "owner": {"user_id": "owner-1", "role": "OWNER"},
+        "managers": [{"user_id": "manager-1", "role": "MANAGER"}],
+        "actor": {
+            "skill_role": "OWNER",
+            "permissions": {
+                "edit_draft": True,
+                "publish_draft": True,
+                "delete_draft": True,
+                "create_upgrade_draft": True,
+                "retire_skill": True,
+                "manage_grants": True,
+                "transfer_owner": True,
+                "request_edit_access": False,
+                "takeover_lease": True,
+            },
+        },
+    }
+    skill_grant_service.add_manager.return_value = {
+        "user_id": "manager-2",
+        "role": "MANAGER",
+    }
+    skill_grant_service.remove_manager.return_value = {
+        "user_id": "manager-2",
+        "role": "MANAGER",
+    }
+    skill_grant_service.transfer_owner.return_value = {
+        "owner": {"user_id": "manager-1", "role": "OWNER"},
+        "managers": [],
+        "actor": {
+            "skill_role": None,
+            "permissions": {
+                "edit_draft": False,
+                "publish_draft": False,
+                "delete_draft": False,
+                "create_upgrade_draft": False,
+                "retire_skill": False,
+                "manage_grants": False,
+                "transfer_owner": False,
+                "request_edit_access": True,
+                "takeover_lease": False,
+            },
+        },
+    }
+
+    grants = client.get("/openapi/v1/bots/spaces/7/skills/9/grants")
+    added = client.put("/openapi/v1/bots/spaces/7/skills/9/managers/manager-2")
+    removed = client.delete(
+        "/openapi/v1/bots/spaces/7/skills/9/managers/manager-2"
+    )
+    transferred = client.post(
+        "/openapi/v1/bots/spaces/7/skills/9/owner-transfer",
+        json={"new_owner_user_id": "manager-1"},
+    )
+
+    assert grants.status_code == 200
+    assert grants.json()["data"]["actor"]["permissions"]["manage_grants"] is True
+    assert added.json()["data"] == {"user_id": "manager-2", "role": "MANAGER"}
+    assert removed.json()["data"] == {"user_id": "manager-2", "role": "MANAGER"}
+    assert transferred.json()["data"]["owner"]["user_id"] == "manager-1"
+    skill_grant_service.list_grants.assert_called_once_with(
+        space_id=7, skill_id=9, actor_id="owner-1"
+    )
+    skill_grant_service.transfer_owner.assert_called_once_with(
+        space_id=7,
+        skill_id=9,
+        actor_id="owner-1",
+        new_owner_user_id="manager-1",
+        reason=None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "code", "message"),
+    [
+        (SpaceSkillGrantForbiddenError(), 403, 403203, "Forbidden"),
+        (SpaceSkillGrantNotFoundError(), 404, 404201, "Not found"),
+        (
+            SpaceSkillGrantMemberRequiredError(),
+            409,
+            409301,
+            "Active Space membership required",
+        ),
+        (
+            SpaceSkillGrantConflictError(),
+            409,
+            409302,
+            "Skill Grant state conflicts with this operation",
+        ),
+        (
+            SpaceSkillGrantReasonRequiredError(),
+            422,
+            422201,
+            "Owner transfer reason is required",
+        ),
+    ],
+)
+def test_grant_endpoints_return_stable_error_codes(
+    client, skill_grant_service, error, status, code, message
+):
+    skill_grant_service.list_grants.side_effect = error
+
+    response = client.get("/openapi/v1/bots/spaces/7/skills/9/grants")
+
+    assert response.status_code == status
+    assert response.json()["code"] == code
+    assert response.json()["message"] == message
 
 
 def test_endpoint_serializes_persisted_datetime_with_utc_marker(client, space_service):

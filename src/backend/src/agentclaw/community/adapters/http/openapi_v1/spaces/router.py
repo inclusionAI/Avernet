@@ -44,6 +44,9 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     SpaceMemberItem,
     SpaceMemberMutationResult,
     SpaceSkillItem,
+    SkillGrantItem,
+    SpaceSkillGrants,
+    TransferSkillOwnerRequest,
     UpdateSpaceMemberRoleRequest,
 )
 from agentclaw.community.api.market_favorite_service import (
@@ -55,6 +58,9 @@ from agentclaw.community.api.space_service import (
 )
 from agentclaw.community.api.space_skill_query_service import (
     SpaceSkillQueryServiceProtocol,
+)
+from agentclaw.community.api.space_skill_grant_service import (
+    SpaceSkillGrantServiceProtocol,
 )
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType as DomainFavoriteTargetType,
@@ -78,6 +84,10 @@ router = APIRouter(
     prefix="/openapi/v1/bots/spaces", tags=["spaces"], route_class=PublicAPIRoute
 )
 SpaceIdPath = Annotated[int, Path(ge=1, description="Space primary identifier.")]
+SkillIdPath = Annotated[int, Path(ge=1, description="Space Skill primary identifier.")]
+GrantUserIdPath = Annotated[
+    str, Path(min_length=1, max_length=128, description="Grant target user identifier.")
+]
 PageNoQuery = Annotated[int, Query(ge=1, description="One-based page number.")]
 PageSizeQuery = Annotated[
     int, Query(ge=1, le=100, description="Maximum items returned per page.")
@@ -282,6 +292,107 @@ async def list_space_skills(
         page_size=page_size,
     )
     return page(total, [_space_skill_item(record) for record in records], request)
+
+
+@router.get(
+    "/{space_id}/skills/{skill_id}/grants",
+    response_model=Envelope[SpaceSkillGrants],
+)
+@envelope_errors
+async def list_space_skill_grants(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    caller: ActingCallerDep,
+    service: SpaceSkillGrantServiceProtocol = Injected(
+        SpaceSkillGrantServiceProtocol
+    ),
+) -> Envelope[SpaceSkillGrants]:
+    actor_id = _require_user_delegation(caller)
+    return envelope(
+        SpaceSkillGrants.model_validate(
+            service.list_grants(
+                space_id=space_id, skill_id=skill_id, actor_id=actor_id
+            )
+        ),
+        request,
+    )
+
+
+@router.put(
+    "/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
+    response_model=Envelope[SkillGrantItem],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def add_space_skill_manager(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    manager_user_id: GrantUserIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: SpaceSkillGrantServiceProtocol = Injected(
+        SpaceSkillGrantServiceProtocol
+    ),
+) -> Envelope[SkillGrantItem]:
+    result = service.add_manager(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=user_id,
+        manager_user_id=manager_user_id,
+    )
+    return envelope(SkillGrantItem.model_validate(result), request)
+
+
+@router.delete(
+    "/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
+    response_model=Envelope[SkillGrantItem],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def remove_space_skill_manager(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    manager_user_id: GrantUserIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: SpaceSkillGrantServiceProtocol = Injected(
+        SpaceSkillGrantServiceProtocol
+    ),
+) -> Envelope[SkillGrantItem]:
+    result = service.remove_manager(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=user_id,
+        manager_user_id=manager_user_id,
+    )
+    return envelope(SkillGrantItem.model_validate(result), request)
+
+
+@router.post(
+    "/{space_id}/skills/{skill_id}/owner-transfer",
+    response_model=Envelope[SpaceSkillGrants],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def transfer_space_skill_owner(
+    body: TransferSkillOwnerRequest,
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: SpaceSkillGrantServiceProtocol = Injected(
+        SpaceSkillGrantServiceProtocol
+    ),
+) -> Envelope[SpaceSkillGrants]:
+    result = service.transfer_owner(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=user_id,
+        new_owner_user_id=body.new_owner_user_id,
+        reason=body.reason,
+    )
+    return envelope(SpaceSkillGrants.model_validate(result), request)
 
 
 @router.post(

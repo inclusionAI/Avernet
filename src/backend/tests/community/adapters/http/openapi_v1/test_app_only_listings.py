@@ -661,6 +661,12 @@ _UNGRANTED_APP_CASES = {
         "request": lambda client: client.get("/openapi/v1/bots/spaces/1/skills"),
         "assert_starved": lambda response: response.status_code == 404,
     },
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/grants"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
     ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites"): {
         "request": lambda client: client.post(
             "/openapi/v1/bots/spaces/1/market-favorites",

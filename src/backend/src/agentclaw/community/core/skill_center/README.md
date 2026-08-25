@@ -20,6 +20,8 @@ provides:
   - "LocalSkillDeleteService"
   - "BotCapabilityAuthorizationHookProtocol"
   - "SkillSetManagementService"
+  - "SpaceSkillGrantService"
+  - "SpaceSkillGrantServiceProtocol"
   - "RuntimeProjectionResolver"
   - "BotCapabilityStateReader"
   - "BotRuntimeProjector"
@@ -51,6 +53,8 @@ consumes:
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
   - "BotRuntimeProjectorProtocol"
+  - "SpaceAccessServiceProtocol"
+  - "SpaceSkillRepository"
 internal_dependencies:
   - agentclaw.community.api.skill_parameter_service_factory
   - agentclaw.community.api.skill_market_service
@@ -76,6 +80,8 @@ internal_dependencies:
   - agentclaw.community.core.mcp
   - agentclaw.community.core.models
   - agentclaw.community.core.spaces.services
+  - agentclaw.community.core.spaces.models
+  - agentclaw.community.core.spaces.protocols
   - agentclaw.community.core.skills_pool
   - agentclaw.community.core.task_queue    # durable enqueue for Bot-level activation sync
   - agentclaw.community.core.workspace
