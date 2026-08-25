@@ -12,6 +12,12 @@ class CapabilityDesiredState:
     memberships: dict[int, tuple[tuple[int, str | None, str | None], ...]]
     mcp_installations: set[str] = field(default_factory=set)
     mcp_memberships: dict[int, tuple[str, ...]] = field(default_factory=dict)
+    # The Bot's Default-Set exclusion rows, ``(set_id, member)``-keyed. Part
+    # of the snapshot so a compensation can restore what the exclusion
+    # commands wrote — the flush treats these rows as authoritative, so a
+    # restore that missed them would be silently re-applied by the next read.
+    skill_exclusions: frozenset[tuple[int, int]] = frozenset()
+    mcp_exclusions: frozenset[tuple[int, str]] = frozenset()
 
 
 @dataclass(frozen=True)

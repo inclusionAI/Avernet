@@ -611,6 +611,16 @@ class CapabilityDesiredStateRepository(
                     env=get_current_env(),
                     server_code=server_code,
                 )
+            # The exclusion rows are desired state too: the flush treats them
+            # as authoritative, so a restore that skipped them would be
+            # silently re-applied by the next read.
+            default_exclusions.replace_all(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                skill_exclusions=state.skill_exclusions,
+                mcp_exclusions=state.mcp_exclusions,
+            )
             session.flush()
 
     def snapshot_desired_state(
@@ -796,4 +806,14 @@ class CapabilityDesiredStateRepository(
             mcp_memberships={
                 set_id: tuple(items) for set_id, items in mcp_memberships.items()
             },
+            skill_exclusions=frozenset(
+                default_exclusions.all_skill_exclusions(
+                    session, bot_id=bot_id, owner_id=owner_id
+                )
+            ),
+            mcp_exclusions=frozenset(
+                default_exclusions.all_mcp_exclusions(
+                    session, bot_id=bot_id, owner_id=owner_id
+                )
+            ),
         )

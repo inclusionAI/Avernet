@@ -290,8 +290,8 @@ class SkillSetManagementService:
             # it can only remove an existing exclusion. The membership itself
             # stays immutable.
             self._require_excluded_default_skill(
-                bot=bot, bot_id=bot_id, set_id=str(target["id"]),
-                skill_id=skill_id,
+                owner_id=str(bot["owner_id"]), bot_id=bot_id,
+                set_id=str(target["id"]), skill_id=skill_id,
             )
             return await self._mutate(
                 bot=bot,
@@ -741,11 +741,11 @@ class SkillSetManagementService:
         )
 
     def _require_excluded_default_skill(
-        self, *, bot: dict, bot_id: str, set_id: str, skill_id: str
+        self, *, owner_id: str, bot_id: str, set_id: str, skill_id: str
     ) -> None:
         """Only an excluded member can be "added" to a Default Set."""
         excluded = self._repository.excluded_default_skill_ids(
-            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id
+            bot_id=bot_id, owner_id=owner_id, set_id=set_id
         )
         if not skill_id.isdecimal() or int(skill_id) not in excluded:
             raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")

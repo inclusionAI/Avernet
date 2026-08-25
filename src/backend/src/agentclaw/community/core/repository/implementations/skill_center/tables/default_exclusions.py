@@ -100,6 +100,85 @@ def unexclude_mcp(
     )
 
 
+def all_skill_exclusions(
+    session, *, bot_id: str, owner_id: str
+) -> set[tuple[int, int]]:
+    """Every ``(set_id, skill_id)`` exclusion the owner holds for this Bot."""
+    return {
+        (int(row.skill_set_id), int(row.skill_id))
+        for row in session.query(DefaultSkillsetSkillExclusion)
+        .filter(
+            DefaultSkillsetSkillExclusion.avernet_tenant
+            == get_current_avernet_tenant(),
+            DefaultSkillsetSkillExclusion.user_id == owner_id,
+            DefaultSkillsetSkillExclusion.bot_id == bot_id,
+        )
+        .all()
+    }
+
+
+def all_mcp_exclusions(
+    session, *, bot_id: str, owner_id: str
+) -> set[tuple[int, str]]:
+    """Every ``(set_id, server_code)`` exclusion the owner holds for this Bot."""
+    return {
+        (int(row.skill_set_id), str(row.server_code))
+        for row in session.query(DefaultSkillsetMcpExclusion)
+        .filter(
+            DefaultSkillsetMcpExclusion.avernet_tenant
+            == get_current_avernet_tenant(),
+            DefaultSkillsetMcpExclusion.user_id == owner_id,
+            DefaultSkillsetMcpExclusion.bot_id == bot_id,
+        )
+        .all()
+    }
+
+
+def replace_all(
+    session,
+    *,
+    bot_id: str,
+    owner_id: str,
+    skill_exclusions: frozenset[tuple[int, int]],
+    mcp_exclusions: frozenset[tuple[int, str]],
+) -> None:
+    """Make the Bot's exclusion rows say exactly this — the restore path."""
+    session.query(DefaultSkillsetSkillExclusion).filter(
+        DefaultSkillsetSkillExclusion.avernet_tenant
+        == get_current_avernet_tenant(),
+        DefaultSkillsetSkillExclusion.user_id == owner_id,
+        DefaultSkillsetSkillExclusion.bot_id == bot_id,
+    ).delete(synchronize_session=False)
+    session.query(DefaultSkillsetMcpExclusion).filter(
+        DefaultSkillsetMcpExclusion.avernet_tenant
+        == get_current_avernet_tenant(),
+        DefaultSkillsetMcpExclusion.user_id == owner_id,
+        DefaultSkillsetMcpExclusion.bot_id == bot_id,
+    ).delete(synchronize_session=False)
+    session.flush()
+    for set_id, skill_id in sorted(skill_exclusions):
+        session.add(
+            DefaultSkillsetSkillExclusion(
+                user_id=owner_id,
+                bot_id=bot_id,
+                skill_set_id=int(set_id),
+                skill_id=int(skill_id),
+                avernet_tenant=get_current_avernet_tenant(),
+            )
+        )
+    for set_id, server_code in sorted(mcp_exclusions):
+        session.add(
+            DefaultSkillsetMcpExclusion(
+                user_id=owner_id,
+                bot_id=bot_id,
+                skill_set_id=int(set_id),
+                server_code=server_code,
+                avernet_tenant=get_current_avernet_tenant(),
+            )
+        )
+    session.flush()
+
+
 def excluded_skill_ids(session, *, bot_id: str, owner_id: str, set_id: int) -> set[int]:
     """The addressed Bot owner's Skill exclusions from a shared Default."""
     return {

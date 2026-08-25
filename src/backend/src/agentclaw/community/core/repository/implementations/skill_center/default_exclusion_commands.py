@@ -54,19 +54,27 @@ class DefaultExclusionCommands:
                 default_engine_types=default_engine_types,
             )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
+            # Only a member can be excluded: a stray id must not leave a
+            # dangling row behind (it would pre-exclude the skill if the
+            # platform ever adds it) nor report an immutable membership as
+            # changed. ``_teardown_ids`` is deliberately wider than the
+            # resolved members — an OFFLINE ``center://`` member still holds
+            # an Installation row this command is the only way to retire.
+            if (
+                not str(skill_id).isdecimal()
+                or int(skill_id) not in self._teardown_ids(session, {int(row.id)})
+            ):
+                return DesiredStateMutation(_item(row), False, old)
             created = default_exclusions.exclude_skill(
                 session, bot_id=bot_id, owner_id=owner_id,
                 set_id=int(row.id), skill_id=int(skill_id),
             )
             if not created:
                 return DesiredStateMutation(_item(row), False, old)
-            if int(skill_id) in set_member_skill_ids(
-                self._scope, session, skill_set_id=int(row.id)
-            ):
-                skill_installations.uninstall(
-                    session, bot_id=bot_id, owner_id=owner_id,
-                    env=get_current_env(), skill_ids={int(skill_id)},
-                )
+            skill_installations.uninstall(
+                session, bot_id=bot_id, owner_id=owner_id,
+                env=get_current_env(), skill_ids={int(skill_id)},
+            )
             session.flush()
             return DesiredStateMutation(_item(row), True, old)
 
@@ -89,6 +97,8 @@ class DefaultExclusionCommands:
                 default_engine_types=default_engine_types,
             )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
+            if not str(skill_id).isdecimal():
+                return DesiredStateMutation(_item(row), False, old)
             removed = default_exclusions.unexclude_skill(
                 session, bot_id=bot_id, owner_id=owner_id,
                 set_id=int(row.id), skill_id=int(skill_id),

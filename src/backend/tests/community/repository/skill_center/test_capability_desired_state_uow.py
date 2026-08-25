@@ -2338,3 +2338,129 @@ def test_exclusion_commands_refuse_an_ordinary_set_address():
         repository.unexclude_default_mcp(
             set_id=str(ordinary.id), server_code="mcp.x", **_DEFAULT_SCOPE
         )
+
+
+def test_excluding_a_never_member_owns_neither_half():
+    """No dangling exclusion row, and the wire must not report a change."""
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, _skill = _seed_default_with_member(db)
+    with db.transactional_orm_session() as session:
+        stranger = Skill(name="stranger", git_path="git://stranger", env="dev")
+        session.add(stranger)
+        session.flush()
+
+    for skill_id in (str(stranger.id), "424242", "not-a-number"):
+        assert not repository.exclude_default_skill(
+            set_id=str(default.id), skill_id=skill_id, **_DEFAULT_SCOPE
+        ).changed
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetSkillExclusion).count() == 0
+        assert session.query(BotSkillInstallation).count() == 1
+
+
+def test_excluding_an_unresolvable_member_still_retires_its_installation():
+    """An OFFLINE center member's row has no other off switch (R1 refuses the
+    direct command); the exclusion is the Default Set's removal path."""
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        default = SkillSet(
+            name="default", user_id="", bolt_id="", engine_type="openclaw",
+            is_default=True, env="dev",
+        )
+        offline = Skill(
+            name="offline", git_path="center://offline-uuid",
+            skill_uuid="offline-uuid", status="OFFLINE", env="dev",
+        )
+        session.add_all([default, offline])
+        session.flush()
+        session.add_all(
+            [
+                SkillSetSkill(
+                    skill_set_id=default.id, skill_id=offline.id,
+                    skill_uuid="offline-uuid", env="dev",
+                ),
+                BotSkillInstallation(
+                    bot_id="bot", owner_id="owner", skill_id=offline.id,
+                    env="dev",
+                ),
+            ]
+        )
+
+    excluded = repository.exclude_default_skill(
+        set_id=str(default.id), skill_id=str(offline.id), **_DEFAULT_SCOPE
+    )
+
+    assert excluded.changed is True
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetSkillExclusion).count() == 1
+        assert session.query(BotSkillInstallation).count() == 0
+
+
+def test_restore_desired_state_compensates_exclusion_commands():
+    """The compensation contract: a restore from the command's own snapshot
+    undoes both halves, so a failed projection cannot half-apply — and the
+    flush cannot re-apply — an exclusion."""
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, skill = _seed_default_with_member(db)
+
+    # Exclude, then compensate as the mutation flow would.
+    excluded = repository.exclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    )
+    assert excluded.previous_state.skill_exclusions == frozenset()
+    repository.restore_desired_state(
+        bot_id="bot", owner_id="owner", state=excluded.previous_state,
+        engine_type="openclaw",
+    )
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetSkillExclusion).count() == 0
+        assert session.query(BotSkillInstallation).count() == 1
+    plan = repository.flush_installations(
+        bot_id="bot", owner_id="owner", env="dev",
+        engine_type="openclaw", default_engine_types=("openclaw",),
+    )
+    assert int(skill.id) in plan.skills_to_install
+
+    # Un-exclude, then compensate: the exclusion row must come back.
+    repository.exclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    )
+    restored = repository.unexclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    )
+    assert restored.previous_state.skill_exclusions == frozenset(
+        {(int(default.id), int(skill.id))}
+    )
+    repository.restore_desired_state(
+        bot_id="bot", owner_id="owner", state=restored.previous_state,
+        engine_type="openclaw",
+    )
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetSkillExclusion).count() == 1
+        assert session.query(BotSkillInstallation).count() == 0
+    # And the retry the user reaches for after a failed command now works.
+    assert repository.unexclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    ).changed
+
+
+def test_restore_desired_state_compensates_mcp_exclusion_commands():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, _skill = _seed_default_with_member(db)
+
+    excluded = repository.exclude_default_mcp(
+        set_id=str(default.id), server_code="mcp.member", **_DEFAULT_SCOPE
+    )
+    repository.restore_desired_state(
+        bot_id="bot", owner_id="owner", state=excluded.previous_state,
+        engine_type="openclaw",
+    )
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetMcpExclusion).count() == 0
+        assert [
+            row.server_code for row in session.query(BotMCPInstallation).all()
+        ] == ["mcp.member"]
