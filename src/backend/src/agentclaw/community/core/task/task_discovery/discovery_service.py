@@ -42,6 +42,7 @@ from agentclaw.community.core.task.task_discovery.models import (
 )
 from agentclaw.community.core.task.task_discovery.protocols import (
     BotServiceProtocol,
+    WorkOrderServiceProtocol,
 )
 from agentclaw.community.core.task.task_discovery.session_initiator import (
     SessionInitiator,
@@ -60,12 +61,6 @@ from agentclaw.community.plugin_api.notify_sender import (
     NotifySenderPlugin,
 )
 from agentclaw.community.utils.env_utils import get_current_env
-
-if TYPE_CHECKING:
-    # 仅作 __init__ 的类型注解；运行期按鸭子类型调用 create_work_order_event。
-    from agentclaw.community.api.work_order_service import (
-        WorkOrderServiceProtocol,
-    )
 
 logger = get_logger()
 

@@ -71,6 +71,7 @@ class WorkOrderEventType(StrEnum):
     HUMAN2BOT_PUBLIC_ORDER_COMPLETED = "HUMAN2BOT_PUBLIC_ORDER_COMPLETED"
     BOT2BOT_PUBLIC_ORDER_CREATED = "BOT2BOT_PUBLIC_ORDER_CREATED"
     BOT2BOT_PUBLIC_ORDER_COMPLETED = "BOT2BOT_PUBLIC_ORDER_COMPLETED"
+    SPACE_MEMBER_REMOVED = "SPACE_MEMBER_REMOVED"
     TASK_DISCOVERED = "TASK_DISCOVERED"
 
 
@@ -92,6 +93,7 @@ EVENT_CATEGORIES: dict[WorkOrderEventType, NotificationCategory] = {
     WorkOrderEventType.HUMAN2BOT_PUBLIC_ORDER_COMPLETED: NotificationCategory.NOTICE,
     WorkOrderEventType.BOT2BOT_PUBLIC_ORDER_CREATED: NotificationCategory.NOTICE,
     WorkOrderEventType.BOT2BOT_PUBLIC_ORDER_COMPLETED: NotificationCategory.NOTICE,
+    WorkOrderEventType.SPACE_MEMBER_REMOVED: NotificationCategory.NOTICE,
     WorkOrderEventType.TASK_DISCOVERED: NotificationCategory.NOTICE,
 }
 
@@ -129,6 +131,7 @@ class WorkOrderMessageTitle(StrEnum):
     SPACE_JOIN_APPROVED = "空间加入申请已通过"
     SPACE_JOIN_REJECTED = "空间加入申请未通过"
     SPACE_MEMBER_ADDED = "你已被添加到空间"
+    SPACE_MEMBER_REMOVED = "你已被移出空间"
     BOT_COLLABORATOR_PENDING = "Bot 共同编辑申请待审批"
     BOT_COLLABORATOR_APPROVED = "Bot 共同编辑申请已通过"
     BOT_COLLABORATOR_REJECTED = "Bot 共同编辑申请未通过"
@@ -143,6 +146,7 @@ class WorkOrderMessageContent(StrEnum):
         "你加入空间「{space_name}」的申请未通过。拒绝原因：{review_remark}"
     )
     SPACE_MEMBER_ADDED = "你已被添加到空间「{space_name}」。"
+    SPACE_MEMBER_REMOVED = "你已被移出空间「{space_name}」。"
     BOT_COLLABORATOR_PENDING = (
         "用户「{applicant_name}」申请共同编辑 Bot「{bot_name}」，请及时处理。"
     )

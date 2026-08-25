@@ -223,3 +223,26 @@ def _cleanup_status_coverage(response, world) -> None:
 )
 def get_status_happy_discovered_and_pending():
     """Status joins persisted tasks with process-local discovery results."""
+
+
+# ---- POST /api/v1/collaboration/tasks/discovery/reschedule ----
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/tasks/discovery/reschedule",
+    scenario="happy",
+    input=CaseInput(query_params={"cron": "30 14 * * *"}),
+    expect=ExpectSuccess(status=200),
+)
+def reschedule_happy():
+    """Happy path: valid cron expression accepted (scheduler may or may not be running)."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/tasks/discovery/reschedule",
+    scenario="error",
+    expect=ExpectError(status=422),
+)
+def reschedule_err_missing_cron():
+    """Error path: missing required cron query param -> FastAPI 422."""

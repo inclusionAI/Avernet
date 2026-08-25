@@ -28,7 +28,7 @@ from agentclaw.community.api.cron_relay_service import (
     CronRelayServiceProtocol as _ApiCronRelayServiceProtocol,
 )
 from agentclaw.community.api.work_order_service import (
-    WorkOrderServiceProtocol,
+    WorkOrderServiceProtocol as _ApiWorkOrderServiceProtocol,
 )
 from agentclaw.community.core.repository.implementations.task.discovery_lock import (
     TaskDiscoveryLockRepository,
@@ -42,6 +42,7 @@ from agentclaw.community.core.task.task_discovery.discovery_service import (
 from agentclaw.community.core.task.task_discovery.protocols import (
     BotServiceProtocol as _TaskDiscoveryBotServiceProtocol,
     CronRelayServiceProtocol as _TaskDiscoveryCronRelayProtocol,
+    WorkOrderServiceProtocol as _TaskDiscoveryWorkOrderServiceProtocol,
 )
 from agentclaw.community.core.task.task_discovery.scheduler import (
     TaskDiscoveryScheduler,
@@ -99,7 +100,7 @@ class TaskDiscoveryModule(Module):
         notify_sender: NotifySenderPlugin,
         bot_service: _TaskDiscoveryBotServiceProtocol,
         discovery_lock_repo: TaskDiscoveryLockRepositoryProtocol,
-        work_order_service: WorkOrderServiceProtocol,
+        work_order_service: _TaskDiscoveryWorkOrderServiceProtocol,
     ) -> DiscoveryService:
         """构建 DiscoveryService（注入 reader + initiator + notify + bot_service + lock + work_order）。"""
         return DiscoveryService(
@@ -150,3 +151,18 @@ class TaskDiscoveryModule(Module):
     ) -> _TaskDiscoveryCronRelayProtocol:
         """Adapt the API cron relay to the task_discovery module's local contract."""
         return cron_relay  # type: ignore[return-value]
+
+    @singleton
+    @provider
+    @inject
+    def _bridge_work_order_protocol(
+        self,
+        work_order_service: _ApiWorkOrderServiceProtocol,
+    ) -> _TaskDiscoveryWorkOrderServiceProtocol:
+        """Adapt the API work-order service to the task_discovery local contract.
+
+        WorkOrderService structurally satisfies the local Protocol (has
+        create_work_order_event), so no adapter wrapper is needed — just
+        return the instance directly.
+        """
+        return work_order_service  # type: ignore[return-value]

@@ -25,15 +25,13 @@ from agentclaw.community.core.task.task_discovery.models import (
     DiscoverySession,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.env_utils import is_local_mode
 
 logger = get_logger()
 
 #: fallback 地址 — 仅在环境变量和 singlebox 探测都失败时使用
 _DEFAULT_BACKEND_URL = "http://localhost:8888"
 _DEFAULT_FRONTEND_URL = "http://localhost:8000"
-
-#: singlebox 本地域名（/etc/hosts 已配 127.0.0.1）
-_SINGLEBOX_HOST = "agentclaw-local.stable.alipay.net"
 
 #: WebSocket 协议常量
 _WS_PROTOCOL = 3
@@ -47,14 +45,15 @@ def _resolve_frontend_url() -> str:
 
     优先级：
       1. ``FRONTEND_URL`` 环境变量（pre/prod 由部署平台注入）
-      2. singlebox 模式（``DEPLOY_PROFILE=singlebox``）→ 固定本地域名
+      2. local 模式（``DEPLOY_PROFILE`` 为 test/singlebox/corp_test）
+         → ``SINGLEBOX_FRONTEND_URL`` 环境变量（默认 localhost:8000）
       3. fallback ``localhost:8000``
     """
     url = os.environ.get("FRONTEND_URL")
     if url:
         return url
-    if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == "singlebox":
-        return f"http://{_SINGLEBOX_HOST}:8000"
+    if is_local_mode():
+        return os.environ.get("SINGLEBOX_FRONTEND_URL", _DEFAULT_FRONTEND_URL)
     return _DEFAULT_FRONTEND_URL
 
 
@@ -63,18 +62,14 @@ def _resolve_backend_url() -> str:
 
     优先级：
       1. ``BACKEND_URL`` 环境变量（pre/prod 由部署平台注入）
-      2. ``SINGLEBOX_BACKEND_URL`` 环境变量（singlebox 模式）
-      3. singlebox 模式 → 固定本地域名
-      4. fallback ``localhost:8888``
+      2. local 模式 → ``SINGLEBOX_BACKEND_URL`` 环境变量（默认 localhost:8888）
+      3. fallback ``localhost:8888``
     """
     url = os.environ.get("BACKEND_URL")
     if url:
         return url
-    if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == "singlebox":
-        return os.environ.get(
-            "SINGLEBOX_BACKEND_URL",
-            f"http://{_SINGLEBOX_HOST}:8888",
-        )
+    if is_local_mode():
+        return os.environ.get("SINGLEBOX_BACKEND_URL", _DEFAULT_BACKEND_URL)
     return _DEFAULT_BACKEND_URL
 
 
