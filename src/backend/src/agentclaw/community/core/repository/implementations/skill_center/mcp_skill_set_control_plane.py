@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
+from agentclaw.community.core.repository.implementations.skill_center.bot_skillset_installations import (
+    set_member_mcp_codes,
+)
 from agentclaw.community.core.repository.implementations.skill_center.tables import (
+    default_exclusions,
     mcp_installations,
 )
 from agentclaw.community.core.repository.implementations.skill_center.tables.default_exclusions import (
@@ -138,6 +142,73 @@ class McpSkillSetControlPlaneCommands:
                 )
             session.flush()
             return DesiredStateMutation(self._as_item(row), True, old)
+
+    def exclude_default_mcp(
+        self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> DesiredStateMutation:
+        """The MCP twin of ``exclude_default_skill``: exclusion row +
+        Installation delta in one transaction."""
+        with self._db.transactional_orm_session() as session:
+            row = self._default_set(
+                session, bot_id=bot_id, owner_id=owner_id, set_id=set_id,
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+            )
+            old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
+            created = default_exclusions.exclude_mcp(
+                session, bot_id=bot_id, owner_id=owner_id,
+                set_id=int(row.id), server_code=server_code,
+            )
+            if not created:
+                return DesiredStateMutation(self._as_item(row), False, old)
+            if server_code in set_member_mcp_codes(
+                self._scope, session, skill_set_id=int(row.id)
+            ):
+                mcp_installations.uninstall(
+                    session, bot_id=bot_id, owner_id=owner_id,
+                    env=get_current_env(), server_codes={server_code},
+                )
+            session.flush()
+            return DesiredStateMutation(self._as_item(row), True, old)
+
+    def unexclude_default_mcp(
+        self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> DesiredStateMutation:
+        with self._db.transactional_orm_session() as session:
+            row = self._default_set(
+                session, bot_id=bot_id, owner_id=owner_id, set_id=set_id,
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+            )
+            old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
+            removed = default_exclusions.unexclude_mcp(
+                session, bot_id=bot_id, owner_id=owner_id,
+                set_id=int(row.id), server_code=server_code,
+            )
+            if not removed:
+                return DesiredStateMutation(self._as_item(row), False, old)
+            if server_code in set_member_mcp_codes(
+                self._scope, session, skill_set_id=int(row.id)
+            ):
+                mcp_installations.install(
+                    session, bot_id=bot_id, owner_id=owner_id,
+                    env=get_current_env(), server_code=server_code,
+                )
+            session.flush()
+            return DesiredStateMutation(self._as_item(row), True, old)
+
+    def excluded_default_mcp_codes(
+        self, *, bot_id: str, owner_id: str, set_id: str
+    ) -> set[str]:
+        """The owner's MCP exclusions from one Default Set."""
+        with self._db.orm_session() as session:
+            return excluded_mcp_codes(
+                session, bot_id=bot_id, owner_id=owner_id, set_id=int(set_id)
+            )
 
     def install_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str,

@@ -2170,3 +2170,171 @@ def test_direct_skill_installation_validates_existence_and_name_uniqueness():
         repository.install_skill(
             bot_id="bot", owner_id="owner", skill_id=str(foreign.id)
         )
+
+
+def _seed_default_with_member(db):
+    """A platform Default whose member is flushed into Installation."""
+    with db.transactional_orm_session() as session:
+        default = SkillSet(
+            name="default", user_id="", bolt_id="", engine_type="openclaw",
+            is_default=True, env="dev",
+        )
+        skill = Skill(name="member", git_path="git://member", env="dev")
+        session.add_all([default, skill])
+        session.flush()
+        session.add_all(
+            [
+                SkillSetSkill(
+                    skill_set_id=default.id, skill_id=skill.id, env="dev"
+                ),
+                SkillSetMCPServer(
+                    skill_set_id=default.id, server_code="mcp.member",
+                    name="member", env="dev",
+                ),
+                BotSkillInstallation(
+                    bot_id="bot", owner_id="owner", skill_id=skill.id, env="dev"
+                ),
+                BotMCPInstallation(
+                    bot_id="bot", owner_id="owner", server_code="mcp.member",
+                    env="dev",
+                ),
+            ]
+        )
+    return default, skill
+
+
+_DEFAULT_SCOPE = {
+    "bot_id": "bot",
+    "owner_id": "owner",
+    "engine_type": "openclaw",
+    "default_engine_types": ("openclaw",),
+}
+
+
+def test_exclusion_retires_the_installation_row_in_one_command():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, skill = _seed_default_with_member(db)
+
+    excluded = repository.exclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    )
+
+    assert excluded.changed is True
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetSkillExclusion).count() == 1
+        assert session.query(BotSkillInstallation).count() == 0
+    assert repository.excluded_default_skill_ids(
+        bot_id="bot", owner_id="owner", set_id=str(default.id)
+    ) == {int(skill.id)}
+    # The flush agrees: an excluded member is an inactive claim.
+    plan = repository.flush_installations(
+        bot_id="bot", owner_id="owner", env="dev",
+        engine_type="openclaw", default_engine_types=("openclaw",),
+    )
+    assert int(skill.id) not in plan.skills_to_install
+    # Idempotent retry owns neither half.
+    assert not repository.exclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    ).changed
+
+
+def test_unexclusion_restores_the_installation_row_in_one_command():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, skill = _seed_default_with_member(db)
+    repository.exclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    )
+
+    restored = repository.unexclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    )
+
+    assert restored.changed is True
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetSkillExclusion).count() == 0
+        assert [
+            int(row.skill_id) for row in session.query(BotSkillInstallation).all()
+        ] == [int(skill.id)]
+    assert not repository.unexclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    ).changed
+
+
+def test_unexclusion_fails_closed_on_a_runtime_name_conflict():
+    """The name guard aborts the whole command: the exclusion stays."""
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, skill = _seed_default_with_member(db)
+    repository.exclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    )
+    with db.transactional_orm_session() as session:
+        rival = Skill(name="member", git_path="git://rival", env="dev")
+        session.add(rival)
+        session.flush()
+        session.add(
+            BotSkillInstallation(
+                bot_id="bot", owner_id="owner", skill_id=rival.id, env="dev"
+            )
+        )
+
+    with pytest.raises(SkillRuntimeNameConflictError):
+        repository.unexclude_default_skill(
+            set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+        )
+
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetSkillExclusion).count() == 1
+
+
+def test_mcp_exclusion_mirrors_the_skill_pair():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, _skill = _seed_default_with_member(db)
+
+    excluded = repository.exclude_default_mcp(
+        set_id=str(default.id), server_code="mcp.member", **_DEFAULT_SCOPE
+    )
+    assert excluded.changed is True
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetMcpExclusion).count() == 1
+        assert session.query(BotMCPInstallation).count() == 0
+    assert repository.excluded_default_mcp_codes(
+        bot_id="bot", owner_id="owner", set_id=str(default.id)
+    ) == {"mcp.member"}
+    assert not repository.exclude_default_mcp(
+        set_id=str(default.id), server_code="mcp.member", **_DEFAULT_SCOPE
+    ).changed
+
+    restored = repository.unexclude_default_mcp(
+        set_id=str(default.id), server_code="mcp.member", **_DEFAULT_SCOPE
+    )
+    assert restored.changed is True
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetMcpExclusion).count() == 0
+        assert [
+            row.server_code for row in session.query(BotMCPInstallation).all()
+        ] == ["mcp.member"]
+
+
+def test_exclusion_commands_refuse_an_ordinary_set_address():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        ordinary = SkillSet(
+            name="ordinary", user_id="owner", bolt_id="bot",
+            engine_type="openclaw", env="dev",
+        )
+        session.add(ordinary)
+        session.flush()
+
+    with pytest.raises(SkillSetControlPlaneNotFoundError):
+        repository.exclude_default_skill(
+            set_id=str(ordinary.id), skill_id="1", **_DEFAULT_SCOPE
+        )
+    with pytest.raises(SkillSetControlPlaneNotFoundError):
+        repository.unexclude_default_mcp(
+            set_id=str(ordinary.id), server_code="mcp.x", **_DEFAULT_SCOPE
+        )

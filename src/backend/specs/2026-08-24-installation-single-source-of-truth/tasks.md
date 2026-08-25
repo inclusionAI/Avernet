@@ -152,7 +152,7 @@ lands in the same group as the migration of its last caller.
 
 ## Group 8 — Default-Set exclusion commands (restored opt-out)
 
-- [ ] 8.1 UoW commands `exclude_default_skill` / `unexclude_default_skill` /
+- [x] 8.1 UoW commands `exclude_default_skill` / `unexclude_default_skill` /
       `exclude_default_mcp` / `unexclude_default_mcp`: exclusion row +
       Installation delta in one transaction; `changed=False` when already in
       the requested state.

@@ -142,6 +142,42 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation: ...
     @abstractmethod
+    def exclude_default_skill(
+        self, *, bot_id: str, owner_id: str, set_id: str, skill_id: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> DesiredStateMutation:
+        """Default-Set per-Bot opt-out (spec E.11): exclusion row +
+        Installation delta in one transaction; ``changed=False`` when the
+        member is already excluded."""
+        ...
+    @abstractmethod
+    def unexclude_default_skill(
+        self, *, bot_id: str, owner_id: str, set_id: str, skill_id: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> DesiredStateMutation: ...
+    @abstractmethod
+    def exclude_default_mcp(
+        self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> DesiredStateMutation: ...
+    @abstractmethod
+    def unexclude_default_mcp(
+        self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> DesiredStateMutation: ...
+    @abstractmethod
+    def excluded_default_skill_ids(
+        self, *, bot_id: str, owner_id: str, set_id: str
+    ) -> set[int]: ...
+    @abstractmethod
+    def excluded_default_mcp_codes(
+        self, *, bot_id: str, owner_id: str, set_id: str
+    ) -> set[str]: ...
+    @abstractmethod
     def install_skill(
         self, *, bot_id: str, owner_id: str, skill_id: str,
         engine_type: str | None = None,
