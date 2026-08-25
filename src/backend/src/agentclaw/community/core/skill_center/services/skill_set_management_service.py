@@ -16,6 +16,7 @@ from agentclaw.community.core.repository.protocols.capability_desired_state impo
 )
 from agentclaw.community.core.skill_center.errors import (
     McpPermissionDeniedError,
+    SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
     SkillSetAccessDeniedError,
 )
@@ -283,15 +284,35 @@ class SkillSetManagementService:
         skill_id: str,
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        runtime_required = self._set_is_active(
-            bot=bot, bot_id=bot_id, set_id=set_id
-        )
+        target = self._target_set(bot=bot, bot_id=bot_id, set_id=set_id)
+        if target["is_default"]:
+            # Adding to the Default Set is the restored opt-out's other half:
+            # it can only remove an existing exclusion. The membership itself
+            # stays immutable.
+            self._require_excluded_default_skill(
+                bot=bot, bot_id=bot_id, set_id=str(target["id"]),
+                skill_id=skill_id,
+            )
+            return await self._mutate(
+                bot=bot,
+                bot_id=bot_id,
+                actor_id=user_id,
+                action="default_set_unexclude_skill",
+                mutation=lambda: self._repository.unexclude_default_skill(
+                    bot_id=bot_id,
+                    owner_id=str(bot["owner_id"]),
+                    set_id=set_id,
+                    skill_id=skill_id,
+                    engine_type=self._engine(bot),
+                    default_engine_types=self._default_engine_types(bot),
+                ),
+            )
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_add_skill",
-            runtime_required=runtime_required,
+            runtime_required=bool(target.get("is_active")),
             mutation=lambda: self._repository.add_skill(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -312,15 +333,30 @@ class SkillSetManagementService:
         skill_id: str,
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        runtime_required = self._set_is_active(
-            bot=bot, bot_id=bot_id, set_id=set_id
-        )
+        target = self._target_set(bot=bot, bot_id=bot_id, set_id=set_id)
+        if target["is_default"]:
+            # A Default Set is always active and its membership immutable:
+            # removing a member is the per-Bot exclusion (spec E.11).
+            return await self._mutate(
+                bot=bot,
+                bot_id=bot_id,
+                actor_id=user_id,
+                action="default_set_exclude_skill",
+                mutation=lambda: self._repository.exclude_default_skill(
+                    bot_id=bot_id,
+                    owner_id=str(bot["owner_id"]),
+                    set_id=set_id,
+                    skill_id=skill_id,
+                    engine_type=self._engine(bot),
+                    default_engine_types=self._default_engine_types(bot),
+                ),
+            )
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_remove_skill",
-            runtime_required=runtime_required,
+            runtime_required=bool(target.get("is_active")),
             mutation=lambda: self._repository.remove_skill(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -400,15 +436,36 @@ class SkillSetManagementService:
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         self._require_mcp_permission(actor_id=user_id, server_code=server_code)
-        runtime_required = self._set_is_active(
-            bot=bot, bot_id=bot_id, set_id=set_id
-        )
+        target = self._target_set(bot=bot, bot_id=bot_id, set_id=set_id)
+        if target["is_default"]:
+            # The MCP twin of add_skill's opt-out half: only an existing
+            # exclusion can be removed; the membership stays immutable.
+            codes = self._repository.excluded_default_mcp_codes(
+                bot_id=bot_id, owner_id=str(bot["owner_id"]),
+                set_id=str(target["id"]),
+            )
+            if server_code not in codes:
+                raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")
+            return await self._mutate(
+                bot=bot,
+                bot_id=bot_id,
+                actor_id=user_id,
+                action="default_set_unexclude_mcp",
+                mutation=lambda: self._repository.unexclude_default_mcp(
+                    bot_id=bot_id,
+                    owner_id=str(bot["owner_id"]),
+                    set_id=set_id,
+                    server_code=server_code,
+                    engine_type=self._engine(bot),
+                    default_engine_types=self._default_engine_types(bot),
+                ),
+            )
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_add_mcp",
-            runtime_required=runtime_required,
+            runtime_required=bool(target.get("is_active")),
             mutation=lambda: self._repository.add_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -429,15 +486,28 @@ class SkillSetManagementService:
         server_code: str,
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        runtime_required = self._set_is_active(
-            bot=bot, bot_id=bot_id, set_id=set_id
-        )
+        target = self._target_set(bot=bot, bot_id=bot_id, set_id=set_id)
+        if target["is_default"]:
+            return await self._mutate(
+                bot=bot,
+                bot_id=bot_id,
+                actor_id=user_id,
+                action="default_set_exclude_mcp",
+                mutation=lambda: self._repository.exclude_default_mcp(
+                    bot_id=bot_id,
+                    owner_id=str(bot["owner_id"]),
+                    set_id=set_id,
+                    server_code=server_code,
+                    engine_type=self._engine(bot),
+                    default_engine_types=self._default_engine_types(bot),
+                ),
+            )
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_remove_mcp",
-            runtime_required=runtime_required,
+            runtime_required=bool(target.get("is_active")),
             mutation=lambda: self._repository.remove_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -658,13 +728,24 @@ class SkillSetManagementService:
             dict.fromkeys((runtime_layout_engine_for_bot(bot), cls._engine(bot)))
         )
 
-    def _set_is_active(self, *, bot: dict, bot_id: str, set_id: str) -> bool:
-        """Whether a membership edit must synchronously reconcile runtime."""
-        item = self._repository.get_set(
+    def _target_set(self, *, bot: dict, bot_id: str, set_id: str) -> dict:
+        """The addressed Set's item: routes Default-Set opt-out vs membership
+        edits, and decides whether the edit must reconcile runtime (an
+        inactive ordinary Set is a draft; a Default is always active)."""
+        return self._repository.get_set(
             bot_id=bot_id,
             owner_id=str(bot["owner_id"]),
             set_id=set_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
         )
-        return bool(item.get("is_active"))
+
+    def _require_excluded_default_skill(
+        self, *, bot: dict, bot_id: str, set_id: str, skill_id: str
+    ) -> None:
+        """Only an excluded member can be "added" to a Default Set."""
+        excluded = self._repository.excluded_default_skill_ids(
+            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id
+        )
+        if not skill_id.isdecimal() or int(skill_id) not in excluded:
+            raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")

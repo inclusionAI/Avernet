@@ -156,7 +156,7 @@ lands in the same group as the migration of its last caller.
       `exclude_default_mcp` / `unexclude_default_mcp`: exclusion row +
       Installation delta in one transaction; `changed=False` when already in
       the requested state.
-- [ ] 8.2 `SkillSetManagementService`: `remove_skill`/`remove_mcp` on the
+- [x] 8.2 `SkillSetManagementService`: `remove_skill`/`remove_mcp` on the
       Default Set performs the exclusion (instead of raising);
       `add_skill`/`add_mcp` on the Default Set removes an existing exclusion,
       else `SYSTEM_DEFAULT_IMMUTABLE`. Runtime reconciled like every
