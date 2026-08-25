@@ -49,10 +49,13 @@ _WRITE_ALLOWLIST: dict[str, str] = {
     ),
 }
 
-#: Modules allowed to import the ``tables`` command modules — the UoW.
+#: Modules allowed to import the ``tables`` command modules — the UoW and
+#: the command mixins it composes.
 _TABLES_IMPORTER_ALLOWLIST = {
     "community/core/repository/implementations/skill_center/capability_desired_state.py",
     "community/core/repository/implementations/skill_center/bot_skillset_installations.py",
+    "community/core/repository/implementations/skill_center/default_exclusion_commands.py",
+    "community/core/repository/implementations/skill_center/direct_installation_commands.py",
     "community/core/repository/implementations/skill_center/mcp_skill_set_control_plane.py",
 }
 
