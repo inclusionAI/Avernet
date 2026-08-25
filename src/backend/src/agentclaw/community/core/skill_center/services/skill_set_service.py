@@ -2191,6 +2191,12 @@ class SkillSetService:
             engine_type=effective_engine,
         )
 
+        # This Bot's exclusions silence a Default member entirely — the row
+        # half too: ``get_set_mcp_servers`` filters only the static default
+        # codes, and the flush already treats an exclusion as the Default
+        # Set's per-Bot deactivation.
+        excluded_codes = set(self.skill_set_repo.get_all_excluded_mcps(user_id, bot_id))
+
         active_mcps = []
         seen_server_codes = set()
         for skill_set in active_skill_sets:
@@ -2206,12 +2212,13 @@ class SkillSetService:
             )
             for mcp in mcps_in_set:
                 server_code = mcp.get("server_code")
-                if server_code and server_code not in seen_server_codes:
+                if (
+                    server_code
+                    and server_code not in excluded_codes
+                    and server_code not in seen_server_codes
+                ):
                     seen_server_codes.add(server_code)
                     active_mcps.append(mcp)
-
-        # Get user-excluded default MCPs (across all default skill sets)
-        excluded_codes = set(self.skill_set_repo.get_all_excluded_mcps(user_id, bot_id))
 
         default_mcp_configs = get_default_mcp_servers(
             effective_engine,
