@@ -139,6 +139,18 @@ user_config:
   # container templates/tenant) are environment-specific — the neutral base sets
   # no corp endpoint. Corp env overlays carry the real URLs/templates; community
   # sets its own in application-community.yaml; the config.py defaults are neutral.
+  #
+  # deploy_runtime is the exception: it names which container the deployment
+  # runs, and therefore which DeployConfigComposer shapes the create-bot payload
+  # (the boot chain, the mount points, the storage volume):
+  #   managed — the managed bot image (four /home/admin/bin scripts, NAS)
+  #   ack     — the open-source engine image on managed Kubernetes / ECI
+  # Every deployment that exists today runs the managed image, so the base sets
+  # it here and each env overlay only has to speak up when it differs. An
+  # unrecognized value fails at boot rather than falling back, so a typo cannot
+  # quietly ship the wrong image's payload.
+  baas:
+    deploy_runtime: "managed"
 
   # NOTE: masa_agent_eval (evaluation service) endpoint is environment-specific —
   # carried by the corp env overlays; config.py default is neutral (localhost).
