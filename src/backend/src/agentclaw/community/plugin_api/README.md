@@ -7,7 +7,7 @@ Plugin Protocol declarations (the kernel's outbound interface to swappable capab
 ```yaml
 purpose: "Plugin Protocol declarations (the kernel's outbound interface to swappable capabilities)."
 provides:
-  - "27 plugin Protocol classes (AuthPlugin, CachePlugin, DatabasePlugin, …)"
+  - "Plugin Protocol classes, including the independent SkillCenterGateway"
   - "Plugin marker"
   - "@plugin_impl decorator + Mode/Flavor enums"
   - "IMPL_REGISTRY"
@@ -25,4 +25,13 @@ internal_dependencies:
 
 ### Change impact
 
-Changing a Protocol signature breaks every local + prod impl + the contract-test suite (Rule 25). Adding a new Protocol requires updating BOUNDARY_SIGNIFICANT_MODULES if it joins a new module, and adding paired impls (Rule 20).
+Changing a Protocol signature breaks every local + prod impl + the contract-test suite (Rule 25). `SkillCenterGateway` is separate from the legacy `SkillCenterClient`: its typed request objects carry no endpoint or credential configuration, every Team Skill operation requires a request-level Team ID, and its adapters do not own publication retries or domain state. Adding a new Protocol requires updating BOUNDARY_SIGNIFICANT_MODULES if it joins a new module, and adding paired impls (Rule 20).
+
+`SkillCenterGateway` is an outbound, trusted-service integration executed in the
+Backend process. It may call only the configured Skill Center endpoint with
+composition-root-provided service credentials; it may not access TeamClaw
+persistence, Runtime, Draft/Attempt/Version state, arbitrary hosts, or caller
+credentials. DTO validation plus adapter-specific endpoint/auth configuration
+enforce that boundary. It has no startup or shutdown phase and owns no durable
+resource; each synchronous operation either returns a normalized DTO or raises
+a stable `SkillCenterGatewayError`, with no cleanup callback or hidden retry.

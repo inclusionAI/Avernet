@@ -11,6 +11,7 @@ from __future__ import annotations
 from injector import Module, provider, singleton
 
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
+from agentclaw.community.plugin_api.skill_center_gateway import SkillCenterGateway
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
 
@@ -26,6 +27,15 @@ class CommunitySkillCenterClientModule(Module):
         )
 
         return CommunitySkillCenterClient()
+
+    @singleton
+    @provider
+    def skill_center_gateway(self) -> SkillCenterGateway:
+        from agentclaw.community.plugins.community.skill_center_gateway import (
+            CommunitySkillCenterGateway,
+        )
+
+        return CommunitySkillCenterGateway()
 
     @singleton
     @provider
