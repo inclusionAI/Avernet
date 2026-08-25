@@ -282,6 +282,36 @@ def test_exchange_caller_identity_installs_opaque_token_without_passport_lookup(
     )
 
 
+def test_exchange_caller_identity_reuses_supplied_caller_token() -> None:
+    service, _ = _service(bot=_bot(call_type="caller"))
+    token_provider = MagicMock()
+    caller_token = CallerToken(
+        access_token="caller-token",
+        subject_user_id="caller-1",
+        expires_at=datetime.now(),
+        fingerprint="fingerprint",
+    )
+    runtime_updater = MagicMock()
+
+    result = service.exchange_caller_identity(
+        iam_token="iam-token",
+        caller_user_id="caller-1",
+        bot_id="bot-1",
+        owner_user_id="owner-1",
+        token_provider=token_provider,
+        runtime_updater=runtime_updater,
+        stage="online",
+        publish_id=1,
+        entity_id="entity-1",
+        binding_id=9,
+        caller_token=caller_token,
+    )
+
+    assert result is None
+    token_provider.exchange.assert_not_called()
+    assert runtime_updater.update_caller_identity.call_args.kwargs["caller_token"] is caller_token
+
+
 def test_exchange_caller_identity_propagates_test_exchange_to_runtime() -> None:
     service, _ = _service(bot=_bot(call_type="owner"))
     token_provider = MagicMock()
