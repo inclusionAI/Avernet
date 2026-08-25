@@ -38,11 +38,11 @@ together.
 | **D1** capability model — *resolved* | #1466 | **W4** apply engine | #1472 |
 | **D2** manifest-upgrade diff policy — *open* | #1467 | **W5** skills + identity | #1473 |
 | **D3** reconcile verification — *resolved* | #1468 | **W6** resources | #1474 |
-| **D4** pre-boot delivery — **open, blocking** | *(to file)* | **W7** named + git sources | #1475 |
+| **D4** pre-boot delivery — **open, blocking** | #1508 | **W7** named + git sources | #1475 |
 | **W1** manifest document | #1469 | **W8** lifecycle apply points | #1476 |
 | **W2** guarded fetcher | #1470 | **W9** `cli_tools` (deferred) | #1477 |
-| **W3** source credentials | #1471 | **W10** service-layer seam | *(to file)* |
-| | | **W11** platform-side materialisation | *(to file)* |
+| **W3** source credentials | #1471 | **W10** service-layer seam | #1509 |
+| | | **W11** platform-side materialisation | #1510 |
 
 Planning PR: #1465.
 
@@ -278,10 +278,9 @@ acceptance criteria rather than as a question:
 - teclaw does not participate in `skills_pool` at all, so this is a BaaS-family
   concern only.
 
-### 3.4 D4 — delivery before a container exists · **OPEN — the blocking question**
+### 3.4 D4 — delivery before a container exists · #1508 · **OPEN — the blocking question**
 
-*No issue filed yet; nothing downstream of W4 can be specified until this has an
-answer.*
+*Nothing downstream of W4 can be specified until this has an answer.*
 
 **The problem.** design §3.1 promises that the first configuration a bot receives
 already contains the manifest result — apply runs *before* the container. But the
@@ -353,7 +352,7 @@ a capability is compatible where narrowing one is not.
 
 ---
 
-#### W10 — A service-layer seam apply and the API can share
+#### W10 — A service-layer seam apply and the API can share · #1509
 
 **Goal.** The validation and authorisation the public API enforces becomes
 callable by something that is not an HTTP request, so apply enforces the same
@@ -389,7 +388,7 @@ Doing it after means writing the checks twice and deleting one copy later.
 
 ---
 
-#### W11 — Platform-side materialisation and persistence
+#### W11 — Platform-side materialisation and persistence · #1510
 
 **Goal.** Fetched content is stored by the platform as its own durable copy, and
 later steps read from that copy rather than re-fetching.
