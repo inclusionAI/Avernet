@@ -93,6 +93,10 @@ setup_chains() {
     # 放行 80/443 (已被 nat 重定向到 Envoy)
     iptables -A ${SIDECAR_FILTER} -p tcp -m multiport --dports 80,443 -j ACCEPT
 
+    # 放行已建立连接的响应流量 (入站请求的响应包目标端口是客户端随机端口, 不在 80/443)
+    # 必须在 REJECT 之前, 否则响应包被 RST 导致入站请求超时
+    iptables -A ${SIDECAR_FILTER} -p tcp -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
     # 拒绝其他所有出站 TCP (REJECT 发送 RST)
     iptables -A ${SIDECAR_FILTER} -p tcp -j REJECT --reject-with tcp-reset
 }
