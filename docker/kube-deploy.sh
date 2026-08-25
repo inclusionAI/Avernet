@@ -64,6 +64,7 @@ ENV_FILE=""
 declare -A DEFAULT_PORT=(
     [baas]=8080
     [gateway]=8080
+    [proxy]=8080
     [bcs]=8080
     [backend]=8080
 )
@@ -111,7 +112,7 @@ done
 # --- Validate ---
 
 if [[ -z "$SERVICE" ]]; then
-    echo "error: --service is required (baas|gateway|bcs|backend)" >&2
+    echo "error: --service is required (baas|gateway|proxy|bcs|backend)" >&2
     exit 2
 fi
 if [[ -z "$IMAGE" ]]; then
@@ -120,16 +121,16 @@ if [[ -z "$IMAGE" ]]; then
 fi
 if [[ -z "${DEFAULT_PORT[$SERVICE]:-}" ]]; then
     echo "error: unknown service '$SERVICE'" >&2
-    echo "  supported: baas, gateway, bcs, backend" >&2
+    echo "  supported: baas, gateway, proxy, bcs, backend" >&2
     exit 2
 fi
 
 PORT="${PORT:-${DEFAULT_PORT[$SERVICE]}}"
-REPLICAS="$DEFAULT_REPLICAS"
-CPU_REQUEST="$DEFAULT_CPU_REQUEST"
-CPU_LIMIT="$DEFAULT_CPU_LIMIT"
-MEMORY_REQUEST="$DEFAULT_MEM_REQUEST"
-MEMORY_LIMIT="$DEFAULT_MEM_LIMIT"
+REPLICAS="${REPLICAS:-$DEFAULT_REPLICAS}"
+CPU_REQUEST="${CPU_REQUEST:-$DEFAULT_CPU_REQUEST}"
+CPU_LIMIT="${CPU_LIMIT:-$DEFAULT_CPU_LIMIT}"
+MEMORY_REQUEST="${MEMORY_REQUEST:-$DEFAULT_MEM_REQUEST}"
+MEMORY_LIMIT="${MEMORY_LIMIT:-$DEFAULT_MEM_LIMIT}"
 
 # --- Load env vars from file (if --env-file given) ---
 
