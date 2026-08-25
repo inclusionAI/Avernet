@@ -13,7 +13,7 @@ use bcs_service_api::application::v1::{
     DirectMessageGroupSummary, GetGroup, GroupDetail, GroupEventSubscriptionProvisioner,
     GroupKindFilter, GroupService, GroupStatus, GroupStrategy as V1GroupStrategy, GroupSummary,
     GroupVisibility, HumanPrincipal, InlineGroupEventSubscriptionRequest, ListGroups,
-    ManagerWorkerConfiguration, Membership, MembershipFilter, NormalGroupSummary, Page,
+    ListPublicGroups, ManagerWorkerConfiguration, Membership, MembershipFilter, NormalGroupSummary, Page,
     Participant as V1Participant, PreparedGroupEventSubscriptions, Principal,
     StateMachineConfiguration, StateMachineDefinition, StateMachineDefinitionReference,
     StateMachineParticipantBinding, UpdateGroup, UpdateGroupParticipant,
@@ -1726,6 +1726,65 @@ impl GroupService for GroupServiceImpl {
                 self.project_summary(group, &view_actor_id, membership)
                     .await?,
             );
+        }
+        Ok(Page {
+            items,
+            total,
+            offset: command.offset,
+            limit: command.limit,
+        })
+    }
+
+    async fn list_public_groups(
+        &self,
+        command: ListPublicGroups,
+    ) -> Result<Page<GroupSummary>, ApplicationError> {
+        if command.limit == 0 || command.limit > 100 {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "limit must be between 1 and 100",
+            ));
+        }
+        let q = command
+            .q
+            .as_deref()
+            .map(str::trim)
+            .filter(|query| !query.is_empty());
+        let n = self
+            .groups
+            .count_filtered(None, Some("public"), q)
+            .await;
+        const SAFETY_CAP: u64 = 1000;
+        if n > SAFETY_CAP {
+            tracing::warn!(
+                count = n,
+                cap = SAFETY_CAP,
+                "public group plaza candidate set truncated to SAFETY_CAP"
+            );
+        }
+        let candidates = self
+            .groups
+            .list_paginated_filtered(0, n.min(SAFETY_CAP), None, Some("public"), q)
+            .await;
+        let filtered = candidates
+            .into_iter()
+            .filter(|group| group.record_status == "active")
+            .filter(|group| {
+                command.strategy.is_none_or(|strategy| {
+                    group.group_kind == GroupKind::Normal
+                        && project_strategy(group.group_strategy) == strategy
+                })
+            })
+            .collect::<Vec<_>>();
+        let total = filtered.len() as u64;
+        let page = filtered
+            .into_iter()
+            .skip(saturating_usize(command.offset))
+            .take(saturating_usize(command.limit))
+            .collect::<Vec<_>>();
+        let mut items = Vec::with_capacity(page.len());
+        for group in page {
+            items.push(self.project_summary(group, "", Membership::None).await?);
         }
         Ok(Page {
             items,
