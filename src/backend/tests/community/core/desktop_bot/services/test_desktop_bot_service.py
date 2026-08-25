@@ -1521,13 +1521,14 @@ def _setup_local_lookup(mocks, bot_id, device_id="m-001", active_engine="opencla
 class TestListUserBots:
     def test_returns_bots_for_user(self):
         service, mocks = _make_service_with_mocks()
-        mocks["bot_repo"].search_bots.side_effect = [
-            (1, [{"bot_id": "b1", "status": "PENDING"}]),
-            (1, [{"bot_id": "b2", "status": "ACTIVE"}]),
-            (1, [{"bot_id": "b3", "status": "OFFLINE"}]),
-            (0, []),  # RELEASING
-            (0, []),  # FAILED
-        ]
+        mocks["bot_repo"].search_bots.return_value = (
+            3,
+            [
+                {"bot_id": "b1", "status": "PENDING"},
+                {"bot_id": "b2", "status": "ACTIVE"},
+                {"bot_id": "b3", "status": "OFFLINE"},
+            ],
+        )
 
         result = service.list_user_bots(user_id="u001")
 
@@ -1535,8 +1536,18 @@ class TestListUserBots:
         assert result[0]["bot_id"] == "b1"
         assert result[1]["bot_id"] == "b2"
         assert result[2]["bot_id"] == "b3"
-        # Called for PENDING, ACTIVE, OFFLINE, RELEASING, FAILED
-        assert mocks["bot_repo"].search_bots.call_count == 5
+        # All five statuses are fetched by ONE status-IN query — the historical
+        # per-status fan-out (5 serial DB round trips) is what made /bots/all slow.
+        assert mocks["bot_repo"].search_bots.call_count == 1
+        kwargs = mocks["bot_repo"].search_bots.call_args.kwargs
+        assert set(kwargs["bot_status_list"]) == {
+            "PENDING",
+            "ACTIVE",
+            "OFFLINE",
+            "RELEASING",
+            "FAILED",
+        }
+        assert kwargs["bot_status"] is None
 
     def test_returns_empty_when_no_bots(self):
         service, mocks = _make_service_with_mocks()
@@ -1556,16 +1567,30 @@ class TestListUserBots:
             assert call.kwargs["owner_id"] == "u001"
             assert call.kwargs["bot_type"] == "desktop"
 
-    def test_continues_on_query_failure(self):
+    def test_fetches_all_pages_when_total_exceeds_page_size(self):
         service, mocks = _make_service_with_mocks()
+        page1 = [{"bot_id": f"b{i:03d}", "status": "ACTIVE"} for i in range(500)]
+        page2 = [{"bot_id": f"b{i:03d}", "status": "PENDING"} for i in range(500, 600)]
         mocks["bot_repo"].search_bots.side_effect = [
-            Exception("DB error"),
-            (1, [{"bot_id": "b1", "status": "ACTIVE"}]),
-            (0, []),
-            (0, []),
-            (0, []),
+            (600, page1),
+            (600, page2),
         ]
 
         result = service.list_user_bots(user_id="u001")
 
-        assert len(result) == 1
+        assert len(result) == 600
+        assert mocks["bot_repo"].search_bots.call_count == 2
+        assert mocks["bot_repo"].search_bots.call_args_list[1].kwargs["page"] == 2
+
+    def test_query_failure_is_swallowed(self):
+        # The historical per-status loop swallowed one status's failure and kept
+        # going. With a single query there is nothing left to fall back on, so
+        # the same swallow-and-log contract now means "empty result", never a
+        # raise — callers treat [] as "no local bots".
+        service, mocks = _make_service_with_mocks()
+        mocks["bot_repo"].search_bots.side_effect = Exception("DB error")
+
+        result = service.list_user_bots(user_id="u001")
+
+        assert result == []
+        assert mocks["bot_repo"].search_bots.call_count == 1
