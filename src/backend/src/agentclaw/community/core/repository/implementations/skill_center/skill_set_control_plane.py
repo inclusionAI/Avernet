@@ -47,6 +47,10 @@ from agentclaw.community.core.repository.skill_set_control_plane_types import (
     SkillSetDesiredState,
     SkillSetMutation,
 )
+from agentclaw.community.core.skill_center.orm import (
+    DefaultSkillsetMcpExclusion,
+    DefaultSkillsetSkillExclusion,
+)
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -406,7 +410,6 @@ class SkillSetControlPlaneRepository(
                 default_engine_types=default_engine_types,
                 locked=True,
             )
-            self._ordinary(row)
             old = self._snapshot(
                 session, bot_id, owner_id, engine_type=engine_type
             )
@@ -420,6 +423,56 @@ class SkillSetControlPlaneRepository(
             )
             if membership is None:
                 return SkillSetMutation(_item(row), False, old)
+            if row.is_default:
+                existing = (
+                    session.query(DefaultSkillsetSkillExclusion)
+                    .filter(
+                        DefaultSkillsetSkillExclusion.avernet_tenant
+                        == get_current_avernet_tenant(),
+                        DefaultSkillsetSkillExclusion.user_id == owner_id,
+                        DefaultSkillsetSkillExclusion.bot_id == bot_id,
+                        DefaultSkillsetSkillExclusion.skill_set_id == int(row.id),
+                        DefaultSkillsetSkillExclusion.skill_id == int(skill_id),
+                    )
+                    .first()
+                )
+                if existing is not None:
+                    return SkillSetMutation(_item(row), False, old)
+                session.add(
+                    DefaultSkillsetSkillExclusion(
+                        user_id=owner_id,
+                        bot_id=bot_id,
+                        skill_set_id=int(row.id),
+                        skill_id=int(skill_id),
+                        avernet_tenant=get_current_avernet_tenant(),
+                    )
+                )
+                other_active = (
+                    self._scope(session.query(SkillSet), SkillSet)
+                    .join(SkillSetSkill, SkillSetSkill.skill_set_id == SkillSet.id)
+                    .filter(
+                        SkillSet.bolt_id == bot_id,
+                        SkillSet.user_id == owner_id,
+                        SkillSet.is_default.is_(False),
+                        SkillSet.is_active.is_(True),
+                        SkillSetSkill.skill_id == int(skill_id),
+                    )
+                )
+                if engine_type is not None:
+                    other_active = other_active.filter(
+                        SkillSet.engine_type == engine_type
+                    )
+                if other_active.first() is None:
+                    self._scope(
+                        session.query(BotSkillInstallation), BotSkillInstallation
+                    ).filter(
+                        BotSkillInstallation.owner_id == owner_id,
+                        BotSkillInstallation.bot_id == bot_id,
+                        BotSkillInstallation.skill_id == int(skill_id),
+                    ).delete(synchronize_session=False)
+                session.flush()
+                return SkillSetMutation(_item(row), True, old)
+            self._ordinary(row)
             # The difference is what this membership was providing.
             before = self._teardown_ids(session, {int(row.id)})
             session.delete(membership)
@@ -540,7 +593,7 @@ class SkillSetControlPlaneRepository(
         state: SkillSetDesiredState,
         engine_type: str | None = None,
     ) -> None:
-        """Atomically restore Membership, set-state and Installation facts."""
+        """Atomically restore every Bot-owned SkillSet desired-state fact."""
         with self._db.transactional_orm_session() as session:
             query = self._scope(session.query(SkillSet), SkillSet).filter(
                 SkillSet.bolt_id == bot_id,
@@ -624,6 +677,37 @@ class SkillSetControlPlaneRepository(
                         server_code=server_code,
                         env=get_current_env(),
                         avernet_tenant=get_current_avernet_tenant(),
+                    )
+                )
+            tenant = get_current_avernet_tenant()
+            session.query(DefaultSkillsetSkillExclusion).filter(
+                DefaultSkillsetSkillExclusion.avernet_tenant == tenant,
+                DefaultSkillsetSkillExclusion.user_id == owner_id,
+                DefaultSkillsetSkillExclusion.bot_id == bot_id,
+            ).delete(synchronize_session=False)
+            session.query(DefaultSkillsetMcpExclusion).filter(
+                DefaultSkillsetMcpExclusion.avernet_tenant == tenant,
+                DefaultSkillsetMcpExclusion.user_id == owner_id,
+                DefaultSkillsetMcpExclusion.bot_id == bot_id,
+            ).delete(synchronize_session=False)
+            for set_id, skill_id in state.default_skill_exclusions:
+                session.add(
+                    DefaultSkillsetSkillExclusion(
+                        user_id=owner_id,
+                        bot_id=bot_id,
+                        skill_set_id=set_id,
+                        skill_id=skill_id,
+                        avernet_tenant=tenant,
+                    )
+                )
+            for set_id, server_code in state.default_mcp_exclusions:
+                session.add(
+                    DefaultSkillsetMcpExclusion(
+                        user_id=owner_id,
+                        bot_id=bot_id,
+                        skill_set_id=set_id,
+                        server_code=server_code,
+                        avernet_tenant=tenant,
                     )
                 )
             session.flush()
@@ -795,7 +879,7 @@ class SkillSetControlPlaneRepository(
         *,
         engine_type: str | None = None,
     ) -> SkillSetDesiredState:
-        """Lock and capture every ordinary-set desired fact for this Bot."""
+        """Lock and capture every SkillSet desired fact for this Bot."""
         query = self._scope(session.query(SkillSet), SkillSet).filter(
             SkillSet.bolt_id == bot_id,
             SkillSet.user_id == owner_id,
@@ -833,6 +917,29 @@ class SkillSetControlPlaneRepository(
                 mcp_memberships[int(member.skill_set_id)].append(
                     str(member.server_code)
                 )
+        tenant = get_current_avernet_tenant()
+        default_skill_exclusions = {
+            (int(row.skill_set_id), int(row.skill_id))
+            for row in session.query(DefaultSkillsetSkillExclusion)
+            .filter(
+                DefaultSkillsetSkillExclusion.avernet_tenant == tenant,
+                DefaultSkillsetSkillExclusion.user_id == owner_id,
+                DefaultSkillsetSkillExclusion.bot_id == bot_id,
+            )
+            .with_for_update()
+            .all()
+        }
+        default_mcp_exclusions = {
+            (int(row.skill_set_id), str(row.server_code))
+            for row in session.query(DefaultSkillsetMcpExclusion)
+            .filter(
+                DefaultSkillsetMcpExclusion.avernet_tenant == tenant,
+                DefaultSkillsetMcpExclusion.user_id == owner_id,
+                DefaultSkillsetMcpExclusion.bot_id == bot_id,
+            )
+            .with_for_update()
+            .all()
+        }
         return SkillSetDesiredState(
             installations=self._installations(session, bot_id, owner_id),
             set_active={int(row.id): bool(row.is_active) for row in sets},
@@ -841,4 +948,6 @@ class SkillSetControlPlaneRepository(
             mcp_memberships={
                 set_id: tuple(items) for set_id, items in mcp_memberships.items()
             },
+            default_skill_exclusions=default_skill_exclusions,
+            default_mcp_exclusions=default_mcp_exclusions,
         )
