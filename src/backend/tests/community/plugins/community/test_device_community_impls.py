@@ -4,7 +4,7 @@ Covers:
 - ``CommunityHealthProbe`` — direct-HTTP /readiness probe (all branches: no
   bindings, no-url binding, healthy/unhealthy/exception probes, payload parsing,
   list_bindings failure, sandbox unsupported).
-- ``CommunityDeviceSyncDispatcher`` / ``CommunityDeviceSyncPlugin`` — no-op sync.
+- ``CommunityDeviceSyncDispatcher`` — selects the DI-provided BaaS DeviceSync service.
 - ``CommunityDeviceAdapterTransport`` — no-op relay transport.
 
 These ship in the community distribution, so they must be exercised directly
@@ -20,10 +20,6 @@ import httpx
 
 from agentclaw.community.plugins.community.device_adapter_transport import (
     CommunityDeviceAdapterTransport,
-)
-from agentclaw.community.plugins.community.device_sync import (
-    CommunityDeviceSyncDispatcher,
-    CommunityDeviceSyncPlugin,
 )
 from agentclaw.community.plugins.community.health_probe import CommunityHealthProbe
 
@@ -173,25 +169,6 @@ def test_sandbox_health_unsupported():
     assert out["code"] == 1
     assert out["instances"] == []
     assert "no sandbox runtime" in out["message"]
-
-
-# ── CommunityDeviceSyncDispatcher / CommunityDeviceSyncPlugin ─────────────────
-
-def test_device_sync_dispatcher_returns_noop_plugin():
-    ctx = SimpleNamespace(bot_id="bot-1", provider="baas")
-    plugin = CommunityDeviceSyncDispatcher().dispatch(ctx)
-    assert isinstance(plugin, CommunityDeviceSyncPlugin)
-
-
-def test_device_sync_plugin_noop_results():
-    p = CommunityDeviceSyncPlugin()
-    assert p.sync_symlinks([{"source": "a", "target": "b"}])["success"] is False
-    assert p.sync_bot_config("bot", 1, "1", "OWNER", "u", "nick")["success"] is False
-    # MCP bool methods return True (Option B: counted, no network call)
-    assert p.sync_all_mcp_servers([{"server_code": "x"}]) is True
-    assert p.sync_single_mcp({"server_code": "x"}, api_key="k") is True
-    assert p.sync_remove_mcp("x") is True
-    assert p.has_mcp("x") is True
 
 
 # ── CommunityDeviceAdapterTransport ──────────────────────────────────────────

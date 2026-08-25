@@ -52,7 +52,7 @@ internal_dependencies:
   - agentclaw.community.di.modules
   - agentclaw.community.log
   - agentclaw.community.plugin_api.device_mcp_sync
-  - agentclaw.community.plugin_api.device_sync
+  - agentclaw.community.plugin_api.device_sync_dispatcher
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.mcp_auth
   - agentclaw.community.plugin_api.mcp_center

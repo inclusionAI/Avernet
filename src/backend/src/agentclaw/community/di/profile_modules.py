@@ -142,9 +142,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             # The reuse column's concerns, now community:
             CommunityAICodingModule(),      # empty workflow catalog (no AntCode)
             CommunityNotifyModule(),    # no-op notify sender (no DingTalk)
-            # Outbound rules + device-sync — community (empty rules / no-op dispatch).
+            # Outbound rules are shared by test and singlebox. DeviceSync is
+            # selected per profile below.
             CommunityOutboundRulesModule(),
-            CommunityDeviceSyncModule(),
             # App services — corp-free test module: real BotChatService, local_sql
             # router, dummy Dima config, community no-op code-platform (AntCode).
             TestAppServicesModule(),
@@ -155,7 +155,11 @@ def modules_for(profile: DeployProfile) -> list[Module]:
                 TestHttpClientModule,
             )
 
-            column.extend([TestDevicesModule(), TestHttpClientModule()])
+            column.extend([
+                CommunityDeviceSyncModule(),
+                TestDevicesModule(),
+                TestHttpClientModule(),
+            ])
         else:
             from agentclaw.community.di.modules.singlebox_access_module import (
                 SingleboxAccessModule,
@@ -166,9 +170,15 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             from agentclaw.community.di.modules.infrastructure.singlebox.devices import (
                 SingleboxDevicesModule,
             )
+            from agentclaw.community.core.devices.services.singlebox_device_sync import (
+                SingleboxDeviceSyncService,
+            )
 
             column.extend([
                 SingleboxDevicesModule(),
+                CommunityDeviceSyncModule(
+                    device_sync_wrapper=SingleboxDeviceSyncService,
+                ),
                 SingleboxAccessModule(),
                 SingleboxCallerIdentityModule(),
             ])
@@ -191,9 +201,6 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.test.outbound_rules import (
             TestOutboundRulesModule,
         )
-        from agentclaw.community.di.modules.infrastructure.test.device_sync import (
-            TestDeviceSyncModule,
-        )
         from agentclaw.community.di.modules.infrastructure.test.http_client import (
             TestHttpClientModule,
         )
@@ -207,7 +214,6 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             # Prod outbound-rule builder / device-sync dispatcher (corp), reused
             # by the corp suite under local doubles.
             TestOutboundRulesModule(),
-            TestDeviceSyncModule(),
             # App services — the SAME corp-free module the test/singlebox column uses.
             # NOTE(totalfrank): it binds ``CodePlatformServiceProtocol`` to the
             # community ``NoopCodePlatformService``, NOT the corp ``AntCodeService``,

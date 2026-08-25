@@ -20,9 +20,9 @@ def mock_repository():
 def mock_device_fs_dispatcher():
     """Mock DeviceFilesystemDispatcher.
 
-    Post Task 4: ChannelService 不再调 ``dispatcher.for_bot``,改调
-    ``dispatcher.dispatch(ctx)``。``for_bot`` 保留为可调 MagicMock 供旧 fixture
-    残留兼容,新 caller 通过 resolver+dispatch。
+    ChannelService resolves a DeviceContext and calls ``dispatch(ctx)``.
+    ``for_bot`` remains on this generic mock because other filesystem fixtures
+    still reference that compatibility method.
     """
     dispatcher = MagicMock()
     dispatcher.for_bot = MagicMock()
@@ -56,7 +56,7 @@ def mock_bot_service():
 
 @pytest.fixture
 def mock_device_sync_dispatcher():
-    """Mock DeviceSyncDispatcher — Task 6 收口后 channel_service 改注入 dispatcher。"""
+    """Mock DeviceSyncDispatcher injected into ChannelService."""
     return MagicMock()
 
 
@@ -1046,9 +1046,9 @@ class TestGenerateOpenclawConfigs:
                 )
 
 class TestProviderDispatch:
-    """Task 4/5: ChannelService routes channel sync on the bot's engine.
+    """ChannelService routes channel sync according to the bot engine.
 
-    teclaw → best-effort recompose+deliver via the supplier (persist-then-deliver);
+    teclaw → best-effort recompose and deliver (persist-then-deliver);
     non-teclaw → the existing openclaw.json write (fail-closed, sync-then-persist).
     """
 
@@ -1108,7 +1108,7 @@ class TestProviderDispatch:
         self, channel_service, mock_repository, mock_bot_service, mock_device_sync_dispatcher
     ):
         """No syncable device → DeviceSyncUnavailableError is swallowed; status persisted."""
-        from agentclaw.community.plugin_api.device_sync import DeviceSyncUnavailableError
+        from agentclaw.community.core.devices.services.device_sync import DeviceSyncUnavailableError
 
         self._teclaw_bot(mock_bot_service)
         mock_repository.get_by_id.return_value = _make_channel_record(channel_id=3)
