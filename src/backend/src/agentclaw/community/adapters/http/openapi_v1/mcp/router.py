@@ -51,8 +51,8 @@ from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
-from agentclaw.community.api.skill_set_management_service import (
-    SkillSetManagementServiceProtocol,
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
 )
 from agentclaw.community.core.mcp.config_flow import (
     list_marketplace_servers,
@@ -123,8 +123,8 @@ async def list_bot_mcps(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetManagementServiceProtocol = Injected(
-        SkillSetManagementServiceProtocol
+    service: DirectActivationServiceProtocol = Injected(
+        DirectActivationServiceProtocol
     ),
 ) -> Envelope[list[BotMcpItem]]:
     return envelope(
@@ -134,7 +134,7 @@ async def list_bot_mcps(
                 service.list_installed_mcps(
                     bot_id=bot_id,
                     owner_id=owner_id,
-                    user_id=user_id,
+                    actor_id=user_id,
                 )
             )
         ],
@@ -150,14 +150,14 @@ async def activate_bot_mcp(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetManagementServiceProtocol = Injected(
-        SkillSetManagementServiceProtocol
+    service: DirectActivationServiceProtocol = Injected(
+        DirectActivationServiceProtocol
     ),
 ) -> Envelope[BotMcpItem]:
-    await service.activate_mcp_direct(
+    await service.activate_mcp(
         bot_id=bot_id,
         owner_id=owner_id,
-        user_id=user_id,
+        actor_id=user_id,
         server_code=server_code,
     )
     return envelope(BotMcpItem(server_code=server_code, active=True), request)
@@ -171,14 +171,14 @@ async def deactivate_bot_mcp(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetManagementServiceProtocol = Injected(
-        SkillSetManagementServiceProtocol
+    service: DirectActivationServiceProtocol = Injected(
+        DirectActivationServiceProtocol
     ),
 ) -> Envelope[BotMcpItem]:
-    await service.deactivate_mcp_direct(
+    await service.deactivate_mcp(
         bot_id=bot_id,
         owner_id=owner_id,
-        user_id=user_id,
+        actor_id=user_id,
         server_code=server_code,
     )
     return envelope(BotMcpItem(server_code=server_code, active=False), request)

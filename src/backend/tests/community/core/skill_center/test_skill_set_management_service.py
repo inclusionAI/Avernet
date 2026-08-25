@@ -1622,66 +1622,6 @@ def test_legacy_name_or_git_path_materializes_market_repo_skill_before_membershi
 
 
 @pytest.mark.asyncio
-async def test_mcp_direct_activation_checks_permission_before_writing_desired_state():
-    repository = _McpRepository()
-    auth = _McpAuth(allowed=True)
-    mcp_center = _McpCenter(allowed=True)
-    service = SkillSetManagementService(
-        repository=repository,
-        bot_repo=_Bots(),
-        runtime=_SuccessfulRuntime(),
-        legacy_factory=object(),
-        passport=object(),
-        authorization=_Authorization(),
-        audit_log_repo=_Audit(),
-        mcp_center=mcp_center,
-        mcp_auth=auth,
-    )
-
-    await service.activate_mcp_direct(
-        bot_id="bot-1",
-        owner_id="true-owner",
-        user_id="true-owner",
-        server_code="mcp.weather",
-    )
-
-    assert mcp_center.calls == [("true-owner", "mcp.weather")]
-    assert repository.direct_calls == [
-        {
-            "bot_id": "bot-1",
-            "owner_id": "true-owner",
-            "server_code": "mcp.weather",
-            "engine_type": "openclaw",
-        }
-    ]
-
-
-@pytest.mark.asyncio
-async def test_mcp_direct_activation_denies_before_writing_desired_state():
-    repository = _McpRepository()
-    service = SkillSetManagementService(
-        repository=repository,
-        bot_repo=_Bots(),
-        runtime=_SuccessfulRuntime(),
-        legacy_factory=object(),
-        passport=object(),
-        authorization=_Authorization(),
-        audit_log_repo=_Audit(),
-        mcp_center=_McpCenter(allowed=False),
-        mcp_auth=_McpAuth(allowed=False),
-    )
-
-    with pytest.raises(McpPermissionDeniedError):
-        await service.activate_mcp_direct(
-            bot_id="bot-1",
-            owner_id="true-owner",
-            user_id="true-owner",
-            server_code="mcp.weather",
-        )
-    assert repository.direct_calls == []
-
-
-@pytest.mark.asyncio
 async def test_runtime_mapping_snapshot_has_no_runtime_side_effects():
     repository = _McpInstallations()
     pool = _RuntimePool()

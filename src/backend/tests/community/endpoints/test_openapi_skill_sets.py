@@ -12,8 +12,17 @@ import time
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
+)
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
+)
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.services.direct_activation_service import (
+    DirectActivationService,
 )
 from agentclaw.community.core.skill_center.authorization_hook import (
     BotCapabilityAuthorizationHookProtocol,
@@ -166,6 +175,21 @@ def _seed(world, *, member: bool = False) -> None:
     )
     world.injector.binder.bind(
         SkillSetManagementServiceProtocol, to=control_plane, scope=None
+    )
+    # The direct-activation routes share the recording runtime, so
+    # ``_assert_reconciled`` observes their projection the same way.
+    direct = DirectActivationService(
+        world.get(CapabilityDesiredStateRepositoryProtocol),
+        world.get(BotRepository),
+        world.get(SkillRepository),
+        runtime,
+        world.get(BotCapabilityAuthorizationHookProtocol),
+        world.get(BotCollabLogRepositoryProtocol),
+        world.get(MCPCenterPlugin),
+        world.get(BotCapabilityStateReaderProtocol),
+    )
+    world.injector.binder.bind(
+        DirectActivationServiceProtocol, to=direct, scope=None
     )
 
 

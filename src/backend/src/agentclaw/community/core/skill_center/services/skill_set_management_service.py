@@ -448,51 +448,6 @@ class SkillSetManagementService:
             ),
         )
 
-    async def activate_mcp_direct(
-        self, *, bot_id: str, owner_id: str, user_id: str, server_code: str
-    ) -> dict:
-        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        self._require_mcp_permission(actor_id=user_id, server_code=server_code)
-        return await self._mutate(
-            bot=bot,
-            bot_id=bot_id,
-            actor_id=user_id,
-            action="mcp_direct_activate",
-            mutation=lambda: self._repository.install_mcp(
-                bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
-                server_code=server_code,
-                engine_type=self._engine(bot),
-            ),
-        )
-
-    async def deactivate_mcp_direct(
-        self, *, bot_id: str, owner_id: str, user_id: str, server_code: str
-    ) -> dict:
-        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        return await self._mutate(
-            bot=bot,
-            bot_id=bot_id,
-            actor_id=user_id,
-            action="mcp_direct_deactivate",
-            mutation=lambda: self._repository.uninstall_mcp(
-                bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
-                server_code=server_code,
-                engine_type=self._engine(bot),
-            ),
-        )
-
-    def list_installed_mcps(
-        self, *, bot_id: str, owner_id: str, user_id: str
-    ) -> set[str]:
-        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        return self._repository.list_installed_mcps(
-            bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
-            engine_type=self._engine(bot),
-        )
-
     async def activate(
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> dict:

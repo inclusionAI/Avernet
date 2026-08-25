@@ -39,6 +39,9 @@ from agentclaw.community.api.skill_parameter_service_factory import (
 from agentclaw.community.api.bot_capability_state_reader import (
     BotCapabilityStateReaderProtocol as ApiBotCapabilityStateReaderProtocol,
 )
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
+)
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
 )
@@ -177,6 +180,9 @@ from agentclaw.community.core.skill_center.services.skill_publish_service import
     SkillPublishService,
 )
 from agentclaw.community.core.skill_center.services.skill_scan import SkillScanService
+from agentclaw.community.core.skill_center.services.direct_activation_service import (
+    DirectActivationService,
+)
 from agentclaw.community.core.skill_center.services.skill_set_management_service import (
     SkillSetManagementService,
 )
@@ -333,6 +339,11 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         binder.bind(
             SkillSetManagementServiceProtocol,
             to=SkillSetManagementService,
+            scope=singleton,
+        )
+        binder.bind(
+            DirectActivationServiceProtocol,
+            to=DirectActivationService,
             scope=singleton,
         )
         binder.bind(

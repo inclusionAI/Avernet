@@ -137,7 +137,7 @@ lands in the same group as the migration of its last caller.
 - [x] 7.3 Extract the shared mutate-reconcile-compensate helper from
       `SkillSetManagementService._mutate/_reconcile` (module-private, used by
       both command services).
-- [ ] 7.4 Create `core/skill_center/services/direct_activation_service.py`
+- [x] 7.4 Create `core/skill_center/services/direct_activation_service.py`
       (`DirectActivationService.activate_skill` / `deactivate_skill` /
       `activate_mcp` / `deactivate_mcp` per plan component 6) +
       `api/direct_activation_service.py`; MCP direct commands move here from

@@ -120,18 +120,6 @@ class SkillSetManagementServiceProtocol(Protocol):
         server_code: str,
     ) -> dict[str, Any]: ...
 
-    async def activate_mcp_direct(
-        self, *, bot_id: str, owner_id: str, user_id: str, server_code: str
-    ) -> dict[str, Any]: ...
-
-    async def deactivate_mcp_direct(
-        self, *, bot_id: str, owner_id: str, user_id: str, server_code: str
-    ) -> dict[str, Any]: ...
-
-    def list_installed_mcps(
-        self, *, bot_id: str, owner_id: str, user_id: str
-    ) -> set[str]: ...
-
     async def activate(
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> dict[str, Any]: ...
