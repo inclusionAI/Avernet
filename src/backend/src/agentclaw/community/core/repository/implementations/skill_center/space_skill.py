@@ -362,9 +362,10 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             actor_member = self._active_member(
                 session, space_id=space_id, user_id=actor_id, env=env, lock=True
             )
+            if actor_member is None:
+                raise SpaceSkillGrantForbiddenError("active membership required")
             is_admin = actor_id == space.created_by or (
-                actor_member is not None
-                and actor_member.role in {"ADMIN", "OWNER", "ADMINISTRATOR"}
+                actor_member.role in {"ADMIN", "OWNER", "ADMINISTRATOR"}
             )
             if actor_id != current_owner.user_id and not is_admin:
                 raise SpaceSkillGrantForbiddenError("owner or space admin required")
@@ -437,6 +438,13 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
         self._require_binding(
             session, space_id=space_id, skill_id=skill_id, env=env, lock=True
         )
+        if (
+            self._active_member(
+                session, space_id=space_id, user_id=actor_id, env=env, lock=True
+            )
+            is None
+        ):
+            raise SpaceSkillGrantForbiddenError("active membership required")
         owner = (
             session.query(SkillGrant)
             .filter(

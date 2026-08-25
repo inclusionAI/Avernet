@@ -21,7 +21,6 @@ provides:
   - "BotCapabilityAuthorizationHookProtocol"
   - "SkillSetManagementService"
   - "SpaceSkillGrantService"
-  - "SpaceSkillGrantServiceProtocol"
   - "RuntimeProjectionResolver"
   - "BotCapabilityStateReader"
   - "BotRuntimeProjector"

@@ -27,16 +27,16 @@ def _service(*, actor_role=SpaceRole.MEMBER, space_type=SpaceType.TEAM):
         "managers": [],
         "actor_role": None,
     }
-    return SpaceSkillGrantService(access, repository), access, repository
+    return (
+        SpaceSkillGrantService(access, repository, lambda: "test"),
+        access,
+        repository,
+    )
 
 
-def test_list_grants_returns_acl_qualifications_not_state_predictions(monkeypatch):
+def test_list_grants_returns_acl_qualifications_not_state_predictions():
     service, _, repository = _service(actor_role=SpaceRole.ADMIN)
     repository.list_grants.return_value["actor_role"] = None
-    monkeypatch.setattr(
-        "agentclaw.community.core.skill_center.services.space_skill_grant_service.get_current_env",
-        lambda: "test",
-    )
 
     result = service.list_grants(space_id=7, skill_id=9, actor_id="space-admin")
 
@@ -57,14 +57,10 @@ def test_list_grants_returns_acl_qualifications_not_state_predictions(monkeypatc
     )
 
 
-def test_owner_can_idempotently_add_manager(monkeypatch):
+def test_owner_can_idempotently_add_manager():
     service, _, repository = _service()
     repository.get_active_role.return_value = "OWNER"
     repository.add_manager.return_value = {"user_id": "manager-1", "role": "MANAGER"}
-    monkeypatch.setattr(
-        "agentclaw.community.core.skill_center.services.space_skill_grant_service.get_current_env",
-        lambda: "test",
-    )
 
     result = service.add_manager(
         space_id=7, skill_id=9, actor_id="owner-1", manager_user_id="manager-1"
@@ -80,13 +76,9 @@ def test_owner_can_idempotently_add_manager(monkeypatch):
     )
 
 
-def test_manager_cannot_manage_other_grants(monkeypatch):
+def test_manager_cannot_manage_other_grants():
     service, _, repository = _service()
     repository.get_active_role.return_value = "MANAGER"
-    monkeypatch.setattr(
-        "agentclaw.community.core.skill_center.services.space_skill_grant_service.get_current_env",
-        lambda: "test",
-    )
 
     with pytest.raises(SpaceSkillGrantForbiddenError):
         service.remove_manager(
@@ -99,13 +91,9 @@ def test_manager_cannot_manage_other_grants(monkeypatch):
     repository.remove_manager.assert_not_called()
 
 
-def test_space_admin_transfer_requires_audit_reason(monkeypatch):
+def test_space_admin_transfer_requires_audit_reason():
     service, _, repository = _service(actor_role=SpaceRole.ADMIN)
     repository.get_active_role.return_value = None
-    monkeypatch.setattr(
-        "agentclaw.community.core.skill_center.services.space_skill_grant_service.get_current_env",
-        lambda: "test",
-    )
 
     with pytest.raises(SpaceSkillGrantReasonRequiredError):
         service.transfer_owner(
@@ -119,7 +107,7 @@ def test_space_admin_transfer_requires_audit_reason(monkeypatch):
     repository.transfer_owner.assert_not_called()
 
 
-def test_owner_transfer_does_not_require_admin_reason(monkeypatch):
+def test_owner_transfer_does_not_require_admin_reason():
     service, _, repository = _service()
     repository.get_active_role.return_value = "OWNER"
     repository.transfer_owner.return_value = {
@@ -127,10 +115,6 @@ def test_owner_transfer_does_not_require_admin_reason(monkeypatch):
         "managers": [],
         "actor_role": None,
     }
-    monkeypatch.setattr(
-        "agentclaw.community.core.skill_center.services.space_skill_grant_service.get_current_env",
-        lambda: "test",
-    )
 
     result = service.transfer_owner(
         space_id=7,
@@ -149,3 +133,28 @@ def test_owner_transfer_does_not_require_admin_reason(monkeypatch):
         reason=None,
         env="test",
     )
+
+
+def test_personal_owner_permissions_do_not_offer_editor_request():
+    service, _, repository = _service(space_type=SpaceType.PERSONAL)
+    repository.list_grants.return_value["actor_role"] = "OWNER"
+
+    result = service.list_grants(space_id=7, skill_id=9, actor_id="owner-1")
+
+    assert result["actor"]["skill_role"] == "OWNER"
+    assert result["actor"]["permissions"]["manage_grants"] is True
+    assert result["actor"]["permissions"]["request_edit_access"] is False
+
+
+def test_persistence_failure_is_not_translated_to_success():
+    service, _, repository = _service()
+    repository.get_active_role.return_value = "OWNER"
+    repository.add_manager.side_effect = RuntimeError("database write failed")
+
+    with pytest.raises(RuntimeError, match="database write failed"):
+        service.add_manager(
+            space_id=7,
+            skill_id=9,
+            actor_id="owner-1",
+            manager_user_id="manager-1",
+        )
