@@ -229,6 +229,7 @@ def _seed_hot_device(
     provider_type: str = "ARCA",
     status: str = "ACTIVE",
     is_deleted: int = 0,
+    provider_device_props: str | None = None,
 ) -> None:
     with db_manager.orm_session() as session:
         session.add(
@@ -243,9 +244,13 @@ def _seed_hot_device(
                 provider_type=provider_type,
                 provider_device_id=provider_device_id,
                 provider_device_props=(
-                    '{"ttl_expiration_time":"2026-09-01T00:00:00"}'
-                    if provider_device_id
-                    else None
+                    provider_device_props
+                    if provider_device_props is not None
+                    else (
+                        '{"ttl_expiration_time":"2026-09-01T00:00:00"}'
+                        if provider_device_id
+                        else None
+                    )
                 ),
                 is_deleted=is_deleted,
             )
@@ -540,14 +545,29 @@ class TestRowUpdates:
 # ==================== find_unregistered anti-join ====================
 
 
-PROPS_TTL = '"ttl_expiration_time": "2026-09-10T00:00:00"'
+PROPS_TTL = (
+    '"ttl_expiration_time": "2026-09-10T00:00:00", '
+    '"ttl_expiration_timestamp": 1788969600000'
+)
 
 
 class TestFindUnregistered:
     def test_device_side_anti_join_and_filters(self, repo):
         # Found: 10 (unregistered), 12 (stale cold sandbox).
-        _seed_hot_device(id_val=10, env=ENV, provider_device_id="sb-10")
-        _seed_hot_device(id_val=12, env=ENV, provider_device_id="sb-12")
+        # Dual-key pair-write props mirror the health_check scanner idiom (CR-GAP-01):
+        # the retargeted reader labels ttl from $.ttl_expiration_timestamp.
+        _seed_hot_device(
+            id_val=10,
+            env=ENV,
+            provider_device_id="sb-10",
+            provider_device_props='{"ttl_expiration_time":"2026-09-01T00:00:00","ttl_expiration_timestamp":1788192000000}',
+        )
+        _seed_hot_device(
+            id_val=12,
+            env=ENV,
+            provider_device_id="sb-12",
+            provider_device_props='{"ttl_expiration_time":"2026-09-01T00:00:00","ttl_expiration_timestamp":1788192000000}',
+        )
         # Suppressed: 11 (matching ACTIVE cold row).
         _seed_hot_device(id_val=11, env=ENV, provider_device_id="sb-11")
         _seed_cold(
@@ -581,8 +601,8 @@ class TestFindUnregistered:
         assert [
             (r["id"], r["sandbox_id"], r["source_table"], r["ttl"]) for r in rows
         ] == [
-            (10, "sb-10", "baas_device", "2026-09-01T00:00:00"),
-            (12, "sb-12", "baas_device", "2026-09-01T00:00:00"),
+            (10, "sb-10", "baas_device", 1788192000000),
+            (12, "sb-12", "baas_device", 1788192000000),
         ]
 
     def test_binding_side_anti_join_json_equality(self, repo):
@@ -635,8 +655,8 @@ class TestFindUnregistered:
         assert [
             (r["id"], r["sandbox_id"], r["source_table"], r["ttl"]) for r in rows
         ] == [
-            (20, "sb-b-20", "ac_entity_device_binding", "2026-09-10T00:00:00"),
-            (22, "sb-b-22", "ac_entity_device_binding", "2026-09-10T00:00:00"),
+            (20, "sb-b-20", "ac_entity_device_binding", 1788969600000),
+            (22, "sb-b-22", "ac_entity_device_binding", 1788969600000),
         ]
         # Four-key contract (Pitfall 4).
         assert sorted(rows[0].keys()) == ["id", "sandbox_id", "source_table", "ttl"]
