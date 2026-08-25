@@ -73,9 +73,14 @@ def _map_status(resp: httpx.Response) -> None:
 
 
 class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenApi HTTP client; exercised by singlebox/corp acceptance / 联调, not CI LOCAL line coverage
-    def __init__(self, keys: ApiKeyProvider, *, http_client: httpx.AsyncClient | None = None) -> None:
+    def __init__(self, keys: ApiKeyProvider, *, http_client: httpx.AsyncClient | None = None,
+                 ensure_grant: bool = False) -> None:
         self._k = keys
         self._client = http_client or httpx.AsyncClient(base_url=keys.base_url)
+        # ensure_grant=False(默认):OOB 预授权模式,跳过 allowed-bots GET/grant,直进 send_message。
+        # admin allowed-bots 端点只认 Human Cookie,corp 无 cookie 时 Bearer-only 打它会被 BaaS 判 500;
+        # prod 假定 bot 已 OOB 预授权 → 默认跳过。需自查/grant 的(测试/联调)显式传 ensure_grant=True。
+        self._ensure_grant = ensure_grant
 
     async def _aclose(self) -> None:
         await self._client.aclose()
@@ -95,7 +100,10 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
         return h
 
     async def ensure_grant(self, bot_id: str) -> None:
-        logger.info("[task][openapi_bot] ensure_grant bot_id=%s")
+        if not self._ensure_grant:
+            logger.info("[task][openapi_bot] ensure_grant 跳过(OOB 预授权模式) bot_id=%s", bot_id)
+            return
+        logger.info("[task][openapi_bot] ensure_grant bot_id=%s", bot_id)
         prefix = self._k.api_key_prefix or self._k.api_key[:_DEFAULT_KEY_PREFIX_LEN]
         logger.info("[task][openapi_bot] >>> ensure_grant GET /api/v1/api-keys/%s/allowed-bots bot_id=%s base_url=%s",
                     prefix, bot_id, self._k.base_url)
