@@ -26,6 +26,23 @@ Nothing in the design docs is amended here. Where this document disagrees with
 them (D1), it says so and leaves the resolution to that question's own
 discussion.
 
+### Trackers
+
+Each entry has a GitHub issue. The issue carries scope and acceptance criteria;
+this document remains the source of truth for detail and for how the items fit
+together.
+
+| | Issue | | Issue |
+| --- | --- | --- | --- |
+| **D1** capability model | #1466 | **W4** apply engine | #1472 |
+| **D2** `keep_last` storage | #1467 | **W5** skills + identity | #1473 |
+| **D3** reconcile verification | #1468 | **W6** resources | #1474 |
+| **W1** manifest document | #1469 | **W7** named + git sources | #1475 |
+| **W2** guarded fetcher | #1470 | **W8** lifecycle apply points | #1476 |
+| **W3** source credentials | #1471 | **W9** `cli_tools` (deferred) | #1477 |
+
+Planning PR: #1465.
+
 ## 2. Settled decisions
 
 These were decided after #1031 merged and are not open. They are recorded here
@@ -86,7 +103,7 @@ follows in W6 with the directory work rather than riding along in W5.
 
 ## 3. Blocking design questions
 
-### D1 — The capability model contradicts the shipped code · gates W1
+### D1 — The capability model contradicts the shipped code · gates W1 · #1466
 
 **The contradiction.** design §5.1 requires two things that cannot both hold
 today:
@@ -124,7 +141,7 @@ it into the manifest's critical path buys nothing the manifest itself needs —
 `manifest` is applied platform-side and is unaffected by either discriminator.
 Only `script` capability turns on this.
 
-### D2 — `keep_last` has no designed storage · gates W4
+### D2 — `keep_last` has no designed storage · gates W4 · #1467
 
 `keep_last` is the **default** `on_fetch_failure` policy (design §4.3): "reuse
 the last successfully materialised version; if there has never been one, record
@@ -142,7 +159,7 @@ One subtlety either way: an entry whose **first** apply fails has no last-good
 version, and must record `skipped` rather than fail — so "no previous success"
 has to be representable, not merely absent.
 
-### D3 — skills-pool reconcile vs manifest-populated skills · gates W5
+### D3 — skills-pool reconcile vs manifest-populated skills · gates W5 · #1468
 
 design §10.2 asks the implementer to "confirm quarantine cleanup has test
 coverage for managed entities". That is an assumption, not a verified fact, and
@@ -178,7 +195,7 @@ a capability is compatible where narrowing one is not.
 
 ---
 
-#### W1 — Manifest document: storage, schema v1, capability, API
+#### W1 — Manifest document: storage, schema v1, capability, API · #1469
 
 **Goal.** A bot can carry a config-manifest document that is stored, validated
 and readable, and a caller can ask which categories that bot supports. Nothing
@@ -254,7 +271,7 @@ materialises it. That is why the feature flag exists.
 
 ---
 
-#### W2 — Guarded fetcher and archive pipeline
+#### W2 — Guarded fetcher and archive pipeline · #1470
 
 **Goal.** One component that fetches a caller-supplied URL safely, and one that
 unpacks an archive safely. No manifest concepts.
@@ -307,7 +324,7 @@ it only if a second appears.
 
 ---
 
-#### W3 — Source credentials
+#### W3 — Source credentials · #1471
 
 **Goal.** A tenant can register a named credential once and reference it from
 many manifests, and the platform can present it when fetching — without the
@@ -361,7 +378,7 @@ binding W2's injection port.
 
 ---
 
-#### W4 — Apply engine, ownership record, and the no-fetch materialisers
+#### W4 — Apply engine, ownership record, and the no-fetch materialisers · #1472
 
 **Goal.** A manifest can be applied on demand, converging the bot's entities
 toward the document, with a report of what happened — proven on the three
@@ -426,7 +443,7 @@ involved.
 
 ---
 
-#### W5 — `skills` and `identity` from URL sources
+#### W5 — `skills` and `identity` from URL sources · #1473
 
 **Goal.** The driving business scenario works: content on a caller's own
 service is fetched at apply time and installed as real skills and identity
@@ -471,7 +488,7 @@ the D3 verification.
 
 ---
 
-#### W6 — `resources`, files and directories
+#### W6 — `resources`, files and directories · #1474
 
 **Goal.** Workspace resources, including whole directories delivered as
 archives.
@@ -505,7 +522,7 @@ directory-level ownership semantics; teclaw per-file expansion.
 
 ---
 
-#### W7 — Named sources and git sources
+#### W7 — Named sources and git sources · #1475
 
 **Goal.** One `ref` change upgrades a whole configuration atomically, and
 content hosted in the company's git service is a first-class source.
@@ -539,7 +556,7 @@ content hosted in the company's git service is a first-class source.
 
 ---
 
-#### W8 — Lifecycle apply points
+#### W8 — Lifecycle apply points · #1476
 
 **Goal.** The business ask, delivered: a bot configures itself when it comes up,
 with no user action.
@@ -572,7 +589,7 @@ and at rebuild-style restart.
 
 ---
 
-#### W9 — `cli_tools` — deferred
+#### W9 — `cli_tools` — deferred · #1477
 
 **Goal.** Command-line tools the model can invoke, installed declaratively.
 
