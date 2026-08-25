@@ -1,12 +1,13 @@
 from unittest.mock import MagicMock
 
-from agentclaw.community.core.service_bot.services.baas_service import BaasService
+from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
+    ManagedDeployConfigComposer,
+)
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
 from agentclaw.community.core.workspace.engines.aicoding import AICodingSandboxProvider
 from agentclaw.community.core.workspace.engines.claude_code import ClaudeCodeSandboxProvider
 from agentclaw.community.core.workspace.engines.openclaw import OpenClawSandboxProvider
 from agentclaw.community.di import config as cfg
-from agentclaw.community.plugins.local.http_client import LocalHttpClient
 
 
 def _make_registry() -> EngineSandboxRegistry:
@@ -20,26 +21,13 @@ def _make_registry() -> EngineSandboxRegistry:
     return registry
 
 
-def _make_service(bot_repo=None) -> BaasService:
-    startup_script_reader = MagicMock()
-    startup_script_reader.get_body.return_value = ""
-    return BaasService(
-        baas_api_base="http://test",
-        tenant="test",
-        template_uuid="test",
-        bot_repo=bot_repo or MagicMock(),
-        bot_publish_repo=MagicMock(),
-        system_config_service=MagicMock(),
+def _make_composer(bot_repo=None) -> ManagedDeployConfigComposer:
+    """The read-only rules are the managed image's own policy, so they moved
+    with it onto ``ManagedDeployConfigComposer``. These tests follow."""
+    return ManagedDeployConfigComposer(
         storage_path=MagicMock(),
-        device_binding_repo=MagicMock(),
-        default_ttl_minutes=10080,
         sandbox_registry=_make_registry(),
-        http_client=LocalHttpClient(),
-        general_http_client=LocalHttpClient(base_url=""),
-        secret_resolver=MagicMock(),
-        common_whitelist_service=MagicMock(),
-        outbound_rule_provider=MagicMock(),
-        startup_script_reader=startup_script_reader,
+        bot_repo=bot_repo or MagicMock(),
     )
 
 
@@ -51,9 +39,9 @@ class TestGetSetReadOnlyRule:
             "active_engine": "openclaw",
             "ext": {},
         }
-        service = _make_service(bot_repo=bot_repo)
+        composer = _make_composer(bot_repo=bot_repo)
 
-        result = service._get_set_read_only_rule(bot_id="bot-1", owner_id="owner-1")
+        result = composer._get_set_read_only_rule(bot_id="bot-1", owner_id="owner-1")
 
         assert result.startswith(" --set_read_only ")
         assert "/home/admin/.openclaw/openclaw.json" in result
@@ -70,9 +58,9 @@ class TestGetSetReadOnlyRule:
             "active_engine": "claude_code",
             "ext": {},
         }
-        service = _make_service(bot_repo=bot_repo)
+        composer = _make_composer(bot_repo=bot_repo)
 
-        result = service._get_set_read_only_rule(bot_id="bot-1", owner_id="owner-1")
+        result = composer._get_set_read_only_rule(bot_id="bot-1", owner_id="owner-1")
 
         assert "/home/admin/.claude_code/workspace/config/mcporter.json" in result
         assert "/home/admin/.claude_code/workspace/.claude/settings.json" in result
@@ -96,9 +84,9 @@ class TestGetSetReadOnlyRule:
                 ]
             },
         }
-        service = _make_service(bot_repo=bot_repo)
+        composer = _make_composer(bot_repo=bot_repo)
 
-        result = service._get_set_read_only_rule(bot_id="bot-1", owner_id="owner-1")
+        result = composer._get_set_read_only_rule(bot_id="bot-1", owner_id="owner-1")
 
         assert "/tmp/custom.txt" in result
         assert "/home/admin/.claude_code/workspace/custom/*.md" in result

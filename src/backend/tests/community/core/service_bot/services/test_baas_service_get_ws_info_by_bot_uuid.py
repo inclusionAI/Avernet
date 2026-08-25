@@ -10,6 +10,9 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
+from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
+    ManagedDeployConfigComposer,
+)
 from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
     BaasServiceError,
@@ -27,6 +30,11 @@ def _make_service_with_response(response_data: dict, status_code: int = 200) -> 
     http_client.get.return_value = http_resp
 
     return BaasService(
+        deploy_composer=ManagedDeployConfigComposer(
+            storage_path=MagicMock(),
+            sandbox_registry=MagicMock(),
+            bot_repo=MagicMock(),
+        ),
         startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://baas.test",
         tenant="tnt",
@@ -57,6 +65,11 @@ def _make_service_raising(status_code: int, body: str) -> BaasService:
     http_client.get.return_value = http_resp
 
     return BaasService(
+        deploy_composer=ManagedDeployConfigComposer(
+            storage_path=MagicMock(),
+            sandbox_registry=MagicMock(),
+            bot_repo=MagicMock(),
+        ),
         startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://baas.test",
         tenant="tnt",
@@ -133,6 +146,11 @@ class TestGetWsInfoByBotUuid:
         http_client.get.return_value = http_resp
 
         service = BaasService(
+            deploy_composer=ManagedDeployConfigComposer(
+                storage_path=MagicMock(),
+                sandbox_registry=MagicMock(),
+                bot_repo=MagicMock(),
+            ),
             startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="tnt",
@@ -181,6 +199,11 @@ class TestGetWsInfoByBotUuid:
         http_client.get.return_value = http_resp
 
         service = BaasService(
+            deploy_composer=ManagedDeployConfigComposer(
+                storage_path=MagicMock(),
+                sandbox_registry=MagicMock(),
+                bot_repo=MagicMock(),
+            ),
             startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="tnt",
@@ -228,6 +251,11 @@ class TestGetWsInfoByBotUuid:
         http_client.get.return_value = http_resp
 
         service = BaasService(
+            deploy_composer=ManagedDeployConfigComposer(
+                storage_path=MagicMock(),
+                sandbox_registry=MagicMock(),
+                bot_repo=MagicMock(),
+            ),
             startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="default-tenant",
@@ -269,6 +297,11 @@ class TestGetWsInfoByBotUuid:
         http_client.get.return_value = http_resp
 
         service = BaasService(
+            deploy_composer=ManagedDeployConfigComposer(
+                storage_path=MagicMock(),
+                sandbox_registry=MagicMock(),
+                bot_repo=MagicMock(),
+            ),
             startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="tnt",
@@ -334,6 +367,11 @@ class TestGetWsInfoByBotUuid:
         http_client.get.side_effect = Exception("Network error")
 
         service = BaasService(
+            deploy_composer=ManagedDeployConfigComposer(
+                storage_path=MagicMock(),
+                sandbox_registry=MagicMock(),
+                bot_repo=MagicMock(),
+            ),
             startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="tnt",
@@ -387,6 +425,11 @@ class TestGetWsInfoDelegation:
         binding_repo.get_by_id.return_value = binding
 
         service = BaasService(
+            deploy_composer=ManagedDeployConfigComposer(
+                storage_path=MagicMock(),
+                sandbox_registry=MagicMock(),
+                bot_repo=MagicMock(),
+            ),
             startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="tnt",
@@ -424,6 +467,11 @@ class TestGetWsInfoDelegation:
         binding_repo.get_by_id.return_value = None
 
         service = BaasService(
+            deploy_composer=ManagedDeployConfigComposer(
+                storage_path=MagicMock(),
+                sandbox_registry=MagicMock(),
+                bot_repo=MagicMock(),
+            ),
             startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="tnt",
@@ -469,6 +517,11 @@ class TestGetWsInfoDelegation:
         binding_repo.get_by_id.return_value = binding
 
         service = BaasService(
+            deploy_composer=ManagedDeployConfigComposer(
+                storage_path=MagicMock(),
+                sandbox_registry=MagicMock(),
+                bot_repo=MagicMock(),
+            ),
             startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="default-tenant",

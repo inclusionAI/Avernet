@@ -332,6 +332,14 @@ class BaasConfig:
     teclaw_template_uuid: str = ""
     # Personal bot via BaaS (poolab template) — deploy supplies it.
     personal_bot_template_uuid: str = ""
+    # Which container this deployment runs, and therefore which
+    # ``DeployConfigComposer`` shapes its create-bot payload:
+    # ``managed`` (the managed bot image) or ``ack`` (the open-source engine
+    # image on Aliyun ACK/ECI). Selected in ``ServiceBotModule.baas_service``;
+    # an unknown value fails at boot rather than falling back, because a
+    # deployment that silently composed the wrong image's payload would create
+    # bots that start and do not work.
+    deploy_runtime: str = "managed"
 
 
 @dataclass(frozen=True)

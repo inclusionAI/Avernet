@@ -61,6 +61,14 @@ user_config:
     api_base_url: "http://localhost:8890"
     tenant: "community"
     template_uuid: ""
+    # Which container this deployment runs, and therefore which
+    # DeployConfigComposer shapes the create-bot payload (the boot chain, the
+    # mount points, the storage volume):
+    #   managed — the managed bot image (four /home/admin/bin scripts, NAS)
+    #   ack     — the open-source engine image on managed Kubernetes / ECI
+    # Omitted ⇒ managed. An unrecognized value fails at boot rather than
+    # falling back, so a typo cannot quietly ship the wrong image's payload.
+    deploy_runtime: "managed"
 
   # Bot-discovery backend URL (empty = discovery inert).
   bcsfuse:

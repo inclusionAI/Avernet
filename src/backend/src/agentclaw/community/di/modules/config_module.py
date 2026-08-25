@@ -403,6 +403,10 @@ class ConfigModule(Module):
                 "personal_bot_template_uuid", defaults.personal_bot_template_uuid
             ),
             default_ttl_minutes=int(ttl),
+            deploy_runtime=str(
+                block.get("deploy_runtime", defaults.deploy_runtime)
+            ).strip()
+            or defaults.deploy_runtime,
         )
 
     @singleton

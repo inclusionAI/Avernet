@@ -4,6 +4,9 @@ from unittest.mock import MagicMock
 
 from agentclaw.community.kernel.device_dto import ResourceSpecification
 
+from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
+    ManagedDeployConfigComposer,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BotDeployConfig
 
 
@@ -35,6 +38,11 @@ def test_deploy_config_to_dict_includes_docker_image():
 def _make_service():
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
     return BaasService(
+        deploy_composer=ManagedDeployConfigComposer(
+            storage_path=MagicMock(),
+            sandbox_registry=MagicMock(),
+            bot_repo=MagicMock(),
+        ),
         startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://test",
         tenant="test",
@@ -106,7 +114,7 @@ def test_resolve_resource_spec_no_ext_returns_none():
 
 def test_build_create_bot_payload_supports_auto_approve_and_extra_envs():
     svc = _make_service()
-    svc._get_start_cmd = MagicMock(return_value="echo start")
+    svc._deploy_composer.build_start_command = MagicMock(return_value="echo start")
     svc._get_destroy_cmd = MagicMock(return_value="echo destroy")
     svc._setup_directory = MagicMock(return_value=[])
     svc._setup_bot_storage = MagicMock(return_value=None)
@@ -140,7 +148,7 @@ def test_build_create_bot_payload_supports_auto_approve_and_extra_envs():
 
 def test_build_create_bot_payload_auto_approves_by_default():
     svc = _make_service()
-    svc._get_start_cmd = MagicMock(return_value="echo start")
+    svc._deploy_composer.build_start_command = MagicMock(return_value="echo start")
     svc._get_destroy_cmd = MagicMock(return_value="echo destroy")
     svc._setup_directory = MagicMock(return_value=[])
     svc._setup_bot_storage = MagicMock(return_value=None)
@@ -168,7 +176,7 @@ def test_build_create_bot_payload_auto_approves_by_default():
 
 def test_payload_includes_resource_spec_from_ext():
     svc = _make_service()
-    svc._get_start_cmd = MagicMock(return_value="echo start")
+    svc._deploy_composer.build_start_command = MagicMock(return_value="echo start")
     svc._get_destroy_cmd = MagicMock(return_value="echo destroy")
     svc._setup_directory = MagicMock(return_value=[])
     svc._setup_bot_storage = MagicMock(return_value=None)
@@ -201,7 +209,7 @@ def test_payload_includes_resource_spec_from_ext():
 
 def test_payload_omits_resource_spec_when_ext_absent():
     svc = _make_service()
-    svc._get_start_cmd = MagicMock(return_value="echo start")
+    svc._deploy_composer.build_start_command = MagicMock(return_value="echo start")
     svc._get_destroy_cmd = MagicMock(return_value="echo destroy")
     svc._setup_directory = MagicMock(return_value=[])
     svc._setup_bot_storage = MagicMock(return_value=None)
@@ -229,7 +237,7 @@ def test_payload_omits_resource_spec_when_ext_absent():
 
 def test_payload_maps_template_config_overrides_to_deploy_config():
     svc = _make_service()
-    svc._get_start_cmd = MagicMock(return_value="echo start")
+    svc._deploy_composer.build_start_command = MagicMock(return_value="echo start")
     svc._get_destroy_cmd = MagicMock(return_value="echo destroy")
     svc._setup_directory = MagicMock(return_value=[])
     svc._setup_bot_storage = MagicMock(return_value=None)
@@ -278,7 +286,7 @@ def test_payload_maps_template_config_overrides_to_deploy_config():
 
 def test_payload_ignores_template_config_command_until_baas_has_field():
     svc = _make_service()
-    svc._get_start_cmd = MagicMock(return_value="echo start")
+    svc._deploy_composer.build_start_command = MagicMock(return_value="echo start")
     svc._get_destroy_cmd = MagicMock(return_value="echo destroy")
     svc._setup_directory = MagicMock(return_value=[])
     svc._setup_bot_storage = MagicMock(return_value=None)
@@ -305,22 +313,32 @@ def test_payload_ignores_template_config_command_until_baas_has_field():
     assert "command" not in payload["config"]["deploy_config"]
 
 
+def _make_composer() -> ManagedDeployConfigComposer:
+    """Read-only rules moved onto the managed composer with the rest of that
+    image's start-command policy."""
+    return ManagedDeployConfigComposer(
+        storage_path=MagicMock(),
+        sandbox_registry=MagicMock(),
+        bot_repo=MagicMock(),
+    )
+
+
 def test_read_only_skipped_for_personal_and_draft():
-    svc = _make_service()
-    svc._resolve_sandbox_provider = MagicMock()
+    composer = _make_composer()
+    composer._resolve_sandbox_provider = MagicMock()
     # personal online / service draft → editable → 不拼 set_read_only
-    assert svc._get_set_read_only_rule(bot_id="b", owner_id="o", bot_type="personal", stage="online") == ""
-    assert svc._get_set_read_only_rule(bot_id="b", owner_id="o", bot_type="service", stage="draft") == ""
+    assert composer._get_set_read_only_rule(bot_id="b", owner_id="o", bot_type="personal", stage="online") == ""
+    assert composer._get_set_read_only_rule(bot_id="b", owner_id="o", bot_type="service", stage="draft") == ""
 
 
 def test_read_only_applied_for_service_online():
     from agentclaw.community.core.workspace.engine_sandbox import ReadOnlyRule
-    svc = _make_service()
+    composer = _make_composer()
     prov = MagicMock()
     prov.get_base_path.return_value = "/home/admin"
     prov.get_default_read_only_rules.return_value = [ReadOnlyRule(path="x.json", rule_type="file")]
-    svc._resolve_sandbox_provider = MagicMock(return_value=prov)
-    svc._bot_repo = MagicMock()
-    svc._bot_repo.get_by_id_and_owner.return_value = None
-    out = svc._get_set_read_only_rule(bot_id="b", owner_id="o", bot_type="service", stage="online")
+    composer._resolve_sandbox_provider = MagicMock(return_value=prov)
+    composer._bot_repo = MagicMock()
+    composer._bot_repo.get_by_id_and_owner.return_value = None
+    out = composer._get_set_read_only_rule(bot_id="b", owner_id="o", bot_type="service", stage="online")
     assert "--set_read_only" in out  # online 才锁

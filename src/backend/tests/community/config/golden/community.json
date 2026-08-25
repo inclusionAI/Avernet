@@ -8,6 +8,7 @@
     },
     "baas": {
       "api_base_url": "http://localhost:8890",
+      "deploy_runtime": "managed",
       "template_uuid": "",
       "tenant": "community"
     },
@@ -127,6 +128,7 @@
       "api_base_url": "http://localhost:8890",
       "api_base_url_pre": "http://localhost:8888",
       "default_ttl_minutes": 10080,
+      "deploy_runtime": "managed",
       "desktop_template_uuid": "",
       "desktop_ttl_minutes": 0,
       "personal_bot_template_uuid": "",
