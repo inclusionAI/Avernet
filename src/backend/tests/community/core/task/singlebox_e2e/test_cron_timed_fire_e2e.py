@@ -33,6 +33,7 @@ openclaw + engine + backend）。
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -56,28 +57,45 @@ _DINGTALK_DEPS = [
     "alibabacloud_endpoint_util==0.0.3",
 ]
 _DINGTALK_SDK = "antdingopensdk==1.0.47"
-_PIP_INDEX_DEV = "https://pypi.antfin-inc.com/simple-dev/"
 _PIP_INDEX = "https://pypi.antfin-inc.com/simple/"
+_PIP_INDEX_DEV = "https://pypi.antfin-inc.com/simple-dev/"
 
 
 def _ensure_dingtalk_sdk() -> None:
-    """惰性安装钉钉 SDK 依赖；仅在 _LIVE 且需钉钉凭证时触发。"""
+    """惰性安装钉钉 SDK 依赖；仅在 _LIVE 且需钉钉凭证时触发。
+
+    优先用 uv pip install（singlebox venv 无 pip），回退到 python -m pip。
+    """
     try:
         import alipay_antdingopensdk_client  # noqa: F401
         return
     except ImportError:
         pass
+
     venv_python = sys.executable
+    venv_dir = str(Path(venv_python).parent.parent)
+
+    # 检测可用的安装方式
+    if shutil.which("uv"):
+        install_cmd_prefix = ["uv", "pip", "install", "--python", venv_python]
+    else:
+        install_cmd_prefix = [venv_python, "-m", "pip", "install"]
+
+    # alibabacloud 系列在公网/内网均有
     for dep in _DINGTALK_DEPS:
-        subprocess.check_call(
-            [venv_python, "-m", "pip", "install", dep],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        try:
+            subprocess.check_call(
+                install_cmd_prefix + [dep],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except subprocess.CalledProcessError:
+            pass
+
     # antdingopensdk 仅在 pypi.antfin-inc.com 有
     for index in (_PIP_INDEX_DEV, _PIP_INDEX):
         try:
             subprocess.check_call(
-                [venv_python, "-m", "pip", "install", _DINGTALK_SDK, "-i", index],
+                install_cmd_prefix + [_DINGTALK_SDK, "--index-url", index],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             break
@@ -381,9 +399,21 @@ class TestCronTimedFireE2E(unittest.TestCase):
             )
             return
 
-        # cron fire 后 discovery 异步执行，给几秒完成
+        # cron fire 后 discovery 异步执行，轮询等待完成
         print("[phase 4] 等待 discovery 完成 ...")
-        time.sleep(5)
+        discoverDeadline = time.time() + 30
+        while time.time() < discoverDeadline:
+            time.sleep(2)
+            try:
+                ds = _discovery_status()
+                ds_data = ds.get("data") or {}
+                tasks = ds_data.get("tasks") or []
+                our = [t for t in tasks if t.get("bot_id") == self._bot_id]
+                if any(t.get("discovered") for t in our):
+                    print("[phase 4] discovery 完成！")
+                    break
+            except Exception:
+                continue
 
         # ================================================================
         # Phase 5: 验证发现结果

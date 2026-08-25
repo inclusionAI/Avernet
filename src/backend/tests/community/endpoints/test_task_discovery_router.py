@@ -246,3 +246,38 @@ def reschedule_happy():
 )
 def reschedule_err_missing_cron():
     """Error path: missing required cron query param -> FastAPI 422."""
+
+
+# ---- POST /api/v1/collaboration/tasks/discovery/dingtalk-config ----
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/tasks/discovery/dingtalk-config",
+    scenario="happy",
+    input=CaseInput(json_body={
+        "ak_id": "test-ak-id",
+        "ak_secret": "test-ak-secret",
+        "robot_code": "test-robot",
+        "card_template_id": "test-template.schema",
+    }),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True},
+    ),
+)
+def dingtalk_config_happy():
+    """Happy path: valid credentials injected successfully."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/tasks/discovery/dingtalk-config",
+    scenario="error_missing_fields",
+    input=CaseInput(json_body={"ak_id": "only-ak-id"}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": False},
+    ),
+)
+def dingtalk_config_err_missing_fields():
+    """Error path: missing required fields -> returns success=False."""
