@@ -38,12 +38,6 @@ user_config:
     create_schema: true
     seed_data: true
 
-  # Aliyun ACK 集群连接配置（用于 plugins.sandbox.arca = "aliyun_ack"）
-  aliyun_ack_cluster:
-    api_server: "https://k8s.example.com"
-    token: ""
-    namespace: "default"
-
   # 沙箱镜像配置（按引擎 template_id → 容器名 → 镜像地址）
   sandbox_images:
     ALIYUN_ACK_DEFAULT:

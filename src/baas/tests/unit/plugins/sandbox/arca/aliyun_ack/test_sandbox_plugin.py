@@ -32,14 +32,12 @@ def _creds(arca_template_id: str = TEMPLATE_ID) -> ArcaCredentials:
         base_url="http://x",
         api_key="k",
         arca_template_id=arca_template_id,
+        app_name="sandbox-ns",
     )
 
 
 def _plugin(**kw) -> AliyunAckSandboxPlugin:
     kw.setdefault("config", _creds())
-    kw.setdefault("api_server", "https://ack.example.com")
-    kw.setdefault("token", "dummy-token")
-    kw.setdefault("namespace", "sandbox-ns")
     kw.setdefault("arca_utils", MagicMock())
     return AliyunAckSandboxPlugin(**kw)
 

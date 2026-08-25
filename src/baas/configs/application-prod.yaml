@@ -43,12 +43,6 @@ user_config:
     socket_timeout: 5.0
     socket_connect_timeout: 5.0
 
-  # Aliyun ACK 集群连接配置
-  aliyun_ack_cluster:
-    api_server: "${ACK_SERVER}"
-    token: "${ACK_TOKEN}"
-    namespace: "default"
-
   # 沙箱镜像配置（按引擎 template_id → 容器名 → 镜像地址）
   sandbox_images:
     ALIYUN_ACK_DEFAULT:

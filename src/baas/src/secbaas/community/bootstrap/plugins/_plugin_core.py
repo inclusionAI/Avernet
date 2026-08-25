@@ -119,9 +119,6 @@ class PluginContainer(containers.DeclarativeContainer):
         local_proc=providers.Object(LocalProcessArcaSandboxPlugin),
         aliyun_ack=providers.Singleton(
             aliyun_ack_plugin_factory,
-            api_server=config.aliyun_ack_cluster.api_server,
-            token=config.aliyun_ack_cluster.token,
-            namespace=config.aliyun_ack_cluster.namespace,
             default_images=config.sandbox_images,
             arca_utils=arca_utils,
         ),
