@@ -160,18 +160,22 @@ if [[ ${#ENV_VARS[@]} -gt 0 ]]; then
     done
 fi
 
-# --- Render template via envsubst ---
+# --- Render template ---
 
-export SERVICE NAMESPACE IMAGE PORT REPLICAS CPU_REQUEST CPU_LIMIT MEMORY_REQUEST MEMORY_LIMIT
+# Read template and replace ENV_VARS placeholder BEFORE envsubst,
+# because envsubst would consume ${ENV_VARS} as an env var (→ empty).
+RENDERED="$(cat "$TEMPLATE")"
 
-RENDERED="$(cat "$TEMPLATE" | envsubst)"
-
-# Replace the ENV_VARS placeholder
 if [[ -n "$ENV_YAML" ]]; then
-    RENDERED="$(echo "$RENDERED" | sed "s|\${ENV_VARS}|${ENV_YAML//$'\n'/\\n}|g")"
+    # Use printf to expand \n into real newlines with proper indentation
+    RENDERED=$(printf '%b' "${RENDERED//\${ENV_VARS}/${ENV_YAML}}")
 else
-    RENDERED="$(echo "$RENDERED" | sed 's|        ${ENV_VARS}||')"
+    RENDERED="${RENDERED//        \${ENV_VARS}/}"
 fi
+
+# Now run envsubst for the remaining ${...} placeholders
+export SERVICE NAMESPACE IMAGE PORT REPLICAS CPU_REQUEST CPU_LIMIT MEMORY_REQUEST MEMORY_LIMIT
+RENDERED="$(echo "$RENDERED" | envsubst)"
 
 # --- Output or apply ---
 
