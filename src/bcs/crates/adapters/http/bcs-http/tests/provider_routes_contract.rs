@@ -13,7 +13,7 @@ use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_config::resolve_env_str;
 use bcs_http::{
     router::build_router,
-    service_key::{ApiKeyEntry, ApiKeyRegistry, sha256_hex},
+    service_key::{ApiKeyEntry, ApiKeyRegistry},
     state::{ChainUserIdentityPort, HttpAppState, HttpUserIdentity, UserIdentityPort},
 };
 use bcs_service_api::application::v1::ApplicationError;
@@ -23,7 +23,7 @@ use bcs_service_api::{
     BotRegistryCoreService, EnsureOwnerEdgesResult, FriendCheckInStrategy,
     InternalBotAttributesService, PatchBotInternalAttributes, ProviderBotBindingRepoPort,
     ProviderBotCoreService, ProviderCoreService, ProviderCredential, ProviderCredentialRepoPort,
-    ProviderRecord, ProviderRepoPort, ProviderStreamGrayList, RelationCoreService, RelationEdge,
+    ProviderRecord, ProviderRepoPort, RelationCoreService, RelationEdge,
     ServiceResult, UserVisibility,
 };
 use bcs_services_container::Services;
@@ -35,7 +35,6 @@ struct TestApp {
     app: Router,
     provider_repo: Arc<dyn ProviderRepoPort>,
     provider_credentials: Arc<dyn ProviderCredentialRepoPort>,
-    provider_stream_gray_list: Arc<ProviderStreamGrayList>,
     registry: Arc<BotCore>,
     relation: Arc<RecordingRelationCoreService>,
     control_plane: Arc<BotControlPlaneCore>,
@@ -105,16 +104,6 @@ fn test_app_with_allowed_switch_provider_ids(allowed_provider_ids: Vec<String>) 
     )
 }
 
-fn test_app_with_service_keys(service_keys: Vec<ApiKeyEntry>) -> TestApp {
-    let chain = static_auth_chain("197262", "Admin");
-    test_app_with_options(
-        Arc::new(ChainUserIdentityPort::new(chain)),
-        None,
-        Vec::new(),
-        service_keys,
-    )
-}
-
 fn test_app_with_options(
     user_identity: Arc<dyn UserIdentityPort>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
@@ -126,7 +115,6 @@ fn test_app_with_options(
     let provider_repo: Arc<dyn ProviderRepoPort> = provider_store.clone();
     let provider_credentials: Arc<dyn ProviderCredentialRepoPort> = provider_store.clone();
     let provider_bindings: Arc<dyn ProviderBotBindingRepoPort> = provider_store.clone();
-    let provider_stream_gray_list = Arc::new(ProviderStreamGrayList::default());
     let internal_bot_attributes = Arc::new(RecordingInternalBotAttributesService::default());
     let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
     let control_plane = Arc::new(BotControlPlaneCore::new(
@@ -175,12 +163,10 @@ fn test_app_with_options(
                 .with_user_identity(user_identity)
                 .with_allowed_switch_provider_ids(allowed_provider_ids)
                 .with_internal_bot_attributes_service(internal_bot_attributes.clone())
-                .with_service_api_keys(Arc::new(ApiKeyRegistry::new(service_keys)))
-                .with_provider_stream_gray_list(provider_stream_gray_list.clone()),
+                .with_service_api_keys(Arc::new(ApiKeyRegistry::new(service_keys))),
         ),
         provider_repo,
         provider_credentials,
-        provider_stream_gray_list,
         registry,
         relation,
         control_plane,
@@ -189,186 +175,9 @@ fn test_app_with_options(
     }
 }
 
-fn admin_service_key() -> (&'static str, ApiKeyEntry) {
-    let raw_key = "stream-gray-admin-key";
-    (
-        raw_key,
-        ApiKeyEntry {
-            name: "stream-gray-admin".to_string(),
-            sha256: sha256_hex(raw_key),
-            bound_groups: Vec::new(),
-        },
-    )
-}
-
-fn bound_service_key() -> (&'static str, ApiKeyEntry) {
-    let raw_key = "stream-gray-bound-key";
-    (
-        raw_key,
-        ApiKeyEntry {
-            name: "stream-gray-bound".to_string(),
-            sha256: sha256_hex(raw_key),
-            bound_groups: vec!["group-1".to_string()],
-        },
-    )
-}
-
 #[derive(Default)]
 struct RecordingRelationCoreService {
     owner_edges: tokio::sync::Mutex<Vec<(String, String, String)>>,
-}
-
-#[tokio::test]
-async fn stream_gray_get_returns_current_created_by_list() {
-    let (raw_key, entry) = admin_service_key();
-    let app = test_app_with_service_keys(vec![entry]);
-    app.provider_stream_gray_list.replace(vec![
-        " 197262 ".to_string(),
-        "alice".to_string(),
-        "197262".to_string(),
-    ]);
-
-    let response = app
-        .app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/providers/stream-gray")
-                .header("X-BCS-Service-Key", raw_key)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = response_json(response).await;
-    assert_eq!(body["enabled"], json!(false));
-    assert_eq!(body["created_by"], json!(["197262", "alice"]));
-}
-
-#[tokio::test]
-async fn stream_gray_put_replaces_and_normalizes_created_by_list() {
-    let (raw_key, entry) = admin_service_key();
-    let app = test_app_with_service_keys(vec![entry]);
-    app.provider_stream_gray_list
-        .replace(vec!["old".to_string()]);
-
-    let response = app
-        .app
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/providers/stream-gray")
-                .header("content-type", "application/json")
-                .header("X-BCS-Service-Key", raw_key)
-                .body(Body::from(
-                    json!({
-                        "enabled": true,
-                        "created_by": [" bob ", "", "alice", "bob"]
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = response_json(response).await;
-    assert_eq!(body["enabled"], json!(true));
-    assert_eq!(body["created_by"], json!(["alice", "bob"]));
-    assert!(app.provider_stream_gray_list.is_enabled());
-    assert_eq!(
-        app.provider_stream_gray_list.list(),
-        vec!["alice".to_string(), "bob".to_string()]
-    );
-    assert!(!app.provider_stream_gray_list.contains(Some("missing")));
-}
-
-#[tokio::test]
-async fn stream_gray_put_can_disable_gray_mode_without_replacing_created_by_list() {
-    let app = test_app_with_service_keys(vec![]);
-    app.provider_stream_gray_list.update(
-        Some(true),
-        Some(vec!["alice".to_string()]),
-    );
-
-    let response = app
-        .app
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/providers/stream-gray")
-                .header("content-type", "application/json")
-                .body(Body::from(json!({ "enabled": false }).to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = response_json(response).await;
-    assert_eq!(body["enabled"], json!(false));
-    assert_eq!(body["created_by"], json!(["alice"]));
-    assert!(!app.provider_stream_gray_list.is_enabled());
-    assert_eq!(
-        app.provider_stream_gray_list.list(),
-        vec!["alice".to_string()]
-    );
-    assert!(app.provider_stream_gray_list.contains(Some("missing")));
-}
-
-#[tokio::test]
-async fn stream_gray_put_works_without_admin_service_key() {
-    let app = test_app_with_service_keys(vec![]);
-
-    let response = app
-        .app
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/providers/stream-gray")
-                .header("content-type", "application/json")
-                .body(Body::from(json!({ "created_by": ["alice"] }).to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = response_json(response).await;
-    assert_eq!(body["created_by"], json!(["alice"]));
-    assert_eq!(
-        app.provider_stream_gray_list.list(),
-        vec!["alice".to_string()]
-    );
-}
-
-#[tokio::test]
-async fn stream_gray_put_ignores_service_key_header() {
-    let (raw_key, _entry) = bound_service_key();
-    let app = test_app_with_service_keys(vec![]);
-
-    let response = app
-        .app
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/providers/stream-gray")
-                .header("content-type", "application/json")
-                .header("X-BCS-Service-Key", raw_key)
-                .body(Body::from(json!({ "created_by": ["alice"] }).to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        app.provider_stream_gray_list.list(),
-        vec!["alice".to_string()]
-    );
 }
 
 #[async_trait::async_trait]
