@@ -65,9 +65,9 @@ def _expiration_dt() -> datetime:
     # CR-01: the wrapper computes the register margin in fixed
     # Asia/Shanghai (+08:00) — the test expectation must share the +08:00
     # wall clock, not the host-local one.
-    return datetime.fromtimestamp(
-        _TTL_MS / 1000, tz=ZoneInfo("Asia/Shanghai")
-    ).replace(tzinfo=None)
+    return datetime.fromtimestamp(_TTL_MS / 1000, tz=ZoneInfo("Asia/Shanghai")).replace(
+        tzinfo=None
+    )
 
 
 def _make_service(
