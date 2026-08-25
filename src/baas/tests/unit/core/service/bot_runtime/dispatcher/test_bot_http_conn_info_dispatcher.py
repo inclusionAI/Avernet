@@ -146,6 +146,7 @@ class TestDispatchBotHttpConnInfo:
         # Verify result
         assert result.http_url.startswith("http://")
         assert result.token == "test-jwt-token"
+        assert result.device_id == "ARCA-SANDBOX-test-001"
 
         # Verify facade was called with provider_device_id directly
         mock_paas_facade.resolve_invoke_http_info.assert_awaited_once()
@@ -537,6 +538,7 @@ class TestDispatchBotHttpConnInfoWithDeviceUuid:
 
         assert result.http_url.startswith("http://")
         assert result.token == "test-jwt-token"
+        assert result.device_id == "ARCA-SANDBOX-test-001"
         mock_paas_facade.resolve_invoke_http_info.assert_awaited_once_with(
             paas_device_id="ARCA-SANDBOX-test-001",
             port=20003,

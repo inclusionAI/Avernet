@@ -14,9 +14,13 @@ class WsConnectionInfo:
         token: JWT proxypass token for authentication at the gateway
         target: Target identifier (format: ARCA_{sandbox_id}:{port})
         expires_at: Token expiration timestamp (UTC)
+        device_id: PaaS device id of the selected device
+            (e.g., "ARCA_SANDBOX-abc"). Empty string until the dispatcher
+            backfills it on the success path.
     """
 
     ws_url: str
     token: str
     target: str
     expires_at: datetime
+    device_id: str = ""

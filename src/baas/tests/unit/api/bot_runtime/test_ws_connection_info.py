@@ -31,6 +31,22 @@ class TestWsConnectionInfo:
         assert info.token == "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test"
         assert info.target == "ARCA_SANDBOX-123:8080"
         assert info.expires_at == expires
+        assert info.device_id == ""
+
+    def test_device_id_defaults_to_empty_and_is_writable(self) -> None:
+        """device_id defaults to empty string and can be backfilled by the dispatcher."""
+        expires = datetime.now(UTC) + timedelta(seconds=300)
+
+        info = WsConnectionInfo(
+            ws_url="wss://test.com/ws",
+            token="token123",
+            target="ARCA_TEST:8080",
+            expires_at=expires,
+        )
+        assert info.device_id == ""
+
+        info.device_id = "ARCA_TEST"
+        assert info.device_id == "ARCA_TEST"
 
     def test_ws_connection_info_immutable_by_default(self) -> None:
         """Dataclass should be immutable by default (frozen)."""
