@@ -96,6 +96,34 @@ def test_skills_emit_only_shared_local_skipped():
 
 
 @pytest.mark.unit
+def test_skills_consume_the_delegated_get_active_skills_dict_contract():
+    """``get_active_skills`` now delegates to the capability reader and emits
+    exactly these keys (``id``, ``name``, ``git_path``, ``skill_uuid``,
+    ``sc_version_number``); the collector must need nothing beyond them."""
+    svc = MagicMock()
+    svc.get_active_skills.return_value = [
+        {
+            "id": "7",
+            "name": "weather",
+            "git_path": "git://team/weather",
+            "skill_uuid": None,
+            "sc_version_number": None,
+        },
+        {
+            "id": "9",
+            "name": "my-skill",
+            "git_path": "local://my-skill",
+            "skill_uuid": None,
+            "sc_version_number": None,
+        },
+    ]
+    skills = _collector(skill_set_service=svc).skills(_req())
+    assert [(s.name, s.scope, s.store, s.path) for s in skills] == [
+        ("weather", "shared", "skill-repo", "team/weather"),
+    ]
+
+
+@pytest.mark.unit
 def test_local_skill_not_emitted_engine_owned():
     """A user (skills-local) skill is engine-owned: the collector does NOT emit a
     ref for it (the running container auto-discovers it; the publish-time gather

@@ -90,9 +90,9 @@ lands in the same group as the migration of its last caller.
 - [x] 4.1 Inject the reader into `SkillSetService` (factory); replace the
       `get_active_skills` merge body with delegation (keys preserved: `id`,
       `name`, `git_path`, `skill_uuid`, `sc_version_number`).
-- [ ] 4.2 Update `test_skill_set_service_symlink_mappings.py`; add the
+- [x] 4.2 Update `test_skill_set_service_symlink_mappings.py`; add the
       exclusion case (excluded member no longer symlinked).
-- [ ] 4.3 Config-compose collector test pinning the skill dict contract.
+- [x] 4.3 Config-compose collector test pinning the skill dict contract.
 
 ## Group 5 — MCP union in one place
 
