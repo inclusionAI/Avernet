@@ -49,6 +49,14 @@ class WorkOrderBotEditorRequestNotAllowedError(WorkOrderError):
     pass
 
 
+class WorkOrderSkillEditorRequestNotAllowedError(WorkOrderError):
+    pass
+
+
+class WorkOrderSkillApplicantAlreadyEditorError(WorkOrderError):
+    pass
+
+
 class WorkOrderNoReviewerError(WorkOrderError):
     pass
 

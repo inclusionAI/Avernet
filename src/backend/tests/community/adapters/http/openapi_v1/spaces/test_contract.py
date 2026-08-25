@@ -29,6 +29,10 @@ from agentclaw.community.api.space_skill_query_service import (
 from agentclaw.community.api.space_skill_grant_service import (
     SpaceSkillGrantServiceProtocol,
 )
+from agentclaw.community.api.space_skill_editor_request_service import (
+    SpaceSkillEditorRequestServiceProtocol,
+)
+from agentclaw.community.core.work_orders.models import WorkOrderRecord, WorkOrderStatus
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
     MarketFavoriteRecord,
@@ -98,12 +102,18 @@ def skill_grant_service():
 
 
 @pytest.fixture
+def skill_editor_request_service():
+    return MagicMock()
+
+
+@pytest.fixture
 def client(
     member_service,
     space_service,
     favorite_service,
     skill_query_service,
     skill_grant_service,
+    skill_editor_request_service,
 ):
     class _Bindings(Module):
         def configure(self, binder):
@@ -112,6 +122,10 @@ def client(
             binder.bind(MarketFavoriteServiceProtocol, to=favorite_service)
             binder.bind(SpaceSkillQueryServiceProtocol, to=skill_query_service)
             binder.bind(SpaceSkillGrantServiceProtocol, to=skill_grant_service)
+            binder.bind(
+                SpaceSkillEditorRequestServiceProtocol,
+                to=skill_editor_request_service,
+            )
 
     app = FastAPI()
     app.include_router(router)
@@ -119,6 +133,45 @@ def client(
     attach_injector(app, Injector([_Bindings()]))
     mount_public_error_handlers(app)
     return user_scoped_client(app, "owner-1")
+
+
+def test_skill_editor_request_publishes_stable_wire_and_uses_current_user(
+    client, skill_editor_request_service
+):
+    now = datetime(2026, 8, 26, 8, 0, 0)
+    skill_editor_request_service.create_request.return_value = WorkOrderRecord(
+        id=91,
+        work_order_no="WO-91",
+        biz_type="SKILL_COLLABORATOR",
+        biz_id="9",
+        applicant_user_id="owner-1",
+        apply_reason="共同维护",
+        status=WorkOrderStatus.PENDING,
+        reviewer_user_id=None,
+        review_remark=None,
+        reviewed_at=None,
+        env="test",
+        gmt_created=now,
+        gmt_modified=now,
+    )
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills/9/editor-requests",
+        json={"reason": "共同维护"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["data"] == {
+        "work_order_id": 91,
+        "work_order_no": "WO-91",
+        "status": "PENDING",
+    }
+    skill_editor_request_service.create_request.assert_called_once_with(
+        space_id=7,
+        skill_id=9,
+        applicant_user_id="owner-1",
+        reason="共同维护",
+    )
 
 
 def test_grant_endpoints_publish_stable_wire_and_delegate_actor(
@@ -171,9 +224,7 @@ def test_grant_endpoints_publish_stable_wire_and_delegate_actor(
 
     grants = client.get("/openapi/v1/bots/spaces/7/skills/9/grants")
     added = client.put("/openapi/v1/bots/spaces/7/skills/9/managers/manager-2")
-    removed = client.delete(
-        "/openapi/v1/bots/spaces/7/skills/9/managers/manager-2"
-    )
+    removed = client.delete("/openapi/v1/bots/spaces/7/skills/9/managers/manager-2")
     transferred = client.post(
         "/openapi/v1/bots/spaces/7/skills/9/owner-transfer",
         json={"new_owner_user_id": "manager-1"},

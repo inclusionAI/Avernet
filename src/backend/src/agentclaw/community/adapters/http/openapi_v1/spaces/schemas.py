@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_serializer
 
@@ -114,6 +115,24 @@ class TransferSkillOwnerRequest(BaseModel):
         max_length=1024,
         description="Required audit reason when a Space administrator transfers ownership.",
     )
+
+
+class CreateSkillEditorRequest(BaseModel):
+    """Request Manager edit access to a Team Space Skill."""
+
+    reason: str = Field(
+        min_length=1,
+        max_length=512,
+        description="Reason for requesting Skill edit access.",
+    )
+
+
+class SkillEditorRequestCreated(BaseModel):
+    """Pending Work Order created for a Skill editor application."""
+
+    work_order_id: int = Field(description="Created Work Order identifier.")
+    work_order_no: str = Field(description="Human-readable Work Order number.")
+    status: Literal["PENDING"] = Field(description="Initial Work Order status.")
 
 
 class SpaceJoinStatus(_DocumentedEnum):

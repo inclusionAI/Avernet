@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 from injector import inject
@@ -13,6 +14,9 @@ from agentclaw.community.core.repository.implementations.work_orders.bot_editor 
 )
 from agentclaw.community.core.repository.implementations.work_orders.creation import (
     _WorkOrderCreationRepository,
+)
+from agentclaw.community.core.repository.implementations.work_orders.skill_editor import (
+    _SkillEditorWorkOrderRepository,
 )
 from agentclaw.community.core.repository.protocols.work_orders import (
     WorkOrderRepositoryProtocol,
@@ -66,6 +70,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         self._Space = SpaceModel
         self._Member = SpaceMemberModel
         self._bot_editor = _BotEditorWorkOrderRepository(db)
+        self._skill_editor = _SkillEditorWorkOrderRepository(db)
         self._creation = _WorkOrderCreationRepository(db)
 
     @staticmethod
@@ -326,6 +331,25 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             env=env,
         )
 
+    def create_skill_editor_request(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        applicant_user_id: str,
+        applicant_name: str,
+        apply_reason: str,
+        env: str,
+    ):
+        return self._skill_editor.create_skill_editor_request(
+            space_id=space_id,
+            skill_id=skill_id,
+            applicant_user_id=applicant_user_id,
+            applicant_name=applicant_name,
+            apply_reason=apply_reason,
+            env=env,
+        )
+
     def list_items(
         self,
         *,
@@ -510,11 +534,19 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             ):
                 return None
             space = None
+            space_reference = work_order.biz_id
+            if work_order.biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value:
+                try:
+                    space_reference = str(
+                        int(json.loads(work_order.biz_data or "{}")["space_id"])
+                    )
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    space_reference = ""
             try:
                 space = (
                     db.query(self._Space)
                     .filter(
-                        self._Space.id == int(work_order.biz_id), self._Space.env == env
+                        self._Space.id == int(space_reference), self._Space.env == env
                     )
                     .one_or_none()
                 )
@@ -551,6 +583,25 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 applicant_name=work_order.applicant_user_id,
                 can_approve=can_approve,
             )
+
+    def review_skill_editor_request(
+        self,
+        *,
+        work_order_id: int,
+        reviewer_user_id: str,
+        review_remark: str | None,
+        target_status: WorkOrderStatus,
+        notification: WorkOrderNotificationDraft,
+        env: str,
+    ):
+        return self._skill_editor.review_skill_editor_request(
+            work_order_id=work_order_id,
+            reviewer_user_id=reviewer_user_id,
+            review_remark=review_remark,
+            target_status=target_status,
+            notification=notification,
+            env=env,
+        )
 
     def review_space_join(
         self,

@@ -7,7 +7,7 @@ unit of work.
 ## Context Boundary
 
 ```yaml
-purpose: "Own approval work orders, recipient notifications, and transactional Space-join decisions."
+purpose: "Own approval work orders, recipient notifications, and dispatch to business-owned approval handlers."
 provides:
   - WorkOrderService
   - WorkOrderNotificationService
@@ -26,9 +26,11 @@ provides:
   - WorkOrderMessageContent
   - WorkOrderNotificationDetail
   - WorkOrderNotificationBadgeSummary
+  - SkillCollaboratorApprovalHandlerProtocol
 consumes:
   - "WorkOrderRepositoryProtocol (core.repository) — persistence and transactional state changes"
   - "SpaceRepositoryProtocol and SpaceAccessService — Space existence, membership, and OWNER authorization"
+  - "SkillCollaboratorApprovalHandlerProtocol — Skill-owned approval policy and atomic Grant transition"
 consumed_by:
   - "adapters/http/openapi_v1/work_orders — public work-order and notification operations"
 internal_dependencies:
@@ -62,7 +64,7 @@ and client compatibility plan.
 | Persisted notification category | `APPROVAL`, `NOTICE` |
 | List category filter | `ALL`, `APPROVAL`, `NOTICE` |
 | List query type | `PENDING_FOR_ME`, `INITIATED_BY_ME`, `PROCESSED_BY_ME` |
-| Supported business type | `SPACE_JOIN` for the currently implemented Space handler; the unified Service API accepts business-module-defined `biz_type` values. |
+| Supported business type | `SPACE_JOIN`, `BOT_COLLABORATOR`, `SKILL_COLLABORATOR`; the unified Service API dispatches Skill policy through its business-owned handler. |
 
 `ALL` is a query-only filter and must never be persisted as a notification
 category. `WorkOrderEventType` is also a persisted whitelist. Approval events are
@@ -137,6 +139,8 @@ from an absent notification.
 | `409203` | 409 | `WorkOrderApplicantAlreadyMemberError` | `Applicant is already a space member` |
 | `409204` | 409 | `WorkOrderNoReviewerError` | `The space has no available approver` |
 | `409205` | 409 | `WorkOrderJoinNotAllowedError` | `The space does not accept join requests` |
+| `409208` | 409 | `WorkOrderSkillEditorRequestNotAllowedError` | `The Skill does not accept editor requests` |
+| `409209` | 409 | `WorkOrderSkillApplicantAlreadyEditorError` | `Applicant already has Skill editor access` |
 
 The numeric codes and fixed messages are enums in
 `adapters/http/openapi_v1/errors_work_order.py`; the centralized

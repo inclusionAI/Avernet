@@ -18,6 +18,9 @@ from agentclaw.community.api.space_skill_query_service import (
 from agentclaw.community.api.space_skill_grant_service import (
     SpaceSkillGrantServiceProtocol,
 )
+from agentclaw.community.api.space_skill_editor_request_service import (
+    SpaceSkillEditorRequestServiceProtocol,
+)
 from agentclaw.community.core.bot_management.bot_space import (
     BotSpaceAccessProtocol,
 )
@@ -44,6 +47,9 @@ from agentclaw.community.core.skill_center.services.space_skill_query_service im
 from agentclaw.community.core.skill_center.services.space_skill_grant_service import (
     SpaceSkillGrantService,
 )
+from agentclaw.community.core.skill_center.services.space_skill_editor_request_service import (
+    SpaceSkillEditorRequestService,
+)
 from agentclaw.community.core.spaces.protocols import (
     SpaceAccessServiceProtocol as CoreSpaceAccessServiceProtocol,
 )
@@ -52,6 +58,11 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 class SpacesModule(Module):
     def configure(self, binder: Binder) -> None:
+        binder.bind(
+            SpaceSkillEditorRequestServiceProtocol,
+            to=SpaceSkillEditorRequestService,
+            scope=singleton,
+        )
         binder.bind(SpaceRepositoryProtocol, to=SpaceRepository, scope=singleton)
         binder.bind(
             MarketFavoriteRepositoryProtocol,

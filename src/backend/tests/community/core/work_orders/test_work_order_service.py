@@ -126,6 +126,7 @@ def _service(*, staff_dept: StaffDeptPlugin | None = None):
     collaborator_repository = MagicMock()
     collaborators = MagicMock()
     member_management = MagicMock()
+    skill_handler = MagicMock()
     if staff_dept is None:
         staff_dept = MagicMock(spec=StaffDeptPlugin)
         staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
@@ -143,6 +144,7 @@ def _service(*, staff_dept: StaffDeptPlugin | None = None):
             collaborators,
             member_management,
             staff_dept,
+            skill_handler,
         ),
         repository,
         spaces,
@@ -161,6 +163,7 @@ def _bot_editor_service():
     collaborators = MagicMock()
     member_management = MagicMock()
     staff_dept = MagicMock(spec=StaffDeptPlugin)
+    skill_handler = MagicMock()
     service = WorkOrderService(
         repository,
         spaces,
@@ -171,6 +174,7 @@ def _bot_editor_service():
         collaborators,
         member_management,
         staff_dept,
+        skill_handler,
     )
     return (
         service,
@@ -445,9 +449,10 @@ def test_create_space_join_request_truncates_staff_nickname() -> None:
         space_id=7, applicant_user_id="applicant-1", reason="join"
     )
 
-    assert repository.create_space_join_request.call_args.kwargs[
-        "applicant_name"
-    ] == "花" * 128
+    assert (
+        repository.create_space_join_request.call_args.kwargs["applicant_name"]
+        == "花" * 128
+    )
 
 
 def test_create_rejects_personal_space() -> None:
@@ -834,6 +839,13 @@ def test_create_work_order_event_normalizes_and_delegates(
         ),
         ({"applicant_user_id": "other-user"}, "applicant must be"),
         ({"apply_reason": "x" * 513}, "no more than 512"),
+        (
+            {
+                "biz_type": "SKILL_COLLABORATOR",
+                "event_type": "SKILL_COLLABORATOR_APPLIED",
+            },
+            "must use the Skill endpoint",
+        ),
     ],
 )
 def test_create_work_order_event_rejects_invalid_input(

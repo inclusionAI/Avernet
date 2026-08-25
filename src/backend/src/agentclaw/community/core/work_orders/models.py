@@ -34,6 +34,7 @@ class WorkOrderApproverStatus(StrEnum):
 class WorkOrderBizType(StrEnum):
     SPACE_JOIN = "SPACE_JOIN"
     BOT_COLLABORATOR = "BOT_COLLABORATOR"
+    SKILL_COLLABORATOR = "SKILL_COLLABORATOR"
 
 
 class NotificationCategory(StrEnum):
@@ -133,6 +134,9 @@ class WorkOrderMessageTitle(StrEnum):
     BOT_COLLABORATOR_PENDING = "Bot 共同编辑申请待审批"
     BOT_COLLABORATOR_APPROVED = "Bot 共同编辑申请已通过"
     BOT_COLLABORATOR_REJECTED = "Bot 共同编辑申请未通过"
+    SKILL_COLLABORATOR_PENDING = "Skill 共同编辑申请待审批"
+    SKILL_COLLABORATOR_APPROVED = "Skill 共同编辑申请已通过"
+    SKILL_COLLABORATOR_REJECTED = "Skill 共同编辑申请未通过"
 
 
 class WorkOrderMessageContent(StrEnum):
@@ -151,6 +155,13 @@ class WorkOrderMessageContent(StrEnum):
     BOT_COLLABORATOR_APPROVED = "你共同编辑 Bot「{bot_name}」的申请已通过。"
     BOT_COLLABORATOR_REJECTED = (
         "你共同编辑 Bot「{bot_name}」的申请未通过。拒绝原因：{review_remark}"
+    )
+    SKILL_COLLABORATOR_PENDING = (
+        "用户「{applicant_name}」申请共同编辑 Skill「{skill_name}」，请及时处理。"
+    )
+    SKILL_COLLABORATOR_APPROVED = "你共同编辑 Skill「{skill_name}」的申请已通过。"
+    SKILL_COLLABORATOR_REJECTED = (
+        "你共同编辑 Skill「{skill_name}」的申请未通过。拒绝原因：{review_remark}"
     )
 
 
