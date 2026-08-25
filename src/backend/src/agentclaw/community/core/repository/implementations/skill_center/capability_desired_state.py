@@ -33,6 +33,7 @@ from agentclaw.community.core.repository.protocols.capability_desired_state impo
 )
 from agentclaw.community.core.repository.implementations.skill_center.bot_skillset_installations import (
     BotSkillSetInstallations,
+    set_member_mcp_codes,
     set_member_skill_ids,
 )
 from agentclaw.community.core.repository.implementations.skill_center.default_exclusion_commands import (
@@ -530,6 +531,71 @@ class CapabilityDesiredStateRepository(
                 )
             session.flush()
             return DesiredStateMutation(_item(row), changed, old)
+
+    def deactivate_all_sets(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> DesiredStateMutation:
+        """Converge the Bot to Default-Set capabilities only (spec C.6).
+
+        Every ordinary Set goes inactive and every skill Installation row is
+        retired — Set-claimed and direct alike, "all" means all; the Default
+        Set's members return through the flush, which is the convergence the
+        spec names. MCP rows are retired only where a Set claimed them: a
+        directly installed MCP is not a skill activation and survives this
+        wire. One transaction.
+        """
+        with self._db.transactional_orm_session() as session:
+            old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
+            query = self._scope(session.query(SkillSet), SkillSet).filter(
+                SkillSet.bolt_id == bot_id,
+                SkillSet.user_id == owner_id,
+                SkillSet.is_default.is_(False),
+            )
+            if engine_type is not None:
+                query = query.filter(SkillSet.engine_type == engine_type)
+            sets = query.with_for_update().all()
+            changed = False
+            for row in sets:
+                if row.is_active:
+                    row.is_active = False
+                    changed = True
+            retired = skill_installations.installed_ids(
+                session, bot_id=bot_id, owner_id=owner_id,
+                env=get_current_env(), locked=True,
+            )
+            skill_installations.uninstall(
+                session, bot_id=bot_id, owner_id=owner_id,
+                env=get_current_env(), skill_ids=retired,
+            )
+            set_codes: set[str] = set()
+            for row in sets:
+                set_codes |= set_member_mcp_codes(
+                    self._scope, session, skill_set_id=int(row.id)
+                )
+            retired_mcps = set_codes & mcp_installations.installed_codes(
+                session, bot_id=bot_id, owner_id=owner_id,
+                env=get_current_env(), locked=True,
+            )
+            mcp_installations.uninstall(
+                session, bot_id=bot_id, owner_id=owner_id,
+                env=get_current_env(), server_codes=retired_mcps,
+            )
+            session.flush()
+            return DesiredStateMutation(
+                {},
+                changed or bool(retired) or bool(retired_mcps),
+                old,
+                details={
+                    "activated": [],
+                    "deactivated": [str(skill_id) for skill_id in sorted(retired)],
+                    "failed": [],
+                },
+            )
 
     def restore_desired_state(
         self,

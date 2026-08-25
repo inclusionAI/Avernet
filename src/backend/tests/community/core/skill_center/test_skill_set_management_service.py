@@ -2206,3 +2206,41 @@ async def test_unexcluding_a_default_mcp_still_requires_marketplace_permission()
             set_id="9", server_code="mcp.back",
         )
     assert repository.exclusion_calls == []
+
+
+class _DeactivateAllRepository(_Repository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.deactivate_all_calls: list[dict] = []
+
+    def deactivate_all_sets(self, **kwargs) -> DesiredStateMutation:
+        self.deactivate_all_calls.append(kwargs)
+        return DesiredStateMutation(
+            {},
+            True,
+            CapabilityDesiredState(set(), {}, {}),
+            details={"activated": [], "deactivated": ["7"], "failed": []},
+        )
+
+
+@pytest.mark.asyncio
+async def test_deactivate_all_runs_the_uow_command_and_reconciles():
+    repository = _DeactivateAllRepository()
+    runtime = _ProjectionCountingRuntime()
+    service = _default_wire_service(repository, runtime)
+
+    result = await service.deactivate_all(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner"
+    )
+
+    assert result["changed"] is True
+    assert result["deactivated"] == ["7"]
+    assert repository.deactivate_all_calls == [
+        {
+            "bot_id": "bot-1",
+            "owner_id": "true-owner",
+            "engine_type": "openclaw",
+            "default_engine_types": ("openclaw",),
+        }
+    ]
+    assert runtime.projections == 1

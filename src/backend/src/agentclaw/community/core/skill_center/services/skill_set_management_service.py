@@ -565,6 +565,24 @@ class SkillSetManagementService:
             ),
         )
 
+    async def deactivate_all(
+        self, *, bot_id: str, owner_id: str, user_id: str
+    ) -> dict:
+        """The legacy "deactivate everything" wire, through desired state."""
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
+        return await self._mutate(
+            bot=bot,
+            bot_id=bot_id,
+            actor_id=user_id,
+            action="skill_set_deactivate_all",
+            mutation=lambda: self._repository.deactivate_all_sets(
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                engine_type=self._engine(bot),
+                default_engine_types=self._default_engine_types(bot),
+            ),
+        )
+
     async def legacy_activate(
         self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
     ) -> dict:

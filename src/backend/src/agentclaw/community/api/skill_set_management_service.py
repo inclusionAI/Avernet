@@ -128,6 +128,10 @@ class SkillSetManagementServiceProtocol(Protocol):
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> dict[str, Any]: ...
 
+    async def deactivate_all(
+        self, *, bot_id: str, owner_id: str, user_id: str
+    ) -> dict[str, Any]: ...
+
     async def legacy_activate(
         self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
     ) -> dict[str, Any]: ...

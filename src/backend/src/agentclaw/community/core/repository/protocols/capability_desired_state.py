@@ -215,6 +215,19 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         self, *, bot_id: str, owner_id: str, engine_type: str | None = None
     ) -> set[str]: ...
     @abstractmethod
+    def deactivate_all_sets(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> DesiredStateMutation:
+        """Ordinary Sets inactive; skill Installation rows and Set-claimed
+        MCP rows retired, one transaction (spec C.6): the Bot converges to
+        Default-Set capabilities only."""
+        ...
+    @abstractmethod
     def set_skill_set_active(
         self,
         *,

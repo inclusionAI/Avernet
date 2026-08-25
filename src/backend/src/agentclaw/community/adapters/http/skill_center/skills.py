@@ -1668,59 +1668,44 @@ async def deactivate_all_skills(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    switcher_factory: SkillSetSwitcherFactoryProtocol = Injected(
-        SkillSetSwitcherFactoryProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
-    path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
 ) -> SwitchSkillSetResponse:
-    """Deactivate all currently active skills."""
-    # Get effective path parameters
+    """Deactivate all currently active skills — through desired state.
+
+    The Bot converges to Default-Set capabilities only (spec C.6); the
+    runtime is reconciled by the command, never by imperative symlink
+    deletion here.
+    """
     (
         effective_entity_id,
         effective_bot_id,
-        effective_engine,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop,
+        _effective_engine,
+        _runtime_engine,
+        _effective_entity_type,
+        _is_desktop,
     ) = _get_path_params(
         ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
     )
 
-    # Get user-specific paths using new directory structure
-    path_factory.get_bot_skills_dir(
-        effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type
-    )
-    path_factory.get_bot_skills_local_dir(
-        effective_entity_id,
-        effective_bot_id,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop=is_desktop,
-    )
-    path_factory.get_bot_engine_dir(
-        effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type
-    )
-    path_factory.get_bot_skills_repo_dir(
-        effective_entity_id,
-        effective_bot_id,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop=is_desktop,
-    )
-
-    switcher = switcher_factory.create(
-        entity_id=effective_entity_id,
+    result = await control_plane.deactivate_all(
         bot_id=effective_bot_id,
-        engine_type=effective_engine,
+        owner_id=effective_entity_id,
+        user_id=ctx.user_id or effective_entity_id,
     )
-    result = await switcher.deactivate_all_skills()
+    deactivated = list(result.get("deactivated") or [])
     return SwitchSkillSetResponse(
-        success=result.success,
-        message=result.message,
+        success=True,
+        message=(
+            f"Successfully deactivated {len(deactivated)} skills"
+            if deactivated
+            else "No active skills to deactivate"
+        ),
         data={
-            "activated": result.activated,
-            "deactivated": result.deactivated,
-            "failed": result.failed,
+            "activated": [],
+            "deactivated": deactivated,
+            "failed": [],
         },
     )
 
