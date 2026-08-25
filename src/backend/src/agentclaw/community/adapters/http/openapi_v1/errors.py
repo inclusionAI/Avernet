@@ -52,11 +52,13 @@ class GrantNotResolvableError(Exception):
 class UserIdMismatchError(Exception):
     """Raised when a request's ``user_id`` is not the verified caller's (→ 403).
 
-    Every user-scoped public operation names the end user it acts for in a
-    required ``user_id`` query parameter rather than inferring it from the
-    principal. For a caller that names an end user, the only user it may name is
-    itself, so the parameter must repeat the ``user`` principal's subject id and
-    a disagreement is refused here.
+    Every delegable user-scoped public operation names the end user it acts for
+    in a required ``user_id`` query parameter. For a caller that names an end
+    user, the only user it may name is itself, so the parameter must repeat the
+    ``user`` principal's subject id and a disagreement is refused here.
+
+    Non-delegable self-service operations do not expose the parameter: they
+    derive the actor from the verified principal and refuse App-only callers.
 
     An **application** caller reaches none of this: it names no end user to
     compare against, so its ``user_id`` is authorized against the grant instead

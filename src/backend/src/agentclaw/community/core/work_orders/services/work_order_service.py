@@ -57,7 +57,15 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderDecision,
     WorkOrderEventCreatedResult,
 )
+from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.staff_dept import (
+    StaffDeptPlugin,
+    StaffProfileLookupError,
+)
 from agentclaw.community.utils.env_utils import get_current_env
+
+
+logger = get_logger()
 
 
 class WorkOrderService:
@@ -72,6 +80,7 @@ class WorkOrderService:
         collaborator_repository: CollaboratorRepositoryProtocol,
         collaborators: CollaboratorServiceProtocol,
         member_management: MemberManagementCapabilityService,
+        staff_dept: StaffDeptPlugin,
     ) -> None:
         self._repository = repository
         self._spaces = spaces
@@ -81,6 +90,7 @@ class WorkOrderService:
         self._collaborator_repository = collaborator_repository
         self._collaborators = collaborators
         self._member_management = member_management
+        self._staff_dept = staff_dept
 
     @staticmethod
     def _required_text(value: str, *, limit: int, error: type[Exception]) -> str:
@@ -344,13 +354,32 @@ class WorkOrderService:
             raise WorkOrderApplicantAlreadyMemberError(
                 "applicant is already a space member"
             )
+        applicant_name = self._get_applicant_name(
+            applicant_user_id=applicant_user_id
+        )
         return self._repository.create_space_join_request(
             space_id=space_id,
             applicant_user_id=applicant_user_id,
-            applicant_name=applicant_user_id,
+            applicant_name=applicant_name,
             apply_reason=reason,
             env=get_current_env(),
         )
+
+    def _get_applicant_name(self, *, applicant_user_id: str) -> str:
+        try:
+            profile = self._staff_dept.get_profile_by_work_no(
+                work_no=applicant_user_id
+            )
+        except StaffProfileLookupError:
+            logger.warning(
+                "failed to resolve applicant nickname; falling back to user id",
+                extra={"user_id": applicant_user_id},
+                exc_info=True,
+            )
+            return applicant_user_id
+
+        nickname = (profile.nick_name or "").strip()
+        return nickname[:128] or applicant_user_id
 
     def list_items(
         self,

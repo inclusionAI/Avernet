@@ -303,6 +303,14 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/dashboard"),
 }
 
+# Operations that are user-scoped but deliberately non-delegable. They derive
+# the actor from the verified human principal and therefore publish no
+# caller-selectable ``user_id``. They may still document a domain-specific 403
+# (the Join Request operation is mounted with the Space authorization errors).
+_AUTHENTICATED_SELF = {
+    ("post", f"{PUBLIC_API_PREFIX}/bots/spaces/{{space_id}}/join-requests"),
+}
+
 #: Bot Logs is excluded for a different reason and must stay that way — see the
 #: "Naming the end user" note in ``openapi_v1/__init__.py``. Its own ``user_id``
 #: is a filter over other people's traces, not the caller's scope.
@@ -419,7 +427,9 @@ def _param(operation: dict, name: str) -> dict | None:
 
 def _user_scoped(path: str, method: str) -> bool:
     return (
-        not path.startswith(_LOGS_PREFIX) and (method, path) not in _NO_USER_DIMENSION
+        not path.startswith(_LOGS_PREFIX)
+        and (method, path) not in _NO_USER_DIMENSION
+        and (method, path) not in _AUTHENTICATED_SELF
     )
 
 
@@ -479,7 +489,7 @@ def test_the_pinned_number_of_operations_take_it():
     # /collaboration/bots/{bot_uuid}/public (same op count, {bot_uuid} not {bot_id}).
     # The task public surface adds one more: GET .../collaboration/tasks/list
     # (execute/dashboard have no user dimension — see _NO_USER_DIMENSION).
-    assert len(taking) == 182
+    assert len(taking) == 181
 
 
 def test_the_exempt_operations_take_none():
@@ -489,6 +499,14 @@ def test_the_exempt_operations_take_none():
         operation = schema["paths"][path][method]
         assert _param(operation, USER_ID_QUERY) is None, f"{method.upper()} {path}"
         assert "403" not in operation["responses"], f"{method.upper()} {path}"
+
+
+def test_authenticated_self_operations_derive_the_user_from_the_principal():
+    """Non-delegable self-service operations expose no steerable user id."""
+    schema = _schema()
+    for method, path in _AUTHENTICATED_SELF:
+        operation = schema["paths"][path][method]
+        assert _param(operation, USER_ID_QUERY) is None, f"{method.upper()} {path}"
 
 
 def test_bot_logs_keeps_its_own_meaning_of_user_id():
@@ -549,7 +567,8 @@ def test_bot_id_is_in_the_path_wherever_it_addresses_a_bot():
 def test_the_403_is_documented_on_exactly_the_user_scoped_operations():
     for path, method, operation in _operations(_schema()):
         documented = "403" in operation["responses"]
-        assert documented is _user_scoped(path, method), f"{method.upper()} {path}"
+        expected = _user_scoped(path, method) or (method, path) in _AUTHENTICATED_SELF
+        assert documented is expected, f"{method.upper()} {path}"
 
 
 def _request_body_models(schema: dict) -> set[str]:
