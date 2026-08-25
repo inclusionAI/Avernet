@@ -62,16 +62,16 @@ ENV_FILE=""
 
 # Service-specific defaults
 declare -A DEFAULT_PORT=(
-    [baas]=8888
-    [gateway]=8080
-    [bcs]=21000
-    [backend]=8090
+    [baas]=80
+    [gateway]=80
+    [bcs]=80
+    [backend]=80
 )
 
 # All services default to 4 CPU / 8Gi spec, 2 replicas.
 DEFAULT_REPLICAS=2
-DEFAULT_CPU_REQUEST="4000m"
-DEFAULT_CPU_LIMIT="4000m"
+DEFAULT_CPU_REQUEST="4"
+DEFAULT_CPU_LIMIT="4"
 DEFAULT_MEM_REQUEST="8Gi"
 DEFAULT_MEM_LIMIT="8Gi"
 
