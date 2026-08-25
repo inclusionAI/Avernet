@@ -6,6 +6,8 @@ import json
 import re
 import time
 import threading
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
@@ -18,6 +20,7 @@ from agentclaw.community.utils.avernet_tenant import (
     bind_current_avernet_tenant,
     get_current_avernet_tenant,
 )
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.repository.models import BotFriendQueryKey, BotFriendStatus, ApprovalStatus, ApprovalType
 from agentclaw.community.core.operator_context import OperatorContext
@@ -40,6 +43,7 @@ if TYPE_CHECKING:
     # BotPublicService is @provider-constructed (bot_public_module), so
     # this annotation is never resolved at runtime.
     from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+    from agentclaw.community.di.config import BcsFuseConfig
     # ``DeviceSyncDispatcher`` 类源头在 plugins/prod/,但 core/ 不得依赖
     # plugins/(arch lint)。镜像 ``ChannelService`` 借 ``DeviceFilesystemDispatcher``
     # 的解法:类型注解走 di/modules/ 转出口(di 是合法的 composition 层)。
@@ -135,6 +139,7 @@ class BotPublicService:
         skill_set_service_factory: "SkillSetServiceFactory",
         device_context_resolver_factory: "Callable[[], DeviceContextResolver]",
         device_sync_dispatcher: "DeviceSyncDispatcher",
+        bcsfuse_config: "BcsFuseConfig",
         catalog_metadata_service: BotCatalogMetadataServiceProtocol,
     ) -> None:
         self._bot_friend_repo = bot_friend_repo
@@ -153,6 +158,7 @@ class BotPublicService:
         # eager injection here would cycle. Resolved at call time instead.
         self._resolver_factory = device_context_resolver_factory
         self._device_sync_dispatcher = device_sync_dispatcher
+        self._bcsfuse_config = bcsfuse_config
         self._catalog_metadata_service = catalog_metadata_service
         self._sync_lock = threading.Lock()
         self._syncing_bots: set[str] = set()
@@ -358,6 +364,66 @@ class BotPublicService:
             list(executor.map(_create_one, keep_work_nos))
 
         logger.info(f"[_rebuild_auth_relationships] Rebuild done: bot_id={bot_id}, owner_id={owner_id}, total={len(keep_work_nos)}")
+
+    def _resolve_bcsfuse_base_url(self) -> str:
+        """Resolve the configured BCSFuse base URL for the current env."""
+        base_url = self._bcsfuse_config.base_url
+        if get_current_env() == "pre" and self._bcsfuse_config.base_url_pre:
+            base_url = self._bcsfuse_config.base_url_pre
+        return base_url.rstrip("/")
+
+    def _sync_bcsfuse_runtime_state(self, bot_id: str, public: str) -> None:
+        """Best-effort sync bot visibility to BCSFuse runtime state."""
+        base_url = self._resolve_bcsfuse_base_url()
+        if not base_url:
+            logger.info(
+                "[_sync_bcsfuse_runtime_state] Skip BCSFuse sync: no base_url configured, "
+                "bot_id=%s public=%s",
+                bot_id,
+                public,
+            )
+            return
+
+        runtime_state = "online" if public == "1" else "offline"
+        url = f"{base_url}/api/v1/workers/{bot_id}/{runtime_state}"
+        request = Request(url, data=b"", method="PUT")
+        request.add_header("Content-Type", "application/json")
+
+        try:
+            with urlopen(request, timeout=15) as response:
+                logger.info(
+                    "[_sync_bcsfuse_runtime_state] Synced BCSFuse runtime state: "
+                    "bot_id=%s runtime_state=%s status=%s",
+                    bot_id,
+                    runtime_state,
+                    getattr(response, "status", "unknown"),
+                )
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+            logger.warning(
+                "[_sync_bcsfuse_runtime_state] BCSFuse HTTP error ignored: "
+                "bot_id=%s runtime_state=%s status=%s body=%s",
+                bot_id,
+                runtime_state,
+                exc.code,
+                body,
+            )
+        except URLError as exc:
+            logger.warning(
+                "[_sync_bcsfuse_runtime_state] BCSFuse URL error ignored: "
+                "bot_id=%s runtime_state=%s reason=%s",
+                bot_id,
+                runtime_state,
+                exc.reason,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[_sync_bcsfuse_runtime_state] BCSFuse sync failed but ignored: "
+                "bot_id=%s runtime_state=%s error=%s",
+                bot_id,
+                runtime_state,
+                exc,
+            )
 
     def public_bot(self, bot_id: str, owner_id: str, public: str, permission_owner: str, friend_approval: str, operator: OperatorContext) -> Dict[str, Any]:
         """
@@ -613,6 +679,7 @@ class BotPublicService:
         self._sync_access_mode_and_relations(
             bot_id, owner_id, access_mode, public,
         )
+        self._sync_bcsfuse_runtime_state(bot_id, public)
         logger.info(
             "[bot_service.public_bot] %s: bot_id=%s public=%s "
             "owner=%s operator=%s",
@@ -954,6 +1021,7 @@ class BotPublicService:
             self._sync_access_mode_and_relations_or_raise(
                 bot_id, owner_id, access_mode, public_value,
             )
+            self._sync_bcsfuse_runtime_state(bot_id, public_value)
             logger.info(f"[bot_service.handle_public_approval_callback] Approval agreed: bot_id={bot_id}, public={public_value}")
             return {"success": True, "public": public_value, "message": "Public status updated"}
         elif last_operate_upper == "DISAGREE":
