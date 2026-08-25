@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import AbstractContextManager
+from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from secbaas.community.api.bot_runtime import (
@@ -361,4 +362,41 @@ class SessionLockService(Protocol):
         block_timeout: float | None = ...,
     ) -> AbstractContextManager[Any]:
         """返回一个上下文管理器，进入后得到带 ``.acquired`` 的锁对象。"""
+        ...
+
+
+@dataclass(slots=True)
+class AbortOutcome:
+    """``chat.abort`` 按 session 取消 run 的结果。
+
+    Attributes:
+        aborted_run_ids: 本次实际取消（标 FAILED + force_done + 本机 task cancel）
+            的 run_id 列表。空表示 session 下无可取消的未终结 run。
+        had_terminal: session 下是否存在已终结（DONE）的队列工作项。
+            用于区分 410 ``run_terminated``（已终结）与 200 ``{aborted: false}``
+            （session 无任何 run 记录）。
+    """
+
+    aborted_run_ids: list[str] = field(default_factory=list)
+    had_terminal: bool = False
+
+
+@runtime_checkable
+class BotRunAbortSurface(Protocol):
+    """按 session_id 取消运行中 run 的接入面。
+
+    由 ``BotRequestWorker`` 实现（owns ``_running_tasks`` / ``_queue`` /
+    ``_executor``），复用 ``_timeout_scan_once`` 的 cancel+force_done 模板。
+    ``BcnDownlinkService.handle_chat_abort`` 经组装根既有 seam 委派该面。
+    """
+
+    async def abort_runs_by_session(self, session_id: str) -> AbortOutcome:
+        """取消 session 下所有未终结（PENDING/RUNNING）的 run。
+
+        顺序（与 ``_timeout_scan_once`` 一致）：先 ``update_error`` 标 FAILED，
+        再 ``queue.force_done(run_id)``，最后对本机 task ``running_task.cancel()``。
+        非本机 RUNNING run 无法本机 cancel，由 force_done + engine 通知 + 对端
+        超时/心跳兜底（与 timeout 同构）。engine 通知（``BotWebsocketClient.chat_abort``）
+        为 best-effort，失败仅记录日志。
+        """
         ...

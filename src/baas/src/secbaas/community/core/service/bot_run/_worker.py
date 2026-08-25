@@ -22,11 +22,12 @@ import os
 import socket
 import time
 import uuid
-from collections.abc import Generator
+from collections.abc import Awaitable, Callable, Generator
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from secbaas.community.core.repository.bot_run import BotRunRepository
 from secbaas.community.core.repository.bot_run_queue import (
     BotRunQueueRecord,
     BotRunQueueRepository,
@@ -41,6 +42,7 @@ from ._bot_concurrency import (
 )
 from ._executor import RequeuedToPendingError
 from ._internal_protocols import (
+    AbortOutcome,
     MachineCountProvider,
     PostRunCallback,
     RequestExecutor,
@@ -84,6 +86,12 @@ class BotRequestWorkerConfig:
     bucket_idle_ttl_seconds: float = 600.0  # 空闲桶淘汰 TTL
 
 
+#: Engine 通知回调类型：``chat.abort`` best-effort 通知 engine 取消 session/run。
+#: 失败仅记录日志，不影响 abort 主流程。``session_id`` 用于 engine 侧 session 定位，
+#: ``run_id`` 为本次取消的 run（非 None 时通知 engine 取消该 run）。
+EngineAbortNotifier = Callable[[str, str | None], Awaitable[None]]
+
+
 def _default_worker_id() -> str:
     return f"{socket.gethostname()}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
 
@@ -97,6 +105,8 @@ class BotRequestWorker:
         qpm_manager: BotConcurrencyManager,
         executor: RequestExecutor,
         *,
+        run_repository: BotRunRepository | None = None,
+        engine_abort_notifier: EngineAbortNotifier | None = None,
         post_run_callback_factories: dict[str, PostRunCallback] | None = None,
         machine_count_provider: MachineCountProvider | None = None,
         config: BotRequestWorkerConfig | None = None,
@@ -105,6 +115,12 @@ class BotRequestWorker:
         self._queue = queue_repository
         self._qpm = qpm_manager
         self._executor = executor
+        # 结果正文仓库（baas_bot_run），用于 abort 时将未终结 run 标 FAILED。
+        # 保留可选以兼容既有不依赖 abort 的装配/测试。
+        self._run_repository = run_repository
+        # best-effort 通知 engine 取消 session/run（BotWebsocketClient.chat_abort seam）。
+        # None 时仅跳过 engine 通知，不影响本机 cancel+force_done+mark_failed。
+        self._engine_abort_notifier = engine_abort_notifier
         # callback 名称 -> 已构造的 PostRunCallback 实例（DI 注入）
         self._callback_factories = post_run_callback_factories or {}
         self._machines = machine_count_provider or FixedMachineCountProvider(1)
@@ -118,7 +134,7 @@ class BotRequestWorker:
         self._stop_event: asyncio.Event | None = None
         self._loop_task: asyncio.Task[None] | None = None
         self._timeout_task: asyncio.Task[None] | None = None
-        # run_id -> 正在执行的 _run_one task，用于超时扫描时 cancel 本机任务
+        # run_id -> 正在执行的 _run_one task，用于超时扫描/abort 时 cancel 本机任务
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
 
     @property
@@ -268,6 +284,82 @@ class BotRequestWorker:
                         e,
                         exc_info=True,
                     )
+
+    # ----------------------------- chat.abort 接入面 -----------------------------
+
+    async def abort_runs_by_session(self, session_id: str) -> AbortOutcome:
+        """按 session_id 取消所有未终结（PENDING/RUNNING）的 run。
+
+        复用 ``_timeout_scan_once`` 的 cancel+force_done 模板，顺序：
+        1. ``run_repository.update_error(run_id, ...)`` 标 FAILED（幂等：已终态时 no-op）；
+        2. ``queue.force_done(run_id)`` 终结队列工作项（幂等）；
+        3. 若 ``assigned_worker == 本 worker``，cancel 本机 ``_running_tasks[run_id]``；
+        4. best-effort 通知 engine（``engine_abort_notifier``），失败仅记录日志。
+
+        非本机 RUNNING run 无法本机 cancel，由 force_done + engine 通知 + 对端
+        超时/心跳兜底（与 timeout 同构）。``update_error`` 与 ``force_done`` 均幂等，
+        abort 与 timeout 并发争抢同一 run 时靠幂等收敛到同一终态（R1）。
+
+        Returns:
+            AbortOutcome: 被取消的 run_id 列表，以及 session 下是否存在已终结记录。
+        """
+        if not session_id:
+            return AbortOutcome(aborted_run_ids=[], had_terminal=False)
+
+        records = self._queue.find_running_by_session(session_id)
+        if not records:
+            terminals = self._queue.find_terminal_by_session(session_id)
+            return AbortOutcome(aborted_run_ids=[], had_terminal=bool(terminals))
+
+        aborted_run_ids: list[str] = []
+        for record in records:
+            run_id = record.run_id
+            # 1. 写终态（FAILED）—— update_error 仅在 PENDING/RUNNING 时生效，已终态 no-op
+            if self._run_repository is not None:
+                try:
+                    self._run_repository.update_error(run_id, "aborted by chat.abort")
+                except Exception as e:
+                    logger.error(
+                        "[BotRequestWorker] abort update_error failed run_id=%s: %s",
+                        run_id,
+                        e,
+                        exc_info=True,
+                    )
+            # 2. force_done 终结队列工作项（幂等）
+            with contextlib.suppress(Exception):
+                self._queue.force_done(run_id)
+            # 3. cancel 本机正在执行的 task
+            if record.assigned_worker == self._worker_id:
+                running_task = self._running_tasks.get(run_id)
+                if running_task is not None and not running_task.done():
+                    running_task.cancel()
+                    logger.info(
+                        "[BotRequestWorker] abort cancelled local task run_id=%s",
+                        run_id,
+                    )
+            aborted_run_ids.append(run_id)
+            logger.info(
+                "[BotRequestWorker] abort run_id=%s session_id=%s status=%s "
+                "worker=%s marked failed+force_done",
+                run_id,
+                session_id,
+                record.status,
+                record.assigned_worker,
+            )
+
+        # 4. best-effort 通知 engine（一次session 级通知，run_id 取首个）
+        if self._engine_abort_notifier is not None and aborted_run_ids:
+            try:
+                await self._engine_abort_notifier(session_id, aborted_run_ids[0])
+            except Exception as e:
+                logger.warning(
+                    "[BotRequestWorker] abort engine notify failed session_id=%s: %s",
+                    session_id,
+                    e,
+                    exc_info=True,
+                )
+
+        return AbortOutcome(aborted_run_ids=aborted_run_ids, had_terminal=False)
 
     # ----------------------------- 主循环单步 -----------------------------
 

@@ -5,11 +5,13 @@ import pytest
 from pydantic import ValidationError
 
 from secbaas.community.adapters.web.routers.bcn_downlink.bcn_model import (
+    ChatAbortRequest,
     ChatSendRequest,
     InteractionResolveRequest,
 )
 from secbaas.community.adapters.web.routers.bcn_downlink.bcn_router import (
     _METHOD_DISPATCH,
+    _dispatch_chat_abort,
     _dispatch_chat_send,
     _dispatch_chat_send_stream,
     _dispatch_interaction_resolve,
@@ -21,6 +23,8 @@ from secbaas.community.api.bcn import (
 from secbaas.community.api.bcn import (
     BcnInteractionResolveResult,
     BcnInvalidRequestError,
+    BcnRunTerminatedError,
+    ChatAbortResult,
 )
 from secbaas.community.api.bot_interaction import InteractionBadRequestError
 from secbaas.community.api.sse import StreamChunk
@@ -450,3 +454,91 @@ async def test_dispatch_chat_send_value_error_wraps_to_bcn_invalid_request():
     with pytest.raises(BcnInvalidRequestError) as exc_info:
         await _dispatch_chat_send(_chat_send_request(), _ValueErrorService())
     assert "invalid timeout value" in str(exc_info.value)
+
+
+# ==================== chat.abort dispatch tests ====================
+
+
+def _chat_abort_request() -> ChatAbortRequest:
+    return ChatAbortRequest.model_validate(
+        {
+            "id": "abort-1",
+            "session_id": "session-abort-1",
+            "bcn_group_id": "group-1",
+            "method": "chat.abort",
+            "to_bot": {"provider_id": "baas", "provider_bot_ref": "bot-1"},
+        }
+    )
+
+
+def test_chat_abort_is_registered_on_json_downlink() -> None:
+    """chat.abort is registered in _METHOD_DISPATCH with ChatAbortRequest."""
+    request_model, dispatcher = _METHOD_DISPATCH["chat.abort"]
+
+    assert request_model is ChatAbortRequest
+    assert dispatcher is _dispatch_chat_abort
+
+
+def test_chat_abort_request_omits_send_inject_fields() -> None:
+    """ChatAbortRequest must not carry message/timeout_ms/from_/attachments."""
+    fields = ChatAbortRequest.model_fields
+
+    for forbidden in ("message", "timeout_ms", "from_", "attachments"):
+        assert forbidden not in fields, (
+            f"chat.abort must omit {forbidden}, got field {forbidden}"
+        )
+    for required in ("id", "session_id", "bcn_group_id", "method", "to_bot"):
+        assert required in fields, f"chat.abort must include {required}"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_chat_abort_success_returns_aborted_run_ids() -> None:
+    """_dispatch_chat_abort maps ChatAbortResult to ChatAbortSuccessResponse."""
+    captured = {}
+
+    class _CapturingService:
+        async def handle_chat_abort(self, input_):
+            captured["input"] = input_
+            return ChatAbortResult(aborted=True, aborted_run_ids=["run-a", "run-b"])
+
+    response = await _dispatch_chat_abort(_chat_abort_request(), _CapturingService())
+
+    assert response.ok is True
+    assert response.aborted is True
+    assert response.aborted_run_ids == ["run-a", "run-b"]
+    input_ = captured["input"]
+    assert input_.id == "abort-1"
+    assert input_.session_id == "session-abort-1"
+    assert input_.bcn_group_id == "group-1"
+    assert input_.to_bot.provider_id == "baas"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_chat_abort_no_run_returns_aborted_false() -> None:
+    """When service returns aborted=False, response mirrors it (no-run case)."""
+
+    class _NoRunService:
+        async def handle_chat_abort(self, input_):
+            return ChatAbortResult(aborted=False, aborted_run_ids=[])
+
+    response = await _dispatch_chat_abort(_chat_abort_request(), _NoRunService())
+
+    assert response.ok is True
+    assert response.aborted is False
+    assert response.aborted_run_ids == []
+
+
+@pytest.mark.asyncio
+async def test_dispatch_chat_abort_propagates_run_terminated_error() -> None:
+    """BcnRunTerminatedError (410) propagates to bcn_exception_handler unchanged."""
+
+    class _TerminatedService:
+        async def handle_chat_abort(self, input_):
+            raise BcnRunTerminatedError(input_.session_id)
+
+    with pytest.raises(BcnRunTerminatedError) as exc_info:
+        await _dispatch_chat_abort(_chat_abort_request(), _TerminatedService())
+
+    assert exc_info.value.http_status == 410
+    assert exc_info.value.error_code == "run_terminated"
+    assert exc_info.value.retryable is False

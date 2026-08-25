@@ -353,3 +353,37 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
             if now > deadline:
                 result.append(row.to_record())
         return result
+
+    @with_orm_session
+    def find_running_by_session(self, session_id: str) -> list[BotRunQueueRecord]:
+        """按 session_id 查询所有未终结（PENDING/RUNNING）的工作项。"""
+        if not session_id:
+            return []
+        rows = (
+            self._session.query(BotRunQueueModel)
+            .filter(
+                BotRunQueueModel.session_id == session_id,
+                BotRunQueueModel.status.in_(("PENDING", "RUNNING")),
+                BotRunQueueModel.env == get_current_env(),
+            )
+            .order_by(BotRunQueueModel.gmt_create.asc())
+            .all()
+        )
+        return [row.to_record() for row in rows]
+
+    @with_orm_session
+    def find_terminal_by_session(self, session_id: str) -> list[BotRunQueueRecord]:
+        """按 session_id 查询所有已终结（DONE）的队列工作项。"""
+        if not session_id:
+            return []
+        rows = (
+            self._session.query(BotRunQueueModel)
+            .filter(
+                BotRunQueueModel.session_id == session_id,
+                BotRunQueueModel.status == "DONE",
+                BotRunQueueModel.env == get_current_env(),
+            )
+            .order_by(BotRunQueueModel.gmt_create.asc())
+            .all()
+        )
+        return [row.to_record() for row in rows]

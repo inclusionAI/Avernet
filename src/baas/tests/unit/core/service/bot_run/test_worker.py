@@ -1012,3 +1012,189 @@ def test_limiter_rebuilt_when_qpm_changes(repo, queue):
     assert limiter2 is not limiter1
     assert limiter2._min_interval == 0.0
     assert limiter2.capacity == 10
+
+
+# ── abort_runs_by_session (chat.abort 接入面) tests ───────────────
+
+
+def _insert_with_session(
+    repo: OrmBotRunRepository,
+    queue: OrmBotRunQueueRepository,
+    bot_id: str,
+    session_id: str,
+) -> str:
+    """双写并显式设置 queue.session_id（chat.abort 按 session 查询需要）。"""
+    run_id = uuid4().hex
+    repo.insert_run(
+        run_id=run_id,
+        bot_id=bot_id,
+        api_key_prefix="sk-",
+        message_long="m",
+        metadata=None,
+    )
+    queue.insert_queue(run_id=run_id, bot_id=bot_id, session_id=session_id)
+    return run_id
+
+
+async def test_abort_runs_by_session_marks_failed_force_done_and_cancels_local_task(
+    repo, queue
+):
+    """RUNNING run -> update_error(FAILED) + force_done + cancel 本机 task."""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+    claimed = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+    assert claimed is not None and claimed.run_id == run_id
+
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def fake_run():
+        started.set()
+        try:
+            await asyncio.sleep(999)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    task = asyncio.create_task(fake_run())
+    await started.wait()
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex, run_repository=repo)
+    worker._running_tasks[run_id] = task
+
+    outcome = await worker.abort_runs_by_session("sess-abort")
+
+    await asyncio.sleep(0)  # let CancelledError propagate
+    assert outcome.aborted_run_ids == [run_id]
+    assert outcome.had_terminal is False
+    assert cancelled.is_set(), "local task must be cancelled"
+    assert repo.get_by_run_id(run_id).status == "FAILED"
+    assert queue.get_by_run_id(run_id).status == "DONE"
+    # idempotent: aborted run no longer in find_running_by_session
+    assert worker._queue.find_running_by_session("sess-abort") == []
+
+
+async def test_abort_runs_by_session_pending_record_marked_failed(repo, queue):
+    """PENDING record (not yet claimed) is also aborted (mark FAILED + force_done)."""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex, run_repository=repo)
+
+    outcome = await worker.abort_runs_by_session("sess-abort")
+
+    assert outcome.aborted_run_ids == [run_id]
+    assert repo.get_by_run_id(run_id).status == "FAILED"
+    assert queue.get_by_run_id(run_id).status == "DONE"
+
+
+async def test_abort_runs_by_session_no_run_record_returns_aborted_false(repo, queue):
+    """Session with no run record -> aborted:false, had_terminal:false."""
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex, run_repository=repo)
+
+    outcome = await worker.abort_runs_by_session("no-such-session")
+
+    assert outcome.aborted_run_ids == []
+    assert outcome.had_terminal is False
+
+
+async def test_abort_runs_by_session_terminal_record_had_terminal_true(repo, queue):
+    """No abortable run but DONE record exists -> aborted_run_ids empty, had_terminal True."""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+    claimed = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+    assert claimed is not None and claimed.run_id == run_id
+    assert queue.mark_done(run_id, "worker-1") == 1
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex, run_repository=repo)
+
+    outcome = await worker.abort_runs_by_session("sess-abort")
+
+    assert outcome.aborted_run_ids == []
+    assert outcome.had_terminal is True
+
+
+async def test_abort_runs_by_session_empty_session_returns_empty(repo, queue):
+    """Empty session_id short-circuits to empty outcome."""
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex, run_repository=repo)
+
+    outcome = await worker.abort_runs_by_session("")
+
+    assert outcome.aborted_run_ids == []
+    assert outcome.had_terminal is False
+
+
+async def test_abort_runs_by_session_engine_notifier_best_effort(repo, queue):
+    """engine_abort_notifier is awaited once per session; failure is logged, not raised."""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+
+    notified = asyncio.Event()
+
+    async def notifier(session_id: str, rid: str | None) -> None:
+        assert session_id == "sess-abort"
+        assert rid == run_id
+        notified.set()
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(
+        queue, repo, ex, run_repository=repo, engine_abort_notifier=notifier
+    )
+
+    outcome = await worker.abort_runs_by_session("sess-abort")
+
+    assert outcome.aborted_run_ids == [run_id]
+    assert notified.is_set()
+
+
+async def test_abort_runs_by_session_engine_notifier_error_swallowed(repo, queue):
+    """engine_abort_notifier raising must not fail the abort."""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+
+    async def notifier(session_id: str, rid: str | None) -> None:
+        raise RuntimeError("engine notify boom")
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(
+        queue, repo, ex, run_repository=repo, engine_abort_notifier=notifier
+    )
+
+    outcome = await worker.abort_runs_by_session("sess-abort")
+
+    assert outcome.aborted_run_ids == [run_id]
+    assert repo.get_by_run_id(run_id).status == "FAILED"
+    assert queue.get_by_run_id(run_id).status == "DONE"
+
+
+async def test_abort_runs_by_session_without_run_repo_skips_update_error(repo, queue):
+    """When run_repository is None, abort still force_done + cancel (best-effort)."""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+    claimed = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+    assert claimed is not None and claimed.run_id == run_id
+
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def fake_run():
+        started.set()
+        try:
+            await asyncio.sleep(999)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    task = asyncio.create_task(fake_run())
+    await started.wait()
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    # run_repository NOT passed -> defaults None
+    worker = _worker(queue, repo, ex)
+    worker._running_tasks[run_id] = task
+
+    outcome = await worker.abort_runs_by_session("sess-abort")
+
+    await asyncio.sleep(0)
+    assert outcome.aborted_run_ids == [run_id]
+    assert cancelled.is_set()
+    assert queue.get_by_run_id(run_id).status == "DONE"

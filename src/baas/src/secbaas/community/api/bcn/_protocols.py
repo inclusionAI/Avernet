@@ -11,6 +11,8 @@ from secbaas.community.api.sse import StreamChunk
 from ._models import (
     BcnInteractionResolveInput,
     BcnInteractionResolveResult,
+    ChatAbortInput,
+    ChatAbortResult,
     ChatHistoryInput,
     ChatHistoryResult,
     ChatInjectInput,
@@ -121,4 +123,27 @@ class BcnDownlinkService(Protocol):
         self, resolve_input: BcnInteractionResolveInput
     ) -> BcnInteractionResolveResult:
         """Persist a BCN interaction answer for the Engine websocket owner."""
+        ...
+
+    async def handle_chat_abort(
+        self, chat_abort_input: ChatAbortInput
+    ) -> ChatAbortResult:
+        """处理 chat.abort 请求
+
+        BCN 请求中止某 session 下运行中的 run。Provider 应：
+        1. 按 session_id 定位 RUNNING/PENDING 的 run；
+        2. 取消本机正在执行的 task、标记 run 终态（FAILED）、终结队列工作项；
+        3. 出站通知 engine（best-effort）；
+        4. 幂等：run 已终态时抛 ``BcnRunTerminatedError`` (410)，重复 abort 稳定 410；
+           session 无任何 run 记录时返回 ``{aborted: False, aborted_run_ids: []}``。
+
+        Args:
+            chat_abort_input: chat.abort 请求的领域输入
+
+        Returns:
+            ChatAbortResult: 是否取消及被取消的 run_id 列表
+
+        Raises:
+            BcnRunTerminatedError: session 下 run 已为终态
+        """
         ...

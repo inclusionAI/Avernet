@@ -217,6 +217,7 @@ Common error codes:
 | `provider_id_mismatch` | 403 | false | Provider ID does not match. |
 | `bot_not_found` | 404 | false | Bot is not registered or cannot be routed. |
 | `conflict` | 409 | false | Same idempotency key but different request body. |
+| `run_terminated` | 410 | false | `chat.abort` targets a run that is already terminal (COMPLETED/FAILED/TIME_OUT/aborted). Repeating `chat.abort` on the same terminal run stably returns 410. |
 | `rate_limited` | 429 | true | Provider applies backpressure. |
 | `unsupported_method` | 501 | false | Unsupported `method`. |
 | `unavailable` | 503 | true | Provider is temporarily unavailable. |
@@ -237,6 +238,20 @@ same task more than once.
 The Provider should maintain session context by `(provider_bot_ref,
 session_id)`. `chat.inject` must write context but must not trigger bot
 reasoning.
+
+### `chat.abort` response
+
+`chat.abort` cancels running tasks for the given `session_id` on a best-effort
+basis. The response shape:
+
+| Session state | HTTP | Body |
+| --- | --- | --- |
+| Has RUNNING/PENDING run(s) | 200 | `{"ok": true, "aborted": true, "aborted_run_ids": ["..."]}` |
+| No abortable run but terminal run record exists | 410 | `{"ok": false, "error": {"code": "run_terminated", "message": "...", "retryable": false}}` |
+| No run record for the session | 200 | `{"ok": true, "aborted": false, "aborted_run_ids": []}` |
+
+`body.id` is the idempotency key. Repeating `chat.abort` on the same terminal run
+stably returns 410 `run_terminated` without side effects.
 
 ## Integration checklist
 
