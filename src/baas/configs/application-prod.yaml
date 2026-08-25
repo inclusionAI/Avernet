@@ -15,11 +15,11 @@ module_config:
 user_config:
   # 插件配置
   plugins:
-    auth: "stub"
+    auth: "oauth"
     secret: "env"
     cache: "redis"
-    bot_service: "stub"
-    engine_adapter: "stub"
+    bot_service: "real"
+    engine_adapter: "real"
     file_transfer: "stub"
     database: "mariadb"
     sandbox:
@@ -58,8 +58,8 @@ user_config:
       nas-server: "${NAS_SERVER}"
 
   bot_service:
-    proxy_base_url: "https://bot_service.example.com"
-    proxy_ws_base_url: "wss://bot_service.example.com"
+    proxy_base_url: "${BOT_SERVICE_PROXY_BASE_URL:-https://backend.avernet-inc.com}"
+    proxy_ws_base_url: "${BOT_SERVICE_PROXY_WS_BASE_URL:-wss://backend.avernet-inc.com}"
     adapter_port: 20003
     ws_path: "/api/openclaw/ws"
     connect_timeout: 10
@@ -79,12 +79,12 @@ user_config:
     enabled: false                    # 是否启用队列 Worker
 
   teamclaw:
-    base_url: "https://teamclaw.example.com"
+    base_url: "${TEAMCLAW_BASE_URL:-https://teamclaw.example.com}"
     timeout: 30
 
   # OAuth 客户端配置
   oauth:
-    base_url: "https://oauth.example.com"
+    base_url: "${OAUTH_BASE_URL:-https://oauth.example.com}"
 
   # 设备 TTL 定时器配置（每 30 分钟扫描整个到期队列并续期+探活）
   device_ttl_timer:
@@ -124,21 +124,21 @@ user_config:
       target_ttl_hours: 24             # 续期目标 TTL（小时）
 
   bot_chat_log_relation:
-    base_url: "https://backend.example.com"
+    base_url: "${BOT_CHAT_LOG_RELATION_BASE_URL:-https://backend.avernet-inc.com}"
     timeout: 10
     max_retries: 0
 
   agentclawproxy:
     host:
-      dev: "agentclawproxy-dev.example.com"
-      pre: "agentclawproxy-pre.example.com"
-      prod: "agentclawproxy-prod.example.com"
+      dev: "${PROXY_HOST_DEV:-proxy-dev.avernet-inc.com}"
+      pre: "${PROXY_HOST_PRE:-proxy-pre.avernet-inc.com}"
+      prod: "${PROXY_HOST_PROD:-proxy.avernet-inc.com}"
 
   poolab:
     endpoint:
-      dev: "https://poolab-dev.example.com"
-      pre: "https://poolab-pre.example.com"
-      prod: "https://poolab-prod.example.com"
+      dev: "${POOLAB_ENDPOINT_DEV:-https://poolab-dev.example.com}"
+      pre: "${POOLAB_ENDPOINT_PRE:-https://poolab-pre.example.com}"
+      prod: "${POOLAB_ENDPOINT_PROD:-https://poolab-prod.example.com}"
 
 # File transfer OSS storage backend configuration (enterprise/prod deployments only)
   file_transfer_oss:
@@ -151,9 +151,9 @@ user_config:
   secbaas:
     callback:
       host:
-        dev: "https://secbaas-dev.example.com"
-        pre: "https://secbaas-pre.example.com"
-        prod: "https://secbaas-prod.example.com"
+        dev: "${BAAS_CALLBACK_HOST_DEV:-https://baas-dev.avernet-inc.com}"
+        pre: "${BAAS_CALLBACK_HOST_PRE:-https://baas-pre.avernet-inc.com}"
+        prod: "${BAAS_CALLBACK_HOST_PROD:-https://baas.avernet-inc.com}"
 
   api_gateway:
     admin_operators:
@@ -164,4 +164,4 @@ user_config:
 
   env:
     # 用于探测当前部署环境的环境变量名称
-    deploy_env_var: "ALI_YUN_ACK"
+    deploy_env_var: "DEPLOY_ENV"
