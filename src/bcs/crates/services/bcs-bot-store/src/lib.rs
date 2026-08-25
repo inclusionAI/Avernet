@@ -1379,11 +1379,7 @@ impl BotRepoPort for PersistentBotRepo {
         let exists_in_db = self.exists_in_db(bot_id).await;
         if exists_in_db {
             self.save_to_db(bot_id, &capabilities, session_token.as_deref(), None)
-                .await
-                .map_err(|e| {
-                    warn!(bot_id = %bot_id, error = %e, "Failed to save bot to database during update_capabilities");
-                    e
-                })?;
+                .await?;
         }
 
         // Wholesale in-memory replacement (no `is_empty` skip, unlike
