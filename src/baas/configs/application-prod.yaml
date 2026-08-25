@@ -10,7 +10,7 @@ log_config:
 # 中间件配置总览
 module_config:
   web:
-    port: 80
+    port: 8080
 
 user_config:
   # 插件配置
