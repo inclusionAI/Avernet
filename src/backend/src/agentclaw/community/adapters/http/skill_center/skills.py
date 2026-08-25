@@ -131,14 +131,8 @@ from agentclaw.community.api.runtime_layout_probe_service import (
     RuntimeLayoutProbeStatus,
 )
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
-from agentclaw.community.api.skill_set_activator_factory import (
-    SkillSetActivatorFactoryProtocol,
-)
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
-)
-from agentclaw.community.api.skill_set_switcher_factory import (
-    SkillSetSwitcherFactoryProtocol,
 )
 from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
 from agentclaw.community.api.repository_catalog_service import (
@@ -1080,34 +1074,42 @@ async def get_current_skill_set(
     ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    switcher_factory: SkillSetSwitcherFactoryProtocol = Injected(
-        SkillSetSwitcherFactoryProtocol
+    control_plane: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> CurrentSkillSetResponse:
     """[DEPRECATED] Get the currently active skill set.
 
     请使用 GET /skillset/active 获取所有激活的能力集列表。
     此接口将在未来版本中移除。
+
+    Multiple Sets activate independently now; this wire's "the current
+    Set" is answered as the first ordinary active Set, else null.
     """
-    # Get effective path parameters
     (
         effective_entity_id,
         effective_bot_id,
-        effective_engine,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop,
+        _effective_engine,
+        _runtime_engine,
+        _effective_entity_type,
+        _is_desktop,
     ) = _get_path_params(
         ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
     )
 
-    switcher = switcher_factory.create(
-        entity_id=effective_entity_id,
+    sets = control_plane.list_sets(
         bot_id=effective_bot_id,
-        engine_type=effective_engine,
+        owner_id=effective_entity_id,
+        user_id=ctx.user_id or effective_entity_id,
     )
-    current = switcher.get_current_skill_set()
-
+    current = next(
+        (
+            item
+            for item in sets
+            if item.get("is_active") and not item.get("is_default")
+        ),
+        None,
+    )
     return CurrentSkillSetResponse(success=True, data=current)
 
 
@@ -1179,9 +1181,6 @@ async def activate_skill_set(
     request: ActivateSkillSetRequest,
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    activator_factory: SkillSetActivatorFactoryProtocol = Injected(
-        SkillSetActivatorFactoryProtocol
-    ),
     control_plane: SkillSetManagementServiceProtocol = Injected(
         SkillSetManagementServiceProtocol
     ),
@@ -1238,9 +1237,6 @@ async def deactivate_skill_set(
     request: DeactivateSkillSetRequest,
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    activator_factory: SkillSetActivatorFactoryProtocol = Injected(
-        SkillSetActivatorFactoryProtocol
-    ),
     control_plane: SkillSetManagementServiceProtocol = Injected(
         SkillSetManagementServiceProtocol
     ),

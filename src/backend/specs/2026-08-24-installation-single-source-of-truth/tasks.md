@@ -170,7 +170,7 @@ lands in the same group as the migration of its last caller.
 - [x] 9.1 UoW `deactivate_all_sets` + `SkillSetManagementService.deactivate_all`;
       route `/api/skills/deactivate-all` through it (response shape kept);
       update `tests/community/_flows/skill_center/api_lifecycle.py`.
-- [ ] 9.2 Reimplement deprecated `/api/skills/skillset/current` from
+- [x] 9.2 Reimplement deprecated `/api/skills/skillset/current` from
       `list_sets` (first ordinary active Set, else `None`).
 - [ ] 9.3 Delete the dead data-init activation step mechanically
       (`_activate_and_sync_skill_sets` call site + method + activator ctor

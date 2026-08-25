@@ -219,7 +219,6 @@ async def test_legacy_deactivate_recovers_non_default_bot_from_exact_set_id() ->
         DeactivateSkillSetRequest(skill_set_id="set-1"),
         ctx=SimpleNamespace(user_id="owner", bot_id="default"),
         bot_repo=_AddressedBots(),
-        activator_factory=object(),
         control_plane=control_plane,
     )
 
