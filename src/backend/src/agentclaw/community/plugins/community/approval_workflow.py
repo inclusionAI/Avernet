@@ -12,11 +12,12 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from agentclaw.community.plugin_api.approval_workflow import (
+    NO_WORKFLOW_MARKER,
     ApprovalWorkflowPlugin,
     DEFAULT_PROCESS_CODE,
 )
 
-_NO_WORKFLOW = "no approval workflow in the community build"
+_NO_WORKFLOW = NO_WORKFLOW_MARKER + "no approval workflow in the community build"
 
 
 class NoApprovalWorkflow(ApprovalWorkflowPlugin):

@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.approval_workflow import (
+    NO_WORKFLOW_MARKER,
     ApprovalWorkflowPlugin,
     DEFAULT_PROCESS_CODE,
 )
@@ -31,7 +32,7 @@ _LOCAL_NOT_STARTED: dict[str, Any] = {
     "approval_url": None,
     "state": None,
     "lastOperate": None,
-    "error_msg": "local mode — antprocess unavailable",
+    "error_msg": NO_WORKFLOW_MARKER + "local mode — antprocess unavailable",
 }
 
 
