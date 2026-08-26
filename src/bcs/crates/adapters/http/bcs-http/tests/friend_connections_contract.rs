@@ -80,6 +80,7 @@ impl ConnectService for RecordingConnectService {
         caller: &str,
         to_bot: &str,
         message: Option<String>,
+        _: Option<bcs_service_api::RequestAuthHeaders>,
     ) -> ServiceResult<ConnectResult> {
         self.create_commands
             .lock()

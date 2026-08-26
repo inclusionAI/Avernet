@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use bcs_domain::edge_permission::{FriendListEntry, PermissionRequest, RequestStatus};
 
 use crate::core::error::ServiceResult;
+use crate::principal::RequestAuthHeaders;
 
 /// Outcome of `create_connect`. Mirrors `POST /friends/request` response.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +54,7 @@ pub trait ConnectService: Send + Sync {
         caller: &str,
         to_bot: &str,
         message: Option<String>,
+        request_auth: Option<RequestAuthHeaders>,
     ) -> ServiceResult<ConnectResult>;
 
     /// Owner (or auto) approves; same-tx builds edge(s) + back-fills request.edge_id.

@@ -8,7 +8,6 @@ use bcs_service_api::port::{
 };
 use bcs_service_api::{ServiceError, ServiceResult};
 use serde::Serialize;
-use tracing::warn;
 
 const WORK_ORDER_PATH: &str = "/openapi/v1/bots/work-orders/events";
 
@@ -51,6 +50,25 @@ impl HttpFriendConnectNotificationPort {
         })?;
         url.query_pairs_mut().append_pair("user_id", user_id);
         Ok(url)
+    }
+
+    fn build_request(
+        &self,
+        command: &FriendConnectNotificationCommand,
+    ) -> Result<reqwest::RequestBuilder, ServiceError> {
+        let user_id = event_actor_user_id(command);
+        let url = self.work_order_url(&user_id)?;
+        let payload = FriendWorkOrderEventRequest::from_command(command);
+        let mut request = self.client.post(url);
+        if let Some(auth) = command.request_auth.as_ref() {
+            if let Some(cookie) = auth.cookie.as_deref() {
+                request = request.header(reqwest::header::COOKIE, cookie);
+            }
+            if let Some(authorization) = auth.authorization.as_deref() {
+                request = request.header(reqwest::header::AUTHORIZATION, authorization);
+            }
+        }
+        Ok(request.json(&payload))
     }
 }
 
@@ -143,10 +161,6 @@ fn notification_kind_label(kind: FriendConnectNotificationKind) -> &'static str 
     }
 }
 
-fn backend_auth_rejection(status: reqwest::StatusCode) -> bool {
-    matches!(status, reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN)
-}
-
 fn title_for(kind: FriendConnectNotificationKind) -> &'static str {
     match kind {
         FriendConnectNotificationKind::ApprovalRequested => "好友添加申请待审批",
@@ -223,13 +237,8 @@ impl FriendConnectNotificationPort for HttpFriendConnectNotificationPort {
         if command.recipient_user_ids.is_empty() {
             return Ok(());
         }
-        let user_id = event_actor_user_id(&command);
-        let url = self.work_order_url(&user_id)?;
-        let payload = FriendWorkOrderEventRequest::from_command(&command);
         let response = self
-            .client
-            .post(url)
-            .json(&payload)
+            .build_request(&command)?
             .send()
             .await
             .map_err(|error| ServiceError::InternalError(format!(
@@ -240,14 +249,6 @@ impl FriendConnectNotificationPort for HttpFriendConnectNotificationPort {
         }
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        if backend_auth_rejection(status) {
-            warn!(
-                status = %status,
-                body = %body,
-                "friend work-order backend rejected the request; treating notification as no-op"
-            );
-            return Ok(());
-        }
         Err(ServiceError::InternalError(format!(
             "friend work-order create request returned {status}: {body}"
         )))
@@ -276,9 +277,37 @@ mod tests {
                 target_bot_id: "bot_2001".to_string(),
                 recipient_user_ids: Vec::new(),
                 message: Some("ignored".to_string()),
+                request_auth: None,
             })
             .await
             .expect("empty recipients should short-circuit");
+    }
+
+    #[test]
+    fn builds_request_with_forwarded_auth_headers() {
+        let adapter = HttpFriendConnectNotificationPort::new("https://backend.example.com/api/")
+            .expect("valid url");
+        let request_auth = bcs_service_api::RequestAuthHeaders {
+            authorization: Some("Bearer user-token".to_string()),
+            cookie: Some("session=abc".to_string()),
+        };
+        let request = adapter
+            .build_request(&FriendConnectNotificationCommand {
+                kind: FriendConnectNotificationKind::ApprovalRequested,
+                env: "dev".to_string(),
+                request_ids: vec!["1".to_string()],
+                applicant_actor_id: "human_1001".to_string(),
+                target_bot_id: "bot_2001".to_string(),
+                recipient_user_ids: vec!["user_2001".to_string()],
+                message: Some("please add me".to_string()),
+                request_auth: Some(request_auth.clone()),
+            })
+            .expect("build request")
+            .build()
+            .expect("materialize request");
+        assert_eq!(request.url().as_str(), "https://backend.example.com/openapi/v1/bots/work-orders/events?user_id=1001");
+        assert_eq!(request.headers().get(reqwest::header::AUTHORIZATION).and_then(|value| value.to_str().ok()), Some("Bearer user-token"));
+        assert_eq!(request.headers().get(reqwest::header::COOKIE).and_then(|value| value.to_str().ok()), Some("session=abc"));
     }
 
     #[tokio::test]
@@ -299,16 +328,10 @@ mod tests {
                 target_bot_id: "bot_2001".to_string(),
                 recipient_user_ids: vec!["user_2001".to_string()],
                 message: Some("please add me".to_string()),
+                request_auth: None,
             })
             .await;
         assert!(matches!(result, Err(ServiceError::InternalError(message)) if message.contains("friend work-order create request failed")));
-    }
-
-    #[test]
-    fn backend_unauthorized_and_forbidden_are_treated_as_noop() {
-        assert!(backend_auth_rejection(reqwest::StatusCode::UNAUTHORIZED));
-        assert!(backend_auth_rejection(reqwest::StatusCode::FORBIDDEN));
-        assert!(!backend_auth_rejection(reqwest::StatusCode::BAD_REQUEST));
     }
 
     #[test]
@@ -321,6 +344,7 @@ mod tests {
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
             message: Some("please add me".to_string()),
+            request_auth: None,
         });
 
         assert_eq!(payload.event_category, "APPROVAL");
@@ -358,6 +382,7 @@ mod tests {
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
             message: None,
+            request_auth: None,
         });
 
         assert_eq!(payload.event_category, "NOTICE");
@@ -378,6 +403,7 @@ mod tests {
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
             message: Some("bot-to-bot".to_string()),
+            request_auth: None,
         });
 
         assert_eq!(payload.event_category, "APPROVAL");
@@ -403,6 +429,7 @@ mod tests {
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
             message: Some("handled".to_string()),
+            request_auth: None,
         });
 
         assert_eq!(payload.event_category, "NOTICE");
@@ -439,6 +466,7 @@ mod tests {
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
             message: None,
+            request_auth: None,
         };
         assert_eq!(event_actor_user_id(&pending), "1001");
 
@@ -450,6 +478,7 @@ mod tests {
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
             message: None,
+            request_auth: None,
         };
         assert_eq!(event_actor_user_id(&notice), "user_2001");
     }
