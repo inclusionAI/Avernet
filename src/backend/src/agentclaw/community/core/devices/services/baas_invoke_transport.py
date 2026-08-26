@@ -20,38 +20,19 @@ docs/superpowers/specs/2026-06-17-baas-transport-bot-type-strategy-design.md
 """
 from __future__ import annotations
 
-import threading
-import time
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import httpx
 
+from agentclaw.community.core.devices.services.baas_http_info import (
+    PROXYPASS_AUTH_HEADER,
+    SharedHttpInfo,
+)
+
 if TYPE_CHECKING:
-    from agentclaw.community.core.service_bot.services.baas_service import (
-        BaasService,
-        HttpConnectionInfo,
-    )
+    from agentclaw.community.core.service_bot.services.baas_service import BaasService
 
 
-# BaaS mints ``http_url`` + ``token`` per (bind_id, port, path). A package upload
-# POSTs every file to the SAME path (``/api/file/upload``), so one resolution serves
-# the whole batch; resolving per file cost a binding DB lookup plus a BaaS round trip
-# each, doubling the request count of every multi-file write. This TTL keeps a reused
-# token comfortably inside its lifetime, and a token that expires anyway is recovered
-# by the refresh-and-retry in :meth:`BaasInvokeTransport._invoke`.
-_HTTP_INFO_TTL_SECONDS = 30.0
-
-# The proxypass gateway answers 401 when it rejects the token it was handed — the one
-# verdict that means "this cached http_info is no longer usable".
-#
-# 403 is deliberately excluded. It does not identify a token problem: the engine's file
-# router maps ``PermissionError`` to 403 (``engine/community/api/file/router.py``) and
-# the proxy forwards upstream responses through unchanged
-# (``sandboxproxy/community/adapters/web/routes.py``), so a 403 is the device's own
-# authorization answer. Replaying it would re-run a mutating upload/delete and, with no
-# ``device_uuid`` pinning the instance, possibly run it against a *different* device —
-# while hiding the engine's actual verdict from the caller.
-_STALE_TOKEN_STATUS = 401
 
 
 def build_desktop_client() -> httpx.Client:
@@ -102,9 +83,9 @@ class BaasInvokeTransport:
     适用云上 baas 容器(未来 personal+baas / service+baas)。
 
     Resolution (``get_http_info``) is cached per path for the life of this
-    instance — see :meth:`_http_info`. The resolver builds one transport per
-    dispatch, so that lifetime is a single request and there is no cross-request
-    staleness to reason about.
+    instance by the shared :class:`SharedHttpInfo`. The resolver builds one
+    transport per dispatch, so that lifetime is a single request and there is no
+    cross-request staleness to reason about.
     """
 
     def __init__(
@@ -116,94 +97,30 @@ class BaasInvokeTransport:
         baas_service: "BaasService",
         device_uuid: str | None = None,
     ):
-        self._bind_id = bind_id
-        self._engine_port = engine_port
-        self._tenant = tenant
-        self._baas_service = baas_service
+        # 云上 baas 容器经 agentclawproxy ``/proxypass`` 网关访问，网关用
+        # ``x-proxypass-token`` 鉴权（与 teclaw/arca 同一网关）；不传则默认
+        # ``openclawToken``，proxypass 网关会 401。``info.token`` 即网关 token，
+        # 仅 header 名不同。
+        #
         # 多实例 service bot 场景，caller 通过 device_uuid 锁定具体实例；透传给
         # invoke_http → get_http_info → BaaS /http-info?device_uuid=。``None`` 表示
         # 单实例 / 未指定，走 BaaS 自动选活跃实例的老行为。
-        self._device_uuid = device_uuid
-        # Guards the cache against the worker threads ``asyncio.to_thread`` fans
-        # device I/O out across. Deliberately held across the ``get_http_info``
-        # call itself, so a batch of concurrent writes coalesces onto ONE
-        # resolution instead of every thread missing the cache and resolving its
-        # own — the whole point of caching here.
-        self._http_info_lock = threading.Lock()
-        self._http_info_cache: dict[str, tuple[float, "HttpConnectionInfo"]] = {}
-
-    def _http_info(
-        self, path: str, *, stale: "HttpConnectionInfo | None" = None
-    ) -> "HttpConnectionInfo":
-        """Resolve ``http_info`` for ``path``, reusing a fresh cached one.
-
-        Keyed by ``path`` alone because every other input BaaS resolves against
-        (``bind_id`` / ``engine_port`` / ``tenant`` / ``device_uuid``) is fixed for
-        this instance. Path must stay in the key: the returned ``http_url`` embeds
-        it, so reusing one path's entry for another would POST to the wrong route.
-
-        ``stale`` names the entry the caller was just rejected on, which makes a
-        refresh a compare-and-swap: it re-resolves only while the cache still holds
-        that exact entry, and otherwise hands back whatever replaced it. An
-        unconditional refresh would resolve once per in-flight request when a
-        concurrent batch is rejected together — reinstating, on the failure path,
-        the very per-file fan-out this cache exists to remove.
-        """
-        with self._http_info_lock:
-            cached = self._http_info_cache.get(path)
-            if (
-                cached is not None
-                and cached[0] > time.monotonic()
-                and cached[1] is not stale
-            ):
-                return cached[1]
-            info = self._baas_service.get_http_info(
-                bind_id=self._bind_id,
-                port=self._engine_port,
-                path=path,
-                tenant=self._tenant,
-                device_uuid=self._device_uuid,
-            )
-            self._http_info_cache[path] = (
-                time.monotonic() + _HTTP_INFO_TTL_SECONDS,
-                info,
-            )
-            return info
+        self._http_info = SharedHttpInfo(
+            baas_service=baas_service,
+            bind_id=bind_id,
+            engine_port=engine_port,
+            tenant=tenant,
+            device_uuid=device_uuid,
+            auth_header=PROXYPASS_AUTH_HEADER,
+        )
 
     def _invoke(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        """Issue one container call against this transport's cached ``http_info``.
+        """Issue one container call against this transport's shared resolution.
 
-        Retries once against a re-resolved ``http_info`` when the gateway answers
-        401: a cached token can expire (or its device be reallocated) mid-batch, and
-        a caller must never see a spurious auth failure caused by this cache
-        choosing to reuse a token. Replay is safe because every payload we send is
-        already materialised (``json`` dicts, ``files`` bytes) rather than a consumed
-        stream. A genuine misconfiguration simply fails twice.
-
-        Every other status — 403 included, see :data:`_STALE_TOKEN_STATUS` — is the
-        device's own answer and is returned untouched.
+        Resolution, its TTL and the refresh-and-retry on a rejected token all live
+        in :class:`SharedHttpInfo`, which the teclaw filesystem shares.
         """
-        call = dict(
-            bind_id=self._bind_id,
-            port=self._engine_port,
-            path=path,
-            method=method,
-            tenant=self._tenant,
-            # 云上 baas 容器经 agentclawproxy ``/proxypass`` 网关访问，网关用
-            # ``x-proxypass-token`` 鉴权（与 teclaw/arca 同一网关）；不传则默认
-            # ``openclawToken``，proxypass 网关会 401。``info.token`` 即网关 token，
-            # 仅 header 名不同。
-            auth_header="x-proxypass-token",
-            device_uuid=self._device_uuid,
-            **kwargs,
-        )
-        info = self._http_info(path)
-        response = self._baas_service.invoke_http(**call, http_info=info)
-        if response.status_code == _STALE_TOKEN_STATUS:
-            return self._baas_service.invoke_http(
-                **call, http_info=self._http_info(path, stale=info)
-            )
-        return response
+        return self._http_info.invoke(method, path, **kwargs)
 
     def post(self, path: str, *, json: Any | None = None) -> httpx.Response:
         return self._invoke("POST", path, json=json)

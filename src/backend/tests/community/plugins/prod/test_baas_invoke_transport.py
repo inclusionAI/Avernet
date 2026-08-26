@@ -470,14 +470,14 @@ def test_concurrent_rejections_share_one_refresh():
         bind_id=42, engine_port=20003, tenant="team_claw", baas_service=svc
     )
     # prime the cache so every worker starts from the same (about to be rejected) entry
-    primed = transport._http_info("/api/file/upload")
+    primed = transport._http_info.resolve("/api/file/upload")
     assert svc.get_http_info.call_count == 1
 
     barrier = threading.Barrier(8)
 
     def refresh_once():
         barrier.wait()
-        transport._http_info("/api/file/upload", stale=primed)
+        transport._http_info.resolve("/api/file/upload", stale=primed)
 
     workers = [threading.Thread(target=refresh_once) for _ in range(8)]
     for w in workers:
@@ -491,11 +491,12 @@ def test_concurrent_rejections_share_one_refresh():
 
 def test_expired_http_info_cache_entry_is_re_resolved(monkeypatch):
     """TTL 过期后重新解析，避免长批次里一直用老 token。"""
-    import agentclaw.community.core.devices.services.baas_invoke_transport as mod
+    import agentclaw.community.core.devices.services.baas_http_info as mod
+    from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
 
     svc = MagicMock()
     svc.invoke_http.return_value = _ok_response()
-    transport = mod.BaasInvokeTransport(
+    transport = BaasInvokeTransport(
         bind_id=42, engine_port=20003, tenant="team_claw", baas_service=svc
     )
 

@@ -24,6 +24,12 @@ auth_header="x-proxypass-token")``, which resolves the proxypass ``http_url`` +
 proxy token via ``get_http_info`` (from the teclaw ``conn_info``'s ``bind_id`` +
 ``engine_port`` + ``tenant``). ``invoke_http`` is synchronous, so calls run on a
 thread.
+
+That resolution is shared across calls by :class:`SharedHttpInfo`, the same seam
+:class:`BaasDeviceFileSystem`'s transport uses. It matters most here: callers
+write a Skill package by fanning its files out concurrently, so resolving per
+file would send a *burst* of identical binding lookups and BaaS round trips
+rather than the queue of them the sequential loop used to send.
 """
 from __future__ import annotations
 
@@ -33,6 +39,10 @@ from typing import TYPE_CHECKING, Any, Callable
 import httpx
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.devices.services.baas_http_info import (
+    PROXYPASS_AUTH_HEADER,
+    SharedHttpInfo,
+)
 from agentclaw.community.core.devices.services.device_filesystem import DeviceFileSystem
 
 if TYPE_CHECKING:
@@ -69,12 +79,17 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
                 transport :class:`BaasDeviceFileSystem` uses.
         """
         self._path_mapper = path_mapper
-        self._baas_service = baas_service
         # BaaS invoke-http fields for reads (same as BaasDeviceFileSystem; teclaw
         # conn_info is build_baas_conn_info_for_http output, so it carries bind_id).
-        self._bind_id: int = conn_info["bind_id"]
-        self._engine_port: int = conn_info["engine_port"]
-        self._tenant: str = conn_info.get("tenant", "default")
+        # They are fixed for this filesystem's lifetime, so the resolution they
+        # produce is shared per path rather than redone per call.
+        self._http_info = SharedHttpInfo(
+            baas_service=baas_service,
+            bind_id=conn_info["bind_id"],
+            engine_port=conn_info["engine_port"],
+            tenant=conn_info.get("tenant", "default"),
+            auth_header=PROXYPASS_AUTH_HEADER,
+        )
         # for log lines only
         self._bot_uuid: str = conn_info.get("paas_device_id", "")
 
@@ -137,26 +152,24 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
         self, path: str, *, json: Any = None, files: Any = None, data: Any = None
     ) -> httpx.Response:
         """Synchronous ``invoke_http`` call (wrap in ``asyncio.to_thread`` for
-        async use) — resolves the container ``http_url`` + token via
-        ``get_http_info`` and POSTs (json body, or ``files``+``data`` multipart
-        for upload).
+        async use) — POSTs a json body, or ``files``+``data`` multipart for upload,
+        against this filesystem's shared container resolution.
 
         The teclaw container is reached through the **agentclawproxy** gateway
         (``http_url`` is ``{base}/proxypass/{target}{path}``, same gateway ARCA
         uses), which authenticates with ``x-proxypass-token`` — NOT the
-        ``openclawToken`` the secbaas invoke-http tunnel uses. So we pass
-        ``auth_header="x-proxypass-token"`` (sending ``openclawToken`` here 401s).
-        ``info.token`` is the gateway's proxy_token; only the header name differs.
+        ``openclawToken`` the secbaas invoke-http tunnel uses. So the resolver is
+        built with ``auth_header=PROXYPASS_AUTH_HEADER`` (sending ``openclawToken``
+        here 401s); ``info.token`` is the gateway's proxy_token, only the header
+        name differs.
+
+        Every file of a package upload POSTs the same ``/api/v1/file/upload`` path,
+        so the whole batch shares one ``get_http_info`` — and a token the gateway
+        rejects mid-batch is refreshed and the call replayed once, so reuse can
+        never surface a spurious 401 to the caller.
         """
-        return self._baas_service.invoke_http(
-            bind_id=self._bind_id,
-            port=self._engine_port,
-            path=path,
-            tenant=self._tenant,
-            json=json,
-            files=files,
-            data=data,
-            auth_header="x-proxypass-token",
+        return self._http_info.invoke(
+            "POST", path, json=json, files=files, data=data
         )
 
     async def read_file(
