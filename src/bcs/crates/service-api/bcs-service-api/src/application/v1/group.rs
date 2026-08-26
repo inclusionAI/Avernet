@@ -116,6 +116,8 @@ pub struct NormalGroupSummary {
     pub version: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
     pub status: GroupStatus,
     pub visibility: GroupVisibility,
     pub membership: Membership,
@@ -133,6 +135,8 @@ pub struct DirectMessageGroupSummary {
     pub version: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
     pub status: GroupStatus,
     pub visibility: GroupVisibility,
     pub membership: Membership,

@@ -132,6 +132,7 @@ fn direct_message_summary_cannot_carry_normal_group_fields() {
         group_id: "dm-1".into(),
         version: 1,
         name: None,
+        context: None,
         status: GroupStatus::Active,
         visibility: GroupVisibility::Private,
         membership: Membership::Direct,
