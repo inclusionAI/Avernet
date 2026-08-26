@@ -29,18 +29,6 @@ use tracing::{info, warn};
 use crate::mapping::capabilities::{to_core_skill, to_wire_skill};
 use crate::state::HttpAppState;
 
-#[derive(Debug, serde::Deserialize)]
-pub struct ProviderStreamGrayRequest {
-    pub enabled: Option<bool>,
-    pub created_by: Option<Vec<String>>,
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct ProviderStreamGrayResponse {
-    pub enabled: bool,
-    pub created_by: Vec<String>,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PatchProviderBotAttributesRequest {
@@ -135,37 +123,6 @@ pub async fn register_provider(
         provider_id: outcome.provider_id,
         provider_admin_token: outcome.provider_admin_token,
         bcs_to_provider_token: outcome.bcs_to_provider_token,
-    }))
-}
-
-pub async fn get_provider_stream_gray(
-    State(state): State<HttpAppState>,
-) -> Result<Json<ProviderStreamGrayResponse>, ProviderRouteError> {
-    let snapshot = state.provider_stream_gray_list.snapshot();
-    Ok(Json(ProviderStreamGrayResponse {
-        enabled: snapshot.enabled,
-        created_by: snapshot.created_by,
-    }))
-}
-
-pub async fn put_provider_stream_gray(
-    State(state): State<HttpAppState>,
-    Json(req): Json<ProviderStreamGrayRequest>,
-) -> Result<Json<ProviderStreamGrayResponse>, ProviderRouteError> {
-    let old = state.provider_stream_gray_list.snapshot();
-    let updated = state
-        .provider_stream_gray_list
-        .update(req.enabled, req.created_by);
-    info!(
-        old_enabled = old.enabled,
-        new_enabled = updated.enabled,
-        old_created_by = ?old.created_by,
-        new_created_by = ?updated.created_by,
-        "provider stream gray list updated"
-    );
-    Ok(Json(ProviderStreamGrayResponse {
-        enabled: updated.enabled,
-        created_by: updated.created_by,
     }))
 }
 
