@@ -40,8 +40,11 @@ every caller still passes `ProjectionScope.everything()`. The suite must be
 green at the end of this group *without* any test expectation changing.
 
 - [ ] 2.1 Add `ProjectionScope` (frozen dataclass: `skills`, `mcp`,
-      `claimed_mcp`, `released_mcp`, plus `everything()`) in
-      `core/skill_center/services/_mutation_flow.py`.
+      `claimed_mcp`, `released_mcp`, `reconcile`, plus `everything()`) in
+      `core/skill_center/services/_mutation_flow.py`. `reconcile` is an
+      explicit flag, not an equality check against `everything()` — a
+      mutation that declares both halves must not be mistaken for a
+      reconcile.
 - [ ] 2.2 Add `scope: ProjectionScope = ProjectionScope.everything()` to
       `project`, `project_mcp_and_cli`, `project_for_cleanup` and
       `_apply_non_skill_projection`; declare it on
@@ -79,24 +82,29 @@ green at the end of this group *without* any test expectation changing.
       `sync_all_mcp_servers` takes dicts and reads `server_code`/`serverCode`
       off each (`core/devices/services/mcp_device_transport.py:76`), so pass
       `[{"server_code": c} for c in sorted(server_codes)]`, not bare strings.
-- [ ] 3.5 `_apply_non_skill_projection`: filter the declared scope against the
+- [ ] 3.5 `_apply_non_skill_projection`: guard the declared scope against the
       projected set — `claimed = scope.claimed_mcp & codes`,
       `released = scope.released_mcp - codes` — then call `sync_mcp_delivery`
       **before** `sync_mcp_desired_state`, so configuration lands before the
       allow-list cites it and withdrawal precedes the allow-list dropping it.
-      An `everything()` scope means `claimed = codes`, `released = ∅`.
+      A `reconcile` scope means `claimed = codes`, `released = ∅`. The
+      intersection is a guard, never a source: it cannot enlarge what the
+      mutation declared, so `add_mcp`'s one code stays one code.
 - [ ] 3.6 Tests — fan-out: adding one MCP to a Bot with three others pushes
-      exactly one detail and declares four allow-list codes; a Bot holding a
-      catalogue-missing MCP can still add an unrelated one.
-- [ ] 3.7 Tests — removal guards: removing an MCP calls `remove_mcp_detail`
-      once; an MCP still claimed by another active Set is **not** removed; a
-      platform/template-default MCP is **not** removed. Both guards come from
-      the `- codes` filter, so assert them directly — a future `_resolve_plan`
-      change must not silently start deleting device config.
+      exactly one detail (assert the `sync_single_mcp` call count is 1, not
+      just that the right code appears) and declares four allow-list codes; a
+      Bot holding a catalogue-missing MCP can still add an unrelated one.
+- [ ] 3.7 Tests — removal guard: removing an MCP calls `remove_mcp_detail`
+      exactly once; a platform/template-default MCP is **not** removed, nor
+      is one a Skill still lists in `mcp_dependencies` — both stay in `codes`
+      without Set membership, so `- codes` spares them. (The cross-Set case
+      needs no test: R3 makes it unreachable,
+      `policies/capability_ownership.py:9`.) Assert directly — a future
+      `_resolve_plan` change must not silently start deleting device config.
 - [ ] 3.8 Test — compensation inverts the scope: a projection failure after a
       successful add removes what it pushed.
-- [ ] 3.9 Test — `ProjectionScope.everything()` pushes every projected code,
-      so the device-activated reconcile path is unchanged.
+- [ ] 3.9 Test — a `reconcile` scope pushes every projected code, so the
+      device-activated reconcile path is unchanged.
 
 ## Group 4 — Delivery shape decided per provider (problem 4)
 

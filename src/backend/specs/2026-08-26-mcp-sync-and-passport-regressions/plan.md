@@ -35,20 +35,31 @@ and diff it afterwards (`claimed = post − pre`). That is strictly more
 machinery for information the caller already holds, plus a second copy of the
 set-union logic that could drift from `_resolve_plan`. Dropped.
 
-The one thing the diff gave for free was REL's removal guards — an MCP that
-another active Set still claims, or that the platform default policy
-supplies, must not be deleted from the device just because *this* Set
-dropped it. That is recovered with one filter against the post-mutation
-projected set, which `_resolve_plan` already computes:
+What the diff did give for free was REL's removal guard: an MCP must not be
+deleted from the device just because *this* Set dropped it, if something else
+still supplies it. That is recovered with one filter against the
+post-mutation projected set, which `_resolve_plan` already computes:
 
 ```python
-claimed  = declared_claimed  & post_codes   # only push what is actually claimed
-released = declared_released - post_codes   # only remove what nothing else claims
+claimed  = declared_claimed  & post_codes   # push only what really ended up claimed
+released = declared_released - post_codes   # remove only what nothing else supplies
 ```
 
-An MCP another Set still holds is still in `post_codes`, so it survives the
-filter and is not deleted. A platform default is always in `post_codes`, same
-result. No pre-snapshot, no diff, both guards preserved.
+**The filter is a guard, not a source.** `claimed` never grows: it is
+whatever the mutation declared, minus anything that did not survive into the
+projected set. `add_mcp` declares exactly one code, so `claimed` is exactly
+one code and delivery is exactly one device write — the intersection cannot
+turn a single-MCP mutation into a batch. `activate` and the reconcile path
+are the only n-ary claimants, which is why the parameter is a set at all.
+
+REL's guard had two halves, and only one still applies here. The
+cross-Set half is now moot: R3 keeps a capability in at most one Set
+(`policies/capability_ownership.py:9`, `RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET`),
+so no other Set can be holding the code this Set just released. The half
+that still matters is non-membership supply — the engine/template default
+policy and skills' `mcp_dependencies` both put codes into `post_codes`
+without any Set claiming them. Dropping a Set's claim on such a code must
+not delete it from the device, and `- post_codes` is what prevents that.
 
 ### Why the provider decides the call shape
 
@@ -265,13 +276,20 @@ class ProjectionScope:
     mcp: bool = False
     claimed_mcp: frozenset[str] = frozenset()
     released_mcp: frozenset[str] = frozenset()
+    reconcile: bool = False
 
     @classmethod
     def everything(cls) -> "ProjectionScope":
         """Reconcile: no mutation to declare, so every projected code is
         treated as newly claimed (device-activated restart, skill upload)."""
-        return cls(skills=True, mcp=True)
+        return cls(skills=True, mcp=True, reconcile=True)
 ```
+
+Sizes, so the cost is explicit: `add_mcp` and `remove_mcp` declare exactly
+one code — one device write, which is the whole point of problems 2 and 3.
+`activate` / `deactivate` declare the Set's members. Only `reconcile`
+declares the full projected set, and only on paths that have no mutation to
+ask.
 
 `ProjectionScope.everything()` is the default, so any caller not updated
 keeps today's behaviour.
@@ -321,8 +339,14 @@ pushes:
         self, *, claimed: frozenset[str], released: frozenset[str]
     ) -> bool:
         """Deliver configuration for newly claimed MCPs and withdraw it for
-        released ones.  Both sets are declared by the mutation and already
-        filtered against the projected set by the caller."""
+        released ones.
+
+        Both sets are declared by the mutation and already guarded against
+        the projected set by the caller, so they are as small as the change
+        was: one code for an MCP add or remove, the Set's members for an
+        activation.  ``sync_mcp_details_for_bot`` resolves the device once
+        for the batch; at one entry that is one device write, not a fan-out.
+        """
         try:
             entries: list[dict[str, Any]] = []
             for server_code in sorted(claimed):
@@ -363,17 +387,22 @@ pushes:
 `if not detail: return False` still fails, but now only for a code we are
 actually installing — the same contract REL had.
 
-**The projector filters the declared scope against the projected set**, which
-is where REL's two removal guards come back:
+**The projector guards the declared scope against the projected set.** The
+mutation supplies the codes; the projected set only removes ones it must not
+act on:
 
 ```python
         codes = set(projection.mcp_server_codes)
-        if scope is ProjectionScope.everything():
+        if scope.reconcile:
+            # No mutation declared anything (device restart, skill upload):
+            # treat the whole projected set as newly claimed.
             claimed, released = frozenset(codes), frozenset()
         else:
-            # An MCP another active Set still claims — or one the platform
-            # default policy supplies — is still in ``codes``, so it survives
-            # here and is never deleted just because this Set dropped it.
+            # Guard, not source. ``claimed`` cannot grow beyond what the
+            # mutation declared, so ``add_mcp``'s single code stays a single
+            # code and costs one device write.  ``- codes`` keeps a release
+            # from deleting a code the default policy or a Skill dependency
+            # still supplies without any Set claiming it.
             claimed = scope.claimed_mcp & codes
             released = scope.released_mcp - codes
         if not await service.sync_mcp_delivery(claimed=claimed, released=released):
@@ -381,6 +410,10 @@ is where REL's two removal guards come back:
         if not await service.sync_mcp_desired_state(server_codes=codes):
             raise SkillSetRuntimeReconcileError()
 ```
+
+Note `scope.reconcile` rather than an identity comparison against
+`everything()` — a dataclass equality check would also match a mutation that
+happened to declare both halves.
 
 Order matters and matches the old invariant: configuration lands before the
 allow-list references it, and withdrawal happens before the allow-list stops
