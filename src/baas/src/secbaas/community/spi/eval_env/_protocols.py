@@ -22,11 +22,9 @@ class EvalBindingResolverProtocol(Protocol):
         bot_id: str,
         entity_id: str,
         env: str,
-    ) -> int | None:
-        ...
+    ) -> int | None: ...
 
-    def is_eval_env_enabled(self) -> bool:
-        ...
+    def is_eval_env_enabled(self) -> bool: ...
 
 
 @runtime_checkable
@@ -38,8 +36,7 @@ class EvalConsistencyCheckProtocol(Protocol):
         *,
         binding_info: Any,
         chat_metadata: dict[str, Any],
-    ) -> bool:
-        ...
+    ) -> bool: ...
 
 
 @runtime_checkable
@@ -53,16 +50,14 @@ class EvalSessionLogProtocol(Protocol):
         bot_id: str,
         session_id: str,
         method: str,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def enrich_chat_metadata(
         self,
         *,
         metadata: dict[str, Any],
         run_id: str,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
     def extract_eval_headers(
         self,
@@ -70,5 +65,4 @@ class EvalSessionLogProtocol(Protocol):
         metadata: dict[str, Any],
         x_eval_id: str | None,
         x_default_tag: str | None,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...

@@ -11,15 +11,15 @@ from secbaas.community.api.bot_runtime import BotBindingInfo
 from secbaas.community.logger import get_logger
 
 if TYPE_CHECKING:
-    from secbaas.community.spi.eval_env import (
-        EvalBindingResolverProtocol,
-    )
     from secbaas.community.core.repository.ac_bot import AcBotRepository
     from secbaas.community.core.repository.ac_bot_publish import (
         AcBotPublishRepository,
     )
     from secbaas.community.core.repository.device_binding import (
         DeviceBindingRepository,
+    )
+    from secbaas.community.spi.eval_env import (
+        EvalBindingResolverProtocol,
     )
 
 logger = get_logger("core-bot-run")
