@@ -1542,6 +1542,7 @@ async fn failed_provider_web_send_uses_unified_system_message() {
             message: "hello".to_string(),
             mentions: vec![],
             attachments: None,
+            quoted_message: None,
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
