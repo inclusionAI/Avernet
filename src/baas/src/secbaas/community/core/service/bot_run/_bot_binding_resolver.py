@@ -18,6 +18,9 @@ if TYPE_CHECKING:
     from secbaas.community.core.repository.device_binding import (
         DeviceBindingRepository,
     )
+    from secbaas.community.spi.eval_env import (
+        EvalBindingResolverProtocol,
+    )
 
 logger = get_logger("core-bot-run")
 
@@ -68,10 +71,12 @@ class BotBindingResolver:
         ac_bot_repo: "AcBotRepository",
         publish_repo: "AcBotPublishRepository",
         binding_repo: "DeviceBindingRepository",
+        eval_binding_resolver: "EvalBindingResolverProtocol | None" = None,
     ):
         self._ac_bot_repo = ac_bot_repo
         self._publish_repo = publish_repo
         self._binding_repo = binding_repo
+        self._eval_binding_resolver = eval_binding_resolver
 
     def resolve(
         self,
@@ -116,29 +121,77 @@ class BotBindingResolver:
 
         # Step 2: For service bots, resolve binding based on lifecycle_stage
         if ac_bot.bot_type == "service":
-            stages = (
-                ["online", "verify", "draft"]
-                if lifecycle_stage == "all"
-                else [lifecycle_stage]
-            )
-            resolved_binding_id: int | None = None
-            for stage in stages:
-                resolved_binding_id = self._resolve_service_bot_binding(
-                    bot_id=bot_id,
-                    entity_id=entity_id,
-                    lifecycle_stage=stage,
-                    draft_binding_id=binding_id,
-                )
-                if resolved_binding_id is not None:
-                    break
+            # eval 生命周期阶段 → 委托 Plugin 决定走 eval binding 还是降级走 online
+            if lifecycle_stage in ("eval", "default"):
+                try:
+                    plugin_enabled = (
+                        self._eval_binding_resolver is not None
+                        and self._eval_binding_resolver.is_eval_env_enabled()
+                    )
+                except Exception:
+                    logger.warning(
+                        "[resolve] eval Plugin is_eval_env_enabled 异常, 降级走 online: bot_id=%s",
+                        bot_id,
+                    )
+                    plugin_enabled = False
 
-            if resolved_binding_id is None:
-                logger.warning(
-                    f"[resolve] No binding found for service bot: bot_id={bot_id}, "
-                    f"lifecycle_stage={lifecycle_stage}"
+                if plugin_enabled:
+                    # Plugin 启用：走 eval binding 解析
+                    resolved_binding_id = (
+                        self._eval_binding_resolver.resolve_eval_binding(
+                            bot_id=bot_id,
+                            entity_id=entity_id,
+                            env=env,
+                        )
+                    )
+                    if resolved_binding_id is None:
+                        logger.warning(
+                            f"[resolve] No eval binding found for service bot: bot_id={bot_id}"
+                        )
+                        return None
+                    binding_id = resolved_binding_id
+                else:
+                    # Plugin 未注入或功能关闭：降级走 online 生产路由
+                    logger.warning(
+                        f"[resolve] Eval env disabled, fallback to online: "
+                        f"bot_id={bot_id}, lifecycle_stage={lifecycle_stage}"
+                    )
+                    resolved_binding_id = self._resolve_service_bot_binding(
+                        bot_id=bot_id,
+                        entity_id=entity_id,
+                        lifecycle_stage="online",
+                        draft_binding_id=binding_id,
+                    )
+                    if resolved_binding_id is None:
+                        logger.warning(
+                            f"[resolve] No online binding found for service bot: bot_id={bot_id}"
+                        )
+                        return None
+                    binding_id = resolved_binding_id
+            else:
+                stages = (
+                    ["online", "verify", "draft"]
+                    if lifecycle_stage == "all"
+                    else [lifecycle_stage]
                 )
-                return None
-            binding_id = resolved_binding_id
+                resolved_binding_id: int | None = None
+                for stage in stages:
+                    resolved_binding_id = self._resolve_service_bot_binding(
+                        bot_id=bot_id,
+                        entity_id=entity_id,
+                        lifecycle_stage=stage,
+                        draft_binding_id=binding_id,
+                    )
+                    if resolved_binding_id is not None:
+                        break
+
+                if resolved_binding_id is None:
+                    logger.warning(
+                        f"[resolve] No binding found for service bot: bot_id={bot_id}, "
+                        f"lifecycle_stage={lifecycle_stage}"
+                    )
+                    return None
+                binding_id = resolved_binding_id
 
         # Step 3: Query binding for device info
         binding = self._binding_repo.get_by_id(binding_id)

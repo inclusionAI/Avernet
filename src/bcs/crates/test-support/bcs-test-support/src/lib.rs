@@ -4,6 +4,7 @@ pub mod contract;
 
 mod auth_noop;
 mod auth_oauth_mock;
+mod edge_permission_noop;
 mod noop;
 
 pub use auth_noop::{NoopAuthPlugin, NoopUserIdentityPort};
@@ -11,6 +12,7 @@ pub use auth_oauth_mock::{
     run_oauth_provider_offline_contract, run_oauth_provider_roundtrip_contract, MockFailure,
     MockOAuthProvider,
 };
+pub use edge_permission_noop::*;
 pub use noop::*;
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

@@ -52,3 +52,17 @@ def test_resolve_many_rejects_missing_owner():
         assert "owner" in str(exc).lower()
     else:
         raise AssertionError("missing owner must fail identity resolution")
+
+
+def test_resolve_many_passes_through_ids_already_carrying_owner():
+    # 已带 ':'(如上游已 resolve 成 BCS 'bot_id:owner_id')视为身份完整,原样透传、不再查 BotService,
+    # 也只把真正需要查询的无 ':' id 传进 BotService。
+    service = _BotService([{"bot_id": "bot_b", "owner_id": "u2"}])
+    resolver = BotServiceBcsBotIdentityResolver(service)
+
+    assert resolver.resolve_many(["bot_a:u1", "bot_b"]) == {
+        "bot_a:u1": "bot_a:u1",
+        "bot_b": "bot_b:u2",
+    }
+    assert service.calls[0]["bot_ids"] == ["bot_b"]
+    assert len(service.calls) == 1

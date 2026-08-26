@@ -1,0 +1,255 @@
+CollaborationDefinitionValidateRequest:
+  type: object
+  additionalProperties: false
+  required: [definition_yaml]
+  description: >-
+    Body of the V1 collaboration-definition validation request. The legacy
+    handler additionally accepted a `yaml` serde alias; the V1 contract does not
+    carry that alias — callers posting `{"yaml": ...}` receive `400
+    invalid_request` and must use `definition_yaml`.
+  properties:
+    definition_yaml:
+      type: string
+      minLength: 1
+      description: Raw collaboration-definition YAML document to validate.
+
+CollaborationDefinitionValidationDiagnostic:
+  type: object
+  additionalProperties: false
+  required: [code, path, message]
+  properties:
+    code:
+      type: string
+      minLength: 1
+    path:
+      type: string
+    message:
+      type: string
+    hint:
+      type: string
+
+CollaborationDefinitionValidationSummary:
+  type: object
+  additionalProperties: false
+  required: [participants, nodes]
+  properties:
+    participants:
+      type: integer
+      minimum: 0
+    nodes:
+      type: integer
+      minimum: 0
+    initial_nodes:
+      type: array
+      items:
+        type: string
+        minLength: 1
+    final_output_node:
+      type: string
+      minLength: 1
+
+CollaborationDefinitionParticipantSlot:
+  type: object
+  additionalProperties: false
+  required: [binding, required, assigned]
+  properties:
+    binding:
+      type: string
+      minLength: 1
+    display_name:
+      type: string
+    description:
+      type: string
+    required:
+      type: boolean
+    assigned:
+      type: boolean
+
+CollaborationDefinitionBotBindingAssignee:
+  type: object
+  additionalProperties: false
+  required: [type, binding]
+  description: >-
+    Participant-bound assignee. Mirrors the legacy
+    `StateMachineAssignee::BotBinding { binding }` variant, which serializes as
+    `{"type":"bot_binding","binding":...}`.
+  properties:
+    type:
+      type: string
+      enum: [bot_binding]
+    binding:
+      type: string
+      minLength: 1
+
+CollaborationDefinitionRuntimeActorAssignee:
+  type: object
+  additionalProperties: false
+  required: [type, actor]
+  description: >-
+    Runtime-resolved actor assignee. Mirrors the legacy
+    `StateMachineAssignee::RuntimeActor { actor }` variant, which serializes as
+    `{"type":"runtime_actor","actor":...}`.
+  properties:
+    type:
+      type: string
+      enum: [runtime_actor]
+    actor:
+      type: string
+      minLength: 1
+
+CollaborationDefinitionGraphNode:
+  type: object
+  additionalProperties: false
+  required: [node_id, display_name, kind, final_output, judge]
+  properties:
+    node_id:
+      type: string
+      minLength: 1
+    display_name:
+      type: string
+    kind:
+      type: string
+      minLength: 1
+    assignee:
+      oneOf:
+        - $ref: "#/CollaborationDefinitionBotBindingAssignee"
+        - $ref: "#/CollaborationDefinitionRuntimeActorAssignee"
+    final_output:
+      type: boolean
+    judge:
+      type: boolean
+
+CollaborationDefinitionGraphEdge:
+  type: object
+  additionalProperties: false
+  required: [source, target, outcome]
+  properties:
+    source:
+      type: string
+      minLength: 1
+    target:
+      type: string
+      minLength: 1
+    outcome:
+      type: string
+      minLength: 1
+
+CollaborationDefinitionGraphPreview:
+  type: object
+  additionalProperties: false
+  required: [graph_mode, nodes, edges]
+  properties:
+    graph_mode:
+      type: string
+      minLength: 1
+    nodes:
+      type: array
+      items:
+        $ref: "#/CollaborationDefinitionGraphNode"
+    edges:
+      type: array
+      items:
+        $ref: "#/CollaborationDefinitionGraphEdge"
+
+CollaborationDefinitionValidationOutcome:
+  type: object
+  additionalProperties: false
+  required: [valid, summary]
+  description: >-
+    Validation result for an authoring collaboration-definition YAML. Mirrors the
+    legacy `CollaborationDefinitionValidationOutcome` serde projection verbatim
+    (byte-compatible). A document that fails to compile or violates a
+    validation rule is still returned as `200` with `valid: false` and populated
+    `errors`; it is not surfaced as an HTTP error.
+  properties:
+    valid:
+      type: boolean
+    errors:
+      type: array
+      items:
+        $ref: "#/CollaborationDefinitionValidationDiagnostic"
+    warnings:
+      type: array
+      items:
+        $ref: "#/CollaborationDefinitionValidationDiagnostic"
+    summary:
+      $ref: "#/CollaborationDefinitionValidationSummary"
+    participants:
+      type: array
+      items:
+        $ref: "#/CollaborationDefinitionParticipantSlot"
+    graph:
+      $ref: "#/CollaborationDefinitionGraphPreview"
+
+CollaborationDefinitionValidationEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      $ref: "#/CollaborationDefinitionValidationOutcome"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+BadRequestResponse:
+  description: Invalid validation request.
+  x-error-codes:
+    - invalid_request
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+UnauthenticatedResponse:
+  description: Gateway Principal is missing or invalid.
+  x-error-codes: [unauthenticated]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+CollaborationDefinitionValidatePath:
+  post:
+    operationId: validate_definition
+    tags: ["Collaboration / Definitions"]
+    summary: Validate a collaboration-definition YAML document.
+    description: >-
+      Versioned projection of legacy `POST
+      /collaboration/definitions/validate`. Compiles and validates an authoring
+      collaboration-definition YAML without persisting or executing it. The
+      validation is not scoped to a Bot or Session, so the request carries no
+      caller principal policy beyond the protected-boundary Gateway Principal.
+      `judge_available` is a server-side runtime configuration injected into
+      the facade at construction; it is not a request field. An invalid
+      document is returned as `200` with `valid: false` and detailed diagnostics
+      — it is not surfaced as an HTTP error, preserving legacy behavior.
+    x-avernet-security:
+      user: optional
+      app: optional
+      bot: optional
+    x-avernet-behavior:
+      legacy_equivalent: /collaboration/definitions/validate
+      result_kind: validation
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/CollaborationDefinitionValidateRequest"
+    responses:
+      "200":
+        description: >-
+          Validation outcome wrapped in the standard envelope. `valid` is the
+          authoritative field; invalid YAML still yields `200` with
+          `valid: false`.
+        content:
+          application/json:
+            schema:
+              $ref: "#/CollaborationDefinitionValidationEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }

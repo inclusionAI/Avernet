@@ -58,6 +58,17 @@ pub struct ListGroupsQuery {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ListPublicGroupsQuery {
+    #[serde(default)]
+    pub offset: u64,
+    #[serde(default = "default_limit")]
+    pub limit: u64,
+    pub q: Option<String>,
+    pub strategy: Option<GroupStrategy>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeleteGroupQuery {
     #[serde(default)]
     pub acting_bot_id: Option<String>,
@@ -85,6 +96,8 @@ impl ListGroupsQuery {
 pub struct ParticipantRequest {
     pub actor_id: String,
     pub role: ParticipantRole,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -233,6 +246,7 @@ impl CreateGroupRequest {
                         .map(|participant| CreateParticipant {
                             actor_id: participant.actor_id,
                             role: participant.role,
+                            tags: participant.tags,
                         })
                         .collect(),
                     collaboration: collaboration.into(),
@@ -271,6 +285,8 @@ impl CreateGroupRequest {
 pub struct UpdateGroupRequest {
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
+    pub context: Option<String>,
     #[serde(default, deserialize_with = "deserialize_present_nullable")]
     pub opening_message: Option<Option<OpeningMessage>>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
@@ -291,7 +307,7 @@ impl From<UpdateGroupRequest> for GroupPatch {
     fn from(value: UpdateGroupRequest) -> Self {
         Self {
             name: value.name,
-            context: None,
+            context: value.context,
             opening_message: value.opening_message,
             visibility: value.visibility,
             delivery_policy: value.delivery_policy.map(|policy| GroupDeliveryPolicy {

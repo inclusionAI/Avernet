@@ -1,0 +1,106 @@
+"""Flush-then-read access to a Bot's active capability state."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+from injector import inject
+
+from agentclaw.community.core.repository.capability_desired_state_types import (
+    InstallationFlushPlan,
+)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolSkillRepositoryProtocol,
+)
+from agentclaw.community.core.skill_center.bot_engine_scope import (
+    bot_default_engine_types,
+    bot_engine_type,
+)
+from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
+from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+
+
+class BotCapabilityStateReader:
+    """The one read model for a Bot's active capabilities.
+
+    Installation is the single source of truth; the tables are not
+    backfilled, so every read first flushes SkillSet configuration into
+    Installation, then answers from Installation alone. The flush is
+    DB-side only — this reader never triggers a runtime projection.
+    """
+
+    @inject
+    def __init__(
+        self,
+        repository: CapabilityDesiredStateRepositoryProtocol,
+        bot_repo: BotRepository,
+        pool_skills: SkillsPoolSkillRepositoryProtocol,
+    ) -> None:
+        self._repository = repository
+        self._bot_repo = bot_repo
+        self._pool_skills = pool_skills
+
+    def member_skill_ids(self, *, bot: Mapping[str, Any]) -> frozenset[int]:
+        plan = self._flush(
+            bot=bot,
+            bot_id=str(bot["bot_id"]),
+            owner_id=str(bot["owner_id"]),
+        )
+        return plan.member_skill_ids
+
+    def active_skill_assets(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        bot: Mapping[str, Any] | None = None,
+    ) -> tuple[RegisteredSkillAsset, ...]:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, bot=bot)
+        self._flush(bot=bot, bot_id=bot_id, owner_id=owner_id)
+        return tuple(
+            self._pool_skills.list_bot_installed_assets(
+                env=str(bot["env"]),
+                bot_id=bot_id,
+                owner_id=owner_id,
+            )
+        )
+
+    def active_mcp_server_codes(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        bot: Mapping[str, Any] | None = None,
+    ) -> frozenset[str]:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, bot=bot)
+        self._flush(bot=bot, bot_id=bot_id, owner_id=owner_id)
+        return frozenset(
+            self._repository.list_installed_mcps(bot_id=bot_id, owner_id=owner_id)
+        )
+
+    def _bot(
+        self, *, bot_id: str, owner_id: str, bot: Mapping[str, Any] | None
+    ) -> Mapping[str, Any]:
+        """A caller-supplied row is trusted; otherwise the exact Bot must exist."""
+        if bot is not None:
+            return bot
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if bot is None:
+            raise LocalSkillNotFoundError()
+        return bot
+
+    def _flush(
+        self, *, bot: Mapping[str, Any], bot_id: str, owner_id: str
+    ) -> InstallationFlushPlan:
+        return self._repository.flush_installations(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            env=str(bot["env"]),
+            engine_type=bot_engine_type(bot),
+            default_engine_types=bot_default_engine_types(bot),
+        )

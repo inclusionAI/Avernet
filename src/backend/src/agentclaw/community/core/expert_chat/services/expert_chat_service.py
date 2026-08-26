@@ -45,6 +45,9 @@ from agentclaw.community.core.expert_chat.services.expert_chat_session_runtime i
     DEFAULT_EXPERT_CHAT_SESSION_TITLE,
     ExpertChatSessionRuntimeMixin,
 )
+from agentclaw.community.core.expert_chat.services.expert_chat_owned_session import (
+    ExpertChatOwnedSessionMixin,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
@@ -104,7 +107,7 @@ class BotInfoProvider(Protocol):
 # ============ Service Implementation ============
 
 
-class ExpertChatService(ExpertChatSessionRuntimeMixin):
+class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMixin):
     """用户与专家Bot对话业务逻辑"""
 
     @inject

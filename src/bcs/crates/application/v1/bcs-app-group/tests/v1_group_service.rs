@@ -20,7 +20,8 @@ use bcs_service_api::application::v1::{
     CreateDirectMessageGroup, CreateGroup, CreateGroupSpec, CreateParticipant, DeleteGroup,
     EventSinkInput, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupEventSubscriptionProvisioner,
     GroupKindFilter, GroupPatch, GroupService, GroupStrategy as V1GroupStrategy, GroupSummary,
-    GroupVisibility, InlineGroupEventSubscriptionRequest, ListGroups, Membership, MembershipFilter,
+    GroupVisibility, InlineGroupEventSubscriptionRequest, ListGroups, ListPublicGroups,
+    Membership, MembershipFilter,
     PendingGroupEventSubscriptions, PreparedGroupEventSubscriptions, UpdateGroup,
 };
 use bcs_service_api::types::{EventActor, EventActorType, EventPayload, OpeningMessage};
@@ -1206,6 +1207,39 @@ async fn group_detail_accepts_human_or_exact_owned_bot_participation_only() {
 }
 
 #[tokio::test]
+async fn get_public_group_readable_without_participation() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+    let mut group = normal_group(
+        "public-plaza-detail",
+        "driver",
+        vec![Participant::bot("driver", ParticipantRole::Driver)],
+        GroupStrategy::Chat,
+        1,
+    );
+    group.visibility = "public".to_string();
+    fixture
+        .groups
+        .upsert(group)
+        .await
+        .expect("store public Group");
+
+    let detail = fixture
+        .service
+        .get(GetGroup {
+            caller: bot_principal("alice"),
+            group_id: "public-plaza-detail".into(),
+        })
+        .await
+        .expect("public Group is readable without participation or owned Bot");
+    let GroupDetail::Collaboration(detail) = detail else {
+        panic!("expected collaboration detail");
+    };
+    assert_eq!(detail.group_id, "public-plaza-detail");
+    assert!(matches!(detail.visibility, GroupVisibility::Public));
+}
+
+#[tokio::test]
 async fn group_detail_propagates_owned_bot_lookup_database_failure() {
     let bots = Arc::new(BotCore::with_repo(Arc::new(
         PersistentBotRepo::with_plugins(Arc::new(InMemoryCachePlugin::new()), Arc::new(FailingDb)),
@@ -1345,6 +1379,11 @@ async fn create_uses_the_authenticated_human_as_originator() {
                 participants: vec![CreateParticipant {
                     actor_id: "helper".into(),
                     role: ParticipantRole::Consultant,
+                    tags: vec![
+                        " tenant-a ".to_string(),
+                        "".to_string(),
+                        "scene-review".to_string(),
+                    ],
                 }],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
                     delivery_policy: GroupDeliveryPolicy {
@@ -1361,6 +1400,15 @@ async fn create_uses_the_authenticated_human_as_originator() {
     };
     assert_eq!(detail.driver_bot_uuid, "driver");
     assert_eq!(detail.originator_actor_id, "human_requester");
+    assert_eq!(
+        detail
+            .participants
+            .iter()
+            .find(|participant| participant.actor_id == "helper")
+            .expect("helper participant")
+            .tags,
+        vec!["tenant-a".to_string(), "scene-review".to_string()]
+    );
     assert!(
         detail
             .participants
@@ -1842,10 +1890,12 @@ async fn human_participant_can_create_with_driver_reachable_protected_participan
                     CreateParticipant {
                         actor_id: "human_staff-1".into(),
                         role: ParticipantRole::Observer,
+                        tags: Vec::new(),
                     },
                     CreateParticipant {
                         actor_id: "helper".into(),
                         role: ParticipantRole::Consultant,
+                        tags: Vec::new(),
                     },
                 ],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
@@ -2040,6 +2090,7 @@ async fn create_group_propagates_non_driver_registry_database_failure() {
                 participants: vec![CreateParticipant {
                     actor_id: "helper".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
                     delivery_policy: GroupDeliveryPolicy {
@@ -2190,6 +2241,7 @@ async fn state_machine_create_without_runtime_fails_before_persisting_group() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2237,6 +2289,7 @@ async fn state_machine_create_rejects_duplicate_participant_binding_names() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2295,6 +2348,7 @@ async fn state_machine_runtime_failure_rolls_back_created_group() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2340,6 +2394,7 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2440,6 +2495,7 @@ async fn state_machine_create_with_inline_yaml_returns_persisted_definition_ref(
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2502,6 +2558,7 @@ async fn state_machine_create_defers_initial_run_until_required_channel_is_bound
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2550,6 +2607,7 @@ async fn state_machine_create_rejects_human_actors_in_bot_bindings() {
                 participants: vec![CreateParticipant {
                     actor_id: "human_staff-1".into(),
                     role: ParticipantRole::Observer,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2602,6 +2660,7 @@ async fn state_machine_create_preserves_authenticated_human_in_audit_and_start()
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2672,6 +2731,7 @@ async fn state_machine_create_does_not_reread_runtime_for_its_response() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2714,6 +2774,7 @@ async fn state_machine_start_failure_removes_runtime_session_and_group() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -2783,6 +2844,7 @@ async fn deleting_state_machine_group_cancels_runs_and_removes_runtime_state() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -3013,6 +3075,7 @@ async fn tenant_metadata_does_not_restrict_bot_collaboration() {
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
                     delivery_policy: GroupDeliveryPolicy {
@@ -3131,6 +3194,7 @@ async fn state_machine_patch_failure_does_not_commit_requested_changes() {
                 participants: vec![CreateParticipant {
                     actor_id: "helper".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -3244,6 +3308,7 @@ async fn create_propagates_protected_participant_friendship_lookup_failure() {
                 participants: vec![CreateParticipant {
                     actor_id: "helper".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
                     delivery_policy: GroupDeliveryPolicy {
@@ -3323,6 +3388,7 @@ async fn update_opening_message_preserves_patch_states_and_strategy_guard() {
                 participants: vec![CreateParticipant {
                     actor_id: "helper".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
@@ -3465,10 +3531,12 @@ async fn create_rejects_duplicate_participant_actor_ids() {
                     CreateParticipant {
                         actor_id: "helper".into(),
                         role: ParticipantRole::Consultant,
+                        tags: Vec::new(),
                     },
                     CreateParticipant {
                         actor_id: "helper".into(),
                         role: ParticipantRole::Observer,
+                        tags: Vec::new(),
                     },
                 ],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
@@ -3507,6 +3575,7 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
                 participants: vec![CreateParticipant {
                     actor_id: "manager".into(),
                     role: ParticipantRole::Manager,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
                     delivery_policy: GroupDeliveryPolicy {
@@ -3536,10 +3605,12 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
                     CreateParticipant {
                         actor_id: "manager".into(),
                         role: ParticipantRole::Manager,
+                        tags: Vec::new(),
                     },
                     CreateParticipant {
                         actor_id: "worker".into(),
                         role: ParticipantRole::Worker,
+                        tags: Vec::new(),
                     },
                 ],
                 collaboration: CollaborationConfiguration::ManagerWorker(Default::default()),
@@ -3704,6 +3775,7 @@ async fn client_caused_group_errors_map_to_documented_4xx_classes() {
                 participants: vec![CreateParticipant {
                     actor_id: "protected".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
                     delivery_policy: GroupDeliveryPolicy {
@@ -4040,6 +4112,229 @@ mod originator_v1_policy {
         assert!(
             matches!(err, ApplicationError::InvalidInput { ref code, .. } if code == "invalid_originator"),
             "got {err:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn list_public_groups_returns_all_public_and_excludes_private() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver-a", "driver-b"] {
+        fixture.add_public_bot(bot).await;
+    }
+
+    // driver-b 公开群；driver-a 私有群（caller 不是任何群的参与者）
+    for (group_id, visibility, updated_at) in [
+        ("pub-recent", "public", 30),
+        ("priv-hidden", "private", 20),
+        ("pub-older", "public", 10),
+    ] {
+        let mut group = normal_group(
+            group_id,
+            if group_id.starts_with("pub") { "driver-b" } else { "driver-a" },
+            vec![Participant::bot(
+                if group_id.starts_with("pub") { "driver-b" } else { "driver-a" },
+                ParticipantRole::Driver,
+            )],
+            GroupStrategy::Chat,
+            updated_at,
+        );
+        group.visibility = visibility.into();
+        fixture.groups.upsert(group).await.expect("store Group");
+    }
+
+    let page = fixture
+        .service
+        .list_public_groups(ListPublicGroups {
+            offset: 0,
+            limit: 20,
+            q: None,
+            strategy: None,
+        })
+        .await
+        .expect("list public groups");
+
+    assert_eq!(page.total, 2);
+    assert_eq!(page.items.len(), 2);
+    for item in &page.items {
+        match item {
+            GroupSummary::Normal(summary) => {
+                assert_eq!(summary.membership, Membership::None);
+                assert!(summary.group_id.starts_with("pub"));
+            }
+            other => panic!("expected normal summary, got {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn list_public_groups_filters_by_strategy() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+
+    for (group_id, strategy) in [
+        ("chat-group", GroupStrategy::Chat),
+        ("sm-group", GroupStrategy::StateMachine),
+    ] {
+        let mut group = normal_group(
+            group_id,
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+            strategy,
+            10,
+        );
+        group.visibility = "public".into();
+        fixture.groups.upsert(group).await.expect("store Group");
+    }
+
+    let page = fixture
+        .service
+        .list_public_groups(ListPublicGroups {
+            offset: 0,
+            limit: 20,
+            q: None,
+            strategy: Some(V1GroupStrategy::StateMachine),
+        })
+        .await
+        .expect("list state_machine public groups");
+
+    assert_eq!(page.total, 1);
+    match &page.items[0] {
+        GroupSummary::Normal(summary) => assert_eq!(summary.group_id, "sm-group"),
+        other => panic!("expected normal summary, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn list_public_groups_paginates_and_reports_filtered_total() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+
+    for idx in 0..5 {
+        let mut group = normal_group(
+            &format!("pub-{idx}"),
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+            GroupStrategy::Chat,
+            10 + idx,
+        );
+        group.visibility = "public".into();
+        fixture.groups.upsert(group).await.expect("store Group");
+    }
+
+    let page = fixture
+        .service
+        .list_public_groups(ListPublicGroups {
+            offset: 1,
+            limit: 2,
+            q: None,
+            strategy: None,
+        })
+        .await
+        .expect("paginated public groups");
+
+    assert_eq!(page.total, 5);
+    assert_eq!(page.items.len(), 2);
+    assert_eq!(page.offset, 1);
+    assert_eq!(page.limit, 2);
+}
+
+#[tokio::test]
+async fn list_public_groups_filters_by_label_query() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+
+    for group_id in ["plaza-alpha", "plaza-beta", "other-gamma"] {
+        let mut group = normal_group(
+            group_id,
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+            GroupStrategy::Chat,
+            10,
+        );
+        group.visibility = "public".into();
+        fixture.groups.upsert(group).await.expect("store Group");
+    }
+
+    let page = fixture
+        .service
+        .list_public_groups(ListPublicGroups {
+            offset: 0,
+            limit: 20,
+            q: Some("plaza".into()),
+            strategy: None,
+        })
+        .await
+        .expect("label-filtered public groups");
+
+    assert_eq!(page.total, 2);
+    let mut ids: Vec<_> = page
+        .items
+        .iter()
+        .map(|item| match item {
+            GroupSummary::Normal(s) => s.group_id.clone(),
+            other => panic!("expected normal, got {other:?}"),
+        })
+        .collect();
+    ids.sort();
+    assert_eq!(ids, vec!["plaza-alpha", "plaza-beta"]);
+}
+
+#[tokio::test]
+async fn list_public_groups_excludes_inactive_records() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+
+    for (group_id, status) in [("active-one", "active"), ("deleted-one", "deleted")] {
+        let mut group = normal_group(
+            group_id,
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+            GroupStrategy::Chat,
+            10,
+        );
+        group.visibility = "public".into();
+        group.record_status = status.into();
+        fixture.groups.upsert(group).await.expect("store Group");
+    }
+
+    let page = fixture
+        .service
+        .list_public_groups(ListPublicGroups {
+            offset: 0,
+            limit: 20,
+            q: None,
+            strategy: None,
+        })
+        .await
+        .expect("active-only public groups");
+
+    assert_eq!(page.total, 1);
+    match &page.items[0] {
+        GroupSummary::Normal(summary) => assert_eq!(summary.group_id, "active-one"),
+        other => panic!("expected normal summary, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn list_public_groups_rejects_out_of_range_limit() {
+    let fixture = Fixture::new().await;
+
+    for invalid_limit in [0u64, 101] {
+        let result = fixture
+            .service
+            .list_public_groups(ListPublicGroups {
+                offset: 0,
+                limit: invalid_limit,
+                q: None,
+                strategy: None,
+            })
+            .await;
+        assert!(result.is_err(), "limit {invalid_limit} should be rejected");
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, ApplicationError::InvalidInput { .. }),
+            "expected InvalidInput for limit {invalid_limit}, got {err:?}"
         );
     }
 }

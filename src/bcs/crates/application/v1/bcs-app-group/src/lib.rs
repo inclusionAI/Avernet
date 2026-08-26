@@ -13,7 +13,7 @@ use bcs_service_api::application::v1::{
     DirectMessageGroupSummary, GetGroup, GroupDetail, GroupEventSubscriptionProvisioner,
     GroupKindFilter, GroupService, GroupStatus, GroupStrategy as V1GroupStrategy, GroupSummary,
     GroupVisibility, HumanPrincipal, InlineGroupEventSubscriptionRequest, ListGroups,
-    ManagerWorkerConfiguration, Membership, MembershipFilter, NormalGroupSummary, Page,
+    ListPublicGroups, ManagerWorkerConfiguration, Membership, MembershipFilter, NormalGroupSummary, Page,
     Participant as V1Participant, PreparedGroupEventSubscriptions, Principal,
     StateMachineConfiguration, StateMachineDefinition, StateMachineDefinitionReference,
     StateMachineParticipantBinding, UpdateGroup, UpdateGroupParticipant,
@@ -811,7 +811,9 @@ impl GroupServiceImpl {
                 format!("Group '{group_id}' was not found"),
             ));
         }
-        if !self.can_read_group_detail(caller, &group).await? {
+        if group.visibility != visibility_name(GroupVisibility::Public)
+            && !self.can_read_group_detail(caller, &group).await?
+        {
             return Err(ApplicationError::forbidden(
                 "Neither the Human Actor nor an owned Bot is a Group Participant",
             ));
@@ -1137,6 +1139,7 @@ impl GroupServiceImpl {
             None => request.participants.push(CreateParticipant {
                 actor_id: request.driver_bot_uuid.clone(),
                 role: lead_role,
+                tags: Vec::new(),
             }),
             _ => {}
         }
@@ -1204,6 +1207,7 @@ impl GroupServiceImpl {
             .map(|participant| GroupCreateParticipantCommand {
                 bot_id: participant.actor_id,
                 role: Some(role_name(participant.role).to_string()),
+                tags: normalize_participant_tags(participant.tags),
             })
             .collect::<Vec<_>>();
         let created = self
@@ -1724,6 +1728,65 @@ impl GroupService for GroupServiceImpl {
                 self.project_summary(group, &view_actor_id, membership)
                     .await?,
             );
+        }
+        Ok(Page {
+            items,
+            total,
+            offset: command.offset,
+            limit: command.limit,
+        })
+    }
+
+    async fn list_public_groups(
+        &self,
+        command: ListPublicGroups,
+    ) -> Result<Page<GroupSummary>, ApplicationError> {
+        if command.limit == 0 || command.limit > 100 {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "limit must be between 1 and 100",
+            ));
+        }
+        let q = command
+            .q
+            .as_deref()
+            .map(str::trim)
+            .filter(|query| !query.is_empty());
+        let n = self
+            .groups
+            .count_filtered(None, Some("public"), q)
+            .await;
+        const SAFETY_CAP: u64 = 1000;
+        if n > SAFETY_CAP {
+            tracing::warn!(
+                count = n,
+                cap = SAFETY_CAP,
+                "public group plaza candidate set truncated to SAFETY_CAP"
+            );
+        }
+        let candidates = self
+            .groups
+            .list_paginated_filtered(0, n.min(SAFETY_CAP), None, Some("public"), q)
+            .await;
+        let filtered = candidates
+            .into_iter()
+            .filter(|group| group.record_status == "active")
+            .filter(|group| {
+                command.strategy.is_none_or(|strategy| {
+                    group.group_kind == GroupKind::Normal
+                        && project_strategy(group.group_strategy) == strategy
+                })
+            })
+            .collect::<Vec<_>>();
+        let total = filtered.len() as u64;
+        let page = filtered
+            .into_iter()
+            .skip(saturating_usize(command.offset))
+            .take(saturating_usize(command.limit))
+            .collect::<Vec<_>>();
+        let mut items = Vec::with_capacity(page.len());
+        for group in page {
+            items.push(self.project_summary(group, "", Membership::None).await?);
         }
         Ok(Page {
             items,
@@ -2365,6 +2428,7 @@ fn project_participant(participant: &bcs_service_api::Participant) -> V1Particip
         name: participant.bot_name.clone(),
         role: participant.role,
         mode: participant.effective_mode(),
+        tags: participant.tags.clone(),
     }
 }
 
@@ -2381,7 +2445,15 @@ fn participant_view_to_v1(view: GroupParticipantView) -> V1Participant {
         mode: view
             .mode
             .unwrap_or_else(|| ParticipantMode::default_for(view.actor_kind)),
+        tags: view.tags,
     }
+}
+
+fn normalize_participant_tags(tags: Vec<String>) -> Vec<String> {
+    tags.into_iter()
+        .map(|tag| tag.trim().to_string())
+        .filter(|tag| !tag.is_empty())
+        .collect()
 }
 
 fn parse_participant_role(role: &str) -> bcs_service_api::ParticipantRole {

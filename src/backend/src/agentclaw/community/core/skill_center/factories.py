@@ -14,29 +14,36 @@ needs the dispatcher *types* under ``TYPE_CHECKING``.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, TYPE_CHECKING
 
 from injector import inject
 
-from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.mcp.services.config_service import MCPConfigService
-from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
-from agentclaw.community.core.skill_center.services.git_sync import GitSyncService
-from agentclaw.community.core.repository.protocols.skill_center import (
-    SkillSetRepository,
-)
-from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.repository.protocols.skill_center import (
-    SkillCategoryRepository,
-)
-from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
-from agentclaw.community.core.skill_center.path_resolution import (
-    build_pool_local_path_adapter,
-)
+from agentclaw.community.core.bot_management.engines.registry import get_default_skill_set_selection_policy
+from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
 from agentclaw.community.core.config_compose.teclaw_paths import (
     to_local_skill_engine_path,
 )
+from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
+from agentclaw.community.core.mcp.services.config_service import MCPConfigService
+from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillCategoryRepository,
+)
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillSetRepository,
+)
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.path_resolution import (
+    build_pool_local_path_adapter,
+)
+from agentclaw.community.core.skill_center.services.git_sync import GitSyncService
+from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
 from agentclaw.community.core.skill_center.services.skill_parameter_service import (
     SkillParameterService,
 )
@@ -45,9 +52,6 @@ from agentclaw.community.core.skill_center.services.skill_set_service import (
     SkillSetService,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
-from agentclaw.community.core.bot_management.engines.registry import get_default_skill_set_selection_policy
-from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 
@@ -58,23 +62,86 @@ if TYPE_CHECKING:
     # type hints — the string annotations below are never resolved at
     # runtime, making the TYPE_CHECKING import sufficient and the
     # core->di boundary intact.
-    from agentclaw.community.core.devices.services.device_context_resolver import (
-        DeviceContextResolver,
-    )
-    from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
-    from agentclaw.community.di.modules.skill_center_module import (
-        DeviceFilesystemDispatcher,
-    )
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import (
-        DeviceSyncDispatcher,
-    )
-
+    pass
 
 logger = get_logger()
 
 
 class LocalSkillQuarantineRepairError(OSError):
     """A partial authoritative-package delete could not be verified repaired."""
+
+
+# Every package file is one device round trip. Issuing them sequentially made a
+# package cost ``file_count × round_trip``, which dominates upload time for the many
+# small files a skill package is made of. Fan them out instead — but bounded: device
+# filesystems run their blocking transport through ``asyncio.to_thread``, whose
+# default executor (``min(32, cpu_count + 4)`` threads) is shared with every other
+# caller in the process, so an unbounded ``gather`` over a large package would starve
+# unrelated work.
+_PACKAGE_IO_CONCURRENCY = 8
+
+
+async def _gather_package_io(coroutines: list) -> list:
+    """Run package-file I/O concurrently, bounded, and drain before returning.
+
+    Every coroutine is awaited to completion even after one fails, then the first
+    failure *in input order* is re-raised. Draining is what makes the fan-out safe
+    to substitute for the sequential loop: a caller that sees ``write`` fail treats
+    the package as failed and immediately ``delete_tree``s its directory, so a write
+    still in flight at that moment could land a file behind the cleanup and leave an
+    orphan the next upload would trip over. Re-raising in input order keeps the
+    surfaced error the same one the sequential loop would have raised.
+
+    Cancellation is drained the same way, and needs its own handling because it does
+    not travel the exception path: device filesystems block inside
+    ``asyncio.to_thread``, which cannot interrupt a call already executing on a
+    worker thread — cancelling only abandons the await while the HTTP write keeps
+    going. Worse, ``CancelledError`` is a ``BaseException``, so
+    ``LocalSkillUploadService``'s ``except Exception`` compensation is skipped while
+    its ``finally`` still releases the edit lease. A retry could then acquire the
+    lease, ``delete_tree`` the directory and start a fresh package that the
+    abandoned writes land into. So the batch is shielded and drained before the
+    cancellation is allowed to continue.
+    """
+    semaphore = asyncio.Semaphore(_PACKAGE_IO_CONCURRENCY)
+
+    async def _bounded(coro):
+        try:
+            async with semaphore:
+                return await coro
+        finally:
+            # A coroutine still queued on the semaphore when this batch is cancelled
+            # would never be awaited, which Python surfaces as a RuntimeWarning.
+            # Closing an already-finished coroutine is a no-op, so this is safe on
+            # the normal path too.
+            coro.close()
+
+    batch = asyncio.ensure_future(
+        asyncio.gather(*(_bounded(coro) for coro in coroutines), return_exceptions=True)
+    )
+    try:
+        results = await asyncio.shield(batch)
+    except BaseException:
+        # Shielding keeps ``batch`` running when the caller is cancelled; awaiting it
+        # here is what guarantees no write is still in flight once this raises.
+        #
+        # The drain is itself shielded, and loops, because cancellation can arrive
+        # more than once — an aborted request overlapping with shutdown, say. A
+        # plain ``await`` here would let that second cancel tear down ``batch``
+        # itself and re-raise with the worker-thread writes still running, which is
+        # exactly the failure the shield above prevents on the first cancel. Only
+        # ``CancelledError`` is absorbed, and only until ``batch`` finishes, so this
+        # delays cancellation by at most the batch's own remaining work.
+        while not batch.done():
+            try:
+                await asyncio.shield(batch)
+            except asyncio.CancelledError:
+                continue
+        raise
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+    return results
 
 
 class LocalSkillPackageStorage:
@@ -90,10 +157,14 @@ class LocalSkillPackageStorage:
         return self._device_directory
 
     async def write(self, files: list[tuple[str, bytes]]) -> None:
-        for relative_path, content in files:
-            await self._filesystem.write_file(
-                f"{self._device_directory}/{relative_path}", content
-            )
+        await _gather_package_io(
+            [
+                self._filesystem.write_file(
+                    f"{self._device_directory}/{relative_path}", content
+                )
+                for relative_path, content in files
+            ]
+        )
 
     async def prepare(self) -> None:
         """Remove an orphaned failed upload before writing a first package."""
@@ -108,6 +179,18 @@ class LocalSkillPackageStorage:
     async def exists(self) -> bool:
         """Whether this storage currently has an authoritative package."""
         return await self._filesystem.exists(self._device_directory)
+
+    async def read_file(self, relative_path: str) -> bytes | None:
+        """Read one validated package-relative file without exposing its locator."""
+        if (
+            not relative_path
+            or relative_path.startswith("/")
+            or ".." in relative_path.split("/")
+        ):
+            raise ValueError("Local Skill package path is invalid")
+        return await self._filesystem.read_file(
+            f"{self._device_directory}/{relative_path}"
+        )
 
     async def verify(self) -> bool:
         """Read and validate every package file without changing storage."""
@@ -144,16 +227,27 @@ class LocalSkillPackageStorage:
         files = await self._read_package_files()
         if await quarantine._filesystem.exists(quarantine.directory):
             raise OSError("Local Skill quarantine already exists")
-        for relative_path, content in files:
-            await quarantine._filesystem.write_file(
-                f"{quarantine.directory}/{relative_path}", content
-            )
-        for relative_path, content in files:
-            copied = await quarantine._filesystem.read_file(
-                f"{quarantine.directory}/{relative_path}"
-            )
-            if copied != content:
-                raise OSError("Local Skill quarantine verification failed")
+        await _gather_package_io(
+            [
+                quarantine._filesystem.write_file(
+                    f"{quarantine.directory}/{relative_path}", content
+                )
+                for relative_path, content in files
+            ]
+        )
+        copied = await _gather_package_io(
+            [
+                quarantine._filesystem.read_file(
+                    f"{quarantine.directory}/{relative_path}"
+                )
+                for relative_path, _ in files
+            ]
+        )
+        if any(
+            actual != expected
+            for actual, (_, expected) in zip(copied, files)
+        ):
+            raise OSError("Local Skill quarantine verification failed")
         try:
             source_cleaned = await self.cleanup()
         except Exception:
@@ -193,17 +287,24 @@ class LocalSkillPackageStorage:
         return True, await quarantine.cleanup()
 
     async def _restore_contents(self, files: list[tuple[str, bytes]]) -> bool:
-        for relative_path, content in files:
-            await self._filesystem.write_file(
-                f"{self.directory}/{relative_path}", content
-            )
-        for relative_path, content in files:
-            restored = await self._filesystem.read_file(
-                f"{self.directory}/{relative_path}"
-            )
-            if restored != content:
-                return False
-        return True
+        await _gather_package_io(
+            [
+                self._filesystem.write_file(
+                    f"{self.directory}/{relative_path}", content
+                )
+                for relative_path, content in files
+            ]
+        )
+        restored = await _gather_package_io(
+            [
+                self._filesystem.read_file(f"{self.directory}/{relative_path}")
+                for relative_path, _ in files
+            ]
+        )
+        return all(
+            actual == expected
+            for actual, (_, expected) in zip(restored, files)
+        )
 
     async def _read_package_files(self) -> list[tuple[str, bytes]]:
         entries = await self._filesystem.list_dir(
@@ -211,7 +312,7 @@ class LocalSkillPackageStorage:
         )
         if entries is None:
             raise OSError("Local Skill package is missing")
-        files: list[tuple[str, bytes]] = []
+        relative_paths: list[str] = []
         for entry in entries:
             if entry.get("is_dir"):
                 continue
@@ -222,9 +323,20 @@ class LocalSkillPackageStorage:
                 or ".." in relative_path.split("/")
             ):
                 raise OSError("Local Skill package has an invalid file path")
-            content = await self._filesystem.read_file(
-                f"{self._device_directory}/{relative_path}"
-            )
+            relative_paths.append(relative_path)
+        # Every listed path is validated before a single read is issued, so a
+        # package containing an invalid path is still rejected outright rather
+        # than partially read.
+        contents = await _gather_package_io(
+            [
+                self._filesystem.read_file(
+                    f"{self._device_directory}/{relative_path}"
+                )
+                for relative_path in relative_paths
+            ]
+        )
+        files: list[tuple[str, bytes]] = []
+        for relative_path, content in zip(relative_paths, contents):
             if content is None:
                 raise OSError("Local Skill package file disappeared")
             files.append((relative_path, content))
@@ -482,6 +594,7 @@ class SkillSetServiceFactory:
             tuple[str, str, str] | None,
         ],
         ext_info_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
+        reader: BotCapabilityStateReaderProtocol | None = None,
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
@@ -496,6 +609,7 @@ class SkillSetServiceFactory:
         self._path_factory = path_factory
         self._pool_layout_paths = pool_layout_paths
         self._ext_info_provider = ext_info_provider
+        self._reader = reader
 
     def create(
         self,
@@ -615,6 +729,7 @@ class SkillSetServiceFactory:
             default_skill_set_selection_policy=get_default_skill_set_selection_policy(),
             path_factory=self._path_factory,
             pool_layout_paths=self._pool_layout_paths,
+            reader=self._reader,
         )
 
 

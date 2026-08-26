@@ -90,7 +90,7 @@ class SearchBasedDispatchStrategy:
     → ② 投 owner bot search skill 在候选里决出 who+how → 4 态 SearchResult。端口(bot/discover)由 DI 注入;
     省略端口 = stub 路径(纯内核单测)恒 MISS。搜推 skill 不自取 BCSFuse,候选集由框架预查喂入 prompt。
 
-    owner bot = ``graph.extend_props["source_channel_id"]``(框架派生取,零 case 知识)。
+    owner bot = ``graph.extend_props["owner_bot_id"]``(框架派生取,零 case 知识)。
     """
 
     rule_id = "search"
@@ -98,7 +98,9 @@ class SearchBasedDispatchStrategy:
 
     def __init__(self, bot=None, discover=None) -> None:
         """bot: OpenApiBotPort(round-trip 投 search skill);discover: BotDiscoverServiceProtocol(语义预查候选)。
-        None=stub 路径(恒 MISS)。"""
+
+        None=stub 路径(恒 MISS)。候选集由框架预查喂入,本策略不依赖任务模式 roster。
+        """
         self._bot = bot
         self._discover = discover
 
@@ -108,18 +110,25 @@ class SearchBasedDispatchStrategy:
     async def apply(self, node: TaskNode, graph: TaskExecutionGraph) -> SearchResult:
         if self._bot is None or self._discover is None:
             return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_port_stub")
-        owner = str(graph.extend_props.get("source_channel_id") or "")
+        owner = str(graph.extend_props.get("owner_bot_id") or "")
         if not owner:
             return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_owner")
         candidates = await _prefetch_candidates(self._discover, node, graph)
         prompt = _compose_search_prompt(node, candidates)
-        logger.info("[search] owner=%s node=%s 候选=%s", owner, node.node_id,
+        logger.info("[task][search] owner=%s node=%s 候选=%s", owner, node.node_id,
                     [c.get("bot_id") for c in candidates])
         run = await self._bot.send_and_wait_async(
             bot_id=owner, message=prompt, metadata={"phase": "search"},
         )
         sr = _parse_search_result(run)
-        logger.info("[search] node=%s → outcome=%s bot_id=%s group=%s miss=%s",
+        # 把任务描述(目标)塞进 GroupFormation.extend_props,供 form_coop_group 设 BCS 建群 context
+        # (→ <GroupContext> `目标`);与 _run_yaml 路径对齐。取 goal.objective→instruction→title。
+        if sr.group_formation is not None:
+            _spec = node.task_spec
+            _tc = ((_spec.goal.objective or _spec.metadata.instruction or _spec.metadata.title) or "").strip()
+            if _tc:
+                sr.group_formation.extend_props["task_context"] = _tc
+        logger.info("[task][task_dispatch_search] node=%s → outcome=%s bot_id=%s group=%s miss=%s",
                     node.node_id, sr.outcome, sr.bot_id, sr.group_id, sr.miss_reason)
         return sr
 
@@ -150,10 +159,10 @@ async def _prefetch_candidates(discover, node: TaskNode, graph: TaskExecutionGra
     """框架候选预查:对 node 的 title/objective/background 各 jieba 分词,每 token 调 search_by_keyword
     (命中 0→空,不 fallback 全量),合并去重按 recommend.score 降序。discover.search_by_keyword 是同步
     requests,经 asyncio.to_thread 包;多 token 用 asyncio.gather 并发。user_id 取 graph 派生
-    source_channel_id;filters={"runtime_state":["online"]},top_k=10,min_score=0.01。"""
+    owner_bot_id;filters={"runtime_state":["online"]},top_k=10,min_score=0.01。"""
     import asyncio
     texts = _query_text(node)
-    user_id = str(graph.extend_props.get("source_channel_id") or "")
+    user_id = str(graph.extend_props.get("owner_bot_id") or "")
     # 三字段分词 → tokens 去重保序
     tokens: list[str] = []
     seen_tok: set[str] = set()
@@ -164,7 +173,7 @@ async def _prefetch_candidates(discover, node: TaskNode, graph: TaskExecutionGra
                 tokens.append(t)
     if not tokens:
         return []
-    logger.info("[search] node=%s 分词 tokens=%s", node.node_id, tokens)
+    logger.info("[task][search] node=%s 分词 tokens=%s", node.node_id, tokens)
 
     async def _q(kw: str) -> list[dict]:
         try:

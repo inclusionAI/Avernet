@@ -21,33 +21,60 @@ logger = get_logger()
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS discovered_tasks (
     task_id            TEXT PRIMARY KEY,
-    project_name       TEXT NOT NULL,
-    description        TEXT,
-    business_scenario  TEXT,
+    bot_id             TEXT NOT NULL,
+    owner_id           TEXT NOT NULL,
+    dt                 TEXT NOT NULL,
+    title              TEXT NOT NULL,
+    instruction        TEXT,
+    background         TEXT,
     discovery_basis    TEXT,
-    work_item_url      TEXT,
     priority           TEXT DEFAULT 'medium',
     discovered_at      TEXT,
-    status             TEXT DEFAULT 'pending_confirmation'
+    status             TEXT DEFAULT 'pending_confirmation',
+    objective          TEXT,
+    acceptances        TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_discovered_tasks_bot_owner_dt
+    ON discovered_tasks(bot_id, owner_id, dt);
 """
 
-#: 查询全量任务的 SQL
-_SELECT_ALL_SQL = "SELECT task_id, project_name, description, business_scenario, discovery_basis, work_item_url, priority, discovered_at, status FROM discovered_tasks;"
+#: 查询全量任务的 SQL（SELECT *：容纳可能新增的列，_row_to_task 防御性读）
+_SELECT_ALL_SQL = "SELECT * FROM discovered_tasks;"
+
+#: 按 (bot_id, owner_id, dt) 查询待确认任务的 SQL
+_SELECT_PENDING_FOR_BOT_SQL = (
+    "SELECT * FROM discovered_tasks "
+    "WHERE bot_id = ? AND owner_id = ? AND dt = ? "
+    "AND status = 'pending_confirmation';"
+)
 
 
 def _row_to_task(row: sqlite3.Row) -> DiscoveredTask:
-    """将 sqlite3.Row 映射为 DiscoveredTask。"""
+    """将 sqlite3.Row 映射为 DiscoveredTask。
+
+    ``objective`` / ``acceptances`` 为后加的列，对旧库（缺这两列）防御性读取：
+    无则以缺省值/空回退，与 DiscoveredTask 字段默认一致。
+    """
+    keys = set(row.keys())
+    raw_acceptances = row["acceptances"] if "acceptances" in keys else None
+    try:
+        acceptances = json.loads(raw_acceptances) if raw_acceptances else []
+    except (TypeError, ValueError):
+        acceptances = []
     return DiscoveredTask(
         task_id=row["task_id"],
-        project_name=row["project_name"],
-        description=row["description"] or "",
-        business_scenario=row["business_scenario"] or "",
+        bot_id=row["bot_id"],
+        owner_id=row["owner_id"],
+        dt=row["dt"],
+        title=row["title"],
+        instruction=row["instruction"] or "",
+        background=row["background"] or "",
         discovery_basis=row["discovery_basis"] or "",
-        work_item_url=row["work_item_url"],
         priority=row["priority"] or "medium",
         discovered_at=row["discovered_at"],
         status=row["status"] or "pending_confirmation",
+        objective=row["objective"] if "objective" in keys and row["objective"] else "",
+        acceptances=acceptances if isinstance(acceptances, list) else [],
     )
 
 
@@ -65,24 +92,30 @@ def init_discovered_tasks_db(db_path: str | Path, tasks: list[dict]) -> None:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     try:
-        conn.execute(_CREATE_TABLE_SQL)
-        conn.execute("DELETE FROM discovered_tasks;")
+        # DROP+CREATE：每次初始化重建建表，保证 objective/acceptances 等新列就位
+        # （CREATE TABLE IF NOT EXISTS 不会给已存在的旧库加列）。
+        conn.executescript("DROP TABLE IF EXISTS discovered_tasks;\n" + _CREATE_TABLE_SQL)
         conn.executemany(
             "INSERT INTO discovered_tasks "
-            "(task_id, project_name, description, business_scenario, "
-            " discovery_basis, work_item_url, priority, discovered_at, status) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
+            "(task_id, bot_id, owner_id, dt, title, instruction, "
+            " background, discovery_basis, priority, "
+            " discovered_at, status, objective, acceptances) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
             [
                 (
                     t["task_id"],
-                    t["project_name"],
-                    t.get("description", ""),
-                    t.get("business_scenario", ""),
+                    t.get("bot_id", ""),
+                    t.get("owner_id", ""),
+                    t.get("dt", ""),
+                    t.get("title", ""),
+                    t.get("instruction", ""),
+                    t.get("background", ""),
                     t.get("discovery_basis", ""),
-                    t.get("work_item_url"),
                     t.get("priority", "medium"),
                     t.get("discovered_at"),
                     t.get("status", "pending_confirmation"),
+                    t.get("objective", ""),
+                    json.dumps(t.get("acceptances", []), ensure_ascii=False),
                 )
                 for t in tasks
             ],
@@ -145,6 +178,37 @@ class SqliteTaskReader:
         """只返回 ``pending_confirmation`` 状态的任务。"""
         return [t for t in self.read_discovered_tasks() if t.needs_confirmation]
 
+    def read_pending_tasks_for_bot(
+        self, bot_id: str, owner_id: str, dt: str,
+    ) -> list[DiscoveredTask]:
+        """返回指定 bot 当天的待确认任务。"""
+        if not self._db_path.exists():
+            logger.warning(
+                "[task_discovery] db file not found: %s", self._db_path
+            )
+            return []
+
+        conn = sqlite3.connect(str(self._db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.execute(
+                _SELECT_PENDING_FOR_BOT_SQL, (bot_id, owner_id, dt),
+            )
+            tasks = [_row_to_task(row) for row in cursor.fetchall()]
+        except sqlite3.DatabaseError as exc:
+            logger.error(
+                "[task_discovery] failed to read %s: %s", self._db_path, exc
+            )
+            return []
+        finally:
+            conn.close()
+
+        logger.info(
+            "[task_discovery] read %d pending tasks for bot=%s owner=%s dt=%s",
+            len(tasks), bot_id, owner_id, dt,
+        )
+        return tasks
+
 
 class MockTaskReader:
     """从本地 JSON 文件读取已发现任务的 mock 实现(向后兼容)。
@@ -154,12 +218,14 @@ class MockTaskReader:
         {
           "tasks": [
             {
-              "task_id": "task-001",
-              "project_name": "...",
-              "description": "...",
-              "business_scenario": "...",
+              "task_id": "discover_task_bot-001_user-001_2026-08-19",
+              "bot_id": "bot-001",
+              "owner_id": "user-001",
+              "dt": "2026-08-19",
+              "title": "...",
+              "instruction": "...",
+              "background": "...",
               "discovery_basis": "...",
-              "work_item_url": "...",
               "priority": "high",
               "discovered_at": "2026-08-17T10:00:00Z",
               "status": "pending_confirmation"
@@ -197,14 +263,18 @@ class MockTaskReader:
                 tasks.append(
                     DiscoveredTask(
                         task_id=item["task_id"],
-                        project_name=item["project_name"],
-                        description=item.get("description", ""),
-                        business_scenario=item.get("business_scenario", ""),
+                        bot_id=item.get("bot_id", ""),
+                        owner_id=item.get("owner_id", ""),
+                        dt=item.get("dt", ""),
+                        title=item["title"],
+                        instruction=item.get("instruction", ""),
+                        background=item.get("background", ""),
                         discovery_basis=item.get("discovery_basis", ""),
-                        work_item_url=item.get("work_item_url"),
                         priority=item.get("priority", "medium"),
                         discovered_at=item.get("discovered_at"),
                         status=item.get("status", "pending_confirmation"),
+                        objective=item.get("objective", ""),
+                        acceptances=item.get("acceptances", []),
                     )
                 )
             except KeyError as exc:
@@ -220,6 +290,15 @@ class MockTaskReader:
     def read_pending_tasks(self) -> list[DiscoveredTask]:
         """只返回 ``pending_confirmation`` 状态的任务。"""
         return [t for t in self.read_discovered_tasks() if t.needs_confirmation]
+
+    def read_pending_tasks_for_bot(
+        self, bot_id: str, owner_id: str, dt: str,
+    ) -> list[DiscoveredTask]:
+        """返回指定 bot 当天的待确认任务。"""
+        return [
+            t for t in self.read_pending_tasks()
+            if t.bot_id == bot_id and t.owner_id == owner_id and t.dt == dt
+        ]
 
 
 __all__ = [

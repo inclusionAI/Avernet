@@ -488,6 +488,7 @@ impl SessionService for FakeSessionService {
             actor_kind: ActorKind::Bot,
             name: None,
             role: ParticipantRole::Consultant,
+            tags: Vec::new(),
             mode: ParticipantMode::Auto,
             joined_at: Some(1),
         })
@@ -510,6 +511,7 @@ impl SessionService for FakeSessionService {
             actor_id: command.bot_uuid,
             name: None,
             role: ParticipantRole::Consultant,
+            tags: Vec::new(),
             mode: command.mode,
             joined_at: Some(1),
         })
@@ -610,6 +612,7 @@ fn session_participant() -> SessionParticipant {
         actor_kind: ActorKind::Bot,
         name: Some("Bot 1".into()),
         role: ParticipantRole::Driver,
+        tags: Vec::new(),
         mode: ParticipantMode::Auto,
         joined_at: Some(1),
     }
@@ -640,7 +643,9 @@ fn test_session_router_for_caller(
         )
         .with_session_file_service(
             Arc::new(FakeSessionFileService),
-            SessionFileUrlProjector::new("https://gateway.example.com/api/v1/collaboration".into())
+            SessionFileUrlProjector::new(
+                "https://gateway.example.com/api/v1/collaboration".into(),
+            )
                 .expect("valid base"),
         ),
     )

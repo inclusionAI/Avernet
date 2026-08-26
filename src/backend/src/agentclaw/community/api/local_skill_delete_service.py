@@ -9,4 +9,6 @@ from typing import Protocol, runtime_checkable
 class LocalSkillDeleteServiceProtocol(Protocol):
     """Delete one inactive Bot-owned Local Skill by deployment-wide ID."""
 
-    async def delete_local_skill(self, *, skill_id: str, actor_id: str) -> None: ...
+    async def delete_local_skill(
+        self, *, skill_id: str, owner_id: str, user_id: str
+    ) -> None: ...

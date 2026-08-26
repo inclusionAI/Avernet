@@ -76,9 +76,19 @@ The outer request is the existing BCS Provider webhook envelope:
 }
 ```
 
-The BaaS lookup key is the trusted outer `session_id` together with
-`params.interactionId`. The stored interaction remains authoritative; the
-Engine request uses the interaction ID returned by that state machine.
+`params.interactionId` is the BaaS-owned public interaction ID emitted on the
+requested SSE. It is the sole interaction lookup and transition key. The outer
+`session_id` remains part of the BCN envelope for protocol compatibility and
+other routing metadata, but BaaS does not compare it with an Engine session key
+or use it to resolve an interaction. After the public-ID lookup, the stored row
+supplies the original Engine `session_key` and `interaction_id` for owner-worker
+dispatch.
+
+For new interactions, the public ID is
+`BAAS-INTERACTION-<sha256-prefix>`, where the suffix is the first 32 lowercase
+hex characters of SHA-256 over the compact UTF-8 JSON array
+`[engine_session_key, engine_interaction_id]`. Existing rows retain the ID that
+was already exposed before migration so in-flight resolves remain compatible.
 
 ## Kind-specific normalization
 
@@ -86,7 +96,8 @@ Engine request uses the interaction ID returned by that state machine.
 
 BCN requires `action = submit | cancel`. A submit requires one or more answers.
 Each answer is keyed by `questionId` and contains a non-empty `question` plus a
-non-empty ordered list of string `values`.
+required ordered list of string `values`. The list may be empty and its strings
+may be empty or whitespace-only; these shapes represent a skipped question.
 
 Given:
 
@@ -133,8 +144,14 @@ summaries are joined with the Chinese semicolon `；`. JSON object and array
 order follows the incoming answer order. `selectedOptions` is a two-dimensional
 array: each inner array is an unchanged copy of one answer's `values`.
 
-No option lookup or `other` substitution occurs. Cancel produces only
-`decision = cancel`.
+Skipped values use the same projections without rewriting. For example,
+`values: []` produces an empty string in the summary, `values`, and `answers`
+maps and an empty inner array in `selectedOptions`. Empty and whitespace-only
+strings are likewise preserved exactly.
+
+No option lookup, membership validation, trimming, or `other` substitution
+occurs. Custom strings are ordinary values. Cancel produces only `decision =
+cancel`.
 
 ### `exec`
 

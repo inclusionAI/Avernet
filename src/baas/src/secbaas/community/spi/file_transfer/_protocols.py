@@ -67,9 +67,29 @@ class ObjectListing:
 class FileTransferBackend(Protocol):
     """Protocol for file transfer storage backend operations.
 
+    Community-only (open-source) deployments are **disabled by default**: the only
+    shipped implementation is ``NoopFileTransferBackend``, which reports
+    ``disabled = True`` and raises ``NotImplementedError`` for every operation.
+    A real production backend is **enterprise-provided** via ``plugin_registry``.
+
     Implementations:
-    - AliyunOssFileTransferBackend: production OSS operations via oss2 SDK.
+    - AliyunOssFileTransferBackend: production OSS operations via oss2 SDK
+      (enterprise-provided). Available (``disabled = False``).
+    - NoopFileTransferBackend: community no-op that disables the feature.
+
+    ``disabled`` reports whether the backend is a no-op and the file-transfer
+    feature should be treated as off (callers SHOULD short-circuit and not
+    perform storage operations). A real backend leaves it ``False``.
     """
+
+    @property
+    def disabled(self) -> bool:
+        """Return True when this backend is a disabled no-op.
+
+        Defaults to ``False`` (enabled). The community no-op backend
+        overrides this to ``True``.
+        """
+        return False
 
     def generate_upload_url(
         self, staging_path: str, expire_seconds: int, content_type: str | None = None

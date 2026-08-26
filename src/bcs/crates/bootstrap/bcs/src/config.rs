@@ -16,10 +16,11 @@ pub use bcs_config_api::{
 // data-contract crate so downstream modules can depend on them without
 // pulling in the rest of the `bcs` binary.
 pub use bcs_config_api::{
-    AuthChainConfig, AuthSdkConfig, ChannelConfigSection, DingTalkAccountConfig, EventingConfig,
-    FusionProviderConfig, LeaderElectionConfig, LlmConfig, LlmProviderType, LogOutputConfig,
-    LogOutputFormat, LoggingConfig, ManifestConfig, SecretConfig, SecurityConfig,
-    StructuredOutputMode, UserDirectoryConfig, UserDirectoryProviderConfig,
+    AuthChainConfig, AuthSdkConfig,
+    ChannelConfigSection, DingTalkAccountConfig, EventingConfig, FusionProviderConfig,
+    LeaderElectionConfig, LlmConfig, LlmProviderType, LogOutputConfig, LogOutputFormat,
+    LoggingConfig, ManifestConfig, SecretConfig, SecurityConfig, StructuredOutputMode,
+    UserDirectoryConfig, UserDirectoryProviderConfig,
     deserialize_optional_secret, serialize_optional_secret,
 };
 #[allow(unused_imports)]
@@ -275,12 +276,19 @@ pub struct CollaborationConfig {
 pub struct OpenApiV1Config {
     #[serde(default = "default_openapi_v1_public_collaboration_base_url")]
     pub public_collaboration_base_url: String,
+    /// Base URL for internal-collaboration endpoints that live under a
+    /// different gateway path than the public openapi prefix (e.g. the no-auth
+    /// shared-file download at `/api/v1/collaboration/sessions/shared-file/content`).
+    /// Defaults to `public_collaboration_base_url` when unset.
+    #[serde(default)]
+    pub internal_collaboration_base_url: Option<String>,
 }
 
 impl Default for OpenApiV1Config {
     fn default() -> Self {
         Self {
             public_collaboration_base_url: default_openapi_v1_public_collaboration_base_url(),
+            internal_collaboration_base_url: None,
         }
     }
 }
@@ -308,6 +316,44 @@ impl OpenApiV1Config {
         if url.query().is_some() || url.fragment().is_some() {
             return Err(
                 "openapi_v1.public_collaboration_base_url must not contain query or fragment"
+                    .to_string(),
+            );
+        }
+        let normalized_path = url.path().trim_end_matches('/').to_string();
+        url.set_path(&normalized_path);
+        Ok(url.to_string().trim_end_matches('/').to_string())
+    }
+
+    /// Returns the validated internal-collaboration base URL, falling back to
+    /// `public_collaboration_base_url` when `internal_collaboration_base_url`
+    /// is not set.
+    pub fn validated_internal_collaboration_base_url(&self) -> Result<String, String> {
+        let raw = self
+            .internal_collaboration_base_url
+            .as_deref()
+            .map(|v| v.trim())
+            .unwrap_or("");
+        if raw.is_empty() {
+            return self.validated_public_collaboration_base_url();
+        }
+        let mut url = url::Url::parse(raw).map_err(|_| {
+            "openapi_v1.internal_collaboration_base_url must be an absolute HTTP(S) URL"
+                .to_string()
+        })?;
+        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+            return Err(
+                "openapi_v1.internal_collaboration_base_url must be an absolute HTTP(S) URL"
+                    .to_string(),
+            );
+        }
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(
+                "openapi_v1.internal_collaboration_base_url must not contain userinfo".to_string(),
+            );
+        }
+        if url.query().is_some() || url.fragment().is_some() {
+            return Err(
+                "openapi_v1.internal_collaboration_base_url must not contain query or fragment"
                     .to_string(),
             );
         }
@@ -617,6 +663,11 @@ pub struct BcsConfig {
     #[serde(default)]
     pub bcs_endpoint: Option<String>,
 
+    /// Backend work-order service base URL used for friend-connect notifications.
+    /// When unset, BCS keeps the legacy no-op notification port.
+    #[serde(default)]
+    pub friend_work_order_base_url: Option<String>,
+
     /// Botchat frontend URL (e.g. "https://botchat.example.com").
     /// Used to generate frontend URLs: onboard registration, chat pages, etc.
     #[serde(default)]
@@ -742,8 +793,9 @@ pub struct BcsConfig {
     #[serde(default)]
     pub session_files: SessionFilesConfig,
 
-    /// Provider IDs allowed to call the switch-bot-delivery endpoint.
-    /// Empty list means no provider can switch bot delivery.
+    /// Provider IDs allowed to use backend-only Provider Bot operations,
+    /// including switch-bot-delivery and Bot attribute management.
+    /// Empty list means no Provider has either capability.
     #[serde(default)]
     pub allowed_switch_provider_ids: Vec<String>,
 
@@ -981,6 +1033,27 @@ fn path_is_under_root(path: &str, root: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
+fn validate_http_base_url(value: &str, field_name: &str) -> Result<(), String> {
+    let raw = value.trim();
+    if raw.is_empty() {
+        return Err(format!("{field_name} must not be blank"));
+    }
+    let url = url::Url::parse(raw)
+        .map_err(|error| format!("{field_name} must be an absolute HTTP(S) URL: {error}"))?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(format!(
+            "{field_name} must be an absolute HTTP(S) URL"
+        ));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(format!("{field_name} must not contain userinfo"));
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err(format!("{field_name} must not contain query or fragment"));
+    }
+    Ok(())
+}
+
 impl Default for BcsConfig {
     fn default() -> Self {
         Self {
@@ -1011,6 +1084,7 @@ impl Default for BcsConfig {
             max_group_messages: default_max_group_messages(),
             strict_container_validation: true,
             bcs_endpoint: None,
+            friend_work_order_base_url: None,
             botchat_url: None,
             register_path: default_register_path(),
             default_visibility: None,
@@ -1461,6 +1535,12 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
+    if let Some(base_url) = config.friend_work_order_base_url.as_deref() {
+        validate_http_base_url(base_url, "friend_work_order_base_url").map_err(|e| {
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+                as Box<dyn std::error::Error>
+        })?;
+    }
     config
         .openapi_v1
         .validated_public_collaboration_base_url()
@@ -2387,9 +2467,55 @@ tenant = "teamclaw"
         ] {
             let cfg = OpenApiV1Config {
                 public_collaboration_base_url: value.to_string(),
+                ..Default::default()
             };
             assert!(
                 cfg.validated_public_collaboration_base_url().is_err(),
+                "expected invalid URL: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn internal_collaboration_base_url_falls_back_to_collaboration_base_url() {
+        let cfg = OpenApiV1Config::default();
+        assert_eq!(
+            cfg.validated_internal_collaboration_base_url().unwrap(),
+            cfg.validated_public_collaboration_base_url().unwrap(),
+        );
+    }
+
+    #[test]
+    fn internal_collaboration_base_url_uses_independent_value_when_set() {
+        let cfg: OpenApiV1Config = toml::from_str(
+            r#"public_collaboration_base_url = "https://gw.example.com/openapi/v1/collaboration"
+            internal_collaboration_base_url = "https://gw.example.com/api/v1/collaboration""#,
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.validated_public_collaboration_base_url().unwrap(),
+            "https://gw.example.com/openapi/v1/collaboration",
+        );
+        assert_eq!(
+            cfg.validated_internal_collaboration_base_url().unwrap(),
+            "https://gw.example.com/api/v1/collaboration",
+        );
+    }
+
+    #[test]
+    fn internal_collaboration_base_url_rejects_unsafe_values() {
+        for value in [
+            "/api/v1/collaboration",
+            "ftp://gw.example.com/api/v1/collaboration",
+            "https://user@gw.example.com/api/v1/collaboration",
+            "https://gw.example.com/api/v1/collaboration?tenant=x",
+        ] {
+            let cfg = OpenApiV1Config {
+                internal_collaboration_base_url: Some(value.to_string()),
+                ..Default::default()
+            };
+            assert!(
+                cfg.validated_internal_collaboration_base_url().is_err(),
                 "expected invalid URL: {value}"
             );
         }

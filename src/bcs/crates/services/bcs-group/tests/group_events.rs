@@ -109,6 +109,7 @@ async fn participant_add_and_remove_are_the_only_public_membership_events() {
         role: ParticipantRole::Observer,
         actor_kind: bcs_service_api::ActorKind::Human,
         mode: Some(ParticipantMode::Present),
+        tags: Vec::new(),
     };
 
     core.mutate(command(

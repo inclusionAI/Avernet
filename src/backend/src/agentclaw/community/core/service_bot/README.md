@@ -26,13 +26,17 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skills_pool    # repository contracts consumed by this module
+  - agentclaw.community.core.skill_center.capability_state_contract    # installation flush before a new artifact build
   - agentclaw.community.core.common_config
+  - agentclaw.community.core.bot_collaborator    # collaborator permission and edit-lock enforcement for public lifecycle operations
+  - agentclaw.community.core.bot_inventory.policies    # shared engine/deploy-mode combination policy for service upgrades
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_startup_script.protocols  # StartupScriptReaderProtocol — the read side of the per-bot startup script, consumed while composing the container start command
   - agentclaw.community.core.channel    # per-stage engine_overrides (DingTalk channels) reader at verify/online promotion
   - agentclaw.community.core.config_compose
   - agentclaw.community.core.caller_identity.credential  # CallerToken used by BaaS outbound-rule update
   - agentclaw.community.core.devices
+  - agentclaw.community.core.engine_runtime.stage    # canonical live-stage publish binding resolution for Caller identity updates
   - agentclaw.community.core.quality.services
   - agentclaw.community.core.skills_pool
   - agentclaw.community.core.system_config
@@ -41,6 +45,7 @@ internal_dependencies:
   - agentclaw.community.di
   - agentclaw.community.kernel.bot_config
   - agentclaw.community.kernel.device_dto    # neutral OutBound / ResourceSpecification DTOs (B6)
+  - agentclaw.community.kernel.deploy_runtime    # DeployRuntime — names which composer shapes the create-bot payload
   - agentclaw.community.kernel.lifecycle    # PublishTaskLifecycle registers durable task handlers
   - agentclaw.community.log
   - agentclaw.community.plugin_api.approval_workflow           # antprocess approval workflow for publish approval

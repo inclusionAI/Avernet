@@ -297,7 +297,11 @@ group_link_url = "https://botchat.example.com/groups/{group_id}"
 session_link_url = "https://botchat.example.com/sessions/{session_id}"
 
 [openapi_v1]
-public_collaboration_base_url = "https://gateway.example.com/api/v1/collaboration"
+# Base URL for protected session-file URLs (e.g. proxy upload targets).
+public_collaboration_base_url = "https://gateway.example.com/openapi/v1/collaboration"
+# Base URL for internal-collaboration endpoints (content, shared-file download).
+# Falls back to public_collaboration_base_url when unset.
+internal_collaboration_base_url = "https://gateway.example.com/api/v1/collaboration"
 
 [session_files]
 storage_backend = "local"      # or "baas"

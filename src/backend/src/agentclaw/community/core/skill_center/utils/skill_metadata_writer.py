@@ -52,10 +52,7 @@ class SkillSetMetadataWriter:
         logger.info(f"[SkillSetMetadataWriter] Initialized: skills_dir={self.skills_dir}, metadata_file={self.METADATA_FILE}, user_id={user_id}")
 
     def _get_active_skill_set_ids(self) -> set:
-        """Get currently active skill set IDs from database (is_active=1).
-
-        Falls back to .current_skill_set file if DB has no active sets.
-        """
+        """Get currently active skill set IDs from database (is_active=1)."""
         # 优先从 DB 读取 is_active（按 user_id + bolt_id 过滤）
         try:
             all_sets = self.skill_set_repo.list_all(user_id=self.user_id, bolt_id=self.bot_id)
@@ -66,17 +63,6 @@ class SkillSetMetadataWriter:
         except Exception as e:
             logger.warning(f"[SkillSetMetadataWriter] Failed to read active sets from DB: {e}")
 
-        # Fallback: 从文件读取（兼容旧的 SkillSetSwitcher 模式）
-        current_set_file = self.skills_dir / ".current_skill_set"
-        try:
-            if current_set_file.exists():
-                data = json.loads(current_set_file.read_text())
-                skill_set_id = data.get("skill_set_id")
-                if skill_set_id:
-                    logger.debug(f"[SkillSetMetadataWriter] Current skill set ID from file: {skill_set_id}")
-                    return {skill_set_id}
-        except Exception as e:
-            logger.warning(f"[SkillSetMetadataWriter] Failed to read current skill set file: {e}")
         return set()
 
     def _get_skill_dir_name(self, git_path: str | None) -> str:

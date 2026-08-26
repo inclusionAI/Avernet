@@ -14,6 +14,7 @@ itself stays mode-agnostic — no dedicated testing module exists here.
 constructed by the injector via ``@inject`` on their constructors —
 they pick up the swapped repositories transparently.
 """
+
 from __future__ import annotations
 
 from typing import Annotated, Callable
@@ -30,6 +31,7 @@ from injector import (
 )
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
 from agentclaw.community.api.create_bot_for_others_service import (
     CreateBotForOthersServiceProtocol,
 )
@@ -42,7 +44,9 @@ from agentclaw.community.api.render_screen_service import RenderScreenServicePro
 from agentclaw.community.core.bot_collaborator.protocols import (
     BotServiceProtocol as CoreBotServiceProtocol,
 )
-from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import (
+    CollaboratorRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import RenderScreenRepository
 from agentclaw.community.core.bot_collaborator.services.credentials_admins_writer import (
     DeviceCredentialsAdminsWriter,
@@ -71,27 +75,44 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
-from agentclaw.community.core.bot_management.services.cleanup_service import BotCleanupService
+from agentclaw.community.core.bot_management.services.bot_space_service import (
+    BotSpaceService,
+)
+from agentclaw.community.core.bot_management.services.cleanup_service import (
+    BotCleanupService,
+)
 from agentclaw.community.core.bot_management.services.create_bot_for_others_service import (
     CreateBotForOthersService,
 )
-from agentclaw.community.core.bot_management.services.data_init_service import DataInitService
+from agentclaw.community.core.bot_management.services.data_init_service import (
+    DataInitService,
+)
 from agentclaw.community.core.bot_management.services.default_bot_passport_repair_service import (
     DefaultBotPassportRepairService,
 )
-from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import WorkspaceHostingService
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import (
+    WorkspaceHostingService,
+)
 from agentclaw.community.core.bot_management.services.teclaw_provision_service import (
     TeclawProvisionService,
 )
 from agentclaw.community.core.bot_management.services.teclaw_publish_task_handler import (
     TeclawPublishTaskLifecycle,
 )
-from agentclaw.community.core.bot_management.services.template_service import TemplateService
-from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
+from agentclaw.community.core.bot_management.services.template_service import (
+    TemplateService,
+)
+from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import (
+    CronAutoSetupService,
+)
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.desktop_bot.device_status_client import DeviceStatusClient
-from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
-from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import (
+    OssToNasRecordRepository,
+)
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+)
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -99,20 +120,25 @@ from agentclaw.community.core.devices.services.baas_template_resolver import (
     SystemConfigBaasTemplateResolver,
 )
 from agentclaw.community.core.devices.services.device_service import DeviceService
-from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
-from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
+from agentclaw.community.core.repository.protocols.platform import (
+    ResourceRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.publishing import (
+    BotPublishRepositoryProtocol,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
-from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
+from agentclaw.community.core.service_bot.services.bot_publish_service import (
+    BotPublishService,
+)
 from agentclaw.community.core.service_bot.services.deploy.producer import (
     DeployArtifactProducerRouter,
 )
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
-from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+from agentclaw.community.core.task_queue.services.task_queue_service import (
+    TaskQueueService,
+)
 from agentclaw.community.core.system_config import SystemConfigService
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-from agentclaw.community.core.skill_center.services.skill_set_service import (
-    SkillSetActivatorFactory,
-)
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
@@ -123,11 +149,21 @@ from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlu
 from agentclaw.community.plugin_api.http_client import QUALIFIER_BCN, HttpClient
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
-from agentclaw.community.core.repository.implementations.bot.bot import BotRepository as UnifiedBotRepository
-from agentclaw.community.core.repository.implementations.bot.restart_lock import BotRestartLockRepository
-from agentclaw.community.core.repository.implementations.bot.startup_script import BotStartupScriptRepository
-from agentclaw.community.core.repository.implementations.bot.render_screen import RenderScreenRepository as UnifiedRenderScreenRepository
-from agentclaw.community.core.repository.implementations.bot.template import TemplateRepository as UnifiedTemplateRepository
+from agentclaw.community.core.repository.implementations.bot.bot import (
+    BotRepository as UnifiedBotRepository,
+)
+from agentclaw.community.core.repository.implementations.bot.restart_lock import (
+    BotRestartLockRepository,
+)
+from agentclaw.community.core.repository.implementations.bot.startup_script import (
+    BotStartupScriptRepository,
+)
+from agentclaw.community.core.repository.implementations.bot.render_screen import (
+    RenderScreenRepository as UnifiedRenderScreenRepository,
+)
+from agentclaw.community.core.repository.implementations.bot.template import (
+    TemplateRepository as UnifiedTemplateRepository,
+)
 
 
 logger = get_logger()
@@ -176,9 +212,7 @@ class BotManagementModule(Module):
         # RenderScreenRepository was already unified earlier.
         # BotRepository is provided below so singlebox can observe real
         # repository usage at the DI/plugin boundary.
-        binder.bind(
-            TemplateRepository, to=UnifiedTemplateRepository, scope=singleton
-        )
+        binder.bind(TemplateRepository, to=UnifiedTemplateRepository, scope=singleton)
         binder.bind(
             RenderScreenRepository,
             to=UnifiedRenderScreenRepository,
@@ -345,7 +379,9 @@ class BotManagementModule(Module):
             device_status_client=DeviceStatusClient.from_baas_config(baas_config),
             cron_auto_setup_service_provider=lambda: injector.get(CronAutoSetupService),
             policy_service=policy_service,
-            baas_template_resolver=SystemConfigBaasTemplateResolver(system_config_service),
+            baas_template_resolver=SystemConfigBaasTemplateResolver(
+                system_config_service
+            ),
             # Lazy (cycle-safe): baas bot 原地重启走 BaaSService.restart_bot。
             baas_service_provider=lambda: injector.get(BaasService),
             task_queue_service=task_queue_service,
@@ -360,7 +396,6 @@ class BotManagementModule(Module):
         resource_repo: ResourceRepositoryProtocol,
         device_service: DeviceService,
         skill_set_factory: SkillSetServiceFactory,
-        skill_set_activator_factory: SkillSetActivatorFactory,
         device_plugin: DeviceAccessor,
         bot_service_provider: Callable[[], BotService],
         skill_repo_sync: SkillRepoSyncPlugin,
@@ -384,7 +419,6 @@ class BotManagementModule(Module):
             resource_repo=resource_repo,
             device_service=device_service,
             skill_set_factory=skill_set_factory,
-            skill_set_activator_factory=skill_set_activator_factory,
             device_plugin=device_plugin,
             bot_service_provider=bot_service_provider,
             skill_md_path=skill_repo_sync.get_data_init_skill_md_path(),
@@ -410,17 +444,13 @@ class BotManagementModule(Module):
     @singleton
     @provider
     @inject
-    def device_service_factory(
-        self, injector: Injector
-    ) -> Callable[[], DeviceService]:
+    def device_service_factory(self, injector: Injector) -> Callable[[], DeviceService]:
         return lambda: injector.get(DeviceService)
 
     @singleton
     @provider
     @inject
-    def bot_service_factory(
-        self, injector: Injector
-    ) -> Callable[[], BotService]:
+    def bot_service_factory(self, injector: Injector) -> Callable[[], BotService]:
         return lambda: injector.get(BotService)
 
     @singleton
@@ -515,6 +545,14 @@ class BotManagementModule(Module):
     @provider
     @inject
     def _bot_service_protocol(self, svc: BotService) -> BotServiceProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _bot_space_service_protocol(
+        self, svc: BotSpaceService
+    ) -> BotSpaceServiceProtocol:
         return svc
 
     @singleton

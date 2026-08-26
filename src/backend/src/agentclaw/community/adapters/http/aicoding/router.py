@@ -26,16 +26,21 @@ from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.baas_service import BaasServiceProtocol
+from agentclaw.community.core.aicoding.protocols import (
+    AicodingBotResolutionServiceProtocol,
+)
 from agentclaw.community.api.device_service import DeviceServiceProtocol
 from agentclaw.community.api.workflow_catalog_service import WorkflowCatalogServiceProtocol
 from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
     with_interceptors,
 )
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotServiceError,
 )
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.bot_management import codefuse_token as _codefuse_token
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.services.identity import VALID_ENTITY_TYPES
@@ -298,14 +303,17 @@ class DimaWorkspaceResponse(BaseModel):
     response_model=DimaWorkspaceResponse,
 )
 @with_interceptors(CollaboratorPermissionInterceptor(
+    required_level=PermissionLevel.MEMBER,
     bot_id="$bot_id",
     owner_id="$user_id",
+    skip_lock_check=True,
 ))
 async def create_bot_dima_workspace(
     bot_id: str,
     user_id: Optional[str] = Query(None, description="Bot owner user ID"),
     ctx: RequestContext = Depends(get_request_context),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    bot_resolution_service: AicodingBotResolutionServiceProtocol = Injected(AicodingBotResolutionServiceProtocol),
 ) -> DimaWorkspaceResponse:
     """为 Coding bot 创建 DIMA 工作空间（幂等）。
 
@@ -316,8 +324,8 @@ async def create_bot_dima_workspace(
 
     幂等：已存在 ``dima_space_id`` 时直接返回该 ID，不会重复创建。
 
-    权限：bot owner 或 collaborator。``user_id`` 用于权限校验时定位 bot
-    所有者；不传时默认使用当前登录用户。
+    权限：bot owner 或 collaborator（至少 MEMBER）。``user_id`` 用于权限校验时
+    定位 bot 所有者；不传时默认使用当前登录用户。
     """
     operator_id = ctx.user_id
     if not operator_id or operator_id == "anonymous":
@@ -332,7 +340,18 @@ async def create_bot_dima_workspace(
     )
 
     try:
-        workspace_id = bot_service.ensure_hosted_workspace(bot_id, resolved_user_id)
+        resolved_bot = bot_resolution_service.resolve_bot_for_dima_workspace(
+            bot_id=bot_id,
+            requested_owner_id=resolved_user_id,
+            operator_id=operator_id,
+            env=get_current_env(),
+        )
+        if not resolved_bot:
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+        workspace_id = bot_service.ensure_hosted_workspace(
+            bot_id,
+            str(resolved_bot.get("owner_id") or resolved_user_id),
+        )
     except BotNotFoundError:
         return DimaWorkspaceResponse(
             success=False, message=f"Bot不存在: {bot_id}", error_code=404, data=None,

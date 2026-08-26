@@ -33,13 +33,50 @@ def test_shipped_config_admits_a_machine_caller_on_the_public_api() -> None:
     assert req[PrincipalType.APP] is Presence.OPTIONAL
 
 
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/openapi/v1/bots/market/skills"),
+        ("POST", "/openapi/v1/bots/market/mcp-servers"),
+        ("POST", "/openapi/v1/bots/market/skill-center/skills"),
+        ("GET", "/openapi/v1/bots/catalog/search"),
+        ("GET", "/openapi/v1/bots/catalog/discover"),
+    ],
+)
+def test_shipped_config_admits_app_only_market_queries(method: str, path: str) -> None:
+    """Market discovery accepts an application identity without a human."""
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    requirement = rs.resolve(method, path)
+
+    assert requirement is not None
+    assert requirement[PrincipalType.USER] is Presence.OPTIONAL
+    assert requirement[PrincipalType.APP] is Presence.OPTIONAL
+
+
 #: The operations that still require a human on the wire. Mirrors Mode REFUSED
 #: in the backend's ``adapters/http/openapi_v1/admission.py`` — that table is
 #: the authority, and this list is the edge's expression of it. They are two
 #: packages, so the agreement is kept by these tests plus the backend's own
 #: enumeration rather than by a shared import.
 _HUMAN_ONLY = [
+    ("GET", "/openapi/v1/org/user"),
+    ("GET", "/openapi/v1/bots/spaces"),
+    ("POST", "/openapi/v1/bots/spaces/personal/initialize"),
+    ("POST", "/openapi/v1/bots/spaces/create"),
+    ("GET", "/openapi/v1/bots/spaces/1/members"),
+    ("POST", "/openapi/v1/bots/spaces/1/members"),
+    ("DELETE", "/openapi/v1/bots/spaces/1/members/user-1"),
+    ("PUT", "/openapi/v1/bots/spaces/1/members/user-1/role"),
+    ("POST", "/openapi/v1/bots/spaces/1/market-favorites"),
+    ("POST", "/openapi/v1/bots/spaces/1/market-favorites/cancel"),
+    ("POST", "/openapi/v1/bots/spaces/1/market-favorites/search"),
+    ("GET", "/openapi/v1/bots/spaces/1/skills"),
+    ("POST", "/openapi/v1/bots/bot-123/iam-token"),
     ("POST", "/openapi/v1/bots"),
+    ("POST", "/openapi/v1/bots/local"),
+    ("GET", "/openapi/v1/bots/bot-123/local/auth-status"),
     ("GET", "/openapi/v1/bots/bot-123/authorized-apps"),
     ("DELETE", "/openapi/v1/bots/bot-123/authorized-apps/42"),
     ("GET", "/openapi/v1/bots/logs/traces"),
@@ -72,6 +109,22 @@ def test_shipped_config_still_requires_a_user_where_a_human_is_required(
     assert req[PrincipalType.USER] is Presence.REQUIRED, (method, path)
 
 
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/openapi/v1/bots/bot-123/iam-token"),
+    ],
+)
+def test_iam_operations_do_not_resolve_an_app_identity(method: str, path: str) -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    req = RouteSecurity.from_table(raw["user_config"]["route_security"]).resolve(
+        method, path
+    )
+
+    assert req is not None
+    assert req == {PrincipalType.USER: Presence.REQUIRED}
+
+
 def test_shipped_config_lets_an_application_discover_its_own_scope() -> None:
     """The one operation an integration calls before it can call anything else.
 
@@ -87,6 +140,33 @@ def test_shipped_config_lets_an_application_discover_its_own_scope() -> None:
     assert req is not None
     assert req[PrincipalType.USER] is Presence.OPTIONAL
     assert req[PrincipalType.APP] is Presence.REQUIRED
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/openapi/v1/bots/bot-123/editors"),
+        ("POST", "/openapi/v1/bots/bot-123/editors"),
+        ("PATCH", "/openapi/v1/bots/bot-123/editors/7"),
+        ("DELETE", "/openapi/v1/bots/bot-123/editors/7"),
+        ("DELETE", "/openapi/v1/bots/bot-123/editors/me"),
+        ("GET", "/openapi/v1/bots/bot-123/render-screens"),
+        ("POST", "/openapi/v1/bots/bot-123/render-screens"),
+        ("PATCH", "/openapi/v1/bots/bot-123/render-screens/7"),
+        ("DELETE", "/openapi/v1/bots/bot-123/render-screens/7"),
+    ],
+)
+def test_shipped_config_allows_app_identity_for_bot_configuration(
+    method: str, path: str
+) -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    req = rs.resolve(method, path)
+
+    assert req is not None
+    assert req[PrincipalType.USER] is Presence.OPTIONAL
+    assert req[PrincipalType.APP] is Presence.OPTIONAL
 
 
 _SOCKET_PATH = "/openapi/v1/bots/messages/ws/ARCA_x@0:20003/api/openclaw/ws"
@@ -152,7 +232,9 @@ def test_the_socket_exemption_does_not_reach_the_http_plane() -> None:
     for path in (_SOCKET_PATH, "/openapi/v1/bots/messages/../../admin/keys"):
         req = rs.resolve("GET", path)
         assert req is not None, path
-        assert req != {}, f"the HTTP plane must not inherit the socket exemption: {path}"
+        assert req != {}, (
+            f"the HTTP plane must not inherit the socket exemption: {path}"
+        )
 
 
 def test_shipped_config_exempts_the_collaboration_socket_handshake() -> None:
@@ -169,7 +251,9 @@ def test_collaboration_socket_exemption_does_not_reach_the_http_plane() -> None:
     assert req[PrincipalType.USER] is Presence.REQUIRED
 
 
-def test_shipped_config_collects_all_optional_file_identities_and_keeps_share_public() -> None:
+def test_shipped_config_collects_all_optional_file_identities_and_keeps_share_public() -> (
+    None
+):
     raw = yaml.safe_load(_CONFIG.read_text())
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
 

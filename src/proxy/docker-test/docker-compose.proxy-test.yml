@@ -1,0 +1,15 @@
+services:
+  proxy:
+    image: proxy:local
+    environment:
+      SERVER_ENV: prod
+      SANDBOXPROXY_PORT: "${SANDBOXPROXY_PORT:-8888}"
+      # Test-only JWT secret (community reads it from config/env overlay).
+      SANDBOXPROXY_JWT_SECRET: "${SANDBOXPROXY_JWT_SECRET:-proxy-test-secret-not-for-prod}"
+    ports:
+      - "${HOST_PORT:-18887}:8888"
+    networks:
+      - proxy-net
+
+networks:
+  proxy-net:

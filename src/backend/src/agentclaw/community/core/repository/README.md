@@ -17,7 +17,7 @@ puts them here rather than there.
 
 ## Domains
 
-Eleven subdirectories, mirrored on both sides. A domain is the consumer seam, not
+Thirteen domains, mirrored on both sides. A domain is the consumer seam, not
 the table: single-repository domains merge into the sibling that shares their
 consumer, so `protocols/<domain>.py` and `implementations/<domain>/` always name
 the same thing.
@@ -35,6 +35,9 @@ the same thing.
 | `devices` | device bindings |
 | `publishing` | service_bot |
 | `config` | system_config, common_config |
+| `spaces` | spaces and space membership |
+| `market_favorites` | space-scoped market favorites |
+| `work_orders` | approval work orders and recipient notifications |
 
 `protocols/bot/` is a package rather than a module only because the single file
 would exceed the Rule 9 size cap; its `__init__.py` re-exports every contract, so
@@ -92,6 +95,12 @@ provides:
   - RenderScreenRepository
   - TemplateRepository
   - UserMCPConfigRepository
+  - CapabilityDesiredStateRepositoryProtocol
+  - CapabilityDesiredStateRepository
+  # spaces / market_favorites
+  - SpaceRepositoryProtocol
+  - MarketFavoriteRepositoryProtocol
+  - WorkOrderRepositoryProtocol
   # chat
   - BotChatDbRepositoryProtocol
   - ChannelRepository
@@ -123,6 +132,15 @@ provides:
   - ResourceRepositoryProtocol
   - SessionResourceRepositoryProtocol
   - TaskQueueRepositoryProtocol
+  # task
+  - TaskInfoRepositoryProtocol
+  - TaskGraphRepositoryProtocol
+  - TaskActionLogRepositoryProtocol
+  - TaskNodeRepositoryProtocol
+  - TaskNodeRunInfoRepositoryProtocol
+  - TaskNodeRelationRepositoryProtocol
+  - TaskCallbackRepositoryProtocol
+  - TaskDiscoveryLockRepositoryProtocol
   # publishing
   - BotPublishRepositoryProtocol
   - PublishOperationRepository    # an ABC, not a Protocol — same role, same surface
@@ -132,6 +150,7 @@ provides:
   - SkillMemberRepository
   - SkillPropagationLogRepository
   - SkillRepository
+  - SpaceSkillRepository
   - SkillSetRepository
   # skills_pool
   - QuarantineRepositoryProtocol
@@ -148,6 +167,10 @@ provides:
   - BotRestartLockRepository
   - BotStartupScriptRepository
   - CollaboratorRepository
+  # spaces / market_favorites
+  - SpaceRepository
+  - MarketFavoriteRepository
+  - WorkOrderRepository
   # chat
   - BotChatDbRepository
   - OpenBotChatRepository
@@ -172,9 +195,19 @@ provides:
   - BotPublishRepository
   - OrmPublishOperationRepository
   # skill_center
+  - SpaceSkillRepository
   # skills_pool
   - SkillsPoolLayoutRepository
   - SkillsPoolRolloutRepository
+  # task
+  - TaskInfoRepository
+  - TaskGraphRepository
+  - TaskActionLogRepository
+  - TaskNodeRepository
+  - TaskNodeRunInfoRepository
+  - TaskNodeRelationRepository
+  - TaskCallbackRepository
+  - TaskDiscoveryLockRepository
 consumes:
   - DatabasePlugin                # the per-profile session seam, injected into every implementation
   - get_current_env               # environment scoping (utils.env_utils)
@@ -201,9 +234,13 @@ internal_dependencies:
   - agentclaw.community.core.quality
   - agentclaw.community.core.service_bot
   - agentclaw.community.core.session_resources
+  - agentclaw.community.core.spaces
+  - agentclaw.community.core.market_favorites
+  - agentclaw.community.core.work_orders
   - agentclaw.community.core.skill_center
   - agentclaw.community.core.skills_pool
   - agentclaw.community.core.system_config
+  - agentclaw.community.core.task
   - agentclaw.community.core.task_queue
   - agentclaw.community.core.user_list
   - agentclaw.community.core.workspace

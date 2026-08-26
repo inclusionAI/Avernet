@@ -14,7 +14,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional, Dict, Any, List, Tuple, TYPE_CHECKING
+from typing import Callable, Optional, Dict, Any, List, Literal, Tuple, TYPE_CHECKING
 
 from agentclaw.community.core.bot_management.capabilities import (
     can_join_bcn_as_provider,
@@ -213,9 +213,9 @@ class DefaultBotTeclawNotAllowedError(BotServiceError):
         super().__init__(DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE)
 
 
-# 仅允许中英文、数字、下划线、中划线、空格；禁止 @ # / 等特殊字符。
+# 仅允许中英文、数字、下划线、中划线、空格，以及产品名/版本说明所需的 +、(、) ；禁止 @ # / 等特殊字符。
 _BOT_NAME_MAX_LEN = 32
-_BOT_NAME_ALLOWED_RE = re.compile(r"^[\w一-鿿 \-]+$", re.UNICODE)
+_BOT_NAME_ALLOWED_RE = re.compile(r"^[\w一-鿿 \-()+]+$", re.UNICODE)
 
 
 def validate_bot_name(bot_name: Optional[str]) -> str:
@@ -224,7 +224,7 @@ def validate_bot_name(bot_name: Optional[str]) -> str:
     Rules:
     - must be non-empty after strip
     - length <= 32 characters
-    - only Chinese/letters/digits/underscore/hyphen/space allowed
+    - only Chinese/letters/digits/underscore/hyphen/space and + ( ) allowed
     """
     if bot_name is None:
         raise BotNameInvalidError("Bot 名称不能为空")
@@ -237,7 +237,8 @@ def validate_bot_name(bot_name: Optional[str]) -> str:
         )
     if not _BOT_NAME_ALLOWED_RE.match(trimmed):
         raise BotNameInvalidError(
-            "Bot 名称只能包含中英文、数字、下划线、中划线和空格，不允许 @、# 等特殊字符"
+            "Bot 名称只能包含中英文、数字、下划线、中划线、空格以及 +、(、) ，"
+            "不允许 @、# 等特殊字符"
         )
     return trimmed
 
@@ -1247,6 +1248,7 @@ class BotService:
         template_type: Optional[str] = None,
         template_config: Optional[Dict[str, Any]] = None,
         cookie: Optional[str] = None,
+        space_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Create a new bot with async device allocation.
@@ -1384,34 +1386,58 @@ class BotService:
                 "ext": ext,
                 "bot_type": resolved_bot_type,
                 "template_type": template_type,  # Template type (e.g., "applicationCoding")
+                "space_id": space_id,  # Business-space ownership: NULL -> personal fallback
             }
 
             bot_record = self._repository.insert(bot_data)
             logger.info(f"[bot_service.create_bot] Bot {bot_id} created with PENDING status")
 
             # Step 1.5: Create template record if template_config is provided
-            if template_config and template_type:
-                try:
-                    logger.info(
-                        "[bot_service.create_bot] Creating template for bot %s, template_type=%s",
-                        bot_id, template_type,
-                    )
-
-                    # For applicationCoding template, ensure DIMA workspace exists
-                    if template_type == "applicationCoding":
-                        # Create DIMA workspace and update template_config with dima_space_id
+            if template_type and template_config is not None:
+                if template_type == "applicationCoding":
+                    # A coding bot without a hosted workspace is unusable, so a
+                    # failed workspace create is fatal here (unlike a plain bot,
+                    # where template creation stays best-effort). The already-
+                    # inserted bot row is soft-deleted; deeper compensation
+                    # (Passport / workspace / template) stays best-effort-by-
+                    # caller, per the plan's explicit deferral.
+                    try:
                         workspace_id = self._require_workspace_hosting().create_workspace_for_bot(
                             staff_id=user_id,
                             bot_id=bot_id,
                             bot_name=resolved_bot_name,
                             template_config=template_config,
                         )
+                    except Exception as exc:
+                        logger.exception(
+                            "[bot_service.create_bot] hosted workspace creation failed bot_id=%s",
+                            bot_id,
+                        )
+                        self._repository.soft_delete_by_owner(bot_id, user_id)
+                        raise BotServiceError(
+                            "applicationCoding workspace creation failed"
+                        ) from exc
+                    if not workspace_id:
+                        logger.error(
+                            "[bot_service.create_bot] hosted workspace creation returned "
+                            "no id bot_id=%s",
+                            bot_id,
+                        )
+                        self._repository.soft_delete_by_owner(bot_id, user_id)
+                        raise BotServiceError(
+                            "applicationCoding workspace creation returned no id"
+                        )
+                    logger.info(
+                        "[bot_service.create_bot] Created hosted workspace %s for bot %s",
+                        workspace_id,
+                        bot_id,
+                    )
 
-                        if workspace_id:
-                            logger.info(f"[bot_service.create_bot] Created DIMA workspace {workspace_id} for bot {bot_id}")
-                        else:
-                            logger.warning(f"[bot_service.create_bot] Failed to create DIMA workspace for bot {bot_id}, continuing without it")
-
+                try:
+                    logger.info(
+                        "[bot_service.create_bot] Creating template for bot %s, template_type=%s",
+                        bot_id, template_type,
+                    )
                     self._template_service.create_template(
                         bot_id=bot_id,
                         template_config=template_config,
@@ -1421,8 +1447,18 @@ class BotService:
                     logger.info(f"[bot_service.create_bot] Template created for bot {bot_id}")
                 except Exception as e:
                     logger.error(f"[bot_service.create_bot] Failed to create template for bot {bot_id}: {e}", exc_info=True)
-                    # Don't fail bot creation if template creation fails
-                    # Just log the error
+                    if template_type == "applicationCoding":
+                        # An applicationCoding bot without its template record is
+                        # not a usable bot. Do not report success after hosting
+                        # succeeded but local template persistence failed. The
+                        # remote workspace may require manual cleanup because the
+                        # delete contract is intentionally deferred.
+                        self._repository.soft_delete_by_owner(bot_id, user_id)
+                        raise BotServiceError(
+                            "applicationCoding template creation failed"
+                        ) from e
+                    # Keep the historical best-effort behavior for non-coding
+                    # template creation.
 
             # 桌面 bot 的设备分配走 BaaS 流程（DesktopBotService._execute_creation），
             # 不应走 DeviceService.apply_device()（会生成 staff_xxx 格式 device_id）。
@@ -1432,6 +1468,48 @@ class BotService:
                     f"skipping DeviceService.apply_device (uses BaaS allocation)"
                 )
                 return bot_record
+
+            # Bot 已落库并完成名称/简介解析后，在设备分配前注册 BCN Provider。
+            # 这样创建路径与 start_bot 对齐；BCN 注册为 best-effort，不影响后续分配。
+            should_register_bcn = self._should_register_bcn_provider(
+                active_engine=resolved_active_engine,
+                bot_type=resolved_bot_type,
+                template_type=template_type,
+                template_config=template_config,
+            )
+            connection_mode = self._resolve_bcn_provider_connection_mode(
+                active_engine=resolved_active_engine,
+                bot_type=resolved_bot_type,
+            )
+            if should_register_bcn:
+                logger.info(
+                    f"[bot_service.create_bot] register bot to BCN as provider: "
+                    f"bot_id={bot_id} active_engine={resolved_active_engine} "
+                    f"bot_type={resolved_bot_type} template_type={template_type} "
+                    f"connection_mode={connection_mode}"
+                )
+                try:
+                    self._register_bot_to_bcn_as_provider(
+                        bot_id=bot_id,
+                        user_id=user_id,
+                        owner_workno=user_id,
+                        bot_name=resolved_bot_name or bot_id,
+                        bot_summary=bot_desc or "",
+                        connection_mode=connection_mode,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[bot_service.create_bot] BCN provider registration failed for bot {bot_id}, "
+                        f"connection_mode={connection_mode}, "
+                        f"error_type={type(e).__name__}, will retry on next start"
+                    )
+            else:
+                logger.info(
+                    f"[bot_service.create_bot] skip BCN provider registration: "
+                    f"bot_id={bot_id} active_engine={resolved_active_engine} "
+                    f"bot_type={resolved_bot_type} template_type={template_type} "
+                    f"connection_mode={connection_mode}"
+                )
 
             # Step 2: 设备分配（错误立即透出给前端）。teclaw bot 走 BaaS 即时备容器
             # (create + approve)，不经 DeviceService.apply_device()；其余引擎走 apply_device。
@@ -1550,46 +1628,6 @@ class BotService:
                 bot_record["device_id"] = device_id
                 bot_record["status"] = final_status
                 bot_record["engine_types"] = resolved_engine_types
-
-                # 创建时注册 BCN Provider（与 start_bot 条件一致）
-                # 触发条件:
-                #   - active_engine == "claude_code" 且 template_type == "normalCC"
-                #   - active_engine == "claude_code" 且 template_type == "personalCoding"
-                #   - active_engine == "aicoding" 且 template_type == "personalCoding"
-                #   - active_engine == "teclaw" (所有 bot_type)
-                #   - active_engine == "openclaw" 且 bot_type == "service"
-                # 排查日志关键字: [bot_service.create_bot] register bot to BCN as provider
-                should_register_bcn = self._should_register_bcn_provider(
-                    active_engine=resolved_active_engine,
-                    bot_type=resolved_bot_type,
-                    template_type=template_type,
-                    template_config=template_config,
-                )
-                if should_register_bcn:
-                    logger.info(
-                        f"[bot_service.create_bot] register bot to BCN as provider: "
-                        f"bot_id={bot_id} active_engine={resolved_active_engine} "
-                        f"bot_type={resolved_bot_type} template_type={template_type}"
-                    )
-                    try:
-                        self._register_bot_to_bcn_as_provider(
-                            bot_id=bot_id,
-                            user_id=user_id,
-                            owner_workno=user_id,
-                            bot_name=resolved_bot_name or bot_id,
-                            bot_summary=bot_desc or "",
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"[bot_service.create_bot] BCN provider registration failed for bot {bot_id}, "
-                            f"will retry on next start: {e}"
-                        )
-                else:
-                    logger.info(
-                        f"[bot_service.create_bot] skip BCN provider registration: "
-                        f"bot_id={bot_id} active_engine={resolved_active_engine} "
-                        f"bot_type={resolved_bot_type} template_type={template_type}"
-                    )
 
                 # 如果是服务型 bot，创建发布单
                 if resolved_bot_type == "service":
@@ -2167,6 +2205,7 @@ class BotService:
         owner_id: Optional[str] = None,
         engine: Optional[str] = None,
         status: Optional[str] = None,
+        space_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
         bot_ids: Optional[List[str]] = None,
@@ -2180,6 +2219,7 @@ class BotService:
             owner_name: Filter by owner name
             bot_id: Filter by bot ID (exact match)
             owner_id: Filter by owner id (exact match) — scopes to one owner
+            space_id: Filter by numeric business-space id (exact match)
             engine: Filter by active engine (exact match)
             status: Filter by lifecycle status (exact match)
             page: Page number (1-based)
@@ -2200,6 +2240,7 @@ class BotService:
             owner_id=owner_id,
             engine=engine,
             status=status,
+            space_id=space_id,
             page=page,
             page_size=page_size,
             bot_ids=bot_ids,
@@ -2210,12 +2251,54 @@ class BotService:
             "items": items,
         }
 
+    def get_bot_by_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
+        """按 bot_id 单查 bot 详情(owner_id / bot_name 等),不限 caller/owner;查不到返 ``None``。
+
+        供内部读侧用——例如 dashboard 给任务节点 ``assignee`` 附加归属(owner_id)/名称(bot_name),
+        不需 owner 权限校验。复用 ``list_bots_by_conditions(bot_id=...)`` 精确单查,取 ``items[0]``。"""
+        page = self.list_bots_by_conditions(bot_id=bot_id, page=1, page_size=1)
+        items = (page or {}).get("items") or []
+        return items[0] if items else None
+
+    def get_bot_classification(self, bot_id: str) -> Optional[Dict[str, str]]:
+        """Return the minimal authenticated-public classification for a Bot.
+
+        The repository's unique lookup fails closed when a tenant contains
+        multiple live records for the same external ``bot_id``.
+        """
+        bot = self._repository.get_unique_by_id(bot_id)
+        if bot is None:
+            return None
+
+        # COSEC: Keep this as an explicit allowlist. Returning the repository
+        # record would expose owner, runtime, template, and credential metadata
+        # to callers who intentionally do not need owner permission.
+        return {
+            "bot_id": str(bot["bot_id"]),
+            "bot_type": str(bot.get("bot_type") or "personal"),
+        }
+
+    def list_bots_by_owner_bot_pairs(
+        self,
+        *,
+        pairs: List[tuple[str, str]],
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """Return display-source records for exact Bot and owner pairs."""
+        total, items = self._repository.list_bots_by_owner_bot_pairs(
+            pairs,
+            page=page,
+            page_size=page_size,
+        )
+        return {"total": total, "items": items}
+
     def list_bots_by_search(
         self,
         public: Optional[str] = None,
         search: Optional[str] = None,
-        page: int = 1,
-        page_size: int = 20,
+        page: int | None = 1,
+        page_size: int | None = 20,
     ) -> Dict[str, Any]:
         """
         List bots with search and pagination.
@@ -3074,8 +3157,18 @@ class BotService:
                 and template_type == "normalCC"
             )
             or active_engine == "teclaw"
-            or (active_engine == "openclaw" and bot_type == "service")
+            or (active_engine == "openclaw" and bot_type in ("service", "personal"))
         )
+
+    @staticmethod
+    def _resolve_bcn_provider_connection_mode(
+        active_engine: Optional[str],
+        bot_type: Optional[str],
+    ) -> Optional[Literal["plugin"]]:
+        """Return the BCN connection mode selected by the Bot lifecycle."""
+        if active_engine == "openclaw" and bot_type == "personal":
+            return "plugin"
+        return None
 
     def _register_bot_to_bcn_as_provider(
         self,
@@ -3084,6 +3177,7 @@ class BotService:
         owner_workno: str,
         bot_name: str,
         bot_summary: str,
+        connection_mode: Optional[Literal["plugin"]] = None,
     ) -> None:
         """Bot 创建/启动时把自己注册到 BCN 为 Provider (下行链路).
 
@@ -3092,7 +3186,7 @@ class BotService:
           - active_engine == "claude_code" 且 template_type == "personalCoding"
           - active_engine == "aicoding" 且 template_type == "personalCoding"
           - active_engine == "teclaw"
-          - active_engine == "openclaw" 且 bot_type == "service"
+          - active_engine == "openclaw" 且 bot_type 为 service 或 personal
 
         受 DRM 开关 ``ClaudeCodeBcnRegister.enabled`` 控制 (默认关),
         失败仅记 warning, 不阻塞 start 主流程 (与 _sync_bot_to_bcn 风格一致).
@@ -3110,24 +3204,29 @@ class BotService:
         if not self._is_claude_code_bcn_register_enabled():
             logger.info(
                 f"[bot_service._register_bot_to_bcn_as_provider] disabled by DRM, "
-                f"skip bot_id={bot_id} owner={owner_workno}"
+                f"skip bot_id={bot_id} owner={owner_workno} connection_mode={connection_mode}"
             )
             return
 
         try:
             from agentclaw.community.core.bot_management.services.bcn_service import BcnServiceError
 
+            register_kwargs: Dict[str, Any] = {
+                "teamclaw_bot_uuid": bot_id,
+                "owner_workno": owner_workno,
+                "name": bot_name,
+                "summary": bot_summary,
+            }
+            if connection_mode is not None:
+                register_kwargs["connection_mode"] = connection_mode
             result = self._bcn_service.register_provider_bot(
-                teamclaw_bot_uuid=bot_id,
-                owner_workno=owner_workno,
-                name=bot_name,
-                summary=bot_summary,
+                **register_kwargs,
             )
 
             if result.get("skipped"):
                 logger.info(
                     f"[bot_service._register_bot_to_bcn_as_provider] env-skipped, "
-                    f"bot_id={bot_id} owner={owner_workno}"
+                    f"bot_id={bot_id} owner={owner_workno} connection_mode={connection_mode}"
                 )
                 return
 
@@ -3141,7 +3240,7 @@ class BotService:
                 f"[bot_service._register_bot_to_bcn_as_provider] registered "
                 f"bot_id={bot_id} owner={owner_workno} "
                 f"bot_uuid={bot_uuid} idempotent={idempotent} "
-                f"runtime_token_present={has_token}"
+                f"runtime_token_present={has_token} connection_mode={connection_mode}"
             )
 
             try:
@@ -3159,12 +3258,14 @@ class BotService:
         except BcnServiceError as e:
             logger.warning(
                 f"[bot_service._register_bot_to_bcn_as_provider] BCN register failed: "
-                f"bot_id={bot_id} owner={owner_workno} error={e}"
+                f"bot_id={bot_id} owner={owner_workno} connection_mode={connection_mode} "
+                f"error_type={type(e).__name__}"
             )
         except Exception as e:
             logger.warning(
                 f"[bot_service._register_bot_to_bcn_as_provider] Unexpected error: "
-                f"bot_id={bot_id} owner={owner_workno} error={e}"
+                f"bot_id={bot_id} owner={owner_workno} connection_mode={connection_mode} "
+                f"error_type={type(e).__name__}"
             )
 
     # DRM 控制开关: claude_code 启动时是否往 BCN 注册 Provider bot.
@@ -4015,7 +4116,7 @@ class BotService:
         #   - active_engine == "claude_code" 且 template_type == "personalCoding"
         #   - active_engine == "aicoding" 且 template_type == "personalCoding"
         #   - active_engine == "teclaw" (所有 bot_type)
-        #   - active_engine == "openclaw" 且 bot_type == "service"
+        #   - active_engine == "openclaw" 且 bot_type 为 "service" 或 "personal"
         # 失败不阻塞主流程, 与 _sync_bot_to_bcn 一致.
         # 排查日志关键字: [bot_service._register_bot_to_bcn_as_provider]
         should_register_bcn = self._should_register_bcn_provider(
@@ -4024,11 +4125,16 @@ class BotService:
             template_type=template_type,
             template_config=resolved_template_config,
         )
+        connection_mode = self._resolve_bcn_provider_connection_mode(
+            active_engine=active_engine,
+            bot_type=bot_type,
+        )
         if should_register_bcn:
             logger.info(
                 f"[bot_service.start_bot] register bot to BCN as provider: "
                 f"bot_id={bot_id} active_engine={active_engine} "
-                f"bot_type={bot_type} template_type={template_type}"
+                f"bot_type={bot_type} template_type={template_type} "
+                f"connection_mode={connection_mode}"
             )
             self._register_bot_to_bcn_as_provider(
                 bot_id=bot_id,
@@ -4036,12 +4142,14 @@ class BotService:
                 owner_workno=bot_owner_id,
                 bot_name=bot.get("bot_name") or bot_id,
                 bot_summary=bot.get("bot_desc") or "",
+                connection_mode=connection_mode,
             )
         else:
             logger.info(
                 f"[bot_service.start_bot] skip BCN provider registration: "
                 f"bot_id={bot_id} active_engine={active_engine} "
-                f"bot_type={bot_type} template_type={template_type}"
+                f"bot_type={bot_type} template_type={template_type} "
+                f"connection_mode={connection_mode}"
             )
 
         logger.info(
@@ -4182,6 +4290,17 @@ class BotService:
             strategy.apply_restart_extra_configs(
                 ctx,
                 extra_configs,
+                template_service=self._template_service,
+            )
+            # Re-sync the engine's external authorization scope (e.g. the
+            # aicoding Passport MCP/CLI grants) to match what was provisioned
+            # at create time, so a restart does not silently drop grants.
+            strategy.refresh_restart_authorization(
+                ctx,
+                bot,
+                extra_configs,
+                passport_plugin=self._passport_plugin,
+                skill_set_factory=self._skill_set_factory,
                 template_service=self._template_service,
             )
         except Exception as exc:
@@ -4479,19 +4598,25 @@ class BotService:
 
         # BaaS 原地重启不会经过 start_bot，这里补齐启动链路的 BCN Provider 注册。
         # 注册接口幂等：已注册时直接返回，也能重试创建阶段失败的注册。
-        if self._should_register_bcn_provider(
+        should_register_bcn = self._should_register_bcn_provider(
             active_engine=active_engine,
             bot_type=bot_type,
             template_type=bot_template_type,
             template_config=resolved_template_config,
-        ):
+        )
+        connection_mode = self._resolve_bcn_provider_connection_mode(
+            active_engine=active_engine,
+            bot_type=bot_type,
+        )
+        if should_register_bcn:
             logger.info(
                 "[bot_service._restart_bot_baas] register bot to BCN as provider: "
-                "bot_id=%s active_engine=%s bot_type=%s template_type=%s",
+                "bot_id=%s active_engine=%s bot_type=%s template_type=%s connection_mode=%s",
                 bot_id,
                 active_engine,
                 bot_type,
                 bot_template_type,
+                connection_mode,
             )
             self._register_bot_to_bcn_as_provider(
                 bot_id=bot_id,
@@ -4499,6 +4624,7 @@ class BotService:
                 owner_workno=bot.get("owner_id") or user_id,
                 bot_name=bot.get("bot_name") or bot_id,
                 bot_summary=bot.get("bot_desc") or "",
+                connection_mode=connection_mode,
             )
 
         # 普通 restart 入口只重启当前 bot，不使用发布态 build 产物目录。
@@ -5666,6 +5792,15 @@ class BotService:
                 "applicationCoding bots require it."
             )
         return self._workspace_hosting_service
+
+    def is_workspace_hosting_available(self) -> bool:
+        """Whether this deployment has a bound Workspace Hosting implementation.
+
+        The route preflight calls this so applicationCoding can be refused (503)
+        before a bot id is allocated or a Passport is applied, rather than
+        tripping ``_require_workspace_hosting`` mid-create after side effects.
+        """
+        return self._workspace_hosting_service is not None
 
     def ensure_hosted_workspace(self, bot_id: str, user_id: str) -> Optional[str]:
         """为 Coding bot 确保 DIMA workspace 存在（幂等）。

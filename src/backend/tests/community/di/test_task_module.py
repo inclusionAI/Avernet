@@ -1,6 +1,6 @@
 from injector import Injector, Module, provider, singleton
 
-from agentclaw.community.adapters.http.openapi_v1.task.auth import (
+from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator, NoopCallbackAuthenticator,
 )
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
@@ -44,3 +44,38 @@ def test_task_module_binds_callback_singletons():
     assert inj.get(TaskServiceProtocol) is inj.get(TaskServiceProtocol)
     assert inj.get(CallbackCorrelationRegistry) is inj.get(CallbackCorrelationRegistry)
     assert inj.get(CallbackAuthenticator) is inj.get(CallbackAuthenticator)
+
+
+def test_resolve_ports_outside_singlebox_returns_the_two_port_contract(monkeypatch):
+    monkeypatch.setenv("DEPLOY_PROFILE", "community")
+
+    assert TaskModule._resolve_ports() == (None, None)
+
+
+def test_resolve_api_base_url_reuses_iframe_callback_origin(monkeypatch):
+    # 回投 origin 取自 economy_governance.iframe_callback_url[_pre](已在 ocb 按环境配好)。真实值经 yaml/overlay
+    # 注入,社区测试只用中立域名,不在 community 内联企业域名。
+
+    # singlebox → SINGLEBOX_BACKEND_URL(本地直连),不走 iframe 解析
+    monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
+    monkeypatch.delenv("SINGLEBOX_BACKEND_URL", raising=False)
+    assert TaskModule._resolve_api_base_url("ignored") == "http://localhost:8888"
+    monkeypatch.setenv("SINGLEBOX_BACKEND_URL", "http://sb.local:8888")
+    assert TaskModule._resolve_api_base_url("ignored") == "http://sb.local:8888"
+
+    # non-singlebox → 取 iframe_callback_url 的 origin(去路径)
+    monkeypatch.setenv("DEPLOY_PROFILE", "community")
+    assert TaskModule._resolve_api_base_url("") == "http://localhost:8888"          # 空 → 兜底
+    assert TaskModule._resolve_api_base_url("not a url") == "http://localhost:8888"  # 非法 → 兜底
+    # 真实形态:预发 iframe_callback_url_pre 形如 https://<backend-host>/api/economy/governance/card-callback
+    assert (
+        TaskModule._resolve_api_base_url(
+            "https://agentclaw-pre.example.test/api/economy/governance/card-callback"
+        )
+        == "https://agentclaw-pre.example.test"
+    )
+    # 带端口/查询也应正确取 origin
+    assert (
+        TaskModule._resolve_api_base_url("https://be.local:8888/path?x=1")
+        == "https://be.local:8888"
+    )

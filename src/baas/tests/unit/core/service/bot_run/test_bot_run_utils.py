@@ -23,6 +23,7 @@ from secbaas.community.core.service.bot_run import (
     resolve_bot_id,
     resolve_user_id,
 )
+from secbaas.community.core.service.bot_run._bot_run_utils import build_chat_metadata
 from secbaas.community.spi.bot_service import BotBindingData
 
 BOT_ID = "test-bot-000001"
@@ -586,3 +587,82 @@ class TestBindingDataToInfoEngineNormalization:
     ):
         info = binding_data_to_info(self._data(engine_type, template_type))
         assert info.engine_type == expected
+
+
+# ==================== Tests: extract_lifecycle_stage eval ====================
+
+
+class TestExtractLifecycleStageEval:
+    """extract_lifecycle_stage 支持 eval 返回值（场景三）。"""
+
+    def test_eval_stage(self):
+        """lifecycle_stage='eval' 正确返回。"""
+        metadata = {"bot_options": {"lifecycle_stage": "eval"}}
+        assert extract_lifecycle_stage(metadata) == "eval"
+
+    def test_eval_stage_with_other_fields(self):
+        """metadata 含 eval_id 等额外字段时仍返回 'eval'。"""
+        metadata = {
+            "bot_options": {"lifecycle_stage": "eval"},
+            "eval_id": "eval:eval:bot-1",
+            "default_tag": "eval",
+        }
+        assert extract_lifecycle_stage(metadata) == "eval"
+
+
+# ==================== Tests: build_chat_metadata eval ====================
+
+
+class TestBuildChatMetadataEval:
+    """build_chat_metadata eval 观测字段注入（S3-AVE-07）。"""
+
+    def test_default_tag_sets_eval_biz_scene(self):
+        """default_tag 非空时 biz_scene 为 'eval:{default_tag}'。"""
+        metadata = {"default_tag": "eval", "biz_task_id": "task-1"}
+        result = build_chat_metadata(metadata, run_id="run-1")
+        assert result["biz_scene"] == "eval:eval"
+        assert result["biz_task_id"] == "task-1"
+
+    def test_default_tag_injects_default_tag_field(self):
+        """default_tag 非空时注入 default_tag 观测字段（通过 eval_session_log Plugin）。"""
+        metadata = {"default_tag": "staging"}
+        mock_log = MagicMock()
+        mock_log.enrich_chat_metadata.return_value = {
+            "biz_task_id": "run-1",
+            "biz_scene": "eval:staging",
+            "default_tag": "staging",
+        }
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=mock_log
+        )
+        assert result["default_tag"] == "staging"
+        mock_log.enrich_chat_metadata.assert_called_once()
+
+    def test_eval_id_injected_when_present(self):
+        """metadata 含 eval_id 时注入到 chat_metadata（通过 eval_session_log Plugin）。"""
+        metadata = {"eval_id": "eval:eval:bot-1", "default_tag": "eval"}
+        mock_log = MagicMock()
+        mock_log.enrich_chat_metadata.return_value = {
+            "biz_task_id": "run-1",
+            "biz_scene": "eval:eval",
+            "eval_id": "eval:eval:bot-1",
+        }
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=mock_log
+        )
+        assert result["eval_id"] == "eval:eval:bot-1"
+        mock_log.enrich_chat_metadata.assert_called_once()
+
+    def test_no_default_tag_uses_default_biz_scene(self):
+        """default_tag 为空时 biz_scene 保持默认逻辑。"""
+        metadata = {"biz_scene": "custom"}
+        result = build_chat_metadata(metadata, run_id="run-1")
+        assert result["biz_scene"] == "custom"
+
+    def test_no_default_tag_no_eval_fields(self):
+        """default_tag 为空无 eval 观测字段注入。"""
+        metadata = {}
+        result = build_chat_metadata(metadata, run_id="run-1")
+        assert "eval_id" not in result
+        assert "default_tag" not in result
+        assert result["biz_scene"] == "default"

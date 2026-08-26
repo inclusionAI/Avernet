@@ -4,6 +4,11 @@ Thin wrapper over the repository. Timing is owned by the database: this service
 just forwards the relative ``delay_seconds`` / ``deadline_seconds`` durations
 (the repository turns them into absolute ``run_at`` / ``deadline_at`` with the
 DB clock) and stamps the current ``env``.
+
+It also carries the one piece of policy the repository has no business knowing:
+whether an enqueue should wake the in-process worker immediately (see
+:class:`WorkerWakeup`) instead of leaving it to the next idle poll. That is
+opt-in per task type, declared at handler registration.
 """
 from __future__ import annotations
 
@@ -12,6 +17,8 @@ from injector import inject
 from typing import Optional
 
 from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
+from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
+from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
 from agentclaw.community.core.task_queue.types import EnqueueResult
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -20,8 +27,15 @@ class TaskQueueService:
     """Persist background work for the in-process worker to pick up."""
 
     @inject
-    def __init__(self, repo: TaskQueueRepositoryProtocol) -> None:
+    def __init__(
+        self,
+        repo: TaskQueueRepositoryProtocol,
+        registry: HandlerRegistry,
+        wakeup: WorkerWakeup,
+    ) -> None:
         self._repo = repo
+        self._registry = registry
+        self._wakeup = wakeup
 
     def enqueue(
         self,
@@ -53,10 +67,18 @@ class TaskQueueService:
           (truncation under a non-strict server, space padding under the
           collation).
 
+        **Immediate execution.** If ``task_type`` was registered with
+        ``wake_on_enqueue=True`` and this call created a task that is due now,
+        the in-process worker is signalled to poll at once rather than waiting
+        out its idle interval. Every other task type is unaffected. The signal
+        is best-effort latency only — it never changes which task runs, who
+        claims it, or what happens if it is missed; a missed signal just means
+        the ordinary poll picks the task up.
+
         See ``TaskQueueRepositoryProtocol.enqueue`` for the key convention and
         the full contract.
         """
-        return self._repo.enqueue(
+        result = self._repo.enqueue(
             task_type=task_type,
             payload=payload,
             delay_seconds=delay_seconds,
@@ -64,3 +86,31 @@ class TaskQueueService:
             env=get_current_env(),
             idempotency_key=idempotency_key,
         )
+        if self._should_wake(result, task_type=task_type, delay_seconds=delay_seconds):
+            # Signalled only *after* the repository call returns, which matters:
+            # ``orm_session()`` commits on clean exit, so the row is committed
+            # and visible to any claim the wake triggers. Signalling earlier
+            # would race the worker against our own uncommitted insert.
+            self._wakeup.notify()
+        return result
+
+    def _should_wake(
+        self, result: EnqueueResult, *, task_type: str, delay_seconds: int
+    ) -> bool:
+        """Whether this enqueue should cut short the worker's idle wait.
+
+        Three conditions, all required:
+
+        - **The type opted in.** Default-off, so existing task types keep their
+          current timing (see ``HandlerRegistry.register``).
+        - **The task is due now.** A delayed task has ``run_at > now()`` and so
+          fails the claim's eligibility predicate; waking for it would burn a
+          poll and change nothing.
+        - **A task was actually created.** A keyed enqueue that joined a live
+          holder (``created=False``) added no work — the holder is already
+          pending or running, and waking cannot make a future ``run_at``
+          eligible any sooner.
+        """
+        if delay_seconds > 0 or not result.created:
+            return False
+        return self._registry.wakes_on_enqueue(task_type)

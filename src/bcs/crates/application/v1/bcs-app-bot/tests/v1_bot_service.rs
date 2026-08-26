@@ -13,8 +13,9 @@ use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_friend::FriendCore;
 use bcs_service_api::application::v1::{
     ApplicationError, Bot, BotCandidatePurpose, BotCandidateSearchMode, BotDescriptorPatch,
-    BotKind, BotPatch, BotReachability, BotService, BotStatus, BotVisibility, GetBot,
-    ListBotCandidates, ListMyBots, QueryBots, SearchBotCandidates, UpdateBot,
+    BotKind, BotPatch, BotReachability, BotService, BotStatus, BotVisibility,
+    FriendCheckInStrategy, GetBot, ListBotCandidates, ListMyBots, QueryBots,
+    SearchBotCandidates, UpdateBot, UserVisibility,
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateSearchCoreResult, BotCandidateSearchCoreService,
@@ -66,6 +67,11 @@ fn v1_bot_commands_expose_the_approved_control_plane_surface() {
                 skills: None,
                 scopes: None,
             }),
+            task_claim_mode: None,
+            task_dream_mode: None,
+            user_visibility: None,
+            friend_ext: None,
+            friend_check_in_strategy: None,
         },
     };
     let _ = ListMyBots {
@@ -290,8 +296,13 @@ async fn ownership_denial_precedes_provider_hydration() {
                 scopes: Vec::new(),
             },
             agent_code: None,
+            task_claim_mode: false,
+            task_dream_mode: false,
             created_at: 1,
             updated_at: 1,
+            user_visibility: Default::default(),
+            friend_ext: Default::default(),
+            friend_check_in_strategy: Default::default(),
         },
     });
     let service = BotServiceImpl::new(
@@ -977,10 +988,19 @@ async fn query_preserves_first_occurrence_and_projects_both_kinds_provider_and_r
         bots.iter().map(Bot::bot_id).collect::<Vec<_>>(),
         vec!["human_staff-1", "physical"]
     );
+    let Bot::Human(human) = &bots[0] else {
+        panic!("expected human bot");
+    };
+    assert_eq!(human.user_visibility, UserVisibility::Protected);
+    assert_eq!(human.friend_ext, serde_json::Map::new());
+    assert_eq!(human.friend_check_in_strategy, FriendCheckInStrategy::Approval);
     let Bot::Physical(physical) = &bots[1] else {
         panic!("expected physical bot");
     };
     assert_eq!(physical.reachability, BotReachability::Reachable);
+    assert_eq!(physical.user_visibility, UserVisibility::Protected);
+    assert_eq!(physical.friend_ext, serde_json::Map::new());
+    assert_eq!(physical.friend_check_in_strategy, FriendCheckInStrategy::Approval);
     assert_eq!(
         physical.provider.as_ref().map(|p| p.name.as_str()),
         Some("Provider One")
@@ -1031,6 +1051,20 @@ async fn update_requires_created_by_and_rejects_descriptor_for_human() {
         .expect_err("human descriptor update");
     assert_eq!(error.code(), "invalid_bot_kind");
 
+    let error = fixture
+        .service
+        .update(UpdateBot {
+            caller: human_caller("staff-1"),
+            bot_id: "human_staff-1".to_string(),
+            patch: BotPatch {
+                task_claim_mode: Some(true),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect_err("human task-mode update");
+    assert_eq!(error.code(), "invalid_bot_kind");
+
     let updated = fixture
         .service
         .update(UpdateBot {
@@ -1045,6 +1079,14 @@ async fn update_requires_created_by_and_rejects_descriptor_for_human() {
                     scopes: Some(vec!["new-scope".to_string()]),
                     ..Default::default()
                 }),
+                task_claim_mode: None,
+                task_dream_mode: None,
+                user_visibility: Some(UserVisibility::Private),
+                friend_ext: Some(serde_json::Map::from_iter([(
+                    "no_check_scope_friend_deps".to_string(),
+                    serde_json::json!(["dep-1"]),
+                )])),
+                friend_check_in_strategy: Some(FriendCheckInStrategy::DeptFree),
             },
         })
         .await
@@ -1055,6 +1097,12 @@ async fn update_requires_created_by_and_rejects_descriptor_for_human() {
     assert_eq!(updated.name, "Renamed");
     assert_eq!(updated.visibility, BotVisibility::Protected);
     assert_eq!(updated.status, BotStatus::Hidden);
+    assert_eq!(updated.user_visibility, UserVisibility::Private);
+    assert_eq!(updated.friend_check_in_strategy, FriendCheckInStrategy::DeptFree);
+    assert_eq!(
+        updated.friend_ext["no_check_scope_friend_deps"],
+        serde_json::json!(["dep-1"])
+    );
     assert!(updated.descriptor.domains.is_empty());
     assert_eq!(updated.descriptor.scopes, vec!["new-scope"]);
 }

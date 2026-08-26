@@ -5,16 +5,28 @@ create_group 三态(chat/manager_worker/state_machine);state_machine 强制 star
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
+import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, AsyncIterator
 
 import httpx
 
 from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import BcsTokenProvider
+
+
+logger = logging.getLogger(__name__)
+
+
+def _response_summary(resp: httpx.Response) -> str:
+    """Return a bounded response summary without leaking auth headers or large bodies."""
+    text = (resp.text or "").replace("\n", " ")
+    return text[:500]
 
 
 class BcsClientError(Exception):
@@ -50,6 +62,8 @@ class BcsCreateGroupRequest:
     start_initial_run: bool | None = None
     originator: str | None = None
     visibility: str | None = None
+    opening_message: dict[str, Any] | None = None
+    event_subscriptions: list[dict[str, Any]] | None = None    # 内联事件订阅(回调 webhook);BCS 把 CloudEvent 推到 sink.url
 
 
 @dataclass
@@ -72,7 +86,45 @@ def _map_status(resp: httpx.Response) -> None:
 class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing + REST); exercised by singlebox/corp acceptance / 联调, not CI LOCAL line coverage
     def __init__(self, token: BcsTokenProvider, *, http_client: httpx.AsyncClient | None = None) -> None:
         self._t = token
+        self._owns_client = http_client is None
         self._client = http_client or httpx.AsyncClient(base_url=token.base_url)
+        # An httpx AsyncClient/connection pool is not safe to share across
+        # asyncio event loops. The task module has a FastAPI loop plus poller
+        # and harness loops, so keep the owned client pinned to the first loop
+        # and use a short-lived client whenever a different loop calls us.
+        self._client_loop: asyncio.AbstractEventLoop | None = None
+
+    @asynccontextmanager
+    async def _client_for_current_loop(self) -> AsyncIterator[httpx.AsyncClient]:
+        """Yield an AsyncClient that belongs to the current event loop."""
+        current_loop = asyncio.get_running_loop()
+        if not self._owns_client:
+            # Injected clients are test/custom transport ownership; preserve
+            # their lifecycle and behavior exactly as before.
+            yield self._client
+            return
+
+        if self._client_loop is None:
+            self._client_loop = current_loop
+            yield self._client
+            return
+
+        if self._client_loop is current_loop:
+            yield self._client
+            return
+
+        # Do not move the persistent pool to another loop. A per-call client
+        # is safe here and is closed on the loop that created it.
+        logger.warning(
+            "[task][bcs_http] event loop changed; using isolated client previous_loop=%s current_loop=%s",
+            id(self._client_loop),
+            id(current_loop),
+        )
+        client = httpx.AsyncClient(base_url=self._t.base_url)
+        try:
+            yield client
+        finally:
+            await client.aclose()
 
     def _sign(self, method: str, path: str, ts: str) -> dict[str, str]:
         sig = hmac.new(self._t.secret.encode(), f"{ts}{method}{path}".encode(), hashlib.sha256).hexdigest()
@@ -86,8 +138,30 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
             headers["Idempotency-Key"] = idempotency_key
         if extra_headers:
             headers.update(extra_headers)
-        r = await self._client.request(method, path, json=json, headers=headers)
-        _map_status(r)
+        _t0 = time.monotonic()
+        logger.info(
+            "[task][bcs_http] >>> request method=%s path=%s base_url=%s json_keys=%s idempotency=%s",
+            method, path, self._t.base_url, sorted((json or {}).keys()), bool(idempotency_key),
+        )
+        try:
+            async with self._client_for_current_loop() as client:
+                r = await client.request(method, path, json=json, headers=headers)
+        except Exception:
+            logger.exception("[task][bcs_http] <<< request transport failed method=%s path=%s elapsed_ms=%s",
+                             method, path, int((time.monotonic() - _t0) * 1000))
+            raise
+        logger.info(
+            "[task][bcs_http] <<< response method=%s path=%s status=%s elapsed_ms=%s body=%s",
+            method, path, r.status_code, int((time.monotonic() - _t0) * 1000), _response_summary(r),
+        )
+        try:
+            _map_status(r)
+        except Exception:
+            logger.exception(
+                "[task][bcs_http] response rejected method=%s path=%s status=%s body=%s",
+                method, path, r.status_code, _response_summary(r),
+            )
+            raise
         return r
 
     async def create_group(self, req: BcsCreateGroupRequest) -> BcsCreateGroupResult:
@@ -95,13 +169,19 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         is_sm = req.group_strategy == "state_machine" or req.collaboration_definition_yaml
         if is_sm:
             body["group_strategy"] = "state_machine"
-            body["start_initial_run"] = False
+            # 透传调用方(form_coop_group)的 start_initial_run;未设时默认 False(向后兼容)。
+            # 不得硬编码 False —— state_machine + event_subscriptions 时 BCS 要求自动启动(groups.rs:627)。
+            body["start_initial_run"] = req.start_initial_run if req.start_initial_run is not None else False
             if req.collaboration_definition_yaml:
                 body["collaboration_definition_yaml"] = req.collaboration_definition_yaml
             if req.participant_bindings:
                 body["participant_bindings"] = req.participant_bindings
+            if req.opening_message:
+                body["opening_message"] = req.opening_message
         elif req.group_strategy:
             body["group_strategy"] = req.group_strategy
+        if req.event_subscriptions:
+            body["event_subscriptions"] = req.event_subscriptions
         for opt in ("context", "topic", "service_spec", "originator", "visibility"):
             v = getattr(req, opt)
             if v is not None:
@@ -135,7 +215,13 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         params: dict[str, Any] = {"limit": limit}
         if since_msg_id:
             params["since_msg_id"] = since_msg_id
-        r = await self._client.request("GET", path, params=params, headers=headers)
+        logger.info("[task][bcs_http] >>> get_session_messages GET path=%s base_url=%s limit=%s since=%s",
+                    path, self._t.base_url, limit, since_msg_id)
+        _t0 = time.monotonic()
+        async with self._client_for_current_loop() as client:
+            r = await client.request("GET", path, params=params, headers=headers)
+        logger.info("[task][bcs_http] <<< get_session_messages GET path=%s status=%s elapsed_ms=%s body=%s",
+                    path, r.status_code, int((time.monotonic() - _t0) * 1000), _response_summary(r))
         _map_status(r)
         return r.json()
 

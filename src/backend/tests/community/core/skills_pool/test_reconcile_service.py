@@ -367,22 +367,24 @@ class FakeSkillRepository:
         ]
 
     def list_bot_local_assets(
-        self, *, env: str, bot_id: str
+        self, *, env: str, owner_id: str, bot_id: str
     ) -> list[RegisteredSkillAsset]:
         assert (env, bot_id) == (SCOPE.env, SCOPE.bot_id)
+        assert owner_id == "owner-1"
         return self.registered
 
-    def list_bot_active_assets(
+    def active_skill_assets(
         self,
         *,
-        env: str,
         bot_id: str,
-        user_id: str,
-        engine: str,
-    ) -> list[RegisteredSkillAsset]:
-        assert (env, bot_id) == (SCOPE.env, SCOPE.bot_id)
-        assert (user_id, engine) == ("owner-1", self.engine)
-        return self.active
+        owner_id: str,
+        bot=None,
+    ) -> tuple[RegisteredSkillAsset, ...]:
+        # Reader-shaped: the pool consumers hand over the Bot row they hold.
+        assert bot_id == SCOPE.bot_id
+        assert owner_id == "owner-1"
+        assert bot is not None
+        return tuple(self.active)
 
 
 class FakeRuntime:
@@ -550,10 +552,12 @@ def build_service(
     skills: FakeSkillRepository | None = None,
     bot_type: str = "personal",
 ) -> SkillsPoolReconcileService:
+    skills = skills or FakeSkillRepository(engine)
     return SkillsPoolReconcileService(
         bot_repository=FakeBotRepository(engine, bot_type=bot_type),
         layout_repository=layouts,
-        skill_repository=skills or FakeSkillRepository(engine),
+        skill_repository=skills,
+        reader=skills,
         runtime=runtime,
     )
 
@@ -577,6 +581,38 @@ async def test_ready_claimed_bot_completes_pool_activation() -> None:
         ),
         12: (
             "local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-b"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("template_type", ("personalCoding", "applicationCoding"))
+async def test_coding_template_probes_aicoding_pool_layout_but_reads_claude_assets(
+    template_type: str,
+) -> None:
+    """The runtime layout is AICoding while the Skill catalogue stays Claude."""
+
+    layouts = FakeLayoutRepository()
+    runtime = FakeRuntime(engine="aicoding")
+    skills = FakeSkillRepository("claude_code")
+    service = build_service(
+        layouts,
+        runtime,
+        engine="claude_code",
+        skills=skills,
+    )
+    service._bots.bot["template_type"] = template_type
+
+    result = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.events == ["probe", "cutover", "mapping", "verify"]
+    assert layouts.committed_locators == {
+        11: (
+            "local:///home/admin/.aicoding/workspace/skills-pool/skills-local/local-a"
+        ),
+        12: (
+            "local:///home/admin/.aicoding/workspace/skills-pool/skills-local/local-b"
         ),
     }
 
@@ -1913,10 +1949,12 @@ async def test_mixed_image_bots_reconcile_independently_in_one_environment() -> 
 
     layouts = MultiLayoutRepository()
     runtime = MixedImageRuntime()
+    skills = FakeSkillRepository()
     service = SkillsPoolReconcileService(
         bot_repository=MultiBotRepository(),
         layout_repository=layouts,
-        skill_repository=FakeSkillRepository(),
+        skill_repository=skills,
+        reader=skills,
         runtime=runtime,
     )
 
@@ -2617,10 +2655,12 @@ def test_stale_signal_uses_current_resolved_binding_for_real_mutations() -> None
         adapter_transport=transport,
         probe_service=ReadyProbeService(),
     )
+    skills = FakeSkillRepository()
     reconcile = SkillsPoolReconcileService(
         bot_repository=FakeBotRepository(),
         layout_repository=layouts,
-        skill_repository=FakeSkillRepository(),
+        skill_repository=skills,
+        reader=skills,
         runtime=runtime,
     )
     handler = SkillsPoolReconcileTaskHandler(
@@ -2878,6 +2918,7 @@ def _pool_active_aicoding_service(
         bot_repository=FakeBotRepository("aicoding"),
         layout_repository=layouts,
         skill_repository=skills,
+        reader=skills,
         runtime=runtime,
     )
     return service, transport, probe, active_root, repo_bridge

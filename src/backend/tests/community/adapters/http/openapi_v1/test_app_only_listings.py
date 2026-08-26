@@ -16,6 +16,7 @@ bots nobody delegated, and it does so with a ``200``.
 from __future__ import annotations
 
 from datetime import datetime
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -30,11 +31,46 @@ from agentclaw.community.adapters.http.openapi_v1.authorized_apps import (
     app_view_router,
 )
 from agentclaw.community.adapters.http.openapi_v1.bots import router as bots_router
+from agentclaw.community.adapters.http.openapi_v1.local import router as local_router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.spaces import router as spaces_router
+from agentclaw.community.adapters.http.openapi_v1.work_orders import (
+    router as work_orders_router,
+)
 from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTES
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
+from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
+from agentclaw.community.api.local_bot_workflow_service import (
+    LocalBotWorkflowServiceProtocol,
+)
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.market_favorite_service import (
+    MarketFavoriteServiceProtocol,
+)
+from agentclaw.community.api.space_service import (
+    SpaceMemberServiceProtocol,
+    SpaceServiceProtocol,
+)
+from agentclaw.community.api.space_skill_query_service import (
+    SpaceSkillQueryServiceProtocol,
+)
+from agentclaw.community.api.work_order_service import (
+    WorkOrderNotificationServiceProtocol,
+    WorkOrderServiceProtocol,
+)
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
+from agentclaw.community.core.bot_inventory.adapters.noop_business_space import (
+    NoopBusinessSpaceContext,
+)
+from agentclaw.community.core.bot_inventory.protocols import (
+    BusinessSpaceContextProtocol,
+)
+from agentclaw.community.core.bot_inventory.types import (
+    BotInventoryItem,
+    BotInventoryKind,
+    DeployMode,
+    DisplayState,
+)
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
@@ -118,6 +154,13 @@ class _Grants:
         ]
 
 
+class _UnexpectedService:
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        raise AssertionError(f"business service must not be called: {name}")
+
+
 class _Bots:
     """Two bots owned by ``USER``. ``SHARED`` is not among them, by design."""
 
@@ -141,7 +184,12 @@ class _Bots:
         """Owner-scoped, as production is — and it resolves the *user's* bot."""
         if user_id != USER:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
-        return {"id": 1, "bot_id": bot_id, "owner_id": USER, "bot_name": "the user's own"}
+        return {
+            "id": 1,
+            "bot_id": bot_id,
+            "owner_id": USER,
+            "bot_name": "the user's own",
+        }
 
     def get_bots_ceiling_for_owner(self, owner_id: str) -> int:
         return 5
@@ -157,18 +205,46 @@ def bots():
 
 @pytest.fixture
 def make_client(bots):
-    def _build(*grant_ids: str, with_user: bool = False):
+    def _build(
+        *grant_ids: str,
+        with_user: bool = False,
+        inventory_service=None,
+        local_service=None,
+        space_context=None,
+    ):
         class _M(Module):
             def configure(self, binder):
                 binder.bind(BotServiceProtocol, to=bots)
                 binder.bind(BotAppGrantServiceProtocol, to=_Grants(*grant_ids))
+                unexpected = _UnexpectedService()
+                binder.bind(SpaceServiceProtocol, to=unexpected)
+                binder.bind(SpaceMemberServiceProtocol, to=unexpected)
+                binder.bind(SpaceSkillQueryServiceProtocol, to=unexpected)
+                binder.bind(MarketFavoriteServiceProtocol, to=unexpected)
+                binder.bind(WorkOrderServiceProtocol, to=unexpected)
+                binder.bind(WorkOrderNotificationServiceProtocol, to=unexpected)
+                binder.bind(
+                    BotInventoryServiceProtocol,
+                    to=inventory_service or unexpected,
+                )
+                binder.bind(
+                    LocalBotWorkflowServiceProtocol,
+                    to=local_service or unexpected,
+                )
+                binder.bind(
+                    BusinessSpaceContextProtocol,
+                    to=space_context or unexpected,
+                )
 
         app = FastAPI()
         # The literal before the wildcard, exactly as ``build_public_router``
         # mounts them: ``/openapi/v1/bots/{bot_id}`` would otherwise claim
         # ``/openapi/v1/bots/authorized`` as "the bot named authorized".
         app.include_router(app_view_router)
+        app.include_router(local_router)
         app.include_router(bots_router)
+        app.include_router(spaces_router)
+        app.include_router(work_orders_router)
         app.dependency_overrides[require_principal] = lambda: _caller(
             with_user=with_user
         )
@@ -245,6 +321,103 @@ def test_a_human_caller_sees_everything_they_own(make_client, bots):
     assert bots.calls[0]["bot_ids"] is None, "unrestricted, not restricted-to-all"
 
 
+def test_workshop_inventory_passes_owned_grants_before_pagination(make_client):
+    inventory = MagicMock()
+    inventory.list_items.return_value = (
+        [
+            BotInventoryItem(
+                bot_id=GRANTED,
+                bot_name="granted",
+                bot_desc="",
+                engine="openclaw",
+                bot_type="personal",
+                kind=BotInventoryKind.PERSONAL_CLOUD,
+                deploy_mode=DeployMode.CLOUD,
+                display_state=DisplayState.RUNNING,
+                status="ACTIVE",
+                owner_entity_id=USER,
+                space=None,
+                card_id=GRANTED,
+            )
+        ],
+        1,
+    )
+    client = make_client(
+        GRANTED,
+        inventory_service=inventory,
+        space_context=NoopBusinessSpaceContext(),
+    )
+
+    listed = _data(
+        client.get("/openapi/v1/bots/all", params={"page": 2, "page_size": 7})
+    )
+
+    assert [item["bot_id"] for item in listed["items"]] == [GRANTED]
+    assert listed["total"] == 1
+    assert inventory.list_items.call_args.kwargs["bot_ids"] == [GRANTED]
+    assert inventory.list_items.call_args.kwargs["page"] == 2
+    assert inventory.list_items.call_args.kwargs["page_size"] == 7
+
+
+def test_workshop_inventory_does_not_widen_from_a_shared_bot_grant(make_client):
+    inventory = MagicMock()
+    client = make_client(
+        SHARED,
+        inventory_service=inventory,
+        space_context=NoopBusinessSpaceContext(),
+    )
+
+    listed = _data(client.get("/openapi/v1/bots/all"))
+
+    assert listed["items"] == [] and listed["total"] == 0
+    inventory.list_items.assert_not_called()
+
+
+def test_local_listing_passes_owned_grants_before_pagination(make_client):
+    local = MagicMock()
+    local.list_bots.return_value = (
+        1,
+        [
+            {
+                "bot_id": GRANTED,
+                "bot_name": "granted",
+                "bot_desc": "",
+                "active_engine": "openclaw",
+                "status": "ACTIVE",
+                "owner_id": USER,
+            }
+        ],
+    )
+    client = make_client(GRANTED, local_service=local)
+
+    listed = _data(
+        client.get("/openapi/v1/bots/local", params={"page": 3, "page_size": 4})
+    )
+
+    assert [item["bot_id"] for item in listed["items"]] == [GRANTED]
+    assert listed["total"] == 1
+    assert local.list_bots.call_args.kwargs["bot_ids"] == [GRANTED]
+    assert local.list_bots.call_args.kwargs["page"] == 3
+    assert local.list_bots.call_args.kwargs["page_size"] == 4
+
+
+def test_local_device_reads_are_user_gated_by_any_live_delegation(make_client):
+    local = MagicMock()
+    local.list_devices.return_value = (
+        1,
+        [{"machine_id": "m1", "machine_name": "Mac", "status": "ACTIVE"}],
+    )
+    local.list_device_files.return_value = {"name": "Desktop", "children": []}
+    client = make_client(SHARED, local_service=local)
+
+    devices = _data(client.get("/openapi/v1/bots/local/devices"))
+    files = _data(client.get("/openapi/v1/bots/local/devices/m1/files"))
+
+    assert devices["total"] == 1
+    assert devices["items"][0]["machine_id"] == "m1"
+    assert files == {"name": "Desktop", "children": []}
+
+
 def test_the_application_view_shows_a_bot_the_user_does_not_own(make_client):
     """The reason this operation has to admit a machine caller at all.
 
@@ -299,6 +472,7 @@ def cross_owner_client(bots):
 
         app = FastAPI()
         app.include_router(app_view_router)
+        app.include_router(local_router)
         app.include_router(bots_router)
         app.dependency_overrides[require_principal] = lambda: _caller(with_user=False)
         attach_injector(app, Injector([_M()]))
@@ -417,6 +591,24 @@ def test_the_name_check_needs_no_delegation(make_client):
 #: *nothing*, and what the empty answer must look like. `assert_starved` gets
 #: the response; it must assert the app learned nothing.
 _UNGRANTED_APP_CASES = {
+    ("GET", "/openapi/v1/bots/skills/repository"): {
+        "request": lambda client: client.get("/openapi/v1/bots/skills/repository"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/skills/repository/tree"): {
+        "request": lambda client: client.get("/openapi/v1/bots/skills/repository/tree"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/skills/repository/{skill_id}"): {
+        "request": lambda client: client.get("/openapi/v1/bots/skills/repository/1"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/skills/repository/sync"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/skills/repository/sync"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
     ("GET", "/openapi/v1/bots"): {
         "request": lambda client: client.get("/openapi/v1/bots"),
         "assert_starved": lambda response: (
@@ -429,10 +621,144 @@ _UNGRANTED_APP_CASES = {
             _data(response)["items"] == [] and _data(response)["total"] == 0
         ),
     },
+    ("GET", "/openapi/v1/bots/all"): {
+        "request": lambda client: client.get("/openapi/v1/bots/all"),
+        "assert_starved": lambda response: (
+            _data(response)["items"] == [] and _data(response)["total"] == 0
+        ),
+    },
+    ("GET", "/openapi/v1/bots/local"): {
+        "request": lambda client: client.get("/openapi/v1/bots/local"),
+        "assert_starved": lambda response: (
+            _data(response)["items"] == [] and _data(response)["total"] == 0
+        ),
+    },
+    ("GET", "/openapi/v1/bots/local/devices"): {
+        "request": lambda client: client.get("/openapi/v1/bots/local/devices"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/local/devices/{machine_id}/files"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/local/devices/machine-1/files"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
     ("GET", "/openapi/v1/bots/ceiling"): {
         "request": lambda client: client.get("/openapi/v1/bots/ceiling"),
         # USER_GATED: no delegation, no relationship — masked as not-found, so
         # a stranger app cannot read a person's quota by naming them.
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/spaces"): {
+        "request": lambda client: client.get("/openapi/v1/bots/spaces"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/members"): {
+        "request": lambda client: client.get("/openapi/v1/bots/spaces/1/members"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"): {
+        "request": lambda client: client.get("/openapi/v1/bots/spaces/1/skills"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/spaces/1/market-favorites",
+            json={
+                "market_source": "SKILLCENTER",
+                "target_type": "SKILL",
+                "target_code": "skill-1",
+            },
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites/cancel"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/spaces/1/market-favorites/cancel",
+            json={
+                "market_source": "SKILLCENTER",
+                "target_type": "SKILL",
+                "target_code": "skill-1",
+            },
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites/search"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/spaces/1/market-favorites/search", json={}
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites/status"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/spaces/1/market-favorites/status",
+            json={
+                "market_source": "SKILLCENTER",
+                "target_type": "SKILL",
+                "target_codes": ["skill-1"],
+            },
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/{bot_id}/editor-requests"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/bot-1/editor-requests",
+            params={"owner_id": "owner-1"},
+            json={"reason": "joint editing"},
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/work-orders"): {
+        "request": lambda client: client.get("/openapi/v1/bots/work-orders"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/work-orders/{work_order_id}"): {
+        "request": lambda client: client.get("/openapi/v1/bots/work-orders/1"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/work-orders/events"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/work-orders/events",
+            json={
+                "event_category": "NOTICE",
+                "biz_type": "TEST",
+                "biz_id": "1",
+                "event_type": "SPACE_JOIN_REVIEWED",
+                "recipient_user_ids": ["u-2"],
+                "title": "notice",
+            },
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/work-orders/{work_order_id}/approval"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/work-orders/1/approval",
+            json={"decision": "APPROVED", "review_remark": "approve"},
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/work-order-notifications/unread-count"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/work-order-notifications/unread-count"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/work-order-notifications/{notification_id}"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/work-order-notifications/1"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/work-order-notifications/read-all"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/work-order-notifications/read-all"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/work-order-notifications/{notification_id}/read"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/work-order-notifications/1/read"
+        ),
         "assert_starved": lambda response: response.status_code == 404,
     },
 }

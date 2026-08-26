@@ -1,5 +1,7 @@
 """Domain errors raised by Skill Center operations."""
 
+from agentclaw.community.core.errors import DomainError
+
 
 class SkillDeleteConsistencyError(RuntimeError):
     """A Skill delete could not safely converge filesystem and database state."""
@@ -65,6 +67,10 @@ class LocalSkillStorageError(Exception):
     """A package persistence or compensating cleanup operation failed."""
 
 
+class SkillParameterValidationError(Exception):
+    """The full Bot-level parameter object violates SKILL.md config."""
+
+
 class LocalSkillRuntimeSyncError(Exception):
     """The runtime projection could not match Local Skill desired state."""
 
@@ -87,3 +93,78 @@ class LocalSkillEditLockUnavailableError(LocalSkillEditPausedError):
 
 class ActiveSkillSetReferenceError(RuntimeError):
     """A Skill became referenced by an active custom SkillSet."""
+
+
+class SkillRuntimeNameConflictError(Exception):
+    """A Direct activation would create an ambiguous runtime entry name."""
+
+
+class SkillEngineNotSupportedError(Exception):
+    """The addressed Bot type and logical Engine cannot consume this Skill."""
+
+
+class RepositoryCatalogNotFoundError(Exception):
+    """A governed shared Repo Skill is not visible in this environment."""
+
+
+class RepositoryCatalogSyncInProgressError(Exception):
+    """The environment-wide governed Repo synchronization already has a holder."""
+
+
+class RepositoryCatalogSyncFailedError(Exception):
+    """The governed Repo synchronization could not finish successfully."""
+
+
+# ── SkillSet control plane ────────────────────────────────────────────────
+# These are ``DomainError`` subclasses so the SkillSet routers can raise the
+# situation and let the HTTP adapter decide the status: the mapping lives in
+# ``adapters.http.app._DOMAIN_ERROR_STATUS_MAP`` (Rule 7 — core/ is
+# transport-free), and ``_domain_error_handler`` logs 5xx with a traceback, so
+# the ``__cause__`` chain survives to the log instead of being replaced by a
+# hand-built ``HTTPException`` at the route.
+#
+# Each default ``detail`` is the message the legacy ``/api/skillsets`` wire
+# already published, so callers see the same body as before. Every raise site
+# may override it when it has something more specific to say.
+
+
+class SkillSetControlPlaneNotFoundError(DomainError):
+    """The addressed Bot scope, or a canonical SkillSet inside it, is absent."""
+
+    def __init__(self, detail: str = "Skill set not found") -> None:
+        super().__init__(detail)
+
+
+class SkillSetAccessDeniedError(DomainError):
+    """The authenticated principal cannot mutate the addressed Bot SkillSet."""
+
+    def __init__(self, detail: str = "Forbidden") -> None:
+        super().__init__(detail)
+
+
+class SkillSetControlPlaneConflictError(DomainError):
+    """A canonical SkillSet command conflicts with desired state.
+
+    Raised with a stable uppercase reason code (``SKILL_SET_NAME_CONFLICT``,
+    ``BOT_MUTATION_BUSY``, ...) that the published wire echoes verbatim.
+    """
+
+    def __init__(self, detail: str = "Skill set operation conflict") -> None:
+        super().__init__(detail)
+
+
+class SkillSetRuntimeReconcileError(DomainError):
+    """Runtime reconciliation failed after desired-state compensation."""
+
+    def __init__(self, detail: str = "Skill set runtime sync failed") -> None:
+        super().__init__(detail)
+
+class SkillSetControlPlaneLockUnavailableError(DomainError):
+    """The runtime layout edit boundary is unavailable; mutation failed closed."""
+
+    def __init__(self, detail: str = "Skill set mutation unavailable") -> None:
+        super().__init__(detail)
+
+
+class McpPermissionDeniedError(Exception):
+    """The actor cannot install or activate the addressed MCP server."""

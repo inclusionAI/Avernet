@@ -493,7 +493,7 @@ fn merge_baas_session_id_into_meta(
     Ok(Some(serde_json::Value::Object(meta_object)))
 }
 
-/// Split a service session id of the form `{group_id}:{8_hex}` into its
+/// Split a service session id at its canonical `{group_id}:<session_suffix>` boundary into its
 /// `(group_id, session_id)` parts. `group_arg` always wins when supplied;
 /// otherwise the colon split must succeed.
 fn split_service_sid<'a>(
@@ -506,7 +506,7 @@ fn split_service_sid<'a>(
     match sid.split_once(':') {
         Some((gid, _)) if !gid.is_empty() => Ok((gid, sid)),
         _ => Err(anyhow!(
-            "Cannot infer group from session id '{}'. Expected '{{group}}:{{8_hex}}' \
+            "Cannot infer group from session id '{}'. Expected '{{group}}:<session_suffix>' \
              or pass --group explicitly.",
             sid
         )),
@@ -845,6 +845,56 @@ fn parse_custom_group_bindings(
     Ok(bindings)
 }
 
+fn apply_group_participant_tags(
+    participants: &mut Vec<bcs_protocol::ParticipantInfo>,
+    lead_bot: &str,
+    lead_role: Option<&str>,
+    values: &[String],
+) -> Result<()> {
+    for value in values {
+        let (raw_bot_id, raw_tag) = value.split_once('=').ok_or_else(|| {
+            anyhow!(
+                "Invalid --participant-tag '{}'; expected BOT_UUID=TAG",
+                value
+            )
+        })?;
+        let bot_id = raw_bot_id.trim();
+        let tag = raw_tag.trim();
+        if bot_id.is_empty() || tag.is_empty() {
+            return Err(anyhow!(
+                "Invalid --participant-tag '{}'; bot UUID and tag must not be empty",
+                value
+            ));
+        }
+        if bot_id == lead_bot
+            && !participants
+                .iter()
+                .any(|participant| participant.bot_uuid == lead_bot)
+        {
+            participants.insert(
+                0,
+                bcs_protocol::ParticipantInfo {
+                    bot_uuid: lead_bot.to_string(),
+                    role: lead_role.map(str::to_string),
+                    tags: Vec::new(),
+                },
+            );
+        }
+        let participant = participants
+            .iter_mut()
+            .find(|participant| participant.bot_uuid == bot_id)
+            .ok_or_else(|| {
+                anyhow!(
+                    "Invalid --participant-tag '{}'; bot '{}' is not a group participant",
+                    value,
+                    bot_id
+                )
+            })?;
+        participant.tags.push(tag.to_string());
+    }
+    Ok(())
+}
+
 fn validate_custom_group_bindings(
     bindings: &BTreeMap<String, bcs_protocol::ParticipantBindingInfo>,
     validation: &serde_json::Value,
@@ -1119,6 +1169,10 @@ enum Commands {
         /// Participants (comma-separated bot UUIDs, e.g. "bot1,20260412_abc:100005")
         #[arg(short, long)]
         participants: String,
+
+        /// Provider routing tag for a participant; repeat as BOT_UUID=TAG
+        #[arg(long = "participant-tag", value_name = "BOT_UUID=TAG")]
+        participant_tags: Vec<String>,
 
         /// Group context (optional description of collaboration goal/background)
         #[arg(long)]
@@ -2796,6 +2850,7 @@ pub async fn run() -> Result<()> {
             driver,
             manager,
             participants,
+            participant_tags,
             context,
             topic,
         } => {
@@ -2828,6 +2883,7 @@ pub async fn run() -> Result<()> {
                             "worker".to_string()
                         }
                     }),
+                    tags: Vec::new(),
                 })
                 .collect();
             if group_strategy.is_some()
@@ -2840,9 +2896,16 @@ pub async fn run() -> Result<()> {
                     bcs_protocol::ParticipantInfo {
                         bot_uuid: driver.clone(),
                         role: Some("manager".to_string()),
+                        tags: Vec::new(),
                     },
                 );
             }
+            apply_group_participant_tags(
+                &mut participants,
+                &driver,
+                group_strategy.map(|_| "manager"),
+                &participant_tags,
+            )?;
 
             debug_request!(
                 debug,
@@ -4926,6 +4989,28 @@ mod tests {
         };
 
         assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn test_create_group_rejects_empty_participant_tag_components() {
+        let participant = || bcs_protocol::ParticipantInfo {
+            bot_uuid: "driver-bot".to_string(),
+            role: None,
+            tags: Vec::new(),
+        };
+
+        for value in ["=tenant-a", "driver-bot="] {
+            let mut participants = vec![participant()];
+            let error = apply_group_participant_tags(
+                &mut participants,
+                "driver-bot",
+                None,
+                &[value.to_string()],
+            )
+            .expect_err("empty participant tag components must be rejected");
+
+            assert!(error.to_string().contains("must not be empty"));
+        }
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 Two layers, because a 404 alone proves neither:
 
-1. **Endpoint layer** — parametrised over all 16 routes: a bot that is not the
+1. **Endpoint layer** — parametrised over all 20 swept routes: a bot that is not the
    caller's answers a masked 404 **and the transport is never invoked**. The
    Track A guard constrains SQL statements, not device calls, so a handler that
    forwarded first and filtered afterwards would still have reached someone
@@ -24,6 +24,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from tests.community.adapters.http.openapi_v1.conftest import (
+    mount_public_error_handlers,
     user_scoped_client,
 )
 from agentclaw.community.adapters.http.openapi_v1 import _ENGINE_RUNTIME_GROUPS
@@ -32,6 +33,10 @@ from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+from agentclaw.community.api.human_bot_friendship_service import (
+    HumanBotFriendshipServiceProtocol,
+)
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel
 from agentclaw.community.plugin_api.models import BotModel
@@ -39,14 +44,14 @@ from agentclaw.community.core.repository.implementations.bot.bot import BotRepos
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
-from .conftest import BOT, OWNER, FakeRelay
+from .conftest import BOT, OWNER, FakeRelay, bind_seam_from_relay
 
 TENANT_A = "tenant-a"
 TENANT_B = "tenant-b"
 
 SESSION_ID = "session:abc:user:1"
 
-#: (method, path template, body) for all 16 routes. ``{bot}`` is substituted
+#: (method, path template, body) for all 20 swept routes. ``{bot}`` is substituted
 #: with the bot the sweep is probing, and it sits *after* the component name —
 #: the surface's addressing rule (see ``openapi_v1/__init__.py``).
 #:
@@ -61,11 +66,15 @@ ROUTES = [
     ("delete", f"/{{bot}}/sessions/{SESSION_ID}", None),
     ("get", f"/{{bot}}/sessions/{SESSION_ID}/messages", None),
     ("delete", f"/{{bot}}/sessions/{SESSION_ID}/messages", None),
+    ("get", "/{bot}/sessions/favorites", None),
+    ("put", f"/{{bot}}/sessions/{SESSION_ID}/favorite", None),
+    ("delete", f"/{{bot}}/sessions/{SESSION_ID}/favorite", None),
     ("get", "/{bot}/engine/status", None),
     ("get", "/{bot}/engine/capabilities", None),
     ("get", "/{bot}/engine/available", None),
     ("get", "/{bot}/models", None),
     ("get", "/{bot}/models/openai/gpt-5.3", None),
+    ("get", "/{bot}/nodes", None),
     ("get", "/{bot}/approvals/mode?session_key=k", None),
     ("put", "/{bot}/approvals/mode?session_key=k", {"mode": "never"}),
     ("get", "/{bot}/approvals/modes", None),
@@ -106,23 +115,29 @@ def connections(relay: FakeRelay):
 
 
 @pytest.fixture
-def client(relay: FakeRelay, connections: _FakeConnections):
+def client(relay: FakeRelay, connections: _FakeConnections, friendships, expert):
     class _M(Module):
         def configure(self, binder):
             binder.bind(EngineRuntimeRelayProtocol, to=relay)
             binder.bind(EngineConnectionServiceProtocol, to=connections)
+            binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
+            binder.bind(ExpertChatServiceProtocol, to=expert)
+            # The gate reads the same ``relay.bots`` this sweep drives, so a
+            # foreign bot is foreign to both and the refusal stays one answer.
+            bind_seam_from_relay(binder, relay)
 
     app = FastAPI()
     for group in _ENGINE_RUNTIME_GROUPS:
         app.include_router(group)
     app.dependency_overrides[require_principal] = lambda: {"user_id": OWNER}
+    mount_public_error_handlers(app)
     attach_injector(app, Injector([_M()]))
     return user_scoped_client(app, OWNER)
 
 
-def test_all_sixteen_routes_are_covered():
+def test_all_twenty_routes_are_covered():
     """Guard the guard: a shrinking list would silently narrow this sweep."""
-    assert len(ROUTES) == 16
+    assert len(ROUTES) == 20
 
 
 @pytest.mark.parametrize(("method", "suffix", "body"), ROUTES, ids=lambda v: str(v))
@@ -212,8 +227,15 @@ class _DB:
 
 def _seed_bot() -> dict:
     return dict(
-        bot_id=BOT, bot_name="N", bot_desc="d", entity_id=OWNER, entity_type="staff",
-        creator_id=OWNER, owner_id=OWNER, status="ACTIVE", owner_name="O",
+        bot_id=BOT,
+        bot_name="N",
+        bot_desc="d",
+        entity_id=OWNER,
+        entity_type="staff",
+        creator_id=OWNER,
+        owner_id=OWNER,
+        status="ACTIVE",
+        owner_name="O",
         active_engine="openclaw",
     )
 

@@ -1,6 +1,67 @@
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 use crate::{BindingChannels, Skill, deserialize_skills};
+
+// ── Bot Search ─────────────────────────────────────────────────────────────
+
+/// Query parameters for `GET /bots/search`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BotSearchQuery {
+    /// Name/summary fuzzy search (contains, case-insensitive).
+    #[serde(default)]
+    pub q: Option<String>,
+    /// Visibility filter: comma-separated public | protected | private values.
+    #[serde(default)]
+    pub visibility: Option<String>,
+    /// User visibility filter: comma-separated public | protected | private values.
+    #[serde(default)]
+    pub user_visibility: Option<String>,
+    /// Status filter: online | hidden.
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Viewer actor kind used to calculate friendship: human | bot.
+    #[serde(default)]
+    pub viewer_actor_type: Option<String>,
+    /// Viewer actor id used to calculate friendship.
+    #[serde(default)]
+    pub viewer_actor_id: Option<String>,
+    /// Friendship filter relative to the explicit viewer: all | friends | non_friends.
+    #[serde(default)]
+    pub friendship: Option<String>,
+    /// Deprecated compatibility alias for `friendship`: true -> friends, false -> non_friends.
+    #[serde(default)]
+    pub is_friend: Option<bool>,
+    /// TC (TeamClaw backend) bot filter. `true` → only bots onboarded from the
+    /// backend, identified by an owner-suffixed `bot_uuid` whose suffix equals
+    /// its `created_by` owner (the same marker the delete flow treats as a TC
+    /// bot). `false` → only non-TC bots. Absent → no filtering.
+    #[serde(default)]
+    pub tc_bot: Option<bool>,
+    /// Pagination offset (default 0).
+    #[serde(default)]
+    pub offset: Option<u64>,
+    /// Page size (default 20, max 100).
+    #[serde(default)]
+    pub limit: Option<u64>,
+}
+
+/// One bot entry in the search response.
+#[derive(Debug, Clone, Serialize)]
+pub struct BotSearchEntry {
+    pub bot_uuid: String,
+    pub name: Option<String>,
+    pub summary: Option<String>,
+    pub visibility: String,
+    pub user_visibility: String,
+    pub friend_ext: Map<String, Value>,
+    pub friend_check_in_strategy: String,
+    pub status: String,
+    pub actor_kind: String,
+    pub is_online: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_friend: Option<bool>,
+}
 
 /// Engine type for the bot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -264,3 +325,4 @@ mod tests {
         assert!(serialized.get("agent_token").is_none());
     }
 }
+

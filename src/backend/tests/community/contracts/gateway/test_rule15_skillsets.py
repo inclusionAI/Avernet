@@ -6,11 +6,14 @@ POST/DELETE /api/skillsets/{id}/mcps 等接口响应字段。
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.api.skill_set_management_service import (
+    SkillSetManagementServiceProtocol,
+)
 
 from tests.community.contracts.gateway.conftest import (
     assert_response_schema, assert_success, assert_has_fields,
@@ -54,24 +57,9 @@ def _make_mock_skillset_service() -> MagicMock:
     svc.delete_skill_set.return_value = True
     # get_set_skills 返回 dict 列表
     svc.get_set_skills.return_value = [MOCK_SKILL_ROW]
-    # add_skills_to_set 是 async 方法
-    svc.add_skills_to_set = AsyncMock(return_value={
-        "success": ["skill_1"], "failed": [],
-    })
-    # remove_skill_from_set 是 async 方法
-    svc.remove_skill_from_set = AsyncMock(return_value=True)
     # get_set_mcp_servers 返回 dict 列表
     svc.get_set_mcp_servers.return_value = [MOCK_MCP_ROW]
     svc.get_bot_mcp_codes.return_value = ["test-mcp"]
-    # add_mcp_to_skill_set 是 async 方法
-    svc.add_mcp_to_skill_set = AsyncMock(return_value={
-        "success": True, "server_code": "test-mcp",
-        "requires_api_key": False, "requires_permission": False,
-    })
-    # remove_mcp_from_skill_set 是 async 方法
-    svc.remove_mcp_from_skill_set = AsyncMock(return_value={
-        "success": True,
-    })
     return svc
 
 
@@ -99,6 +87,19 @@ def _bind_skillset_deps(app):
         {"cli_code": "cli.delete", "cli_name": "Delete CLI", "cli_desc": "removed"},
     ]
     bind_mock_service(PassportPlugin, mock_passport, app)
+    control = MagicMock()
+    control.list_sets.return_value = [MOCK_SKILLSET_ROW]
+    control.get_set.return_value = MOCK_SKILLSET_ROW
+    control.list_skills.return_value = [MOCK_SKILL_ROW]
+    control.list_resources.return_value = [{
+        **MOCK_SKILLSET_ROW,
+        "mcps": [MOCK_MCP_ROW],
+        "clis": mock_passport.query_passport_clis.return_value,
+    }]
+    control.delete_set.return_value = None
+    control.create_set.return_value = {**MOCK_SKILLSET_ROW, "name": "NewSet"}
+    control.update_set.return_value = {**MOCK_SKILLSET_ROW, "name": "Updated"}
+    bind_mock_service(SkillSetManagementServiceProtocol, control, app)
     return mock_factory, mock_passport
 
 

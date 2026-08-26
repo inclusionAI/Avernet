@@ -1,0 +1,49 @@
+app_name: sandboxproxy
+enable_sidecar: false
+workers: 1
+
+log_config:
+  log_level: INFO
+  log_dir: ""
+  trace_log_dir: ""
+
+user_config:
+  plugins:
+    resolver: prefix
+    relay_client: baas
+
+  jwt:
+    secret: ${SANDBOXPROXY_JWT_SECRET:-}
+
+  aliyun_ack_cluster:
+    api_server: https://ack.internal.example
+    token: ${ALIYUN_ACK_TOKEN:-}
+    namespace: default
+    api_keys:
+      "0": ${ARCA_API_KEY_0:-}
+      "1": ${ARCA_API_KEY_1:-}
+
+  baas:
+    host: http://baas.internal.example
+    device_props_path: /api/v1/devices/provider-device/{provider_device_id}/props
+
+  teclaw:
+    host: http://teclaw.internal.example
+
+  open_apis: {}
+
+  proxy:
+    cors:
+      allowed_origins: []
+      max_age: 3600
+    routes:
+      - prefix: /proxypass/
+        proxy_timeout: 86400
+        websocket: true
+      - prefix: /wsrelay/
+        proxy_timeout: 86400
+        websocket: true
+      - prefix: /wsrevrelay/
+        proxy_timeout: 86400
+        websocket: true
+    middleware_chain: []

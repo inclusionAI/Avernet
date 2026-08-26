@@ -29,22 +29,29 @@ def _make_service(
     *,
     resolver=None,
     device_sync_dispatcher=None,
+    bcn_service=None,
+    bcsfuse_config=None,
+    catalog_metadata_service=None,
 ):
     """构造 BotPublicService — 注入 resolver + dispatcher。
 
     Task 6 收口后 ``device_sync_supplier`` 入参已删除。
     """
+    resolved = resolver or MagicMock()
     return BotPublicService(
         bot_friend_repo=MagicMock(),
         bot_repository=MagicMock(),
         process_service=MagicMock(),
         bot_service=MagicMock(),
+        bcn_service=bcn_service or MagicMock(),
         passport_plugin=MagicMock(),
         auth_relationship_plugin=MagicMock(),
         publish_approval_plugin=MagicMock(),
         skill_set_service_factory=MagicMock(),
-        device_context_resolver=resolver or MagicMock(),
+        device_context_resolver_factory=lambda: resolved,
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
+        bcsfuse_config=bcsfuse_config or MagicMock(base_url="", base_url_pre=""),
+        catalog_metadata_service=catalog_metadata_service or MagicMock(),
     )
 
 

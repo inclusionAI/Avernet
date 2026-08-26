@@ -11,9 +11,14 @@ Bindings:
 """
 from __future__ import annotations
 
+from typing import Annotated
+
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+from agentclaw.community.api.human_bot_friendship_service import (
+    HumanBotFriendshipServiceProtocol,
+)
 from agentclaw.community.api.expert_chat_instance_service import (
     ExpertChatInstanceServiceProtocol,
 )
@@ -23,9 +28,13 @@ from agentclaw.community.core.expert_chat.services.expert_chat_instance_service 
     ExpertChatInstanceService,
 )
 from agentclaw.community.core.expert_chat.services.expert_chat_service import ExpertChatService
+from agentclaw.community.core.bot_chat.bcn_friendship import (
+    BcnHumanBotFriendshipService,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.repository.implementations.chat.expert_chat import ExpertChatRepository as UnifiedExpertChatRepository
 from agentclaw.community.core.repository.implementations.chat.expert_chat_instance import ExpertChatInstanceRepository as UnifiedExpertChatInstanceRepository
+from agentclaw.community.plugin_api.http_client import QUALIFIER_BCN, HttpClient
 
 
 logger = get_logger()
@@ -76,3 +85,12 @@ class ExpertChatModule(Module):
         self, svc: ExpertChatInstanceService
     ) -> ExpertChatInstanceServiceProtocol:
         return svc
+
+    @singleton
+    @provider
+    @inject
+    def human_bot_friendship_service(
+        self,
+        http_client: Annotated[HttpClient, QUALIFIER_BCN],
+    ) -> HumanBotFriendshipServiceProtocol:
+        return BcnHumanBotFriendshipService(http_client)

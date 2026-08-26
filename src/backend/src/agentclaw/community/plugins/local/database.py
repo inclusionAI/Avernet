@@ -18,6 +18,7 @@ Trade-off: ``./scripts/local_setup.sh --local`` no longer persists DB
 state across backend restarts. Documented in the project ``CLAUDE.md``
 "Running Modes" table.
 """
+
 import os
 import threading
 from contextlib import contextmanager
@@ -156,12 +157,16 @@ class SqliteDB(MockSeam, DatabasePlugin, LifecycleBase):
         import agentclaw.community.core.bot_chat.models  # noqa: F401  bot_chat private-Base tables
         import agentclaw.community.core.bot_dormant.sqlite_models  # noqa: F401  ac_bot_dormant_*
         import agentclaw.community.core.task_queue.repository.models  # noqa: F401  ac_task_queue
+        import agentclaw.community.core.task.repository.models  # noqa: F401  task_info / task_node / task_node_run_info / task_node_relation / task_callback
         import agentclaw.community.core.skills_pool.repository.models  # noqa: F401  ac_bot_skill_layout_state
         import agentclaw.community.core.session_resources.repository.models  # noqa: F401  ac_session_resource
         import agentclaw.community.core.economy.governance.orm  # noqa: F401  governance_*
         import agentclaw.community.core.caller_identity.models  # noqa: F401  caller identity tables
         import agentclaw.community.core.bot_app_grant.models  # noqa: F401  ac_bot_app_grant / ac_bot_app_grant_log
         import agentclaw.community.core.user_list.models  # noqa: F401  ac_entity_user_list
+        import agentclaw.community.core.spaces.repository.models  # noqa: F401  ac_space / ac_space_member
+        import agentclaw.community.core.market_favorites.repository.models  # noqa: F401  ac_market_favorite
+        import agentclaw.community.core.work_orders.repository.models  # noqa: F401  ac_work_order / ac_work_order_notification
 
         # bot_chat uses a private ``Base = declarative_base()`` instead of
         # the canonical ``agentclaw.community.core.base.Base``. Side-effect import

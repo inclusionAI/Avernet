@@ -42,6 +42,9 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope_errors
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.core.bot_inventory.protocols import (
+    BusinessSpaceContextProtocol,
+)
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
@@ -90,9 +93,16 @@ async def get_bot_auth_status(
             "defaults to 'personal' when omitted."
         ),
     ] = None,
+    space_id: Annotated[
+        str | None,
+        Query(description="Business space to associate with the created bot."),
+    ] = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
     auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
+    space_context: BusinessSpaceContextProtocol = Injected(
+        BusinessSpaceContextProtocol
+    ),
 ) -> Envelope[BotAuthStatus]:
     """Poll authorization for a pending creation; the bot is created on ISSUED.
 
@@ -107,6 +117,12 @@ async def get_bot_auth_status(
     the same engine registry check, the same engine/cluster pairing, and the
     same personal/service restriction on bot_type.
 
+    This retired GET spelling is plain-bot only: it carries no template
+    parameters, so an application-coding creation must be completed through the
+    POST at the same path, which accepts the nested 'engine_properties.template' object.
+    Polling an application-coding creation here would complete it as a plain bot,
+    which is not supported.
+
     While the authorization service has no status for the bot yet — the
     Passport is not ready — the poll answers PENDING with a message saying
     so, rather than an error: keep polling.
@@ -120,9 +136,11 @@ async def get_bot_auth_status(
         bot_name=bot_name,
         bot_desc=bot_desc,
         bot_type=bot_type,
+        space_id=space_id,
         bot_service=bot_service,
         passport_plugin=passport_plugin,
         auth_rel_plugin=auth_rel_plugin,
+        space_context=space_context,
     )
 
 

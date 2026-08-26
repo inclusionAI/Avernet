@@ -5,10 +5,16 @@ from ._protocols import ScheduledTask
 from ._tasks import (
     BotRunRecoveryTask,
     BotRunRecoveryTaskConfig,
+    DeadlineRenewalScheduler,
+    DeadlineRenewalSchedulerConfig,
     DeviceTtlTimerTask,
     DeviceTtlTimerTaskConfig,
+    ExpireSandboxTimerTask,
+    ExpireSandboxTimerTaskConfig,
     FileTransferPoller,
     FileTransferPollerConfig,
+    GapDetectionResult,
+    RenewalRunReport,
 )
 
 __all__ = [
@@ -16,8 +22,14 @@ __all__ = [
     "ScheduledTask",
     "BotRunRecoveryTask",
     "BotRunRecoveryTaskConfig",
+    "DeadlineRenewalScheduler",
+    "DeadlineRenewalSchedulerConfig",
     "DeviceTtlTimerTask",
     "DeviceTtlTimerTaskConfig",
+    "ExpireSandboxTimerTask",
+    "ExpireSandboxTimerTaskConfig",
     "FileTransferPoller",
     "FileTransferPollerConfig",
+    "GapDetectionResult",
+    "RenewalRunReport",
 ]

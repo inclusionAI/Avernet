@@ -32,6 +32,7 @@ from ._device import (
     DeviceNotFoundError,
     DeviceResponse,
     DeviceStatus,
+    ProviderDevicePropsResponse,
 )
 from ._device_config import (
     ArcaCreateConfig,
@@ -170,6 +171,7 @@ __all__ = [
     "PoolabInstanceSummary",
     "ProxyExecRequest",
     "ProxyHealthRequest",
+    "ProviderDevicePropsResponse",
     "SigmaCreateConfig",
     "SigmaCreationResult",
     "SigmaCredentials",

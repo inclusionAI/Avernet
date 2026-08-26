@@ -18,14 +18,43 @@ api/
 └── …
 ```
 
-Conformance is **structural**: concrete services under
-`core/<module>/services/` do *not* inherit from the Protocol (that
-would force a `core → api` import, which the layering rule forbids).
-Instead `tests/architecture/test_service_api_conformance.py` parametrizes
-over every `(Protocol, ConcreteService)` pair and asserts
+Conformance is checked **structurally**, and a concrete service *may*
+also inherit its Protocol. `core → api` is forbidden by default —
+`tests/architecture/test_architecture_compliance.py::test_core_layer_does_not_import_api`
+enforces it — but that gate carries a documented per-file allowlist for
+service implementations that bridge to their own Protocol, so a service
+under `core/<module>/services/` may declare
+`class XService(XServiceProtocol)` by adding itself there. Prefer that
+over structural-only: it makes the contract navigable in an IDE (jump
+from Protocol to implementation and back) and, when every Protocol member
+is `@abstractmethod`, turns a missing member into a construction-time
+`TypeError` naming it instead of a silently inherited `...` body that
+returns `None`.
+
+Two edits come with it: the allowlist entry in
+`test_architecture_compliance.py`, and the import declared in the
+module's `## Context Boundary`. `arch.rules.md` Rule 6 is an
+**Invariant**, so a cross-layer exception is a deliberate cost — keep
+them rare, and justify each one in the allowlist comment.
+
+The cleaner long-term shape is to define the Protocol in `core/` and
+re-export it from `api/` — then `core` imports its own abstraction and
+there is no exception at all. `governance_service.py` documents that
+pattern. It needs `test_api_layer_is_protocols_only.py` taught about
+re-export-only modules first, which is why it is not used here.
+
+Services that predate this — and those whose Protocol still declares
+`*args: Any, **kwargs: Any`, against which inheritance would assert
+nothing — remain structural-only. Both forms are supported.
+
+Either way `tests/architecture/test_service_api_conformance.py`
+parametrizes over every `(Protocol, ConcreteService)` pair and asserts
 `issubclass(ConcreteService, Protocol)` against the `@runtime_checkable`
 Protocol — so a missing or renamed method on the concrete class fails
-CI rather than only showing up as a router-time `AttributeError`.
+CI rather than only showing up as a router-time `AttributeError`. That
+gate stays the backstop for the structural-only services, and its
+signature check still catches drift (a renamed keyword, `async`→`def`)
+that inheritance alone does not.
 
 Two enforcement gates live under `tests/architecture/`:
 
@@ -47,13 +76,18 @@ purpose: "Service API Protocols — transport-agnostic contracts between adapter
 provides:
   - "One Protocol per public service / factory"
   - "Structural conformance gate via tests/architecture/test_service_api_conformance.py"
+  - BotRuntimeProjectorProtocol
+  - SkillMetadataParserProtocol
 consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.core.bot_collaborator.models # Collaborator records, roles and permission levels — typed in collaborator_service.py
   - agentclaw.community.core.access.models            # UserInfoRecord — typed in user_service.py
   - agentclaw.community.core.bot_app_grant.models    # BotAppGrantRecord — typed in bot_app_grant_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.bot_chat.schemas        # ConversationDetail, HealthCheckData — typed in bot_chat_service.py
+  - agentclaw.community.core.bot_inventory.types   # Bot inventory/local workflow DTOs — typed in bot_inventory_service.py and local_bot_workflow_service.py
+  - agentclaw.community.core.bot_management.bot_space  # Bot Space assignment result typed in bot_space_service.py
   - agentclaw.community.core.bot_startup_script.repository.models  # BotStartupScriptRecord — typed in bot_startup_script_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.caller_identity.contracts  # Caller identity API DTOs and stable errors
   - agentclaw.community.core.caller_identity.credential  # CallerToken — typed in caller_credential.py
@@ -68,6 +102,10 @@ internal_dependencies:
   - agentclaw.community.core.quality.models          # QualityTaskRecord — typed in quality_service.py and task_processor_service.py
   - agentclaw.community.core.service_bot.repository.models  # BotPublishRecord — typed in engine_config_service.py
   - agentclaw.community.core.resources.models        # Resource / ResourceType — typed in resource_service.py (Protocol signatures mirror slim ResourceService verbatim; round-2 review #4)
+  - agentclaw.community.core.spaces.models           # Space/member records and enums — typed in space_service.py
+  - agentclaw.community.core.repository.protocols.skill_center_types # Space Skill query projection
+  - agentclaw.community.core.market_favorites.models # Favorite records and target enum — typed in market_favorite_service.py
+  - agentclaw.community.core.work_orders.models       # Work-order, notification, query, status, and event contracts
   - agentclaw.community.core.service_bot.services.baas_service  # BotWsConnectionInfoResponse / HttpConnectionInfo — typed in baas_service.py (BaasService is a plain core service)
   - agentclaw.community.core.service_bot.types       # PublishStage enum — typed in baas_service.py
   - agentclaw.community.core.skills_pool             # Skills Pool rollout/query/recovery domain DTOs used by operator Service API Protocols
@@ -76,6 +114,8 @@ internal_dependencies:
   - agentclaw.community.core.skill_center            # Local Skill desired-state lifecycle contract
   - agentclaw.community.core.skill_center            # Local Skill recoverable deletion lifecycle contract
   - agentclaw.community.core.task.domain.models      # TaskInfo, TaskExecutionGraph, TaskOpResult, TaskCallbackData — typed in task_service.py and task_loop_callback.py
+  - agentclaw.community.core.task.domain.requests    # TaskInfoRequest — typed in task_service.py Protocol execute signature
+  - agentclaw.community.core.task.repository.types   # TaskInfoRecord — typed in task_service.py Protocol list_tasks signature
   - agentclaw.community.kernel.device_dto            # OutBoundOperationRule — typed in baas_service.py Protocol (B6)
   - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py
@@ -89,3 +129,12 @@ fail otherwise. Removing or renaming a method is a breaking change for
 every consumer (adapter / CLI / RPC) — coordinate with downstream.
 Field shape in adapter-owned types (e.g. `AuthenticatedUser`) lives
 under `adapters/http/`, not here.
+
+`SkillMetadataParserProtocol` is additive. Its current concrete implementation
+is `SkillParser`; `LocalSkillUploadService` consumes the core-owned form of the
+same contract, while folder import, Git import and Draft/publication validation
+can adopt it without changing the parser wire. It adds no deployment config.
+The 100-character name and 65,535-byte description limits match the current
+`ac_skill` persistence columns. Legacy no-frontmatter upload remains a
+compatibility fallback outside the canonical Protocol; removing that fallback
+would require a separate migration and compatibility review.

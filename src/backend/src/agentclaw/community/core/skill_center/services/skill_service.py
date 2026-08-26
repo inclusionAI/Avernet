@@ -33,7 +33,12 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillCategoryRepository
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
-from agentclaw.community.core.skill_center.services.skill_parser import SkillInfo, SkillParser, SkillTreeNode
+from agentclaw.community.core.skill_center.services.skill_parser import (
+    SkillInfo,
+    SkillManifestError,
+    SkillParser,
+    SkillTreeNode,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 
@@ -515,20 +520,18 @@ class SkillService:
             active_path = active_root / name
             content = None
             skill_file = active_path / "SKILL.md"
-            if await device_fs.exists(str(skill_file)):
-                content = await device_fs.read_file(str(skill_file))
-            else:
-                readme_file = active_path / "README.md"
-                if await device_fs.exists(str(readme_file)):
-                    content = await device_fs.read_file(str(readme_file))
+            if not await device_fs.exists(str(skill_file)):
+                continue
+            content = await device_fs.read_file(str(skill_file))
             if content is None:
                 continue
 
             try:
-                text = content.decode("utf-8")
-            except UnicodeDecodeError:
-                text = content.decode("gbk", errors="replace")
-            skill_info = SkillParser.parse_content(text)
+                text = SkillParser.decode_content(content)
+                skill_info = SkillParser.parse_installed_content(text)
+            except SkillManifestError:
+                logger.warning("[get_active_skills_from_device] Invalid SKILL.md: %s", skill_file)
+                continue
             if not skill_info:
                 continue
 
@@ -606,252 +609,6 @@ class SkillService:
 
     # ========================================================================
     # 技能激活/停用 (文件系统)
-    # ========================================================================
-
-    async def activate_skill(self, skill_path: str, user_id: str | None = None, bolt_id: str | None = None) -> bool:
-        """
-        激活单个技能 (创建软链接)
-
-        Args:
-            skill_path: 技能路径，格式为 git://path 或 local://name
-            user_id: 用户 ID（用于 device_fs 路由）
-            bolt_id: Bolt ID（用于 device_fs 路由）
-
-        Note:
-            Pool-owned local skill 必须先通过 DeviceFileSystem 验证源路径
-            存在，避免向运行时发布 dangling mapping。Legacy 保留历史
-            best-effort 行为；git skill 继续由运行时 repo mount 解析，不在
-            Backend 管理视图预检源路径。
-        """
-        logger.info(f"[SkillService.activate_skill] Start: skill_path={skill_path}")
-
-        try:
-            protocol, source = self.parse_skill_path(skill_path)
-        except ValueError as e:
-            logger.error(f"[SkillService.activate_skill] Invalid skill_path: {e}")
-            return False
-
-        device_fs = self._device_fs_factory(bolt_id, user_id)
-        if protocol == "local" and self.runtime_uses_pool_paths:
-            source = Path(self._local_skill_path_adapter(str(source)))
-            try:
-                source_exists = await device_fs.exists(str(source))
-            except Exception as e:
-                logger.warning(
-                    "[SkillService.activate_skill] Failed to verify local "
-                    "source %s: %s",
-                    source,
-                    e,
-                    exc_info=True,
-                )
-                return False
-            if not source_exists:
-                logger.error(
-                    "[SkillService.activate_skill] Refusing to activate "
-                    "missing local source: %s",
-                    source,
-                )
-                return False
-
-        # 生成链接名称 —— 软链名取尾名 patent-quality-audit，与 local 分支
-        # (Path(path).name) 及 get_symlink_mappings (split('/')[-1]) 对齐。
-        # 注意：DB link_name 字段仍用全路径下划线格式（get_link_name），二者口径不同。
-        if protocol == "git":
-            relative_path = skill_path[6:]  # git://path -> path
-            link_name = relative_path.strip("/").split("/")[-1]
-        else:
-            # local:///aidesktop/.../skills-local/skill-name -> skill-name
-            path = skill_path[8:]  # 去掉 local:// 前缀
-            link_name = Path(path).name  # 提取技能名称（路径最后一部分）
-
-        target_link = self.active_dir / link_name
-
-        # Protect reserved names (directories and config files) - prevent overwriting
-        if link_name in self.RESERVED_SKILL_NAMES:
-            logger.error(f"[SkillService.activate_skill] Cannot activate skill with reserved name: {link_name}")
-            return False
-
-        # Calculate path for skill activation
-        # Use relative paths so symlinks resolve correctly on BOTH
-        # the management host (NAS direct access) and the runtime device (NFS mount).
-        #
-        # On device, skills-repo and skills-local are NFS-mounted INSIDE skills/:
-        #   /home/admin/.openclaw/skills/
-        #   ├── skills-repo/        ← NFS submount of bolt_shared/skills-repo (RO)
-        #   ├── skills-local/       ← NFS mount of user's skills-local (RW)
-        #   └── {link_name}  →  skills-repo/path/to/skill  or  skills-local/skill-name
-        #
-        # On management host (NAS), skills/skills-repo/ and skills/skills-local/ are
-        # the actual directories. _resolve_symlink_for_management() handles translation.
-        #
-        # source.relative_to() is pure path arithmetic — no filesystem access.
-        try:
-            if protocol == "git":
-                source_relative = Path("skills-repo") / source.relative_to(self.repo_dir)
-            else:
-                # Local skills: relative path from skills/ to skills/skills-local/
-                source_relative = Path("./skills-local") / source.relative_to(self.local_dir)
-            logger.info(f"[SkillService.activate_skill] Creating symlink: {target_link} -> {source_relative}")
-        except ValueError:
-            # Fallback to absolute path if relative calculation fails
-            source_relative = source.resolve()
-            logger.debug(f"[SkillService.activate_skill] Using absolute path (relative calculation failed): {target_link} -> {source_relative}")
-
-        if (
-            not self.runtime_uses_pool_paths
-            and (target_link.exists() or target_link.is_symlink())
-        ):
-            # Phase 4: engine-view path — 让 engine 在 VM 内删，不要宿主机 shutil.rmtree
-            success = await self._delete_active_entry(device_fs, target_link)
-            if not success:
-                logger.error(
-                    f"[SkillService.activate_skill] Failed to remove existing link at {target_link}"
-                )
-                return False
-
-        # Pool bindpath validates every source before replacing targets. Keep an
-        # existing runtime link in place until that single authoritative publish
-        # succeeds; eagerly deleting it here would create a gap and would violate
-        # fail-before-mutation when the requested mapping conflicts with an active
-        # SkillSet mapping.
-
-        # R2 修复: 不再 pathlib 本地写软链。
-        # 软链建立由 device_sync (调 adapter bindpath) 单方面负责,跟线上 Arca 行为对齐。
-        # 之前的 target_link.symlink_to(source_relative) 会跟 device_sync 形成双写,
-        # 且在 adapter 不可达时留下不一致的本地软链 (TC-CAP-C016 残留根因之一)。
-        logger.info(
-            f"[SkillService.activate_skill] Success: marked skill active "
-            f"(symlink will be created by device_sync bindpath): {target_link}"
-        )
-        return True
-
-    async def deactivate_skill(self, skill_id: str, *, bolt_id: str | None = None, user_id: str | None = None) -> bool:
-        """停用单个技能（删除软链接、目录或文件）
-
-        会删除 skills 目录下的技能内容，但保护以下保留项目：
-        - skills-repo: 技能仓库目录
-        - skills-local: 本地上传技能目录
-        - .current_skill_set: 当前技能集标记文件
-        - skill_sets.json: 技能集配置文件
-        """
-        logger.info(f"[SkillService.deactivate_skill] Start: skill_id={skill_id}")
-
-        # Protect reserved names (directories and config files) from being deactivated
-        if skill_id in self.RESERVED_SKILL_NAMES:
-            logger.warning(f"[SkillService.deactivate_skill] Cannot deactivate reserved item: {skill_id}")
-            return False
-
-        target_path = self.active_dir / skill_id
-        logger.info(f"[SkillService.deactivate_skill] target_path={target_path}, exists={target_path.exists()}, is_symlink={target_path.is_symlink()}")
-
-        # 尝试 link_name 格式转换（兼容两种格式）
-        if not target_path.exists() and not target_path.is_symlink():
-            link_name = self.get_link_name(skill_id)
-            target_path = self.active_dir / link_name
-            logger.info(f"[SkillService.deactivate_skill] Trying link name: {link_name}, new target: {target_path}")
-
-        # ``active_dir`` is an engine-view path. For desktop and BaaS Bots it
-        # normally does not exist on the backend host, so host-side absence
-        # cannot prove that the remote runtime link is already gone.
-        device_fs = self._device_fs_factory(bolt_id, user_id)
-
-        # 检查是否存在（文件、目录、或断开的软链接）
-        if not target_path.exists() and not target_path.is_symlink():
-            success = await self._delete_active_entry(device_fs, target_path)
-            if success:
-                logger.debug(
-                    "[SkillService.deactivate_skill] Skill not found on host; "
-                    "remote runtime cleanup completed: %s",
-                    skill_id,
-                )
-            return success
-
-        # Phase 4: engine-view path — 让 engine 在 VM 内删
-        success = await self._delete_active_entry(device_fs, target_path)
-        if success:
-            logger.info(f"[SkillService.deactivate_skill] Success: removed {skill_id}")
-            return True
-        else:
-            logger.warning(f"[SkillService.deactivate_skill] Failed: {skill_id}")
-            return False
-
-    async def activate_skills_batch(
-        self,
-        skill_paths: list[str],
-        *,
-        user_id: str | None = None,
-        bolt_id: str | None = None,
-    ) -> dict[str, Any]:
-        """批量激活技能。
-
-        Args:
-            skill_paths: 技能路径列表，格式为 git://path 或 local://name
-            user_id: 用户 ID（透传给 activate_skill 用于 device_fs 路由）
-            bolt_id: Bot ID（透传给 activate_skill 用于 device_fs 路由）
-        """
-        results = {"success": [], "failed": []}
-
-        # Run all activations concurrently — propagate user_id/bolt_id so each
-        # activate_skill picks the right DeviceFileSystem plugin (BAAS vs ARCA
-        # vs Local). Otherwise inner calls land on LocalDeviceFileSystem
-        # fallback regardless of the bot's actual device binding.
-        activations = await asyncio.gather(
-            *[
-                self.activate_skill(skill_path, user_id=user_id, bolt_id=bolt_id)
-                for skill_path in skill_paths
-            ],
-            return_exceptions=True,
-        )
-
-        for skill_path, success in zip(skill_paths, activations):
-            if isinstance(success, Exception):
-                results["failed"].append({
-                    "path": skill_path,
-                    "error": str(success)
-                })
-            elif success:
-                try:
-                    protocol, source = self.parse_skill_path(skill_path)
-                    if protocol == "git":
-                        relative_path = skill_path[6:]
-                        skill_id = relative_path
-                        link_name = self.get_link_name(relative_path)
-                    else:
-                        skill_id = skill_path[8:]
-                        link_name = Path(skill_id).name
-                    results["success"].append({
-                        "id": skill_id,
-                        "link_name": link_name,
-                        "path": skill_path
-                    })
-                except ValueError:
-                    results["success"].append({
-                        "id": skill_path,
-                        "link_name": skill_path.replace('/', '_'),
-                        "path": skill_path
-                    })
-            else:
-                results["failed"].append({
-                    "path": skill_path,
-                    "error": "Failed to activate skill"
-                })
-
-        return results
-
-    async def deactivate_all_skills(self) -> dict[str, Any]:
-        """停用所有技能"""
-        results = {"success": [], "failed": []}
-
-        for skill in self.get_active_skills():
-            if await self.deactivate_skill(skill.id):
-                results["success"].append(skill.id)
-            else:
-                results["failed"].append(skill.id)
-
-        return results
-
-    # ========================================================================
-    # 缓存机制（使用全局缓存）
     # ========================================================================
 
     def _get_cached(self, cache_key: str) -> Any:
@@ -1040,7 +797,7 @@ class SkillService:
                     # 只有包含 SKILL.md 的目录才被认为是技能
                     if SkillParser.has_skill_file(item):
                         # 是技能目录，解析并缓存
-                        skill_info = SkillParser.parse(item)
+                        skill_info = SkillParser.parse_repository(item)
                         if skill_info:
                             index[rel_path] = skill_info
                     else:
@@ -1075,7 +832,7 @@ class SkillService:
 
         # 检查是否是技能目录（不在索引中的情况）- 只有 SKILL.md 才算
         if SkillParser.has_skill_file(path):
-            skill_info = SkillParser.parse(path)
+            skill_info = SkillParser.parse_repository(path)
             if skill_info:
                 # 添加到索引
                 skills_index[rel_path] = skill_info
@@ -1113,7 +870,7 @@ class SkillService:
 
         # 只有包含 SKILL.md 的目录才被认为是技能
         if SkillParser.has_skill_file(path):
-            skill_info = SkillParser.parse(path)
+            skill_info = SkillParser.parse_repository(path)
             return SkillTreeNode(
                 name=skill_info.get("name", path.name) if skill_info else path.name,
                 path=str(path.relative_to(market_repo_dir)),
@@ -1296,7 +1053,6 @@ class SkillService:
                 - synced: bool - 是否实际执行了同步
                 - message: str
         """
-        import asyncio
 
         local_skills_root = self.skill_repo_sync.get_local_skills_root()
         if isinstance(local_skills_root, Path):
@@ -1305,6 +1061,12 @@ class SkillService:
                 "delegating to SkillRepoSyncPlugin"
             )
             result = self.sync_repo()
+            # The local Plugin only acquires/refreshed the host-side corpus.
+            # Keep the public operation equivalent to GitSyncService: one
+            # successful fetch is followed by exactly one DB scan and one
+            # atomic cache refresh (owned by sync_skills_from_git).
+            if result.get("success"):
+                result["database"] = self.sync_skills_from_git()
             result.setdefault("error", None)
             return result
 
@@ -1336,7 +1098,8 @@ class SkillService:
                 # 不透传会导致 sync_market 把 "Distributed lock held" 当成 500 错误抛出。
                 "error": result.get("error"),
                 "message": "Sync completed" if result.get("success") else result.get("error", "Sync failed"),
-                "subtrees": result.get("subtrees", {})
+                "subtrees": result.get("subtrees", {}),
+                "database": result.get("database"),
             }
         except Exception as e:
             logger.error(f"[sync_repo_with_lock] Error: {e}")
@@ -1375,7 +1138,6 @@ class SkillService:
 
     def sync_repo(self) -> dict[str, Any]:
         """同步技能仓库，委托给 SkillRepoSyncPlugin。"""
-        import asyncio
 
         logger.info("[SkillService.sync_repo] Delegating to SkillRepoSyncPlugin")
 
@@ -1474,21 +1236,11 @@ class SkillService:
                     # 非 teclaw: identity（主机路径原样）。
                     skill_base = self._local_skill_path_adapter(str(local_path))
 
-                    # 尝试 SKILL.md
-                    content = await device_fs.read_file(f"{skill_base}/SKILL.md")
-                    if content:
-                        try:
-                            return content.decode("utf-8")
-                        except UnicodeDecodeError:
-                            return content.decode("gbk", errors="replace")
-                    # 尝试 README.md
-                    content = await device_fs.read_file(f"{skill_base}/README.md")
-                    if content:
-                        try:
-                            return content.decode("utf-8")
-                        except UnicodeDecodeError:
-                            return content.decode("gbk", errors="replace")
-                    logger.warning(f"[get_skill_readme] Skill file not found: {skill_base}")
+                    for filename in ("SKILL.md", "README.md"):
+                        content = await device_fs.read_file(f"{skill_base}/{filename}")
+                        if content:
+                            return SkillParser.decode_content_for_display(content)
+                    logger.warning(f"[get_skill_readme] SKILL.md/README.md not found: {skill_base}")
                     # Local skill 没找到，继续尝试 repo（兜底）
                 elif git_path.startswith('git://'):
                     # Git skill，从 repo 查找
@@ -1496,14 +1248,12 @@ class SkillService:
                     skill_path = self._get_market_repo_dir() / relative_path
                     logger.info(f"[get_skill_readme] git:// path: {skill_path}, exists={skill_path.exists()}")
                     if skill_path.exists():
-                        skill_file = SkillParser.find_skill_file(skill_path)
+                        skill_file = SkillParser.find_display_file(skill_path)
                         if skill_file:
                             try:
-                                return skill_file.read_text(encoding="utf-8")
-                            except UnicodeDecodeError:
-                                return skill_file.read_text(encoding="gbk", errors="replace")
+                                return SkillParser.decode_content_for_display(skill_file.read_bytes())
                             except Exception as e:
-                                logger.error(f"[SkillService] Error reading repo readme: {e}")
+                                logger.error(f"[SkillService] Error reading SKILL.md: {e}")
                     logger.info("[get_skill_readme] Falling through to _get_readme_from_repo")
                     return self._get_readme_from_repo(skill_id)
                 else:
@@ -1515,6 +1265,30 @@ class SkillService:
         except Exception as e:
             logger.error(f"[get_skill_readme] Unexpected error: skill_id={skill_id}, error={type(e).__name__}: {e}")
             raise
+
+    def get_repository_skill_content(self, skill_id: str) -> str | None:
+        """Read exactly the governed Repo asset's ``SKILL.md`` from global storage.
+
+        This deliberately does not reuse the historical README fallback or a
+        Bot-scoped workspace path.  Repo content is an environment-shared
+        artifact and its consumable contract is the literal global
+        ``skills-repo/<git-relative-path>/SKILL.md`` file.
+        """
+        if not skill_id.isdecimal():
+            return None
+        skill = self._skill_repo.get_by_id(skill_id)
+        git_path = str((skill or {}).get("git_path") or "")
+        if not git_path.startswith("git://"):
+            return None
+        relative_path = git_path[len("git://") :]
+        try:
+            root = self._get_market_repo_dir().resolve()
+            manifest = (root / relative_path / "SKILL.md").resolve()
+            if root not in manifest.parents or not manifest.is_file():
+                return None
+            return SkillParser.decode_content_for_display(manifest.read_bytes())
+        except (OSError, ValueError):
+            return None
 
     def _get_readme_from_repo(self, skill_id: str) -> str | None:
         """从仓库中查找技能的 README"""
@@ -1534,14 +1308,12 @@ class SkillService:
         if not skill_path:
             return None
 
-        skill_file = SkillParser.find_skill_file(skill_path)
+        skill_file = SkillParser.find_display_file(skill_path)
         if skill_file:
             try:
-                return skill_file.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                return skill_file.read_text(encoding="gbk", errors="replace")
+                return SkillParser.decode_content_for_display(skill_file.read_bytes())
             except Exception as e:
-                logger.error("[SkillService] Error reading repo readme: %s", e)
+                logger.error("[SkillService] Error reading SKILL.md: %s", e)
 
         return None
 
@@ -1576,7 +1348,7 @@ class SkillService:
 
     def _parse_skill_md_for_db(self, skill_path: Path) -> dict[str, Any] | None:
         """解析技能文件，返回数据库需要的格式"""
-        base_info = SkillParser.parse(skill_path)
+        base_info = SkillParser.parse_repository(skill_path)
         if not base_info:
             return None
 
@@ -1627,10 +1399,7 @@ class SkillService:
             if content is None:
                 logger.warning(f"[parse_local_skill_config] SKILL.md not found: {rel}")
                 return None
-            try:
-                text = content.decode("utf-8")
-            except UnicodeDecodeError:
-                text = content.decode("gbk", errors="replace")
+            text = SkillParser.decode_content(content)
             return SkillParser.parse_content(text)
         except Exception as e:
             logger.warning(f"[parse_local_skill_config] Failed to parse {git_path}: {e}")
@@ -1839,17 +1608,21 @@ class SkillService:
 
         raw_bytes = skill_md_file.get("content", b"")
         try:
-            content_str = raw_bytes.decode("utf-8")
-        except UnicodeDecodeError:
-            content_str = raw_bytes.decode("gbk", errors="replace")
-        skill_info = SkillParser.parse_content(content_str) if content_str else {}
-        if not self._has_required_skill_field(content_str, "name"):
-            raise ValueError("SKILL.md must contain required field: name.")
-        skill_name = self._extract_upload_scalar_field(content_str, "name")
-        if not skill_name:
-            raise ValueError("SKILL.md field 'name' cannot be empty.")
-        if not self._has_required_skill_field(content_str, "description"):
-            raise ValueError("SKILL.md must contain required field: description.")
+            content_str = SkillParser.decode_content(raw_bytes)
+        except SkillManifestError as exc:
+            raise ValueError("SKILL.md must be encoded as UTF-8 or GBK.") from exc
+        try:
+            skill_info = SkillParser.parse_content(content_str) if content_str else None
+        except SkillManifestError as exc:
+            if exc.code != "MISSING_FRONTMATTER":
+                raise
+            # Compatibility for packages accepted by the retiring upload API:
+            # plain YAML metadata at the root of SKILL.md. New manifests remain
+            # governed by the strict frontmatter parser above.
+            skill_info = SkillParser.parse_legacy_upload_content(content_str)
+        if not skill_info:
+            raise ValueError("SKILL.md must contain valid frontmatter or legacy metadata.")
+        skill_name = skill_info["name"]
         if skill_root:
             folder_name = os.path.basename(skill_root)
             if folder_name != skill_name:
@@ -1858,10 +1631,6 @@ class SkillService:
                     f"Folder name: '{folder_name}', SKILL.md name: '{skill_name}'."
                 )
 
-        if not re.match(r'^[a-zA-Z0-9-]+$', skill_name):
-            raise ValueError(
-                f"Skill name '{skill_name}' is invalid. Only English letters, numbers, and '-' are allowed"
-            )
         if skill_name in self.RESERVED_SKILL_NAMES:
             raise ValueError(f"Skill name '{skill_name}' is reserved and cannot be used")
         skill_info["name"] = skill_name

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import StrEnum
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.workspace.skill_layout import (
+    runtime_layout_engine_for_bot,
+)
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     CUTOVER_EVIDENCE_CONTRACT_VERSION,
     RuntimeLayoutProbeResult,
@@ -15,6 +16,9 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
 from agentclaw.community.core.skills_pool.aicoding_retirement import (
     is_aicoding_active_mapping_reconciliation_candidate,
     is_trusted_aicoding_repo_retirement_resume,
+)
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.core.skills_pool.active_aicoding_bridge_repair import (
     ActiveAICodingBridgeRepairStatus,
@@ -29,6 +33,7 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
     logical_skill_mappings_from_evidence,
     local_locators_from_evidence,
     local_skill_name,
+    mapping_contract_for,
 )
 from agentclaw.community.core.skills_pool.mapping_convergence import (
     MappingConvergenceStatus,
@@ -48,39 +53,15 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayoutPhase,
 )
 from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
+from agentclaw.community.core.skills_pool.reconcile_models import (
+    SkillsPoolReconcileOutcome,
+    SkillsPoolReconcileResult,
+)
 from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
 from agentclaw.community.log import get_logger
 
 
 logger = get_logger()
-
-
-class SkillsPoolReconcileOutcome(StrEnum):
-    POOL_ACTIVE = "pool_active"
-    ALREADY_ACTIVE = "already_active"
-    NOT_CLAIMED = "not_claimed"
-    LEASE_NOT_HELD = "lease_not_held"
-    BOT_NOT_FOUND = "bot_not_found"
-    BOT_CHANGED = "bot_changed"
-    NOT_CAPABLE = "not_capable"
-    TRANSIENT_ERROR = "transient_error"
-    INVALID = "invalid"
-    STATE_RACE_LOST = "state_race_lost"
-    DATA_INCONSISTENT = "data_inconsistent"
-    ACTIVE_ENTRY_CONFLICT = "active_entry_conflict"
-    CUTOVER_FAILED = "cutover_failed"
-    MAPPING_FAILED = "mapping_failed"
-    MAPPING_VERIFY_FAILED = "mapping_verify_failed"
-    DATABASE_COMMIT_FAILED = "database_commit_failed"
-    MANUAL_REPAIR_REQUIRED = "manual_repair_required"
-
-
-@dataclass(frozen=True, slots=True)
-class SkillsPoolReconcileResult:
-    outcome: SkillsPoolReconcileOutcome
-    preparation_id: str | None = None
-    evidence: dict[str, object] | None = None
-    retryable: bool | None = None
 
 
 class SkillsPoolReconcileService:
@@ -93,11 +74,13 @@ class SkillsPoolReconcileService:
         bot_repository: BotRepository,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         skill_repository: SkillsPoolSkillRepositoryProtocol,
+        reader: BotCapabilityStateReaderProtocol,
         runtime: SkillsPoolRuntimeProtocol,
     ) -> None:
         self._bots = bot_repository
         self._layouts = layout_repository
         self._skills = skill_repository
+        self._reader = reader
         self._runtime = runtime
 
     async def reconcile(
@@ -144,6 +127,13 @@ class SkillsPoolReconcileService:
         if engine not in FILESYSTEM_POOL_ENGINES:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
 
+        # ``engine`` is the logical control-plane identity.  Coding-template
+        # Bots retain Claude Code catalogue/asset semantics while their image
+        # exposes the AICoding filesystem layout to the Pool runtime.
+        layout_engine = runtime_layout_engine_for_bot(bot)
+        if layout_engine not in FILESYSTEM_POOL_ENGINES:
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
+
         owner_id = bot.get("owner_id")
         if not isinstance(owner_id, (str, int)) or isinstance(owner_id, bool):
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
@@ -158,7 +148,7 @@ class SkillsPoolReconcileService:
         probe = await self._runtime.probe(
             bot_id=scope.bot_id,
             user_id=user_id,
-            engine=engine,
+            engine=layout_engine,
         )
         logger.info(
             "[skills_pool.reconcile] runtime probe bot_id=%s generation=%s "
@@ -171,7 +161,7 @@ class SkillsPoolReconcileService:
         )
         finalizing_repo_retirement_resume = is_trusted_aicoding_repo_retirement_resume(
             state=state,
-            engine=engine,
+            engine=layout_engine,
             probe=probe,
         )
         if (
@@ -329,17 +319,19 @@ class SkillsPoolReconcileService:
 
         local_assets = self._skills.list_bot_local_assets(
             env=scope.env,
+            owner_id=user_id,
             bot_id=scope.bot_id,
         )
-        active_assets = self._skills.list_bot_active_assets(
-            env=scope.env,
-            bot_id=scope.bot_id,
-            user_id=user_id,
-            engine=engine,
+        active_assets = self._reader.active_skill_assets(
+            bot_id=scope.bot_id, owner_id=user_id, bot=bot
         )
         try:
             local_names = [local_skill_name(asset) for asset in local_assets]
             mappings = build_logical_skill_mappings(active_assets)
+            mapping_contract_version = mapping_contract_for(
+                mappings,
+                probe.evidence.get("supported_mapping_contract_versions"),
+            )
             durable_retired_mappings = logical_skill_mappings_from_evidence(
                 state.last_failure_evidence
             )
@@ -420,6 +412,7 @@ class SkillsPoolReconcileService:
                 preparation_id=probe.preparation_id,
                 registered_local_names=local_names,
                 mappings=mappings,
+                mapping_contract_version=mapping_contract_version,
             )
             if not cutover.committed:
                 evidence = cutover.to_dict()
@@ -643,15 +636,16 @@ class SkillsPoolReconcileService:
 
         convergence = await converge_post_cutover_mappings(
             layouts=self._layouts,
-            skills=self._skills,
+            reader=self._reader,
             runtime=self._runtime,
             scope=scope,
             generation=generation,
             lease_owner=lease_owner,
             user_id=user_id,
-            engine=engine,
+            bot=bot,
             cutover_mappings=mappings,
             durable_retired_mappings=durable_retired_mappings,
+            mapping_contract_version=mapping_contract_version,
         )
         if convergence.status is MappingConvergenceStatus.LEASE_NOT_HELD:
             return SkillsPoolReconcileResult(
@@ -712,6 +706,7 @@ class SkillsPoolReconcileService:
             )
         if not self._layouts.commit_pool_active(
             scope=scope,
+            owner_id=user_id,
             migration_generation=generation,
             lease_owner=lease_owner,
             preparation_id=probe.preparation_id,
@@ -808,6 +803,9 @@ class SkillsPoolReconcileService:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
         if engine not in FILESYSTEM_POOL_ENGINES:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
+        layout_engine = runtime_layout_engine_for_bot(bot)
+        if layout_engine not in FILESYSTEM_POOL_ENGINES:
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
         owner_id = bot.get("owner_id")
         if not isinstance(owner_id, (str, int)) or isinstance(owner_id, bool):
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
@@ -815,19 +813,20 @@ class SkillsPoolReconcileService:
         probe = await self._runtime.probe(
             bot_id=scope.bot_id,
             user_id=str(owner_id),
-            engine=engine,
+            engine=layout_engine,
         )
         if is_aicoding_active_mapping_reconciliation_candidate(
             state=state,
-            engine=engine,
+            engine=layout_engine,
             probe=probe,
         ):
             return await self._reconcile_active_aicoding_repo_bridges(
                 scope=scope,
                 state=state,
+                bot=bot,
                 bot_id=scope.bot_id,
                 user_id=str(owner_id),
-                engine=engine,
+                layout_engine=layout_engine,
                 initial_probe=probe,
             )
         if probe.status is not RuntimeLayoutProbeStatus.READY:
@@ -852,12 +851,13 @@ class SkillsPoolReconcileService:
         if bot.get("bot_type") == "desktop":
             try:
                 mappings = build_logical_skill_mappings(
-                    self._skills.list_bot_active_assets(
-                        env=scope.env,
-                        bot_id=scope.bot_id,
-                        user_id=str(owner_id),
-                        engine=engine,
+                    self._reader.active_skill_assets(
+                        bot_id=scope.bot_id, owner_id=str(owner_id), bot=bot
                     )
+                )
+                mapping_contract_version = mapping_contract_for(
+                    mappings,
+                    probe.evidence.get("supported_mapping_contract_versions"),
                 )
             except ValueError as error:
                 return SkillsPoolReconcileResult(
@@ -870,6 +870,7 @@ class SkillsPoolReconcileService:
                 user_id=str(owner_id),
                 mappings=mappings,
                 retired_mappings=[],
+                mapping_contract_version=mapping_contract_version,
             ):
                 return SkillsPoolReconcileResult(
                     SkillsPoolReconcileOutcome.MAPPING_FAILED,
@@ -881,6 +882,7 @@ class SkillsPoolReconcileService:
                 user_id=str(owner_id),
                 mappings=mappings,
                 retired_mappings=[],
+                mapping_contract_version=mapping_contract_version,
             ):
                 return SkillsPoolReconcileResult(
                     SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED,
@@ -898,19 +900,22 @@ class SkillsPoolReconcileService:
         *,
         scope: BotSkillLayoutScope,
         state: BotSkillLayoutState,
+        bot: dict,
         bot_id: str,
         user_id: str,
-        engine: str,
+        layout_engine: str,
         initial_probe: RuntimeLayoutProbeResult,
     ) -> SkillsPoolReconcileResult:
         repair = await request_active_aicoding_bridge_repair(
             skills=self._skills,
+            reader=self._reader,
             runtime=self._runtime,
             scope=scope,
             state=state,
+            bot=bot,
             bot_id=bot_id,
             user_id=user_id,
-            engine=engine,
+            layout_engine=layout_engine,
             initial_probe=initial_probe,
         )
         if repair.status is ActiveAICodingBridgeRepairStatus.ENGINE_REJECTED:

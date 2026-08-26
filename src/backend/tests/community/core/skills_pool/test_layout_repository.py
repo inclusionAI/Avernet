@@ -980,6 +980,7 @@ def test_finalizing_without_quarantine_accepts_runtime_identity_and_commits() ->
     )
     assert repository.commit_pool_active(
         scope=scope,
+        owner_id=scope.entity_id,
         migration_generation="generation-1",
         lease_owner="worker-1",
         preparation_id="preparation-1",
@@ -1229,16 +1230,18 @@ def test_operator_resolves_manual_repair_with_note_and_explicit_fact() -> None:
     )
     with database.transactional_orm_session() as session:
         session.add(
-            Skill(
-                id=91,
-                name="local-a",
-                git_path="local:///legacy/local-a",
-                bolt_id=scope.bot_id,
-                env=scope.env,
-            )
+                Skill(
+                    id=91,
+                    name="local-a",
+                    git_path="local:///legacy/local-a",
+                    user_id=scope.entity_id,
+                    bolt_id=scope.bot_id,
+                    env=scope.env,
+                )
         )
     assert repository.commit_pool_active(
         scope=scope,
+        owner_id=scope.entity_id,
         migration_generation="generation-1",
         lease_owner="worker-2",
         preparation_id="preparation-1",
@@ -1319,7 +1322,7 @@ def test_legacy_committed_repair_refresh_failure_keeps_refresh_phase() -> None:
     assert state.last_failure_code == "TRANSIENT_ERROR"
 
 
-def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
+def test_pool_active_commit_updates_only_local_rows_for_exact_bot_owner() -> None:
     database = InMemorySqliteDB()
     repository = SkillsPoolLayoutRepository(database)
     scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
@@ -1368,6 +1371,7 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
                     id=1,
                     name="local-a",
                     git_path="local:///legacy/local-a",
+                    user_id="owner-1",
                     bolt_id="bot-1",
                     env="pre",
                 ),
@@ -1375,6 +1379,7 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
                     id=2,
                     name="local-b",
                     git_path="local://local-b",
+                    user_id="owner-1",
                     bolt_id="bot-1",
                     env="pre",
                 ),
@@ -1399,11 +1404,22 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
                     bolt_id="bot-1",
                     env="prod",
                 ),
+                # ``default`` is a shared Bot id.  Another owner's Local
+                # rows must not expand this owner's post-cutover locator set.
+                Skill(
+                    id=6,
+                    name="other-owner-local",
+                    git_path="local:///legacy/other-owner-local",
+                    user_id="entity-2",
+                    bolt_id="bot-1",
+                    env="pre",
+                ),
             ]
         )
 
     committed = repository.commit_pool_active(
         scope=scope,
+        owner_id="owner-1",
         migration_generation="generation-1",
         lease_owner="worker-1",
         preparation_id="preparation-1",
@@ -1553,6 +1569,7 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
         3: "git://business/repo",
         4: "local:///legacy/other-bot",
         5: "local:///legacy/other-env",
+        6: "local:///legacy/other-owner-local",
     }
 
 
@@ -1613,6 +1630,7 @@ def test_pool_active_commit_rejects_partial_or_stale_local_locator_set() -> None
                     id=1,
                     name="local-a",
                     git_path="local:///legacy/local-a",
+                    user_id=scope.entity_id,
                     bolt_id="bot-1",
                     env="pre",
                 ),
@@ -1620,6 +1638,7 @@ def test_pool_active_commit_rejects_partial_or_stale_local_locator_set() -> None
                     id=2,
                     name="local-b",
                     git_path="local:///legacy/local-b",
+                    user_id=scope.entity_id,
                     bolt_id="bot-1",
                     env="pre",
                 ),
@@ -1628,6 +1647,7 @@ def test_pool_active_commit_rejects_partial_or_stale_local_locator_set() -> None
 
     assert not repository.commit_pool_active(
         scope=scope,
+        owner_id=scope.entity_id,
         migration_generation="generation-1",
         lease_owner="worker-1",
         preparation_id="preparation-1",

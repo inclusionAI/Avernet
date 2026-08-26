@@ -1,0 +1,86 @@
+"""Service API contracts for spaces and members."""
+
+from __future__ import annotations
+
+from abc import abstractmethod
+from typing import Protocol, TYPE_CHECKING, runtime_checkable
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.spaces.models import (
+        PersonalSpaceLookupRecord,
+        SpaceMemberRecord,
+        SpaceMemberSummaryRecord,
+        SpaceRecord,
+        SpaceRole,
+        SpaceScTeamRepairResult,
+        SpaceSummaryRecord,
+        SpaceType,
+    )
+
+
+@runtime_checkable
+class SpaceServiceProtocol(Protocol):
+    @abstractmethod
+    def initialize_personal(self, *, user_id: str) -> tuple[SpaceRecord, bool]: ...
+
+    @abstractmethod
+    def create_team(self, *, name: str, creator_id: str) -> SpaceRecord: ...
+
+    @abstractmethod
+    def repair_sc_team_binding(self, *, space_id: int) -> SpaceScTeamRepairResult: ...
+
+    @abstractmethod
+    def batch_query_personal(
+        self, *, user_ids: list[str]
+    ) -> list[PersonalSpaceLookupRecord]: ...
+
+    @abstractmethod
+    def list_spaces(
+        self,
+        *,
+        user_id: str,
+        keyword: str | None,
+        space_type: SpaceType | None,
+        page_no: int,
+        page_size: int,
+    ) -> tuple[int, list[SpaceSummaryRecord]]: ...
+
+
+@runtime_checkable
+class SpaceAccessServiceProtocol(Protocol):
+    @abstractmethod
+    def require_space_member(
+        self, *, space_id: int, user_id: str
+    ) -> tuple[SpaceRecord, SpaceMemberRecord]: ...
+
+
+@runtime_checkable
+class SpaceMemberServiceProtocol(Protocol):
+    @abstractmethod
+    def list_members(
+        self,
+        *,
+        space_id: int,
+        actor_id: str,
+        keyword: str | None,
+        page_no: int,
+        page_size: int,
+    ) -> tuple[int, list[SpaceMemberSummaryRecord]]: ...
+
+    @abstractmethod
+    def add_member(
+        self,
+        *,
+        space_id: int,
+        actor_id: str,
+        user_id: str,
+        role: SpaceRole,
+    ) -> SpaceMemberRecord: ...
+
+    @abstractmethod
+    def delete_member(self, *, space_id: int, actor_id: str, user_id: str) -> bool: ...
+
+    @abstractmethod
+    def update_role(
+        self, *, space_id: int, actor_id: str, user_id: str, role: SpaceRole
+    ) -> SpaceMemberSummaryRecord: ...

@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from gateway.community.bootstrap import initialize_database
-from gateway.community.bootstrap._configs import DatabaseConfig
 from gateway.community.core.app import APIKeyGenerator, AppRegistrar, AppRepository
 from gateway.community.core.app._orm import AppRow
 from gateway.community.core.app._registrar import IssuedApp, PrefixAllocationError
@@ -16,9 +15,7 @@ from gateway.community.spi.database import DataSourcePlugin
 
 @pytest.fixture
 def db() -> DataSourcePlugin:
-    return initialize_database(
-        SqliteDatabasePlugin(), DatabaseConfig(plugin_type="SQLITE_ORM", db_url="")
-    )
+    return initialize_database(SqliteDatabasePlugin())
 
 
 @pytest.fixture

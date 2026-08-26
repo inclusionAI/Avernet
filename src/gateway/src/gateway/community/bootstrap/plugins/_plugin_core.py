@@ -7,13 +7,17 @@ from gateway.community.plugins.auth.stub import StubAuthPlugin
 from gateway.community.plugins.authn.access_key_token import AccessKeyTokenStrategy
 from gateway.community.plugins.authn.app_token import AppTokenStrategy
 from gateway.community.plugins.authn.bot_token import BotTokenStrategy
+from gateway.community.plugins.authn.dev_cookie import DevCookieUserStrategy
 from gateway.community.plugins.authn.google_token import GoogleUserStrategy
 from gateway.community.plugins.cache.in_memory import InMemoryCachePlugin
+from gateway.community.plugins.cache.redis import RedisCachePlugin
+from gateway.community.plugins.database.mariadb import MariaDbOrmPlugin
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.plugins.forwarder.httpx import HttpxForwarder
 from gateway.community.plugins.schema_catalog.file import FileSchemaCatalog
 from gateway.community.plugins.schema_catalog.http import HttpSchemaCatalog
 from gateway.community.plugins.secret_resolver.community import CommunitySecretResolver
+from gateway.community.plugins.secret_resolver.env import EnvSecretResolver
 
 
 def _default(value, fallback):
@@ -24,8 +28,19 @@ class PluginContainer(containers.DeclarativeContainer):
     config = providers.Configuration()
 
     database = providers.Selector(
-        config.plugins.database.plugin_database,
-        SQLITE_ORM=providers.Singleton(SqliteDatabasePlugin),
+        config.plugins.database,
+        sqlite=providers.Singleton(
+            SqliteDatabasePlugin,
+            database_url=config.database.database_url,
+            create_schema=config.database.create_schema,
+            seed_data=config.database.seed_data,
+        ),
+        mariadb=providers.Singleton(
+            MariaDbOrmPlugin,
+            database_url=config.database.database_url,
+            create_schema=config.database.create_schema,
+            seed_data=config.database.seed_data,
+        ),
     )
 
     forwarder = providers.Selector(
@@ -38,25 +53,32 @@ class PluginContainer(containers.DeclarativeContainer):
         http=providers.Singleton(HttpSchemaCatalog),
     )
 
-    cache_plugin = providers.Selector(
-        config.plugins.cache,
-        stub=providers.Singleton(InMemoryCachePlugin),
-    )
-
-    auth = providers.Selector(
-        config.plugins.auth,
-        stub=providers.Singleton(StubAuthPlugin),
-    )
-
     # SecretResolver — community flavor reads signing keys (and other creds)
-    # from the process environment. Enterprise registers a corp/KMS-backed
-    # option (e.g. "corp") via plugin_registry.register_plugin_option_provider
-    # and selects it with ``plugins.secret: "corp"`` in the config overlay.
+    # from the process environment; the ``env`` flavor provides a BaaS-aligned
+    # env-backed resolver (BaaS ``EnvSecretStorePlugin`` contract). Enterprise
+    # may register further options via plugin_registry.
     secret_resolver = providers.Selector(
         config.plugins.secret,
         community=providers.Singleton(
             CommunitySecretResolver, env_prefix=config.secret.env_prefix
         ),
+        env=providers.Singleton(EnvSecretResolver, env_prefix=config.secret.env_prefix),
+    )
+
+    cache_plugin = providers.Selector(
+        config.plugins.cache,
+        stub=providers.Singleton(InMemoryCachePlugin),
+        redis=providers.Singleton(
+            RedisCachePlugin,
+            url=config.cache_redis.url,
+            socket_timeout=config.cache_redis.socket_timeout,
+            socket_connect_timeout=config.cache_redis.socket_connect_timeout,
+        ),
+    )
+
+    auth = providers.Selector(
+        config.plugins.auth,
+        stub=providers.Singleton(StubAuthPlugin),
     )
 
     bot_registry = providers.Factory(BotRepository, db=database)
@@ -74,6 +96,8 @@ class PluginContainer(containers.DeclarativeContainer):
             "https://openidconnect.googleapis.com/v1/userinfo",
         ),
     )
+    dev_cookie_strategy = providers.Singleton(DevCookieUserStrategy)
+
     bot_token_strategy = providers.Singleton(
         BotTokenStrategy,
         registry=bot_registry,
@@ -100,8 +124,14 @@ class PluginContainer(containers.DeclarativeContainer):
         ),
     )
 
+    # The dev auth mock (plugins/authn/dev_header) is deliberately NOT in this
+    # pool: this container is the production DI graph — enterprise merges its
+    # strategies into this same dict — and the mock must not exist in it. The
+    # bootstrap constructs it directly, only under GATEWAY_AUTH_MOCK=1
+    # (bootstrap/_authn.py), so without the env var it is never even imported.
     authn_strategies = providers.Dict(
         google=google_strategy,
+        dev_cookie=dev_cookie_strategy,
         bot_token=bot_token_strategy,
         app_token=app_token_strategy,
         access_key_token=access_key_token_strategy,

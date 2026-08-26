@@ -37,8 +37,20 @@ paths:
     $ref: ./openapi/friendships.yaml#/AcceptFriendRequestPath
   /openapi/v1/collaboration/friend-requests/{request_id}/reject:
     $ref: ./openapi/friendships.yaml#/RejectFriendRequestPath
+  /openapi/v1/collaboration/friend-connections/requests:
+    $ref: ./openapi/friendships.yaml#/FriendConnectionRequestsPath
+  /openapi/v1/collaboration/friend-connections/requests/{request_id}/accept:
+    $ref: ./openapi/friendships.yaml#/FriendConnectionAcceptPath
+  /openapi/v1/collaboration/friend-connections/requests/{request_id}/reject:
+    $ref: ./openapi/friendships.yaml#/FriendConnectionRejectPath
+  /openapi/v1/collaboration/friend-connections/requests/{request_id}/cancel:
+    $ref: ./openapi/friendships.yaml#/FriendConnectionCancelPath
+  /openapi/v1/collaboration/friend-connections:
+    $ref: ./openapi/friendships.yaml#/FriendConnectionsPath
   /openapi/v1/collaboration/groups:
     $ref: ./openapi/groups.yaml#/GroupsPath
+  /openapi/v1/collaboration/public-groups:
+    $ref: ./openapi/groups.yaml#/PublicGroupsPath
   /openapi/v1/collaboration/groups/{group_id}:
     $ref: ./openapi/groups.yaml#/GroupPath
   /openapi/v1/collaboration/groups/{group_id}/participants:
@@ -129,6 +141,12 @@ components:
       $ref: ./domain-models.yaml#/Friendship
     FriendRequest:
       $ref: ./domain-models.yaml#/FriendRequest
+    FriendConnectionActor:
+      $ref: ./domain-models.yaml#/FriendConnectionActor
+    FriendConnectionRequest:
+      $ref: ./domain-models.yaml#/FriendConnectionRequest
+    FriendConnection:
+      $ref: ./domain-models.yaml#/FriendConnection
     ErrorEnvelope:
       $ref: ./shared.yaml#/ErrorEnvelope
     EventSubscription:

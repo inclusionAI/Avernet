@@ -86,7 +86,7 @@ class GapBasedPlanningStrategy:
     (has_gap=True,children=[]),编排核走深度闸门 HUNG(不能假 done:没规划过不可能闭 gap)。
 
     gap 计算与验收同构:apply 返 children=gap 未闭(继续拆/+派发);返 []+has_gap=F=gap 闭=验收通过(节点 DONE 上行)。
-    owner bot = ``graph.extend_props["source_channel_id"]``(框架派生取,零 case 知识)。
+    owner bot = ``graph.extend_props["owner_bot_id"]``(框架派生取,零 case 知识)。
     """
 
     rule_id = "gap_based"
@@ -103,9 +103,9 @@ class GapBasedPlanningStrategy:
         if self._bot is None:
             # 无规划端口:无法计算 gap / 产子 → 有 gap 拆不出(编排核走深度闸门 HUNG,不假 done)
             return PlanResult(children=[], has_gap=True, gap_detail="no_planning_port")
-        owner = str(graph.extend_props.get("source_channel_id") or "")
+        owner = str(graph.extend_props.get("owner_bot_id") or "")
         if not owner:
-            # 有端口但无 owner bot(source_channel_id 缺失):无人可投规划 prompt → 有 gap 拆不出(→ HUNG)
+            # 有端口但无 owner bot(owner_bot_id 缺失):无人可投规划 prompt → 有 gap 拆不出(→ HUNG)
             return PlanResult(children=[], has_gap=True, gap_detail="no_owner_bot")
         prompt = _compose_planning_prompt(graph, target)
         run = await self._bot.send_and_wait_async(

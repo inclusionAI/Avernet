@@ -11,14 +11,17 @@ use bcs_bot_store::{MemoryBotRepo, PersistentBotRepo};
 use bcs_cache_local::InMemoryCachePlugin;
 use bcs_db_api::{
     DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbSqlFlavor, DbStatement,
-    DbTransactionStep, DbTransactionStepResult, DbValue as Value,
+    DbTransactionStep, DbTransactionStepResult, DbValue as Value, db_get_column, db_get_column_opt,
 };
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateVisibility, BotCapabilities,
     BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery, BotControlPlanePatch,
-    BotControlPlaneRepoPort, BotRepoPort,
+    BotControlPlaneRecord, BotControlPlaneRepoPort, BotRepoPort, BotTaskModesQuery,
+    FriendCheckInStrategy, TaskModeMatch, UserVisibility,
 };
+use bcs_service_api::types::ServiceError;
+use tokio::sync::Barrier;
 
 #[tokio::test]
 async fn memory_control_plane_supports_both_kinds_candidates_and_patch_timestamps() {
@@ -129,6 +132,131 @@ async fn memory_control_plane_supports_both_kinds_candidates_and_patch_timestamp
     assert_eq!(after.descriptor.domains, vec!["memory"]);
     assert_eq!(after.created_at, before.created_at);
     assert!(after.updated_at > before.updated_at);
+}
+
+#[tokio::test]
+async fn memory_control_plane_restores_internal_attributes_from_persisted_capabilities() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let env = bcs_config::resolve_env_str();
+    let repo = MemoryBotRepo::with_base_dir(temp.path().to_path_buf());
+    repo.register_with_owner_and_token(
+        "memory-attributes".to_string(),
+        BotCapabilities {
+            name: Some("Memory Attributes".to_string()),
+            ..Default::default()
+        },
+        "staff-1",
+        "token-1",
+    )
+    .await
+    .expect("register memory bot");
+    repo.patch_control_plane(
+        "memory-attributes",
+        &env,
+        BotControlPlanePatch {
+            user_visibility: Some(UserVisibility::Public),
+            friend_ext: Some(serde_json::Map::from_iter([(
+                "team".to_string(),
+                serde_json::json!("platform"),
+            )])),
+            friend_check_in_strategy: Some(FriendCheckInStrategy::Open),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch memory bot");
+
+    let restored = MemoryBotRepo::with_base_dir(temp.path().to_path_buf());
+    restored
+        .register(
+            "memory-attributes".to_string(),
+            BotCapabilities {
+                name: Some("Memory Attributes".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("restore memory bot");
+    let record = restored
+        .get_control_plane("memory-attributes", &env)
+        .await
+        .expect("read restored bot")
+        .expect("restored bot exists");
+    assert_eq!(record.user_visibility, UserVisibility::Public);
+    assert_eq!(record.friend_ext["team"], "platform");
+    assert_eq!(record.friend_check_in_strategy, FriendCheckInStrategy::Open);
+}
+
+#[tokio::test]
+async fn memory_control_plane_concurrent_partial_patches_preserve_both_changes() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let env = bcs_config::resolve_env_str();
+    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
+    repo.register_with_owner_and_token(
+        "memory-concurrent-attributes".to_string(),
+        BotCapabilities {
+            name: Some("Memory Concurrent Attributes".to_string()),
+            ..Default::default()
+        },
+        "staff-1",
+        "token-1",
+    )
+    .await
+    .expect("register memory bot");
+
+    let start = Arc::new(Barrier::new(3));
+    let visibility_repo = repo.clone();
+    let visibility_start = start.clone();
+    let visibility_env = env.clone();
+    let visibility_patch = tokio::spawn(async move {
+        visibility_start.wait().await;
+        visibility_repo
+            .patch_control_plane(
+                "memory-concurrent-attributes",
+                &visibility_env,
+                BotControlPlanePatch {
+                    user_visibility: Some(UserVisibility::Private),
+                    ..Default::default()
+                },
+            )
+            .await
+    });
+    let strategy_repo = repo.clone();
+    let strategy_start = start.clone();
+    let strategy_env = env.clone();
+    let strategy_patch = tokio::spawn(async move {
+        strategy_start.wait().await;
+        strategy_repo
+            .patch_control_plane(
+                "memory-concurrent-attributes",
+                &strategy_env,
+                BotControlPlanePatch {
+                    friend_check_in_strategy: Some(FriendCheckInStrategy::DeptFree),
+                    ..Default::default()
+                },
+            )
+            .await
+    });
+    start.wait().await;
+    visibility_patch
+        .await
+        .expect("visibility patch task")
+        .expect("visibility patch");
+    strategy_patch
+        .await
+        .expect("strategy patch task")
+        .expect("strategy patch");
+
+    let record = repo
+        .get_control_plane("memory-concurrent-attributes", &env)
+        .await
+        .expect("read memory bot")
+        .expect("memory bot exists");
+    assert_eq!(record.user_visibility, UserVisibility::Private);
+    assert_eq!(
+        record.friend_check_in_strategy,
+        FriendCheckInStrategy::DeptFree
+    );
 }
 
 #[tokio::test]
@@ -431,6 +559,9 @@ async fn persistent_control_plane_owned_filters_and_patch_replace_descriptor_arr
                     skills: None,
                     scopes: Some(vec!["new-scope".to_string()]),
                 }),
+                task_claim_mode: None,
+                task_dream_mode: None,
+                ..Default::default()
             },
         )
         .await
@@ -484,6 +615,351 @@ async fn persistent_control_plane_patch_returns_existing_row_when_mysql_changes_
 
     assert_eq!(updated.bot_id, "unchanged");
     assert_eq!(updated.name, "Unchanged");
+}
+
+#[tokio::test]
+async fn persistent_control_plane_internal_attributes_round_trip_and_clear_friend_ext() {
+    let (repo, db) = fixture().await;
+    seed_bot(
+        db.as_ref(),
+        "attributes",
+        "Attributes",
+        "bot",
+        "protected",
+        "online",
+        Some("staff-1"),
+        "2026-01-01 00:00:00",
+    )
+    .await;
+
+    let legacy = repo
+        .get_control_plane("attributes", "dev")
+        .await
+        .expect("read legacy row")
+        .expect("legacy row exists");
+    assert_eq!(legacy.user_visibility, UserVisibility::Protected);
+    assert!(legacy.friend_ext.is_empty());
+    assert_eq!(
+        legacy.friend_check_in_strategy,
+        FriendCheckInStrategy::Approval
+    );
+
+    let updated = repo
+        .patch_control_plane(
+            "attributes",
+            "dev",
+            BotControlPlanePatch {
+                visibility: Some("private".to_string()),
+                user_visibility: Some(UserVisibility::Private),
+                friend_ext: Some(serde_json::Map::from_iter([(
+                    "scope".to_string(),
+                    serde_json::json!("engineering"),
+                )])),
+                friend_check_in_strategy: Some(FriendCheckInStrategy::DeptFree),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("patch internal attributes")
+        .expect("patched row exists");
+    assert_eq!(updated.visibility, "private");
+    assert_eq!(updated.user_visibility, UserVisibility::Private);
+    assert_eq!(updated.friend_ext["scope"], "engineering");
+    assert_eq!(
+        updated.friend_check_in_strategy,
+        FriendCheckInStrategy::DeptFree
+    );
+    let rows = db
+        .query(DbStatement::with_params(
+            "SELECT visibility, user_visibility, friend_ext, friend_check_in_strategy, \
+                    json_extract(bot_info, '$.user_visibility') AS bot_info_user_visibility, \
+                    json_extract(bot_info, '$.friend_ext') AS bot_info_friend_ext, \
+                    json_extract(bot_info, '$.friend_check_in_strategy') AS bot_info_friend_check_in_strategy \
+             FROM bcs_bots WHERE bot_uuid = ? AND env = ?",
+            vec![Value::from("attributes"), Value::from("dev")],
+        ))
+        .await
+        .expect("read physical attributes");
+    let row = rows.first().expect("physical attributes row");
+    assert_eq!(
+        db_get_column::<String>(row, "visibility").expect("visibility"),
+        "private"
+    );
+    assert_eq!(
+        db_get_column::<String>(row, "user_visibility").expect("user visibility"),
+        "private"
+    );
+    assert_eq!(
+        db_get_column::<String>(row, "friend_ext").expect("friend extension"),
+        r#"{"scope":"engineering"}"#
+    );
+    assert_eq!(
+        db_get_column::<String>(row, "friend_check_in_strategy").expect("strategy"),
+        "DEPT_FREE"
+    );
+    for column in [
+        "bot_info_user_visibility",
+        "bot_info_friend_ext",
+        "bot_info_friend_check_in_strategy",
+    ] {
+        assert!(
+            db_get_column_opt::<String>(row, column)
+                .expect("bot info attribute")
+                .is_none(),
+            "{column} must not be written to bot_info"
+        );
+    }
+
+    let cleared = repo
+        .patch_control_plane(
+            "attributes",
+            "dev",
+            BotControlPlanePatch {
+                friend_ext: Some(serde_json::Map::new()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("clear friend extension")
+        .expect("cleared row exists");
+    assert!(cleared.friend_ext.is_empty());
+    assert_eq!(cleared.user_visibility, UserVisibility::Private);
+    assert_eq!(
+        cleared.friend_check_in_strategy,
+        FriendCheckInStrategy::DeptFree
+    );
+}
+
+#[tokio::test]
+async fn persistent_control_plane_rejects_invalid_physical_internal_attributes() {
+    let (repo, db) = fixture().await;
+    for bot_id in [
+        "invalid-user-visibility",
+        "invalid-friend-ext",
+        "invalid-friend-check-in-strategy",
+    ] {
+        seed_bot(
+            db.as_ref(),
+            bot_id,
+            "Invalid Attributes",
+            "bot",
+            "protected",
+            "online",
+            Some("staff-1"),
+            "2026-01-01 00:00:00",
+        )
+        .await;
+    }
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_bots SET user_visibility = ? WHERE bot_uuid = ? AND env = ?",
+        vec![
+            Value::from("invalid"),
+            Value::from("invalid-user-visibility"),
+            Value::from("dev"),
+        ],
+    ))
+    .await
+    .expect("corrupt user visibility");
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_bots SET friend_ext = ? WHERE bot_uuid = ? AND env = ?",
+        vec![
+            Value::from("[]"),
+            Value::from("invalid-friend-ext"),
+            Value::from("dev"),
+        ],
+    ))
+    .await
+    .expect("corrupt friend extension");
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_bots SET friend_check_in_strategy = ? WHERE bot_uuid = ? AND env = ?",
+        vec![
+            Value::from("UNKNOWN"),
+            Value::from("invalid-friend-check-in-strategy"),
+            Value::from("dev"),
+        ],
+    ))
+    .await
+    .expect("corrupt friend check-in strategy");
+
+    for bot_id in [
+        "invalid-user-visibility",
+        "invalid-friend-ext",
+        "invalid-friend-check-in-strategy",
+    ] {
+        let error = repo
+            .get_control_plane(bot_id, "dev")
+            .await
+            .expect_err("invalid persisted attributes must fail closed");
+        assert!(matches!(error, ServiceError::InternalError(_)));
+    }
+}
+
+#[tokio::test]
+async fn persistent_capability_save_preserves_patched_internal_attributes() {
+    let (repo, db) = fixture().await;
+    seed_bot(
+        db.as_ref(),
+        "lifecycle-attributes",
+        "Lifecycle Attributes",
+        "bot",
+        "protected",
+        "online",
+        Some("staff-1"),
+        "2026-01-01 00:00:00",
+    )
+    .await;
+    let patched = repo.patch_control_plane(
+        "lifecycle-attributes",
+        "dev",
+        BotControlPlanePatch {
+            user_visibility: Some(UserVisibility::Private),
+            friend_ext: Some(serde_json::Map::from_iter([(
+                "source".to_string(),
+                serde_json::json!("control-plane"),
+            )])),
+            friend_check_in_strategy: Some(FriendCheckInStrategy::DeptFree),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch internal attributes")
+    .expect("patched bot exists");
+    assert_eq!(patched.user_visibility, UserVisibility::Private);
+    assert_eq!(
+        patched.friend_check_in_strategy,
+        FriendCheckInStrategy::DeptFree
+    );
+
+    repo.save_to_storage(
+        "lifecycle-attributes",
+        &BotCapabilities {
+            name: Some("Lifecycle Attributes Saved".to_string()),
+            summary: Some("saved capabilities".to_string()),
+            visibility: "protected".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("save capabilities");
+
+    let record = repo
+        .get_control_plane("lifecycle-attributes", "dev")
+        .await
+        .expect("read lifecycle bot")
+        .expect("lifecycle bot exists");
+    assert_eq!(record.name, "Lifecycle Attributes Saved");
+    assert_eq!(record.user_visibility, UserVisibility::Private);
+    assert_eq!(record.friend_ext["source"], "control-plane");
+    assert_eq!(
+        record.friend_check_in_strategy,
+        FriendCheckInStrategy::DeptFree
+    );
+}
+
+#[tokio::test]
+async fn persistent_control_plane_concurrent_partial_patches_preserve_both_changes() {
+    let db = sqlite_db().await;
+    seed_bot(
+        db.as_ref(),
+        "persistent-concurrent-attributes",
+        "Persistent Concurrent Attributes",
+        "bot",
+        "protected",
+        "online",
+        Some("staff-1"),
+        "2026-01-01 00:00:00",
+    )
+    .await;
+    let synchronized_db: Arc<dyn DbPlugin> = Arc::new(SynchronizedSnapshotDb {
+        inner: db,
+        snapshot_read_barrier: Barrier::new(2),
+    });
+    let repo = Arc::new(PersistentBotRepo::with_plugins_flavor_and_cache_key_prefix(
+        Arc::new(InMemoryCachePlugin::new()),
+        synchronized_db,
+        DbSqlFlavor::Sqlite,
+        "test:",
+    ));
+
+    let visibility_repo = repo.clone();
+    let visibility_patch = tokio::spawn(async move {
+        visibility_repo
+            .patch_control_plane(
+                "persistent-concurrent-attributes",
+                "dev",
+                BotControlPlanePatch {
+                    user_visibility: Some(UserVisibility::Private),
+                    ..Default::default()
+                },
+            )
+            .await
+    });
+    let strategy_repo = repo.clone();
+    let strategy_patch = tokio::spawn(async move {
+        strategy_repo
+            .patch_control_plane(
+                "persistent-concurrent-attributes",
+                "dev",
+                BotControlPlanePatch {
+                    friend_check_in_strategy: Some(FriendCheckInStrategy::DeptFree),
+                    ..Default::default()
+                },
+            )
+            .await
+    });
+    visibility_patch
+        .await
+        .expect("visibility patch task")
+        .expect("visibility patch");
+    strategy_patch
+        .await
+        .expect("strategy patch task")
+        .expect("strategy patch");
+
+    let record = repo
+        .get_control_plane("persistent-concurrent-attributes", "dev")
+        .await
+        .expect("read persistent bot")
+        .expect("persistent bot exists");
+    assert_eq!(record.user_visibility, UserVisibility::Private);
+    assert_eq!(
+        record.friend_check_in_strategy,
+        FriendCheckInStrategy::DeptFree
+    );
+}
+
+struct SynchronizedSnapshotDb {
+    inner: Arc<dyn DbPlugin>,
+    snapshot_read_barrier: Barrier,
+}
+
+#[async_trait]
+impl DbPlugin for SynchronizedSnapshotDb {
+    async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        let synchronize_snapshot = statement
+            .sql()
+            .starts_with("SELECT bot_info FROM bcs_bots");
+        let rows = self.inner.query(statement).await?;
+        if synchronize_snapshot {
+            self.snapshot_read_barrier.wait().await;
+        }
+        Ok(rows)
+    }
+
+    async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
+        self.inner.execute(statement).await
+    }
+
+    async fn transaction(
+        &self,
+        steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        self.inner.transaction(steps).await
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        self.inner.health_check().await
+    }
 }
 
 struct UnchangedUpdateDb;
@@ -556,6 +1032,11 @@ async fn sqlite_db() -> Arc<dyn DbPlugin> {
             status TEXT NOT NULL DEFAULT 'online',
             is_deleted INTEGER NOT NULL DEFAULT 0,
             agent_code TEXT,
+            task_claim_mode INTEGER NOT NULL DEFAULT 0,
+            task_dream_mode INTEGER NOT NULL DEFAULT 0,
+            user_visibility TEXT NOT NULL DEFAULT 'protected',
+            friend_ext JSON,
+            friend_check_in_strategy TEXT NOT NULL DEFAULT 'APPROVAL',
             UNIQUE (bot_uuid, env)
         )",
     ))
@@ -619,4 +1100,298 @@ async fn seed_bot(
     ))
     .await
     .expect("seed bot row");
+}
+
+#[tokio::test]
+async fn persistent_control_plane_task_modes_patch_persists_and_reads_back() {
+    let (repo, db) = fixture().await;
+    seed_bot(
+        db.as_ref(),
+        "claim-bot",
+        "Claim Bot",
+        "bot",
+        "public",
+        "online",
+        Some("staff-1"),
+        "2026-01-01 00:00:00",
+    )
+    .await;
+    seed_bot(
+        db.as_ref(),
+        "dream-bot",
+        "Dream Bot",
+        "bot",
+        "public",
+        "online",
+        Some("staff-2"),
+        "2026-01-02 00:00:00",
+    )
+    .await;
+
+    // Default state: both toggles false on seeded rows.
+    let claim = repo
+        .get_control_plane("claim-bot", "dev")
+        .await
+        .expect("get claim")
+        .expect("claim row");
+    assert!(!claim.task_claim_mode);
+    assert!(!claim.task_dream_mode);
+
+    // Patching one toggle leaves the other untouched and bot_info intact.
+    let patched = repo
+        .patch_control_plane(
+            "claim-bot",
+            "dev",
+            BotControlPlanePatch {
+                task_claim_mode: Some(true),
+                task_dream_mode: Some(false),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("patch claim")
+        .expect("claim row");
+    assert!(patched.task_claim_mode);
+    assert!(!patched.task_dream_mode);
+    assert_eq!(patched.descriptor.summary, "summary-claim-bot");
+
+    repo.patch_control_plane(
+        "dream-bot",
+        "dev",
+        BotControlPlanePatch {
+            task_claim_mode: Some(false),
+            task_dream_mode: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch dream")
+    .expect("dream row");
+
+    // Reads back the persisted values independently.
+    let claim = repo
+        .get_control_plane("claim-bot", "dev")
+        .await
+        .expect("get claim")
+        .expect("claim row");
+    assert!(claim.task_claim_mode);
+    assert!(!claim.task_dream_mode);
+
+    let dream = repo
+        .get_control_plane("dream-bot", "dev")
+        .await
+        .expect("get dream")
+        .expect("dream row");
+    assert!(!dream.task_claim_mode);
+    assert!(dream.task_dream_mode);
+}
+
+/// Sort a Vec<String> in place so roster filter assertions stay order-independent
+/// (the repo orders by gmt_create DESC, bot_uuid ASC, which the caller should not re-derive).
+fn sorted_ids(mut ids: Vec<String>) -> Vec<String> {
+    ids.sort();
+    ids
+}
+
+/// Extract + sort the bot_ids from a roster query result for order-independent comparison.
+fn roster_ids(records: Vec<BotControlPlaneRecord>) -> Vec<String> {
+    sorted_ids(records.into_iter().map(|record| record.bot_id).collect())
+}
+
+#[tokio::test]
+async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
+    let (repo, db) = fixture().await;
+    seed_bot(
+        db.as_ref(),
+        "claim-bot",
+        "Claim Bot",
+        "bot",
+        "public",
+        "online",
+        Some("staff-1"),
+        "2026-01-01 00:00:00",
+    )
+    .await;
+    seed_bot(
+        db.as_ref(),
+        "dream-bot",
+        "Dream Bot",
+        "bot",
+        "public",
+        "online",
+        Some("staff-2"),
+        "2026-01-02 00:00:00",
+    )
+    .await;
+    seed_bot(
+        db.as_ref(),
+        "both-bot",
+        "Both Bot",
+        "bot",
+        "public",
+        "online",
+        Some("staff-3"),
+        "2026-01-03 00:00:00",
+    )
+    .await;
+    // none-bot keeps the seeded defaults (claim=false, dream=false) to exercise the
+    // `false` filter branch and the default-value read-through in record_from_row.
+    seed_bot(
+        db.as_ref(),
+        "none-bot",
+        "None Bot",
+        "bot",
+        "public",
+        "online",
+        Some("staff-4"),
+        "2026-01-04 00:00:00",
+    )
+    .await;
+
+    // claim-bot: claim=T, dream=F | dream-bot: claim=F, dream=T | both-bot: claim=T, dream=T.
+    repo.patch_control_plane(
+        "claim-bot",
+        "dev",
+        BotControlPlanePatch {
+            task_claim_mode: Some(true),
+            task_dream_mode: Some(false),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch claim-bot")
+    .expect("claim-bot row");
+    repo.patch_control_plane(
+        "dream-bot",
+        "dev",
+        BotControlPlanePatch {
+            task_claim_mode: Some(false),
+            task_dream_mode: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch dream-bot")
+    .expect("dream-bot row");
+    repo.patch_control_plane(
+        "both-bot",
+        "dev",
+        BotControlPlanePatch {
+            task_claim_mode: Some(true),
+            task_dream_mode: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch both-bot")
+    .expect("both-bot row");
+
+    // (None, None, _) => no filter: all four bots.
+    let all = repo
+        .list_control_plane_by_task_modes(BotTaskModesQuery {
+            env: "dev".to_string(),
+            task_claim_mode: None,
+            task_dream_mode: None,
+            match_mode: TaskModeMatch::Any,
+        })
+        .await
+        .expect("list (none, none)");
+    assert_eq!(
+        roster_ids(all),
+        sorted_ids(vec![
+            "claim-bot".to_string(),
+            "dream-bot".to_string(),
+            "both-bot".to_string(),
+            "none-bot".to_string(),
+        ]),
+    );
+
+    // (Some(true), None, _) => claim ON: claim-bot, both-bot.
+    let claim_on = repo
+        .list_control_plane_by_task_modes(BotTaskModesQuery {
+            env: "dev".to_string(),
+            task_claim_mode: Some(true),
+            task_dream_mode: None,
+            match_mode: TaskModeMatch::Any,
+        })
+        .await
+        .expect("list (claim=true, none)");
+    assert_eq!(
+        roster_ids(claim_on),
+        sorted_ids(vec!["claim-bot".to_string(), "both-bot".to_string()]),
+    );
+
+    // (None, Some(true), _) => dream ON: dream-bot, both-bot.
+    let dream_on = repo
+        .list_control_plane_by_task_modes(BotTaskModesQuery {
+            env: "dev".to_string(),
+            task_claim_mode: None,
+            task_dream_mode: Some(true),
+            match_mode: TaskModeMatch::Any,
+        })
+        .await
+        .expect("list (none, dream=true)");
+    assert_eq!(
+        roster_ids(dream_on),
+        sorted_ids(vec!["dream-bot".to_string(), "both-bot".to_string()]),
+    );
+
+    // (Some(true), Some(true), All) => both ON: both-bot only.
+    let both_all = repo
+        .list_control_plane_by_task_modes(BotTaskModesQuery {
+            env: "dev".to_string(),
+            task_claim_mode: Some(true),
+            task_dream_mode: Some(true),
+            match_mode: TaskModeMatch::All,
+        })
+        .await
+        .expect("list (both=true, all)");
+    assert_eq!(roster_ids(both_all), vec!["both-bot".to_string()]);
+
+    // (Some(true), Some(true), Any) => claim OR dream ON: claim-bot, dream-bot, both-bot.
+    let both_any = repo
+        .list_control_plane_by_task_modes(BotTaskModesQuery {
+            env: "dev".to_string(),
+            task_claim_mode: Some(true),
+            task_dream_mode: Some(true),
+            match_mode: TaskModeMatch::Any,
+        })
+        .await
+        .expect("list (both=true, any)");
+    assert_eq!(
+        roster_ids(both_any),
+        sorted_ids(vec![
+            "claim-bot".to_string(),
+            "dream-bot".to_string(),
+            "both-bot".to_string(),
+        ]),
+    );
+
+    // (Some(false), None, _) => claim OFF: dream-bot, none-bot. Exercises the `false`
+    // SQL-param branch (value 0) and reading a false toggle back through record_from_row.
+    let claim_off = repo
+        .list_control_plane_by_task_modes(BotTaskModesQuery {
+            env: "dev".to_string(),
+            task_claim_mode: Some(false),
+            task_dream_mode: None,
+            match_mode: TaskModeMatch::Any,
+        })
+        .await
+        .expect("list (claim=false, none)");
+    assert_eq!(
+        roster_ids(claim_off),
+        sorted_ids(vec!["dream-bot".to_string(), "none-bot".to_string()]),
+    );
+
+    // env scoping: a different env returns no rows (environment isolation).
+    let other_env = repo
+        .list_control_plane_by_task_modes(BotTaskModesQuery {
+            env: "prod".to_string(),
+            task_claim_mode: None,
+            task_dream_mode: None,
+            match_mode: TaskModeMatch::Any,
+        })
+        .await
+        .expect("list prod env");
+    assert!(other_env.is_empty());
 }

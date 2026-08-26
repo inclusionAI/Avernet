@@ -985,7 +985,11 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             env=self._env,
         )
 
-        # 4. 检查是否有发布成功的记录（排除当前记录）
+        # 4. 仅当存在另一条「发布成功(SUCCESS)」记录时禁止删除当前草稿。
+        # 产品确认规则(8e3b6da27):历史版本已升级(UPGRADED)或已下线(RELEASED)时,
+        # 离线操作会新建一条 DRAFT,此时仍允许 Owner 删除草稿;仅 SUCCESS 表示线上仍有该 Bot,
+        # 须保留。FAILED 不视作「已上线」,可丢弃。与 service_publication_facade._actions
+        # 的删除可见性判定保持一致(改其一须同步)。
         for p in all_publishes:
             if p.id != publish_id and p.status == PublishStatus.SUCCESS:
                 return False
@@ -1075,8 +1079,14 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 f"[offline_publish] Publish status updated to draft: publish_id={publish_id}"
             )
 
-        # Step 5: 异步执行销毁流程（仅 ONLINE 阶段，VERIFY 阶段无需销毁）
+        # Step 5: both verify cancellation and online offline must tear down the
+        # corresponding runtime.  Merely changing VALIDATING -> DRAFT leaves the
+        # verify container alive and makes a later staging publish race a stale
+        # runtime.  The durable destroy task is idempotent for both stages.
         if stage == PublishStage.VERIFY.value:
+            publish_flow_service.enqueue_offline_destroy(
+                publish_id=publish_id, stage=stage, operator="system"
+            )
             result["message"] = f"验证环境已下线，发布单已回退到草稿状态: publish_id={publish_id}"
 
             logger.info(

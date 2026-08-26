@@ -47,9 +47,22 @@ gateway_start() {
     log_info "Starting Gateway service on port ${GATEWAY_PORT}..."
     log_info "Log: ${GATEWAY_LOG}"
 
+    # Principal signing key: same variable name and dev default as the BCS
+    # verifier side (scripts/modules/bcs.sh), so the two ends of the signed
+    # principal contract hold the same key without any coordination. The
+    # backend verifies under its own spelling, armed in backend.sh with the
+    # same default. An .env.local value overrides all three together.
+    export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+
+    # Local caller identity: the only community `user` strategy verifies real
+    # Google tokens, which a dev box has none of. GATEWAY_AUTH_MOCK=1 appends
+    # the x-dev-user header strategy (mirrors BCS_AUTH_MOCK in bcs.sh); set
+    # GATEWAY_AUTH_MOCK=0 in .env.local to require real credentials.
+    export GATEWAY_AUTH_MOCK="${GATEWAY_AUTH_MOCK:-1}"
+
     (
         cd "${GATEWAY_DIR}"
-        GATEWAY_PORT="${GATEWAY_PORT}" APP_PORT="${GATEWAY_PORT}" "${GATEWAY_APP_SCRIPT}" start --mode bare
+        SERVER_ENV="${SERVER_ENV:-local}" GATEWAY_PORT="${GATEWAY_PORT}" APP_PORT="${GATEWAY_PORT}" "${GATEWAY_APP_SCRIPT}" start --mode bare
     ) >> "${GATEWAY_LOG}" 2>&1
 
     local gateway_pid=""
@@ -75,7 +88,7 @@ gateway_stop() {
     log_info "Stopping Gateway..."
 
     if [ -x "${GATEWAY_APP_SCRIPT}" ]; then
-        (cd "${GATEWAY_DIR}" && GATEWAY_PORT="${GATEWAY_PORT}" APP_PORT="${GATEWAY_PORT}" "${GATEWAY_APP_SCRIPT}" stop) >> "${GATEWAY_LOG}" 2>&1 || true
+        (cd "${GATEWAY_DIR}" && SERVER_ENV="${SERVER_ENV:-local}" GATEWAY_PORT="${GATEWAY_PORT}" APP_PORT="${GATEWAY_PORT}" "${GATEWAY_APP_SCRIPT}" stop) >> "${GATEWAY_LOG}" 2>&1 || true
     fi
 
     if [ -f "${GATEWAY_PID_FILE}" ]; then

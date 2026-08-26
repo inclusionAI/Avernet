@@ -10,41 +10,46 @@ import io
 import json
 import re
 import zipfile
-from typing import Any, Callable, TYPE_CHECKING
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Callable
 from uuid import uuid4
-
-import yaml
-from injector import inject
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
+from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
+    BotRepository,
 )
-from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillRepository,
+)
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillDuplicateError,
     LocalSkillEditBusyError,
     LocalSkillEditLockUnavailableError,
     LocalSkillEditPausedError,
     LocalSkillInvalidPackageError,
+    LocalSkillLayoutRollbackError,
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
     LocalSkillTooLargeError,
-    LocalSkillLayoutRollbackError,
 )
-from agentclaw.community.core.repository.protocols.skill_center import (
-    SkillSetRepository,
-)
-from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
-from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.skill_center.factories import (
     SkillServiceFactory,
-    SkillSetServiceFactory,
+)
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    BotRuntimeProjectorProtocol,
+)
+from agentclaw.community.core.skill_center.services.skill_parser import (
+    SkillParser,
+)
+from agentclaw.community.core.skill_center.skill_metadata import (
+    SkillManifestError,
+    SkillMetadataParserProtocol,
 )
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditBusyError,
@@ -54,6 +59,7 @@ from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditRollbackError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
+from injector import inject
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -74,24 +80,24 @@ class LocalSkillUploadService:
     def __init__(
         self,
         skill_repo: SkillRepository,
-        skill_set_repo: SkillSetRepository,
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
-        skill_set_service_factory: SkillSetServiceFactory,
         audit_log_repo: BotCollabLogRepositoryProtocol,
         edit_guard: SkillsPoolEditGuard,
         device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
+        runtime_reconciler: BotRuntimeProjectorProtocol,
+        metadata_parser: SkillMetadataParserProtocol,
     ) -> None:
         self._skill_repo = skill_repo
-        self._skill_set_repo = skill_set_repo
         self._bot_repo = bot_repo
         self._collaborators = collaborator_service
         self._skill_service_factory = skill_service_factory
-        self._skill_set_service_factory = skill_set_service_factory
         self._audit_log_repo = audit_log_repo
         self._edit_guard = edit_guard
         self._device_context_resolver_provider = device_context_resolver_provider
+        self._runtime_reconciler = runtime_reconciler
+        self._metadata_parser = metadata_parser
 
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
@@ -120,15 +126,10 @@ class LocalSkillUploadService:
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
                 raise LocalSkillNotReadyError()
-            name, description, files = self._unpack(package)
+            name, description, files = self._unpack(package, self._metadata_parser)
             is_teclaw = self._is_teclaw(bot_id=bot_id, owner_id=owner_id)
             # Re-read same-name candidates, owner, readiness and default state
             # under the edit lock.  Uploader identity is intentionally absent.
-            default_set = self._ensure_default_set(
-                owner_id=owner_id,
-                bot_id=bot_id,
-                engine_type=bot.get("active_engine"),
-            )
             matches = self._same_name_matches(
                 bot_id=bot_id, owner_id=owner_id, name=name
             )
@@ -154,11 +155,36 @@ class LocalSkillUploadService:
                 name=name,
                 description=description,
                 files=files,
-                default_set=default_set,
                 is_teclaw=is_teclaw,
             )
         finally:
             self._edit_guard.release(lease)
+
+    async def upload_local_skill_files(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        files: Sequence[tuple[str, bytes]],
+    ) -> dict[str, Any]:
+        """Accept a browser directory selection through the ZIP authority.
+
+        The old product API represents a directory as a flat multipart file
+        list plus relative paths.  Repackage it once here, then reuse the
+        complete ZIP validation, same-name replacement and compensation flow.
+        """
+        package = (
+            files[0][1]
+            if len(files) == 1 and files[0][0].endswith(".zip")
+            else self._pack_directory(files)
+        )
+        return await self.upload_local_skill(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            package=package,
+        )
 
     async def _create(
         self,
@@ -170,7 +196,6 @@ class LocalSkillUploadService:
         name: str,
         description: str,
         files: list[tuple[str, bytes]],
-        default_set: dict[str, Any],
         is_teclaw: bool,
     ) -> dict[str, Any]:
         directory, storage = self._skill_service_factory.local_skill_package_storage(
@@ -184,8 +209,6 @@ class LocalSkillUploadService:
             name=name,
         )
         skill: dict[str, Any] | None = None
-        associated = False
-        excluded = False
         try:
             # A previous failed first upload has no authoritative record, but
             # must not be mixed into this package on a retry.
@@ -204,21 +227,6 @@ class LocalSkillUploadService:
                     "source_type": "upload",
                 }
             )
-            default_set = self._ensure_default_set(
-                owner_id=owner_id,
-                bot_id=bot_id,
-                engine_type=bot.get("active_engine"),
-            )
-            if not self._skill_set_repo.add_skill_to_set(
-                default_set["id"], skill["id"], user_id=owner_id
-            ):
-                raise RuntimeError("default Skill Set association failed")
-            associated = True
-            if not self._skill_set_repo.add_default_skill_exclusion(
-                owner_id, bot_id, int(default_set["id"]), int(skill["id"])
-            ):
-                raise RuntimeError("default Skill Set exclusion failed")
-            excluded = True
             self._audit_log_repo.insert(
                 {
                     "bot_id": bot_id,
@@ -239,20 +247,6 @@ class LocalSkillUploadService:
         except Exception as exc:  # details remain internal; public mapper is fixed
             # Compensation must continue after a failed rollback step: a failed
             # association delete must never prevent package cleanup.
-            if excluded and skill is not None:
-                try:
-                    self._skill_set_repo.remove_default_skill_exclusion(
-                        owner_id, bot_id, int(default_set["id"]), int(skill["id"])
-                    )
-                except Exception:
-                    pass
-            if associated and skill is not None:
-                try:
-                    self._skill_set_repo.remove_skill_from_set(
-                        default_set["id"], skill["id"]
-                    )
-                except Exception:
-                    pass
             if skill is not None:
                 try:
                     self._skill_repo.delete(skill["id"])
@@ -271,49 +265,6 @@ class LocalSkillUploadService:
             entity_id=str(bot["entity_id"]),
             bot_id=bot_id,
         )
-
-    def _ensure_default_set(
-        self, *, owner_id: str, bot_id: str, engine_type: str | None
-    ) -> dict[str, Any]:
-        default_set = self._skill_set_repo.get_default(
-            user_id=owner_id,
-            bolt_id=bot_id,
-            engine_type=engine_type,
-        )
-        if default_set is not None:
-            return default_set
-        return self._skill_set_repo.create(
-            {
-                "name": "默认技能集",
-                "description": "系统默认技能集，用户可以根据需要添加或移除技能",
-                "user_id": owner_id,
-                "bolt_id": bot_id,
-                "is_default": True,
-                "is_builtin": False,
-                "is_active": False,
-                "engine_type": engine_type,
-            }
-        )
-
-    def _ensure_default_set_membership(
-        self,
-        *,
-        owner_id: str,
-        bot_id: str,
-        engine_type: str | None,
-        skill_id: str,
-    ) -> None:
-        """Repair legacy Local Skill membership before publishing a replacement."""
-        default_set = self._ensure_default_set(
-            owner_id=owner_id, bot_id=bot_id, engine_type=engine_type
-        )
-        members = self._skill_set_repo.get_skills_in_set(str(default_set["id"]))
-        if any(str(member.get("id")) == skill_id for member in members):
-            return
-        if not self._skill_set_repo.add_skill_to_set(
-            str(default_set["id"]), skill_id, user_id=owner_id
-        ):
-            raise LocalSkillStorageError()
 
     async def _replace(
         self,
@@ -349,18 +300,16 @@ class LocalSkillUploadService:
                 name=name,
             )
         )
-        staged_locator, staged = (
-            self._skill_service_factory.local_skill_package_storage(
-                entity_id=str(bot["entity_id"]),
-                owner_id=owner_id,
-                bot_id=bot_id,
-                engine_type=bot.get("active_engine"),
-                entity_type=str(bot.get("entity_type") or "staff"),
-                is_desktop=bot.get("bot_type") == "desktop",
-                is_teclaw=is_teclaw,
-                name=name,
-                directory_name=version_dir,
-            )
+        _, staged = self._skill_service_factory.local_skill_package_storage(
+            entity_id=str(bot["entity_id"]),
+            owner_id=owner_id,
+            bot_id=bot_id,
+            engine_type=bot.get("active_engine"),
+            entity_type=str(bot.get("entity_type") or "staff"),
+            is_desktop=bot.get("bot_type") == "desktop",
+            is_teclaw=is_teclaw,
+            name=name,
+            directory_name=version_dir,
         )
         old_storage = (
             self._skill_service_factory.local_skill_package_storage_for_locator(
@@ -375,13 +324,12 @@ class LocalSkillUploadService:
             )
         )
         has_old_package = await old_storage.exists()
-        # A previous delete can leave a stale Local Skill row while its
-        # canonical package directory is already gone.  That row still makes
-        # this a same-name replacement, but it provides no bytes to back up.
-        # Treat it as a metadata-only legacy record and publish the staged
-        # package directly to the stable canonical locator.
-        old_is_canonical = old_locator == canonical_locator and has_old_package
-        obsolete_storage = old_storage if has_old_package else None
+        # Replacement is defined only for the stable layout-owned locator.
+        # It must never migrate ``git_path`` or manufacture a new package for a
+        # metadata row whose old bytes are already missing: either case would
+        # leave no authoritative old package to restore on failure.
+        if old_locator != canonical_locator or not has_old_package:
+            raise LocalSkillStorageError()
         backup = None
         old_metadata = {
             "description": skill.get("description"),
@@ -394,23 +342,19 @@ class LocalSkillUploadService:
         try:
             await staged.write(files)
             await staged.verify()
-            if old_is_canonical:
-                backup_dir = f".{name}.rollback-{uuid4().hex}"
-                _, backup = (
-                    self._skill_service_factory.local_skill_package_storage(
-                        entity_id=str(bot["entity_id"]),
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        engine_type=bot.get("active_engine"),
-                        entity_type=str(bot.get("entity_type") or "staff"),
-                        is_desktop=bot.get("bot_type") == "desktop",
-                        is_teclaw=is_teclaw,
-                        name=name,
-                        directory_name=backup_dir,
-                    )
-                )
-                await old_storage.copy_to(backup)
-                obsolete_storage = backup
+            backup_dir = f".{name}.rollback-{uuid4().hex}"
+            _, backup = self._skill_service_factory.local_skill_package_storage(
+                entity_id=str(bot["entity_id"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                engine_type=bot.get("active_engine"),
+                entity_type=str(bot.get("entity_type") or "staff"),
+                is_desktop=bot.get("bot_type") == "desktop",
+                is_teclaw=is_teclaw,
+                name=name,
+                directory_name=backup_dir,
+            )
+            await old_storage.copy_to(backup)
             # ``copy_to(..., replace=True)`` can fail after clearing or partly
             # writing the canonical directory.  Mark the mutation before the
             # call so every such failure restores the old authority.
@@ -428,30 +372,7 @@ class LocalSkillUploadService:
                 raise RuntimeError("Local Skill metadata switch failed")
             switched = True
             runtime_sync_attempted = True
-            if bool(skill["active"]):
-                self._ensure_default_set_membership(
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                    engine_type=bot.get("active_engine"),
-                    skill_id=str(skill["id"]),
-                )
-            else:
-                # A prior default-set exclusion can be stale after defaults
-                # are recreated.  Mirror the desired inactive state into the
-                # current default set before publishing the replacement.
-                default_set = self._ensure_default_set(
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                    engine_type=bot.get("active_engine"),
-                )
-                if not self._skill_set_repo.add_default_skill_exclusion(
-                    owner_id,
-                    bot_id,
-                    int(default_set["id"]),
-                    int(skill["id"]),
-                ):
-                    raise LocalSkillStorageError()
-            if not self._sync_runtime(bot, owner_id, bot_id):
+            if not await self._sync_runtime(owner_id, bot_id):
                 raise LocalSkillRuntimeSyncError()
             self._audit_log_repo.insert(
                 {
@@ -467,14 +388,10 @@ class LocalSkillUploadService:
             await self._restore_replacement(
                 skill=skill,
                 old_metadata=old_metadata,
-                bot=bot,
                 owner_id=owner_id,
                 bot_id=bot_id,
                 staged=staged,
-                staged_locator=staged_locator,
                 canonical=canonical,
-                canonical_locator=canonical_locator,
-                old_is_canonical=old_is_canonical,
                 backup=backup,
                 canonical_published=canonical_published,
                 switched=switched,
@@ -486,14 +403,10 @@ class LocalSkillUploadService:
                 await self._restore_replacement(
                     skill=skill,
                     old_metadata=old_metadata,
-                    bot=bot,
                     owner_id=owner_id,
                     bot_id=bot_id,
                     staged=staged,
-                    staged_locator=staged_locator,
                     canonical=canonical,
-                    canonical_locator=canonical_locator,
-                    old_is_canonical=old_is_canonical,
                     backup=backup,
                     canonical_published=canonical_published,
                     switched=switched,
@@ -504,9 +417,29 @@ class LocalSkillUploadService:
                     await self._discard(backup)
                 await self._discard(staged)
             raise LocalSkillStorageError() from exc
-        if obsolete_storage is not None:
-            await self._discard(obsolete_storage)
-        await self._discard(staged)
+        try:
+            # Keep the rollback copy until every other temporary package has
+            # been removed.  If any cleanup fails, the operation still has the
+            # bytes required to restore the old canonical package.
+            await self._discard(staged)
+            await self._discard(backup)
+        except Exception as exc:
+            try:
+                await self._restore_replacement(
+                    skill=skill,
+                    old_metadata=old_metadata,
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    staged=staged,
+                    canonical=canonical,
+                    backup=backup,
+                    canonical_published=canonical_published,
+                    switched=switched,
+                    runtime_sync_attempted=runtime_sync_attempted,
+                )
+            except Exception as rollback_exc:
+                raise LocalSkillStorageError() from rollback_exc
+            raise LocalSkillStorageError() from exc
         return {
             "operation": "updated",
             "skill": {
@@ -523,14 +456,10 @@ class LocalSkillUploadService:
         *,
         skill: dict[str, Any],
         old_metadata: dict[str, Any],
-        bot: dict[str, Any],
         owner_id: str,
         bot_id: str,
         staged,
-        staged_locator: str,
         canonical,
-        canonical_locator: str,
-        old_is_canonical: bool,
         backup,
         canonical_published: bool,
         switched: bool,
@@ -538,19 +467,18 @@ class LocalSkillUploadService:
     ) -> None:
         if canonical_published:
             try:
-                if old_is_canonical:
-                    if backup is None:
-                        raise LocalSkillStorageError()
-                    await backup.copy_to(canonical, replace=True)
-                elif not await canonical.cleanup():
+                if backup is None:
                     raise LocalSkillStorageError()
+                await backup.copy_to(canonical, replace=True)
             except Exception as exc:
                 raise LocalSkillStorageError() from exc
         if switched:
             restored = self._skill_repo.update(skill["id"], old_metadata)
             if restored is None:
                 raise LocalSkillStorageError()
-            if runtime_sync_attempted and not self._sync_runtime(bot, owner_id, bot_id):
+            if runtime_sync_attempted and not await self._sync_runtime(
+                owner_id, bot_id
+            ):
                 raise LocalSkillRuntimeSyncError()
         if backup is not None:
             await self._discard(backup)
@@ -572,6 +500,7 @@ class LocalSkillUploadService:
         except Exception as exc:
             raise LocalSkillStorageError() from exc
         return context.provider == "teclaw"
+
     def _same_name_matches(
         self, *, bot_id: str, owner_id: str, name: str
     ) -> list[dict[str, Any]]:
@@ -601,16 +530,13 @@ class LocalSkillUploadService:
             matches.append({**row, "active": bool(current["active"])})
         return matches
 
-    def _sync_runtime(self, bot: dict[str, Any], owner_id: str, bot_id: str) -> bool:
+    async def _sync_runtime(self, owner_id: str, bot_id: str) -> bool:
         try:
-            service = self._skill_set_service_factory.create(
-                user_id=owner_id,
-                entity_id=str(bot["entity_id"]),
+            await self._runtime_reconciler.project(
                 bot_id=bot_id,
-                engine_type=bot.get("active_engine"),
-                entity_type=bot.get("entity_type"),
+                owner_id=owner_id,
             )
-            return bool(service.sync_runtime())
+            return True
         except Exception:
             return False
 
@@ -641,7 +567,10 @@ class LocalSkillUploadService:
         return bot
 
     @staticmethod
-    def _unpack(package: bytes) -> tuple[str, str, list[tuple[str, bytes]]]:
+    def _unpack(
+        package: bytes,
+        metadata_parser: SkillMetadataParserProtocol = SkillParser(),
+    ) -> tuple[str, str, list[tuple[str, bytes]]]:
         if len(package) > _MAX_COMPRESSED:
             raise LocalSkillTooLargeError()
         try:
@@ -691,17 +620,18 @@ class LocalSkillUploadService:
         if wrapper is not None and len(roots) != 1:
             raise LocalSkillInvalidPackageError("invalid_wrapper")
         try:
-            text = markdown.decode("utf-8", errors="strict")
-        except UnicodeDecodeError as exc:
-            raise LocalSkillInvalidPackageError("invalid_encoding") from exc
-        metadata = SkillParser.parse_content(text) or {}
-        if not metadata.get("name") or not metadata.get("description"):
             try:
-                raw_metadata = yaml.safe_load(text)
-            except yaml.YAMLError:
-                raw_metadata = None
-            if isinstance(raw_metadata, dict):
-                metadata = raw_metadata
+                canonical = metadata_parser.parse_skill_markdown(markdown, path=skill_path)
+                metadata = canonical.to_dict()
+            except SkillManifestError as exc:
+                if exc.code.value != "MISSING_FRONTMATTER":
+                    raise
+                # Keep packages accepted by the historical upload endpoints
+                # working while new frontmatter manifests remain strict.
+                text = SkillParser.decode_content(markdown)
+                metadata = SkillParser.parse_legacy_upload_content(text) or {}
+        except SkillManifestError as exc:
+            raise LocalSkillInvalidPackageError() from exc
         name = metadata.get("name")
         description = metadata.get("description")
         if not isinstance(name, str) or not isinstance(description, str):
@@ -722,3 +652,51 @@ class LocalSkillUploadService:
             raise LocalSkillInvalidPackageError("invalid_wrapper")
         normalized = [(p[len(wrapper) + 1 :] if wrapper else p, c) for p, c in files]
         return name, description, normalized
+
+    @staticmethod
+    def _pack_directory(files: Sequence[tuple[str, bytes]]) -> bytes:
+        """Encode directory files without trusting browser-provided paths."""
+        if not files or len(files) > _MAX_FILES:
+            raise LocalSkillInvalidPackageError()
+        seen: set[str] = set()
+        total = 0
+        stream = io.BytesIO()
+        try:
+            with zipfile.ZipFile(
+                stream, mode="w", compression=zipfile.ZIP_DEFLATED
+            ) as archive:
+                for path, content in files:
+                    if not isinstance(path, str) or not isinstance(content, bytes):
+                        raise LocalSkillInvalidPackageError()
+                    if (
+                        not path
+                        or path.startswith(("/", "\\"))
+                        or re.match(r"^[A-Za-z]:", path) is not None
+                        or "\\" in path
+                        or any(part == "" for part in path.split("/"))
+                        or ".." in path.split("/")
+                        or len(path) > 256
+                    ):
+                        raise LocalSkillInvalidPackageError()
+                    normalized = "/".join(
+                        part for part in path.split("/") if part not in ("", ".")
+                    )
+                    if not normalized or normalized in seen:
+                        raise LocalSkillInvalidPackageError()
+                    if len(content) > _MAX_FILE:
+                        raise LocalSkillTooLargeError()
+                    total += len(content)
+                    if total > _MAX_EXPANDED:
+                        raise LocalSkillTooLargeError()
+                    seen.add(normalized)
+                    archive.writestr(normalized, content)
+        except LocalSkillInvalidPackageError:
+            raise
+        except LocalSkillTooLargeError:
+            raise
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise LocalSkillInvalidPackageError() from exc
+        package = stream.getvalue()
+        if len(package) > _MAX_COMPRESSED:
+            raise LocalSkillTooLargeError()
+        return package

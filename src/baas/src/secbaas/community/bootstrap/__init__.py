@@ -19,7 +19,7 @@ Usage in FastAPI routes:
 
 from dependency_injector.wiring import Provide
 
-from ._configs import DatabaseConfig, init_container_config, load_container_config
+from ._configs import init_container_config, load_container_config
 from ._container import (
     ApplicationContainer,
     initialize_services,
@@ -34,9 +34,9 @@ def get_container() -> ApplicationContainer:
     global _container
     if _container is None:
         _container = ApplicationContainer()
-        from ._container import _inject_enterprise_plugins
+        from ._container import _apply_enterprise_plugins
 
-        _inject_enterprise_plugins(_container)
+        _apply_enterprise_plugins(_container)
     return _container
 
 
@@ -46,15 +46,14 @@ def set_container(container: ApplicationContainer) -> None:
     Called by app.py's lifespan after creating and config-populating a container.
     """
     global _container
-    from ._container import _inject_enterprise_plugins
+    from ._container import _apply_enterprise_plugins
 
-    _inject_enterprise_plugins(container)
+    _apply_enterprise_plugins(container)
     _container = container
 
 
 __all__ = [
     "ApplicationContainer",
-    "DatabaseConfig",
     "get_container",
     "init_container_config",
     "initialize_services",

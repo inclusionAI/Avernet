@@ -6,6 +6,23 @@ use serde::{Deserialize, Serialize};
 
 use super::{ApplicationError, AuthenticatedCaller, DeleteResult};
 
+/// Default time-to-live (15 days) for the no-auth share link minted when an
+/// upload completes. The system-message download URL points at this share link.
+pub const UPLOAD_COMPLETION_SHARE_TTL_SECONDS: u64 = 15 * 86_400;
+
+/// Builds internal-collaboration download URLs for session files.
+///
+/// The upload-completion notification links to a share link instead of the
+/// authenticated content endpoint so message receivers (including other bots)
+/// can fetch the file without credentials. Core logic stays transport-agnostic:
+/// the concrete public-facing base is supplied by the delivery adapter that
+/// implements this trait.
+pub trait SessionFileInternalContentUrlProjector: Send + Sync {
+    /// Returns the full public URL for consuming the shared file content
+    /// behind `token`.
+    fn shared_content_url(&self, token: &str) -> String;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionFileActorKind {
@@ -82,9 +99,6 @@ pub struct CompleteSessionFile {
     pub caller: AuthenticatedCaller,
     pub session_id: String,
     pub file_id: String,
-    /// Server-constructed URL used only by the best-effort upload
-    /// notification. It is never populated from request JSON.
-    pub notification_content_url: String,
 }
 
 #[derive(Debug, Clone)]

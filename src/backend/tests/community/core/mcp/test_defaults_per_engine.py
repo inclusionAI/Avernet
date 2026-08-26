@@ -547,45 +547,49 @@ def test_template_config_cli_presets_are_aicoding_specific():
     ) == []
 
 
-# teclaw ships no default MCP servers: a teclaw bot starts empty and every MCP
-# it runs comes from its owner's own skill-set configuration. The publish suite's
-# ``_install_default_mcp_catalog`` derives its mock *from*
-# ``_DEFAULT_MCP_SERVERS_BY_ENGINE["teclaw"]``, so it only ever proves that a
-# build resolves whatever the roster happens to hold — a roster that silently
-# regrew an entry would sail straight through it. These cases are what make such
-# an edit fail loudly.
+# The teclaw roster, spelled out independently of the source list. The publish
+# suite's ``_install_default_mcp_catalog`` derives its mock *from*
+# ``_DEFAULT_MCP_SERVERS_BY_ENGINE["teclaw"]``, so it proves only that a build
+# resolves whatever the roster happens to hold — a typo'd or duplicated
+# ``server_code`` would sail straight through it. This second, independent copy
+# is what makes such an edit fail loudly.
+TECLAW_DEFAULT_MCP_CODES = (
+    "mcp.ant.lwawchat.cogmessagemcp",
+    "mcp.ant.antdingopenapi.antdingreportmcpserver",
+    "mcp.ant.antdingopenapi.antdinggroupmcpserver",
+    "mcp.ant.lwawchat.cogdocumentmcp",
+    "mcp.ant.antdingopenapi.antdingeventmcpserver",
+    "mcp.ant.antdingopenapi.antdingrobotmcpserver",
+    "mcp.ant.antdingopenapi.antdingmessagemcpserver",
+    "mcp.ant.antdingopenapi.antdingtodomcpserver",
+    "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver",
+    "mcp.ant.arkai.dimamcpserver",
+    "mcp.ant.homistudio.recordmcp",
+    "mcp.ant.rpc.dcanttouch.adminservice",
+    "hitl",
+)
 
 
-def test_teclaw_has_no_default_mcp_servers():
-    """teclaw's roster is empty — no MCP is granted without the owner asking."""
-    assert get_default_mcp_servers("teclaw") == []
-    assert get_default_mcp_server_codes("teclaw") == []
-    # ``hitl`` is local/stdio and was the roster's last entry; it is not an
-    # exception to the empty default, only an MCP the owner may add explicitly.
-    assert "hitl" not in get_default_mcp_server_codes("teclaw")
+def test_teclaw_default_roster_shape():
+    """teclaw's roster: exact codes, exact order, no dupes, local entry last."""
+    codes = [s["server_code"] for s in get_default_mcp_servers("teclaw")]
+    assert codes == list(TECLAW_DEFAULT_MCP_CODES)
+    assert len(codes) == len(set(codes)), "duplicate server_code in the teclaw roster"
+    # ``hitl`` is the only local/stdio entry and stays last, matching how the
+    # other engines list it. The artifact path resolves its launch instruction
+    # through LocalMCPRegistry, not MCP Center — see ``_stdio_launch_for``.
+    assert codes[-1] == "hitl"
 
 
 def test_teclaw_roster_is_its_own_bucket():
-    """teclaw resolves its own (empty) defaults rather than inheriting another
-    engine's.
+    """teclaw resolves its own defaults rather than inheriting another engine's.
 
     ``_resolve_default_mcp_engine_bucket`` normalizes case and delegates bucket
     overrides to the engine registry; an alias onto ``openclaw`` would silently
-    hand teclaw a full roster, so pin both the normalization and the emptiness.
+    swap the whole roster, so pin both the normalization and the distinctness.
     """
-    assert get_default_mcp_servers("TECLAW") == []
-    assert get_default_mcp_servers("openclaw") != []
-
-
-def test_teclaw_bucket_is_declared_not_missing():
-    """The empty roster is a declared decision, not an unknown-engine fallback.
-
-    ``get_default_mcp_servers`` fails closed for engines it does not know, so an
-    accidentally deleted ``teclaw`` key would return the same ``[]`` while losing
-    the bucket that keeps teclaw distinguishable from a typo'd engine name.
-    """
-    from agentclaw.community.core.mcp.services._defaults import (
-        _DEFAULT_MCP_SERVERS_BY_ENGINE,
+    assert [s["server_code"] for s in get_default_mcp_servers("TECLAW")] == list(
+        TECLAW_DEFAULT_MCP_CODES
     )
-
-    assert _DEFAULT_MCP_SERVERS_BY_ENGINE["teclaw"] == []
+    openclaw_codes = {s["server_code"] for s in get_default_mcp_servers("openclaw")}
+    assert "mcp.ant.lwawchat.cogmessagemcp" not in openclaw_codes

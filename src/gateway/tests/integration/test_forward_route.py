@@ -16,13 +16,14 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
+from gateway.community.adapters.web._cors import install_cors
 from gateway.community.adapters.web._forward import (
     _ALL_METHODS,
     _request_body,
     forward_request,
 )
 from gateway.community.bootstrap._principal_signer import build_principal_signer
-from gateway.community.config import ConfigLoader, UserConfig
+from gateway.community.config import ConfigLoader, CorsConfig, UserConfig
 from gateway.community.core.forwarding import DomainMap
 from gateway.community.plugins.forwarder.httpx import HttpxForwarder
 from gateway.community.plugins.secret_resolver.community import CommunitySecretResolver
@@ -75,6 +76,23 @@ async def _stub_upstream(scope: Scope, receive: Receive, send: Send) -> None:
                     (b"content-type", b"application/json"),
                     (b"set-cookie", b"session=1"),
                     (b"set-cookie", b"csrf=2"),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": b'{"code":200000}'})
+    elif path == "/openapi/v1/bots/cors" and method == "GET":
+        # An upstream that is also reachable directly answers CORS for its own
+        # origin pairs. Those headers must not travel back through the gateway.
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"access-control-allow-origin", b"https://upstream.example.com"),
+                    (b"access-control-allow-credentials", b"true"),
+                    (b"access-control-expose-headers", b"X-Upstream"),
+                    (b"x-upstream", b"kept"),
                 ],
             }
         )
@@ -300,6 +318,50 @@ def test_successful_forward_streams_body_and_preserves_cookies() -> None:
     assert resp.headers.get_list("set-cookie") == ["session=1", "csrf=2"]
 
 
+def test_upstream_cors_headers_are_not_relayed() -> None:
+    """The edge owns CORS, so an upstream's own headers stop at the gateway.
+
+    Two ``Access-Control-Allow-Origin`` values in one response are rejected by a
+    browser exactly as none are, and the upstream's value names an origin pair
+    the edge never agreed to.
+    """
+    app, _ = _build()
+    install_cors(app, CorsConfig(allow_origins=["https://frontend.example.com"]))
+    with TestClient(app) as client:
+        resp = client.get(
+            "/openapi/v1/bots/cors",
+            headers={"Origin": "https://frontend.example.com"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.headers.get_list("access-control-allow-origin") == [
+        "https://frontend.example.com"
+    ]
+    assert "X-Upstream" not in resp.headers.get("access-control-expose-headers", "")
+    # Only the CORS headers are dropped; the rest of the response is verbatim.
+    assert resp.headers["x-upstream"] == "kept"
+    assert resp.json() == {"code": 200000}
+
+
+def test_preflight_is_answered_before_the_authenticator_runs() -> None:
+    """A preflight carries no credential, so it must not reach auth at all."""
+    app, auth = _build()
+    auth.fail = True  # any request that reaches the authenticator is refused
+    install_cors(app, CorsConfig(allow_origins=["https://frontend.example.com"]))
+    with TestClient(app) as client:
+        resp = client.options(
+            "/openapi/v1/bots",
+            headers={
+                "Origin": "https://frontend.example.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == "https://frontend.example.com"
+    assert auth.calls == []
+
+
 def test_sse_streaming_forward() -> None:
     app, _ = _build()
     with TestClient(app) as client:
@@ -437,7 +499,6 @@ def test_real_authenticator_admits_google_token_then_forwards() -> None:
     """End-to-end sanity: Authenticator + GoogleUserStrategy (MockTransport) → forward 200."""
     from gateway.community.bootstrap import initialize_database
     from gateway.community.bootstrap._authn import build_authenticator
-    from gateway.community.bootstrap._configs import DatabaseConfig
     from gateway.community.core.authn import IdentityChain
     from gateway.community.plugins.authn.google_token import GoogleUserStrategy
     from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
@@ -446,9 +507,7 @@ def test_real_authenticator_admits_google_token_then_forwards() -> None:
     def _userinfo_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"sub": "g-1", "email": "a@example.com"})
 
-    db = initialize_database(
-        SqliteDatabasePlugin(), DatabaseConfig(plugin_type="SQLITE_ORM", db_url="")
-    )
+    db = initialize_database(SqliteDatabasePlugin())
     authenticator = _test_authenticator(db)
     # Swap the USER chain to a MockTransport google so no real network call.
     authenticator.strategies[PrincipalType.USER] = IdentityChain(
@@ -492,12 +551,9 @@ def test_real_authenticator_rejects_missing_required_identity() -> None:
     """No google token + required user → 401 before forwarding."""
     from gateway.community.bootstrap import initialize_database
     from gateway.community.bootstrap._authn import build_authenticator
-    from gateway.community.bootstrap._configs import DatabaseConfig
     from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 
-    db = initialize_database(
-        SqliteDatabasePlugin(), DatabaseConfig(plugin_type="SQLITE_ORM", db_url="")
-    )
+    db = initialize_database(SqliteDatabasePlugin())
     authenticator = _test_authenticator(db)
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=_stub_upstream))  # type: ignore[arg-type]
 

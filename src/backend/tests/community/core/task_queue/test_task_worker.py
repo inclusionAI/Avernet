@@ -27,6 +27,7 @@ from agentclaw.community.core.task_queue.examples import (
 from agentclaw.community.core.task_queue.repository.models import TaskQueueModel  # noqa: F401
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
 from agentclaw.community.core.task_queue.services.worker import TaskWorker
 from agentclaw.community.core.task_queue.types import Complete, TaskStatus
 from agentclaw.community.di.config import TaskQueueWorkerConfig
@@ -67,8 +68,11 @@ class _World:
         self.repo = TaskQueueRepository(InMemorySqliteDB(engine))
         self.registry = HandlerRegistry()
         self.config = config
-        self.service = TaskQueueService(self.repo)
-        self.worker = TaskWorker(self.repo, self.registry, config)
+        # One latch, shared by the enqueue path and the worker — same wiring
+        # the DI module provides in production.
+        self.wakeup = WorkerWakeup()
+        self.service = TaskQueueService(self.repo, self.registry, self.wakeup)
+        self.worker = TaskWorker(self.repo, self.registry, config, self.wakeup)
 
     def enqueue(
         self,
@@ -330,7 +334,7 @@ def test_teclaw_publish_task_is_reclaimed_after_worker_restart():
     )
     assert [task.id for task in abandoned] == [record.id]
 
-    restarted_worker = TaskWorker(w.repo, w.registry, w.config)
+    restarted_worker = TaskWorker(w.repo, w.registry, w.config, w.wakeup)
     asyncio.run(restarted_worker.run_once())
 
     assert w.status_of(record.id) == TaskStatus.SUCCEEDED
@@ -341,3 +345,139 @@ def test_teclaw_publish_task_is_reclaimed_after_worker_restart():
         publish_id=9,
         status="ACTIVE",
     )
+
+
+# ── opt-in immediate execution ──────────────────────────────────────────────
+# A task type may ask for its enqueues to wake the worker at once instead of
+# waiting out the idle poll. Off by default, so every pre-existing type keeps
+# the timing it already had — that default is what most of these tests pin down.
+
+
+class _RecordingWakeup:
+    """Stands in for ``WorkerWakeup`` to count signals without a live loop."""
+
+    def __init__(self):
+        self.notifies = 0
+
+    def notify(self):
+        self.notifies += 1
+
+
+def _service_with(world, wakeup):
+    """A service over ``world``'s repo/registry but a countable latch."""
+    return TaskQueueService(world.repo, world.registry, wakeup)
+
+
+def test_registry_defaults_to_not_waking_on_enqueue():
+    """The default is opt-out: registering a handler the way every existing
+    adopter does must leave its task type on the ordinary poll cadence."""
+    registry = HandlerRegistry()
+    registry.register(NoopTaskHandler("legacy"))
+    assert registry.wakes_on_enqueue("legacy") is False
+
+
+def test_registry_records_an_explicit_opt_in():
+    registry = HandlerRegistry()
+    registry.register(NoopTaskHandler("urgent"), wake_on_enqueue=True)
+    assert registry.wakes_on_enqueue("urgent") is True
+
+
+def test_registry_reports_no_wake_for_an_unregistered_type():
+    """Only a process that can actually run the type benefits from waking, so
+    an unknown type is a plain False rather than an error."""
+    assert HandlerRegistry().wakes_on_enqueue("never-registered") is False
+
+
+def test_opted_in_type_signals_the_worker_on_enqueue():
+    w = _world()
+    w.registry.register(NoopTaskHandler("urgent"), wake_on_enqueue=True)
+    wakeup = _RecordingWakeup()
+    _service_with(w, wakeup).enqueue("urgent", {}, 3600)
+    assert wakeup.notifies == 1
+
+
+def test_type_that_did_not_opt_in_is_left_on_the_poll_cadence():
+    """The core guarantee for existing task types: nothing about their timing
+    changes."""
+    w = _world()
+    w.registry.register(NoopTaskHandler("legacy"))
+    wakeup = _RecordingWakeup()
+    _service_with(w, wakeup).enqueue("legacy", {}, 3600)
+    assert wakeup.notifies == 0
+
+
+def test_delayed_enqueue_does_not_signal_even_when_opted_in():
+    """A delayed task has ``run_at > now()``, so it fails the claim's
+    eligibility predicate — waking would burn a poll and change nothing."""
+    w = _world()
+    w.registry.register(NoopTaskHandler("urgent"), wake_on_enqueue=True)
+    wakeup = _RecordingWakeup()
+    _service_with(w, wakeup).enqueue("urgent", {}, 3600, delay_seconds=30)
+    assert wakeup.notifies == 0
+
+
+def test_keyed_enqueue_that_joined_a_live_task_does_not_signal():
+    """``created=False`` means no work was added — the holder is already
+    pending or running, so there is nothing new for a wake to pick up."""
+    w = _world()
+    w.registry.register(NoopTaskHandler("urgent"), wake_on_enqueue=True)
+    wakeup = _RecordingWakeup()
+    service = _service_with(w, wakeup)
+
+    first = service.enqueue("urgent", {}, 3600, idempotency_key="k1")
+    second = service.enqueue("urgent", {}, 3600, idempotency_key="k1")
+
+    assert first.created is True
+    assert second.created is False
+    assert second.record.id == first.record.id
+    assert wakeup.notifies == 1  # the create signalled; the join did not
+
+
+def test_signalling_never_breaks_the_enqueue_contract():
+    """A latency optimisation must not change what enqueue returns or persists."""
+    w = _world()
+    w.registry.register(NoopTaskHandler("urgent"), wake_on_enqueue=True)
+    record = _service_with(w, _RecordingWakeup()).enqueue(
+        "urgent", {"a": 1}, 3600
+    ).record
+    assert record.task_type == "urgent"
+    assert record.payload == {"a": 1}
+    assert w.status_of(record.id) == TaskStatus.PENDING
+
+
+def test_enqueue_survives_a_wakeup_that_has_no_loop_bound():
+    """End-to-end with the real latch and no running worker: the notify is a
+    no-op and the task is still enqueued for the next poll to claim."""
+    w = _world()
+    w.registry.register(NoopTaskHandler("urgent"), wake_on_enqueue=True)
+    record = w.enqueue("urgent")  # w.wakeup is real and unbound
+    assert w.status_of(record.id) == TaskStatus.PENDING
+    asyncio.run(w.worker.run_once())
+    assert w.status_of(record.id) == TaskStatus.SUCCEEDED
+
+
+def test_idle_worker_loop_wakes_on_an_opted_in_enqueue():
+    """The whole feature, end to end through the real loop: with a poll interval
+    far longer than the test could tolerate, an enqueue still gets claimed
+    promptly because it cuts the idle wait short."""
+    w = _world(poll_interval_seconds=30.0, poll_jitter_seconds=0.0)
+    w.registry.register(NoopTaskHandler("urgent"), wake_on_enqueue=True)
+
+    async def drive():
+        await w.worker.startup()
+        try:
+            # First tick finds nothing and settles into the 30s idle wait.
+            await asyncio.sleep(0.1)
+            record = await asyncio.to_thread(w.enqueue, "urgent")
+            started = time.monotonic()
+            while time.monotonic() - started < 5.0:
+                if w.status_of(record.id) == TaskStatus.SUCCEEDED:
+                    return time.monotonic() - started
+                await asyncio.sleep(0.02)
+            return None
+        finally:
+            await w.worker.shutdown()
+
+    elapsed = asyncio.run(drive())
+    assert elapsed is not None, "task was not claimed — the wake never landed"
+    assert elapsed < 5.0

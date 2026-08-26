@@ -22,7 +22,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import base64
-import json
 import re
 import time
 
@@ -40,17 +39,27 @@ from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousErr
 
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     DEFAULT_DEVICE_PROVIDER,
     resolve_device_provider,
 )
-from agentclaw.community.core.service_bot.types import PublishStage, is_editable_bot
+from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
-from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxProvider, EngineSandboxRegistry
+from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
 
 from agentclaw.community.core.devices.protocols import StoragePathProtocol
+from agentclaw.community.core.service_bot.services.deploy.deploy_config_composer import (
+    BotDeployContext,
+    DeployConfigComposer,
+)
+# Re-exported: ``Storage`` and ``MountPointEntry`` were defined here before the
+# composer seam moved them next to the strategies that build them. Importing
+# them from this module still works.
+from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
+    MountPointEntry,
+    Storage,
+)
 from agentclaw.community.core.devices.services.sandbox_overrides import (
     InvalidSandboxOverridesError,
     SandboxOverrides,
@@ -237,41 +246,6 @@ class HttpConnectionInfo:
 
 
 @dataclass
-class Storage:
-    """
-    Sandbox storage.
-    """
-
-    type: str
-    """
-    Storage type.
-    """
-    path: str
-    """
-    Storage path.
-    """
-    storage_id: str
-    """
-    Storage id.
-    """
-    quota: str
-    """
-    Storage quota, such as "1Gi".
-    """
-    permission: str
-
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典格式。"""
-        return {
-            "type": self.type,
-            "path": self.path,
-            "storage_id": self.storage_id,
-            "quota": self.quota,
-            "permission": self.permission,
-        }
-
-
-@dataclass
 class BotDeployConfig:
     """Bot 部署配置。
 
@@ -363,27 +337,6 @@ class BotDeployConfig:
 
 
 @dataclass
-class MountPointEntry:
-    """OSS mount point configuration for DeployConfig.
-
-        Platform-agnostic representation, converted to Arca MountPoint when needed.
-        Keeps domain model independent of Arca SDK per D-01.
-        Field names match Arca MountPoint for clarity (id, remote_dir, local_dir, permission).
-        """
-    remote_dir: str
-    local_dir: str
-    permission: str
-
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典格式。"""
-        return {
-            "remote_dir": self.remote_dir,
-            "local_dir": self.local_dir,
-            "permission": self.permission,
-        }
-
-
-@dataclass
 class BotConfig:
     """Bot 配置。
 
@@ -445,6 +398,7 @@ class BaasService:  # pragma: no cover
         common_whitelist_service: "CommonWhiteListService",
         outbound_rule_provider: "OutboundRuleProvider",
         startup_script_reader: "StartupScriptReaderProtocol",
+        deploy_composer: DeployConfigComposer,
         personal_bot_template_uuid: Optional[str] = None,
         theta_master_key_secret: str = "",
     ):
@@ -472,6 +426,13 @@ class BaasService:  # pragma: no cover
         used by :meth:`_build_personal_bot_payload`. None 时该方法会主动 raise，
         caller 通过 ``template_uuid`` 参数显式传也可。
 
+        ``deploy_composer``: the runtime-specific half of the create-bot
+        payload — ``after_create_cmd_hook``, ``mount_points`` and ``storage``.
+        ``ManagedDeployConfigComposer`` composes what the managed bot image
+        expects; a deployment running a different image (the open-source engine
+        on ACK/ECI) selects its own. Everything else about the payload is
+        deployment-independent and stays here.
+
         ``secret_resolver``: Mist secret 解析插件 (Rule 20)。DI 装配时由
         ``ServiceBotModule.baas_service`` 注入: prod → ProdSecretResolver (走
         layotto/Mist); singlebox / pytest → LocalSecretResolver (返 None
@@ -495,6 +456,10 @@ class BaasService:  # pragma: no cover
         self._common_whitelist_service = common_whitelist_service
         self._outbound_rule_provider = outbound_rule_provider
         self._theta_master_key_secret = theta_master_key_secret
+        # Which container this deployment runs: the boot chain, the mounts and
+        # the storage volume of every bot it creates. Selected once in the
+        # composition root from ``baas.deploy_runtime``.
+        self._deploy_composer = deploy_composer
         # Per-bot startup script (issue #926). Resolved here rather than passed
         # down by each caller: _build_create_bot_payload is reached from create,
         # from service-bot release, and from upgrade_bot (restart), and a script
@@ -715,11 +680,23 @@ class BaasService:  # pragma: no cover
         # 根据白名单选择挂载本地 session 目录或 home 目录到远端 NAS。
         # 整条 payload 链路只查询一次白名单，start_cmd 与 storage 共用同一结果；
         # 未命中或读取异常时默认沿用 session 目录，保证灰度切换安全。
-        if migration_path:
+        # Resolved once, before anything reads it: the migration path is
+        # rewritten according to it, and the composer is handed the decision
+        # rather than the whitelist. The mount and storage builders used to
+        # each re-ask on a ``None``, so one payload could make three reads.
+        #
+        # A caller that states the answer keeps it. That is a change only in
+        # theory: this used to re-resolve whenever ``migration_path`` was set,
+        # overriding the caller — but every caller that passes the flag
+        # (bot_service restart, baas_device_service allocate) passes an empty
+        # migration path, so the override never fired.
+        if mount_home_dir_storage is None:
             mount_home_dir_storage = self._should_mount_home_dir_storage(
                 owner_id=owner_id,
                 bot_id=bot_id,
             )
+
+        if migration_path:
             migration_path = self._normalize_migration_path_for_mount(
                 migration_path=migration_path,
                 mount_home_dir_storage=mount_home_dir_storage,
@@ -735,48 +712,35 @@ class BaasService:  # pragma: no cover
                 entity_id=entity_id, bot_id=bot_id
             )
 
-        # 构建 sandbox 成功后执行的命令
-        start_up_cmd = self._get_start_cmd(
+        # 一次成形，三个 composer 方法共用：同一个容器的同一份描述。
+        deploy_ctx = BotDeployContext(
             bot_id=bot_id,
             owner_id=owner_id,
             entity_id=entity_id,
             entity_type=entity_type,
-            migration_pat=migration_path,
             bot_type=bot_type,
             engine=engine,
+            migration_path=migration_path,
+            mount_home_dir_storage=mount_home_dir_storage,
             stage=stage,
             version=version,
-            mount_home_dir_storage=mount_home_dir_storage,
+            mount_path=mount_path,
             ext_info=ext_info,
-            startup_script=startup_script,
+        )
+
+        # 构建 sandbox 成功后执行的命令
+        start_up_cmd = self._compose_start_command(
+            deploy_ctx, startup_script=startup_script
         )
 
         # 构建实例销毁前置hook命令
         destroy_cmd = self._get_destroy_cmd()
 
-        # 获取挂载点配置
-        mount_points = self._setup_directory(
-            entity_id=entity_id,
-            entity_type=entity_type,
-            bot_id=bot_id,
-            engine_type=engine,
-            mount_path=mount_path,
-            owner_id=owner_id,
-            mount_home_dir_storage=mount_home_dir_storage,
-        )
+        # 挂载点与 storage 由 deploy composer 按本部署的容器形态决定。
+        mount_points = self._deploy_composer.build_mount_points(deploy_ctx)
 
-        # 获取 bot 的 nas storage 挂载点：命中白名单走 home 目录，
-        # 否则沿用 sessions 目录（白名单判定在 _setup_bot_storage 内部完成）。
-        storage = self._setup_bot_storage(
-            entity_id=entity_id,
-            entity_type=entity_type,
-            owner_id=owner_id,
-            bot_id=bot_id,
-            engine_type=engine,
-            mount_home_dir_storage=mount_home_dir_storage,
-            bot_type=bot_type,
-            stage=stage,
-        )
+        # ``None`` ⇒ 该部署不挂 storage，BotDeployConfig.to_dict 直接不带该字段。
+        storage = self._deploy_composer.build_storage(deploy_ctx)
 
         # 引擎专属模板字段在 strategy 内集中消费；下游只接收通用 dict。
         from agentclaw.community.core.bot_management.engines import resolve_provisioning
@@ -2334,32 +2298,36 @@ class BaasService:  # pragma: no cover
             ext_info: Optional[Dict[str, Any]] = None,
             startup_script: str = "",
     ):
-        # 1、Bootstrap 补偿脚本
-        bootstrap_cmp = self._get_bootstrap_cmp()
-
-        # 2、安装引擎
-        install_engine_cmd = self._get_install_engine_cmd()
-
-        # 3、设置同步服务
-        # setup_cmd = self._get_setup_sync_service_cmd(engine)
-
-        # 4、 确保引擎目录存在
-        # mkdir_cmd = self._get_mkdir_engine_dir_cmd(engine)
-
-        # 5、 启动同步服务
-        start_cmd = self._get_start_sandbox_service_cmd(
-            engine, migration_pat, bot_type, bot_id, owner_id, entity_id, entity_type, stage, version, mount_home_dir_storage, ext_info
+        return self._compose_start_command(
+            BotDeployContext(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                entity_id=entity_id,
+                entity_type=entity_type,
+                bot_type=bot_type,
+                engine=engine,
+                migration_path=migration_pat,
+                mount_home_dir_storage=mount_home_dir_storage,
+                stage=stage,
+                version=version or "1",
+                ext_info=ext_info,
+            ),
+            startup_script=startup_script,
         )
 
-        # 6、 Start watchdog
-        watchdog_cmd = self._get_start_watchdog_cmd()
+    def _compose_start_command(
+        self, ctx: BotDeployContext, *, startup_script: str
+    ) -> str:
+        """The composer's boot chain, plus this bot's own startup script.
 
-        chain = (
-            f"{bootstrap_cmp} && ({install_engine_cmd}) && "
-            f" {start_cmd} && {watchdog_cmd}"
-        )
+        The chain belongs to whichever container the deployment runs, so the
+        composer owns it. Everything here — the user stage and the exit-status
+        contract around it — is the same on every deployment, which is why it
+        lives once on the service instead of being rewritten by each composer.
+        """
+        chain = self._deploy_composer.build_start_command(ctx)
 
-        # 7、 Per-bot startup script (issue #926)
+        # Per-bot startup script (issue #926)
         if not startup_script:
             return chain
 
@@ -2502,376 +2470,6 @@ class BaasService:  # pragma: no cover
 
         return "supervisorctl stop sync"
 
-    def _get_bootstrap_cmp(self):
-        """执行 bootstrap 补偿脚本。"""
-        return "su admin -c 'bash /home/admin/bin/bootstrap_minimal.sh'"
-
-    def _get_setup_sync_service_cmd(self, engine: str = ""):
-        """执行 setup_supervisor_sync_service.sh 脚本。"""
-        setup_cmd = f"bash /home/admin/bin/setup_supervisor_sync_service.sh {engine}"
-        logger.info(f"[_get_setup_sync_service_cmd] Executing cmd: {setup_cmd}")
-        return setup_cmd
-
-    def _get_install_engine_cmd(self):
-        """执行 install_engine.sh 脚本。
-
-        install_engine.sh 是从 start_service.sh 拆分出来的，
-        负责安装/更新引擎二进制并落盘 marker 文件，setup_supervisor_sync_service.sh
-        会等待该 marker 才继续。BaaS 路径通过 && 串联各步，install_engine
-        同步执行即可，无需 nohup；存在性保护用于 backend 先发版而 daas-script
-        旧镜像尚无该脚本的窗口。
-        """
-        script_path = "/home/admin/bin/install_engine.sh"
-        log_path = "/home/admin/logs/install_engine.log"
-        install_cmd = (
-            f"if [ -f {script_path} ]; then "
-            f"bash {script_path} >> {log_path} 2>&1; "
-            f"else echo '[install_engine] {script_path} not found, skip'; fi"
-        )
-        logger.info(f"[_get_install_engine_cmd] Executing cmd: {install_cmd}")
-        return install_cmd
-
-    def _get_start_sandbox_service_cmd(
-        self,
-        engine: str,
-        migration_path: str,
-        bot_type: str,
-        bot_id: str | None,
-        owner_id: str | None,
-        entity_id: str | None,
-        entity_type: str | None,
-        stage: str | None = PublishStage.ONLINE.value,
-        version: str | None = "1",
-        mount_home_dir_storage: bool = False,
-        ext_info: Optional[Dict[str, Any]] = None,
-    ):
-        """启动沙箱服务。"""
-        # 保留 {token} 和 {client_id} 占位符，供后续替换
-        start_service_cmd = (
-            f"/home/admin/bin/start_service.sh --token {{token}} --client_id {{client_id}} --bot_type {bot_type} --engine {engine}"
-        )
-
-        # 个人 Bot 和服务 Bot 草稿没有迁移目录；此时不传 --source_dir，
-        # 避免 start_service.sh 把后面的 --bot_id 当成 source_dir 的值。
-        if migration_path:
-            start_service_cmd += f" --source_dir {migration_path}"
-
-        if bot_id:
-            start_service_cmd += f" --bot_id {bot_id}"
-        if owner_id:
-            start_service_cmd += f" --owner_id {owner_id}"
-
-        if entity_id and entity_type:
-            start_service_cmd += f" --entity_id {entity_id} --entity_type {entity_type}"
-
-        if stage:
-            stage_str = stage
-            ext_info = ext_info or {}
-            if ext_info.get("biz_id"):
-                stage_str += f"-{ext_info.get('biz_id')}"
-            start_service_cmd += f" --stage {stage_str}"
-
-        if version:
-            start_service_cmd += f" --version V{version}"
-
-        # 命中 home 目录挂载白名单时，通知容器内启动脚本使用 NAS home 目录。
-        start_service_cmd += f" --useNas {str(mount_home_dir_storage).lower()}"
-
-        read_only_rules = self._get_set_read_only_rule(
-            bot_id=bot_id, owner_id=owner_id,
-            bot_type=bot_type, stage=stage or PublishStage.ONLINE.value,
-        )
-        start_service_cmd += read_only_rules
-
-        start_cmd = f"""su admin -c 'nohup {start_service_cmd} >> /home/admin/start.log 2>&1'"""
-
-        logger.info(f"[_get_start_sandbox_service_cmd] Executing cmd: {start_cmd}")
-        return start_cmd
-
-    def _resolve_sandbox_provider(
-        self,
-        bot_id: str = "",
-        owner_id: str = "",
-        engine: str = "",
-    ) -> EngineSandboxProvider:
-        """解析引擎对应的 sandbox provider。"""
-        engine_type = engine or resolve_runtime_engine_for_bot(bot_id, owner_id, bot_repo=self._bot_repo)
-        try:
-            return self._sandbox_registry.resolve(engine_type)
-        except Exception as e:
-            logger.warning(
-                "[_resolve_sandbox_provider] resolve failed for engine=%s, fallback to default: %s",
-                engine_type,
-                e,
-            )
-            return self._sandbox_registry.resolve(DEFAULT_ENGINE_TYPE)
-
-    def _parse_bot_ext(self, bot: Dict[str, Any] | None) -> Dict[str, Any]:
-        if not bot:
-            return {}
-        ext = bot.get("ext") or {}
-        if isinstance(ext, str):
-            try:
-                ext = json.loads(ext)
-            except json.JSONDecodeError:
-                return {}
-        return ext if isinstance(ext, dict) else {}
-
-    def _materialize_rule_path(self, path: str, base_path: str) -> str:
-        if not path:
-            return path
-        if path.startswith("/"):
-            return path
-        return f"{base_path.rstrip('/')}/{path}"
-
-    def _materialize_default_rules(
-        self,
-        provider: EngineSandboxProvider,
-    ) -> list[dict[str, str]]:
-        base_path = provider.get_base_path()
-        result: list[dict[str, str]] = []
-        for rule in provider.get_default_read_only_rules():
-            result.append({
-                "path": self._materialize_rule_path(rule.path, base_path),
-                "rule_type": rule.rule_type,
-            })
-        return result
-
-    def _normalize_custom_read_only_rules(
-        self,
-        rules: Any,
-        *,
-        base_path: str,
-    ) -> list[dict[str, str]]:
-        if not isinstance(rules, list):
-            return []
-
-        result: list[dict[str, str]] = []
-        for item in rules:
-            if not isinstance(item, dict):
-                continue
-            path = item.get("path")
-            if not path or not isinstance(path, str):
-                continue
-            rule_type = item.get("rule_type", "file")
-            result.append({
-                "path": self._materialize_rule_path(path, base_path),
-                "rule_type": rule_type,
-            })
-        return result
-
-    def _dedupe_read_only_rules(self, rules: list[dict[str, str]]) -> list[dict[str, str]]:
-        seen: set[tuple[str, str]] = set()
-        result: list[dict[str, str]] = []
-        for rule in rules:
-            key = (rule.get("path", ""), rule.get("rule_type", "file"))
-            if key in seen:
-                continue
-            seen.add(key)
-            result.append(rule)
-        return result
-
-    def _get_set_read_only_rule(self, bot_id: str = "", owner_id: str = "", engine: str = "",
-                                bot_type: str = "service", stage: str = "online"):
-        """返回只读规则，拼接为 --set_read_only 参数。
-
-        可编辑(personal / service草稿)不锁:容器内仍需写 mcporter 等配置;
-        只有 service 发布 online 才锁。判定收口 is_editable_bot。
-        """
-        if is_editable_bot(bot_type, stage):
-            return ""
-        provider = self._resolve_sandbox_provider(bot_id=bot_id, owner_id=owner_id, engine=engine)
-        base_path = provider.get_base_path()
-        default_rules = self._materialize_default_rules(provider)
-
-        custom_rules: list[dict[str, str]] = []
-        if bot_id and owner_id:
-            try:
-                bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-                ext = self._parse_bot_ext(bot)
-                custom_rules = self._normalize_custom_read_only_rules(
-                    ext.get("read_only_rules", []),
-                    base_path=base_path,
-                )
-            except Exception as e:
-                logger.warning(
-                    "[_get_set_read_only_rule] Failed to query custom rules: %s", e
-                )
-
-        all_rules = self._dedupe_read_only_rules(default_rules + custom_rules)
-        all_paths = [r["path"] for r in all_rules if r.get("path")]
-        if not all_paths:
-            return ""
-        return f" --set_read_only {','.join(all_paths)}"
-
-    def _get_start_watchdog_cmd(
-            self,
-    ):
-        # Start watchdog
-        # 保留 {token} 和 {client_id} 占位符，供后续替换
-        watchdog_cmd = "/home/admin/bin/starting_watchdog.sh --token {token} --client_id {client_id}"
-        exec_watchdog_cmd = (
-            f"""su admin -c 'nohup {watchdog_cmd} >> /home/admin/logs/starting_watchdog.log 2>&1'"""
-        )
-        logger.info(f"[_get_start_watchdog_cmd] Executing cmd: {exec_watchdog_cmd}")
-        return exec_watchdog_cmd
-
-    def _get_mkdir_engine_dir_cmd(self, engine: str) -> str:
-        """确保引擎目录存在，兼容旧设备缺少引擎级 NAS 挂载的情况。
-
-        对于旧设备，通过 symlink 将 /home/admin/.{engine} 指向
-        /home/admin/nfs/bot-data/{engine}（通用 NAS 挂载下的子目录）。
-        """
-        engine_dir = f"/home/admin/.{engine}"
-        nfs_engine_dir = f"/home/admin/nfs/bot-data/{engine}"
-        cmd = (
-            f"test -d {engine_dir} || "
-            f"(mkdir -p {nfs_engine_dir} && ln -sfn {nfs_engine_dir} {engine_dir}) ; "
-        )
-        logger.info(f"[_ensure_engine_dirs] Executing cmd: {cmd}")
-        return cmd
-
-    def _setup_directory(
-        self,
-        entity_id: str,
-        entity_type: str,
-        bot_id: str,
-        engine_type: str = DEFAULT_ENGINE_TYPE,
-        mount_path: Optional[str] = None,
-        owner_id: str = "",
-        mount_home_dir_storage: bool | None = None,
-    ) -> list[MountPointEntry]:
-        """使用 OSS 创建用户目录结构，返回 Arca MountPoint 配置。
-
-        Args:
-            entity_id: 实体 ID
-            entity_type: 实体类型
-            bot_id: Bot ID
-            engine_type: 引擎类型，默认 "openclaw"
-            mount_path: 用户自定义 NAS 挂载路径（可选，追加到 mount_points）
-        """
-        sp = self._storage_path
-        bolt_data = sp.get_bolt_data_path(entity_type=entity_type, entity_id=entity_id, bot_id=bot_id)
-        skill_repo = sp.get_skills_repo_path()
-
-        # 引擎感知：通过 EngineSandboxProvider 动态解析 skills 挂载本地路径
-        # （base_path/{skill_target_relpath}/skills-repo），避免硬编码 openclaw
-        provider = self._resolve_sandbox_provider(engine=engine_type)
-        base_path = provider.get_base_path()
-        build_plan = provider.get_build_plan()
-        skills_local_dir = f"{base_path}/{build_plan.skill_target_relpath}/skills-repo"
-
-        # OSS 挂载点必须位于 /home/admin/nfs/ 下；引擎专用目录
-        # （/home/admin/.{engine}、/home/admin/.config/{engine}）由
-        # _ensure_engine_dirs() 在沙箱内通过 symlink 指向 bot-data 子目录。
-
-        mount_points = [
-            # agentclaw-sys 挂载
-            MountPointEntry(
-                remote_dir="/agentclaw-sys",
-                local_dir="/mnt/sys",
-                permission="READ_ONLY",
-            ),
-        ]
-
-        # skill repo独立挂载
-        # bolt 配置数据独立挂载
-        if mount_home_dir_storage is None:
-            mount_home_dir_storage = bool(owner_id) and self._should_mount_home_dir_storage(
-                owner_id=owner_id,
-                bot_id=bot_id,
-            )
-
-        if mount_home_dir_storage:
-            mount_points.append(
-                MountPointEntry(
-                    remote_dir=f"/{bolt_data}",
-                    local_dir="/opt/nfs/bot-data",
-                    permission="READ_WRITE",
-                ),
-            )
-        else:
-            mount_points.extend(
-                [
-                    MountPointEntry(
-                        remote_dir=f"/{bolt_data}",
-                        local_dir="/home/admin/nfs/bot-data",
-                        permission="READ_WRITE",
-                    ),
-                    MountPointEntry(
-                        remote_dir=f"/{skill_repo}",
-                        local_dir=skills_local_dir,
-                        permission="READ_ONLY",
-                    ),
-                ]
-            )
-
-        # 用户自定义挂载路径
-        if mount_path:
-            mount_points.append(
-                MountPointEntry(
-                    remote_dir=mount_path,
-                    local_dir=mount_path,
-                    permission="READ_WRITE",
-                ),
-            )
-            logger.info(
-                f"[BaasService._setup_directory] Added custom mount_path: {mount_path}"
-            )
-
-        return mount_points
-
-    def _setup_bot_storage(
-            self,
-            entity_id: str,
-            entity_type: str,
-            owner_id: str,
-            bot_id: str,
-            engine_type: str = DEFAULT_ENGINE_TYPE,
-            mount_home_dir_storage: bool | None = None,
-            bot_type: str = "",
-            stage: str = "",
-    ) -> Storage:
-        """根据通用白名单配置选择 Bot 的 NAS storage 挂载目录。"""
-        if mount_home_dir_storage is None:
-            mount_home_dir_storage = self._should_mount_home_dir_storage(
-                owner_id=owner_id,
-                bot_id=bot_id,
-            )
-
-        if mount_home_dir_storage:
-            logger.info(
-                "[BaasService._setup_bot_storage] Use home dir storage: "
-                "owner_id=%s, bot_id=%s, engine_type=%s",
-                owner_id,
-                bot_id,
-                engine_type,
-            )
-            return self._setup_home_dir_storage(
-                entity_id=entity_id,
-                entity_type=entity_type,
-                bot_id=bot_id,
-                engine_type=engine_type,
-                device_scoped_home_storage=self._requires_device_scoped_home_storage(
-                    bot_type=bot_type,
-                    stage=stage,
-                ),
-            )
-
-        logger.info(
-            "[BaasService._setup_bot_storage] Use sessions dir storage: "
-            "owner_id=%s, bot_id=%s, engine_type=%s",
-            owner_id,
-            bot_id,
-            engine_type,
-        )
-        return self._setup_sessions_dir(
-            entity_id=entity_id,
-            entity_type=entity_type,
-            bot_id=bot_id,
-            engine_type=engine_type,
-        )
-
     def _should_mount_home_dir_storage(self, *, owner_id: str, bot_id: str) -> bool:
         """判断当前 bot 是否切换到 home 目录挂载。
 
@@ -2898,74 +2496,6 @@ class BaasService:  # pragma: no cover
                 exc,
             )
             return False
-
-    def _setup_sessions_dir(
-            self,
-            entity_id: str,
-            entity_type: str,
-            bot_id: str,
-            engine_type: str = DEFAULT_ENGINE_TYPE,
-    ) -> Storage:
-
-        # sessions NAS 远端路径（{device_uuid} 占位符由 BaaS 层赋值，service bot 多副本按设备隔离）。
-        # 重启不丢 session 改由原地 restart 保证（device_uuid 不变），不靠去掉后缀。
-        from agentclaw.community.core.workspace.path_factory import get_bot_nas_storage_id
-        nas_storage_id = get_bot_nas_storage_id(
-            entity_id=entity_id, bot_id=bot_id, engine_type=engine_type, entity_type=entity_type,
-        )
-        sessions_storage_id = f"{nas_storage_id}_{{device_uuid}}"
-
-        # 引擎感知：sessions 目录由 EngineSandboxProvider 自描述,
-        # BaasService 不再拼接引擎相关的子路径约定。
-        provider = self._resolve_sandbox_provider(engine=engine_type)
-        sessions_dir = provider.get_sessions_dir()
-
-        storage = Storage(
-            type="nas",
-            storage_id=sessions_storage_id,
-            quota="1Gi",
-            permission="0777",
-            path=sessions_dir,
-        )
-
-        return storage
-
-    def _setup_home_dir_storage(
-            self,
-            entity_id: str,
-            entity_type: str,
-            bot_id: str,
-            engine_type: str = DEFAULT_ENGINE_TYPE,
-            device_scoped_home_storage: bool = False,
-    ) -> Storage:
-
-        # 个人 Bot / 草稿服务 Bot 只有一个运行态来源，home 目录复用 bot 级 NAS。
-        # 预发/生产服务 Bot 支持多实例，每台 BaaS 设备要隔离自己的 home NAS。
-        from agentclaw.community.core.workspace.path_factory import get_bot_nas_storage_id
-        nas_storage_id = get_bot_nas_storage_id(
-            entity_id=entity_id, bot_id=bot_id, engine_type=engine_type, entity_type=entity_type,
-        )
-        if device_scoped_home_storage:
-            nas_storage_id = f"{nas_storage_id}_{{device_uuid}}"
-
-        storage = Storage(
-            type="nas",
-            storage_id=nas_storage_id,
-            quota="1Gi",
-            permission="0777",
-            path="/home/admin",
-        )
-
-        return storage
-
-    @staticmethod
-    def _requires_device_scoped_home_storage(*, bot_type: str, stage: str) -> bool:
-        """预发/生产服务 Bot 支持多实例，home NAS 需要按 BaaS device_uuid 隔离。"""
-        return (
-            (bot_type or "").strip().lower() == "service"
-            and (stage or "").strip().lower()
-            in {PublishStage.VERIFY.value, PublishStage.ONLINE.value, PublishStage.EVAL.value}
-        )
 
     def _resolve_bot_type(self, bot_id: str, owner_id: str) -> str | None:
         """根据 bot_id + owner_id 查询 bot_type（供 outbound rule 选择 secret）。"""
@@ -3642,25 +3172,49 @@ class BaasService:  # pragma: no cover
         if stage == PublishStage.DRAFT.value:
             binding_id = bot.get("binding_id")
         elif stage in {PublishStage.VERIFY.value, PublishStage.ONLINE.value}:
-            if (
-                not isinstance(publish_id, int)
-                or isinstance(publish_id, bool)
-                or publish_id <= 0
-            ):
-                raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
-            record = self._bot_publish_repo.get_by_id(publish_id)
-            if (
-                record is None
-                or getattr(record, "source_bot_id", None) != bot_id
-                or getattr(record, "owner_id", None) != owner_user_id
-            ):
-                raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
-            ext = getattr(record, "ext", None)
-            binding_id = (
-                (ext.get("binding") or {}).get(stage)
-                if isinstance(ext, dict)
-                else None
-            )
+            if publish_id is None:
+                # Delayed to avoid the engine_runtime package's composition
+                # imports forming a cycle while service_bot is initialized.
+                from agentclaw.community.core.engine_runtime.stage import (
+                    DeviceNotBoundError,
+                    EngineStageNotLiveError,
+                    resolve_stage_bind_id,
+                )
+
+                try:
+                    binding_id = resolve_stage_bind_id(
+                        self._bot_publish_repo,
+                        self._device_binding_repo,
+                        bot_pk=int(bot.get("id") or 0),
+                        bot_id=bot_id,
+                        stage=stage,
+                        env=str(bot.get("env") or ""),
+                    )
+                except (DeviceNotBoundError, EngineStageNotLiveError, ValueError) as exc:
+                    raise CallerCredentialError(CALLER_TARGET_NOT_FOUND) from exc
+            else:
+                # Retain the internal/legacy exact-version path.  The public
+                # OpenAPI no longer accepts publish_id and always uses the
+                # server-selected live release above.
+                if (
+                    not isinstance(publish_id, int)
+                    or isinstance(publish_id, bool)
+                    or publish_id <= 0
+                ):
+                    raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
+                record = self._bot_publish_repo.get_by_id(publish_id)
+                if (
+                    record is None
+                    or getattr(record, "source_bot_id", None) != bot_id
+                    or getattr(record, "owner_id", None) != owner_user_id
+                ):
+                    raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+                ext = getattr(record, "ext", None)
+                binding_id = (
+                    (ext.get("binding") or {}).get(stage)
+                    if isinstance(ext, dict)
+                    else None
+                )
         else:
             raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
         if not self._is_valid_caller_binding_id(binding_id):
@@ -3876,6 +3430,7 @@ class BaasService:  # pragma: no cover
         device_uuid: Optional[str] = None,
         auth_header: str = "openclawToken",
         timeout: float | None = None,
+        http_info: Optional[HttpConnectionInfo] = None,
     ) -> httpx.Response:
         """容器内 API 统一出口：封装 get_http_info + 直传完整 http_url。
 
@@ -3905,6 +3460,13 @@ class BaasService:  # pragma: no cover
                 需传 ``"x-proxypass-token"`` —— 该网关用此 header 鉴权，传 openclawToken
                 会 401。``info.token`` 是网关对应的 token，header 名不同而已。
             timeout: 获取连接信息并调用容器 API 的总超时秒数；不传时沿用各请求默认值。
+            http_info: 已解析好的连接信息。传入时跳过 get_http_info（省掉一次
+                binding 查库 + 一次 BaaS 往返），直接用它的 ``http_url``/``token``
+                发请求。调用方须保证它是用**同一** bind_id / port / **path** /
+                tenant / device_uuid 解析出来的 —— ``http_url`` 里含 path，换个
+                path 复用会打到错误的容器路由。批量同 path 请求（如逐文件
+                ``/api/file/upload``）由 ``BaasInvokeTransport`` 按 path 缓存后
+                在此复用。
 
         Returns:
             httpx.Response — 来自 self._general_http 的原始响应，供调用方自行处理
@@ -3916,18 +3478,24 @@ class BaasService:  # pragma: no cover
             raise ValueError("timeout must be positive")
 
         started_at = time.monotonic() if timeout is not None else None
-        http_info_timeout_kwargs = (
-            {"timeout": min(timeout, 5.0)} if timeout is not None else {}
-        )
-        info = self.get_http_info(
-            bind_id=bind_id,
-            port=port,
-            path=path,
-            tenant=tenant,
-            device_affinity=device_affinity,
-            device_uuid=device_uuid,
-            **http_info_timeout_kwargs,
-        )
+        if http_info is not None:
+            # Caller already resolved this (same bind_id/port/path/tenant/device_uuid)
+            # and is reusing it across a batch — the whole ``timeout`` budget is the
+            # container request's, since no resolution round trip is spent here.
+            info = http_info
+        else:
+            http_info_timeout_kwargs = (
+                {"timeout": min(timeout, 5.0)} if timeout is not None else {}
+            )
+            info = self.get_http_info(
+                bind_id=bind_id,
+                port=port,
+                path=path,
+                tenant=tenant,
+                device_affinity=device_affinity,
+                device_uuid=device_uuid,
+                **http_info_timeout_kwargs,
+            )
 
         request_timeout_kwargs: dict[str, float] = {}
         if timeout is not None and started_at is not None:

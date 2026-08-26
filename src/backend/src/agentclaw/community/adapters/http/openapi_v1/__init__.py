@@ -176,7 +176,15 @@ from fastapi import APIRouter, Depends
 from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
+from .collaboration_bots import public_router as collaboration_public_router
+from .task import task_router
 from .bots.engine_config import router as engine_config_router
+from .org import dept_router as org_dept_router
+from .org import router as org_router
+from .channels import router as channels_router
+from .containers import router as containers_router
+from .diagnostics import router as diagnostics_router
+from .editors import router as editors_router
 from .deprecated import (
     ENGINE_RUNTIME_GROUPS as _LEGACY_ENGINE_RUNTIME,
     GRANT_CHECKED_GROUPS as _LEGACY_GRANT_CHECKED,
@@ -186,6 +194,7 @@ from .contracts import (
     ENGINE_RUNTIME_ERROR_RESPONSES,
     ERROR_RESPONSES,
     USER_SCOPED_ERROR_RESPONSES,
+    SPACE_SCOPED_ERROR_RESPONSES,
 )
 from .dependencies import require_principal
 from .principal import require_granted_addressed_bot, require_granted_own_bot
@@ -193,20 +202,46 @@ from .engine_runtime.approvals import router as engine_approvals_router
 from .engine_runtime.connection import router as engine_connection_router
 from .engine_runtime.engine import router as engine_engine_router
 from .engine_runtime.models import router as engine_models_router
+from .engine_runtime.nodes import router as engine_nodes_router
 from .engine_runtime.sessions import router as engine_sessions_router
 from .harness import harness_router
 from .identity import router as identity_router
+from .local import router as local_router
 from .loadtest import router as loadtest_router
+from .market import router as market_router
 from .mcp import router as mcp_router
+from .mcp.router import bot_mcp_router
 from .bot_logs import router as logs_router
+from .bot_chats import router as chats_router
+from .bot_public import router as bot_public_router
 from .resources import router as resources_router
+from .render_screens import router as render_screens_router
+from .repository_catalog import router as repository_catalog_router
 from .routines import router as routines_router
+from .skills import publish_status_router as skill_publish_status_router
 from .skills import router as skills_router
+from .skill_sets import router as skill_sets_router
+from .service_publications import (
+    edit_lock_router as service_edit_lock_router,
+    router as service_lifecycle_router,
+)
+from .spaces import router as spaces_router
+from .work_orders import router as work_orders_router
+from agentclaw.community.adapters.http.openapi_v1.authorization import (
+    PublicAPIRoute,
+    assert_every_route_authorized,
+)
+from .token import token_router
 
 # Every public route lives under this prefix. Exported so app-level handlers can
 # tell a public request from an internal one (e.g. to envelope validation errors
 # only on this surface).
-PUBLIC_API_PREFIX = "/openapi/v1"
+#: Re-exported so existing callers keep importing it from here; the
+#: definition lives in ``contracts`` so ``access_log`` can read it at module
+#: scope without closing an import loop back through this package.
+from agentclaw.community.adapters.http.openapi_v1.contracts import (  # noqa: E402
+    PUBLIC_API_PREFIX,
+)
 
 # The groups that answer no 403, because no route in them is scoped by the
 # *caller's* user: Bot Logs never derived a user from the credential at all, and
@@ -242,7 +277,13 @@ _MIXED_GROUPS = [
 # retiring addresses. See "Mount order" above. Splitting them across lists is
 # about which *response table* each gets; it does not change that they all
 # precede `bots`.
+_OPEN_SUBGROUPS = [
+    # Skill Workbench status is tenant-identical and app-admissible.
+    skill_publish_status_router,
+]
+
 _SUBGROUPS = [
+    token_router,
     # Both authorization groups precede `bots` below. `authorized_apps_router`
     # sits *under* `{bot_id}` so path shape already keeps it distinct, but
     # `authorized_bots_router` is a top-level literal and genuinely depends on
@@ -250,18 +291,43 @@ _SUBGROUPS = [
     # claiming it.
     authorized_apps_router,
     authorized_bots_router,
-    # Mixed, like `bots`: its two collection operations declare the grant check
-    # per route, and its four `{skill_id}` operations resolve the bot's owner
-    # from the skill record and check it themselves. A group-level dependency
-    # here would refuse an application holding a valid grant on a *shared* bot,
-    # because it would look the grant up against the delegating user rather than
-    # the owner. See `skills/router.py` and `admission.SKILL_SCOPED_OPERATIONS`.
+    # Product Bot Chat reads are bot-first and use the product service's
+    # owner/collaborator adjudication. Their own route dependency checks an
+    # app-only caller's grant against the addressed owner.
+    chats_router,
+    # Every current Skill operation carries the addressed owner at its public
+    # boundary, so collection and item operations share one grant model.
     skills_router,
+    # Local workflows are mixed: listings filter grants, device discovery is
+    # user-gated, existing Bot operations check the own-Bot grant, and only the
+    # creation/authorization pair remains human-only. Dependencies are declared
+    # per route in the local router.
+    local_router,
     # Harness public surface: every route is `{bot_id}`-first under
     # `/bots/{bot_id}/harness/...` and performs its own owner/collaborator
     # check via `HarnessBotAccessDep`, so it joins the plain subgroups with
     # only `_PUBLIC_AUTH` + the user-scoped error table.
     harness_router,
+]
+
+# These groups may address a shared Bot. ``OwnerIdDep`` performs the same grant
+# check transitively while resolving the addressed owner, but the mount also
+# declares it explicitly so the admission rule is visible where the public
+# surface is assembled. FastAPI caches the shared dependency per request.
+_ADDRESSED_BOT_SUBGROUPS = [
+    # Bot grants lend the delegating user's live Bot permissions. Editors and
+    # render screens therefore use the same addressed-owner grant boundary as
+    # the other shared-Bot configuration groups; their services still enforce
+    # the caller's effective Owner/Admin/Member level for each operation.
+    editors_router,
+    render_screens_router,
+    service_lifecycle_router,
+    service_edit_lock_router,
+    containers_router,
+    diagnostics_router,
+    channels_router,
+    skill_sets_router,
+    bot_mcp_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it
@@ -304,6 +370,7 @@ _ENGINE_RUNTIME_GROUPS = [
     engine_sessions_router,
     engine_engine_router,
     engine_models_router,
+    engine_nodes_router,
     engine_approvals_router,
     engine_connection_router,
 ]
@@ -347,7 +414,59 @@ def build_public_router() -> APIRouter:
     ``user_id`` parameter itself is always per handler (see "Naming the end
     user" above).
     """
-    public = APIRouter()
+    public = APIRouter(route_class=PublicAPIRoute)
+    # The caller's own identity — the one operation whose answer IS the user,
+    # so it takes no ``user_id`` and can answer no 403: it gets the base error
+    # table, not the user-scoped one. The caller is the sole top-level public
+    # resource here because it describes the authenticated principal itself.
+    public.include_router(
+        org_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Department directory search — a tenant-wide catalogue read (no ``user_id``),
+    # backed by the same StaffDeptPlugin as the whoami's dept fields.
+    public.include_router(
+        org_dept_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Space and work-order APIs use literal groups under the common ``bots``
+    # namespace, but are not scoped to one bot and therefore do not inherit a
+    # bot grant gate.
+    public.include_router(
+        spaces_router,
+        responses=SPACE_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    public.include_router(
+        work_orders_router,
+        responses=SPACE_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    for router in _OPEN_SUBGROUPS:
+        public.include_router(
+            router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+        )
+    # Tenant-identical marketplace queries. This literal group must be mounted
+    # before the ``{bot_id}`` wildcard router below.
+    public.include_router(
+        market_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Tenant-identical Bot catalog queries. The catalog has no user dimension,
+    # so it publishes the base error table and admits User or App principals.
+    public.include_router(
+        bot_public_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    public.include_router(
+        repository_catalog_router,
+        responses=USER_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
     for router in _GROUPS_WITHOUT_CALLER_SCOPE + _MIXED_GROUPS:
         public.include_router(
             router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
@@ -361,6 +480,12 @@ def build_public_router() -> APIRouter:
             router,
             responses=USER_SCOPED_ERROR_RESPONSES,
             dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_OWN_BOT,
+        )
+    for router in _ADDRESSED_BOT_SUBGROUPS:
+        public.include_router(
+            router,
+            responses=USER_SCOPED_ERROR_RESPONSES,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_ADDRESSED_BOT,
         )
     # The engine-runtime groups already run this exact check transitively —
     # their `OwnerIdDep` consumes the owner it returns — so declaring it at the
@@ -401,6 +526,34 @@ def build_public_router() -> APIRouter:
     public.include_router(
         bots_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
     )
+    # New-version bcs publish-to-users: served at the external contract path
+    # POST /openapi/v1/collaboration/bots/{bot_uuid}/public. The gateway's
+    # collaboration-publish domain verbatim-forwards it here (no rewrite), so the
+    # backend serves the public address directly. user-scoped responses for the
+    # openapi_v1 admission contract; authz deferred per design (caller identity
+    # via _PUBLIC_AUTH/UserIdDep, no grant check yet).
+    public.include_router(
+        collaboration_public_router,
+        responses=USER_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Task public surface (execute/dashboard/list) — served at the external
+    # contract path the gateway's `collaboration-tasks` domain routes to the
+    # backend (pulled out of the broad collaboration→bcs namespace). Not
+    # bot-scoped, no grant gate; caller identity via _PUBLIC_AUTH/UserIdDep,
+    # authz via the table. Mixed group: execute/dashboard have no user dimension
+    # (no 403), only `list` is user-scoped and declares its 403 per-route — so
+    # the mount uses the base ERROR_RESPONSES, not USER_SCOPED_ERROR_RESPONSES.
+    public.include_router(
+        task_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # The two failures `PublicAPIRoute` cannot see itself: a router built
+    # without it (whose routes never ran its `__init__`), and a table row left
+    # behind by a rename. Raising here means the application does not start,
+    # which is the point — an operation nothing governs is never served.
+    assert_every_route_authorized(public)
     return public
 
 

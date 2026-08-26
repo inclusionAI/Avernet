@@ -26,10 +26,19 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_domain::{
-    invite_token_decode_and_verify, invite_token_encode, InviteTargetType, InviteTokenError,
-    InviteTokenPayload,
+    invite_token_decode_and_verify, invite_token_encode, ActorKind, InviteTargetType,
+    InviteTokenError, InviteTokenPayload,
 };
 use bcs_service_api::application::v1::{
+    friend_connection::{
+        AcceptFriendConnectionRequest, CancelFriendConnectionRequest,
+        CreateFriendConnectionRequest, DeleteFriendConnection, FriendConnectionActor,
+        FriendConnectionActorType, FriendConnectionCreateResult, FriendConnectionCreateStatus,
+        FriendConnectionPage, FriendConnectionRequestDirection, FriendConnectionRequestPage,
+        FriendConnectionRequestStatus, FriendConnectionRequestView, FriendConnectionService,
+        FriendConnectionView, ListFriendConnectionRequests, ListFriendConnections,
+        RejectFriendConnectionRequest,
+    },
     friendship::FriendRequestDirection,
     invitation::InvitationState,
     AcceptFriendRequest, AcceptInvitation, ApplicationError, CreateBotFriendRequest,
@@ -39,7 +48,8 @@ use bcs_service_api::application::v1::{
     RejectFriendRequest, require_authenticated_user, require_human,
 };
 use bcs_service_api::{
-    ActorKind, BotRegistryCoreService, FriendCoreService, FriendRequestCoreService,
+    application::{ConnectService, ConnectStatus, RequestDirection},
+    BotRegistryCoreService, FriendCoreService, FriendRequestCoreService,
     FriendRequest as DomainFriendRequest, FriendRequestDirection as DomainFriendRequestDirection,
     Friendship as DomainFriendship, Group as DomainGroup, GroupCoreService, GroupKind,
     GroupStatus, GroupStrategy, InviteService, InviteUseCaseError, JoinByInviteCommand,
@@ -68,6 +78,7 @@ pub struct InvitationFriendshipServiceImpl {
     sessions: Arc<dyn SessionManagementService>,
     registry: Arc<dyn BotRegistryCoreService>,
     invite: Arc<dyn InviteService>,
+    connect: Option<Arc<dyn ConnectService>>,
     token_secret: Vec<u8>,
     config: InvitationFriendshipServiceConfig,
 }
@@ -91,9 +102,24 @@ impl InvitationFriendshipServiceImpl {
             sessions,
             registry,
             invite,
+            connect: None,
             token_secret,
             config,
         }
+    }
+
+    pub fn with_friend_connection_service(
+        mut self,
+        connect: Arc<dyn ConnectService>,
+    ) -> Self {
+        self.connect = Some(connect);
+        self
+    }
+
+    fn connect_service(&self) -> Result<&Arc<dyn ConnectService>, ApplicationError> {
+        self.connect.as_ref().ok_or_else(|| {
+            ApplicationError::internal("friend connection service is not configured")
+        })
     }
 
     // ── authorization helpers ──────────────────────────────────────────
@@ -678,6 +704,340 @@ fn map_service_error(error: ServiceError) -> ApplicationError {
             ApplicationError::invalid("invalid_request", message)
         }
         other => ApplicationError::internal(other.to_string()),
+    }
+}
+
+// ── friend-connections (edge-permission) helpers ──────────────────────
+
+impl InvitationFriendshipServiceImpl {
+    fn caller_default_actor(
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+    ) -> Result<String, ApplicationError> {
+        if let Some(bot) = &caller.bot {
+            return Ok(bot.bot_uuid.clone());
+        }
+        let user = require_authenticated_user(caller)?;
+        Ok(format!("human_{}", user.id))
+    }
+
+    fn actor_to_internal(actor: &FriendConnectionActor) -> String {
+        match actor.actor_type {
+            FriendConnectionActorType::Human => format!("human_{}", actor.id),
+            FriendConnectionActorType::Bot => actor.id.clone(),
+        }
+    }
+
+    fn actor_from_internal(actor_id: &str) -> FriendConnectionActor {
+        if let Some(human_id) = actor_id.strip_prefix("human_") {
+            FriendConnectionActor {
+                actor_type: FriendConnectionActorType::Human,
+                id: human_id.to_string(),
+            }
+        } else {
+            FriendConnectionActor {
+                actor_type: FriendConnectionActorType::Bot,
+                id: actor_id.to_string(),
+            }
+        }
+    }
+
+    async fn resolve_acting_actor(
+        &self,
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+        requested: Option<&FriendConnectionActor>,
+    ) -> Result<String, ApplicationError> {
+        let default_actor = Self::caller_default_actor(caller)?;
+        let Some(requested) = requested else {
+            return Ok(default_actor);
+        };
+        let requested_id = Self::actor_to_internal(requested);
+        if requested_id == default_actor {
+            return Ok(requested_id);
+        }
+        if requested.actor_type == FriendConnectionActorType::Bot {
+            if let Some(user) = &caller.user {
+                let bot = self.load_bot(&requested.id).await?;
+                if bot.created_by.as_deref() == Some(user.id.as_str()) {
+                    return Ok(requested_id);
+                }
+            }
+        }
+        Err(ApplicationError::forbidden(format!(
+            "Authenticated principal cannot act as actor '{requested_id}'"
+        )))
+    }
+
+    async fn resolve_request_decider(
+        &self,
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+        request: &bcs_domain::edge_permission::PermissionRequest,
+    ) -> Result<String, ApplicationError> {
+        let default_actor = Self::caller_default_actor(caller)?;
+        if request.to_id == default_actor {
+            return Ok(default_actor);
+        }
+        if let Some(user) = &caller.user {
+            if !request.to_id.starts_with("human_") {
+                let bot = self.load_bot(&request.to_id).await?;
+                if bot.created_by.as_deref() == Some(user.id.as_str()) {
+                    return Ok(request.to_id.clone());
+                }
+            }
+        }
+        Err(ApplicationError::forbidden(format!(
+            "Authenticated principal cannot decide request '{}'",
+            request.request_id
+        )))
+    }
+
+    async fn ensure_can_cancel_request(
+        &self,
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+        request: &bcs_domain::edge_permission::PermissionRequest,
+    ) -> Result<(), ApplicationError> {
+        let default_actor = Self::caller_default_actor(caller)?;
+        if request.created_by == default_actor || request.from_id == default_actor {
+            return Ok(());
+        }
+        if let Some(user) = &caller.user {
+            if !request.from_id.starts_with("human_") {
+                let bot = self.load_bot(&request.from_id).await?;
+                if bot.created_by.as_deref() == Some(user.id.as_str()) {
+                    return Ok(());
+                }
+            }
+        }
+        Err(ApplicationError::forbidden(format!(
+            "Authenticated principal cannot cancel request '{}'",
+            request.request_id
+        )))
+    }
+}
+
+#[async_trait]
+impl FriendConnectionService for InvitationFriendshipServiceImpl {
+    async fn create_friend_connection_request(
+        &self,
+        command: CreateFriendConnectionRequest,
+    ) -> Result<FriendConnectionCreateResult, ApplicationError> {
+        let connect = self.connect_service()?;
+        let from = self
+            .resolve_acting_actor(&command.caller, command.from_actor.as_ref())
+            .await?;
+        if command.to_actor.actor_type != FriendConnectionActorType::Bot {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "to_actor.type must be bot for friend connection requests",
+            ));
+        }
+        let result = connect
+            .create_connect(&from, &command.to_actor.id, command.message, None)
+            .await
+            .map_err(map_service_error)?;
+        let status = match result.status {
+            ConnectStatus::Pending => FriendConnectionCreateStatus::Pending,
+            ConnectStatus::Approved => FriendConnectionCreateStatus::Approved,
+            ConnectStatus::PublicNoEdge => FriendConnectionCreateStatus::PublicNoEdge,
+        };
+        Ok(FriendConnectionCreateResult {
+            request_ids: result.request_ids,
+            edge_ids: result.edge_ids,
+            status,
+            auto_accepted: result.auto_accepted,
+        })
+    }
+
+    async fn list_friend_connection_requests(
+        &self,
+        command: ListFriendConnectionRequests,
+    ) -> Result<FriendConnectionRequestPage, ApplicationError> {
+        if command.page_size == 0 || command.page_size > 100 {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "page_size must be between 1 and 100",
+            ));
+        }
+        let connect = self.connect_service()?;
+        let actor = self
+            .resolve_acting_actor(&command.caller, command.actor.as_ref())
+            .await?;
+        let direction = match command.direction {
+            FriendConnectionRequestDirection::Received => RequestDirection::Received,
+            FriendConnectionRequestDirection::Sent => RequestDirection::Sent,
+            FriendConnectionRequestDirection::All => RequestDirection::All,
+        };
+        let status = command.status.map(|status| match status {
+            FriendConnectionRequestStatus::Pending => {
+                bcs_domain::edge_permission::RequestStatus::Pending
+            }
+            FriendConnectionRequestStatus::Approved => {
+                bcs_domain::edge_permission::RequestStatus::Approved
+            }
+            FriendConnectionRequestStatus::Rejected => {
+                bcs_domain::edge_permission::RequestStatus::Rejected
+            }
+            FriendConnectionRequestStatus::Cancelled => {
+                bcs_domain::edge_permission::RequestStatus::Cancelled
+            }
+        });
+        let page = connect
+            .list_requests(&actor, direction, status, command.page, command.page_size)
+            .await
+            .map_err(map_service_error)?;
+        Ok(FriendConnectionRequestPage {
+            items: page.items.iter().map(project_friend_connection_request).collect(),
+            total: page.total,
+            page: page.page,
+            page_size: page.page_size,
+        })
+    }
+
+    async fn accept_friend_connection_request(
+        &self,
+        command: AcceptFriendConnectionRequest,
+    ) -> Result<FriendConnectionRequestView, ApplicationError> {
+        let connect = self.connect_service()?;
+        let request = connect
+            .get_request(&command.request_id)
+            .await
+            .map_err(map_service_error)?;
+        let decider = self.resolve_request_decider(&command.caller, &request).await?;
+        connect
+            .approve(&command.request_id, &decider)
+            .await
+            .map_err(map_service_error)?;
+        let updated = connect
+            .get_request(&command.request_id)
+            .await
+            .map_err(map_service_error)?;
+        Ok(project_friend_connection_request(&updated))
+    }
+
+    async fn reject_friend_connection_request(
+        &self,
+        command: RejectFriendConnectionRequest,
+    ) -> Result<FriendConnectionRequestView, ApplicationError> {
+        let connect = self.connect_service()?;
+        let request = connect
+            .get_request(&command.request_id)
+            .await
+            .map_err(map_service_error)?;
+        let decider = self.resolve_request_decider(&command.caller, &request).await?;
+        connect
+            .reject(&command.request_id, &decider, command.reason)
+            .await
+            .map_err(map_service_error)?;
+        let updated = connect
+            .get_request(&command.request_id)
+            .await
+            .map_err(map_service_error)?;
+        Ok(project_friend_connection_request(&updated))
+    }
+
+    async fn cancel_friend_connection_request(
+        &self,
+        command: CancelFriendConnectionRequest,
+    ) -> Result<FriendConnectionRequestView, ApplicationError> {
+        let connect = self.connect_service()?;
+        let request = connect
+            .get_request(&command.request_id)
+            .await
+            .map_err(map_service_error)?;
+        self.ensure_can_cancel_request(&command.caller, &request).await?;
+        connect
+            .cancel(&command.request_id)
+            .await
+            .map_err(map_service_error)?;
+        let updated = connect
+            .get_request(&command.request_id)
+            .await
+            .map_err(map_service_error)?;
+        Ok(project_friend_connection_request(&updated))
+    }
+
+    async fn list_friend_connections(
+        &self,
+        command: ListFriendConnections,
+    ) -> Result<FriendConnectionPage, ApplicationError> {
+        let connect = self.connect_service()?;
+        let actor = self
+            .resolve_acting_actor(&command.caller, Some(&command.actor))
+            .await?;
+        let items = connect
+            .list_friends(&actor)
+            .await
+            .map_err(map_service_error)?;
+        let total = items.len() as u32;
+        Ok(FriendConnectionPage {
+            items: items.iter().map(project_friend_connection).collect(),
+            total,
+        })
+    }
+
+    async fn delete_friend_connection(
+        &self,
+        command: DeleteFriendConnection,
+    ) -> Result<DeleteResult, ApplicationError> {
+        let connect = self.connect_service()?;
+        let caller = Self::caller_default_actor(&command.caller)?;
+        let target = Self::actor_to_internal(&command.target_actor);
+        let revoked = connect
+            .revoke_friend(&caller, &target)
+            .await
+            .map_err(map_service_error)?;
+        Ok(DeleteResult {
+            deleted: !revoked.is_empty(),
+        })
+    }
+}
+
+fn project_friend_connection_request(
+    request: &bcs_domain::edge_permission::PermissionRequest,
+) -> FriendConnectionRequestView {
+    FriendConnectionRequestView {
+        request_id: request.request_id.clone(),
+        edge_id: request.edge_id.clone(),
+        from_actor: InvitationFriendshipServiceImpl::actor_from_internal(&request.from_id),
+        to_actor: InvitationFriendshipServiceImpl::actor_from_internal(&request.to_id),
+        message: request.message.clone(),
+        status: match request.status {
+            bcs_domain::edge_permission::RequestStatus::Pending => {
+                FriendConnectionRequestStatus::Pending
+            }
+            bcs_domain::edge_permission::RequestStatus::Approved => {
+                FriendConnectionRequestStatus::Approved
+            }
+            bcs_domain::edge_permission::RequestStatus::Rejected => {
+                FriendConnectionRequestStatus::Rejected
+            }
+            bcs_domain::edge_permission::RequestStatus::Cancelled => {
+                FriendConnectionRequestStatus::Cancelled
+            }
+        },
+        decision_reason: request.decision_reason.clone(),
+        created_by: InvitationFriendshipServiceImpl::actor_from_internal(&request.created_by),
+        decided_by: request
+            .decided_by
+            .as_deref()
+            .map(InvitationFriendshipServiceImpl::actor_from_internal),
+        decided_at: request.decided_at,
+    }
+}
+
+fn project_friend_connection(
+    entry: &bcs_domain::edge_permission::FriendListEntry,
+) -> FriendConnectionView {
+    FriendConnectionView {
+        actor: match entry.kind {
+            ActorKind::Human => InvitationFriendshipServiceImpl::actor_from_internal(&entry.actor_id),
+            ActorKind::Bot => FriendConnectionActor {
+                actor_type: FriendConnectionActorType::Bot,
+                id: entry.actor_id.clone(),
+            },
+        },
+        name: entry.name.clone(),
+        summary: entry.summary.clone(),
+        is_online: entry.is_online,
     }
 }
 

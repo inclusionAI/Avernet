@@ -35,8 +35,9 @@ from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/connection", tags=["connection"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/connection", tags=["connection"], route_class=PublicAPIRoute)
 
 
 @router.get("", response_model=Envelope[Connection])

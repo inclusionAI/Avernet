@@ -8,9 +8,9 @@ internal names belong in ``#`` comments.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
 
@@ -100,8 +100,65 @@ class Bot(BaseModel):
     )
     status: str = Field(description=_BOT_STATUS_DESC)
     owner_entity_id: str = Field(
-        description="The user who owns the bot — echoes the user_id the "
-        "request named."
+        description="The user who owns the bot — echoes the user_id the request named."
+    )
+
+
+BotMetadataId = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=255),
+]
+
+
+class BotMetadataQuery(BaseModel):
+    """One exact Bot identity whose display metadata should be resolved."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bot_id: BotMetadataId = Field(description="Bot identifier.")
+    owner_id: BotMetadataId = Field(
+        description="Owner identifier paired with bot_id to identify one Bot."
+    )
+
+
+class BotMetadataQueries(BaseModel):
+    """Exact Bot identities whose display metadata should be resolved."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bots: list[BotMetadataQuery] = Field(
+        min_length=1,
+        max_length=100,
+        description=(
+            "Bot and owner identifier pairs to resolve. Pairs may come from any "
+            "upstream source; duplicates are ignored. At most 100 may be submitted."
+        ),
+    )
+
+
+class BotMetadata(BaseModel):
+    """Display-safe Bot metadata, without ownership or runtime internals."""
+
+    bot_id: str = Field(description="Unique Bot identifier.")
+    owner_id: str = Field(description="Owner identifier paired with the Bot identifier.")
+    bot_name: str = Field(description="Display name.")
+    bot_desc: str = Field(description="Display description; may be empty.")
+    engine: str = Field(description="Engine that powers the Bot.")
+    bot_type: str = Field(description="Bot kind, such as personal or service.")
+    status: str = Field(description="Current lifecycle status.")
+
+
+class BotCreateEngineProperties(BaseModel):
+    """Engine-specific properties used while creating a bot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    template: dict[str, Any] = Field(
+        description=(
+            "Application-coding template properties. Passed through unchanged to "
+            "the template validator; platform-managed identity and lifecycle "
+            "fields are not accepted."
+        ),
     )
 
 
@@ -130,13 +187,58 @@ class BotCreate(BaseModel):
     engine: str = Field(description=_ENGINE_DESC)
     cluster_name: ClusterName = Field(description=_CLUSTER_DESC)
     bot_type: BotType = Field(description=_BOT_TYPE_DESC)
-    # ``engine_options`` is deliberately absent. Nothing downstream consumes
-    # ``BotCreateSpec.extra_properties`` yet, so declaring the field would
-    # publish a contract slot the server rejects on every non-empty value —
+    space_id: str | None = Field(
+        default=None,
+        description="Business space to associate with the bot, when applicable.",
+    )
+    engine_properties: BotCreateEngineProperties | None = Field(
+        default=None,
+        description=(
+            "Optional engine-specific properties. Omit for a plain bot; provide "
+            "template for an application-coding bot."
+        ),
+    )
+    # ``engine_options`` is deliberately absent. The engine-owned bag the
+    # server actually consumes is ``engine_properties`` above (routed to the
+    # engine-selected ``EngineProvisioningStrategy.prepare_create``); an
+    # additional options slot would publish a contract nothing reads, so
+    # every non-empty value would be a request the server always rejects —
     # generated clients would compile a request that always fails. It returns
-    # here, unchanged in shape, once ``create_bot`` reads the bag; until then
-    # ``extra="forbid"`` names it in the error rather than the schema promising
-    # something untrue.
+    # here, unchanged in shape, once ``create_bot`` reads such a bag; until
+    # then ``extra="forbid"`` names it in the error rather than the schema
+    # promising something untrue.
+
+
+class BotSpaceUpdate(BaseModel):
+    """Change the Space that owns a Bot."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": {"space_id": 42}},
+    )
+
+    space_id: int = Field(
+        ge=1,
+        description=(
+            "Target Space identifier from GET /openapi/v1/spaces. Use the "
+            "numeric personal-Space id to move the Bot back to personal space."
+        ),
+    )
+
+
+class BotSpaceAssignment(BaseModel):
+    """Persisted Bot ownership-Space assignment."""
+
+    bot_id: str = Field(description="Bot whose owning Space was changed.")
+    space_id: int = Field(description="Numeric identifier of the owning Space.")
+    space_code: str = Field(description="Stable external code of the owning Space.")
+    space_name: str = Field(description="Display name of the owning Space.")
+    space_type: str = Field(
+        description="Ownership model of the Space: PERSONAL or TEAM."
+    )
+    changed: bool = Field(
+        description="False when the Bot already belonged to the requested Space."
+    )
 
 
 class BotUpdate(BaseModel):
@@ -258,6 +360,17 @@ class BotAuthStatusPoll(BaseModel):
         description="Echo of the bot type the bot was requested with; "
         "defaults to 'personal' when omitted.",
     )
+    space_id: str | None = Field(
+        default=None,
+        description="Echo of the business space the bot was requested with; "
+        "omitted resolves the caller's current space, exactly as on create.",
+    )
+    engine_properties: BotCreateEngineProperties | None = Field(
+        default=None,
+        description=(
+            "Echo of the engine-specific properties the bot was requested with."
+        ),
+    )
 
 
 class BotAuthStatus(BaseModel):
@@ -349,7 +462,7 @@ class Ceiling(BaseModel):
 
 
 class Passport(BaseModel):
-    """Agent Passport (identity credential) summary."""
+    """A bot's platform-issued identity credential summary."""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -366,6 +479,12 @@ class Passport(BaseModel):
         "identity credential downstream services authenticate the bot "
         "against. An opaque string whose shape is deployment-defined; it may "
         "equal the bot_id."
+    )
+    expire_at: str | None = Field(
+        default=None, description="License expiration time when reported."
+    )
+    certificate_url: str | None = Field(
+        default=None, description="License certificate URL when reported."
     )
 
 
@@ -434,4 +553,174 @@ class StartupScript(BaseModel):
     )
     unsupported_reason: str = Field(
         description="Empty when supported; otherwise names the cause.",
+    )
+
+
+class DataInitRequest(BaseModel):
+    """Options for starting a bot's cold-start data initialization."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    force: bool = Field(
+        default=False,
+        description="Run initialization again even if it previously completed.",
+    )
+
+
+DataInitStatus = Literal[
+    "not_started", "pending_init", "in_progress", "completed", "failed"
+]
+
+
+class DataInitResult(BaseModel):
+    """Public-safe cold-start data initialization state."""
+
+    bot_id: str = Field(description="Bot whose data initialization state is reported.")
+    status: DataInitStatus = Field(
+        description=(
+            "Current state. A trigger acknowledgement is `in_progress`; read the "
+            "same resource with GET for the persisted state."
+        )
+    )
+    message: str | None = Field(
+        default=None, description="Additional trigger detail, when available."
+    )
+    started_at: datetime | None = Field(
+        default=None,
+        description="Initialization start time, when a running attempt recorded one.",
+    )
+
+
+# ── Bot inventory card surface ─────────────────────────────────────────────
+# Card list returned by ``/openapi/v1/bots/all``. Action affordances are
+# embedded in each item; there is no rich-card detail or standalone actions route.
+# These Literals are trimmed siblings of the core enums in
+# ``core.bot_inventory.types`` (kept as strings so a pydantic schema carries
+# them as JSON enums without a circular import on the core module).
+
+DeployMode = Literal["cloud", "local"]
+BotInventoryKind = Literal["personal_cloud", "local", "service"]
+DisplayState = Literal[
+    "running",
+    "pending",
+    "failed",
+    "dormant",
+    "local_running",
+    "local_offline",
+    "local_pending",
+    "local_failed",
+    "service_draft",
+    "service_deploying",
+    "service_prestable",
+    "service_staging",
+    "service_online",
+    "service_offline",
+]
+BotAction = Literal[
+    "view",
+    "chat",
+    "edit",
+    "delete",
+    "restart",
+    "data_init",
+    "activate",
+    "open_folder",
+    "passport",
+    "engine_config",
+    "runtime_logs",
+    "engine_restart",
+    "publish_staging",
+    "publish_online",
+    "cancel_staging",
+    "upgrade",
+    "offline",
+    "retry",
+]
+
+
+class BusinessSpace(BaseModel):
+    """Business-space reference surfaced on an inventory card."""
+
+    space_id: str = Field(description="Unique identifier of the business space.")
+    name: str = Field(description="Display name of the business space.")
+    kind: str = Field(description="Space kind from the business-space owner.")
+
+
+class BotInventoryItem(BaseModel):
+    """Unified card for a personal cloud, local, or service bot."""
+
+    bot_id: str = Field(description="Unique identifier of the bot.")
+    card_id: str = Field(
+        description="Stable card identity; service cards include the publication id."
+    )
+    bot_name: str = Field(description="Display name of the bot.")
+    bot_desc: str = Field(
+        description="Description of what the bot is for; may be empty."
+    )
+    engine: str = Field(description="Engine currently assigned to the bot.")
+    bot_type: str = Field(
+        description="Underlying bot type reported by the bot service."
+    )
+    kind: BotInventoryKind = Field(
+        description="Inventory category used to render the bot card."
+    )
+    deploy_mode: DeployMode = Field(
+        description="Whether the bot runs in the cloud or on a local device."
+    )
+    display_state: DisplayState = Field(
+        description="Normalized lifecycle state used by the inventory view."
+    )
+    status: str = Field(
+        description="Lifecycle status used by the owning view. Service cards expose draft/deploying/prestable/running/offline; other cards retain their owning service's status."
+    )
+    internal_status: str | None = Field(
+        default=None,
+        description="Stored service-publication status for diagnostics; null for non-service cards.",
+    )
+    publication_id: int | None = Field(
+        default=None,
+        description="Service publication id represented by this card; otherwise null.",
+    )
+    publication_version: int | None = Field(
+        default=None,
+        description="Service publication version represented by this card; otherwise null.",
+    )
+    live_version: int | None = Field(
+        default=None, description="Currently running service version, when one exists."
+    )
+    owner_entity_id: str = Field(description="User who owns the bot.")
+    space: BusinessSpace | None = Field(
+        default=None, description="Business space containing the bot, when resolved."
+    )
+    avatar_url: str | None = Field(
+        default=None, description="Avatar URL for the bot, when configured."
+    )
+    machine_id: str | None = Field(
+        default=None,
+        description="Host device identifier for a local bot; otherwise null.",
+    )
+    mount_path: str | None = Field(
+        default=None,
+        description="Mounted workspace path for a local bot; otherwise null.",
+    )
+    passport_id: str | None = Field(
+        default=None,
+        description="Platform identity credential identifier, when issued.",
+    )
+    actions: list[BotAction] = Field(
+        default_factory=list, description="Actions currently available for this bot."
+    )
+    disabled_actions: dict[str, str] | None = Field(
+        default=None,
+        description="Unavailable actions mapped to caller-facing reasons, when any.",
+    )
+
+
+class BotActivateResult(BaseModel):
+    """Acknowledgement that a recycled personal cloud bot is reactivating."""
+
+    bot_id: str = Field(description="Bot whose reactivation was started.")
+    status: str = Field(description="Current reactivation status.")
+    message: str | None = Field(
+        default=None, description="Additional reactivation detail, when available."
     )

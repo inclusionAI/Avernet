@@ -8,7 +8,56 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Iterable
 from typing import List, Optional, Protocol, runtime_checkable
+
+from .skill_center_types import (
+    SpaceCreateData,
+    SpaceRecord,
+    SpaceSkillCreateData,
+    SpaceSkillCreationRecord,
+    SpaceSkillOwnerGrantData,
+    SpaceSkillOwnershipData,
+    SpaceSkillQueryRecord,
+)
+
+
+@runtime_checkable
+class SpaceSkillRepository(Protocol):
+    """Tenant-scoped persistence seam for additive Space Skill facts."""
+
+    @abstractmethod
+    def create_space(self, data: SpaceCreateData) -> SpaceRecord:
+        ...
+
+    @abstractmethod
+    def get_space(self, space_id: int, *, env: str) -> SpaceRecord | None:
+        ...
+
+    @abstractmethod
+    def create_space_skill(
+        self,
+        *,
+        skill_data: SpaceSkillCreateData,
+        ownership_data: SpaceSkillOwnershipData,
+        owner_grant_data: SpaceSkillOwnerGrantData,
+    ) -> SpaceSkillCreationRecord:
+        """Atomically persist the initial identity, ownership and owner grant."""
+        ...
+
+    @abstractmethod
+    def list_space_skills(
+        self,
+        *,
+        space_id: int,
+        actor_id: str,
+        env: str,
+        keyword: str | None,
+        offset: int,
+        limit: int,
+    ) -> tuple[int, list[SpaceSkillQueryRecord]]:
+        """Return a stable, database-paginated Space Skill projection."""
+        ...
 
 
 @runtime_checkable
@@ -65,17 +114,22 @@ class SkillRepository(Protocol):
         ...
 
     @abstractmethod
-    def list_bot_local_skills(
+    def list_bot_skills(
         self,
         *,
         bot_id: str,
         user_id: str,
+        skill_set_member_ids: Iterable[int],
         page: int,
         page_size: int,
         active: bool | None,
         keyword: str | None,
     ) -> tuple[int, list[dict]]:
-        """Page exact Bot-owned ``local://`` desired-state Skill metadata."""
+        """Page desired-state metadata for every Skill one Bot reaches.
+
+        ``skill_set_member_ids`` are the Skills a SkillSet bridges to the Bot,
+        resolved by the SkillSet control plane; Bot-owned rows are found here.
+        """
         ...
 
     @abstractmethod
@@ -83,6 +137,13 @@ class SkillRepository(Protocol):
         self, *, skill_id: str, bot_id: str, user_id: str
     ) -> dict | None:
         """Return one exact Bot-owned ``local://`` Skill with desired state."""
+        ...
+
+    @abstractmethod
+    def list_bot_installed_skills(
+        self, *, env: str, owner_id: str, bot_id: str
+    ) -> list[dict]:
+        """Return active-only Installation assets for one Bot."""
         ...
 
     @abstractmethod

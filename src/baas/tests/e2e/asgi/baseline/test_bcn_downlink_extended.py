@@ -68,7 +68,8 @@ _INTERACTION_RESOLVE_BODY: dict = {
             "components": {
                 "header": "Components",
                 "question": "Which components?",
-                "values": ["web", "worker"],
+                "values": ["web"],
+                "customValues": ["scheduler"],
             }
         },
     },
@@ -94,8 +95,7 @@ class TestInteractionResolve:
     ) -> None:
         body = deepcopy(_INTERACTION_RESOLVE_BODY)
         body["params"]["answers"]["components"]["values"] = [
-            "answer-must-not-leak",
-            "",
+            {"private": "answer-must-not-leak"},
         ]
 
         response = await api.client.post(
@@ -136,10 +136,12 @@ class TestInteractionResolve:
             if dependency.name == "service"
         )
         _testclient_app.dependency_overrides[dep_key] = lambda: _CapturingService()
+        body = deepcopy(_INTERACTION_RESOLVE_BODY)
+        body["params"]["answers"]["components"]["values"] = []
         try:
             response = await api.client.post(
                 _BCN_DOWNLINK_URL,
-                json=_INTERACTION_RESOLVE_BODY,
+                json=body,
                 headers=_VALID_HEADERS,
             )
         finally:
@@ -147,7 +149,8 @@ class TestInteractionResolve:
 
         assert response.status_code == 200
         assert response.json() == {"ok": True, "retryable": None, "error": None}
-        assert captured["input"].answers["components"].values == ("web", "worker")
+        assert captured["input"].answers["components"].values == ()
+        assert captured["input"].answers["components"].custom_values == ("scheduler",)
         assert captured["input"].answers["components"].header == "Components"
 
 

@@ -105,6 +105,20 @@ class TestListMCPServers:
         ]
         assert "extInfo" in original_properties
 
+    def test_forwards_tag_filter(self, client, mock_market_service):
+        mock_market_service.get_mcp_list.return_value = {
+            "success": True,
+            "data": [],
+            "total": 0,
+            "page_num": 1,
+            "page_size": 10,
+        }
+
+        resp = client.get("/api/mcp/market/list", params={"tags": ["calendar"]})
+
+        assert resp.status_code == 200
+        assert mock_market_service.get_mcp_list.call_args.kwargs["tags"] == ["calendar"]
+
 
 # ==================== GET /api/mcp/market/detail ====================
 

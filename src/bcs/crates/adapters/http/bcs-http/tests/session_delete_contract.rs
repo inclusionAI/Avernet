@@ -225,6 +225,7 @@ fn bot_participant(bot_uuid: &str, role: ParticipantRole) -> Participant {
         role,
         actor_kind: ActorKind::Bot,
         mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+        tags: Vec::new(),
     }
 }
 

@@ -1,9 +1,20 @@
 """Default no-op provisioning strategy."""
 from __future__ import annotations
 
+from typing import Any
+
+from agentclaw.community.core.bot_management.errors import (
+    BotCombinationUnsupportedError,
+    BotTemplateInvalidError,
+)
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
-from .provisioning import BotProvisioningContext, EngineProvisioningStrategy
+from .provisioning import (
+    BotCreateTemplateValidationMode,
+    BotProvisioningContext,
+    EngineProvisioningStrategy,
+    PreparedBotCreate,
+)
 
 
 class DefaultProvisioningStrategy(EngineProvisioningStrategy):
@@ -15,6 +26,48 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
     @property
     def engine_type(self) -> str:
         return self._engine_type
+
+    def prepare_create(
+        self,
+        *,
+        engine_type: str,
+        engine_properties: dict[str, Any],
+        bot_type: str,
+        deployment_mode: str,
+        space_kind: str,
+        template_validation_mode: BotCreateTemplateValidationMode = (
+            BotCreateTemplateValidationMode.LEGACY
+        ),
+    ) -> PreparedBotCreate:
+        """Reject create-time engine properties this engine does not own.
+
+        A ``template`` key means application-coding intent (new public contract
+        or legacy normalization); the combination error keeps the historical
+        409 mapping for the legacy shape instead of turning it into a 422.
+        Gates replicate the deleted ``prepare_bot_create`` ladder exactly:
+        error messages name the *requested* engine (the shared fallback
+        instance's own ``engine_type`` would say "default"), and the cloud-only
+        check still answers before the engine check.
+        """
+        if not engine_properties:
+            return PreparedBotCreate()
+        if "template" in engine_properties:
+            # Historical gate order: a local deployment reports "cloud-only"
+            # before the engine gate gets to answer.
+            if deployment_mode != "cloud":
+                raise BotCombinationUnsupportedError(
+                    "application coding is cloud-only"
+                )
+            # claude_code resolves to the Aicoding strategy, so any engine
+            # reaching this default-managed branch fails the engine gate.
+            raise BotCombinationUnsupportedError(
+                f"application coding does not support engine: {engine_type}"
+            )
+        raise BotTemplateInvalidError(
+            "engine {} does not support engine_properties: {}".format(
+                engine_type, sorted(engine_properties)
+            )
+        )
 
     def resolve_bot_engine(self, bot: dict[str, object]) -> str | None:
         engine = bot.get("active_engine")
@@ -53,6 +106,18 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
         ctx: BotProvisioningContext,
         extra_configs: dict[str, object] | None,
         *,
+        template_service: object,
+    ) -> None:
+        return None
+
+    def refresh_restart_authorization(
+        self,
+        ctx: BotProvisioningContext,
+        bot: dict[str, object],
+        extra_configs: dict[str, object] | None,
+        *,
+        passport_plugin: object,
+        skill_set_factory: object,
         template_service: object,
     ) -> None:
         return None

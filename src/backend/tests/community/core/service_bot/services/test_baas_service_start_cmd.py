@@ -8,13 +8,31 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
+    ManagedDeployConfigComposer,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
+
+
+def _make_composer() -> ManagedDeployConfigComposer:
+    """The managed image's boot chain — the four ``/home/admin/bin`` scripts and
+    the argv they take — is the composer's, so the tests that pin it are too."""
+    return ManagedDeployConfigComposer(
+        storage_path=MagicMock(),
+        sandbox_registry=MagicMock(),
+        bot_repo=MagicMock(),
+    )
 
 
 def _make_service() -> BaasService:
     """Build a ``BaasService`` with mocks — all deps are required now."""
     return BaasService(
+        deploy_composer=ManagedDeployConfigComposer(
+            storage_path=MagicMock(),
+            sandbox_registry=MagicMock(),
+            bot_repo=MagicMock(),
+        ),
         startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://test",
         tenant="test",
@@ -36,18 +54,18 @@ def _make_service() -> BaasService:
 
 class TestGetInstallEngineCmd:
     def test_uses_install_engine_script_path(self):
-        cmd = _make_service()._get_install_engine_cmd()
+        cmd = _make_composer()._get_install_engine_cmd()
         assert "/home/admin/bin/install_engine.sh" in cmd
 
     def test_has_existence_guard(self):
-        cmd = _make_service()._get_install_engine_cmd()
+        cmd = _make_composer()._get_install_engine_cmd()
         assert "if [ -f /home/admin/bin/install_engine.sh ]" in cmd
         assert "skip" in cmd
 
     def test_runs_synchronously_no_nohup(self):
         # BaaS chains commands with &&; install_engine must finish (and write
         # its marker) before setup_supervisor_sync_service.sh runs.
-        cmd = _make_service()._get_install_engine_cmd()
+        cmd = _make_composer()._get_install_engine_cmd()
         assert "nohup" not in cmd
         # No fire-and-forget backgrounding (`bash ... &`). 2>&1 is a redirect,
         # not a background, so it's fine.
@@ -55,7 +73,7 @@ class TestGetInstallEngineCmd:
         assert not cmd.rstrip().endswith("&")
 
     def test_redirects_to_log(self):
-        cmd = _make_service()._get_install_engine_cmd()
+        cmd = _make_composer()._get_install_engine_cmd()
         assert "/home/admin/logs/install_engine.log" in cmd
 
 
@@ -101,10 +119,10 @@ class TestGetStartCmdOrdering:
 
 class TestGetStartSandboxServiceCmdNasFlag:
     def test_includes_use_nas_when_home_dir_storage_enabled(self):
-        service = _make_service()
-        service._get_set_read_only_rule = MagicMock(return_value="")
+        composer = _make_composer()
+        composer._get_set_read_only_rule = MagicMock(return_value="")
 
-        cmd = service._get_start_sandbox_service_cmd(
+        cmd = composer._get_start_sandbox_service_cmd(
             engine="openclaw",
             migration_path="/tmp/src",
             bot_type="agent",
@@ -122,10 +140,10 @@ class TestGetStartSandboxServiceCmdNasFlag:
 
 class TestGetStartSandboxServiceCmdSourceDir:
     def test_omits_source_dir_when_migration_path_empty(self):
-        service = _make_service()
-        service._get_set_read_only_rule = MagicMock(return_value="")
+        composer = _make_composer()
+        composer._get_set_read_only_rule = MagicMock(return_value="")
 
-        cmd = service._get_start_sandbox_service_cmd(
+        cmd = composer._get_start_sandbox_service_cmd(
             engine="openclaw",
             migration_path="",
             bot_type="personal",
@@ -172,14 +190,19 @@ class TestStartupScriptSegment:
         ``_cmd()`` passes even if both are wrong.
         """
         svc = _make_service()
+        # The service's own composer, not a fresh one: reconstructing from a
+        # second instance would pass even if the service were wired to a
+        # different composer than the one under test.
+        composer = svc._deploy_composer
         expected = (
-            f"{svc._get_bootstrap_cmp()} && ({svc._get_install_engine_cmd()}) && "
-            f" {svc._get_start_sandbox_service_cmd(
+            f"{composer._get_bootstrap_cmp()} && "
+            f"({composer._get_install_engine_cmd()}) && "
+            f" {composer._get_start_sandbox_service_cmd(
                 'openclaw', '/tmp/src', 'agent', 'bot-1', 'owner-1',
                 'entity-1', 'user', 'online', '1', False, None,
-            )} && {svc._get_start_watchdog_cmd()}"
+            )} && {composer._get_start_watchdog_cmd()}"
         )
-        assert self._cmd("") == expected
+        assert svc._get_start_cmd(**self._ARGS, startup_script="") == expected
 
     def test_no_script_adds_nothing_from_the_user_stage(self):
         cmd = self._cmd("")
@@ -374,6 +397,11 @@ class TestStartupScriptReachesEveryStartPath:
         mistake is a TypeError naming the argument."""
         with pytest.raises(TypeError, match="startup_script_reader"):
             BaasService(
+                deploy_composer=ManagedDeployConfigComposer(
+                    storage_path=MagicMock(),
+                    sandbox_registry=MagicMock(),
+                    bot_repo=MagicMock(),
+                ),
                 baas_api_base="http://test",
                 tenant="test",
                 template_uuid="test",

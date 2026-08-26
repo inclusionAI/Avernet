@@ -83,6 +83,7 @@ from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
 from .schemas import FileEntry, Preview, ResourceType
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 logger = get_logger()
 
@@ -252,7 +253,7 @@ async def _list_dir_or_empty(
     return listed or []
 
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/resources", tags=["resources"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/resources", tags=["resources"], route_class=PublicAPIRoute)
 
 #: The query parameter addressing a file or folder, documented once. Kept as an
 #: Annotated default so handlers stay directly callable in tests.

@@ -1,0 +1,34 @@
+id: hello-demo
+version: "1.0.0"
+title: TaskGuard Hello Demo
+description: |
+  A minimal built-in demo pack for TaskGuard. It shows how to receive user input,
+  pass data between phases, reference node outputs, and finish with a done node.
+  Suitable as a starting point for new workflow authors.
+
+workflows:
+  - id: hello-world
+    file: workflows/hello-world.yaml
+  - id: greeting-chain
+    file: workflows/greeting-chain.yaml
+
+facades:
+  - command: hello
+    defaultWorkflow: hello-world
+    aliases: [hello-world]
+    help:
+      title: Hello World Demo
+      summary: A minimal 3-phase workflow that greets the user.
+      examples:
+        - "/hello World"
+        - "/hello Alice"
+
+  - command: greet
+    defaultWorkflow: greeting-chain
+    aliases: [greeting-chain]
+    help:
+      title: Greeting Chain Demo
+      summary: A 4-phase workflow that chains analysis and personalization.
+      examples:
+        - "/greet Alice"
+        - "/greet Bob --style formal"

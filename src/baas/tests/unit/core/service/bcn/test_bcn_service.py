@@ -234,8 +234,7 @@ async def test_handle_ask_user_resolve_normalizes_all_values_as_ordinary(
 
     assert result.ok is True
     mock_interaction_service.resolve.assert_called_once_with(
-        session_key="session-1",
-        interaction_id="interaction-ask-1",
+        baas_interaction_id="interaction-ask-1",
         resolution=InteractionResolution(
             kind="ask_user",
             decision="submit",
@@ -267,6 +266,140 @@ async def test_handle_ask_user_resolve_normalizes_all_values_as_ordinary(
         },
         idempotency_key="idem-ask-1",
     )
+
+
+@pytest.mark.asyncio
+async def test_handle_ask_user_resolve_normalizes_explicit_custom_values(
+    service, mock_interaction_service
+) -> None:
+    result = await service.handle_interaction_resolve(
+        _make_interaction_resolve_input(
+            answers={
+                "deploy_target": BcnInteractionAnswer(
+                    values=(),
+                    custom_values=("private cloud",),
+                    question="what's your deploy target?",
+                    header="Deployment environment",
+                ),
+                "components": BcnInteractionAnswer(
+                    values=("web",),
+                    custom_values=("scheduler",),
+                    question="whats' the components?",
+                    header="Components",
+                ),
+            }
+        )
+    )
+
+    assert result.ok is True
+    mock_interaction_service.resolve.assert_called_once_with(
+        baas_interaction_id="interaction-ask-1",
+        resolution=InteractionResolution(
+            kind="ask_user",
+            decision="submit",
+            answer=(
+                "Deployment environment: 自定义输入: private cloud；"
+                "Components: web，自定义输入: scheduler"
+            ),
+            message=(
+                "Deployment environment: 自定义输入: private cloud；"
+                "Components: web，自定义输入: scheduler"
+            ),
+            values={
+                "Deployment environment": "自定义输入: private cloud",
+                "Components": "web，自定义输入: scheduler",
+            },
+            answers={
+                "what's your deploy target?": "自定义输入: private cloud",
+                "whats' the components?": "web，自定义输入: scheduler",
+            },
+            selected_options=(("other",), ("other",)),
+        ),
+        request_envelope={
+            "type": "req",
+            "id": "bcn-resolve-1",
+            "method": "interaction.resolve",
+        },
+        idempotency_key="idem-ask-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_ask_user_resolve_preserves_blank_custom_values(
+    service, mock_interaction_service
+) -> None:
+    result = await service.handle_interaction_resolve(
+        _make_interaction_resolve_input(
+            answers={
+                "blank": BcnInteractionAnswer(
+                    values=(),
+                    custom_values=("", "   "),
+                    question="Keep blank custom input?",
+                    header="Blank",
+                )
+            }
+        )
+    )
+
+    assert result.ok is True
+    rendered = "自定义输入: ，自定义输入:    "
+    mock_interaction_service.resolve.assert_called_once_with(
+        baas_interaction_id="interaction-ask-1",
+        resolution=InteractionResolution(
+            kind="ask_user",
+            decision="submit",
+            answer=f"Blank: {rendered}",
+            message=f"Blank: {rendered}",
+            values={"Blank": rendered},
+            answers={"Keep blank custom input?": rendered},
+            selected_options=(("other",),),
+        ),
+        request_envelope={
+            "type": "req",
+            "id": "bcn-resolve-1",
+            "method": "interaction.resolve",
+        },
+        idempotency_key="idem-ask-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_ask_user_resolve_preserves_skipped_values(
+    service, mock_interaction_service
+) -> None:
+    result = await service.handle_interaction_resolve(
+        _make_interaction_resolve_input(
+            answers={
+                "empty_array": BcnInteractionAnswer(
+                    values=(),
+                    question="Skip with an empty array?",
+                    header="Array",
+                ),
+                "empty_string": BcnInteractionAnswer(
+                    values=("",),
+                    question="Skip with an empty string?",
+                    header="Empty",
+                ),
+                "whitespace": BcnInteractionAnswer(
+                    values=("   ",),
+                    question="Skip with whitespace?",
+                    header="Blank",
+                ),
+            }
+        )
+    )
+
+    assert result.ok is True
+    resolution = mock_interaction_service.resolve.call_args.kwargs["resolution"]
+    assert resolution.answer == "；".join(["Array: ", "Empty: ", "Blank:    "])
+    assert resolution.message == resolution.answer
+    assert resolution.values == {"Array": "", "Empty": "", "Blank": "   "}
+    assert resolution.answers == {
+        "Skip with an empty array?": "",
+        "Skip with an empty string?": "",
+        "Skip with whitespace?": "   ",
+    }
+    assert resolution.selected_options == ((), ("",), ("   ",))
 
 
 @pytest.mark.asyncio

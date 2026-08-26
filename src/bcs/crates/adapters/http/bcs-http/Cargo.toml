@@ -46,10 +46,14 @@ uuid            = { workspace = true }
 sha2            = { workspace = true }
 hex             = { workspace = true }
 reqwest         = { workspace = true }
+# Transitional (Installment 1-2): edge-permission Noop service impls back the
+# `connect`/`admission` AppState fields until real services land in Installment 3.
+bcs-test-support = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true }
 bcs-app-session = { workspace = true }
+bcs-config = { workspace = true }
 bcs-bot = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-cli = { workspace = true }
@@ -62,7 +66,6 @@ bcs-session-file-store = { workspace = true }
 bcs-storage-api = { workspace = true }
 bcs-auth-local = { workspace = true }
 bcs-services-container = { workspace = true, features = ["test-support"] }
-bcs-test-support = { workspace = true }
 bcs-user-directory-api = { workspace = true }
 tempfile = { workspace = true }
 tower = { workspace = true, features = ["util"] }

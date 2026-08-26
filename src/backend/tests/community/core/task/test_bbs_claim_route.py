@@ -1,4 +1,4 @@
-"""BBS claim HTTP 路由契约测试(FR-PICK-02):POST /openapi/v1/collaboration/tasks/bbs/claim。
+"""BBS claim HTTP 路由契约测试(FR-PICK-02):POST /api/v1/collaboration/tasks/bbs/claim。
 
 独立 TestClient + 小型 test injector(TaskModule + stub discover),不拉起 singlebox 全栈。
 验证:首次 claim 200(返 root_node_id);再次 claim 同任务 409(CAS 输者)。
@@ -11,9 +11,10 @@ from fastapi_injector import attach_injector
 from fastapi.testclient import TestClient
 from injector import Injector, Module, provider, singleton
 
-from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
+from agentclaw.community.adapters.http.task.router import router as task_internal_router
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.core.repository.protocols.task import TaskInfoRepositoryProtocol
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
@@ -23,6 +24,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskInfo,
     TaskSpec,
 )
+from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
 
 
@@ -47,6 +49,11 @@ class _StubDiscoverModule(Module):
 
         return _B()  # type: ignore[return-value]
 
+    @provider
+    def task_info_repo(self) -> TaskInfoRepositoryProtocol:
+        # 路由契约测不验持久化(execute 未走);facade 构造需 protocol 绑定 → None 跳过 persist。
+        return None  # type: ignore[return-value]
+
 
 @pytest.fixture
 def client():
@@ -55,7 +62,7 @@ def client():
 
     injector = Injector([TaskModule(), _StubDiscoverModule()])
     app = FastAPI()
-    app.include_router(task_router)
+    app.include_router(task_internal_router)
     attach_injector(app, injector)
     return TestClient(app), injector
 
@@ -69,8 +76,8 @@ def _bbs_task(injector: Injector, task_id: str) -> None:
             context=Context(background="", extend_props={}),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
-        source_channel_type="bot",
-        source_channel_id="b1",
+        source_type="bot",
+        owner_bot_id="b1",
         execution_config={},
     ))
     graph_svc.update_task_graph_info(task_id, TaskGraphPatch(extend_props_patch={"bbs_mode": True}))
@@ -79,11 +86,14 @@ def _bbs_task(injector: Injector, task_id: str) -> None:
 def test_claim_route_200_then_409(client):
     c, inj = client
     _bbs_task(inj, "r1")
-    r1 = c.post("/openapi/v1/collaboration/tasks/bbs/claim", json={"task_id": "r1", "bot_id": "botA"})
+    r1 = c.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": "r1", "bot_id": "botA"})
     assert r1.status_code == 200, r1.text
     body = r1.json()
     assert body["code"] == 200000
     assert body["data"]["root_node_id"] == "r1"
     assert body["data"]["task_id"] == "r1"
-    r2 = c.post("/openapi/v1/collaboration/tasks/bbs/claim", json={"task_id": "r1", "bot_id": "botB"})
+    # 再次 claim 同任务:CAS 输者。``@envelope_errors`` 把 TaskStateError 映射为 409
+    # ErrorEnvelope(``ENVELOPE_ERRORS``),故断言 409 响应体而非领域错误上抛。
+    r2 = c.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": "r1", "bot_id": "botB"})
     assert r2.status_code == 409, r2.text
+    assert r2.json()["code"] == 409000

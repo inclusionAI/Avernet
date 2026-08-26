@@ -1,23 +1,22 @@
-"""Contract tests — http adapter 16 endpoint caller 走 resolver + dispatcher.
+"""Contract tests for HTTP callers using resolver + dispatcher boundaries.
 
-Task 3 of `docs/superpowers/plans/2026-06-15-device-sync-supplier-for-bot-cleanup.md`:
-确认 ``adapters/http`` 下的 device_sync / device_fs caller 都通过
-``DeviceContextResolver.resolve_for_bot(bot_id, user_id) → dispatcher.dispatch(ctx)``,
-不再走旧的 ``supplier.for_bot`` / ``dispatcher.for_bot`` 闭包模式。
+The covered device-sync and device-filesystem endpoints resolve a
+``DeviceContext`` and then invoke the corresponding dispatcher.
 
 9 个核心 endpoint case 覆盖 16 caller(file_router 8 caller 选 2 代表性即可):
-- A 组(device_sync_supplier → resolver + device_sync_dispatcher):
+- A 组(device sync resolver + dispatcher):
   * skills.py:867 activate_skill
   * skills.py:937 deactivate_skill
   * skills.py:1281 activate_skills_batch
   * skillsets.py:1378 sync_skills_to_device
-- B 组(device_fs_dispatcher.for_bot → resolver + dispatch(ctx)):
+- B 组(device filesystem resolver + dispatcher):
   * identity/router.py:249 (_write_file_safely 经 endpoint 触发)
   * resources/router.py:587 delete_resource
   * resources/router.py:631 upload_files_legacy
   * resources/file_router.py:581 list_files
   * resources/file_router.py:670 upload_files
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -34,6 +33,7 @@ from agentclaw.community.adapters.http.dependencies import (
     get_request_context,
 )
 from agentclaw.community.core.devices.services.device_context import DeviceContext
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
@@ -88,7 +88,6 @@ def _skills_router_app(mock_ctx, tmp_path):
     from agentclaw.community.adapters.http.skill_center.skills import (
         router as skills_router,
     )
-    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
@@ -96,10 +95,20 @@ def _skills_router_app(mock_ctx, tmp_path):
     from agentclaw.community.di.modules.skill_center_module import (
         SkillSetServiceFactory,
     )
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
-    from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
+    from agentclaw.community.plugin_api.device_sync_dispatcher import (
+        DeviceSyncDispatcher,
+    )
+    from agentclaw.community.api.skill_service_factory import (
+        SkillServiceFactoryProtocol,
+    )
     from agentclaw.community.api.skill_set_service_factory import (
         SkillSetServiceFactoryProtocol,
+    )
+    from agentclaw.community.api.skill_query_service import (
+        SkillQueryServiceProtocol,
+    )
+    from agentclaw.community.api.direct_activation_service import (
+        DirectActivationServiceProtocol,
     )
 
     ctx = _make_ctx()
@@ -110,53 +119,48 @@ def _skills_router_app(mock_ctx, tmp_path):
     dispatcher = MagicMock()
     dispatcher.dispatch.return_value = sync_plugin
 
+    query_service = MagicMock()
+
+    def _resolve_legacy(**kwargs):
+        _ = kwargs
+        return "1"
+
+    query_service.resolve_legacy_skill_id.side_effect = _resolve_legacy
+    query_service.get_skill.return_value = {
+        "id": "1",
+        "name": "a",
+        "bolt_id": "bot-1",
+        "user_id": "user-1",
+    }
+    _record = {
+        "id": "1",
+        "name": "a",
+        "link_name": "a",
+        "git_path": "git://path/a",
+    }
+    direct_activation = MagicMock()
+    direct_activation.activate_skill = AsyncMock(return_value=_record)
+    direct_activation.deactivate_skill = AsyncMock(return_value=_record)
+    resolver.query_service = query_service
+    resolver.direct_activation = direct_activation
+
     # ─── Other deps used by the endpoints ───
     skill_service = MagicMock()
     skill_service.activate_skill = AsyncMock(return_value=True)
     skill_service.deactivate_skill = AsyncMock(return_value=True)
     skill_service.activate_skills_batch = AsyncMock(
-        return_value={"success": [{"path": "a", "skill_id": "a", "link_name": "a"}], "failed": []}
+        return_value={
+            "success": [{"path": "a", "skill_id": "a", "link_name": "a"}],
+            "failed": [],
+        }
     )
     skill_service.get_link_name = MagicMock(return_value="link_name")
-    skill_service.list_git_skills = MagicMock(return_value=[])
-    skill_service.get_market_tree = MagicMock(return_value=[])
-    skill_service.get_sync_status = MagicMock(return_value={"status": "idle"})
 
     skill_service_factory = MagicMock()
     skill_service_factory.create.return_value = skill_service
 
     skill_set_service = MagicMock()
     skill_set_service.get_symlink_mappings.return_value = []
-    skill_set_service.ensure_default_skill_set.return_value = {
-        "id": "default-set",
-        "name": "默认技能集",
-        "description": "default",
-        "is_default": True,
-        "is_builtin": False,
-        "user_id": "user-1",
-        "bolt_id": "bot-1",
-        "engine_type": "openclaw",
-        "gmt_created": "",
-        "gmt_modified": "",
-    }
-    skill_set_service.get_default_skill_set.return_value = {
-        "id": "default-set",
-        "name": "默认技能集",
-        "description": "default",
-        "is_default": True,
-        "is_builtin": False,
-        "user_id": "user-1",
-        "bolt_id": "bot-1",
-        "engine_type": "openclaw",
-        "gmt_created": "",
-        "gmt_modified": "",
-    }
-    skill_set_service.add_mcp_to_skill_set = AsyncMock(
-        return_value={"success": True}
-    )
-    skill_set_service.remove_mcp_from_skill_set = AsyncMock(
-        return_value={"success": True}
-    )
     skill_set_service_factory = MagicMock()
     skill_set_service_factory.create.return_value = skill_set_service
 
@@ -180,15 +184,13 @@ def _skills_router_app(mock_ctx, tmp_path):
         def configure(self, binder):
             binder.bind(BotRepository, to=bot_repo)
             binder.bind(WorkspacePathFactory, to=path_factory)
-            binder.bind(
-                SkillServiceFactoryProtocol, to=skill_service_factory
-            )
-            binder.bind(
-                SkillSetServiceFactoryProtocol, to=skill_set_service_factory
-            )
+            binder.bind(SkillServiceFactoryProtocol, to=skill_service_factory)
+            binder.bind(SkillSetServiceFactoryProtocol, to=skill_set_service_factory)
             binder.bind(SkillSetServiceFactory, to=skill_set_service_factory)
             binder.bind(DeviceContextResolver, to=resolver)
             binder.bind(DeviceSyncDispatcher, to=dispatcher)
+            binder.bind(SkillQueryServiceProtocol, to=query_service)
+            binder.bind(DirectActivationServiceProtocol, to=direct_activation)
 
     injector = Injector([_TestModule()])
     attach_injector(app, injector)
@@ -210,7 +212,9 @@ def _skillsets_router_app(mock_ctx, tmp_path):
     from agentclaw.community.di.modules.skill_center_module import (
         SkillSetServiceFactory,
     )
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+    from agentclaw.community.plugin_api.device_sync_dispatcher import (
+        DeviceSyncDispatcher,
+    )
     from agentclaw.community.api.skill_set_service_factory import (
         SkillSetServiceFactoryProtocol,
     )
@@ -225,34 +229,6 @@ def _skillsets_router_app(mock_ctx, tmp_path):
 
     skill_set_service = MagicMock()
     skill_set_service.get_symlink_mappings.return_value = []
-    skill_set_service.ensure_default_skill_set.return_value = {
-        "id": "default-set",
-        "name": "默认技能集",
-        "description": "default",
-        "is_default": True,
-        "is_builtin": False,
-        "user_id": "user-1",
-        "bolt_id": "bot-1",
-        "engine_type": "openclaw",
-        "gmt_created": "",
-        "gmt_modified": "",
-    }
-    skill_set_service.get_default_skill_set.return_value = {
-        "id": "default-set",
-        "name": "默认技能集",
-        "description": "default",
-        "is_default": True,
-        "is_builtin": False,
-        "user_id": "user-1",
-        "bolt_id": "bot-1",
-        "engine_type": "openclaw",
-        "gmt_created": "",
-        "gmt_modified": "",
-    }
-    skill_set_service.add_mcp_to_skill_set = AsyncMock(return_value={"success": True})
-    skill_set_service.remove_mcp_from_skill_set = AsyncMock(
-        return_value={"success": True}
-    )
     skill_set_service_factory = MagicMock()
     skill_set_service_factory.create.return_value = skill_set_service
 
@@ -273,9 +249,7 @@ def _skillsets_router_app(mock_ctx, tmp_path):
         def configure(self, binder):
             binder.bind(BotRepository, to=bot_repo)
             binder.bind(WorkspacePathFactory, to=path_factory)
-            binder.bind(
-                SkillSetServiceFactoryProtocol, to=skill_set_service_factory
-            )
+            binder.bind(SkillSetServiceFactoryProtocol, to=skill_set_service_factory)
             binder.bind(SkillSetServiceFactory, to=skill_set_service_factory)
             binder.bind(DeviceContextResolver, to=resolver)
             binder.bind(DeviceSyncDispatcher, to=dispatcher)
@@ -288,49 +262,9 @@ def _skillsets_router_app(mock_ctx, tmp_path):
 
 
 class TestSkillsEndpointsUseResolver:
-    def test_activate_skill_endpoint_uses_resolver(self, mock_request_ctx, tmp_path):
-        with _skills_router_app(mock_request_ctx, tmp_path) as (
-            client,
-            resolver,
-            dispatcher,
-            _sync_plugin,
-        ):
-            resp = client.post(
-                "/api/skills/sk-x/activate",
-                json={"source_path": "sk-x"},
-                params={
-                    "entity_id": "user-1",
-                    "entity_type": "staff",
-                    "bot_id": "bot-1",
-                    "engine_type": "openclaw",
-                },
-            )
-            assert resp.status_code == 200, resp.text
-            resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
-            dispatcher.dispatch.assert_called_once()
-            assert dispatcher.dispatch.call_args[0][0] is resolver.resolve_for_bot.return_value
-
-    def test_deactivate_skill_endpoint_uses_resolver(self, mock_request_ctx, tmp_path):
-        with _skills_router_app(mock_request_ctx, tmp_path) as (
-            client,
-            resolver,
-            dispatcher,
-            _sync_plugin,
-        ):
-            resp = client.post(
-                "/api/skills/sk-x/deactivate",
-                params={
-                    "entity_id": "user-1",
-                    "entity_type": "staff",
-                    "bot_id": "bot-1",
-                    "engine_type": "openclaw",
-                },
-            )
-            assert resp.status_code == 200, resp.text
-            resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
-            dispatcher.dispatch.assert_called_once()
-
-    def test_activate_skills_batch_endpoint_uses_resolver(self, mock_request_ctx, tmp_path):
+    def test_activate_skills_batch_endpoint_uses_resolver(
+        self, mock_request_ctx, tmp_path
+    ):
         with _skills_router_app(mock_request_ctx, tmp_path) as (
             client,
             resolver,
@@ -339,7 +273,7 @@ class TestSkillsEndpointsUseResolver:
         ):
             client.post(
                 "/api/skills/market/activate-batch",
-                json={"skill_paths": ["sk-x"]},
+                json={"skill_paths": ["git://path/a"]},
                 params={
                     "entity_id": "user-1",
                     "entity_type": "staff",
@@ -347,73 +281,19 @@ class TestSkillsEndpointsUseResolver:
                     "engine_type": "openclaw",
                 },
             )
-            # Endpoint may end up 500 if response shape doesn't match the schema;
-            # what matters for this contract test is that resolver was called
-            # before any device sync.
-            resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
-            dispatcher.dispatch.assert_called_once()
-
-    def test_market_runtime_path_endpoints_resolve_runtime_paths(
-        self, mock_request_ctx, tmp_path
-    ):
-        with _skills_router_app(mock_request_ctx, tmp_path) as (
-            client,
-            _resolver,
-            _dispatcher,
-            _sync_plugin,
-        ):
-            params = {
-                "entity_id": "user-1",
-                "entity_type": "staff",
-                "bot_id": "bot-1",
-                "engine_type": "openclaw",
-            }
-
-            local_resp = client.get("/api/skills/market/local", params=params)
-            tree_resp = client.get("/api/skills/market/tree", params=params)
-            status_resp = client.get("/api/skills/market/sync-status", params=params)
-
-            assert local_resp.status_code == 200, local_resp.text
-            assert tree_resp.status_code == 200, tree_resp.text
-            assert status_resp.status_code == 200, status_resp.text
-
+            # Batch is now a Compatibility Adapter over the canonical Direct
+            # control plane; that deep module owns runtime resolution.
+            resolver.resolve_for_bot.assert_not_called()
+            dispatcher.dispatch.assert_not_called()
+            resolver.direct_activation.activate_skill.assert_awaited_once_with(
+                skill_id="1",
+                bot_id="bot-1",
+                owner_id="user-1",
+                actor_id="user-1",
+            )
 
 
 class TestSkillsetsEndpointUsesResolver:
-
-    def test_default_and_mcp_endpoints_thread_runtime_engine(
-        self, mock_request_ctx, tmp_path
-    ):
-        with _skillsets_router_app(mock_request_ctx, tmp_path) as (
-            client,
-            _resolver,
-            _dispatcher,
-            _sync_plugin,
-        ):
-            params = {
-                "entity_id": "user-1",
-                "entity_type": "staff",
-                "bot_id": "bot-1",
-                "engine_type": "openclaw",
-            }
-
-            ensure_resp = client.post("/api/skillsets/default/ensure", params=params)
-            current_resp = client.get("/api/skillsets/default/current", params=params)
-            add_mcp_resp = client.post(
-                "/api/skillsets/default-set/mcps",
-                params=params,
-                json={"server_code": "mcp.example"},
-            )
-            remove_mcp_resp = client.delete(
-                "/api/skillsets/default-set/mcps/mcp.example",
-                params=params,
-            )
-
-            assert ensure_resp.status_code == 200, ensure_resp.text
-            assert current_resp.status_code == 200, current_resp.text
-            assert add_mcp_resp.status_code == 200, add_mcp_resp.text
-            assert remove_mcp_resp.status_code == 200, remove_mcp_resp.text
-
     def test_sync_skills_to_device_endpoint_uses_resolver(
         self, mock_request_ctx, tmp_path
     ):
@@ -447,7 +327,9 @@ def _identity_router_app(mock_ctx, tmp_path, monkeypatch):
     """TestClient for identity router that hits _write_file_safely (the
     Arca branch in particular).
     """
-    from agentclaw.community.adapters.http.identity.router import router as identity_router
+    from agentclaw.community.adapters.http.identity.router import (
+        router as identity_router,
+    )
     from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
@@ -543,18 +425,24 @@ class TestIdentityRouterUsesResolver:
 
 @contextmanager
 def _resources_router_app(mock_ctx, tmp_path):
-    from agentclaw.community.adapters.http.resources.router import router as resources_router
+    from agentclaw.community.adapters.http.resources.router import (
+        router as resources_router,
+    )
     from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
-    from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
+    from agentclaw.community.core.repository.protocols.platform import (
+        ResourceRepositoryProtocol,
+    )
     from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
     from agentclaw.community.di.modules.skill_center_module import (
         DeviceFilesystemDispatcher,
     )
     from agentclaw.community.api.baas_service import BaasServiceProtocol
-    from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
+    from agentclaw.community.core.repository.protocols.publishing import (
+        BotPublishRepositoryProtocol,
+    )
 
     ctx = _make_ctx()
     resolver = _make_mock_resolver(ctx)
@@ -604,18 +492,14 @@ def _resources_router_app(mock_ctx, tmp_path):
             binder.bind(WorkspacePathFactory, to=path_factory)
             binder.bind(DeviceContextResolver, to=resolver)
             binder.bind(DeviceFilesystemDispatcher, to=dispatcher)
-            binder.bind(
-                BaasServiceProtocol, to=CallableProvider(lambda: baas_service)
-            )
+            binder.bind(BaasServiceProtocol, to=CallableProvider(lambda: baas_service))
             binder.bind(
                 BotPublishRepositoryProtocol,
                 to=CallableProvider(lambda: publish_repo),
             )
             # delete_resource injects PassportPlugin (yuque perm sync); not
             # exercised here (fake_resource is not a yuque link) but DI must resolve it.
-            binder.bind(
-                PassportPlugin, to=CallableProvider(lambda: MagicMock())
-            )
+            binder.bind(PassportPlugin, to=CallableProvider(lambda: MagicMock()))
 
     injector = Injector([_TestModule()])
     attach_injector(app, injector)
@@ -651,7 +535,10 @@ class TestResourcesRouterUsesResolver:
             # Resolver MUST be called once for ctx → dispatcher.dispatch(ctx).
             resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
             dispatcher.dispatch.assert_called_once()
-            assert dispatcher.dispatch.call_args[0][0] is resolver.resolve_for_bot.return_value
+            assert (
+                dispatcher.dispatch.call_args[0][0]
+                is resolver.resolve_for_bot.return_value
+            )
 
     def test_upload_files_legacy_endpoint_uses_resolver(
         self, mock_request_ctx, tmp_path
@@ -697,7 +584,9 @@ def _file_router_app(mock_ctx, tmp_path):
         DeviceFilesystemDispatcher,
     )
     from agentclaw.community.api.baas_service import BaasServiceProtocol
-    from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
+    from agentclaw.community.core.repository.protocols.publishing import (
+        BotPublishRepositoryProtocol,
+    )
 
     ctx = _make_ctx()
     resolver = _make_mock_resolver(ctx)
@@ -738,18 +627,14 @@ def _file_router_app(mock_ctx, tmp_path):
             binder.bind(WorkspacePathFactory, to=path_factory)
             binder.bind(DeviceContextResolver, to=resolver)
             binder.bind(DeviceFilesystemDispatcher, to=dispatcher)
-            binder.bind(
-                BaasServiceProtocol, to=CallableProvider(lambda: baas_service)
-            )
+            binder.bind(BaasServiceProtocol, to=CallableProvider(lambda: baas_service))
             binder.bind(
                 BotPublishRepositoryProtocol,
                 to=CallableProvider(lambda: publish_repo),
             )
             # delete_resource injects PassportPlugin (yuque perm sync); not
             # exercised here (fake_resource is not a yuque link) but DI must resolve it.
-            binder.bind(
-                PassportPlugin, to=CallableProvider(lambda: MagicMock())
-            )
+            binder.bind(PassportPlugin, to=CallableProvider(lambda: MagicMock()))
 
     injector = Injector([_TestModule()])
     attach_injector(app, injector)

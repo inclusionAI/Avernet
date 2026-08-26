@@ -41,6 +41,7 @@ pub enum GroupStrategy {
 pub enum Membership {
     Direct,
     SessionOnly,
+    None,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +98,8 @@ pub struct Participant {
     pub name: Option<String>,
     pub role: ParticipantRole,
     pub mode: ParticipantMode,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -264,10 +267,19 @@ pub struct ListGroups {
     pub strategy: Option<GroupStrategy>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ListPublicGroups {
+    pub offset: u64,
+    pub limit: u64,
+    pub q: Option<String>,
+    pub strategy: Option<GroupStrategy>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateParticipant {
     pub actor_id: String,
     pub role: ParticipantRole,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -479,6 +491,16 @@ pub trait GroupService: Send + Sync {
         command: ListGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError>;
 
+    async fn list_public_groups(
+        &self,
+        command: ListPublicGroups,
+    ) -> Result<Page<GroupSummary>, ApplicationError> {
+        let _ = command;
+        Err(ApplicationError::internal(
+            "list_public_groups not configured",
+        ))
+    }
+
     async fn create(&self, command: CreateGroup) -> Result<GroupDetail, ApplicationError>;
 
     async fn create_with_outcome(
@@ -525,4 +547,22 @@ pub trait GroupService: Send + Sync {
         &self,
         command: DeleteGroupParticipant,
     ) -> Result<DeleteResult, ApplicationError>;
+}
+
+#[cfg(test)]
+mod membership_none_tests {
+    use super::Membership;
+    use serde_json::json;
+
+    #[test]
+    fn none_serializes_to_snake_case_none() {
+        let value = serde_json::to_value(Membership::None).expect("serialize");
+        assert_eq!(value, json!("none"));
+    }
+
+    #[test]
+    fn none_round_trips_through_wire() {
+        let parsed: Membership = serde_json::from_value(json!("none")).expect("deserialize");
+        assert_eq!(parsed, Membership::None);
+    }
 }

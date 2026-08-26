@@ -6,6 +6,10 @@ info:
 paths:
   /api/v1/collaboration/bots/{bot_id}/candidates/search:
     $ref: ./openapi/bots.yaml#/BotCandidateSearchPath
+  /api/v1/collaboration/templates:
+    $ref: ./openapi/collaboration-templates.yaml#/CollaborationTemplatesPath
+  /api/v1/collaboration/templates/{template_id}:
+    $ref: ./openapi/collaboration-templates.yaml#/CollaborationTemplatePath
   /api/v1/collaboration/sessions/{session_id}/files:
     $ref: ./openapi/session-files.yaml#/SessionFilesPath
   /api/v1/collaboration/sessions/{session_id}/files/{file_id}:
@@ -18,3 +22,21 @@ paths:
     $ref: ./openapi/session-files.yaml#/ShareSessionFilePath
   /api/v1/collaboration/sessions/shared-file/content:
     $ref: ./openapi/session-files.yaml#/SharedSessionFileContentPath
+  /api/v1/collaboration/state-machine-runs/{run_id}:
+    $ref: ./openapi/state-machine-runs.yaml#/StateMachineRunPath
+  /api/v1/collaboration/state-machine-runs/{run_id}/graph:
+    $ref: ./openapi/state-machine-runs.yaml#/StateMachineRunGraphPath
+  /api/v1/collaboration/state-machine-runs/{run_id}/nodes/{node_id}:
+    $ref: ./openapi/state-machine-runs.yaml#/StateMachineNodeRunPath
+  /api/v1/collaboration/state-machine-runs/{run_id}/nodes/{node_id}/respond:
+    $ref: ./openapi/state-machine-runs.yaml#/RespondHumanNodePath
+  /api/v1/collaboration/state-machine-runs/{run_id}/pending-human-nodes:
+    $ref: ./openapi/state-machine-runs.yaml#/PendingHumanNodesPath
+  /api/v1/collaboration/state-machine-runs/{run_id}/cancel:
+    $ref: ./openapi/state-machine-runs.yaml#/CancelStateMachineRunPath
+  /api/v1/collaboration/manifest:
+    $ref: ./openapi/manifest.yaml#/ManifestPath
+  /api/v1/collaboration/assets/{bundle_name}/{file_name}:
+    $ref: ./openapi/manifest.yaml#/ManifestAssetPath
+  /api/v1/collaboration/definitions/validate:
+    $ref: ./openapi/collaboration-definitions.yaml#/CollaborationDefinitionValidatePath

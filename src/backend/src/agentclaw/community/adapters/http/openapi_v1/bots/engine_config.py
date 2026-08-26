@@ -57,8 +57,9 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 )
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/engine", tags=["bots"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/engine", tags=["bots"], route_class=PublicAPIRoute)
 
 
 def _engine_config_target(bot: dict[str, Any]) -> tuple[str, str, str]:

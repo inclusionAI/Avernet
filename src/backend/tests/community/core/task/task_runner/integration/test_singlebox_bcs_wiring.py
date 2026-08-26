@@ -1,9 +1,8 @@
 """singlebox 环境 BCS 端口接线测试:复用 BcsHttpAdapter + 本地 LocalBcsTokenProvider。
 
 本地 BCS(Rust :21000)与生产 BCS 同 REST、`require_authentication=false`,
-HMAC `X-ECB-*` 头被本地忽略 → singlebox 直接用 BcsHttpAdapter(本地 token provider)即可,
-无需新建 adapter 类。本测覆盖:本地 provider 取值、_resolve_ports 单 box 装配出真 BcsHttpAdapter、
-BcsHttpAdapter+本地 provider 的 create_group 契约。
+HMAC `X-ECB-*` 头被本地忽略 → singlebox 直接使用本地 BCS 凭据。
+本测覆盖:本地凭据取值、_resolve_ports 装配真实 BcsHttpAdapter、create_group 契约。
 """
 from __future__ import annotations
 

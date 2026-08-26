@@ -17,6 +17,12 @@
   direct storage presigned targets are preserved unchanged.
 - A preparatory V1 Gateway wire projection and HS256 token verifier that
   returns a complete, secret-free authenticated caller.
+- The caller-agnostic public Group catalog at
+  `GET /openapi/v1/collaboration/public-groups`, which lists all
+  `visibility=public` Groups without participant scoping. The Gateway
+  Principal boundary still requires an authenticated User; the catalog
+  emits `membership=none` because no per-caller participation is
+  evaluated at list time.
 
 ## Consumes
 
@@ -41,7 +47,7 @@
 
 - Production bootstrap mounts this Router directly at its contract-owned
   `/openapi/v1/collaboration/**` paths and injects completed V1 application
-  services plus the Gateway Principal verifier.
+  services behind the Gateway Principal boundary.
 - Bootstrap injects the Session File application facade and a validated public
   collaboration base URL. The adapter does not infer public URLs from request
   headers.

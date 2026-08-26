@@ -44,11 +44,13 @@ internal_dependencies:
   - agentclaw.community.kernel.device_dto    # neutral CommandResult / ResourceSpecification / OutBound DTOs (B6)
   - agentclaw.community.log
   - agentclaw.community.core.devices.services.device_filesystem    # DeviceFileSystem — return type of the core device-fs dispatcher (B6)
+  - agentclaw.community.plugin_api.http_client    # HttpClient used by BaaS transports
   - agentclaw.community.plugin_api.device_sync    # DeviceSyncPlugin — return type of the core device-sync dispatcher (B6)
   - agentclaw.community.plugin_api.devices    # DeviceAccessor — injected into DeviceFilesystemDispatcher (B6)
   - agentclaw.community.plugin_api.drm    # DRM dynamic-config reader plugin (B6)
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.outbound_rules    # OutboundRuleProvider (kernel rule) injected into ArcaDeviceService (B6)
+  - agentclaw.community.plugin_api.eval_env    # DYNAMIC_ENV_TAG_KEY 常量引用（eval 设备路由）
   - agentclaw.community.plugin_api.passport
   - agentclaw.community.plugin_api.sandbox_runtime    # SandboxRuntimeClient — ARCA SDK I/O seam (B6)
   - agentclaw.community.plugin_api.secret_resolver    # build_outbound_operation_rule 接 SecretResolver, 收口 Mist→layotto 硬依赖

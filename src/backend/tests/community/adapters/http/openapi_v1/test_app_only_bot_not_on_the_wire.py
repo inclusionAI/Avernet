@@ -37,14 +37,14 @@ from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
-)
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
+from agentclaw.community.api.skill_query_service import (
+    SkillQueryServiceProtocol,
 )
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
+)
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
 )
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
 from agentclaw.community.core.gateway_principal import (
@@ -53,6 +53,7 @@ from agentclaw.community.core.gateway_principal import (
     VerifiedCaller,
 )
 from tests.community.adapters.http.openapi_v1.conftest import (
+    bind_bot_access_seam,
     mount_public_error_handlers,
     user_scoped_client,
 )
@@ -137,24 +138,43 @@ class _Skills:
             "gmt_modified": datetime(2026, 8, 2),
         }
 
-    async def delete_local_skill(self, *, skill_id: str, actor_id: str):
+    async def delete_local_skill(self, *, skill_id: str, owner_id: str, user_id: str):
         self.deleted.append(skill_id)
 
-    async def set_local_skill_active(self, *, skill_id: str, actor_id: str, active):
-        self.activated.append(skill_id)
-        return {**self.get_local_skill(skill_id=skill_id, actor_id=actor_id),
-                "changed": True}
+    def get_skill(self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str):
+        return self.get_local_skill(skill_id=skill_id, actor_id=user_id)
 
-    def list_local_skills(self, *, bot_id, owner_id, actor_id, page, page_size,
-                          active=None, keyword=None):
+    async def activate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+    ):
+        self.activated.append(skill_id)
+        return {
+            **self.get_local_skill(skill_id=skill_id, actor_id=actor_id),
+            "changed": True,
+        }
+
+    async def deactivate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+    ):
+        self.activated.append(skill_id)
+        return {
+            **self.get_local_skill(skill_id=skill_id, actor_id=actor_id),
+            "active": False,
+            "changed": True,
+        }
+
+    def list_bot_skills(
+        self, *, bot_id, owner_id, actor_id, page, page_size, active=None, keyword=None
+    ):
         self.listed.append((bot_id, owner_id))
         return 0, []
 
     async def upload_local_skill(self, *, bot_id, owner_id, actor_id, package):
         self.uploaded.append((bot_id, owner_id))
-        return {"operation": "created",
-                "skill": self.get_local_skill(skill_id=GRANTED_SKILL,
-                                              actor_id=actor_id)}
+        return {
+            "operation": "created",
+            "skill": self.get_local_skill(skill_id=GRANTED_SKILL, actor_id=actor_id),
+        }
 
 
 class _Cron:
@@ -181,11 +201,19 @@ def client(skills, cron):
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotAppGrantServiceProtocol, to=_Grants())
-            binder.bind(LocalSkillQueryServiceProtocol, to=skills)
+            binder.bind(SkillQueryServiceProtocol, to=skills)
             binder.bind(LocalSkillDeleteServiceProtocol, to=skills)
-            binder.bind(LocalSkillStateServiceProtocol, to=skills)
             binder.bind(LocalSkillUploadServiceProtocol, to=skills)
+            binder.bind(DirectActivationServiceProtocol, to=skills)
             binder.bind(CronRelayServiceProtocol, to=cron)
+            # The four ``{skill_id}`` operations declare ``Check(MEMBER)``
+            # now, so the seam runs on them. It is not what this file is
+            # about — the grant check is — but it fails closed against an
+            # unwired app and would answer 404 for every case below,
+            # including the ones that must be served. ``USER`` is the
+            # granted owner here, so the level resolves to OWNER and the
+            # grant stays the only thing deciding these outcomes.
+            bind_bot_access_seam(binder)
 
     # Mounted exactly as build_public_router mounts them, because this file is
     # about what an application caller may reach and the mount is half of that.
@@ -197,9 +225,7 @@ def client(skills, cron):
     # skills here would assert against an assembly production does not have.
     app = FastAPI()
     app.include_router(skills_router)
-    app.include_router(
-        routines_router, dependencies=[Depends(require_granted_own_bot)]
-    )
+    app.include_router(routines_router, dependencies=[Depends(require_granted_own_bot)])
     app.dependency_overrides[require_principal] = _app_caller
     attach_injector(app, Injector([_M()]))
     mount_public_error_handlers(app)

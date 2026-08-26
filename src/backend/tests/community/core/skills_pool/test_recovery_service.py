@@ -315,6 +315,18 @@ class _AICodingBots(_Bots):
         return {**value, "active_engine": "aicoding"}
 
 
+class _ClaudeProductAICodingBots(_Bots):
+    def get_by_id_and_entity(
+        self, bot_id: str, entity_id: str
+    ) -> dict[str, object]:
+        value = super().get_by_id_and_entity(bot_id, entity_id)
+        return {
+            **value,
+            "active_engine": "claude_code",
+            "template_type": "architect",
+        }
+
+
 class _Skills:
     local = [
         RegisteredSkillAsset(
@@ -338,10 +350,11 @@ class _Skills:
     def list_bot_local_assets(self, **kwargs: object) -> list[RegisteredSkillAsset]:
         return self.local
 
-    def list_bot_active_assets(
-        self, **kwargs: object
-    ) -> list[RegisteredSkillAsset]:
-        return self.active
+    def active_skill_assets(
+        self, *, bot_id, owner_id, bot=None
+    ) -> tuple[RegisteredSkillAsset, ...]:
+        assert bot is not None
+        return tuple(self.active)
 
 
 class _HistoricalSkills(_Skills):
@@ -364,6 +377,7 @@ class _RollbackRuntime:
         self.events: list[str] = []
         self.publish_results = [True, False]
         self.mapping_layouts: list[SkillMappingSourceLayout] = []
+        self.probe_requests: list[tuple[str, str, str]] = []
         self.expected_registered_local_names = ["local-a"]
         self.probe_result = RuntimeLayoutProbeResult(
             status=RuntimeLayoutProbeStatus.READY,
@@ -373,8 +387,15 @@ class _RollbackRuntime:
             evidence={"mapping_contract_version": MAPPING_CONTRACT_VERSION},
         )
 
-    async def probe(self, **kwargs: object) -> RuntimeLayoutProbeResult:
+    async def probe(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        engine: str,
+    ) -> RuntimeLayoutProbeResult:
         self.events.append("probe")
+        self.probe_requests.append((bot_id, user_id, engine))
         return self.probe_result
 
     async def rollback_to_legacy(self, **kwargs: object) -> PoolCutoverResult:
@@ -450,6 +471,7 @@ async def test_new_rollback_uses_the_lease_acquired_by_begin() -> None:
         bot_repository=_Bots(),
         layout_repository=layouts,
         skill_repository=_Skills(),
+        reader=_Skills(),
         runtime=runtime,
         edit_guard=_EditGuard(),
     )
@@ -475,6 +497,7 @@ async def test_service_draft_operator_rollback_is_rejected_before_state_change()
         bot_repository=_ServiceBots(),
         layout_repository=layouts,
         skill_repository=_Skills(),
+        reader=_Skills(),
         runtime=runtime,
         edit_guard=edit_guard,
     )
@@ -506,6 +529,7 @@ async def test_explicit_rollback_only_moves_forward_and_preserves_pool_writes() 
         bot_repository=_Bots(),
         layout_repository=layouts,
         skill_repository=_Skills(),
+        reader=_Skills(),
         runtime=runtime,
         edit_guard=_EditGuard(),
     )
@@ -563,6 +587,7 @@ async def test_rollback_updates_all_historical_local_versions() -> None:
         bot_repository=_Bots(),
         layout_repository=layouts,
         skill_repository=_HistoricalSkills(),
+        reader=_HistoricalSkills(),
         runtime=runtime,
         edit_guard=_EditGuard(),
     )
@@ -590,6 +615,7 @@ async def test_rollback_bot_validation_failure_is_persisted() -> None:
         bot_repository=_ChangedBots(),
         layout_repository=layouts,
         skill_repository=_Skills(),
+        reader=_Skills(),
         runtime=_RollbackRuntime(),
         edit_guard=_EditGuard(),
     ).rollback(
@@ -619,6 +645,7 @@ async def test_rollback_old_runtime_is_fenced_before_v2_mapping_request() -> Non
         bot_repository=_Bots(),
         layout_repository=layouts,
         skill_repository=_Skills(),
+        reader=_Skills(),
         runtime=runtime,
         edit_guard=_EditGuard(),
     )
@@ -660,6 +687,7 @@ async def test_rollback_post_cutover_sync_pending_is_retryable() -> None:
         bot_repository=_Bots(),
         layout_repository=layouts,
         skill_repository=_Skills(),
+        reader=_Skills(),
         runtime=runtime,
         edit_guard=_EditGuard(),
     ).rollback(
@@ -698,6 +726,7 @@ async def test_aicoding_rollback_resumes_after_active_repo_restoration() -> None
         bot_repository=_AICodingBots(),
         layout_repository=layouts,
         skill_repository=_Skills(),
+        reader=_Skills(),
         runtime=runtime,
         edit_guard=_EditGuard(),
     ).rollback(
@@ -716,3 +745,35 @@ async def test_aicoding_rollback_resumes_after_active_repo_restoration() -> None
         "verify",
     ]
     assert layouts.events == ["begin", "cutover", "database"]
+
+
+@pytest.mark.asyncio
+async def test_claude_product_rollback_probes_aicoding_physical_layout() -> None:
+    layouts = _RollbackLayouts()
+    runtime = _RollbackRuntime()
+    runtime.publish_results = [True, True]
+    runtime.probe_result = RuntimeLayoutProbeResult(
+        status=RuntimeLayoutProbeStatus.READY,
+        engine="aicoding",
+        layout_contract_version=LAYOUT_CONTRACT_VERSION,
+        preparation_id="preparation-1",
+        evidence={"mapping_contract_version": MAPPING_CONTRACT_VERSION},
+    )
+
+    result = await SkillsPoolRollbackService(
+        bot_repository=_ClaudeProductAICodingBots(),
+        layout_repository=layouts,
+        skill_repository=_Skills(),
+        reader=_Skills(),
+        runtime=runtime,
+        edit_guard=_EditGuard(),
+    ).rollback(
+        scope=SCOPE,
+        rollback_generation="rollback-1",
+        lease_owner="operator-task-1",
+        operator="oncall-1",
+        note="restore mixed runtime",
+    )
+
+    assert result.outcome is SkillsPoolRollbackOutcome.LEGACY_ACTIVE
+    assert runtime.probe_requests == [(SCOPE.bot_id, "owner-1", "aicoding")]

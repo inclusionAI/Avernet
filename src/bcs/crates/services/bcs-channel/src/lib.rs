@@ -333,8 +333,9 @@ impl BcsChannelService {
             .collect();
         let session = self
             .sessions
-            .create(
+            .create_channel(
                 &ctx.group_id,
+                &msg.channel_type,
                 NewSessionParams {
                     session_kind: SessionKind::Chat,
                     caller_principal: Some(ctx.caller_principal.clone()),
@@ -480,8 +481,9 @@ impl BcsChannelService {
         participants.push(human);
         let session = self
             .sessions
-            .create(
+            .create_channel(
                 &ctx.group_id,
+                &msg.channel_type,
                 NewSessionParams {
                     session_kind: SessionKind::ServiceInvocation,
                     caller_id: Some(actor_id.to_string()),
@@ -3758,6 +3760,8 @@ mod tests {
             .await?
             .ok_or_else(|| ServiceError::InternalError("missing conv_b".to_string()))?;
         assert_ne!(conv_a.bcs_session_id, conv_b.bcs_session_id);
+        assert!(conv_a.bcs_session_id.starts_with("group_1:channel_dingtalk_"));
+        assert!(conv_b.bcs_session_id.starts_with("group_1:channel_dingtalk_"));
 
         let web_sends = harness.message_flow.web_sends.lock().await;
         assert_eq!(web_sends.len(), 2);
@@ -3854,7 +3858,7 @@ mod tests {
             "msg_id=msg_a",
             "binding_id=generated_id",
             "actor_id=human_u1",
-            "bcs_session_id=group_1:00000001",
+            "bcs_session_id=group_1:channel_dingtalk_",
         ] {
             assert!(
                 logs.contains(expected),
@@ -4489,7 +4493,11 @@ mod tests {
         assert_eq!(notifications.len(), 1);
         let notification = &notifications[0];
         assert_eq!(notification.group_id, "group_1");
-        assert_eq!(notification.session_id, "group_1:00000001");
+        assert!(
+            notification
+                .session_id
+                .starts_with("group_1:channel_dingtalk_")
+        );
         assert_eq!(notification.participants.len(), 2);
         assert!(notification.participants.iter().all(Participant::is_bot));
         let SystemMessageEvent::SessionContext {
@@ -4573,8 +4581,14 @@ mod tests {
             )
             .await?
             .ok_or_else(|| ServiceError::InternalError("missing conversation".to_string()))?;
-        assert!(mapped.bcs_session_id.starts_with("bcs_grp_dingtalk_"));
-        assert!(mapped.bcs_session_id.len() <= 64);
+        let (group_id, suffix) = mapped
+            .bcs_session_id
+            .split_once(':')
+            .expect("channel session id has one group separator");
+        assert!(group_id.starts_with("bcs_grp_dingtalk_"));
+        assert!(suffix.starts_with("channel_dingtalk_"));
+        assert_eq!(mapped.bcs_session_id.matches(':').count(), 1);
+        assert!(mapped.bcs_session_id.len() <= 128);
 
         Ok(())
     }

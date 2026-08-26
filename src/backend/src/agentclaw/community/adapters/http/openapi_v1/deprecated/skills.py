@@ -55,11 +55,11 @@ from agentclaw.community.adapters.http.openapi_v1.skills.schemas import (
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
+from agentclaw.community.api.skill_query_service import (
+    SkillQueryServiceProtocol,
 )
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
 )
 from agentclaw.community.di import Injected
 
@@ -100,12 +100,15 @@ def _collection_shim(handler, method: str, replacement: str):
         shim,
         "owner_id",
         LegacyOwnerEntityId,
+        replacement_default=None,
         doc=deprecated_doc(handler, f"{method} {replacement}"),
     )
     return _grant_checked(shim)
 
 
-def _check_collection_grant(caller, *, bot_id: str, owner_id: str | None, actor_id: str) -> None:
+def _check_collection_grant(
+    caller, *, bot_id: str, owner_id: str | None, user_id: str
+) -> None:
     """The owner-aware check the retiring collection addresses carry themselves.
 
     Identical to what ``list_skills`` and ``upload_skill`` used to do inline:
@@ -116,7 +119,7 @@ def _check_collection_grant(caller, *, bot_id: str, owner_id: str | None, actor_
     """
     if not caller.is_application:
         return
-    caller.require_bot(bot_id, owner_id=owner_id or actor_id)
+    caller.require_bot(bot_id, owner_id=owner_id or user_id)
 
 
 def _grant_checked(shim):
@@ -137,8 +140,12 @@ def _grant_checked(shim):
             caller,
             bot_id=kwargs["bot_id"],
             owner_id=kwargs.get("owner_id"),
-            actor_id=kwargs["actor_id"],
+            user_id=kwargs["user_id"],
         )
+        # The retiring wire has an optional owner_entity_id. Its historical
+        # omission means the caller's own Bot, exactly as OwnerIdDep does on
+        # the current address; do not pass the external None into Core.
+        kwargs["owner_id"] = kwargs.get("owner_id") or kwargs["user_id"]
         return await shim(**kwargs)
 
     caller_param = inspect.Parameter(
@@ -149,7 +156,11 @@ def _grant_checked(shim):
     # Ahead of any parameter carrying a default, or the signature is invalid.
     parameters = list(signature.parameters.values())
     cut = next(
-        (i for i, p in enumerate(parameters) if p.default is not inspect.Parameter.empty),
+        (
+            i
+            for i, p in enumerate(parameters)
+            if p.default is not inspect.Parameter.empty
+        ),
         len(parameters),
     )
     guarded.__signature__ = signature.replace(
@@ -201,43 +212,44 @@ legacy_route(
 
 
 async def _bot_behind(
-    query_service: LocalSkillQueryServiceProtocol,
+    query_service: SkillQueryServiceProtocol,
     caller,
     *,
     skill_id: str,
-    actor_id: str,
-) -> str:
+    user_id: str,
+) -> tuple[str, str]:
     """The bot a skill belongs to, with the grant checked against it.
 
     Both halves come off the record, and the user-scoped read runs first — so
     another user's skill is refused before the grant is consulted, and the
     grant check never becomes the thing that leaks a skill's existence.
     """
-    record = query_service.get_local_skill(skill_id=skill_id, actor_id=actor_id)
+    record = query_service.get_local_skill(skill_id=skill_id, actor_id=user_id)
     _require_skills_grant(caller, record)
-    return str(record["bolt_id"])
+    return str(record["bolt_id"]), str(record["user_id"])
 
 
 async def get_skill_legacy(
     skill_id: SkillIdPath,
-    actor_id: UserIdDep,
+    user_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
-    query_service: LocalSkillQueryServiceProtocol = Injected(
-        LocalSkillQueryServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
     ),
 ) -> Envelope[Skill]:
     """Get public metadata for one Local Skill; the Skill ID selects its Bot.
 
     Deprecated: use GET /openapi/v1/bots/{bot_id}/skills/{skill_id}.
     """
-    bot_id = await _bot_behind(
-        query_service, caller, skill_id=skill_id, actor_id=actor_id
+    bot_id, owner_id = await _bot_behind(
+        query_service, caller, skill_id=skill_id, user_id=user_id
     )
     return await get_skill(
         bot_id=bot_id,
         skill_id=skill_id,
-        actor_id=actor_id,
+        owner_id=owner_id,
+        user_id=user_id,
         caller=caller,
         request=request,
         query_service=query_service,
@@ -246,27 +258,28 @@ async def get_skill_legacy(
 
 async def delete_skill_legacy(
     skill_id: SkillIdPath,
-    actor_id: UserIdDep,
+    user_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
     delete_service: LocalSkillDeleteServiceProtocol = Injected(
         LocalSkillDeleteServiceProtocol
     ),
-    query_service: LocalSkillQueryServiceProtocol = Injected(
-        LocalSkillQueryServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
     ),
 ) -> Envelope[Deleted]:
     """Delete a skill by id.
 
     Deprecated: use DELETE /openapi/v1/bots/{bot_id}/skills/{skill_id}.
     """
-    bot_id = await _bot_behind(
-        query_service, caller, skill_id=skill_id, actor_id=actor_id
+    bot_id, owner_id = await _bot_behind(
+        query_service, caller, skill_id=skill_id, user_id=user_id
     )
     return await delete_skill(
         bot_id=bot_id,
         skill_id=skill_id,
-        actor_id=actor_id,
+        owner_id=owner_id,
+        user_id=user_id,
         caller=caller,
         request=request,
         delete_service=delete_service,
@@ -277,27 +290,28 @@ async def delete_skill_legacy(
 def _state_shim(handler, verb: str):
     async def shim(
         skill_id: SkillIdPath,
-        actor_id: UserIdDep,
+        user_id: UserIdDep,
         caller: ActingCallerDep,
         request: Request,
-        query_service: LocalSkillQueryServiceProtocol = Injected(
-            LocalSkillQueryServiceProtocol
+        query_service: SkillQueryServiceProtocol = Injected(
+            SkillQueryServiceProtocol
         ),
-        state_service: LocalSkillStateServiceProtocol = Injected(
-            LocalSkillStateServiceProtocol
+        direct_activation: DirectActivationServiceProtocol = Injected(
+            DirectActivationServiceProtocol
         ),
     ) -> Envelope[SkillState]:
-        bot_id = await _bot_behind(
-            query_service, caller, skill_id=skill_id, actor_id=actor_id
+        bot_id, owner_id = await _bot_behind(
+            query_service, caller, skill_id=skill_id, user_id=user_id
         )
         return await handler(
             bot_id=bot_id,
             skill_id=skill_id,
-            actor_id=actor_id,
+            owner_id=owner_id,
+            user_id=user_id,
             caller=caller,
             request=request,
             query_service=query_service,
-            state_service=state_service,
+            direct_activation=direct_activation,
         )
 
     shim.__name__ = f"{handler.__name__}_legacy"

@@ -16,6 +16,7 @@ import {
   initAgentEventsSubscription,
   rememberTaskToolSession,
   resolveChatRunId,
+  resolveEngineSessionPeerId,
   resolveInboundSender,
   resolveGroupIdFromSessionKey,
   setInboundMediaFactBuilderForTest,
@@ -146,6 +147,25 @@ describe('openclaw-channel-bcn', () => {
     assert.match(
       resolveChatRunId(undefined, '  '),
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it('uses the canonical BCS session id as the OpenClaw route peer for protocol v3', () => {
+    const channelSessionId = 'bcs_grp_dingtalk_dm_x:channel_dingtalk_abcdef12';
+    assert.equal(
+      resolveEngineSessionPeerId({
+        session_key: channelSessionId,
+        bcs_group_id: 'bcs_grp_dingtalk_dm_x',
+        bcs_session_id: channelSessionId,
+      }, 'onboarding-bot'),
+      channelSessionId,
+    );
+    assert.equal(
+      resolveEngineSessionPeerId({
+        session_key: 'group:bcs_grp',
+        bcs_group_id: 'bcs_grp_dingtalk_dm_x',
+      }, 'onboarding-bot'),
+      'bcs_grp_dingtalk_dm_x',
     );
   });
 

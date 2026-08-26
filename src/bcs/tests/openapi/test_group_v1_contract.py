@@ -417,3 +417,35 @@ def test_update_group_does_not_accept_context() -> None:
 
     assert "context" not in schema["properties"]
     assert set(schema["properties"]) == {"name", "visibility", "delivery_policy"}
+
+
+PUBLIC_GROUPS_PATH = "/openapi/v1/collaboration/public-groups"
+
+
+def test_list_public_groups_endpoint_exists() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][PUBLIC_GROUPS_PATH]["get"]
+
+    assert operation["operationId"] == "list_public_groups"
+    query_names = {
+        parameter["name"]
+        for parameter in operation["parameters"]
+        if parameter["in"] == "query"
+    }
+    assert query_names == {"offset", "limit", "q", "strategy"}
+    assert operation["x-avernet-security"] == {"user": "required"}
+    # load_contract 会递归解析并内联所有 $ref（validate_openapi_contract.py:68-99），
+    # 解析后 200 响应 schema 是完整的 GroupPageEnvelope 对象，无 "$ref" 键。
+    # 按解析后的形状断言，仿既有测试风格。
+    schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert schema["properties"]["code"]["const"] == 20_000
+    assert "items" in schema["properties"]["data"]["properties"]
+
+
+def test_public_groups_path_does_not_collide_with_group_id_path() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+
+    # The plaza catalog lives at a distinct top-level path so the
+    # {group_id} parameter on /groups/{group_id} cannot shadow it.
+    assert PUBLIC_GROUPS_PATH in contract["paths"]
+    assert "/openapi/v1/collaboration/groups/public" not in contract["paths"]

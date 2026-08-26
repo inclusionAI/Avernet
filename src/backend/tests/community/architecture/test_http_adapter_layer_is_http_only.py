@@ -93,6 +93,11 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
                      # deliberately no FastAPI, which is what lets them be
                      # tested without a client. Named in full rather than as a
                      # short pattern so this entry cannot exempt anything else.
+    "auth",          # callback HMAC verification ports (e.g. task/auth.py) —
+                     # import-light by design: a pluggable authenticator must not
+                     # depend on the HTTP stack.
+    "translator",    # inbound edge schema → SSOT domain translation (task/translator.py):
+                     # pure data shaping, no FastAPI, exercised without a client.
 )
 
 

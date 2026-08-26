@@ -8,6 +8,7 @@ is overridden per test to supply (or withhold) a caller.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -30,12 +31,27 @@ from agentclaw.community.adapters.http.openapi_v1.deprecated.auth_status import 
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotNotFoundError,
+    BotOperationNotAllowedError,
+)
+from agentclaw.community.core.spaces.errors import (
+    SpaceAccessDeniedError,
+    SpaceNotFoundError,
+)
+from agentclaw.community.core.bot_inventory.adapters.noop_business_space import (
+    NoopBusinessSpaceContext,
+)
+from agentclaw.community.core.bot_inventory.protocols import (
+    BusinessSpaceContextProtocol,
+)
+from agentclaw.community.core.bot_inventory.types import BusinessSpaceRef
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
@@ -54,9 +70,15 @@ BOT = {
     # startup-script row keys on bot_id, not on this: uk_bot_id_entity_id_env
     # means a deleted bot_id is never reissued, so it names one bot for good.
     "id": 77,
-    "bot_id": "b1", "bot_name": "N", "bot_desc": "D", "active_engine": "teclaw",
-    "bot_type": "personal", "status": "ACTIVE", "owner_id": "u1",
-    "entity_id": "u1", "entity_type": "staff",
+    "bot_id": "b1",
+    "bot_name": "N",
+    "bot_desc": "D",
+    "active_engine": "teclaw",
+    "bot_type": "personal",
+    "status": "ACTIVE",
+    "owner_id": "u1",
+    "entity_id": "u1",
+    "entity_type": "staff",
     "device_binding": {"device_id": "dev-9"},
 }
 
@@ -66,6 +88,7 @@ def svc():
     m = MagicMock()
     m.get_bot.return_value = BOT
     m.list_bots_by_conditions.return_value = {"total": 1, "items": [BOT]}
+    m.list_bots_by_owner_bot_pairs.return_value = {"total": 1, "items": [BOT]}
     m.check_bot_name_exists.return_value = True
     m.update_bot.return_value = {**BOT, "bot_name": "Renamed"}
     m.restart_bot.return_value = {**BOT, "status": "PENDING"}
@@ -79,6 +102,22 @@ def svc():
 @pytest.fixture
 def bot_repo():
     return MagicMock()
+
+
+@pytest.fixture
+def bot_space():
+    service = MagicMock()
+    service.change_space.return_value = SimpleNamespace(
+        bot={**BOT, "space_id": 42},
+        space=SimpleNamespace(
+            id=42,
+            space_code="spc-42",
+            name="Team",
+            space_type=SimpleNamespace(value="TEAM"),
+        ),
+        changed=True,
+    )
+    return service
 
 
 @pytest.fixture
@@ -126,10 +165,21 @@ def startup_script():
 
 
 @pytest.fixture
-def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, auth_rel, startup_script):
+def client(
+    svc,
+    bot_space,
+    policy,
+    passport,
+    engine_config,
+    bot_repo,
+    skill_set_factory,
+    auth_rel,
+    startup_script,
+):
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=svc)
+            binder.bind(BotSpaceServiceProtocol, to=bot_space)
             binder.bind(PolicyServiceProtocol, to=policy)
             binder.bind(PassportPlugin, to=passport)
             binder.bind(EngineConfigServiceProtocol, to=engine_config)
@@ -137,6 +187,10 @@ def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, au
             binder.bind(SkillSetServiceFactoryProtocol, to=skill_set_factory)
             binder.bind(AuthRelationshipPlugin, to=auth_rel)
             binder.bind(BotStartupScriptServiceProtocol, to=startup_script)
+            binder.bind(
+                BusinessSpaceContextProtocol,
+                to=NoopBusinessSpaceContext(),
+            )
 
     app = FastAPI()
     app.include_router(router)
@@ -175,13 +229,65 @@ def test_list_bots(client):
 
 
 def test_list_bots_filters_reach_service(client, svc):
-    client.get("/openapi/v1/bots?keyword=x&engine=teclaw&status=ACTIVE&page=2&page_size=5")
+    client.get(
+        "/openapi/v1/bots?keyword=x&engine=teclaw&status=ACTIVE&page=2&page_size=5"
+    )
     kw = svc.list_bots_by_conditions.call_args.kwargs
     assert kw["owner_id"] == "u1"
     assert kw["bot_name"] == "x"
     assert kw["engine"] == "teclaw"
     assert kw["status"] == "ACTIVE"
     assert kw["page"] == 2 and kw["page_size"] == 5
+
+
+def test_search_bot_metadata_returns_only_display_fields(client, svc):
+    response = client.post(
+        "/openapi/v1/bots/metadata/queries?page=2&page_size=5",
+        json={
+            "bots": [
+                {"bot_id": "b1", "owner_id": "u1"},
+                {"bot_id": "b1", "owner_id": "u1"},
+                {"bot_id": "b2", "owner_id": "u2"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "total": 1,
+        "items": [
+            {
+                "bot_id": "b1",
+                "owner_id": "u1",
+                "bot_name": "N",
+                "bot_desc": "D",
+                "engine": "teclaw",
+                "bot_type": "personal",
+                "status": "ACTIVE",
+            }
+        ],
+    }
+    assert svc.list_bots_by_owner_bot_pairs.call_args.kwargs == {
+        "page": 2,
+        "page_size": 5,
+        "pairs": [("b1", "u1"), ("b2", "u2")],
+    }
+
+
+@pytest.mark.parametrize(
+    "bots",
+    [
+        [],
+        [{"bot_id": f"b{i}", "owner_id": f"u{i}"} for i in range(101)],
+    ],
+)
+def test_search_bot_metadata_rejects_invalid_batch_size(client, bots):
+    response = client.post(
+        "/openapi/v1/bots/metadata/queries",
+        json={"bots": bots},
+    )
+
+    assert response.status_code == 422
 
 
 def test_check_name_needs_no_user_id(client):
@@ -216,7 +322,23 @@ def test_status(client):
 
 def test_passport(client):
     data = _ok(client.get("/openapi/v1/bots/b1/passport"))
-    assert data == {"bot_id": "b1", "passport_id": "ac-1"}
+    # passport_id (agent_code/agent_id) is the existence signal; the license
+    # fields stay nullable when the PassportPlugin did not return them.
+    assert data["bot_id"] == "b1"
+    assert data["passport_id"] == "ac-1"
+    assert data["expire_at"] is None
+    assert data["certificate_url"] is None
+
+
+def test_passport_forwards_license_fields(client, passport):
+    passport.query_agent_passport.return_value = {
+        "agent_code": "ac-1",
+        "expire_at": "2027-01-01T00:00:00Z",
+        "certificate_url": "https://cert/ac-1",
+    }
+    data = _ok(client.get("/openapi/v1/bots/b1/passport"))
+    assert data["expire_at"] == "2027-01-01T00:00:00Z"
+    assert data["certificate_url"] == "https://cert/ac-1"
 
 
 def test_passport_missing_is_404(client, passport):
@@ -257,6 +379,74 @@ def test_delete_bot(client, svc):
     svc.delete_bot.assert_called_once_with("b1", "u1")
 
 
+def test_change_bot_space(client, bot_space):
+    data = _ok(client.put("/openapi/v1/bots/b1/space", json={"space_id": 42}))
+
+    assert data == {
+        "bot_id": "b1",
+        "space_id": 42,
+        "space_code": "spc-42",
+        "space_name": "Team",
+        "space_type": "TEAM",
+        "changed": True,
+    }
+    bot_space.change_space.assert_called_once_with(
+        bot_id="b1", owner_id="u1", space_id=42
+    )
+
+
+def test_change_bot_space_requires_explicit_user_id(client, bot_space):
+    response = client.put(
+        "/openapi/v1/bots/b1/space",
+        params={"user_id": None},
+        json={"space_id": 42},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422000
+    bot_space.change_space.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"space_id": 0},
+        {"space_id": None},
+        {"space_id": 42, "owner_id": "u2"},
+    ],
+)
+def test_change_bot_space_rejects_invalid_bodies(client, bot_space, body):
+    response = client.put("/openapi/v1/bots/b1/space", json=body)
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422000
+    bot_space.change_space.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [
+        (BotNotFoundError("missing"), 404),
+        (SpaceNotFoundError("missing"), 404),
+        (SpaceAccessDeniedError("denied"), 403),
+        (BotOperationNotAllowedError("desktop"), 409),
+    ],
+)
+def test_change_bot_space_domain_failures_use_standard_envelope(
+    client, bot_space, error, status
+):
+    bot_space.change_space.side_effect = error
+
+    response = client.put("/openapi/v1/bots/b1/space", json={"space_id": 42})
+
+    assert response.status_code == status
+    body = response.json()
+    assert body["code"] == status * 1000
+    assert body["data"] is None
+    assert "request_id" in body
+
+
 def test_restart_bot(client):
     data = _ok(client.post("/openapi/v1/bots/b1/restart"))
     assert data["status"] == "PENDING"
@@ -287,18 +477,22 @@ def test_mutating_not_found_masked(client, svc):
 
 # ----- create + auth-status (Task 8) ---------------------------------------
 
-# openclaw is in the default SUPPORTED_ENGINE_TYPES registry; teclaw is NOT
-# (it is only available where ENGINE_TYPES is configured to include it), so the
-# create path's engine check would reject it here. Tests that specifically need
-# the teclaw/ANDC pairing patch the registry.
+# openclaw and teclaw are both in the default SUPPORTED_ENGINE_TYPES registry.
+# Tests that need a narrower registry still patch _get_engine_types explicitly.
 _CREATE_BODY = {
-    "bot_name": "NewBot", "bot_desc": "d", "engine": "openclaw",
-    "cluster_name": "ACRA", "bot_type": "personal",
+    "bot_name": "NewBot",
+    "bot_desc": "d",
+    "engine": "openclaw",
+    "cluster_name": "ACRA",
+    "bot_type": "personal",
 }
 
 
 def test_create_bot_201(client, svc, passport):
-    passport.apply_first_agent_passport.return_value = {"token": "tok", "agent_code": "ac"}
+    passport.apply_first_agent_passport.return_value = {
+        "token": "tok",
+        "agent_code": "ac",
+    }
     with patch.object(bots_router, "generate_bot_id", return_value="default"):
         resp = client.post("/openapi/v1/bots", json=_CREATE_BODY)
     assert resp.status_code == 201, resp.json()
@@ -306,16 +500,200 @@ def test_create_bot_201(client, svc, passport):
     assert body["code"] == 201000
     assert body["data"]["bot_id"] == "b1"
     svc.create_bot.assert_called_once()
+    assert svc.create_bot.call_args.kwargs["space_id"] is None
+
+
+def test_real_space_reference_exposes_numeric_id():
+    assert (
+        BusinessSpaceRef(space_id="42", name="Team", kind="team").numeric_id == 42
+    )
+
+
+def test_synthetic_personal_reference_has_no_numeric_id():
+    assert (
+        BusinessSpaceRef(
+            space_id="personal:u1",
+            name="Personal",
+            kind="personal",
+        ).numeric_id
+        is None
+    )
+
+
+def test_create_bot_owner_relationship_failure_is_enveloped_502(
+    client, passport, auth_rel
+):
+    passport.apply_first_agent_passport.return_value = {
+        "token": "tok",
+        "agent_code": "ac",
+    }
+    auth_rel.create_relationship.return_value = None
+    with patch.object(bots_router, "generate_bot_id", return_value="default"):
+        resp = client.post("/openapi/v1/bots", json=_CREATE_BODY)
+
+    assert resp.status_code == 502
+    assert resp.json()["code"] == 502000
+    assert resp.json()["message"] == "Authorization relationship service error"
+    assert resp.json()["data"] is None
+
+
+def test_create_bot_normalizes_unexpected_relationship_failure(
+    client, passport, auth_rel
+):
+    passport.apply_first_agent_passport.return_value = {
+        "token": "tok",
+        "agent_code": "ac",
+    }
+    auth_rel.create_relationship.side_effect = RuntimeError("downstream unavailable")
+    with patch.object(bots_router, "generate_bot_id", return_value="default"):
+        response = client.post("/openapi/v1/bots", json=_CREATE_BODY)
+
+    assert response.status_code == 502
+    assert response.json()["code"] == 502000
+    assert response.json()["message"] == "Authorization relationship service error"
+
+
+def test_create_bot_rejects_unresolved_business_space_before_side_effects(
+    client, svc, passport
+):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            "bot_name": "N2",
+            "bot_desc": "D",
+            "engine": "teclaw",
+            "cluster_name": "ANDC",
+            "bot_type": "personal",
+            "space_id": "team:unknown",
+        },
+    )
+
+    assert response.status_code == 404
+    passport.apply_passport.assert_not_called()
+    svc.create_bot.assert_not_called()
 
 
 def test_create_bot_202_pending(client, passport):
-    passport.apply_first_agent_passport.return_value = {"token": None, "iframe_url": "http://auth"}
+    passport.apply_first_agent_passport.return_value = {
+        "token": None,
+        "iframe_url": "http://auth",
+    }
     with patch.object(bots_router, "generate_bot_id", return_value="default"):
         resp = client.post("/openapi/v1/bots", json=_CREATE_BODY)
     assert resp.status_code == 202, resp.json()
     body = resp.json()
     assert body["code"] == 202000
     assert body["data"]["iframe_url"] == "http://auth"
+
+
+def test_create_application_coding_requires_engine_properties_template(client, svc, passport):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine": "claude_code",
+            "cluster_name": "ACRA",
+            "bot_type": "personal",
+            "engine_properties": {},
+        },
+    )
+    assert response.status_code == 422, response.json()
+    passport.apply_first_agent_passport.assert_not_called()
+    svc.create_bot.assert_not_called()
+
+
+def test_create_application_coding_maps_template_to_internal_spec(
+    client, svc, passport
+):
+    properties = {
+        "devflow_workflow": "app-flow",
+        "yuque_kb_repos": [],
+        "code_repos": [],
+        "bot_template_config": {
+            "preset_capabilities": {},
+            "ext_config": {"thetaKey": "value"},
+        },
+    }
+    passport.apply_first_agent_passport.return_value = {
+        "token": "tok",
+        "agent_code": "ac",
+    }
+
+    with patch.object(bots_router, "generate_bot_id", return_value="default"):
+        response = client.post(
+            "/openapi/v1/bots",
+            json={
+                **_CREATE_BODY,
+                "engine": "claude_code",
+                "engine_properties": {"template": properties},
+            },
+        )
+
+    assert response.status_code == 201, response.json()
+    kwargs = svc.create_bot.call_args.kwargs
+    assert kwargs["template_type"] == "applicationCoding"
+    assert kwargs["template_config"] == properties
+
+
+def test_create_rejects_legacy_template_envelope(client, svc):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "template": {"type": "applicationCoding", "properties": {}},
+        },
+    )
+
+    assert response.status_code == 422
+    svc.create_bot.assert_not_called()
+
+
+def test_create_rejects_legacy_top_level_template_fields(client, svc):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "template_type": "applicationCoding",
+            "template_config": {},
+        },
+    )
+
+    assert response.status_code == 422
+    svc.create_bot.assert_not_called()
+
+
+def test_create_rejects_unknown_engine_properties_fields(client, svc):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine_properties": {
+                "template": {},
+                "template_uid": "caller-controlled",
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    svc.create_bot.assert_not_called()
+
+
+def test_create_engine_properties_for_non_coding_engine_is_combination_error(
+    client, svc
+):
+    # openclaw + application-coding intent answers 409 (combination
+    # unsupported), not a template-invalid 422 — the mapping the routing
+    # through the default engine strategy preserves.
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine_properties": {"template": {"devflow_workflow": "x"}},
+        },
+    )
+    assert response.status_code == 409, response.json()
+    assert response.json()["code"] == 409000
+    svc.create_bot.assert_not_called()
 
 
 def test_create_bot_cluster_mismatch_400(client, svc):
@@ -348,6 +726,34 @@ def test_auth_status_issued(client, svc, passport):
     svc.create_bot.assert_called_once()
 
 
+def test_auth_status_missing_agent_code_is_enveloped_before_create(
+    client, svc, passport
+):
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    passport.query_agent_passport.return_value = {"agent_code": None}
+
+    response = client.get("/openapi/v1/bots/b1/auth-status")
+
+    assert response.status_code == 502
+    assert response.json()["code"] == 502000
+    assert response.json()["message"] == "Authorization service error"
+    svc.create_bot.assert_not_called()
+
+
+def test_auth_status_agent_identity_query_failure_is_enveloped_before_create(
+    client, svc, passport
+):
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    passport.query_agent_passport.side_effect = RuntimeError("identity unavailable")
+
+    response = client.get("/openapi/v1/bots/b1/auth-status")
+
+    assert response.status_code == 502
+    assert response.json()["code"] == 502000
+    assert response.json()["message"] == "Authorization service error"
+    svc.create_bot.assert_not_called()
+
+
 def test_auth_status_issued_preserves_create_attributes(client, svc, passport):
     """Re-supplied attributes reach completion so the bot isn't downgraded."""
     passport.query_auth_status.return_value = {"status": "ISSUED"}
@@ -355,14 +761,33 @@ def test_auth_status_issued_preserves_create_attributes(client, svc, passport):
     with patch.object(
         bots_router, "_get_engine_types", return_value=["openclaw", "teclaw"]
     ):
-        _ok(client.get(
-            "/openapi/v1/bots/b1/auth-status"
-            "?engine=teclaw&cluster_name=ANDC&bot_name=NewBot&bot_desc=d"
-        ))
+        _ok(
+            client.get(
+                "/openapi/v1/bots/b1/auth-status"
+                "?engine=teclaw&cluster_name=ANDC&bot_name=NewBot&bot_desc=d"
+            )
+        )
     kw = svc.create_bot.call_args.kwargs
     assert kw["engine_type"] == "teclaw"  # not defaulted to openclaw
     assert kw["bot_name"] == "NewBot"
     assert kw["bot_desc"] == "d"
+
+
+def test_auth_status_rejects_unresolved_business_space_before_polling(
+    client, svc, passport
+):
+    response = client.get(
+        "/openapi/v1/bots/b1/auth-status",
+        params={
+            "engine": "teclaw",
+            "cluster_name": "ANDC",
+            "space_id": "team:unknown",
+        },
+    )
+
+    assert response.status_code == 404
+    passport.query_auth_status.assert_not_called()
+    svc.create_bot.assert_not_called()
 
 
 def test_auth_status_engine_cluster_mismatch_400(client, svc):
@@ -416,6 +841,45 @@ def test_post_auth_status_preserves_create_attributes(client, svc, passport):
     assert kw["bot_name"] == "NewBot"
     assert kw["bot_desc"] == "d"
     assert kw["bot_type"] == "service"
+
+
+def test_post_auth_status_application_coding_requires_engine_properties_template(
+    client, svc, passport
+):
+    response = client.post(
+        "/openapi/v1/bots/b1/auth-status",
+        json={
+            "engine": "claude_code",
+            "cluster_name": "ACRA",
+            "engine_properties": {},
+        },
+    )
+    assert response.status_code == 422, response.json()
+    passport.query_auth_status.assert_not_called()
+    svc.create_bot.assert_not_called()
+
+
+def test_post_auth_status_maps_template_to_internal_spec(client, svc, passport):
+    properties = {
+        "devflow_workflow": "app-flow",
+        "bot_template_config": {"ext_config": {"thetaKey": "value"}},
+    }
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    passport.query_agent_passport.return_value = {"agent_code": "ac"}
+
+    response = client.post(
+        "/openapi/v1/bots/b1/auth-status",
+        json={
+            "engine": "claude_code",
+            "cluster_name": "ACRA",
+            "engine_properties": {"template": properties},
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    kwargs = svc.create_bot.call_args.kwargs
+    assert kwargs["template_type"] == "applicationCoding"
+    assert kwargs["template_config"] == properties
 
 
 def test_post_auth_status_engine_cluster_mismatch_400(client, svc):
@@ -480,14 +944,18 @@ def test_post_auth_status_passport_not_ready_is_pending(client, svc, passport):
 def test_application_bot_not_ready_until_repos_cloned(client, svc):
     """R1/F1: ACTIVE alone must not report an application bot as ready."""
     svc.get_bot.return_value = {
-        **BOT, "template_type": "applicationCoding", "active_engine": "aicoding",
+        **BOT,
+        "template_type": "applicationCoding",
+        "active_engine": "aicoding",
         "ext": {"start_status": "STARTING"},
     }
     assert _ok(client.get("/openapi/v1/bots/b1/status"))["is_ready"] is False
 
     # ...and ready once the clone reports SUCCEEDED.
     svc.get_bot.return_value = {
-        **BOT, "template_type": "applicationCoding", "active_engine": "aicoding",
+        **BOT,
+        "template_type": "applicationCoding",
+        "active_engine": "aicoding",
         "ext": {"start_status": "SUCCEEDED"},
     }
     assert _ok(client.get("/openapi/v1/bots/b1/status"))["is_ready"] is True
@@ -529,6 +997,18 @@ def test_update_syncs_passport_identity(client, passport):
     assert kw["bot_id"] == "b1"
     assert kw["user_id"] == "u1"
     assert kw["bot_name"] == "Renamed"
+
+
+def test_update_passport_failure_is_enveloped_502(client, svc, passport):
+    passport.update_passport.side_effect = RuntimeError("downstream unavailable")
+
+    resp = client.put("/openapi/v1/bots/b1", json={"bot_name": "Renamed"})
+
+    assert svc.update_bot.called
+    assert resp.status_code == 502
+    assert resp.json()["code"] == 502000
+    assert resp.json()["message"] == "Authorization service error"
+    assert resp.json()["data"] is None
 
 
 def test_update_without_identity_change_skips_passport(client, passport):
@@ -577,7 +1057,9 @@ def test_engine_config_malformed_json_is_enveloped(client, engine_config):
 def test_pending_auth_forwards_redirect_url(client, passport, svc):
     """R2/F12: a redirect-only Passport response must not lose the handle."""
     passport.apply_first_agent_passport.return_value = {
-        "token": None, "redirect_url": "http://redirect", "iframe_url": None,
+        "token": None,
+        "redirect_url": "http://redirect",
+        "iframe_url": None,
     }
     with patch.object(bots_router, "generate_bot_id", return_value="default"):
         resp = client.post("/openapi/v1/bots", json=_CREATE_BODY)
@@ -597,7 +1079,9 @@ def test_deleting_default_bot_is_client_error(client, svc):
     assert resp.json()["code"] == 409000
 
 
-def test_unsupported_engine_rejected_before_side_effects(client, svc, passport, bot_repo):
+def test_unsupported_engine_rejected_before_side_effects(
+    client, svc, passport, bot_repo
+):
     """R3/F16: an unknown engine must not allocate an id or apply for a Passport."""
     bad = {**_CREATE_BODY, "engine": "not-a-real-engine", "cluster_name": "ACRA"}
     with patch.object(bots_router, "generate_bot_id", return_value="default") as gen:
@@ -617,14 +1101,44 @@ def test_teclaw_andc_create_allowed_when_engine_configured(client, svc, passport
     unless the deployment enables it via ENGINE_TYPES — this pins that the
     teclaw/ANDC pairing itself is valid, not accidentally unreachable.
     """
-    passport.apply_first_agent_passport.return_value = {"token": "tok", "agent_code": "ac"}
+    passport.apply_first_agent_passport.return_value = {
+        "token": "tok",
+        "agent_code": "ac",
+    }
     body = {**_CREATE_BODY, "engine": "teclaw", "cluster_name": "ANDC"}
-    with patch.object(
-        bots_router, "_get_engine_types", return_value=["openclaw", "teclaw"]
-    ), patch.object(bots_router, "generate_bot_id", return_value="default"):
+    with (
+        patch.object(
+            bots_router, "_get_engine_types", return_value=["openclaw", "teclaw"]
+        ),
+        patch.object(bots_router, "generate_bot_id", return_value="default"),
+    ):
         resp = client.post("/openapi/v1/bots", json=body)
     assert resp.status_code == 201, resp.json()
     svc.create_bot.assert_called_once()
+
+
+def test_service_create_rejects_non_service_engine_before_side_effects(
+    client, svc, passport
+):
+    body = {
+        **_CREATE_BODY,
+        "engine": "hermes",
+        "cluster_name": "ACRA",
+        "bot_type": "service",
+    }
+    with (
+        patch.object(
+            bots_router, "_get_engine_types", return_value=["openclaw", "hermes"]
+        ),
+        patch.object(bots_router, "generate_bot_id", return_value="default") as gen,
+    ):
+        response = client.post("/openapi/v1/bots", json=body)
+
+    assert response.status_code == 409
+    assert response.json()["code"] == 409000
+    gen.assert_not_called()
+    passport.apply_first_agent_passport.assert_not_called()
+    svc.create_bot.assert_not_called()
 
 
 def test_desktop_bot_type_rejected(client, svc):
@@ -691,6 +1205,23 @@ def test_auth_status_accepts_supported_bot_type(client, svc, passport):
     assert svc.create_bot.call_args.kwargs["bot_type"] == "service"
 
 
+def test_auth_status_rejects_non_service_engine_before_authorization_lookup(
+    client, svc, passport
+):
+    with patch.object(
+        bots_router, "_get_engine_types", return_value=["openclaw", "hermes"]
+    ):
+        response = client.get(
+            "/openapi/v1/bots/b1/auth-status"
+            "?engine=hermes&cluster_name=ACRA&bot_type=service"
+        )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == 409000
+    passport.query_auth_status.assert_not_called()
+    svc.create_bot.assert_not_called()
+
+
 def test_engine_config_unknown_provider_is_enveloped(client, engine_config):
     """R4/F21: a documented resolver failure must not escape the envelope.
 
@@ -753,6 +1284,23 @@ def test_create_schema_does_not_advertise_engine_options(client):
     """A generated client must not be able to compile a request we always reject."""
     schema = client.app.openapi()["components"]["schemas"]["BotCreate"]
     assert "engine_options" not in schema["properties"]
+
+
+def test_create_schema_nests_template_under_engine_properties(client):
+    schemas = client.app.openapi()["components"]["schemas"]
+    create_properties = schemas["BotCreate"]["properties"]
+    poll_properties = schemas["BotAuthStatusPoll"]["properties"]
+    engine_properties = schemas["BotCreateEngineProperties"]["properties"]
+
+    assert "engine_properties" in create_properties
+    assert "engine_properties" in poll_properties
+    assert "template" not in create_properties
+    assert "template" not in poll_properties
+    assert "template_type" not in create_properties
+    assert "template_config" not in create_properties
+    assert "template_type" not in poll_properties
+    assert "template_config" not in poll_properties
+    assert set(engine_properties) == {"template"}
 
 
 def test_auth_status_validates_cluster_against_default_engine(client, svc, passport):
@@ -820,15 +1368,24 @@ def test_update_rejects_fields_it_cannot_apply(client, svc):
 def test_passport_accepts_the_local_plugin_identifier(client, passport):
     """R6/F32: the local plugin issues ``agent_id`` and leaves ``agent_code`` null."""
     passport.query_agent_passport.return_value = {
-        "agent_id": "b1", "agent_code": None, "mcps": [],
+        "agent_id": "b1",
+        "agent_code": None,
+        "mcps": [],
     }
     data = _ok(client.get("/openapi/v1/bots/b1/passport"))
-    assert data == {"bot_id": "b1", "passport_id": "b1"}
+    # ``agent_id`` sets passport_id; license fields stay null when absent.
+    assert data["bot_id"] == "b1"
+    assert data["passport_id"] == "b1"
+    assert data["expire_at"] is None
+    assert data["certificate_url"] is None
 
 
 def test_passport_prefers_agent_code_when_both_present(client, passport):
     """``agent_code`` stays the primary identifier where the provider issues one."""
-    passport.query_agent_passport.return_value = {"agent_id": "b1", "agent_code": "ac-1"}
+    passport.query_agent_passport.return_value = {
+        "agent_id": "b1",
+        "agent_code": "ac-1",
+    }
     data = _ok(client.get("/openapi/v1/bots/b1/passport"))
     assert data["passport_id"] == "ac-1"
 
@@ -1054,7 +1611,9 @@ def test_startup_script_absent_reads_as_empty_not_an_error(client, svc, startup_
     assert data["unsupported_reason"] == ""
 
 
-def test_startup_script_get_returns_the_stored_body_and_audit(client, svc, startup_script):
+def test_startup_script_get_returns_the_stored_body_and_audit(
+    client, svc, startup_script
+):
     svc.get_bot.return_value = _SUPPORTED_BOT
     startup_script.get.return_value = _record(modifier="alice")
 
@@ -1071,9 +1630,7 @@ def test_startup_script_put_stores_and_takes_modifier_from_the_principal(
     startup_script.put.return_value = _record(script="echo new")
 
     data = _ok(
-        client.put(
-            "/openapi/v1/bots/b1/startup-script", json={"script": "echo new"}
-        )
+        client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo new"})
     )
     assert data["script"] == "echo new"
     # The principal is what gets recorded — never anything from the body.
@@ -1094,9 +1651,7 @@ def test_a_put_whose_bot_is_still_there_stores_and_returns_200(
     startup_script.put.return_value = _record(script="echo new")
 
     data = _ok(
-        client.put(
-            "/openapi/v1/bots/b1/startup-script", json={"script": "echo new"}
-        )
+        client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo new"})
     )
 
     assert data["script"] == "echo new"
@@ -1119,9 +1674,7 @@ def test_a_put_that_loses_the_race_with_deletion_is_withdrawn_and_404s(
     svc.get_bot.side_effect = [_SUPPORTED_BOT, BotNotFoundError("gone")]
     startup_script.put.return_value = _record(script="echo new")
 
-    resp = client.put(
-        "/openapi/v1/bots/b1/startup-script", json={"script": "echo new"}
-    )
+    resp = client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo new"})
 
     assert resp.status_code == 404
     # Unconditional now: the key cannot have changed hands, so the only row
@@ -1140,9 +1693,7 @@ def test_a_withdrawal_that_cannot_complete_is_not_reported_as_a_clean_404(
     startup_script.delete.side_effect = RuntimeError("db down")
 
     with pytest.raises(RuntimeError, match="db down"):
-        client.put(
-            "/openapi/v1/bots/b1/startup-script", json={"script": "echo new"}
-        )
+        client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo new"})
 
 
 def test_the_write_contract_does_not_promise_starts_that_never_recompose(
@@ -1215,9 +1766,10 @@ def test_startup_script_put_is_refused_for_a_teclaw_bot(client, svc, startup_scr
     startup_script.put.assert_not_called()
     # The surface uses fixed messages (never str(exc)), so the *reason* is
     # discovered from GET rather than from the refusal.
-    assert "teclaw" in _ok(client.get("/openapi/v1/bots/b1/startup-script"))[
-        "unsupported_reason"
-    ]
+    assert (
+        "teclaw"
+        in _ok(client.get("/openapi/v1/bots/b1/startup-script"))["unsupported_reason"]
+    )
 
 
 def test_startup_script_get_still_answers_for_an_unsupported_bot(

@@ -41,6 +41,7 @@ def with_query_parameter(
     name: str,
     annotation: Any,
     *,
+    replacement_default: Any = inspect.Parameter.empty,
     suffix: str = "legacy",
     doc: str | None = None,
 ) -> Callable[..., Any]:
@@ -63,14 +64,16 @@ def with_query_parameter(
         # default. Re-annotating the second kind without also clearing the
         # default leaves both, which FastAPI refuses outright. So the marker is
         # unwrapped to the value it was standing in for.
-        default = parameter.default
-        if isinstance(default, params.Param):
-            default = (
+        parameter_default = parameter.default
+        if isinstance(parameter_default, params.Param):
+            parameter_default = (
                 inspect.Parameter.empty
-                if default.default is Ellipsis
-                else default.default
+                if parameter_default.default is Ellipsis
+                else parameter_default.default
             )
-        return parameter.replace(annotation=annotation, default=default)
+        if replacement_default is not inspect.Parameter.empty:
+            parameter_default = replacement_default
+        return parameter.replace(annotation=annotation, default=parameter_default)
 
     parameters = [
         rewrite(parameter) if key == name else parameter

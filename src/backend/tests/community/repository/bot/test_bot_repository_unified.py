@@ -10,6 +10,7 @@ ac_entity_device_binding join (was a None stub). Plus: plain INSERT
 (refused on a duplicate key, never an upsert), single conditional
 soft-delete, search_bots JOIN.
 """
+
 import json
 from contextlib import contextmanager
 
@@ -30,9 +31,7 @@ pytestmark = pytest.mark.integration
 
 class _FileSqliteDB:
     def __init__(self, engine):
-        self._factory = sessionmaker(
-            bind=engine, autocommit=False, autoflush=False
-        )
+        self._factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
     @contextmanager
     def orm_session(self):
@@ -85,6 +84,7 @@ def _data(**ov):
 
 # ── insert (plain INSERT, never an upsert) ─────────────────────────
 
+
 def test_insert_and_get(repo):
     rec = repo.insert(_data())
     assert rec["id"] > 0
@@ -123,6 +123,7 @@ def test_get_by_id_returns_none_for_deleted(repo):
     # Soft delete the bot
     with repo._db.orm_session() as s:
         from agentclaw.community.plugin_api.models import BotModel
+
         s.query(BotModel).filter(BotModel.id == rec["id"]).update(
             {BotModel.is_delete: 1}
         )
@@ -189,6 +190,7 @@ def test_insert_plain_not_upsert(repo):
 
 # ── env-scoping (adopt prod) ────────────────────────────────────────
 
+
 def test_get_env_scoped(repo, db):
     rec = repo.insert(_data())
     with db.orm_session() as s:
@@ -212,9 +214,7 @@ def test_explicit_env_default_bot_read_and_ext_update_are_isolated(repo, db):
         _data(bot_id="default", entity_id="staff_prod", ext={"source": "prod"})
     )
     with db.orm_session() as s:
-        s.query(BotModel).filter(BotModel.id == pre["id"]).update(
-            {BotModel.env: "pre"}
-        )
+        s.query(BotModel).filter(BotModel.id == pre["id"]).update({BotModel.env: "pre"})
         s.query(BotModel).filter(BotModel.id == prod["id"]).update(
             {BotModel.env: "prod"}
         )
@@ -242,12 +242,8 @@ def test_explicit_env_ext_update_rolls_back_when_multiple_rows_match(repo, db):
     # distinct entity_id, so the pair is legal under the unique key. That is
     # the only way this state is reachable now, and it is reachable: entity_id
     # is not part of what update_ext_by_id_owner_and_env matches on.
-    first = repo.insert(
-        _data(bot_id="default", entity_id="staff_a", ext={"row": 1})
-    )
-    second = repo.insert(
-        _data(bot_id="default", entity_id="staff_b", ext={"row": 2})
-    )
+    first = repo.insert(_data(bot_id="default", entity_id="staff_a", ext={"row": 1}))
+    second = repo.insert(_data(bot_id="default", entity_id="staff_b", ext={"row": 2}))
     with db.orm_session() as s:
         s.query(BotModel).filter(BotModel.id.in_([first["id"], second["id"]])).update(
             {BotModel.env: "prod"}, synchronize_session=False
@@ -317,14 +313,47 @@ def test_list_and_count(repo):
     assert t4 == 2
 
 
+def test_list_by_search_can_return_complete_ordered_candidate_set(repo):
+    """Catalog joins must happen before pagination to avoid page holes."""
+    repo.insert(_data(bot_id="b1", public="1"))
+    repo.insert(_data(bot_id="b2", public="1"))
+    repo.insert(_data(bot_id="b3", public="1"))
+
+    total, rows = repo.list_by_search(public="1", page=None, page_size=None)
+
+    assert total == 3
+    assert [row["bot_id"] for row in rows] == ["b3", "b2", "b1"]
+
+
 def test_list_by_conditions_owner_engine_status_filters(repo):
     """Additive owner_id / engine / status filters narrow with exact totals."""
-    repo.insert(_data(bot_id="b1", owner_id="alice", active_engine="teclaw",
-                      status="ACTIVE", bot_name="Alpha"))
-    repo.insert(_data(bot_id="b2", owner_id="alice", active_engine="openclaw",
-                      status="PENDING", bot_name="Beta"))
-    repo.insert(_data(bot_id="b3", owner_id="bob", active_engine="teclaw",
-                      status="ACTIVE", bot_name="Gamma"))
+    repo.insert(
+        _data(
+            bot_id="b1",
+            owner_id="alice",
+            active_engine="teclaw",
+            status="ACTIVE",
+            bot_name="Alpha",
+        )
+    )
+    repo.insert(
+        _data(
+            bot_id="b2",
+            owner_id="alice",
+            active_engine="openclaw",
+            status="PENDING",
+            bot_name="Beta",
+        )
+    )
+    repo.insert(
+        _data(
+            bot_id="b3",
+            owner_id="bob",
+            active_engine="teclaw",
+            status="ACTIVE",
+            bot_name="Gamma",
+        )
+    )
 
     # No new filters → every row (backward-compatible default).
     assert repo.list_by_conditions()[0] == 3
@@ -343,6 +372,17 @@ def test_list_by_conditions_owner_engine_status_filters(repo):
     assert rows[0]["bot_id"] == "b1"
     # Keyword (bot_name) still composes with the new filters.
     assert repo.list_by_conditions(owner_id="alice", bot_name="Alpha")[0] == 1
+
+
+def test_list_by_conditions_space_filter_spans_owners(repo):
+    repo.insert(_data(bot_id="b1", owner_id="alice", space_id="22"))
+    repo.insert(_data(bot_id="b2", owner_id="bob", space_id="22"))
+    repo.insert(_data(bot_id="b3", owner_id="carol", space_id="23"))
+
+    total, rows = repo.list_by_conditions(space_id="22")
+
+    assert total == 2
+    assert {row["bot_id"] for row in rows} == {"b1", "b2"}
 
 
 def test_count_by_owner_excludes_desktop(repo):
@@ -368,20 +408,21 @@ def test_exists_by_owner_and_bot_type_only_matches_live_requested_type(repo):
 
 # ── update_by_owner allowlist (adopt prod) ──────────────────────────
 
+
 def test_update_by_owner_allowlist_drops_non_allowlisted(repo):
     repo.insert(_data(bot_id="b1", status="PENDING"))
     out = repo.update_by_owner(
         "b1",
         "emp1",
         {
-            "status": "ACTIVE",          # allowlisted → applied
-            "engine_types": ["x"],        # NOT allowlisted → dropped
-            "creator_id": "hacker",       # NOT allowlisted → dropped
+            "status": "ACTIVE",  # allowlisted → applied
+            "engine_types": ["x"],  # NOT allowlisted → dropped
+            "creator_id": "hacker",  # NOT allowlisted → dropped
         },
     )
     assert out["status"] == "ACTIVE"
-    assert out["creator_id"] == "emp1"           # unchanged
-    assert out["engine_types"] != ["x"]          # unchanged (dropped)
+    assert out["creator_id"] == "emp1"  # unchanged
+    assert out["engine_types"] != ["x"]  # unchanged (dropped)
 
 
 def test_update_by_owner_json_fields(repo):
@@ -405,19 +446,19 @@ def test_update_by_owner_no_fields_returns_current(repo):
 
 # ── soft delete (single conditional is_delete=1 UPDATE) ─────────────
 
+
 def test_soft_delete_is_flag_not_hard(repo, db):
     repo.insert(_data(bot_id="b1"))
     assert repo.soft_delete_by_owner("b1", "emp1") is True
     assert repo.get_by_id_and_owner("b1", "emp1") is None
     with db.orm_session() as s:
-        row = s.query(BotModel).filter(
-            BotModel.bot_id == "b1"
-        ).first()
+        row = s.query(BotModel).filter(BotModel.bot_id == "b1").first()
         assert row is not None and row.is_delete == 1  # row still there
     assert repo.soft_delete_by_owner("b1", "emp1") is False
 
 
 # ── device-provider real join (adopt prod — drop stub) ──────────────
+
 
 def test_get_device_provider_join(repo, db):
     repo.insert(_data(bot_id="b1", device_id="dev-9"))
@@ -435,7 +476,11 @@ def test_get_device_provider_join(repo, db):
             )
         )
     res = repo.get_device_provider_by_bot_id("b1")
-    assert res == {"device_provider": "arca", "sandbox_id": "sbx-1", "bot_type": "personal"}
+    assert res == {
+        "device_provider": "arca",
+        "sandbox_id": "sbx-1",
+        "bot_type": "personal",
+    }
     res2 = repo.get_device_provider_by_bot_id_and_owner("b1", "emp1")
     assert res2["device_provider"] == "arca"
     assert res2["bot_type"] == "personal"
@@ -452,6 +497,7 @@ def test_get_device_provider_no_binding_row(repo):
 
 
 # ── search_bots JOIN to bot_publish ─────────────────────────────────
+
 
 def test_search_bots_with_publish(repo, db):
     rec = repo.insert(_data(bot_id="b1", bot_type="service"))
@@ -478,14 +524,14 @@ def test_search_bots_with_publish(repo, db):
 
 
 def test_list_active_bots_by_entity(repo):
-    repo.insert(_data(bot_id="b1", status="ACTIVE", binding_id=5,
-                      owner_id="emp1"))
+    repo.insert(_data(bot_id="b1", status="ACTIVE", binding_id=5, owner_id="emp1"))
     repo.insert(_data(bot_id="b2", status="PENDING", owner_id="emp1"))
     active = repo.list_active_bots_by_entity("emp1")
     assert [a["bot_id"] for a in active] == ["b1"]
 
 
 # ── device_provider_result includes bot_type ──────────────────────
+
 
 def test_device_provider_result_includes_bot_type():
     """_device_provider_result 返回的 dict 必须包含 bot_type 字段。"""
@@ -509,6 +555,7 @@ def test_device_provider_result_includes_bot_type():
 
 # ── search_bots with collaborator_user_id ─────────────────────────────
 
+
 def test_search_bots_owner_only(repo):
     """场景2: 仅 owner_id 查询（向后兼容）"""
     repo.insert(_data(bot_id="b1", owner_id="owner1"))
@@ -528,31 +575,35 @@ def test_search_bots_collaborator_only(repo, db):
     # 创建 bot
     rec1 = repo.insert(_data(bot_id="b1", owner_id="owner1"))
     rec2 = repo.insert(_data(bot_id="b2", owner_id="owner1"))
-    rec3 = repo.insert(_data(bot_id="b3", owner_id="owner2"))
+    repo.insert(_data(bot_id="b3", owner_id="owner2"))
 
     # 添加协作者关系：user1 是 b1 的 admin，b2 的 member
     env = get_current_env()
     with db.orm_session() as s:
-        s.add(BotCollaboratorModel(
-            bot_pk=rec1["id"],
-            bot_id="b1",
-            owner_id="owner1",
-            user_id="user1",
-            user_name="User One",
-            role="admin",
-            operator_id="owner1",
-            env=env,
-        ))
-        s.add(BotCollaboratorModel(
-            bot_pk=rec2["id"],
-            bot_id="b2",
-            owner_id="owner1",
-            user_id="user1",
-            user_name="User One",
-            role="member",
-            operator_id="owner1",
-            env=env,
-        ))
+        s.add(
+            BotCollaboratorModel(
+                bot_pk=rec1["id"],
+                bot_id="b1",
+                owner_id="owner1",
+                user_id="user1",
+                user_name="User One",
+                role="admin",
+                operator_id="owner1",
+                env=env,
+            )
+        )
+        s.add(
+            BotCollaboratorModel(
+                bot_pk=rec2["id"],
+                bot_id="b2",
+                owner_id="owner1",
+                user_id="user1",
+                user_name="User One",
+                role="member",
+                operator_id="owner1",
+                env=env,
+            )
+        )
 
     # 查询 user1 作为协作者的 bot
     total, items = repo.search_bots(collaborator_user_id="user1")
@@ -569,29 +620,28 @@ def test_search_bots_collaborator_only(repo, db):
 def test_search_bots_owner_and_collaborator(repo, db):
     """场景1: owner_id + collaborator_user_id 组合查询（OR 关系）"""
     # 创建 bot
-    rec1 = repo.insert(_data(bot_id="b1", owner_id="user1"))  # user1 是 owner
+    repo.insert(_data(bot_id="b1", owner_id="user1"))  # user1 是 owner
     rec2 = repo.insert(_data(bot_id="b2", owner_id="owner2"))  # user1 是协作者
-    rec3 = repo.insert(_data(bot_id="b3", owner_id="owner3"))  # user1 无关系
+    repo.insert(_data(bot_id="b3", owner_id="owner3"))  # user1 无关系
 
     # user1 是 b2 的协作者
     env = get_current_env()
     with db.orm_session() as s:
-        s.add(BotCollaboratorModel(
-            bot_pk=rec2["id"],
-            bot_id="b2",
-            owner_id="owner2",
-            user_id="user1",
-            user_name="User One",
-            role="admin",
-            operator_id="owner2",
-            env=env,
-        ))
+        s.add(
+            BotCollaboratorModel(
+                bot_pk=rec2["id"],
+                bot_id="b2",
+                owner_id="owner2",
+                user_id="user1",
+                user_name="User One",
+                role="admin",
+                operator_id="owner2",
+                env=env,
+            )
+        )
 
     # 查询 user1 是 owner 或协作者的 bot
-    total, items = repo.search_bots(
-        owner_id="user1",
-        collaborator_user_id="user1"
-    )
+    total, items = repo.search_bots(owner_id="user1", collaborator_user_id="user1")
     assert total == 2
     bot_ids = {i["bot_id"] for i in items}
     assert bot_ids == {"b1", "b2"}
@@ -610,16 +660,18 @@ def test_search_bots_user_role_none_for_owner(repo, db):
     # owner 同时也是协作者（异常情况，但应正确处理）
     env = get_current_env()
     with db.orm_session() as s:
-        s.add(BotCollaboratorModel(
-            bot_pk=rec["id"],
-            bot_id="b1",
-            owner_id="owner1",
-            user_id="owner1",
-            user_name="Owner",
-            role="admin",
-            operator_id="owner1",
-            env=env,
-        ))
+        s.add(
+            BotCollaboratorModel(
+                bot_pk=rec["id"],
+                bot_id="b1",
+                owner_id="owner1",
+                user_id="owner1",
+                user_name="Owner",
+                role="admin",
+                operator_id="owner1",
+                env=env,
+            )
+        )
 
     total, items = repo.search_bots(collaborator_user_id="owner1")
     assert total == 1
@@ -647,7 +699,10 @@ def test_search_bots_no_collaborator_match(repo, db):
     total, items = repo.search_bots(collaborator_user_id="unknown_user")
     assert total == 0
     assert items == []
+
+
 # ── search_bots filters ────────────────────────────────────────────
+
 
 def test_search_bots_filter_bot_id_and_template_type(repo):
     repo.insert(_data(bot_id="s1", template_type="applicationCoding"))
@@ -740,3 +795,31 @@ def test_list_by_conditions_treats_like_wildcards_literally(repo):
 
     # Ordinary substring search is unchanged.
     assert repo.list_by_conditions(bot_name="Bot")[0] == 4
+
+
+# ── structured Business Space assignment ───────────────────────────
+
+
+def test_update_space_by_owner_persists_space_and_modifier(repo):
+    repo.insert(_data(bot_id="space-bot", space_id=7, modifier_id="creator"))
+
+    out = repo.update_space_by_owner(bot_id="space-bot", owner_id="emp1", space_id=42)
+
+    assert out is not None
+    assert out["space_id"] == 42
+    assert out["modifier_id"] == "emp1"
+
+
+def test_update_space_by_owner_missing_or_deleted_returns_none(repo):
+    assert (
+        repo.update_space_by_owner(bot_id="missing", owner_id="emp1", space_id=42)
+        is None
+    )
+
+    repo.insert(_data(bot_id="deleted-space-bot", is_delete=1, space_id=7))
+    assert (
+        repo.update_space_by_owner(
+            bot_id="deleted-space-bot", owner_id="emp1", space_id=42
+        )
+        is None
+    )

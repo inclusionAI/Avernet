@@ -34,10 +34,12 @@ fn group_create_command_carries_caller_and_members() {
             GroupCreateParticipantCommand {
                 bot_id: "driver".to_string(),
                 role: Some("driver".to_string()),
+                tags: Vec::new(),
             },
             GroupCreateParticipantCommand {
                 bot_id: "bot-a".to_string(),
                 role: Some("consultant".to_string()),
+                tags: Vec::new(),
             },
         ],
         member_bot_ids: vec!["bot-a".to_string(), "bot-b".to_string()],
@@ -197,6 +199,7 @@ fn group_result_dtos_are_route_friendly_views() {
         role: "driver".to_string(),
         actor_kind: bcs_service_api::ActorKind::Bot,
         mode: None,
+        tags: Vec::new(),
     };
     let detail = GroupDetailResult {
         group_id: "group-1".to_string(),
@@ -249,6 +252,7 @@ fn group_result_dtos_are_route_friendly_views() {
             role: "consultant".to_string(),
             actor_kind: bcs_service_api::ActorKind::Bot,
             mode: None,
+            tags: Vec::new(),
         },
     };
     let history = GroupHistoryResult {
@@ -265,6 +269,7 @@ fn group_result_dtos_are_route_friendly_views() {
         role: "observer".to_string(),
         actor_kind: bcs_service_api::ActorKind::Bot,
         mode: None,
+        tags: Vec::new(),
     })
     .unwrap();
 
@@ -316,6 +321,7 @@ async fn noop_group_management_service_fails_closed() {
             participants: vec![GroupCreateParticipantCommand {
                 bot_id: "bot-a".to_string(),
                 role: Some("consultant".to_string()),
+                tags: Vec::new(),
             }],
             member_bot_ids: vec!["bot-a".to_string()],
             group_kind: None,

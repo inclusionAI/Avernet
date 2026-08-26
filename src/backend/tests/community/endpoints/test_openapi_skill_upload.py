@@ -24,8 +24,9 @@ from agentclaw.community.core.skill_center.factories import (
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
 )
-from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
@@ -81,6 +82,9 @@ class _RuntimeFactory:
 
     def sync_runtime(self):
         return True
+
+    async def project(self, **_kwargs):
+        return None
 
 
 class _DeviceContextResolverStub:
@@ -201,33 +205,26 @@ def _seed_uploadable_bot(world) -> None:
         LocalSkillUploadServiceProtocol,
         to=LocalSkillUploadService(
             world.get(SkillRepository),
-            world.get(SkillSetRepository),
             world.get(BotRepository),
             world.get(CollaboratorServiceProtocol),
             storage_factory,
-            _RuntimeFactory(),
             world.get(BotCollabLogRepositoryProtocol),
             world.get(SkillsPoolEditGuard),
             lambda: _DeviceContextResolverStub(),
+            _RuntimeFactory(),
+            SkillParser(),
         ),
         scope=None,
     )
 
 
-def _assert_associated_to_owning_bot_default(response, world) -> None:
+def _assert_created_inactive_without_default_membership(response, world) -> None:
     skill_id = response.json()["data"]["skill"]["skill_id"]
     with avernet_tenant_scope(_TENANT):
-        default_set = world.get(SkillSetRepository).get_default(
-            user_id=_OWNER, bolt_id=_BOT_ID, engine_type="openclaw"
+        skill = world.get(SkillRepository).get_bot_local_skill(
+            skill_id=skill_id, bot_id=_BOT_ID, user_id=_OWNER
         )
-        assert default_set is not None
-        assert default_set["bolt_id"] == _BOT_ID
-        assert skill_id in {
-            skill["id"]
-            for skill in world.get(SkillSetRepository).get_skills_in_set(
-                default_set["id"]
-            )
-        }
+        assert skill is not None and skill["active"] is False
 
 
 @endpoint_test(
@@ -241,7 +238,7 @@ def _assert_associated_to_owning_bot_default(response, world) -> None:
         raw_body=_package(),
     ),
     seed=_seed_uploadable_bot,
-    extra_assertions=(_assert_associated_to_owning_bot_default,),
+    extra_assertions=(_assert_created_inactive_without_default_membership,),
     expect=ExpectSuccess(
         status=201,
         json_contains={
@@ -274,6 +271,52 @@ def multipart_upload_is_an_explicit_error_case():
     """The public endpoint accepts only raw ``application/zip`` bodies."""
 
 
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/skills/upload-folder",
+    scenario="directory_created_in_verified_tenant",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _OWNER},
+        headers={PRINCIPAL_HEADER: _principal()},
+        form_data={"file_paths": '["SKILL.md"]'},
+        files=[("files", ("SKILL.md", b"name: folder-upload\ndescription: folder coverage\n"))],
+    ),
+    seed=_seed_uploadable_bot,
+    extra_assertions=(_assert_created_inactive_without_default_membership,),
+    expect=ExpectSuccess(
+        status=201,
+        json_contains={
+            "code": 201000,
+            "data": {
+                "operation": "created",
+                "skill": {"name": "folder-upload", "active": False},
+            },
+        },
+    ),
+)
+def folder_upload_creates_an_inactive_skill():
+    """A multipart directory upload follows the same inactive Local contract."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/skills/upload-folder",
+    scenario="directory_rejects_misaligned_relative_paths",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _OWNER},
+        headers={PRINCIPAL_HEADER: _principal()},
+        form_data={"file_paths": '["SKILL.md", "extra.py"]'},
+        files=[("files", ("SKILL.md", b"name: folder-upload\n"))],
+    ),
+    seed=_seed_uploadable_bot,
+    expect=ExpectError(status=400),
+)
+def folder_upload_rejects_misaligned_relative_paths():
+    """The declared paths must remain one-to-one with uploaded files."""
+
+
 # The retiring address. `POST /openapi/v1/bots/skills/upload?bot_id=` is what
 # clients call today, and it is not a re-registration: the shim publishes
 # `bot_id` in the query and `owner_entity_id` where the current address
@@ -292,7 +335,7 @@ def multipart_upload_is_an_explicit_error_case():
         raw_body=_package(),
     ),
     seed=_seed_uploadable_bot,
-    extra_assertions=(_assert_associated_to_owning_bot_default,),
+    extra_assertions=(_assert_created_inactive_without_default_membership,),
     expect=ExpectSuccess(
         status=201,
         json_contains={

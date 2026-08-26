@@ -36,7 +36,6 @@ def data_init_service(device_service_mock, resolver_mock) -> DataInitService:
         resource_repo=MagicMock(),
         device_service=device_service_mock,
         skill_set_factory=MagicMock(),
-        skill_set_activator_factory=MagicMock(),
         device_plugin=MagicMock(),
         bot_service_provider=lambda: MagicMock(),
         skill_md_path="/test/SKILL.md",

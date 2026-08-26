@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     )
     from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
     from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+    from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.core.repository.protocols.skill_center import SkillPropagationLogRepository
 
 logger = get_logger()

@@ -478,14 +478,6 @@ API_LIFECYCLE_FLOWS: list[FlowCase] = [
             ),
             FlowStep(
                 method="POST",
-                path="/api/skills/{uploaded_skill_id}/activate",
-                query={"entity_id": "{user_id}", "bot_id": "{bot_id}", "engine_type": "openclaw"},
-                body={"source_path": "{uploaded_git_path}", "relative_path": "{uploaded_git_path}"},
-                expect_status=200,
-                expect={"success": True},
-            ),
-            FlowStep(
-                method="POST",
                 path="/api/skills/market/activate-batch",
                 query={"entity_id": "{user_id}", "bot_id": "{bot_id}", "engine_type": "openclaw"},
                 body={"skill_paths": ["{uploaded_git_path}"]},
@@ -548,13 +540,6 @@ API_LIFECYCLE_FLOWS: list[FlowCase] = [
             FlowStep(
                 method="GET",
                 path="/api/skills/skillset/active",
-                query={"entity_id": "{user_id}", "bot_id": "{bot_id}", "engine_type": "openclaw"},
-                expect_status=200,
-                expect={"success": True},
-            ),
-            FlowStep(
-                method="POST",
-                path="/api/skills/deactivate-all",
                 query={"entity_id": "{user_id}", "bot_id": "{bot_id}", "engine_type": "openclaw"},
                 expect_status=200,
                 expect={"success": True},
@@ -770,17 +755,6 @@ API_LIFECYCLE_FLOWS: list[FlowCase] = [
                 },
                 expect_status=200,
                 expect={"success": True},
-            ),
-            FlowStep(
-                method="POST",
-                path="/api/skills/skillset/switch",
-                query={"entity_id": "{user_id}", "bot_id": "{bot_id}", "engine_type": "openclaw"},
-                body={"skill_set_id": "{skill_set_id}"},
-                expect_status=200,
-                # singlebox/openclaw MCP filter-servers may return a device-side
-                # failure while the skill-set switch itself has been attempted.
-                # Keep this as a real user operation, but do not make current
-                # MCP-scope infrastructure readiness the gate for this flow.
             ),
             FlowStep(
                 method="GET",

@@ -26,7 +26,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, TYPE_CHECKING
 
-from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
@@ -37,9 +36,6 @@ if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_service import DeviceService
     from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
     from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-    from agentclaw.community.core.skill_center.services.skill_set_service import (
-        SkillSetActivatorFactory,
-    )
     from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 
 logger = get_logger()
@@ -79,7 +75,6 @@ class DataInitService:
         resource_repo: "ResourceRepositoryProtocol",
         device_service: "DeviceService",
         skill_set_factory: "SkillSetServiceFactory",
-        skill_set_activator_factory: "SkillSetActivatorFactory",
         device_plugin: "DeviceAccessor",
         bot_service_provider: Callable[[], "BotService"],
         skill_md_path: str,
@@ -95,13 +90,9 @@ class DataInitService:
         # ``resolver`` 是全仓唯一 provider 解析点 — ``_get_engine_connection``
         # 通过 (bot_id, owner_id) 拿 typed ``DeviceContext`` 替代旧的
         # ``device_service.get_device_connection_v2(binding_id, ...)``。
-        #
-        # ``skill_set_activator_factory`` — Task 6 收口后,_activate_and_sync_skill_sets
-        # 走 factory.create(...) 拿 activator,避免在业务层手拼 ctor 参数。
         self._resource_repo = resource_repo
         self._device_service = device_service
         self._skill_set_factory = skill_set_factory
-        self._skill_set_activator_factory = skill_set_activator_factory
         self._device_plugin = device_plugin
         self._bot_service_provider = bot_service_provider
         self._skill_md_path = skill_md_path
@@ -124,7 +115,8 @@ class DataInitService:
         entity_id: str,
         entity_type: str,
         force: bool = False,
-    ) -> dict:
+        iam_token: str | None = None,
+    ) -> dict[str, str]:
         """触发 Bot 数据初始化流程。
 
         根据 Bot 当前状态决定立即执行还是标记 pending_init：
@@ -139,6 +131,7 @@ class DataInitService:
             entity_id: 关联实体 ID
             entity_type: 关联实体类型（staff/proj/team）
             force: 是否强制重新初始化（忽略 completed 状态）
+            iam_token: HTTP 边界传入的临时 IAM 凭证；仅在本次初始化需要时暂存
 
         Returns:
             dict with keys: status, message
@@ -190,11 +183,15 @@ class DataInitService:
                 )
                 return {"status": "skipped", "message": "初始化正在进行中"}
 
-            # Bot 已就绪，设为 in_progress 并记录开始时间，直接 await 执行
-            bot_service.update_bot_ext(bot_id, owner_id, {
+            # Bot 已就绪。状态与临时凭证在同一次持久化调用中写入，避免
+            # 第二次并发幂等检查判定跳过后仍遗留凭证。
+            active_update = {
                 "data_init_status": "in_progress",
                 "data_init_started_at": datetime.now(timezone.utc).isoformat(),
-            })
+            }
+            if iam_token:
+                active_update["iam_token"] = iam_token
+            bot_service.update_bot_ext(bot_id, owner_id, active_update)
             logger.info(
                 f"bot_id={bot_id} trigger_init branch_active awaiting_execution"
             )
@@ -208,13 +205,40 @@ class DataInitService:
             else:
                 return {"status": "failed", "message": "初始化失败，所有重试已耗尽"}
         else:
-            # Bot 还没就绪，标记 pending_init，等设备心跳回调触发
-            bot_service.update_bot_ext(bot_id, owner_id, {"data_init_status": "pending_init"})
+            # Bot 还没就绪，标记 pending_init，等设备心跳回调触发。凭证与
+            # 状态同写，确保设备回调可用且不会先留下孤立 secret。
+            pending_update = {"data_init_status": "pending_init"}
+            if iam_token:
+                pending_update["iam_token"] = iam_token
+            bot_service.update_bot_ext(bot_id, owner_id, pending_update)
             logger.info(
                 f"bot_id={bot_id} trigger_init branch_pending "
                 f"bot_status={bot_status} marked=pending_init waiting=device_callback"
             )
             return {"status": "pending_init", "message": "等待 Bot 就绪后自动执行"}
+
+
+    def get_status(self, bot_id: str, owner_id: str) -> dict[str, str | None]:
+        """Return the public-safe data-init state without exposing ``bot.ext``."""
+        bot = self._bot_service_provider().get_bot(bot_id, owner_id)
+        ext = bot.get("ext") or {}
+        if isinstance(ext, str):
+            try:
+                ext = json.loads(ext)
+            except (json.JSONDecodeError, TypeError):
+                ext = {}
+        if not isinstance(ext, dict):
+            ext = {}
+
+        raw_status = ext.get("data_init_status")
+        known = {"pending_init", "in_progress", "completed", "failed"}
+        status = str(raw_status) if raw_status in known else "not_started"
+        started_at = ext.get("data_init_started_at")
+        return {
+            "bot_id": bot_id,
+            "status": status,
+            "started_at": str(started_at) if started_at else None,
+        }
 
     async def _async_execute_with_retry(
         self,
@@ -349,21 +373,6 @@ class DataInitService:
             f"cost_ms={(_time.time() - _t_collect) * 1000:.0f}"
         )
 
-        # 1.5 激活所有 skillset 并同步软链到设备（失败不阻塞）
-        _t_skill = _time.time()
-        try:
-            await self._activate_and_sync_skill_sets(bot_id, owner_id, entity_id)
-            logger.info(
-                f"bot_id={bot_id} execute_init skillset_sync_done "
-                f"cost_ms={(_time.time() - _t_skill) * 1000:.0f}"
-            )
-        except Exception as e:
-            logger.warning(
-                f"bot_id={bot_id} execute_init skillset_sync_failed exc={e} "
-                f"cost_ms={(_time.time() - _t_skill) * 1000:.0f} non_blocking=true",
-                exc_info=True,
-            )
-
         # 2. 通过 Engine 让 LLM 执行 data-init Skill
         # _send_to_engine 内部使用同步 I/O（requests + websocket-client），
         # 通过 asyncio.to_thread() 在线程池中执行，避免阻塞 asyncio 事件循环
@@ -437,62 +446,6 @@ class DataInitService:
         })
         logger.info(f"bot_id={bot_id} execute_init completed")
 
-    async def _activate_and_sync_skill_sets(
-        self,
-        bot_id: str,
-        owner_id: str,
-        entity_id: str,
-    ) -> None:
-        """激活所有 skillset 并同步软链到设备。
-
-        1. 对每个 skillset 调用 activate（未激活的走完整流程，已激活的跳过）
-        2. 无条件补一次 device sync（处理已激活但缺软链的情况）
-
-        engine_type 必须按 bot 真实 active_engine 透传，否则
-        SkillSetService.__init__ 会把 engine_type=None 兜底成 openclaw,
-        导致 claude_code 等 engine 的 bot 在 data_init 全量同步时被
-        错按 openclaw 捞技能集 / 算软链路径（曾把 claude_code 已下的
-        10 个软链覆盖成 openclaw 默认集的 4 个）。
-        """
-        # 取 bot 真实 active_engine；取不到时降级 DEFAULT_ENGINE_TYPE 继续走完流程，
-        # 不让本步骤的失败整段跳过 skillset 激活（保持修复前的容错性）。
-        engine_type = DEFAULT_ENGINE_TYPE
-        try:
-            bot = self._bot_service_provider().get_bot(bot_id, owner_id)
-            engine_type = bot.get("active_engine") or DEFAULT_ENGINE_TYPE
-        except Exception as exc:
-            logger.warning(
-                f"bot_id={bot_id} activate_and_sync_skill_sets get_bot failed, "
-                f"fallback engine_type={engine_type} exc={exc}",
-                exc_info=True,
-            )
-
-        activator = self._skill_set_activator_factory.create(
-            entity_id=entity_id,
-            bot_id=bot_id,
-            engine_type=engine_type,
-        )
-        skill_sets = activator.skill_set_service.skill_set_repo.list_all(
-            user_id=entity_id, bolt_id=bot_id
-        )
-        logger.info(
-            f"bot_id={bot_id} activate_and_sync_skill_sets found skill_sets={len(skill_sets)} entity_id={entity_id}"
-        )
-
-        for ss in skill_sets:
-            ss_id = str(ss.get('id', ''))
-            result = await activator.activate_skill_set(ss_id, user_id=owner_id)
-            logger.info(
-                f"bot_id={bot_id} activate_and_sync_skill_sets activate skill_set={ss_id} "
-                f"success={result.success} message={result.message}"
-            )
-
-        # 无条件同步软链到设备（全量覆盖）
-        sync_result = activator._do_device_sync(
-            user_id=owner_id, caller="DataInitService"
-        )
-        logger.info(f"bot_id={bot_id} activate_and_sync_skill_sets device_sync result={sync_result}")
-
     def _collect_bot_info(
         self,
         bot_id: str,
@@ -512,7 +465,7 @@ class DataInitService:
         bot = bot_service.get_bot(bot_id, owner_id)
         link_resources = self._collect_link_resources(bot_id, owner_id)
 
-        # 从 bot.ext 中读取存储的 iam_token（由 router 层在触发 data_init 前写入）
+        # 从 bot.ext 中读取临时 iam_token（由 trigger_init 在确认本次需要执行后写入）
         ext = bot.get("ext") or {}
         if isinstance(ext, str):
             try:

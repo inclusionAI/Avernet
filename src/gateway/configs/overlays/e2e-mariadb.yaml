@@ -1,0 +1,14 @@
+# MariaDB E2E overlay — use MariaDB as the gateway storage backend.
+# Select via: SOFAPY_CONFIG_OVERLAY=e2e-mariadb
+# Enables schema creation so the E2E acceptance suite can run against a
+# freshly-created database. Requires a reachable MariaDB server.
+# Values below target the local E2E devbox container
+# (docker run -d -p 33306:3306 -e MARIADB_DATABASE=gateway_test \
+#   -e MARIADB_USER=gateway -e MARIADB_PASSWORD=gatewaypass mariadb:11).
+user_config:
+  plugins:
+    database: "mariadb"
+  database:
+    database_url: "mysql+aiomysql://gateway:gatewaypass@127.0.0.1:33306/gateway_test?charset=utf8mb4"
+    create_schema: true
+    seed_data: true

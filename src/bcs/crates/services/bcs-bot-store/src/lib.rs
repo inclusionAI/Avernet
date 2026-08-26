@@ -30,8 +30,10 @@ use bcs_db_api::{
 use bcs_service_api::{
     BindingChannels, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
-    BotControlPlaneRecord, BotControlPlaneRepoPort, BotDynamicStatus, BotMetricCount,
-    BotMetricsSnapshotPort, RegisteredBot, ServiceError, ServiceResult, Skill,
+    BotControlPlaneRecord, BotControlPlaneRepoPort, BotTaskModesQuery, TaskModeMatch,
+    BotDynamicStatus, BotMetricCount,
+    BotMetricsSnapshotPort, ConnectStreamError, RegisteredBot, ServiceError, ServiceResult, Skill,
+    is_mock_token,
 };
 
 pub mod memory;
@@ -52,6 +54,36 @@ const DEFAULT_CACHE_KEY_PREFIX: &str = "bcs:";
 
 /// Cache key namespace for bot status.
 const STATUS_CACHE_KEY_NAMESPACE: &str = "status:";
+
+fn bot_info_json_set(
+    updates: Vec<(&'static str, serde_json::Value)>,
+) -> ServiceResult<(String, Vec<Value>)> {
+    let mut expressions = Vec::with_capacity(updates.len());
+    let mut params = Vec::with_capacity(updates.len());
+    for (path, value) in updates {
+        expressions.push(format!("'{path}', json_extract(?, '$')"));
+        params.push(Value::from(serde_json::to_string(&value).map_err(|error| {
+            ServiceError::InternalError(error.to_string())
+        })?));
+    }
+    Ok((
+        format!(
+            "bot_info = JSON_SET(\
+             CASE WHEN JSON_VALID(bot_info) AND LOWER(JSON_TYPE(bot_info)) = 'object' \
+                  THEN bot_info ELSE JSON_OBJECT() END, {})",
+            expressions.join(", ")
+        ),
+        params,
+    ))
+}
+
+fn serialized_string_value<T: Serialize>(value: &T) -> ServiceResult<String> {
+    serde_json::to_value(value)
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| ServiceError::InternalError("expected a serialized string value".to_string()))
+}
 
 fn is_legacy_namespace(bot_uuid: &str, staff_no: &str) -> bool {
     let suffix = format!(":{}", staff_no);
@@ -355,6 +387,7 @@ impl PersistentBotRepo {
             hidden,
             agent_code: caps.agent_code.clone(),
             agent_token: caps.agent_token.clone(),
+            ..Default::default()
         };
         let bot_info_json = serde_json::to_string(&bot_info)
             .map_err(|e| ServiceError::InternalError(e.to_string()))?;
@@ -383,27 +416,47 @@ impl PersistentBotRepo {
             // use update_created_by_in_db() / save_created_by() for that.
             // Only overwrite session_token when we have a value; None means
             // the caller doesn't know the token — preserve whatever is in DB.
+            // Update only lifecycle-owned JSON fields so private control-plane
+            // attributes and forward-compatible keys remain authoritative.
+            let (bot_info_assignment, bot_info_params) = bot_info_json_set(vec![
+                ("$.summary", serde_json::to_value(&bot_info.summary)?),
+                ("$.domains", serde_json::to_value(&bot_info.domains)?),
+                ("$.skills", serde_json::to_value(&bot_info.skills)?),
+                ("$.scopes", serde_json::to_value(&bot_info.scopes)?),
+                (
+                    "$.binding_channels",
+                    serde_json::to_value(&bot_info.binding_channels)?,
+                ),
+                ("$.agent_code", serde_json::to_value(&bot_info.agent_code)?),
+                ("$.agent_token", serde_json::to_value(&bot_info.agent_token)?),
+            ])?;
             if let Some(token) = session_token {
-                let sql = "UPDATE bcs_bots SET name = ?, bot_info = ?, session_token = ?, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?";
-                self.db_execute_affected(sql, vec![
-                    Value::from(name),
-                    Value::from(bot_info_json.as_str()),
+                let sql = format!(
+                    "UPDATE bcs_bots SET name = ?, {bot_info_assignment}, session_token = ?, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
+                );
+                let mut params = vec![Value::from(name)];
+                params.extend(bot_info_params);
+                params.extend([
                     Value::from(token),
                     Value::from(visibility),
                     agent_code_value.clone(),
                     Value::from(bot_uuid),
                     Value::from(env.as_str()),
-                ]).await
+                ]);
+                self.db_execute_affected(&sql, params).await
             } else {
-                let sql = "UPDATE bcs_bots SET name = ?, bot_info = ?, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?";
-                self.db_execute_affected(sql, vec![
-                    Value::from(name),
-                    Value::from(bot_info_json.as_str()),
+                let sql = format!(
+                    "UPDATE bcs_bots SET name = ?, {bot_info_assignment}, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
+                );
+                let mut params = vec![Value::from(name)];
+                params.extend(bot_info_params);
+                params.extend([
                     Value::from(visibility),
                     agent_code_value.clone(),
                     Value::from(bot_uuid),
                     Value::from(env.as_str()),
-                ]).await
+                ]);
+                self.db_execute_affected(&sql, params).await
             }
         } else {
             // INSERT new record — None maps to SQL NULL.
@@ -1313,6 +1366,50 @@ impl BotRepoPort for PersistentBotRepo {
         Ok(())
     }
 
+    async fn update_capabilities(
+        &self,
+        bot_id: &str,
+        capabilities: BotCapabilities,
+    ) -> ServiceResult<()> {
+        info!(bot_id = %bot_id, name = ?capabilities.name, "update_capabilities: replacing capabilities",);
+        let session_token: Option<String> = {
+            let bots = self.bots.read().await;
+            bots.get(bot_id).and_then(|b| b.session_token.clone())
+        };
+        let exists_in_db = self.exists_in_db(bot_id).await;
+        if exists_in_db {
+            self.save_to_db(bot_id, &capabilities, session_token.as_deref(), None)
+                .await?;
+        }
+
+        // Wholesale in-memory replacement (no `is_empty` skip, unlike
+        // `register`) so a PATCH that clears a field also takes effect in the
+        // live registry and runtime discovery, not only in the database.
+        // Session token / created_by / runtime state are on `RegisteredBotInner`
+        // and are left untouched here.
+        let updated_in_memory = {
+            let mut bots = self.bots.write().await;
+            if let Some(existing) = bots.get_mut(bot_id) {
+                existing.last_heartbeat = Instant::now();
+                existing.capabilities = capabilities;
+                info!(bot_id = %bot_id, "update_capabilities: replaced capabilities in memory");
+                true
+            } else {
+                info!(
+                    bot_id = %bot_id,
+                    "update_capabilities: skipped in-memory update because bot is not loaded"
+                );
+                false
+            }
+        };
+
+        if updated_in_memory || exists_in_db {
+            Ok(())
+        } else {
+            Err(ServiceError::BotNotFound(bot_id.to_string()))
+        }
+    }
+
     async fn register_with_owner_and_token(
         &self,
         bot_id: String,
@@ -1583,10 +1680,32 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn list_active(&self) -> Vec<RegisteredBot> {
-        // Master has all active connections in memory
+        // Master has active connections in memory, while soft-delete state is
+        // authoritative in the DB. Re-registering a retained soft-deleted row
+        // intentionally does not clear `is_deleted`, so default active reads
+        // must cross-check the DB before exposing memory entries.
+        let env = resolve_env();
+        let active_bot_ids = match self
+            .db_query(
+                "SELECT bot_uuid FROM bcs_bots WHERE env = ? AND COALESCE(is_deleted, 0) = 0",
+                vec![Value::from(env.as_str())],
+            )
+            .await
+        {
+            Ok(rows) => rows
+                .into_iter()
+                .filter_map(|row| db_get_column::<String>(&row, "bot_uuid").ok())
+                .collect::<std::collections::HashSet<_>>(),
+            Err(error) => {
+                warn!(env = %env, error = %error, "list_active: failed to load active bot ids from DB; returning empty result to preserve DB tombstone authority");
+                return Vec::new();
+            }
+        };
+
         let bots = self.bots.read().await;
         bots.values()
             .filter(|b| !b.is_expired())
+            .filter(|b| active_bot_ids.contains(&b.bot_uuid))
             .map(|b| b.to_registered_bot())
             .collect()
     }
@@ -2302,6 +2421,153 @@ impl BotRepoPort for PersistentBotRepo {
 
     // ===== Streaming Connection Management =====
 
+    async fn connect_or_promote_streaming(
+        &self,
+        bot_id: String,
+    ) -> Result<String, ConnectStreamError> {
+        // Decide the branch from the registry's authoritative current token
+        // (memory → DB fallback via load_token) and existence (memory or DB),
+        // before taking the write lock, so a DB-only bot after a BCS restart is
+        // still located and a previously-registered bot (even with no token) is
+        // refused rather than silently overwritten.
+        let existing_token = self.load_token(&bot_id).await;
+        let is_mock = existing_token.as_deref().map(is_mock_token).unwrap_or(false);
+        let bot_exists = {
+            let in_mem = self.bots.read().await.get(&bot_id).is_some();
+            in_mem || existing_token.is_some() || self.exists_in_db(&bot_id).await
+        };
+        // ws_connection presence and connected state are only meaningful in
+        // memory; a DB-only entry has no live connection.
+        let in_memory_connected = {
+            let bots = self.bots.read().await;
+            bots.get(&bot_id)
+                .map(|bot| bot.ws_connection.is_some())
+                .unwrap_or(false)
+        };
+        let token_preview = |t: &str| format!("{}...", &t[..t.len().min(4)]);
+
+        match (bot_exists, is_mock, in_memory_connected) {
+            // truly new (no record anywhere) → create with a real token
+            (false, _, _) => {
+                let session_token = uuid::Uuid::new_v4().to_string();
+                let mut bots = self.bots.write().await;
+                bots.insert(
+                    bot_id.clone(),
+                    RegisteredBotInner {
+                        bot_uuid: bot_id.clone(),
+                        last_heartbeat: Instant::now(),
+                        capabilities: BotCapabilities::default(),
+                        dynamic_status: BotDynamicStatus::default(),
+                        status: bcs_service_api::ActorStatus::Online,
+                        actor_kind: bcs_service_api::ActorKind::Bot,
+                        ws_connection: Some(BotConnection {
+                            session_token: session_token.clone(),
+                            connected_at: Instant::now(),
+                        }),
+                        session_token: Some(session_token.clone()),
+                        env: Some(resolve_env()),
+                        hidden: false,
+                        created_by: None,
+                    },
+                );
+                self.token_to_bot
+                    .write()
+                    .await
+                    .insert(session_token.clone(), bot_id.clone());
+                info!(
+                    bot_id = %bot_id,
+                    branch = "create",
+                    token_preview = %token_preview(&session_token),
+                    "register_streaming_connection: create"
+                );
+                Ok(session_token)
+            }
+            // pre-registered plugin bot, not yet attached → promote MOCK → real
+            (true, true, _) => {
+                let previous_mock = existing_token.clone();
+                let session_token = uuid::Uuid::new_v4().to_string();
+                // Persist FIRST: if this fails, surface the error before any
+                // in-memory mutation, so memory and DB never split into a
+                // "real-token in memory, MOCK in DB" half-state that only
+                // surfaces as a stale-MOCK reconnect after a BCS restart.
+                if let Err(err) = self.save_token_to_db(&bot_id, &session_token).await {
+                    warn!(
+                        bot_id = %bot_id,
+                        error = %err,
+                        "connect_or_promote_streaming: promote_mock DB persist failed; refusing ws"
+                    );
+                    return Err(ConnectStreamError::InternalError(format!(
+                        "promote_mock: failed to persist promoted token: {err}"
+                    )));
+                }
+                let mut bots = self.bots.write().await;
+                if let Some(bot) = bots.get_mut(&bot_id) {
+                    bot.ws_connection = Some(BotConnection {
+                        session_token: session_token.clone(),
+                        connected_at: Instant::now(),
+                    });
+                    bot.session_token = Some(session_token.clone());
+                    bot.last_heartbeat = Instant::now();
+                } else {
+                    // DB-only after restart: hydrate the entry with the new real
+                    // token so subsequent connects see a real-token bot.
+                    bots.insert(
+                        bot_id.clone(),
+                        RegisteredBotInner {
+                            bot_uuid: bot_id.clone(),
+                            last_heartbeat: Instant::now(),
+                            capabilities: BotCapabilities::default(),
+                            dynamic_status: BotDynamicStatus::default(),
+                            status: bcs_service_api::ActorStatus::Online,
+                            actor_kind: bcs_service_api::ActorKind::Bot,
+                            ws_connection: Some(BotConnection {
+                                session_token: session_token.clone(),
+                                connected_at: Instant::now(),
+                            }),
+                            session_token: Some(session_token.clone()),
+                            env: Some(resolve_env()),
+                            hidden: false,
+                            created_by: None,
+                        },
+                    );
+                }
+                let mut token_to_bot = self.token_to_bot.write().await;
+                if let Some(prev) = previous_mock {
+                    token_to_bot.remove(&prev);
+                }
+                token_to_bot.insert(session_token.clone(), bot_id.clone());
+                info!(
+                    bot_id = %bot_id,
+                    branch = "promote_mock",
+                    previous_token_kind = "mock",
+                    token_preview = %token_preview(&session_token),
+                    "register_streaming_connection: promote_mock"
+                );
+                Ok(session_token)
+            }
+            // real token, already connected → reject
+            (true, false, true) => {
+                warn!(
+                    bot_id = %bot_id,
+                    branch = "already_connected",
+                    "connect_or_promote_streaming: real-token bot already connected"
+                );
+                Err(ConnectStreamError::AlreadyConnected(bot_id))
+            }
+            // real token, not connected → anti-hijack: refuse an empty/stale-token
+            // claim of a real-token bot. (Reconnect by the real token still works
+            // via the existing reconnect_streaming(token) path.)
+            (true, false, false) => {
+                warn!(
+                    bot_id = %bot_id,
+                    branch = "already_registered",
+                    "connect_or_promote_streaming: refusing empty/stale-token claim of real-token bot"
+                );
+                Err(ConnectStreamError::AlreadyRegistered(bot_id))
+            }
+        }
+    }
+
     async fn register_streaming_connection(&self, bot_id: String) -> Result<String, ()> {
         info!(bot_id = %bot_id, "register_streaming_connection: registering new connection");
 
@@ -2599,6 +2865,56 @@ fn control_plane_record_from_row(row: &DbRow) -> ServiceResult<BotControlPlaneRe
     let agent_code = db_get_column_opt::<String>(row, "agent_code")
         .map_err(|error| ServiceError::InternalError(error.to_string()))?
         .or(bot_info.agent_code);
+    let user_visibility = db_get_column_opt::<String>(row, "user_visibility")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .map(|value| {
+            serde_json::from_value(serde_json::Value::String(value)).map_err(|error| {
+                warn!(
+                    bot_id,
+                    column = "user_visibility",
+                    "Invalid persisted Bot attribute"
+                );
+                ServiceError::InternalError(error.to_string())
+            })
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let friend_ext = db_get_column_opt::<String>(row, "friend_ext")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .map(|value| {
+            serde_json::from_str(&value).map_err(|error| {
+                warn!(
+                    bot_id,
+                    column = "friend_ext",
+                    "Invalid persisted Bot attribute"
+                );
+                ServiceError::InternalError(error.to_string())
+            })
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let friend_check_in_strategy = db_get_column_opt::<String>(row, "friend_check_in_strategy")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .map(|value| {
+            serde_json::from_value(serde_json::Value::String(value)).map_err(|error| {
+                warn!(
+                    bot_id,
+                    column = "friend_check_in_strategy",
+                    "Invalid persisted Bot attribute"
+                );
+                ServiceError::InternalError(error.to_string())
+            })
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let task_claim_mode = db_get_column_opt::<i64>(row, "task_claim_mode")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .map(|value| value != 0)
+        .unwrap_or(false);
+    let task_dream_mode = db_get_column_opt::<i64>(row, "task_dream_mode")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .map(|value| value != 0)
+        .unwrap_or(false);
     let created_at = db_get_column::<i64>(row, "gmt_create_ms")
         .map_err(|error| ServiceError::InternalError(error.to_string()))?
         .max(0) as u64;
@@ -2621,8 +2937,13 @@ fn control_plane_record_from_row(row: &DbRow) -> ServiceResult<BotControlPlaneRe
             scopes: bot_info.scopes,
         },
         agent_code,
+        task_claim_mode,
+        task_dream_mode,
         created_at,
         updated_at,
+        user_visibility,
+        friend_ext,
+        friend_check_in_strategy,
     })
 }
 
@@ -2635,7 +2956,8 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
     ) -> ServiceResult<Option<BotControlPlaneRecord>> {
         let sql = format!(
             "SELECT bot_uuid, name, bot_info, visibility, status, actor_kind, env, \
-                    created_by, agent_code, ({}) * 1000 AS gmt_create_ms, \
+                    created_by, agent_code, task_claim_mode, task_dream_mode, user_visibility, \
+                    friend_ext, friend_check_in_strategy, ({}) * 1000 AS gmt_create_ms, \
                     ({}) * 1000 AS gmt_modified_ms \
              FROM bcs_bots \
              WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0 \
@@ -2689,6 +3011,8 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             "{common}\
              SELECT b.bot_uuid, b.name, b.bot_info, b.visibility, b.status, \
                     b.actor_kind, b.env, b.created_by, b.agent_code, \
+                    b.task_claim_mode, b.task_dream_mode, b.user_visibility, b.friend_ext, \
+                    b.friend_check_in_strategy, \
                     ({} ) * 1000 AS gmt_create_ms, \
                     ({} ) * 1000 AS gmt_modified_ms, \
                     CASE WHEN f.bot_uuid IS NULL THEN 0 ELSE 1 END AS is_friend \
@@ -2760,7 +3084,8 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
     ) -> ServiceResult<Vec<BotControlPlaneRecord>> {
         let mut sql = format!(
             "SELECT bot_uuid, name, bot_info, visibility, status, actor_kind, env, \
-                    created_by, agent_code, ({}) * 1000 AS gmt_create_ms, \
+                    created_by, agent_code, task_claim_mode, task_dream_mode, user_visibility, \
+                    friend_ext, friend_check_in_strategy, ({}) * 1000 AS gmt_create_ms, \
                     ({}) * 1000 AS gmt_modified_ms \
              FROM bcs_bots \
              WHERE created_by = ? AND env = ? AND COALESCE(is_deleted, 0) = 0",
@@ -2802,12 +3127,69 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         rows.iter().map(control_plane_record_from_row).collect()
     }
 
+    async fn list_control_plane_by_task_modes(
+        &self,
+        query: BotTaskModesQuery,
+    ) -> ServiceResult<Vec<BotControlPlaneRecord>> {
+        let mut sql = format!(
+            "SELECT bot_uuid, name, bot_info, visibility, status, actor_kind, env, \
+                    created_by, agent_code, task_claim_mode, task_dream_mode, user_visibility, \
+                    friend_ext, friend_check_in_strategy, \
+                    ({}) * 1000 AS gmt_create_ms, ({}) * 1000 AS gmt_modified_ms \
+             FROM bcs_bots \
+             WHERE env = ? AND COALESCE(is_deleted, 0) = 0 \
+             AND COALESCE(actor_kind, 'bot') = 'bot'",
+            self.flavor.unix_ts("gmt_create"),
+            self.flavor.unix_ts("gmt_modified")
+        );
+        let mut params = vec![Value::from(query.env.as_str())];
+        match (query.task_claim_mode, query.task_dream_mode, query.match_mode) {
+            (Some(claim), Some(dream), TaskModeMatch::All) => {
+                sql.push_str(" AND task_claim_mode = ? AND task_dream_mode = ?");
+                params.push(Value::from(if claim { 1 } else { 0 }));
+                params.push(Value::from(if dream { 1 } else { 0 }));
+            }
+            (Some(claim), Some(dream), TaskModeMatch::Any) => {
+                sql.push_str(" AND (task_claim_mode = ? OR task_dream_mode = ?)");
+                params.push(Value::from(if claim { 1 } else { 0 }));
+                params.push(Value::from(if dream { 1 } else { 0 }));
+            }
+            (Some(claim), None, _) => {
+                sql.push_str(" AND task_claim_mode = ?");
+                params.push(Value::from(if claim { 1 } else { 0 }));
+            }
+            (None, Some(dream), _) => {
+                sql.push_str(" AND task_dream_mode = ?");
+                params.push(Value::from(if dream { 1 } else { 0 }));
+            }
+            (None, None, _) => {}
+        }
+        sql.push_str(" ORDER BY gmt_create DESC, bot_uuid ASC");
+        let rows = self
+            .db_query(&sql, params)
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        rows.iter().map(control_plane_record_from_row).collect()
+    }
+
     async fn patch_control_plane(
         &self,
         bot_id: &str,
         env: &str,
         patch: BotControlPlanePatch,
     ) -> ServiceResult<Option<BotControlPlaneRecord>> {
+        if patch.user_visibility.is_some()
+            || patch.friend_ext.is_some()
+            || patch.friend_check_in_strategy.is_some()
+        {
+            debug!(
+                bot_id = %bot_id,
+                has_user_visibility = patch.user_visibility.is_some(),
+                has_friend_ext = patch.friend_ext.is_some(),
+                has_friend_check_in_strategy = patch.friend_check_in_strategy.is_some(),
+                "Patching internal Bot attributes in persistent storage"
+            );
+        }
         let existing = self.get_control_plane(bot_id, env).await?;
         if existing.is_none() {
             return Ok(None);
@@ -2816,76 +3198,67 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         let mut assignments = Vec::new();
         let mut params = Vec::new();
         if let Some(name) = patch.name.as_deref() {
-            assignments.push("name = ?");
+            assignments.push("name = ?".to_string());
             params.push(Value::from(name));
         }
         if let Some(visibility) = patch.visibility.as_deref() {
-            assignments.push("visibility = ?");
+            assignments.push("visibility = ?".to_string());
             params.push(Value::from(visibility));
         }
         if let Some(status) = patch.status {
-            assignments.push("status = ?");
+            assignments.push("status = ?".to_string());
             params.push(Value::from(match status {
                 bcs_service_api::ActorStatus::Online => "online",
                 bcs_service_api::ActorStatus::Hidden => "hidden",
             }));
         }
-        if let Some(descriptor) = patch.descriptor.as_ref() {
-            let rows = self
-                .db_query(
-                    "SELECT bot_info FROM bcs_bots WHERE bot_uuid = ? AND env = ? \
-                     AND COALESCE(is_deleted, 0) = 0 LIMIT 1",
-                    vec![Value::from(bot_id), Value::from(env)],
-                )
-                .await
-                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
-            let raw = rows
-                .first()
-                .map(|row| db_get_column_opt::<String>(row, "bot_info"))
-                .transpose()
-                .map_err(|error| ServiceError::InternalError(error.to_string()))?
-                .flatten();
-            let mut value = raw
-                .as_deref()
-                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-                .filter(serde_json::Value::is_object)
-                .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
-            let object = value.as_object_mut().ok_or_else(|| {
-                ServiceError::InternalError("Bot descriptor is not a JSON object".to_string())
-            })?;
-            if let Some(summary) = descriptor.summary.as_ref() {
-                object.insert(
-                    "summary".to_string(),
-                    serde_json::Value::String(summary.clone()),
-                );
+        if let Some(task_claim_mode) = patch.task_claim_mode {
+            assignments.push("task_claim_mode = ?".to_string());
+            params.push(Value::from(if task_claim_mode { 1 } else { 0 }));
+        }
+        if let Some(task_dream_mode) = patch.task_dream_mode {
+            assignments.push("task_dream_mode = ?".to_string());
+            params.push(Value::from(if task_dream_mode { 1 } else { 0 }));
+        }
+        if let Some(user_visibility) = patch.user_visibility {
+            assignments.push("user_visibility = ?".to_string());
+            params.push(Value::from(serialized_string_value(&user_visibility)?));
+        }
+        if let Some(friend_ext) = patch.friend_ext.as_ref() {
+            assignments.push("friend_ext = json_extract(?, '$')".to_string());
+            params.push(Value::from(serde_json::to_string(friend_ext)?));
+        }
+        if let Some(friend_check_in_strategy) = patch.friend_check_in_strategy {
+            assignments.push("friend_check_in_strategy = ?".to_string());
+            params.push(Value::from(serialized_string_value(
+                &friend_check_in_strategy,
+            )?));
+        }
+        if patch.descriptor.is_some() {
+            let mut json_updates = Vec::new();
+            if let Some(descriptor) = patch.descriptor.as_ref() {
+                if let Some(summary) = descriptor.summary.as_ref() {
+                    json_updates.push(("$.summary", serde_json::to_value(summary)?));
+                }
+                if let Some(domains) = descriptor.domains.as_ref() {
+                    json_updates.push(("$.domains", serde_json::to_value(domains)?));
+                }
+                if let Some(skills) = descriptor.skills.as_ref() {
+                    json_updates.push(("$.skills", serde_json::to_value(skills)?));
+                }
+                if let Some(scopes) = descriptor.scopes.as_ref() {
+                    json_updates.push(("$.scopes", serde_json::to_value(scopes)?));
+                }
             }
-            if let Some(domains) = descriptor.domains.as_ref() {
-                object.insert(
-                    "domains".to_string(),
-                    serde_json::to_value(domains)
-                        .map_err(|error| ServiceError::InternalError(error.to_string()))?,
-                );
+            if !json_updates.is_empty() {
+                let (assignment, json_params) = bot_info_json_set(json_updates)?;
+                assignments.push(assignment);
+                params.extend(json_params);
             }
-            if let Some(skills) = descriptor.skills.as_ref() {
-                object.insert(
-                    "skills".to_string(),
-                    serde_json::to_value(skills)
-                        .map_err(|error| ServiceError::InternalError(error.to_string()))?,
-                );
-            }
-            if let Some(scopes) = descriptor.scopes.as_ref() {
-                object.insert(
-                    "scopes".to_string(),
-                    serde_json::to_value(scopes)
-                        .map_err(|error| ServiceError::InternalError(error.to_string()))?,
-                );
-            }
-            assignments.push("bot_info = ?");
-            params.push(Value::from(value.to_string()));
         }
 
-        assignments.push("gmt_modified = CURRENT_TIMESTAMP");
-        assignments.push("updated_at = CURRENT_TIMESTAMP");
+        assignments.push("gmt_modified = CURRENT_TIMESTAMP".to_string());
+        assignments.push("updated_at = CURRENT_TIMESTAMP".to_string());
         params.push(Value::from(bot_id));
         params.push(Value::from(env));
         let sql = format!(
@@ -2949,6 +3322,7 @@ mod tests {
             hidden: false,
             agent_code: None,
             agent_token: None,
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&bot_info).unwrap();
@@ -3138,6 +3512,7 @@ mod tests {
             hidden: false,
             agent_code: None,
             agent_token: None,
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&bot_info).unwrap();
@@ -3292,6 +3667,7 @@ mod tests {
             hidden: false,
             agent_code: None,
             agent_token: None,
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&bot_info).unwrap();
@@ -3416,6 +3792,7 @@ mod tests {
             hidden: false,
             agent_code: None,
             agent_token: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&bot_info).unwrap();
         // JSON escaping handles most cases, but the SQL layer also does escaping

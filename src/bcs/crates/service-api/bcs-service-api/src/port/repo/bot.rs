@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 
+use crate::core::registry::ConnectStreamError;
 use crate::types::{
     ActorStatus, AgentCredentials, BotCapabilities, BotDynamicStatus, EnsureHumanResult,
     RegisteredBot, ServiceResult,
@@ -29,6 +30,22 @@ pub trait BotRepoPort: Send + Sync {
         self.save_created_by(&bot_id_for_followup, created_by, false)
             .await?;
         self.save_token(&bot_id_for_followup, token).await
+    }
+
+    /// Replace a bot's capabilities wholesale (including cleared/empty arrays).
+    ///
+    /// Unlike [`register`](Self::register), whose existing-bot merge skips
+    /// empty `domains`/`skills`/`scopes`, this writes the given capabilities
+    /// verbatim so a partial update that clears a field actually takes effect
+    /// in the live registry. The default delegates to `register` for backward
+    /// compatibility; stores that support wholesale replacement should
+    /// override this to avoid the empty-array skip.
+    async fn update_capabilities(
+        &self,
+        bot_id: &str,
+        capabilities: BotCapabilities,
+    ) -> ServiceResult<()> {
+        self.register(bot_id.to_string(), capabilities).await
     }
 
     async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool;
@@ -245,6 +262,25 @@ pub trait BotRepoPort: Send + Sync {
     }
 
     async fn register_streaming_connection(&self, bot_id: String) -> Result<String, ()>;
+    /// Connect or promote a streaming connection by `bot_id`, deciding
+    /// atomically inside the store:
+    /// - bot absent            → create with a fresh real token + attach ws
+    /// - bot exists, MOCK token → promote: replace MOCK with a real token +
+    ///   attach ws (and persist the real token back to `bcs_bots`)
+    /// - bot exists, real token, no ws → `AlreadyRegistered` (anti-hijack)
+    /// - bot exists, real token, ws present → `AlreadyConnected`
+    ///
+    /// Default impl delegates to [`register_streaming_connection`]
+    /// (preserving legacy semantics for noop/test repos).
+    async fn connect_or_promote_streaming(
+        &self,
+        bot_id: String,
+    ) -> Result<String, ConnectStreamError> {
+        let id = bot_id.clone();
+        self.register_streaming_connection(bot_id)
+            .await
+            .map_err(|_| ConnectStreamError::AlreadyConnected(id))
+    }
     async fn reconnect_streaming(&self, existing_token: String) -> Result<(String, String), ()>;
     async fn disconnect_streaming(&self, bot_id: &str);
     async fn is_connected(&self, bot_id: &str) -> bool;

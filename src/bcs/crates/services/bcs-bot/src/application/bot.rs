@@ -9,7 +9,8 @@ use bcs_service_api::{
     BotDiscoveryService, BotLeaveCommand, BotLeaveResult, BotListCommand, BotListEntry,
     BotListResult, BotManagementService, BotPagedListCommand, BotPagedListResult,
     BotQueryByIdsCommand, BotQueryByIdsResult, BotQueryEntry, BotQueryService,
-    BotRegistryCoreService, OrganizationCoreService, OrganizationMemberSummary,
+    BotRegistryCoreService, BotSearchResult, OrganizationCoreService, OrganizationMemberSummary,
+    SearchBotsCommand,
     BotRuntimeConnectCommand, BotRuntimeConnectOutcome, BotRuntimeConnectionService,
     BotRuntimeDisconnectCommand, BotRuntimeStatusCommand, BotRuntimeStatusOutcome,
     BotStatusUpdateCommand, BotStatusUpdateResult, BotUseCaseError, BotVisibilityCommand,
@@ -342,6 +343,73 @@ impl BotQueryService for Bot {
             entries.push(self.bot_to_query_entry(bot).await);
         }
         Ok(BotQueryByIdsResult { bots: entries })
+    }
+
+    async fn search_bots(
+        &self,
+        command: SearchBotsCommand,
+    ) -> Result<BotSearchResult, BotUseCaseError> {
+        let q_lower = command
+            .q
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_lowercase());
+
+        let mut filtered: Vec<RegisteredBot> = self
+            .registry
+            .list_active()
+            .await
+            .into_iter()
+            .filter(|bot| {
+                command.requester_actor_id.as_deref() != Some(bot.bot_uuid.as_str())
+            })
+            .filter(|bot| match command.visibility.as_ref() {
+                Some(wants) => wants.iter().any(|want| bot.capabilities.visibility == *want),
+                None => is_discover_visible(&bot.capabilities.visibility),
+            })
+            .filter(|bot| {
+                command.status.map_or(true, |want| bot.status == want)
+            })
+            .filter(|bot| match &q_lower {
+                Some(needle) => {
+                    let name = bot
+                        .capabilities
+                        .name
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase();
+                    let summary = bot
+                        .capabilities
+                        .summary
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase();
+                    name.contains(needle) || summary.contains(needle)
+                }
+                None => true,
+            })
+            .collect();
+
+        // TC (TeamClaw backend) bot filter: an owner-suffixed `bot_uuid` whose
+        // suffix equals its `created_by` owner — the persistent marker the
+        // delete flow treats as a TC bot (`is_owner_suffixed_bot_id_for_staff`).
+        if let Some(want_tc) = command.tc_bot {
+            filtered.retain(|bot| is_tc_bot(bot) == want_tc);
+        }
+
+        // Sort by display name ascending; bots without a name sort last.
+        filtered.sort_by(|a, b| {
+            (a.capabilities.name.as_deref().unwrap_or(""))
+                .cmp(b.capabilities.name.as_deref().unwrap_or(""))
+        });
+
+        let total = filtered.len() as u64;
+        let mut items = Vec::with_capacity(filtered.len());
+        for bot in filtered {
+            items.push(self.bot_to_query_entry(bot).await);
+        }
+        Ok(BotSearchResult { items, total })
     }
 }
 
@@ -1347,6 +1415,18 @@ fn is_owner_suffixed_bot_id_for_staff(bot_uuid: &str, staff_no: &str) -> bool {
     bot_uuid
         .rsplit_once(':')
         .is_some_and(|(_, suffix)| suffix == staff_no)
+}
+
+/// A TC (TeamClaw backend) bot: its `bot_uuid` is owner-suffixed and the
+/// suffix matches its bound `created_by` owner. This is the persisted marker
+/// for bots onboarded via the backend `ensure` flow (cf. the delete-flow
+/// "TC bot must be deleted from TC" gate).
+fn is_tc_bot(bot: &RegisteredBot) -> bool {
+    bot.created_by.as_deref().is_some_and(|owner| {
+        bot.bot_uuid
+            .rsplit_once(':')
+            .is_some_and(|(_, suffix)| suffix == owner)
+    })
 }
 
 fn authorize_bot_management(

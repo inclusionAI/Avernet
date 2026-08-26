@@ -134,7 +134,7 @@ def _task_info(task_id="t_phase"):
             goal=Goal(objective="产出尽调报告",
                       acceptances=[AcceptanceCriteria(id=f"ac{i}", description=f"d{i}") for i in range(1, 6)]),
         ),
-        source_channel_type="bot", source_channel_id="owner_bot",
+        source_type="bot", owner_bot_id="owner_bot",
         execution_config={"MAX_DEPTH": 3, "BBS_MAX_DEPTH": 3},
     )
 

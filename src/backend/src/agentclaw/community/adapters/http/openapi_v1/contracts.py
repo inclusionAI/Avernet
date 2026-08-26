@@ -17,6 +17,19 @@ from pydantic import BaseModel, ConfigDict, Field
 # From ``api/`` — the Service API seam — not the core service module it lives in.
 from agentclaw.community.api.bot_startup_script_service import MAX_SCRIPT_BYTES
 
+#: The prefix every operation on this surface is mounted under.
+#:
+#: Defined here rather than in the package's ``__init__`` because ``access_log``
+#: needs it at *module* scope, and ``__init__`` imports the routers before it
+#: would reach the assignment. That ordering was harmless while no row was
+#: ``Check``: nothing pulled ``bot_access`` — and through it ``access_log`` —
+#: in during router import. The first adjudicated route makes
+#: ``PublicAPIRoute.__init__`` import the seam at decoration time, which closes
+#: the loop back into a half-initialised ``__init__``. A leaf module cannot be
+#: half-initialised by anything downstream of it.
+PUBLIC_API_PREFIX = "/openapi/v1"
+
+
 # Standard codes = HTTP status (3 digits) + business subcode (3 digits).
 CODE_OK = 200000
 CODE_CREATED = 201000
@@ -230,6 +243,18 @@ STARTUP_SCRIPT_WRITE_RESPONSES: dict[int | str, dict[str, object]] = {
 USER_SCOPED_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     **ERROR_RESPONSES,
     **USER_SCOPED_403,
+}
+
+# Space/member/favorite routes derive the actor from the verified principal and
+# can answer 403 for a valid caller lacking the required space role. This is a
+# different contract from USER_SCOPED_403: there is no caller-supplied user_id.
+SPACE_SCOPED_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
+    **ERROR_RESPONSES,
+    403: {
+        "model": ErrorEnvelope,
+        "description": "The authenticated user lacks the required space membership or role",
+        **error_example(403, "Forbidden"),
+    },
 }
 
 # Extra failures only the engine-runtime groups can produce. Attached to those

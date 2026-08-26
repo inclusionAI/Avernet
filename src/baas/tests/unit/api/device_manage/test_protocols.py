@@ -34,6 +34,7 @@ class TestDeviceServiceProtocol:
             "destroy_device_by_uuid",
             "stop_device_by_uuid",
             "get_device_info",
+            "get_provider_device_props",
         }
         protocol_methods = {
             name

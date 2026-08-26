@@ -106,6 +106,18 @@ class HttpClient(Plugin, Protocol):
         """Issue a DELETE to ``base_url + path`` and return the response."""
         ...
 
+    def patch(
+        self,
+        path: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+        json: Any | None = None,
+        headers: Mapping[str, str] | None = None,
+        timeout: float = 30.0,
+    ) -> httpx.Response:
+        """Issue a PATCH to ``base_url + path`` and return the response."""
+        ...
+
     def stream(
         self,
         method: str,
@@ -123,6 +135,22 @@ class HttpClient(Plugin, Protocol):
         ``raise_for_status`` propagate unchanged.
         """
         ...
+
+
+# ── Transport-neutral exception aliases ─────────────────────────────────────
+# Stable boundary-level names for the three httpx exception types Core services
+# use to classify HTTP failures. Core
+# services must not import ``httpx`` directly; they import these aliases from
+# ``plugin_api.http_client`` instead. The aliases map 1:1 to the existing
+# exception branches so result-dict branches and messages are preserved verbatim.
+HttpClientStatusError = httpx.HTTPStatusError
+HttpClientRequestError = httpx.RequestError
+HttpClientTimeoutError = httpx.TimeoutException
+"""Transport-neutral HTTP exception aliases (re-exports of the ``httpx``
+exception types under stable boundary names). Importing these from
+``plugin_api.http_client`` keeps Core services free of direct ``httpx`` imports
+while preserving the exact
+status / request-failure / generic-failure classification branches."""
 
 
 # ── Injector qualifiers (Guice @Named-style) ─────────────────────────────────

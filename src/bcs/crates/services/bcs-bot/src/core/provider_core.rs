@@ -7,11 +7,11 @@ use tracing::{info, warn};
 
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, CoordinationMode, ProviderAuthMode,
-    ProviderBotBinding, ProviderBotBindingRepoPort, ProviderBotCoreService,
-    ProviderCoordinationConfig, ProviderCoreService, ProviderCredential,
+    ProviderBotBinding, ProviderBotBindingRepoPort, ProviderBotConnectionMode,
+    ProviderBotCoreService, ProviderCoordinationConfig, ProviderCoreService, ProviderCredential,
     ProviderCredentialRepoPort, ProviderOrganizationManagementConfig, ProviderRecord,
     ProviderRepoPort, RegisterProviderBotParams, RegisteredProvider, RuntimeBotIdentity,
-    ServiceError, ServiceResult,
+    ServiceError, ServiceResult, Skill, UpdateProviderBotCoreResult, mock_token,
 };
 
 use super::ids::{new_bot_uuid, new_provider_id, new_session_token};
@@ -133,6 +133,7 @@ impl ProviderCore {
             skills,
             scopes,
             bot_uuid,
+            connection_mode,
         } = params;
         let provider = self
             .authenticated_provider(provider_id, provider_admin_token)
@@ -145,18 +146,22 @@ impl ProviderCore {
                 request_id: None,
             });
         }
-        if let Some(existing_binding) = self
-            .bindings
-            .get_binding_by_provider_ref(&provider.provider_id, &provider_bot_ref)
-            .await?
-        {
-            info!(
-                provider_id = %provider.provider_id,
-                bot_uuid = %existing_binding.bot_uuid,
-                provider_bot_ref = %provider_bot_ref,
-                "register_provider_bot: provider bot ref already registered; returning existing binding"
-            );
-            return Ok((existing_binding, None));
+        // Gateway mode short-circuits on an existing binding (idempotent replay).
+        // Plugin mode never writes a binding, so this short-circuit never applies.
+        if !matches!(connection_mode, ProviderBotConnectionMode::Plugin) {
+            if let Some(existing_binding) = self
+                .bindings
+                .get_binding_by_provider_ref(&provider.provider_id, &provider_bot_ref)
+                .await?
+            {
+                info!(
+                    provider_id = %provider.provider_id,
+                    bot_uuid = %existing_binding.bot_uuid,
+                    provider_bot_ref = %provider_bot_ref,
+                    "register_provider_bot: provider bot ref already registered; returning existing binding"
+                );
+                return Ok((existing_binding, None));
+            }
         }
 
         let provider_auth_mode = parse_downlink_config(&provider.config)?.auth_mode;
@@ -181,53 +186,120 @@ impl ProviderCore {
             }
             None => new_bot_uuid(),
         };
-        let session_token = new_session_token();
-        let bot_runtime_token = matches!(
-            provider_auth_mode,
-            ProviderAuthMode::StaticBearer | ProviderAuthMode::ProviderAdmin
-        )
-        .then(|| session_token.clone());
-        self.registry
-            .register_with_owner_and_token(bot_uuid.clone(), capabilities, owner, &session_token)
-            .await
-            .inspect_err(|err| {
-                warn!(
-                    provider_id = %provider.provider_id,
-                    bot_uuid = %bot_uuid,
-                    error = %err,
-                    "register_provider_bot: registry.register failed"
-                );
-            })?;
 
-        let now = now_ms();
-        let binding = ProviderBotBinding {
-            bot_uuid: bot_uuid.clone(),
-            provider_id: provider.provider_id.clone(),
-            provider_bot_ref: provider_bot_ref.clone(),
-            disabled: false,
-            created_at: now,
-            updated_at: now,
-        };
-        self.bindings
-            .insert_binding(binding.clone())
-            .await
-            .inspect_err(|err| {
-                warn!(
+        match connection_mode {
+            ProviderBotConnectionMode::Gateway => {
+                let session_token = new_session_token();
+                let bot_runtime_token = matches!(
+                    provider_auth_mode,
+                    ProviderAuthMode::StaticBearer | ProviderAuthMode::ProviderAdmin
+                )
+                .then(|| session_token.clone());
+                self.registry
+                    .register_with_owner_and_token(
+                        bot_uuid.clone(),
+                        capabilities,
+                        owner,
+                        &session_token,
+                    )
+                    .await
+                    .inspect_err(|err| {
+                        warn!(
+                            provider_id = %provider.provider_id,
+                            bot_uuid = %bot_uuid,
+                            error = %err,
+                            "register_provider_bot: registry.register failed"
+                        );
+                    })?;
+
+                let now = now_ms();
+                let binding = ProviderBotBinding {
+                    bot_uuid: bot_uuid.clone(),
+                    provider_id: provider.provider_id.clone(),
+                    provider_bot_ref: provider_bot_ref.clone(),
+                    disabled: false,
+                    created_at: now,
+                    updated_at: now,
+                };
+                self.bindings
+                    .insert_binding(binding.clone())
+                    .await
+                    .inspect_err(|err| {
+                        warn!(
+                            provider_id = %provider.provider_id,
+                            bot_uuid = %bot_uuid,
+                            provider_bot_ref = %provider_bot_ref,
+                            error = %err,
+                            "register_provider_bot: insert_binding failed; bot record orphaned"
+                        );
+                    })?;
+                info!(
                     provider_id = %provider.provider_id,
                     bot_uuid = %bot_uuid,
                     provider_bot_ref = %provider_bot_ref,
-                    error = %err,
-                    "register_provider_bot: insert_binding failed; bot record orphaned"
+                    auth_mode = ?provider_auth_mode,
+                    "register_provider_bot: completed"
                 );
-            })?;
-        info!(
-            provider_id = %provider.provider_id,
-            bot_uuid = %bot_uuid,
-            provider_bot_ref = %provider_bot_ref,
-            auth_mode = ?provider_auth_mode,
-            "register_provider_bot: completed"
-        );
-        Ok((binding, bot_runtime_token))
+                Ok((binding, bot_runtime_token))
+            }
+            ProviderBotConnectionMode::Plugin => {
+                // Token rule (token-agnostic): preserve whatever the registry
+                // currently holds (memory → DB fallback), else mint a MOCK
+                // placeholder for later WS-connect promotion. Registration never
+                // rewrites/overwrites a real token.
+                let existing_token = self.registry.load_token(&bot_uuid).await;
+                let session_token = existing_token.clone().unwrap_or_else(mock_token);
+                let branch_label = if existing_token.is_some() {
+                    "merge_preserve_token"
+                } else {
+                    "create_mock"
+                };
+                // Plugin bots do NOT write a provider_binding → the bot reaches
+                // BCS over WebSocket; `resolve_delivery_target` falls back to
+                // WebSocket and `is_provider_downlink_bot` returns false.
+                self.registry
+                    .register_with_owner_and_token(
+                        bot_uuid.clone(),
+                        capabilities,
+                        owner,
+                        &session_token,
+                    )
+                    .await
+                    .inspect_err(|err| {
+                        warn!(
+                            provider_id = %provider.provider_id,
+                            bot_uuid = %bot_uuid,
+                            error = %err,
+                            "register_provider_bot: registry.register failed"
+                        );
+                    })?;
+
+                // Unpersisted phantom returned for response population only;
+                // `list_provider_bots` queries the binding repo directly so the
+                // phantom is never listed.
+                let now = now_ms();
+                let binding = ProviderBotBinding {
+                    bot_uuid: bot_uuid.clone(),
+                    provider_id: provider.provider_id.clone(),
+                    provider_bot_ref: provider_bot_ref.clone(),
+                    disabled: false,
+                    created_at: now,
+                    updated_at: now,
+                };
+                info!(
+                    provider_id = %provider.provider_id,
+                    bot_id = %bot_uuid,
+                    provider_bot_ref = %provider_bot_ref,
+                    connection_mode = "plugin",
+                    branch = branch_label,
+                    token_preview = %format!("{}...", &session_token[..session_token.len().min(4)]),
+                    "register_provider_bot: plugin bot registered (no binding)"
+                );
+                // bot_runtime_token is None for plugin: the real runtime token
+                // comes from the WS handshake; the MOCK sentinel never leaves BCS.
+                Ok((binding, None))
+            }
+        }
     }
 }
 
@@ -1043,5 +1115,104 @@ impl ProviderBotCoreService for ProviderCore {
                 message: format!("provider bot '{}' not found", bot_uuid),
                 request_id: None,
             })
+    }
+
+    async fn update_provider_bot(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+        provider_bot_ref: &str,
+        name: Option<String>,
+        summary: Option<String>,
+        domains: Option<Vec<String>>,
+        skills: Option<Vec<Skill>>,
+        scopes: Option<Vec<String>>,
+        visibility: Option<String>,
+    ) -> ServiceResult<UpdateProviderBotCoreResult> {
+        let provider = self
+            .authenticated_provider(provider_id, provider_admin_token)
+            .await?;
+        validate_external_id("provider_bot_ref", provider_bot_ref)?;
+        let binding = self
+            .bindings
+            .get_binding_by_provider_ref(&provider.provider_id, provider_bot_ref)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::BotNotFound(format!("provider bot '{}' not found", provider_bot_ref))
+            })?;
+        if binding.provider_id != provider.provider_id {
+            return Err(ServiceError::Forbidden("provider_id_mismatch".to_string()));
+        }
+        if binding.disabled {
+            return Err(ServiceError::InvalidOperation {
+                message: format!("provider bot '{}' is disabled", binding.bot_uuid),
+                request_id: None,
+            });
+        }
+        let existing = self
+            .registry
+            .get(&binding.bot_uuid)
+            .await
+            .ok_or_else(|| ServiceError::BotNotFound(binding.bot_uuid.clone()))?;
+
+        // `registry.get()` strips `agent_code` (routing identifier, not a general
+        // capability). Reconstruct it exactly as the register path does so an
+        // AgentPass bot's `agent_code` (== its `provider_bot_ref`) is not wiped
+        // from the DB column on the subsequent `register` save.
+        let auth_mode = parse_downlink_config(&provider.config)?.auth_mode;
+        let agent_code = (auth_mode == ProviderAuthMode::AgentPass)
+            .then(|| provider_bot_ref.to_string());
+
+        // PATCH-merge: each `Some` replaces (empty Vec clears), `None` keeps.
+        // `agent_token` is left `None` (managed in-memory only, never via caps).
+        if let Some(visibility) = visibility.as_deref() {
+            let trimmed = visibility.trim();
+            if !matches!(trimmed, "public" | "protected" | "private") {
+                return Err(ServiceError::InvalidOperation {
+                    message: "visibility must be 'public', 'protected', or 'private'"
+                        .to_string(),
+                    request_id: None,
+                });
+            }
+        }
+
+        let mut merged = existing.capabilities.clone();
+        if let Some(name) = name {
+            merged.name = Some(name);
+        }
+        if let Some(summary) = summary {
+            merged.summary = Some(summary);
+        }
+        if let Some(domains) = domains {
+            merged.domains = domains;
+        }
+        if let Some(skills) = skills {
+            merged.skills = skills;
+        }
+        if let Some(scopes) = scopes {
+            merged.scopes = scopes;
+        }
+        if let Some(visibility) = visibility {
+            merged.visibility = visibility.trim().to_string();
+        }
+        merged.agent_code = agent_code;
+
+        // Use `update_capabilities` (wholesale replacement) rather than
+        // `register`, whose existing-bot merge skips empty capability arrays
+        // — a PATCH that clears domains/skills/scopes must take effect in the
+        // live registry and runtime discovery, not only in the response.
+        self.registry
+            .update_capabilities(&binding.bot_uuid, merged.clone())
+            .await?;
+        info!(
+            provider_id = %provider.provider_id,
+            bot_uuid = %binding.bot_uuid,
+            provider_bot_ref = %provider_bot_ref,
+            "update_provider_bot: capabilities updated in place"
+        );
+        Ok(UpdateProviderBotCoreResult {
+            binding,
+            capabilities: merged,
+        })
     }
 }

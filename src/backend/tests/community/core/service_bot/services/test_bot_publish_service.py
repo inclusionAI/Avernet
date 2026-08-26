@@ -649,8 +649,10 @@ class TestOfflinePublish:
         mock_repo.update_status.assert_called_once_with(
             1, PublishStatus.DRAFT, PublishStatus.VALIDATING
         )
-        # VERIFY 阶段不执行销毁流程（也不入队）
-        mock_publish_flow_service.enqueue_offline_destroy.assert_not_called()
+        # 取消预发既回退状态，也用持久任务销毁 verify 运行时。
+        mock_publish_flow_service.enqueue_offline_destroy.assert_called_once_with(
+            publish_id=1, stage=PublishStage.VERIFY, operator="system"
+        )
 
     @pytest.mark.asyncio
     async def test_offline_publish_not_found(self):
@@ -892,6 +894,30 @@ class TestCanDeleteBot:
 
         result = service.can_delete_bot(publish_id=1)
         assert result is False
+
+    @pytest.mark.parametrize(
+        "historical_status",
+        [PublishStatus.UPGRADED, PublishStatus.RELEASED],
+    )
+    def test_can_delete_bot_allows_inactive_publish_history(
+        self, historical_status
+    ):
+        """历史版本已升级或下线时，当前草稿仍可删除。"""
+        mock_repo = Mock()
+        draft_record = _create_mock_record(
+            record_id=2,
+            status=PublishStatus.DRAFT,
+        )
+        historical_record = _create_mock_record(
+            record_id=1,
+            status=historical_status,
+        )
+        mock_repo.get_by_id.return_value = draft_record
+        mock_repo.list_by_source_bot.return_value = [draft_record, historical_record]
+
+        service = _make_service(bot_publish_repo=mock_repo)
+
+        assert service.can_delete_bot(publish_id=2) is True
 
 
 class TestCanEditBot:

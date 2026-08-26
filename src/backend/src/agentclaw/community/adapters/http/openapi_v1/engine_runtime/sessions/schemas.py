@@ -103,7 +103,9 @@ class Session(BaseModel):
         "once its last page is reached."
     )
     gmt_create: str = Field(description="Creation time (ISO 8601); may be empty.")
-    gmt_modified: str = Field(description="Last-modified time (ISO 8601); may be empty.")
+    gmt_modified: str = Field(
+        description="Last-modified time (ISO 8601); may be empty."
+    )
 
 
 class SessionCreate(BaseModel):
@@ -148,6 +150,138 @@ class SessionUpdate(BaseModel):
     model: str | None = Field(default=None, description="New model.")
 
 
+class SessionFileUpload(BaseModel):
+    """One file requested for a session upload; routing stays server-side."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str = Field(
+        min_length=1,
+        max_length=255,
+        description="Original file name.",
+    )
+    size_bytes: int | None = Field(
+        default=None,
+        ge=0,
+        description="Optional byte size.",
+    )
+    content_hash: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Optional client content hash.",
+    )
+
+
+class SessionFileUploadIntentRequest(BaseModel):
+    """The files for which the server should issue upload grants."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    files: list[SessionFileUpload] = Field(
+        min_length=1,
+        max_length=20,
+        description="One to twenty upload requests.",
+    )
+
+
+class SessionFileUploadCompleteRequest(BaseModel):
+    """Prove one granted transfer has completed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    resource_id: str = Field(
+        min_length=1,
+        max_length=128,
+        description="Resource returned by its upload intent.",
+    )
+    transfer_id: str = Field(
+        min_length=1,
+        max_length=256,
+        description="Transfer returned by its upload grant.",
+    )
+
+
+class SessionFile(BaseModel):
+    """Public state for a file associated with one session."""
+
+    resource_id: str = Field(description="Opaque file resource identifier.")
+    display_name: str = Field(description="Original display name.")
+    status: str = Field(description="Upload or materialization state.")
+    size_bytes: int | None = Field(
+        default=None,
+        description="Recorded byte size when available.",
+    )
+    content_hash: str | None = Field(
+        default=None,
+        description="Recorded client content hash when available.",
+    )
+    task_version: int | None = Field(
+        default=None,
+        description="Materialization attempt version when available.",
+    )
+    error_code: str | None = Field(
+        default=None,
+        description="Fixed materialization failure category when available.",
+    )
+
+
+class SessionFileUploadGrant(SessionFile):
+    """A resource plus the existing BaaS upload grant."""
+
+    upload_url: str | None = Field(
+        default=None,
+        description="Direct upload URL for single-part grants.",
+    )
+    transfer_id: str = Field(
+        description="Opaque transfer identifier used to complete upload."
+    )
+    upload_type: str = Field(
+        description="Grant transfer mode, such as SINGLE or MULTIPART."
+    )
+    http_method: str = Field(description="HTTP method required by the grant.")
+    expires_at: str | None = Field(
+        default=None,
+        description="Grant expiry time when supplied.",
+    )
+    upload_session_id: str | None = Field(
+        default=None,
+        description="Multipart upload session identifier when supplied.",
+    )
+    part_size: int | None = Field(
+        default=None,
+        description="Multipart part size when supplied.",
+    )
+    part_count: int | None = Field(
+        default=None,
+        description="Multipart part count when supplied.",
+    )
+    parts: list[dict] | None = Field(
+        default=None,
+        description="Multipart part upload instructions when supplied.",
+    )
+
+
+class SessionFileUploadIntentResult(BaseModel):
+    """The resources and upload grants created for one request."""
+
+    files: list[SessionFileUploadGrant] = Field(
+        description="Created file upload grants."
+    )
+
+
+class SessionFileList(BaseModel):
+    """Files returned by a session lifecycle read."""
+
+    files: list[SessionFile] = Field(description="Files in the requested state.")
+
+
+class SessionFavorite(BaseModel):
+    """The favorite state of one session for the acting user."""
+
+    session_id: str = Field(description="Session whose favorite state changed.")
+    favorited: bool = Field(description="Whether the session is now a favorite.")
+
+
 # Named concretisations rather than `BoundedPage[Session]` used inline. Pydantic
 # builds a parametrised generic with no `__doc__`, so the schema description —
 # the only place the lower-bound caveat is stated — would silently vanish from
@@ -175,6 +309,14 @@ __all__ = [
     "MessagePage",
     "Session",
     "SessionCreate",
+    "SessionFavorite",
+    "SessionFile",
+    "SessionFileList",
+    "SessionFileUpload",
+    "SessionFileUploadCompleteRequest",
+    "SessionFileUploadGrant",
+    "SessionFileUploadIntentRequest",
+    "SessionFileUploadIntentResult",
     "SessionPage",
     "SessionUpdate",
 ]

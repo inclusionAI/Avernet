@@ -46,12 +46,23 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "hitl"},
     ],
     "moltis": [],
-    # Intentionally empty: teclaw bots start with no default MCP servers and
-    # get every MCP from their owner's own skill-set configuration. The key
-    # stays declared (like ``moltis``) so teclaw keeps resolving its own
-    # bucket — dropping it would make teclaw indistinguishable from an
-    # unknown engine and hide a future bucket-aliasing regression.
-    "teclaw": [],
+    "teclaw": [
+        {"server_code": "mcp.ant.lwawchat.cogmessagemcp", "name": "蚂蚁钉协作群消息相关-MCP服务"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingreportmcpserver", "name": "蚂蚁钉日志服务"},
+        {"server_code": "mcp.ant.antdingopenapi.antdinggroupmcpserver", "name": "蚂蚁钉群服务"},
+        {"server_code": "mcp.ant.lwawchat.cogdocumentmcp", "name": "蚂蚁钉协作群文档相关-MCP服务"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingeventmcpserver", "name": "蚂蚁钉日程相关-MCP服务"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingrobotmcpserver", "name": "蚂蚁钉机器人相关-MCP服务"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingmessagemcpserver", "name": "蚂蚁钉消息相关-MCP服务"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingtodomcpserver", "name": "蚂蚁钉待办服务"},
+        {"server_code": "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver", "name": "语雀 MCP"},
+        {"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima-MCP服务"},
+        {"server_code": "mcp.ant.homistudio.recordmcp", "name": "会中会话记录查询服务"},
+        {"server_code": "mcp.ant.rpc.dcanttouch.adminservice", "name": "行政小宝MCP服务"},
+        # Local/stdio; resolved through LocalMCPRegistry, not MCP Center. Kept
+        # last to match the other engines' lists.
+        {"server_code": "hitl", "name": "HITL"},
+    ],
     "claude_code": [
         {"server_code": "mcp.ant.antprocessai.anttaskmcp", "name": "任务中心MCP", "description": "任务中心待办任务，已办任务等相关任务查询MCP"},
         {"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima MCP", "description": "Dima MCP"},

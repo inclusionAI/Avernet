@@ -36,6 +36,23 @@ pub enum ProviderCoordinationModeDto {
     Disabled,
 }
 
+/// How a provider-registered bot connects to BCS. `gateway` (default) writes a
+/// provider_binding row (HTTP webhook downlink); `plugin` skips the binding so
+/// the bot connects over WebSocket through a BCN plugin. Unknown value
+/// deserializes to an error → 400. Absent/`None` ⇒ `gateway`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderBotConnectionModeDto {
+    Gateway,
+    Plugin,
+}
+
+impl Default for ProviderBotConnectionModeDto {
+    fn default() -> Self {
+        Self::Gateway
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderCoordinationConfigDto {
     pub mode: ProviderCoordinationModeDto,
@@ -163,6 +180,11 @@ pub struct RegisterProviderBotRequest {
     /// Access scopes this bot has (same semantics as `POST /bots/onboard`).
     #[serde(default)]
     pub scopes: Vec<String>,
+    /// How this bot connects to BCS. Absent/`None` ⇒ `gateway` (binding
+    /// written, HTTP webhook downlink). `plugin` skips the binding so the bot
+    /// connects over WebSocket; accepted only for allow-listed providers.
+    #[serde(default)]
+    pub connection_mode: Option<ProviderBotConnectionModeDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,8 +206,13 @@ pub struct PatchProviderBotRequest {
     pub summary: Option<String>,
     #[serde(default)]
     pub domains: Option<Vec<String>>,
+    /// Skills as structured `{ name, description }` objects only. Unlike
+    /// provider-bot registration, the legacy bare-string form is deliberately
+    /// not accepted, so the PATCH request shape matches the structured skills
+    /// emitted in the response (round-trip fidelity) and lets clients update
+    /// skill descriptions. Absent/`null` leaves skills unchanged.
     #[serde(default)]
-    pub skills: Option<Vec<String>>,
+    pub skills: Option<Vec<Skill>>,
     #[serde(default)]
     pub scopes: Option<Vec<String>>,
     #[serde(default)]

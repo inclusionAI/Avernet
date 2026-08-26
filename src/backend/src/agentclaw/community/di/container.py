@@ -19,9 +19,10 @@ from injector import Injector, Module
 from agentclaw.community.di.modules.access_module import AccessModule
 from agentclaw.community.di.modules.aicoding_module import AICodingModule
 from agentclaw.community.di.modules.bot_app_grant_module import BotAppGrantModule
-from agentclaw.community.di.modules.bot_collaborator_module import BotCollaboratorModule
 from agentclaw.community.di.modules.bot_chat_open_module import BotChatOpenModule
+from agentclaw.community.di.modules.bot_collaborator_module import BotCollaboratorModule
 from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
+from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
 from agentclaw.community.di.modules.task_module import TaskModule
@@ -30,15 +31,16 @@ from agentclaw.community.di.modules.channel_module import ChannelModule
 from agentclaw.community.di.modules.common_config_module import CommonConfigModule
 from agentclaw.community.di.modules.config_module import ConfigModule
 from agentclaw.community.di.modules.cron_module import CronModule
-from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
 from agentclaw.community.di.modules.desktop_bot_module import DesktopBotModule
 from agentclaw.community.di.modules.devices_module import DevicesModule
-from agentclaw.community.di.modules.expert_chat_module import ExpertChatModule
+from agentclaw.community.di.modules.economy_governance_module import EconomyGovernanceModule
 from agentclaw.community.di.modules.engine_config_module import EngineConfigModule
+from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
+from agentclaw.community.di.modules.expert_chat_module import ExpertChatModule
 from agentclaw.community.di.modules.grt_chat_module import GrtChatModule
 from agentclaw.community.di.modules.harness_module import HarnessModule
-from agentclaw.community.di.modules.identity_module import IdentityModule
 from agentclaw.community.di.modules.http_client_module import HttpClientModule
+from agentclaw.community.di.modules.identity_module import IdentityModule
 from agentclaw.community.di.modules.mcp_module import McpModule
 from agentclaw.community.di.modules.quality_module import QualityModule
 from agentclaw.community.di.modules.resources_module import ResourcesModule
@@ -46,15 +48,18 @@ from agentclaw.community.di.modules.service_bot_module import ServiceBotModule
 from agentclaw.community.di.modules.session_resources_module import SessionResourcesModule
 from agentclaw.community.di.modules.skill_center_module import SkillCenterModule
 from agentclaw.community.di.modules.skills_pool_module import SkillsPoolModule
+from agentclaw.community.di.modules.spaces_module import SpacesModule
 from agentclaw.community.di.modules.system_config_module import SystemConfigModule
+from agentclaw.community.di.modules.task_discovery_module import TaskDiscoveryModule
+from agentclaw.community.di.modules.task_module import TaskModule
+from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
-from agentclaw.community.di.modules.economy_governance_module import EconomyGovernanceModule
 from agentclaw.community.di.modules.user_list_module import UserListModule
+from agentclaw.community.di.modules.work_orders_module import WorkOrdersModule
 from agentclaw.community.di.modules.task_discovery_module import TaskDiscoveryModule
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.di.profile_modules import modules_for
 from agentclaw.community.log import get_logger
-
 
 logger = get_logger()
 
@@ -103,6 +108,7 @@ def build_injector(
         SystemConfigModule(),
         CommonConfigModule(),
         BotManagementModule(),
+        BotInventoryModule(),
         SkillsPoolModule(),
         BotPublicModule(),
         TaskModule(),
@@ -119,6 +125,8 @@ def build_injector(
         AccessModule(),
         ResourcesModule(),
         SessionResourcesModule(),
+        SpacesModule(),
+        WorkOrdersModule(),
         HarnessModule(),
         BotCollaboratorModule(),
         BotAppGrantModule(),
@@ -127,6 +135,7 @@ def build_injector(
         UserListModule(),
         BotDormantModule(),
         TaskQueueModule(),
+        TaskPersistenceModule(),
         QualityModule(),
         # HTTP transport (real httpx) — shared by every base profile. Only the
         # test/corp_test columns override these keys with LocalHttpClient;

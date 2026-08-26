@@ -14,9 +14,10 @@ from contextlib import contextmanager
 
 import pytest
 from sqlalchemy import create_engine, event
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.models import Skill, SkillSet, SkillSetSkill
+from agentclaw.community.core.models import BotSkillInstallation, Skill, SkillSet, SkillSetSkill
 from agentclaw.community.core.skill_center.errors import ActiveSkillSetReferenceError
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill import AcSkillMember
@@ -63,6 +64,7 @@ def db(tmp_path):
         Skill,
         SkillSet,
         SkillSetSkill,
+        BotSkillInstallation,
         SkillSetMCPServer,
         DefaultSkillsetMcpExclusion,
         DefaultSkillsetSkillExclusion,
@@ -118,7 +120,15 @@ def test_delete_removes_all_associations_for_active_and_inactive_local_skills(
     inactive_set = sets.create({"name": "inactive", "is_active": False})
     extra_set = sets.create({"name": "extra", "is_active": True})
     sets.add_skill_to_set(active_set["id"], active_skill["id"])
-    sets.add_skill_to_set(extra_set["id"], active_skill["id"])
+    # Model a historical duplicate that predates the ordinary-set uniqueness rule.
+    with db.orm_session() as session:
+        session.add(
+            SkillSetSkill(
+                skill_set_id=int(extra_set["id"]),
+                skill_id=int(active_skill["id"]),
+                env="dev",
+            )
+        )
     sets.add_skill_to_set(inactive_set["id"], inactive_skill["id"])
 
     assert skills.delete(active_skill["id"]) is True
@@ -244,6 +254,36 @@ def test_public_local_delete_commits_cleanup_work_with_derived_state(skills, set
             assert session.query(Skill).count() == 0
             assert session.query(SkillSetSkill).count() == 0
             assert session.query(DefaultSkillsetSkillExclusion).count() == 0
+
+
+def test_public_local_replace_rejects_a_locator_change(skills, db):
+    with avernet_tenant_scope("tenant-a"):
+        skill = skills.create(
+            {
+                "name": "local",
+                "description": "old",
+                "git_path": "local:///skills/local",
+                "user_id": "owner",
+                "bolt_id": "bot",
+            }
+        )
+
+        with pytest.raises(
+            ValueError, match="Local Skill replacement cannot change git_path"
+        ):
+            skills.replace_bot_local_skill(
+                skill_id=skill["id"],
+                owner_id="owner",
+                bot_id="bot",
+                old_locator="/skills/local",
+                new_locator="/skills/.local.replacement-1",
+                description="new",
+            )
+
+        with db.orm_session() as session:
+            persisted = session.query(Skill).one()
+            assert persisted.git_path == "local:///skills/local"
+            assert persisted.description == "old"
 
 
 @pytest.mark.skip(reason="durable cleanup work was removed")
@@ -420,20 +460,19 @@ def test_public_local_delete_rechecks_active_custom_set_in_delete_transaction(
             assert session.query(LocalSkillCleanupWorkModel).one().status == "preparing"  # noqa: F821
 
 
-def test_skill_create_is_plain_insert_not_upsert(skills):
-    # Distinct versions → two independent rows (plain INSERT, not an
-    # upsert that would update-in-place).
-    a = skills.create({"name": "dup", "skill_uuid": "x", "version": 1})
-    b = skills.create({"name": "dup", "skill_uuid": "x", "version": 2})
-    assert a["id"] != b["id"]
-    assert len(skills.list_skills()) == 2
+def test_skill_identity_rejects_a_second_row_for_the_same_uuid(skills):
+    skills.create({"name": "dup", "skill_uuid": "x", "version": 1})
+    with pytest.raises(IntegrityError, match="UNIQUE constraint failed"):
+        skills.create({"name": "dup", "skill_uuid": "x", "version": 2})
 
 
-def test_skill_create_matches_prod_without_a_source_only_unique_constraint(skills):
-    """Prod accepts duplicate legacy skill identity fields; SQLite must too."""
-    first = skills.create({"name": "d", "skill_uuid": "x", "version": 1})
-    duplicate = skills.create({"name": "d", "skill_uuid": "x", "version": 1})
-    assert duplicate["id"] != first["id"]
+def test_skill_uuid_constraint_is_scoped_by_tenant_and_env(skills):
+    skills.create({"name": "d", "skill_uuid": "x", "version": 1})
+    with avernet_tenant_scope("tenant-b"):
+        other_tenant = skills.create(
+            {"name": "d", "skill_uuid": "x", "version": 1}
+        )
+    assert other_tenant["skill_uuid"] == "x"
 
 
 def test_skill_user_id_anonymous_coercion(skills):
@@ -527,7 +566,7 @@ def test_delete_by_bot_id(skills):
 
 
 def test_list_skill_set_references_includes_active_and_inactive_sets(
-    skills, sets
+    skills, sets, db
 ):
     skill = skills.create({"name": "referenced", "bolt_id": "bot-x"})
     active_set = sets.create(
@@ -537,7 +576,15 @@ def test_list_skill_set_references_includes_active_and_inactive_sets(
         {"name": "inactive", "bolt_id": "bot-x", "is_active": False}
     )
     sets.add_skill_to_set(active_set["id"], skill["id"])
-    sets.add_skill_to_set(inactive_set["id"], skill["id"])
+    # Preserve coverage for legacy duplicate membership rows.
+    with db.orm_session() as session:
+        session.add(
+            SkillSetSkill(
+                skill_set_id=int(inactive_set["id"]),
+                skill_id=int(skill["id"]),
+                env="dev",
+            )
+        )
 
     assert skills.list_skill_set_references(skill["id"]) == [
         {"skill_set_id": active_set["id"]},
@@ -579,12 +626,19 @@ def test_list_skill_set_references_ignores_orphans_and_matches_center_uuid(
     ) == [{"skill_set_id": live_set["id"]}]
 
 
-def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets):
+def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets, db):
+    """The installed view answers from Installation rows for one exact Bot.
+
+    Set membership no longer reaches this read directly: the lazy flush folds
+    it into Installation first (pinned in the desired-state UoW tests), and
+    this pure join is what the reader answers from.
+    """
     local = skills.create(
         {
             "name": "local-a",
             "git_path": "local:///legacy/local-a",
             "bolt_id": "bot-x",
+            "user_id": "owner-x",
         }
     )
     repo = skills.create(
@@ -594,87 +648,47 @@ def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets):
             "bolt_id": "bot-x",
         }
     )
-    skills.create(
+    other = skills.create(
         {
             "name": "other-local",
             "git_path": "local:///legacy/other-local",
             "bolt_id": "bot-y",
+            "user_id": "other-owner",
         }
     )
-    skill_set = sets.create(
-        {
-            "name": "active",
-            "bolt_id": "bot-x",
-            "user_id": "owner-x",
-            "engine_type": "openclaw",
-            "is_active": True,
-        }
-    )
-    sets.add_skill_to_set(skill_set["id"], local["id"])
-    sets.add_skill_to_set(skill_set["id"], repo["id"])
+    with db.orm_session() as session:
+        for skill_id, bot_id, owner_id in (
+            (int(local["id"]), "bot-x", "owner-x"),
+            (int(repo["id"]), "bot-x", "owner-x"),
+            (int(other["id"]), "bot-y", "other-owner"),
+        ):
+            session.add(
+                BotSkillInstallation(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    skill_id=skill_id,
+                    env=local["env"],
+                )
+            )
 
     local_assets = skills.list_bot_local_assets(
         env=local["env"],
+        owner_id="owner-x",
         bot_id="bot-x",
     )
-    active_assets = skills.list_bot_active_assets(
+    installed_assets = skills.list_bot_installed_assets(
         env=local["env"],
         bot_id="bot-x",
-        user_id="owner-x",
-        engine="openclaw",
+        owner_id="owner-x",
     )
 
     assert [(asset.skill_id, asset.name) for asset in local_assets] == [
         (int(local["id"]), "local-a")
     ]
-    assert {asset.git_path for asset in active_assets} == {
+    assert {asset.git_path for asset in installed_assets} == {
         "local:///legacy/local-a",
         "git://business/repo-a",
     }
-
-
-def test_skills_pool_active_assets_include_default_set_and_exclusions(
-    skills, sets
-):
-    default_enabled = skills.create(
-        {
-            "name": "default-enabled",
-            "git_path": "git://defaults/enabled",
-        }
-    )
-    default_excluded = skills.create(
-        {
-            "name": "default-excluded",
-            "git_path": "git://defaults/excluded",
-        }
-    )
-    default_set = sets.create(
-        {
-            "name": "OpenClaw defaults",
-            "is_default": True,
-            "is_active": True,
-            "engine_type": "openclaw",
-        }
-    )
-    sets.add_skill_to_set(default_set["id"], default_enabled["id"])
-    sets.add_skill_to_set(default_set["id"], default_excluded["id"])
-    sets.add_default_skill_exclusion(
-        user_id="owner-x",
-        bot_id="bot-x",
-        skill_set_id=int(default_set["id"]),
-        skill_id=int(default_excluded["id"]),
-    )
-
-    assets = skills.list_bot_active_assets(
-        env=default_enabled["env"],
-        bot_id="bot-x",
-        user_id="owner-x",
-        engine="openclaw",
-    )
-
-    assert [asset.git_path for asset in assets] == [
-        "git://defaults/enabled"
-    ]
 
 
 # ── SkillSetRepository ──────────────────────────────────────────────
@@ -701,22 +715,17 @@ def test_add_remove_skill_to_set(skills, sets):
     assert sets.get_skills_in_set(ss["id"]) == []
 
 
-def test_get_skills_in_set_center_max_version(skills, sets):
-    ss = sets.create({"name": "cset"})
+def test_legacy_center_version_rows_are_rejected_by_stable_uuid_constraint(skills, sets):
+    sets.create({"name": "cset"})
     skills.create(
         {"name": "cv1", "git_path": "center://c", "skill_uuid": "cu",
          "status": "PUBLISHED", "version": 1}
     )
-    skills.create(
-        {"name": "cv2", "git_path": "center://c", "skill_uuid": "cu",
-         "status": "PUBLISHED", "version": 2}
-    )
-    with skills._db.orm_session() as s:
-        s.add(SkillSetSkill(skill_set_id=int(ss["id"]),
-                            skill_id=0, skill_uuid="cu"))
-    res = sets.get_skills_in_set(ss["id"])
-    assert len(res) == 1
-    assert res[0]["version"] == 2  # MAX(version) PUBLISHED
+    with pytest.raises(IntegrityError, match="UNIQUE constraint failed"):
+        skills.create(
+            {"name": "cv2", "git_path": "center://c", "skill_uuid": "cu",
+             "status": "PUBLISHED", "version": 2}
+        )
 
 
 def test_get_all_active_skill_sets_preserves_global_and_bot_scoped_defaults(sets):
@@ -1088,3 +1097,9 @@ def test_list_all_can_use_runtime_default_engine_for_global_default(sets):
     )
 
     assert {row["id"] for row in rows} == {aicoding_global["id"], custom["id"]}
+
+
+# Exclusion semantics moved off this read: a Default-Set exclusion is that
+# Set's per-Bot deactivation, applied by ``flush_installations`` before any
+# read — per-Bot scoping of exclusions is pinned by the desired-state UoW
+# tests (``test_repair_drops_only_the_owners_own_default_exclusions``).
