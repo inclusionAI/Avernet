@@ -55,6 +55,26 @@ def _block(name: str) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
+def _pool_policy(
+    block: dict[str, Any], base: cfg.HttpClientPoolPolicy
+) -> cfg.HttpClientPoolPolicy:
+    """One transport policy from a YAML mapping, per-field fallback to ``base``.
+
+    Run twice per override: once with the dataclass defaults to resolve the
+    shared ``defaults``, then again per override *starting from those defaults*.
+    That is what lets an override name one key and still resolve to a total
+    policy, so ``for_qualifier`` never has to merge at the call site.
+    """
+    return cfg.HttpClientPoolPolicy(
+        max_connections=int(block.get("max_connections", base.max_connections)),
+        max_keepalive_connections=int(
+            block.get("max_keepalive_connections", base.max_keepalive_connections)
+        ),
+        keepalive_expiry=float(block.get("keepalive_expiry", base.keepalive_expiry)),
+        http2=bool(block.get("http2", base.http2)),
+    )
+
+
 class ConfigModule(Module):
     """Bind every typed config dataclass."""
 
@@ -493,6 +513,47 @@ class ConfigModule(Module):
                 "git_download_dir", defaults.git_download_dir
             ),
         )
+
+    @singleton
+    @provider
+    def http_client_pool(self) -> cfg.HttpClientPoolConfig:
+        """Outbound HTTP transport policy for the ``HttpClient`` bindings.
+
+        YAML shape under ``user_config.http_client``::
+
+            max_connections: 100
+            max_keepalive_connections: 20
+            keepalive_expiry: 5.0
+            http2: false
+            overrides:                  # optional, keyed by HttpClient qualifier
+              baas: {http2: true}
+
+        Missing block ⇒ dataclass defaults for every binding, so no deployment
+        needs a config change to adopt pooling. An override names only the keys
+        it changes; the rest come from the resolved shared defaults, so a value
+        left unset keeps tracking those defaults if they later change.
+
+        An unrecognised qualifier key is inert rather than fatal — this provider
+        does no I/O and has no binding list to validate against, and failing boot
+        over a typo in a pool ceiling is the worse trade. ``HttpClientModule``
+        logs each binding's resolved policy, which is where a typo shows up.
+        """
+        block = _block("http_client")
+        defaults = _pool_policy(block, cfg.HttpClientPoolPolicy())
+        raw_overrides = block.get("overrides") or {}
+        overrides: dict[str, cfg.HttpClientPoolPolicy] = {}
+        if isinstance(raw_overrides, dict):
+            for name, body in raw_overrides.items():
+                if isinstance(body, dict):
+                    overrides[str(name)] = _pool_policy(dict(body), defaults)
+                else:
+                    logger.warning(
+                        "ConfigModule: http_client.overrides.%s is not a mapping "
+                        "(%r); ignoring it and using the shared defaults.",
+                        name,
+                        type(body).__name__,
+                    )
+        return cfg.HttpClientPoolConfig(defaults=defaults, overrides=overrides)
 
     @singleton
     @provider
