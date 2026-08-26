@@ -135,6 +135,7 @@ class BotRuntimeProjector:
         )
         await self._apply_non_skill_projection(
             service=service,
+            bot=bot,
             engine=engine,
             bot_id=bot_id,
             owner_id=owner_id,
@@ -149,12 +150,13 @@ class BotRuntimeProjector:
         owner_id: str,
     ) -> None:
         """Rebuild MCP/CLI when a cutover task exclusively owns Skill mappings."""
-        service, _bot, engine, projection, effective_cli_items = self._resolve_plan(
+        service, bot, engine, projection, effective_cli_items = self._resolve_plan(
             bot_id=bot_id,
             owner_id=owner_id,
         )
         await self._apply_non_skill_projection(
             service=service,
+            bot=bot,
             engine=engine,
             bot_id=bot_id,
             owner_id=owner_id,
@@ -174,7 +176,7 @@ class BotRuntimeProjector:
         Local/Repo removal.  Center requires the Pool v3 contract and is never
         permitted on this compatibility path.
         """
-        service, _bot, engine, projection, effective_cli_items = (
+        service, bot, engine, projection, effective_cli_items = (
             self._resolve_cleanup_plan(bot_id=bot_id, owner_id=owner_id)
         )
         if any(mapping.corpus == "center" for mapping in projection.skill_mappings):
@@ -185,6 +187,7 @@ class BotRuntimeProjector:
             raise SkillSetRuntimeReconcileError()
         await self._apply_non_skill_projection(
             service=service,
+            bot=bot,
             engine=engine,
             bot_id=bot_id,
             owner_id=owner_id,
@@ -415,6 +418,7 @@ class BotRuntimeProjector:
         self,
         *,
         service,
+        bot: dict,
         engine: str,
         bot_id: str,
         owner_id: str,

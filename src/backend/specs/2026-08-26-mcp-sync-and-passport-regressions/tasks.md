@@ -19,7 +19,7 @@ Paths are relative to `src/backend/src/agentclaw/community/` unless noted.
       `"owner"` when the Bot has no row for that code. `McpCallType` is a
       `StrEnum` (`core/caller_identity/models.py:16`), so normalise with
       `str(...)` rather than assuming a `.value` attribute exists.
-- [ ] 1.3 Thread `bot` into `_apply_non_skill_projection` — `_resolve_plan`
+- [x] 1.3 Thread `bot` into `_apply_non_skill_projection` — `_resolve_plan`
       already returns it, and all three entry points (`project`,
       `project_mcp_and_cli`, `project_for_cleanup`) hold it.
 - [ ] 1.4 Add `"mcp_items"` to the `resource_scope` at
