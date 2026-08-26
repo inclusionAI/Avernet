@@ -13,6 +13,8 @@ delivery failure is NOT best-effort).
 The plugin's MCP methods are **synchronous** (the service wraps them in
 ``asyncio.to_thread``), so the doubles use plain ``MagicMock``.
 """
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -959,6 +961,128 @@ class TestSyncMcpDetailToAllBots:
 
         assert result["success"] is True
         assert result["sync_results"][0]["reason"] == "缺少设备连接信息"
+
+    # ── fan-out across bots ───────────────────────────────────────────
+    #
+    # Each bot is a *different* device, and the batch used to walk them one at a
+    # time — so one credential change cost ``bot_count × (resolve + probe + push)``
+    # for an entity of up to 100 bots. Worse, ``resolve_for_bot`` is synchronous
+    # with a blocking ws-info round trip inside, so every one of those resolutions
+    # also sat on the event loop and stalled unrelated requests.
+
+    def _service_with_bots(self, bot_ids, *, resolver, dispatcher):
+        bot_repo = MagicMock()
+        bot_repo.list_by_entity.return_value = (
+            len(bot_ids), [{"bot_id": b} for b in bot_ids],
+        )
+        return _make_sync_service(
+            bot_repository=bot_repo, resolver=resolver, dispatcher=dispatcher,
+        )
+
+    @pytest.mark.asyncio
+    async def test_bots_are_pushed_concurrently(self):
+        state = {"in_flight": 0, "peak": 0}
+        lock = threading.Lock()
+
+        def _sync_single_mcp(*_args, **_kwargs):
+            # Runs on a ``to_thread`` worker, so the counters need a lock.
+            with lock:
+                state["in_flight"] += 1
+                state["peak"] = max(state["peak"], state["in_flight"])
+            try:
+                time.sleep(0.01)
+                return True
+            finally:
+                with lock:
+                    state["in_flight"] -= 1
+
+        plugin = _make_plugin(sync_single_mcp=MagicMock(side_effect=_sync_single_mcp))
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        bot_ids = [f"bot{i}" for i in range(6)]
+        service = self._service_with_bots(
+            bot_ids, resolver=resolver, dispatcher=dispatcher
+        )
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1", server_code="mcp.x", mcp_data={"server_code": "mcp.x"},
+            entity_id="100", entity_type="staff",
+        )
+
+        assert result["success"] is True
+        assert state["peak"] > 1
+
+    @pytest.mark.asyncio
+    async def test_results_keep_the_bot_list_order(self):
+        """并发不改变结果顺序：sync_results 仍按 bot 列表排列。"""
+        plugin = _make_plugin()
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        bot_ids = [f"bot{i}" for i in range(5)]
+        service = self._service_with_bots(
+            bot_ids, resolver=resolver, dispatcher=dispatcher
+        )
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1", server_code="mcp.x", mcp_data={"server_code": "mcp.x"},
+            entity_id="100", entity_type="staff",
+        )
+
+        assert [r["bot_id"] for r in result["sync_results"]] == bot_ids
+
+    @pytest.mark.asyncio
+    async def test_resolution_does_not_run_on_the_event_loop(self):
+        """resolve_for_bot 同步且内含阻塞 ws-info HTTP，必须在线程池里跑。"""
+        loop_thread = threading.get_ident()
+        seen: list[int] = []
+
+        def _resolve(bot_id, entity_id):
+            seen.append(threading.get_ident())
+            return _make_ctx(bot_id=bot_id)
+
+        resolver = MagicMock()
+        resolver.resolve_for_bot.side_effect = _resolve
+        dispatcher = MagicMock()
+        dispatcher.dispatch.return_value = _make_plugin()
+        service = self._service_with_bots(
+            ["bot1", "bot2"], resolver=resolver, dispatcher=dispatcher
+        )
+
+        await service.sync_mcp_detail_to_all_bots(
+            user_id="u1", server_code="mcp.x", mcp_data={"server_code": "mcp.x"},
+            entity_id="100", entity_type="staff",
+        )
+
+        assert seen and all(tid != loop_thread for tid in seen)
+
+    @pytest.mark.asyncio
+    async def test_one_bot_raising_neither_stops_nor_hides_the_others(self):
+        """一台设备抛异常既不中止其余投递，也不改变它们的结果——与逐台循环一致。"""
+        good = _make_plugin()
+        bad = _make_plugin(
+            sync_single_mcp=MagicMock(side_effect=RuntimeError("device blew up"))
+        )
+        resolver = MagicMock()
+        resolver.resolve_for_bot.side_effect = lambda bot_id, entity_id: _make_ctx(
+            bot_id=bot_id
+        )
+        dispatcher = MagicMock()
+        dispatcher.dispatch.side_effect = lambda ctx: (
+            bad if ctx.bot_id == "bot2" else good
+        )
+        service = self._service_with_bots(
+            ["bot1", "bot2", "bot3"], resolver=resolver, dispatcher=dispatcher
+        )
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1", server_code="mcp.x", mcp_data={"server_code": "mcp.x"},
+            entity_id="100", entity_type="staff",
+        )
+
+        # a device that has the MCP and succeeded keeps the batch out of rollback
+        assert result["success"] is True
+        assert [(r["bot_id"], r["synced"]) for r in result["sync_results"]] == [
+            ("bot1", True), ("bot2", False), ("bot3", True),
+        ]
+        assert result["sync_results"][1]["error"] == "device blew up"
 
 
 class TestSyncMcpDetailsForBot:

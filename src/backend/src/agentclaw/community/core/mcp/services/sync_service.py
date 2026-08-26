@@ -19,6 +19,7 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
+from agentclaw.community.core.devices.device_io_batch import gather_device_io
 from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.detail_fanout import (
@@ -550,22 +551,30 @@ class MCPSyncService:
             logger.info("[MCPSyncService] 未找到 bot，无需同步")
             return {"success": True, "sync_results": [], "error": None}
 
-        sync_results: list[dict[str, Any]] = []
-        any_success = False
-        has_mcp_devices = 0
-
-        for bot_id in bot_ids:
+        # 每台 bot 都是一台**不同**的设备，逐台 await 让本次配置改动的耗时变成
+        # ``bot_count × (解析 + 探测 + 投递)``——一个实体最多取 100 台。而且
+        # ``resolve_for_bot`` 是同步的（内含阻塞 ws-info HTTP 加若干 DB 查询），
+        # 直接 await 会把 event loop 占住，连带拖住其他请求；``sync_mcp_details_for_bot``
+        # 早就为此把它放进了线程池，这里跟上。
+        #
+        # 扇出是有界的，理由与 ``fan_out_mcp_details`` 一致；并且在放行前排空：
+        # ``config_flow.write_unified_config`` 会在失败时回滚刚落库的凭据，若此刻
+        # 还有投递在途，它会把新凭据推到已回滚的配置之后。
+        async def _sync_one(bot_id: str) -> tuple[bool, dict[str, Any]]:
+            """投递到单台 bot。返回 (是否计入回滚判定, 该 bot 的结果)。"""
             # per-bot 投递插件由 resolver+dispatcher 按容器类型路由；无可投递设备→跳过(不计入回滚判定)。
             try:
-                ctx = self._resolver_provider().resolve_for_bot(bot_id, entity_id)
+                ctx = await asyncio.to_thread(
+                    self._resolver_provider().resolve_for_bot, bot_id, entity_id
+                )
             except (DeviceNotBoundError, UnknownProviderError):
                 logger.warning("[MCPSyncService] 跳过 bot=%s: 缺少连接信息", bot_id)
-                sync_results.append({
+                return False, {
                     "bot_id": bot_id, "synced": False, "reason": "缺少设备连接信息",
-                })
-                continue
+                }
             plugin = self._device_sync_dispatcher_provider().dispatch(ctx)
 
+            counted = False
             try:
                 # 探测设备是否已装该 MCP；arca/baas 真实探测，未装则跳过（不计入）。
                 # 整产物设备（teclaw）的 has_mcp 恒为 True：始终投递并计入回滚判定，
@@ -579,12 +588,11 @@ class MCPSyncService:
                     logger.warning(
                         "[MCPSyncService] bot=%s 设备上未找到 MCP %s", bot_id, server_code
                     )
-                    sync_results.append({
+                    return False, {
                         "bot_id": bot_id, "synced": False, "reason": "设备上未找到该 MCP",
-                    })
-                    continue
+                    }
 
-                has_mcp_devices += 1
+                counted = True
                 logger.info("[MCPSyncService] 正在同步 MCP %s 到 bot=%s", server_code, bot_id)
 
                 sync_success = await self._sync_mcp_detail(
@@ -599,20 +607,27 @@ class MCPSyncService:
 
                 if sync_success:
                     logger.info("[MCPSyncService] bot=%s 同步成功", bot_id)
-                    any_success = True
                 else:
                     logger.error("[MCPSyncService] bot=%s 同步失败", bot_id)
 
-                sync_results.append({
+                return counted, {
                     "bot_id": bot_id,
                     "synced": sync_success,
                     "error": None if sync_success else "设备同步返回失败",
-                })
+                }
             except Exception as e:
                 logger.error("[MCPSyncService] 同步到 bot=%s 异常: %s", bot_id, e)
-                sync_results.append({
+                # 探测阶段就抛的异常说明这台设备装没装该 MCP 未知，与逐台循环一样
+                # 不计入回滚判定；探测通过之后抛的才计入。
+                return counted, {
                     "bot_id": bot_id, "synced": False, "error": str(e),
-                })
+                }
+
+        outcomes = await gather_device_io([_sync_one(bot_id) for bot_id in bot_ids])
+        # 顺序与 bot_ids 一致，与逐台循环产出的 sync_results 完全相同。
+        sync_results: list[dict[str, Any]] = [result for _, result in outcomes]
+        has_mcp_devices = sum(1 for counted, _ in outcomes if counted)
+        any_success = any(result.get("synced") for result in sync_results)
 
         # 只有"确实有该 MCP 的设备全部失败"时才整体报错；
         # 如果设备上没有该 MCP 或者根本没有设备，不算失败。
