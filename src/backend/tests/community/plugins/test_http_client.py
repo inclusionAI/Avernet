@@ -5,13 +5,17 @@
 client, ``None`` args are omitted so the wire shape matches a hand-written httpx
 call, and ``timeout`` rides on the request rather than the constructor.
 
-These patch ``httpx.Client`` and assert on construction arguments and
-delegation — i.e. what ``HttpxClient`` *asks httpx to do*. What httpx then does
-with it (per-request timeout budgets, absolute-URL handling, actual connection
-reuse) is httpx's own contract; it was verified directly against the pinned
-version and is recorded in the plan's verified-assumptions table. There is no
-injectable transport to drive a real client with — that seam was deliberately
-removed, see ``specs/2026-08-26-http-client-connection-pooling/spec.md``.
+Two layers here. The first patches ``httpx.Client`` outright and asserts on
+construction arguments and delegation — what ``HttpxClient`` *asks httpx to do*.
+The second (see "real-client behaviour" below) drives a real ``httpx.Client``
+over an ``httpx.MockTransport``, built through the production
+``_pooled_client()`` path so production's own arguments are the ones under test.
+
+``HttpxClient`` takes no injectable transport — that seam was production surface
+only tests used and was deliberately removed (see
+``specs/2026-08-26-http-client-connection-pooling/spec.md``). The second layer
+needs none: patching the constructor to add ``transport=`` reaches the same
+place without the class knowing about it.
 """
 from __future__ import annotations
 
@@ -23,7 +27,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from agentclaw.community.plugins.http_client import _DiscardingCookieJar, HttpxClient
+from agentclaw.community.plugins.http_client import HttpxClient
 
 
 @contextmanager
@@ -304,14 +308,23 @@ def test_teardown_without_a_pool_is_a_noop():
 # rewrite changed and which nothing else exercises end to end.
 
 
-def _seeded(handler, base_url: str = "http://svc.test") -> HttpxClient:
-    """An ``HttpxClient`` whose pool is a real client over ``MockTransport``."""
-    client = HttpxClient(base_url=base_url)
-    client._client = httpx.Client(
-        base_url=base_url,
-        transport=httpx.MockTransport(handler),
-        cookies=_DiscardingCookieJar(),
-    )
+def _seeded(handler, base_url: str = "http://svc.test", **kwargs) -> HttpxClient:
+    """An ``HttpxClient`` whose pool is a real client over ``MockTransport``.
+
+    The pool is built through the production ``_pooled_client()`` path, with only
+    ``transport=`` added to whatever kwargs production passes. Hand-assembling
+    the client here instead would silently drop production's own arguments —
+    notably ``cookies=_DiscardingCookieJar()`` — and leave the tests below
+    asserting against a client the production code never builds.
+    """
+    real_ctor = httpx.Client
+
+    def ctor(**client_kwargs):
+        return real_ctor(**client_kwargs, transport=httpx.MockTransport(handler))
+
+    client = HttpxClient(base_url=base_url, **kwargs)
+    with patch("httpx.Client", side_effect=ctor):
+        client._pooled_client()
     return client
 
 

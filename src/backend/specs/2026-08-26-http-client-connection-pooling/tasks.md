@@ -81,9 +81,12 @@ config path including the HTTP/2 flag; Group 3 validates.
       alongside the rest of the local-impl contract, so it is not lost with the
       file. Confirm nothing else imports from the deleted module.
 - [x] 1.9 Run `tests/community/plugins/test_http_client.py` and
-      `tests/community/contracts/test_http_client.py`. Both green. Note in the
-      PR that `HttpxClient.stream()` now has no automated coverage — a
-      deliberate trade recorded in `spec.md`, not an oversight.
+      `tests/community/contracts/test_http_client.py`. Both green. (Code review
+      then restored real-client `stream()` coverage without reintroducing the
+      constructor seam — patching `httpx.Client` to add `transport=` while the
+      pool is built through the production path — so the "no stream coverage"
+      caveat this task originally carried no longer applies. See
+      `tests/.../test_llm_real_stream.py` for the recovered F1 regression.)
 
 ## Group 2 — Make the ceilings and the protocol configurable
 

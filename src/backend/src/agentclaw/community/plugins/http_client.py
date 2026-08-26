@@ -57,10 +57,18 @@ afterwards lazily builds a fresh one. A call already in flight is not protected:
 if ``close()`` lands between ``_pooled_client()`` returning and the request being
 sent, httpx raises ``RuntimeError("Cannot send a request, as the client has been
 closed.")`` — which is not an ``httpx.HTTPError``, so a caller catching transport
-errors will not catch it. That window is accepted rather than guarded: teardown
+errors will not catch it.
+
+That window is accepted rather than guarded, but it is not empty: ``teardown``
 runs in shutdown phase 2, after every participant's ``shutdown()`` has returned,
-so service-tier traffic is already finished by then, and closing the hole would
-mean retry semantics this seam deliberately does not have.
+which drains *coroutines* — not the ``asyncio.to_thread`` workers this seam is
+usually called from. ``LLM._stream_read`` in particular can still be reading an
+SSE body on such a worker when the pool closes underneath it, and nothing
+cancels it. Closing the hole properly would mean either tracking in-flight
+requests or retrying on a closed client; the first is bookkeeping this seam does
+not otherwise need, and the second is retry semantics it deliberately does not
+have. The consequence is bounded — a ``RuntimeError`` in a worker thread during
+shutdown, on a request whose response nobody is waiting for any more.
 """
 from __future__ import annotations
 

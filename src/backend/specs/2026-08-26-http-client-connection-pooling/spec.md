@@ -274,17 +274,21 @@ HTTP/1.1 connections. Community and singlebox CI cannot exercise it. This is the
 primary reason `http2` ships defaulted off: pooling and multiplexing can then be
 validated against it one at a time rather than together.
 
-**`stream()` loses its automated coverage.** Removing the `transport` seam
-deletes the only tests that exercised `HttpxClient.stream()`, including the F1
-regression pinning `LLM.chat()` against a real stream. This is an accepted
-trade: a production constructor argument that exists solely for tests is design
-damage, and the judgement is that carrying it is worse than the gap. What bounds
-the risk — `stream()` after the rewrite is three lines with no branching, and
-`test_session_resources.py` still drives the pooled non-stream path over a real
-socket — does not eliminate it: a pooling mistake specific to streaming would now
-reach production rather than CI. If that gap is ever worth closing, `respx` is
-already a dev dependency and intercepts httpx at the transport layer without any
-production seam, so coverage can return without the parameter.
+**`stream()` coverage, given up and then recovered.** Removing the `transport`
+seam deleted the only tests that exercised `HttpxClient.stream()`, including the
+F1 regression pinning `LLM.chat()` against a real stream. That was accepted as a
+trade — a production constructor argument existing solely for tests is design
+damage — but code review pointed out the trade was unnecessary: patching
+`httpx.Client` to add `transport=` while the pool is built through the
+production `_pooled_client()` path reaches a real client without any production
+seam at all. Both the streaming cases and the F1 regression are restored on that
+basis, so the design keeps the smaller constructor *and* the coverage.
+
+The residual gap is narrower: no test exercises a genuine pool exhaustion, since
+`MockTransport` bypasses httpcore's connection pool entirely and provoking a real
+`PoolTimeout` needs a live server plus timing. The boundary classification of
+`PoolTimeout` is pinned instead, and the subclass relationship is verified in the
+plan's assumptions table.
 
 **A new runtime dependency.** `httpx[http2]` pulls `h2`, `hpack`, and
 `hyperframe` — three small, pure-Python packages maintained alongside httpx

@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+from unittest.mock import patch
 
 import httpx
 
 from agentclaw.community.core.harness.services.llm import LLM
-from agentclaw.community.plugins.http_client import _DiscardingCookieJar, HttpxClient
+from agentclaw.community.plugins.http_client import HttpxClient
 
 
 def _sse_handler(content: str):
@@ -37,13 +38,19 @@ def _sse_handler(content: str):
 
 
 def _seeded_client(handler, base_url: str = "http://llm.local") -> HttpxClient:
-    """A real pooled client over ``MockTransport`` — no constructor seam."""
+    """A real pooled client over ``MockTransport`` — no constructor seam.
+
+    Built through the production ``_pooled_client()`` path with only
+    ``transport=`` added, so the client under test is the one production builds.
+    """
+    real_ctor = httpx.Client
+
+    def ctor(**client_kwargs):
+        return real_ctor(**client_kwargs, transport=httpx.MockTransport(handler))
+
     client = HttpxClient(base_url=base_url)
-    client._client = httpx.Client(
-        base_url=base_url,
-        transport=httpx.MockTransport(handler),
-        cookies=_DiscardingCookieJar(),
-    )
+    with patch("httpx.Client", side_effect=ctor):
+        client._pooled_client()
     return client
 
 
