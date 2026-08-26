@@ -346,9 +346,56 @@ hide a missing binding at boot, which is worse than two test edits.
 
 A commented `http_client` block under `user_config`, matching how the file
 documents other optional blocks (e.g. the commented LLM `base_url`). Commented,
-not active, so the dataclass defaults remain the single source of the values.
-The `http2` key carries a one-line note that it engages only against TLS
-upstreams offering `h2`.
+not active, so the dataclass defaults remain the single source of the values —
+the block exists to show the shape, not to set it.
+
+```yaml
+user_config:
+  # Outbound HTTP transport policy for the HttpClient plugins.
+  # Omit the whole block to take the defaults shown below.
+  # http_client:
+  #   # Shared defaults — apply to every binding that has no override.
+  #   max_connections: 100            # hard ceiling on open connections, PER BINDING.
+  #                                   # Past it a request waits, then fails with
+  #                                   # HttpClientTimeoutError (httpx.PoolTimeout).
+  #   max_keepalive_connections: 20   # how many of those stay open once idle
+  #   keepalive_expiry: 5.0           # seconds an idle connection is kept. Keep BELOW
+  #                                   # the upstream's own idle timeout, or a connection
+  #                                   # it already closed surfaces as RemoteProtocolError.
+  #   http2: false                    # negotiated via TLS ALPN only: engages on https://
+  #                                   # upstreams offering h2, silently stays on HTTP/1.1
+  #                                   # for http:// ones (no cleartext h2c upgrade).
+  #
+  #   # Optional per-binding overrides. Valid keys are exactly the four HttpClient
+  #   # qualifiers: baas, bcn, general, masa_agent_eval. An unrecognised key is
+  #   # silently inert — check the boot log line for each binding to confirm what
+  #   # actually resolved.
+  #   overrides:
+  #     baas:
+  #       http2: true                 # single origin, plain request/response —
+  #                                   # the safest binding to flip h2 on first
+  #     general:
+  #       max_connections: 200        # base_url="" — this one pool is shared across
+  #                                   # agentclawproxy, LLM endpoints and container IPs,
+  #                                   # and its SSE streams each hold a slot for the
+  #                                   # whole response body
+```
+
+**How that resolves.** An override replaces the whole policy for its binding, but
+the *provider* builds each one starting from the resolved defaults, so the YAML
+stays sparse while the object is total. With the block above:
+
+| Binding | max_connections | max_keepalive | keepalive_expiry | http2 |
+| --- | --- | --- | --- | --- |
+| `baas` | 100 *(default)* | 20 *(default)* | 5.0 *(default)* | **true** |
+| `bcn` | 100 | 20 | 5.0 | false |
+| `general` | **200** | 20 | 5.0 | false |
+| `masa_agent_eval` | 100 | 20 | 5.0 | false |
+
+Note what `baas` inherits: setting only `http2` leaves its three ceilings at the
+shared defaults — and if those defaults later change, `baas` follows them. That
+is the intended behavior and the reason the merge happens in the provider rather
+than at the call site.
 
 ## Test plan
 
