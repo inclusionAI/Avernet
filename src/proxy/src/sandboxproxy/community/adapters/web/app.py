@@ -71,14 +71,21 @@ def build_app(container: ApplicationContainer, loaded: Config) -> FastAPI:
         relay_client = container.relay_client()
         relay_server = container.relay_server()
         forwarding = container.forwarding()
+        target_resolver = container.target_resolver()
 
         await relay_client.start()
         await forwarding.start()
         await relay_server.start()
+        resolver_start = getattr(target_resolver, "start", None)
+        if resolver_start is not None:
+            await resolver_start()
         logger.info("app started")
         try:
             yield
         finally:
+            resolver_shutdown = getattr(target_resolver, "shutdown", None)
+            if resolver_shutdown is not None:
+                await resolver_shutdown()
             await relay_server.shutdown()
             await forwarding.shutdown()
             await relay_client.shutdown()

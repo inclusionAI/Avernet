@@ -16,8 +16,6 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-_SECRET = "e2e-forward-secret"
-
 
 def _sign(secret: str, payload: dict) -> str:
     def _b64(data: bytes) -> str:
@@ -41,6 +39,26 @@ def _upstream_app():
                 "path": "/" + path,
                 "method": request.method,
                 "query": dict(request.query_params),
+            }
+        )
+
+    return app
+
+
+def _baas_app(pod_ip: str):
+    app = FastAPI()
+
+    @app.get("/api/v1/devices/provider-device/{provider_device_id}/props")
+    async def props(provider_device_id: str):
+        return JSONResponse(
+            {
+                "code": 0,
+                "message": "success",
+                "data": {
+                    "provider_device_id": provider_device_id,
+                    "status": "ACTIVE",
+                    "provider_device_props": {"metadata": {"ip_addr": pod_ip}},
+                },
             }
         )
 
@@ -73,22 +91,57 @@ class _UpstreamServer:
         raise RuntimeError("upstream did not start")
 
 
+class _BaasServer:
+    def __init__(self, port: int, pod_ip: str):
+        self.port = port
+        self.pod_ip = pod_ip
+        self.thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self.thread = threading.Thread(
+            target=uvicorn.run,
+            kwargs={
+                "app": _baas_app(self.pod_ip),
+                "host": "127.0.0.1",
+                "port": self.port,
+                "log_level": "error",
+            },
+            daemon=True,
+        )
+        self.thread.start()
+        for _ in range(50):
+            try:
+                httpx.get(f"http://127.0.0.1:{self.port}/health")
+                return
+            except httpx.HTTPError:
+                time.sleep(0.1)
+        raise RuntimeError("baas did not start")
+
+
 @pytest.fixture
 def upstream_port():
     return 18765
 
 
+@pytest.fixture
+def baas_port():
+    return 18766
+
+
 @pytest.mark.e2e
 class TestProxypassForward:
-    def test_forward_to_live_upstream(self, upstream_port: int) -> None:
+    def test_forward_to_live_upstream(
+        self, upstream_port: int, baas_port: int, jwt_secret: str
+    ) -> None:
         import tempfile
         from pathlib import Path
 
-        secret = _SECRET
-        os.environ["SANDBOXPROXY_JWT_SECRET"] = secret
+        secret = jwt_secret
 
         upstream = _UpstreamServer(upstream_port)
         upstream.start()
+        baas = _BaasServer(baas_port, pod_ip="127.0.0.1")
+        baas.start()
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 cfg = Path(tmp) / "application.yaml"
@@ -100,8 +153,8 @@ class TestProxypassForward:
                     "    relay_client: stub\n"
                     "  jwt:\n"
                     f"    secret: {secret}\n"
-                    "  aliyun_ack_cluster:\n"
-                    f"    api_server: http://127.0.0.1:{upstream_port}\n"
+                    "  baas:\n"
+                    f"    host: http://127.0.0.1:{baas_port}\n"
                 )
                 os.environ["SANDBOXPROXY_CONFIG_PATH"] = str(cfg)
 
@@ -133,9 +186,15 @@ class TestProxypassForward:
                 from starlette.testclient import TestClient
 
                 with TestClient(app) as client:
-                    token = _sign(secret, {"sub": "u1", "exp": time.time() + 3600})
+                    token = _sign(
+                        secret,
+                        {
+                            "target": f"ARCA_ALIYUN_ACK_DEFAULT-abc@1:{upstream_port}",
+                            "exp": int(time.time()) + 3600,
+                        },
+                    )
                     resp = client.get(
-                        "/proxypass/ARCA_12345:8080/echo?x=1",
+                        f"/proxypass/ARCA_ALIYUN_ACK_DEFAULT-abc@1:{upstream_port}/echo?x=1",
                         headers={"Authorization": f"Bearer {token}"},
                     )
                     assert resp.status_code == 200

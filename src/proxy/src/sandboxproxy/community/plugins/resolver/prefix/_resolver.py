@@ -34,8 +34,20 @@ class PrefixTargetResolver:
             "LOCAL_": LocalTargetResolver(normalized),
         }
 
-    def resolve(self, target_host: str) -> dict[str, str]:
+    async def start(self) -> None:
+        for resolver in self._resolvers.values():
+            start = getattr(resolver, "start", None)
+            if start is not None:
+                await start()
+
+    async def shutdown(self) -> None:
+        for resolver in self._resolvers.values():
+            shutdown = getattr(resolver, "shutdown", None)
+            if shutdown is not None:
+                await shutdown()
+
+    async def resolve(self, target_host: str) -> dict[str, str]:
         for prefix, resolver in self._resolvers.items():
             if target_host.startswith(prefix):
-                return resolver.resolve(target_host)
+                return await resolver.resolve(target_host)
         raise ValueError(f"Unsupported proxypass target: {target_host!r}")

@@ -95,6 +95,14 @@ class DeviceResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
+class ProviderDevicePropsResponse(BaseModel):
+    """provider_device_props for a device looked up by provider_device_id."""
+
+    provider_device_id: str
+    status: str
+    provider_device_props: dict[str, Any] | None
+
+
 class DeviceInfo(BaseModel):
     """Lightweight device model for bot embed (subset of DeviceResponse fields)."""
 

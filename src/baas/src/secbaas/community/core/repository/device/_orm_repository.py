@@ -263,6 +263,25 @@ class OrmDeviceRepository(OrmConnectionMixin, DeviceRepository):
         return record
 
     @with_orm_session
+    def get_by_provider_device_id(self, provider_device_id: str) -> DeviceRecord | None:
+        log.info("get_by_provider_device_id: provider_device_id=%s", provider_device_id)
+        row = (
+            self._session.query(DeviceModel)
+            .filter(
+                DeviceModel.provider_device_id == provider_device_id,
+                DeviceModel.is_deleted == 0,
+            )
+            .order_by(DeviceModel.id.desc())
+            .first()
+        )
+        record = row.to_record() if row else None
+        log.info(
+            "[device:get_by_provider_device_id] result: %s",
+            record.id if record else "None",
+        )
+        return record
+
+    @with_orm_session
     def get_by_provider_device_id_like(
         self, provider_device_id_prefix: str
     ) -> DeviceRecord | None:

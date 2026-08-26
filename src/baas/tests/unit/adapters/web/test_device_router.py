@@ -15,10 +15,14 @@ from fastapi import HTTPException
 from secbaas.community.adapters.web.routers.paas_service.device_router import (
     DeviceNotFoundResponse,
     get_device_info,
+    get_provider_device_props,
     router,
 )
 from secbaas.community.api import ApiResponse
-from secbaas.community.api.device_manage import DeviceResponse
+from secbaas.community.api.device_manage import (
+    DeviceResponse,
+    ProviderDevicePropsResponse,
+)
 
 # ==================== Helpers ====================
 
@@ -322,3 +326,94 @@ class TestGetDeviceInfo:
         assert result.data.provider_type is None
         assert result.data.provider_device_id is None
         assert result.data.provider_device_props is None
+
+
+# ==================== GET get_provider_device_props ====================
+
+
+class TestGetProviderDeviceProps:
+    """Tests for get_provider_device_props endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_found_returns_200(self) -> None:
+        """Test that a found device returns ApiResponse with props data."""
+        provider_device_id = "ALIYUN_ACK_DEFAULT-abc@0"
+        expected = ProviderDevicePropsResponse(
+            provider_device_id=provider_device_id,
+            status="ACTIVE",
+            provider_device_props={
+                "sandbox_id": "sb-001",
+                "metadata": {"ip_addr": "10.0.0.7"},
+            },
+        )
+        mock_svc = MagicMock()
+        mock_svc.get_provider_device_props.return_value = expected
+
+        result = await get_provider_device_props(
+            provider_device_id=provider_device_id,
+            device_service=mock_svc,
+        )
+
+        assert isinstance(result, ApiResponse)
+        assert result.code == 0
+        assert result.data is not None
+        assert result.data.provider_device_id == provider_device_id
+        assert result.data.status == "ACTIVE"
+        assert result.data.provider_device_props["metadata"]["ip_addr"] == "10.0.0.7"
+        mock_svc.get_provider_device_props.assert_called_once_with(
+            provider_device_id=provider_device_id
+        )
+
+    @pytest.mark.asyncio
+    async def test_not_found_raises_404(self) -> None:
+        """Test that a missing provider device raises HTTPException 404."""
+        mock_svc = MagicMock()
+        mock_svc.get_provider_device_props.return_value = None
+
+        with pytest.raises(HTTPException) as exc_info:
+            await get_provider_device_props(
+                provider_device_id="nonexistent-provider",
+                device_service=mock_svc,
+            )
+
+        assert exc_info.value.status_code == 404
+        detail = exc_info.value.detail
+        assert detail["error"] == "DEVICE_NOT_FOUND"
+        assert "nonexistent-provider" in detail["message"]
+
+    @pytest.mark.asyncio
+    async def test_unexpected_error_raises_500(self) -> None:
+        """Test that unexpected errors raise HTTPException 500."""
+        mock_svc = MagicMock()
+        mock_svc.get_provider_device_props.side_effect = RuntimeError(
+            "Database connection lost"
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await get_provider_device_props(
+                provider_device_id="ALIYUN_ACK_DEFAULT-abc@0",
+                device_service=mock_svc,
+            )
+
+        assert exc_info.value.status_code == 500
+        detail = exc_info.value.detail
+        assert detail["error"] == "INTERNAL_ERROR"
+        assert "Database connection lost" in detail["message"]
+
+    @pytest.mark.asyncio
+    async def test_http_exception_re_raised_as_is(self) -> None:
+        """Test that HTTPException raised by service is re-raised directly."""
+        mock_svc = MagicMock()
+        mock_svc.get_provider_device_props.side_effect = HTTPException(
+            status_code=429,
+            detail={"error": "RATE_LIMITED", "message": "Too many requests"},
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await get_provider_device_props(
+                provider_device_id="ALIYUN_ACK_DEFAULT-abc@0",
+                device_service=mock_svc,
+            )
+
+        assert exc_info.value.status_code == 429
+        assert exc_info.value.detail["error"] == "RATE_LIMITED"

@@ -2,18 +2,13 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from sandboxproxy.community.api.identity import resolve_instance_id
 
-_SECRET = "e2e-relay-secret"
-
 
 @pytest.fixture
-def app():
-    os.environ["SANDBOXPROXY_JWT_SECRET"] = _SECRET
+def app(jwt_secret: str):
     from sandboxproxy.community.adapters.web import build_app
     from sandboxproxy.community.bootstrap import (
         ApplicationContainer,

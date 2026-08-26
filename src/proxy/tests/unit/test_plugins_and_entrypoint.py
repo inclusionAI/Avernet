@@ -134,5 +134,16 @@ class TestRunnerPlugin:
 
         monkeypatch.setattr(uvicorn, "run", fake_run)
         plugin = BareAppRunnerPlugin()
-        plugin.run(config_path=str(cfg))
+        try:
+            plugin.run(config_path=str(cfg))
+        finally:
+            # ``plugin.run`` mutates the process environment directly (not via
+            # monkeypatch); undo it immediately so later tests that load config
+            # from the working directory are not redirected to a deleted temp
+            # path.
+            import os
+
+            os.environ.pop("SANDBOXPROXY_RUN_MODE", None)
+            os.environ.pop("SANDBOXPROXY_CONFIG_PATH", None)
+
         assert captured["app"] == "sandboxproxy.community.adapters.web.app:app"

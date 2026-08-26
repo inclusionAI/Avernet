@@ -6,14 +6,11 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import time
 
 import pytest
 
 from sandboxproxy.community.api.identity import resolve_instance_id
-
-_SECRET = "e2e-baseline-secret"
 
 
 def _sign(secret: str, payload: dict) -> str:
@@ -29,8 +26,7 @@ def _sign(secret: str, payload: dict) -> str:
 
 
 @pytest.fixture
-def app():
-    os.environ["SANDBOXPROXY_JWT_SECRET"] = _SECRET
+def app(jwt_secret: str):
     from sandboxproxy.community.adapters.web import build_app
     from sandboxproxy.community.bootstrap import (
         ApplicationContainer,
@@ -70,8 +66,8 @@ class TestBaselineLifecycle:
     def test_proxypass_requires_auth(self, client) -> None:
         assert client.get("/proxypass/ARCA_1").status_code == 401
 
-    def test_proxypass_accepts_valid_token(self, client) -> None:
-        token = _sign(_SECRET, {"sub": "u1", "exp": time.time() + 3600})
+    def test_proxypass_accepts_valid_token(self, client, jwt_secret: str) -> None:
+        token = _sign(jwt_secret, {"sub": "u1", "exp": time.time() + 3600})
         resp = client.get(
             "/proxypass/ARCA_1", headers={"Authorization": f"Bearer {token}"}
         )

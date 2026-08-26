@@ -65,9 +65,11 @@ class _FakePod:
         self,
         phase: str = "Running",
         name: str = "openclaw-ack-test-pod",
+        pod_ip: str | None = "10.0.0.7",
     ) -> None:
         self.status = MagicMock()
         self.status.phase = phase
+        self.status.pod_ip = pod_ip
         self.metadata = MagicMock()
         self.metadata.name = name
         self.metadata.labels = {"avernet.arcasandbox/template": TEMPLATE_ID}
@@ -234,6 +236,28 @@ class TestSandbox:
         assert isinstance(info, ArcaSandboxInfo)
         assert info.sandbox_id == "aliyun-ack-1"
         assert info.status == "Running"
+
+    def test_get_info_reports_ip_addr(self) -> None:
+        with _CoreHarness() as h:
+            pod = _FakePod(pod_ip="10.0.0.7")
+            h.core.read_namespaced_pod.return_value = pod
+            sb = AliyunAckSandbox(
+                "aliyun-ack-1", "ns", TEMPLATE_ID, MagicMock(), pod_name="aliyun-ack-1"
+            )
+            info = sb.get_info()
+        assert info.metadata["ip_addr"] == "10.0.0.7"
+        assert info.metadata["pod_name"] == "aliyun-ack-1"
+        assert info.metadata["namespace"] == "ns"
+
+    def test_get_info_raises_when_ip_missing(self) -> None:
+        with _CoreHarness() as h:
+            pod = _FakePod(pod_ip=None)
+            h.core.read_namespaced_pod.return_value = pod
+            sb = AliyunAckSandbox(
+                "aliyun-ack-1", "ns", TEMPLATE_ID, MagicMock(), pod_name="aliyun-ack-1"
+            )
+            with pytest.raises(RuntimeError, match="no status.pod_ip"):
+                sb.get_info()
 
     def test_get_info_echoes_ttl_in_minutes(self) -> None:
         with _CoreHarness() as h:
