@@ -26,7 +26,9 @@ import asyncio
 DEVICE_IO_CONCURRENCY = 8
 
 
-async def gather_device_io(coroutines: list) -> list:
+async def gather_device_io(
+    coroutines: list, *, return_exceptions: bool = False
+) -> list:
     """Run per-file device I/O concurrently, bounded, and drain before returning.
 
     Every coroutine is awaited to completion even after one fails, then the first
@@ -36,6 +38,13 @@ async def gather_device_io(coroutines: list) -> list:
     still in flight at that moment could land a file behind the cleanup and leave an
     orphan the next upload would trip over. Re-raising in input order keeps the
     surfaced error the same one the sequential loop would have raised.
+
+    ``return_exceptions=True`` hands the failures back in place instead, for the
+    callers that report a per-item outcome (which skill activated, which bot took
+    the config) rather than failing the request as a whole. The bound and the drain
+    are unaffected — that flag chooses only what happens *after* the batch is
+    complete. It is the same name and meaning ``asyncio.gather`` gives it, and the
+    reason those callers can move onto this helper at all.
 
     Cancellation is drained the same way, and needs its own handling because it does
     not travel the exception path: device filesystems block inside
@@ -83,9 +92,10 @@ async def gather_device_io(coroutines: list) -> list:
             except asyncio.CancelledError:
                 continue
         raise
-    for result in results:
-        if isinstance(result, BaseException):
-            raise result
+    if not return_exceptions:
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
     return results
 
 

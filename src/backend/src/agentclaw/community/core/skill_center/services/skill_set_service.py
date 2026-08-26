@@ -955,8 +955,12 @@ class SkillSetService:
                 owner_id = self.entity_id or user_id
 
                 # Activate all concurrently with proper device routing
-                activation_results = await asyncio.gather(
-                    *[
+                # Bounded rather than a raw ``gather``: each activation blocks a
+                # worker in the shared ``asyncio.to_thread`` executor, so an
+                # unbounded fan-out over a large set starves the rest of the
+                # process until it drains.
+                activation_results = await gather_device_io(
+                    [
                         self.skill_service.activate_skill(
                             gp,
                             user_id=owner_id,
@@ -964,7 +968,7 @@ class SkillSetService:
                         )
                         for gp in git_paths
                     ],
-                    return_exceptions=True
+                    return_exceptions=True,
                 )
                 # 收集激活失败的信息，让调用方可见
                 activation_failed = []
@@ -2861,8 +2865,10 @@ class SkillSetSwitcher(_DeviceSyncMixin):
 
         skill_infos = [(skill.get('id'), skill.get('git_path')) for skill in new_skills]
         if skill_infos:
-            activations = await asyncio.gather(
-                *[
+            # Bounded: see ``gather_device_io``. A skill set can carry dozens of
+            # skills and each activation occupies a shared executor worker.
+            activations = await gather_device_io(
+                [
                     self.skill_set_service.skill_service.activate_skill(
                         git_path,
                         user_id=owner_id,
@@ -2871,7 +2877,7 @@ class SkillSetSwitcher(_DeviceSyncMixin):
                     for _, git_path in skill_infos
                     if git_path
                 ],
-                return_exceptions=True
+                return_exceptions=True,
             )
             # Pair results with skill_ids, handling cases where git_path was None
             idx = 0
@@ -2970,17 +2976,28 @@ class SkillSetSwitcher(_DeviceSyncMixin):
             result.message = "No active skills to deactivate"
             return result
 
-        for skill_id in current_active:
-            try:
-                success = await self.skill_set_service.skill_service.deactivate_skill(
-                    skill_id, bolt_id=self.skill_set_service.bot_id, user_id=self.skill_set_service.entity_id
+        # One device round trip per skill, and the entries are independent, so they
+        # go out together instead of in turn — bounded and drained like every other
+        # device fan-out here. Results are still paired back to ``current_active``
+        # in order, so ``deactivated`` / ``failed`` read exactly as before.
+        outcomes = await gather_device_io(
+            [
+                self.skill_set_service.skill_service.deactivate_skill(
+                    skill_id,
+                    bolt_id=self.skill_set_service.bot_id,
+                    user_id=self.skill_set_service.entity_id,
                 )
-                if success:
-                    result.deactivated.append(skill_id)
-                else:
-                    result.failed.append({"skill_id": skill_id, "action": "deactivate", "error": "Failed to deactivate"})
-            except Exception as e:
-                result.failed.append({"skill_id": skill_id, "action": "deactivate", "error": str(e)})
+                for skill_id in current_active
+            ],
+            return_exceptions=True,
+        )
+        for skill_id, outcome in zip(current_active, outcomes):
+            if isinstance(outcome, BaseException):
+                result.failed.append({"skill_id": skill_id, "action": "deactivate", "error": str(outcome)})
+            elif outcome:
+                result.deactivated.append(skill_id)
+            else:
+                result.failed.append({"skill_id": skill_id, "action": "deactivate", "error": "Failed to deactivate"})
 
         if len(result.failed) == 0:
             # 清除数据库中的激活状态
@@ -3059,8 +3076,9 @@ class SkillSetSwitcher(_DeviceSyncMixin):
 
         # Activate all concurrently
         if tasks:
-            activations = await asyncio.gather(
-                *[
+            # Bounded: see ``gather_device_io``.
+            activations = await gather_device_io(
+                [
                     self.skill_set_service.skill_service.activate_skill(
                         skill_path,
                         user_id=owner_id,
@@ -3068,7 +3086,7 @@ class SkillSetSwitcher(_DeviceSyncMixin):
                     )
                     for _, skill_path, _ in tasks
                 ],
-                return_exceptions=True
+                return_exceptions=True,
             )
             for (skill_id, skill_path, source_path), act_result in zip(tasks, activations):
                 if isinstance(act_result, Exception):

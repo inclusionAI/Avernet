@@ -12,7 +12,6 @@ Replaces: SkillService class (lines 535-2625)
 """
 from __future__ import annotations
 
-import asyncio
 import io
 import json
 import os
@@ -807,8 +806,13 @@ class SkillService:
         # activate_skill picks the right DeviceFileSystem plugin (BAAS vs ARCA
         # vs Local). Otherwise inner calls land on LocalDeviceFileSystem
         # fallback regardless of the bot's actual device binding.
-        activations = await asyncio.gather(
-            *[
+        #
+        # Bounded rather than a raw ``gather``: each activation blocks a worker in
+        # the shared ``asyncio.to_thread`` executor (``min(32, cpu_count + 4)``
+        # threads for the whole process), so an unbounded fan-out over a large
+        # market selection starves every other caller until it drains.
+        activations = await gather_device_io(
+            [
                 self.activate_skill(skill_path, user_id=user_id, bolt_id=bolt_id)
                 for skill_path in skill_paths
             ],
@@ -854,10 +858,24 @@ class SkillService:
         """停用所有技能"""
         results = {"success": [], "failed": []}
 
-        for skill in self.get_active_skills():
-            if await self.deactivate_skill(skill.id):
+        # Each deactivation removes one independent entry under ``active_dir``, one
+        # device round trip each — so doing them in turn made this cost
+        # ``active_count × round_trip``. They touch no shared device state, so they
+        # go out together (bounded, like every other device fan-out here).
+        active = list(self.get_active_skills())
+        outcomes = await gather_device_io(
+            [self.deactivate_skill(skill.id) for skill in active],
+            return_exceptions=True,
+        )
+        for skill, outcome in zip(active, outcomes):
+            if outcome is True:
                 results["success"].append(skill.id)
             else:
+                if isinstance(outcome, BaseException):
+                    logger.warning(
+                        "[SkillService.deactivate_all_skills] %s failed: %s",
+                        skill.id, outcome,
+                    )
                 results["failed"].append(skill.id)
 
         return results

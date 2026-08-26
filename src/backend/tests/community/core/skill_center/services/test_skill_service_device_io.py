@@ -210,3 +210,82 @@ async def test_active_list_skips_entries_whose_manifest_is_absent(tmp_path):
     )
 
     assert [skill.id for skill in skills] == ["real"]
+
+
+# ── activate / deactivate batches ─────────────────────────────────────
+#
+# These already ran concurrently, but through a raw ``asyncio.gather`` — every
+# activation blocks a worker in the ``asyncio.to_thread`` executor, which is
+# shared process-wide (``min(32, cpu_count + 4)`` threads), so a large market
+# selection or skill set starved every other caller until it drained.
+
+@pytest.mark.asyncio
+async def test_activate_batch_stays_bounded(tmp_path):
+    state = {"in_flight": 0, "peak": 0}
+
+    async def _activate(skill_path, **_kwargs):
+        state["in_flight"] += 1
+        state["peak"] = max(state["peak"], state["in_flight"])
+        try:
+            await asyncio.sleep(0.005)
+            return True
+        finally:
+            state["in_flight"] -= 1
+
+    service = _service(tmp_path, _RecordingDeviceFilesystem())
+    service.activate_skill = _activate
+
+    paths = [f"git://biz/skill-{index}" for index in range(DEVICE_IO_CONCURRENCY * 3)]
+    results = await service.activate_skills_batch(paths, user_id="u1", bolt_id="bot1")
+
+    assert len(results["success"]) == len(paths)
+    assert state["peak"] > 1
+    assert state["peak"] <= DEVICE_IO_CONCURRENCY
+
+
+@pytest.mark.asyncio
+async def test_activate_batch_still_reports_each_failure_against_its_path(tmp_path):
+    async def _activate(skill_path, **_kwargs):
+        if skill_path.endswith("-1"):
+            raise RuntimeError("device refused")
+        return not skill_path.endswith("-2")
+
+    service = _service(tmp_path, _RecordingDeviceFilesystem())
+    service.activate_skill = _activate
+
+    paths = [f"git://biz/skill-{index}" for index in range(4)]
+    results = await service.activate_skills_batch(paths, user_id="u1", bolt_id="bot1")
+
+    assert [entry["path"] for entry in results["success"]] == [
+        "git://biz/skill-0",
+        "git://biz/skill-3",
+    ]
+    assert [(f["path"], f["error"]) for f in results["failed"]] == [
+        ("git://biz/skill-1", "device refused"),
+        ("git://biz/skill-2", "Failed to activate skill"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_deactivate_all_removes_entries_concurrently(tmp_path):
+    state = {"in_flight": 0, "peak": 0}
+
+    async def _deactivate(skill_id, **_kwargs):
+        state["in_flight"] += 1
+        state["peak"] = max(state["peak"], state["in_flight"])
+        try:
+            await asyncio.sleep(0.005)
+            return skill_id != "skill-2"
+        finally:
+            state["in_flight"] -= 1
+
+    service = _service(tmp_path, _RecordingDeviceFilesystem())
+    active = [MagicMock(id=f"skill-{index}") for index in range(5)]
+    service.get_active_skills = MagicMock(return_value=active)
+    service.deactivate_skill = _deactivate
+
+    results = await service.deactivate_all_skills()
+
+    assert results["success"] == ["skill-0", "skill-1", "skill-3", "skill-4"]
+    assert results["failed"] == ["skill-2"]
+    assert state["peak"] > 1
