@@ -28,6 +28,9 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetRuntimeReconcileError,
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ProjectionScope,
+)
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeDesiredState,
     RuntimeProjection,
@@ -115,6 +118,7 @@ class BotRuntimeProjector:
         bot_id: str,
         owner_id: str,
         retired_mappings: Sequence[PoolSkillMapping] = (),
+        scope: ProjectionScope = ProjectionScope.everything(),
     ) -> None:
         (
             service,
@@ -139,6 +143,7 @@ class BotRuntimeProjector:
         )
         await self._apply_non_skill_projection(
             service=service,
+            scope=scope,
             identity_modes=identity_modes,
             engine=engine,
             bot_id=bot_id,
@@ -152,6 +157,7 @@ class BotRuntimeProjector:
         *,
         bot_id: str,
         owner_id: str,
+        scope: ProjectionScope = ProjectionScope.everything(),
     ) -> None:
         """Rebuild MCP/CLI when a cutover task exclusively owns Skill mappings."""
         (
@@ -167,6 +173,7 @@ class BotRuntimeProjector:
         )
         await self._apply_non_skill_projection(
             service=service,
+            scope=scope,
             identity_modes=identity_modes,
             engine=engine,
             bot_id=bot_id,
@@ -180,6 +187,7 @@ class BotRuntimeProjector:
         *,
         bot_id: str,
         owner_id: str,
+        scope: ProjectionScope = ProjectionScope.everything(),
     ) -> None:
         """Safely remove legacy state without granting new runtime writes.
 
@@ -203,6 +211,7 @@ class BotRuntimeProjector:
             raise SkillSetRuntimeReconcileError()
         await self._apply_non_skill_projection(
             service=service,
+            scope=scope,
             identity_modes=identity_modes,
             engine=engine,
             bot_id=bot_id,
@@ -475,6 +484,7 @@ class BotRuntimeProjector:
         self,
         *,
         service,
+        scope: ProjectionScope,
         identity_modes: Mapping[str, object],
         engine: str,
         bot_id: str,
@@ -504,7 +514,7 @@ class BotRuntimeProjector:
                     # Derived from the items rather than passed separately:
                     # ``unpack_resource_scope`` ignores ``mcp_codes`` once
                     # ``mcp_items`` is present, so two independent lists could
-                    # silently diverge and only one would reach AgentPass.
+                    # silently diverge and only one would reach the passport service.
                     "mcp_codes": [item["mcp_code"] for item in mcp_items],
                     "mcp_items": mcp_items,
                     "cli_items": effective_cli_items,

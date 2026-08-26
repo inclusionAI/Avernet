@@ -81,7 +81,7 @@ green at the end of this group *without* any test expectation changing.
       explicit flag, not an equality check against `everything()` — a
       mutation that declares both halves must not be mistaken for a
       reconcile.
-- [ ] 2.2 Add `scope: ProjectionScope = ProjectionScope.everything()` to
+- [x] 2.2 Add `scope: ProjectionScope = ProjectionScope.everything()` to
       `project`, `project_mcp_and_cli`, `project_for_cleanup` and
       `_apply_non_skill_projection`; declare it on
       `core/skill_center/runtime_projection_contract.py` and
