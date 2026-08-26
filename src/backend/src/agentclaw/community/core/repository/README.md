@@ -140,6 +140,7 @@ provides:
   - TaskNodeRunInfoRepositoryProtocol
   - TaskNodeRelationRepositoryProtocol
   - TaskCallbackRepositoryProtocol
+  - TaskDiscoveryLockRepositoryProtocol
   # publishing
   - BotPublishRepositoryProtocol
   - PublishOperationRepository    # an ABC, not a Protocol — same role, same surface
@@ -208,6 +209,7 @@ provides:
   - TaskNodeRunInfoRepository
   - TaskNodeRelationRepository
   - TaskCallbackRepository
+  - TaskDiscoveryLockRepository
 consumes:
   - DatabasePlugin                # the per-profile session seam, injected into every implementation
   - get_current_env               # environment scoping (utils.env_utils)
