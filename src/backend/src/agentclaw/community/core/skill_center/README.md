@@ -119,7 +119,9 @@ Capability activation is the highest-throughput flow in production. Changes here
 `SkillCenterGatewayService` is a typed consumer of the independent SC adapter
 boundary. It accepts already-resolved Team requests and does not modify
 `ac_skill`, create Versions, select an Attempt result, retry publication, or
-materialize runtime content.
+materialize runtime content. It also preserves catalogue metadata, tag trees,
+SC publish diagnostics, non-paged versions, and exact download facts without
+turning any of them into HTTP presentation DTOs.
 
 ### One writer, one flush, one reader, one rule book
 

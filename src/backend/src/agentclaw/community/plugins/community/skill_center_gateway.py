@@ -16,13 +16,14 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterPublishSubmitRequest,
     SkillCenterSkill,
     SkillCenterSkillPage,
+    SkillCenterTag,
     SkillCenterTeam,
     SkillCenterTeamCreateRequest,
     SkillCenterTeamLookupRequest,
     SkillCenterTeamSkillDetailRequest,
     SkillCenterTeamSkillListRequest,
     SkillCenterVersionListRequest,
-    SkillCenterVersionPage,
+    SkillCenterVersion,
 )
 
 
@@ -54,6 +55,9 @@ class CommunitySkillCenterGateway(SkillCenterGateway):
     ) -> SkillCenterSkill | None:
         self._unavailable()
 
+    def list_public_tags(self) -> tuple[SkillCenterTag, ...]:
+        self._unavailable()
+
     def list_team_skills(
         self, request: SkillCenterTeamSkillListRequest
     ) -> SkillCenterSkillPage:
@@ -76,7 +80,7 @@ class CommunitySkillCenterGateway(SkillCenterGateway):
 
     def list_versions(
         self, request: SkillCenterVersionListRequest
-    ) -> SkillCenterVersionPage:
+    ) -> tuple[SkillCenterVersion, ...]:
         self._unavailable()
 
     def get_exact_download(

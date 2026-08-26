@@ -6,6 +6,8 @@ from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_im
 from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterExactDownload,
     SkillCenterExactDownloadRequest,
+    SkillCenterAccessLevel,
+    SkillCenterBelongTo,
     SkillCenterGateway,
     SkillCenterGatewayError,
     SkillCenterGatewayErrorCode,
@@ -19,6 +21,8 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterPublishSubmitRequest,
     SkillCenterSkill,
     SkillCenterSkillPage,
+    SkillCenterSortOrder,
+    SkillCenterTag,
     SkillCenterTeam,
     SkillCenterTeamCreateRequest,
     SkillCenterTeamLookupRequest,
@@ -26,7 +30,6 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterTeamSkillListRequest,
     SkillCenterVersion,
     SkillCenterVersionListRequest,
-    SkillCenterVersionPage,
 )
 from agentclaw.community.plugins.local._mock_seam import MockSeam
 
@@ -76,12 +79,74 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
     def search_public_skills(
         self, request: SkillCenterPublicSkillSearchRequest
     ) -> SkillCenterSkillPage:
-        return SkillCenterSkillPage((), 0, request.page_num, request.page_size)
+        items = [
+            skill
+            for skill in self._skills.values()
+            if skill.access_level is SkillCenterAccessLevel.PUBLIC
+            and (
+                request.keyword is None
+                or request.keyword.casefold() in skill.skill_name.casefold()
+                or request.keyword.casefold() in (skill.description or "").casefold()
+            )
+            and (not request.tags or bool(set(request.tags) & set(skill.tags)))
+            and (
+                request.official_only is None
+                or skill.is_official is request.official_only
+            )
+            and (
+                request.recommended_only is None
+                or skill.is_recommended is request.recommended_only
+            )
+            and (
+                request.creator_name is None
+                or request.creator_name.casefold()
+                in (skill.creator_name or "").casefold()
+            )
+            and (
+                request.creator_work_no is None
+                or request.creator_work_no == skill.creator_id
+            )
+        ]
+        if request.sort_by is SkillCenterSortOrder.OLDEST:
+            pass
+        elif request.sort_by is SkillCenterSortOrder.DOWNLOAD:
+            items.sort(key=lambda item: item.download_count or 0, reverse=True)
+        elif request.sort_by is SkillCenterSortOrder.FAVORITE:
+            items.sort(key=lambda item: item.favorite_count or 0, reverse=True)
+        else:
+            items.reverse()
+        start = (request.page_num - 1) * request.page_size
+        page = items[start : start + request.page_size]
+        return SkillCenterSkillPage(
+            tuple(page), len(items), request.page_num, request.page_size
+        )
 
     def get_public_skill(
         self, request: SkillCenterPublicSkillDetailRequest
     ) -> SkillCenterSkill | None:
-        return None
+        return next(
+            (
+                skill
+                for (_, skill_code), skill in self._skills.items()
+                if skill_code == request.skill_code
+                and skill.access_level is SkillCenterAccessLevel.PUBLIC
+            ),
+            None,
+        )
+
+    def list_public_tags(self) -> tuple[SkillCenterTag, ...]:
+        names = sorted(
+            {
+                tag
+                for skill in self._skills.values()
+                if skill.access_level is SkillCenterAccessLevel.PUBLIC
+                for tag in skill.tags
+            }
+        )
+        return tuple(
+            SkillCenterTag(tag_id=str(index), name=name)
+            for index, name in enumerate(names, start=1)
+        )
 
     def list_team_skills(
         self, request: SkillCenterTeamSkillListRequest
@@ -97,7 +162,9 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
         )
         start = (request.page_num - 1) * request.page_size
         page = items[start : start + request.page_size]
-        return SkillCenterSkillPage(page, len(items), request.page_num, request.page_size)
+        return SkillCenterSkillPage(
+            page, len(items), request.page_num, request.page_size
+        )
 
     def get_team_skill(
         self, request: SkillCenterTeamSkillDetailRequest
@@ -114,7 +181,15 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
             skill_code=request.skill_code,
             skill_name=request.skill_name,
             description=request.description or "",
+            skill_id=f"local-skill-{len(self._skills) + 1}",
             latest_version_number=request.version_number,
+            icon_url=request.icon_url,
+            access_level=SkillCenterAccessLevel(request.visibility.value),
+            belong_to=SkillCenterBelongTo.TEAM,
+            tags=request.tags,
+            is_official=False,
+            is_recommended=False,
+            is_test=False,
             team_id=request.team_id,
         )
         versions = self._versions.setdefault(key, [])
@@ -140,17 +215,16 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
             skill_code=request.skill_code,
             version_number=request.version_number,
             status=SkillCenterPublishState.PUBLISHED,
+            skill_name=self._skills[(request.team_id, request.skill_code)].skill_name,
+            upstream_status="PUBLISHED",
+            status_description="已发布",
+            source="LOCAL",
         )
 
     def list_versions(
         self, request: SkillCenterVersionListRequest
-    ) -> SkillCenterVersionPage:
-        versions = tuple(self._versions.get((request.team_id, request.skill_code), ()))
-        start = (request.page_num - 1) * request.page_size
-        page = versions[start : start + request.page_size]
-        return SkillCenterVersionPage(
-            page, len(versions), request.page_num, request.page_size
-        )
+    ) -> tuple[SkillCenterVersion, ...]:
+        return tuple(self._versions.get((request.team_id, request.skill_code), ()))
 
     def get_exact_download(
         self, request: SkillCenterExactDownloadRequest
@@ -162,11 +236,14 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
                 f"skill {request.skill_code} version {request.version_number} "
                 f"does not exist in team {request.team_id}"
             )
+        download_url = (
+            f"file:///local-skill-center/{request.team_id}/"
+            f"{request.skill_code}/{request.version_number}.zip"
+        )
         return SkillCenterExactDownload(
             skill_code=request.skill_code,
             version_number=request.version_number,
-            download_url=(
-                f"file:///local-skill-center/{request.team_id}/"
-                f"{request.skill_code}/{request.version_number}.zip"
-            ),
+            download_url=download_url,
+            office_download_url=download_url,
+            intranet_download_url=download_url,
         )

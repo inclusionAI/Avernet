@@ -99,4 +99,4 @@ internal_dependencies:
 
 ### Change impact
 
-Local-mode breakage shows up only when running ./scripts/local_setup.sh --local. `LocalSkillCenterGateway` is a stateful offline Fake and records every call through `MockSeam`; it never selects a default Team or retries publish submission. Adding a new plugin Protocol requires a paired local impl here per Rule 20. Removing the local impl breaks offline dev for the entire feature.
+Local-mode breakage shows up only when running ./scripts/local_setup.sh --local. `LocalSkillCenterGateway` is a stateful offline Fake and records every call through `MockSeam`; it never selects a default Team or retries publish submission. Its public catalogue and tag tree are derived from public Fake submissions, while Team listing, exact status, versions and downloads remain Team-scoped. Adding a new plugin Protocol requires a paired local impl here per Rule 20. Removing the local impl breaks offline dev for the entire feature.
