@@ -19,6 +19,7 @@ and client construction happen in downstream module providers.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from injector import Module, inject, provider, singleton
@@ -59,15 +60,24 @@ _TRUE_SCALARS = frozenset({"true", "yes", "on", "1"})
 _FALSE_SCALARS = frozenset({"false", "no", "off", "0"})
 
 
-def _coerce(block: dict[str, Any], key: str, cast, fallback, where: str):
+def _coerce(block: dict[str, Any], key: str, cast, fallback, where: str, valid=None):
     """One config value, cast defensively, falling back on anything unusable.
 
-    An empty or malformed YAML scalar (``max_connections:`` with no value,
-    ``keepalive_expiry: ~``) would otherwise raise inside the provider. That is
-    not a loud failure: ``discover_lifecycle_participants`` swallows a provider
-    exception, so all four HttpClient bindings would vanish at boot with no log
-    line, and the first outbound call would die somewhere unrelated. A bad pool
-    ceiling has to stay inert, as the block's docs promise.
+    An empty, malformed or out-of-range YAML scalar (``max_connections:`` with
+    no value, ``keepalive_expiry: ~``, ``max_connections: .inf``,
+    ``max_connections: 0``) would otherwise either raise inside the provider or
+    sail through as a working-looking value that breaks the binding.
+
+    Raising here is not a loud failure — it is the quietest one available:
+    ``discover_lifecycle_participants`` swallows a provider exception, so all
+    four HttpClient bindings would vanish at boot with no log line and no
+    teardown registration, and the first outbound call would die somewhere
+    unrelated. Hence the broad ``except``: no config value is worth losing the
+    transport over, and every rejection is logged with the offending key.
+
+    ``valid`` rejects values that cast cleanly but cannot work — a
+    ``max_connections`` of 0 turns every request on that binding into a
+    ``PoolTimeout`` for the life of the process.
     """
     if key not in block:
         return fallback
@@ -78,13 +88,20 @@ def _coerce(block: dict[str, Any], key: str, cast, fallback, where: str):
         )
         return fallback
     try:
-        return cast(raw)
-    except (TypeError, ValueError):
+        value = cast(raw)
+    except Exception as exc:  # noqa: BLE001 — see docstring: never fatal
         logger.warning(
-            "ConfigModule: %s.%s=%r is not a valid %s; using %r.",
-            where, key, raw, cast.__name__, fallback,
+            "ConfigModule: %s.%s=%r is not a valid %s (%s); using %r.",
+            where, key, raw, cast.__name__, type(exc).__name__, fallback,
         )
         return fallback
+    if valid is not None and not valid(value):
+        logger.warning(
+            "ConfigModule: %s.%s=%r is out of range; using %r.",
+            where, key, value, fallback,
+        )
+        return fallback
+    return value
 
 
 def _as_bool(raw: Any) -> bool:
@@ -116,18 +133,21 @@ def _pool_policy(
     policy, so ``for_qualifier`` never has to merge at the call site.
     """
     return cfg.HttpClientPoolPolicy(
+        # A ceiling below 1 would make every request on the binding wait for a
+        # connection that can never exist, then fail as a timeout — forever.
         max_connections=_coerce(
-            block, "max_connections", int, base.max_connections, where
+            block, "max_connections", int, base.max_connections, where,
+            valid=lambda v: v >= 1,
         ),
+        # 0 is legitimate here: it disables keep-alive without disabling the pool.
         max_keepalive_connections=_coerce(
-            block,
-            "max_keepalive_connections",
-            int,
-            base.max_keepalive_connections,
-            where,
+            block, "max_keepalive_connections", int,
+            base.max_keepalive_connections, where,
+            valid=lambda v: v >= 0,
         ),
         keepalive_expiry=_coerce(
-            block, "keepalive_expiry", float, base.keepalive_expiry, where
+            block, "keepalive_expiry", float, base.keepalive_expiry, where,
+            valid=lambda v: v >= 0 and math.isfinite(v),
         ),
         http2=_coerce(block, "http2", _as_bool, base.http2, where),
     )

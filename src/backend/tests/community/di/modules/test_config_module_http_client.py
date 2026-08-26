@@ -177,3 +177,30 @@ def test_falsey_http2_scalars_do_not_enable_http2(resolve, raw):
 @pytest.mark.parametrize("raw", ["true", "True", "yes", "on", "1", True, 1])
 def test_truthy_http2_scalars_enable_http2(resolve, raw):
     assert resolve({"http2": raw}).defaults.http2 is True
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        {"max_connections": float("inf")},   # `max_connections: .inf` -> OverflowError
+        {"max_connections": 0},              # every request would PoolTimeout forever
+        {"max_connections": -5},
+        {"max_keepalive_connections": -1},
+        {"keepalive_expiry": -1.0},
+        {"keepalive_expiry": float("nan")},
+        {"keepalive_expiry": float("inf")},
+    ],
+)
+def test_unusable_values_fall_back_instead_of_breaking_the_binding(resolve, block):
+    """Values that cast cleanly but cannot work are as damaging as ones that
+    raise: `max_connections: 0` makes every request on the binding wait for a
+    connection that can never exist and fail as a timeout, for the life of the
+    process."""
+    conf = resolve(block)
+    assert conf.defaults == cfg.HttpClientPoolPolicy()
+
+
+def test_zero_keepalive_connections_is_allowed(resolve):
+    """0 is legitimate here — it disables keep-alive without disabling the
+    pool, so it must not be swept up by the range guard."""
+    assert resolve({"max_keepalive_connections": 0}).defaults.max_keepalive_connections == 0
