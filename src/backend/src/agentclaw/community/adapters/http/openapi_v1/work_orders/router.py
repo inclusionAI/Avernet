@@ -29,7 +29,6 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     CreateSpaceJoinRequest,
     CreateWorkOrderEventRequest,
     WorkOrderEventCreated,
-    WorkOrderEventStatus,
     CreateBotEditorRequest,
     BotEditorRequestCreated,
     NotificationDetailResponse,
@@ -51,6 +50,9 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.converter import (
     display_title,
     json_object,
 )
+from agentclaw.community.adapters.http.work_orders.event_adapter import (
+    create_work_order_event_data,
+)
 from agentclaw.community.api.work_order_service import (
     WorkOrderNotificationServiceProtocol,
     WorkOrderServiceProtocol,
@@ -59,7 +61,6 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderItemType as DomainWorkOrderItemType,
     WorkOrderListItem as DomainListItem,
     WorkOrderQueryType as DomainWorkOrderQueryType,
-    NotificationCategory as DomainNotificationCategory,
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
@@ -254,30 +255,12 @@ async def create_work_order_event(
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderEventCreated]:
     actor_id = _require_user_delegation(caller)
-    result = service.create_work_order_event(
-        event_category=DomainNotificationCategory(body.event_category),
-        biz_type=body.biz_type,
-        biz_id=body.biz_id,
-        event_type=body.event_type,
-        applicant_user_id=body.applicant_user_id,
-        approver_user_ids=body.approver_user_ids,
-        recipient_user_ids=body.recipient_user_ids,
-        title=body.title,
-        content=body.content,
-        apply_reason=body.apply_reason,
-        biz_data=body.biz_data,
+    data = create_work_order_event_data(
+        body=body,
         actor_id=actor_id,
+        service=service,
     )
-    return created(
-        WorkOrderEventCreated(
-            event_category=result.event_category,
-            work_order_id=result.work_order_id,
-            work_order_no=result.work_order_no,
-            notification_ids=result.notification_ids,
-            status=WorkOrderEventStatus(result.status),
-        ),
-        request,
-    )
+    return created(data, request)
 
 
 @router.get(
