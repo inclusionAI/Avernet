@@ -23,9 +23,11 @@ tokio = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-chat-run-store = { workspace = true }
+bcs-cache-api = { workspace = true }
 bcs-protocol = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
 bcs-test-support = { workspace = true }
+bcs-cache-local = { workspace = true }
 tokio = { workspace = true }

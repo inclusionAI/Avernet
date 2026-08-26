@@ -4226,7 +4226,15 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             )
         };
         let bot_run_context: Arc<dyn BotRunContextPort> =
-            Arc::new(bcs_message_flow::MemoryBotRunContextStore::new());
+            if config.bot_run_context_store == "redis" {
+                Arc::new(bcs_message_flow::RedisBotRunContextStore::new(
+                    cache_plugin.clone(),
+                    cache_key_prefix.clone(),
+                    config.async_chat_run_retention_ms,
+                ))
+            } else {
+                Arc::new(bcs_message_flow::MemoryBotRunContextStore::new())
+            };
         let session_file_service = build_session_files_service(
             &config,
             crate::env::resolve_env(),
