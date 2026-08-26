@@ -178,18 +178,23 @@ class TaskModule(Module):
             gov = injector.get(EconomyGovernanceConfig)
         except Exception:  # noqa: BLE101 EconomyGovernanceModule 未装(纯内核/轻量测试列) → 取不到
             gov = None
-        # driver-bot session_token 取数(参考 ocb 直读 bcs_bots.session_token):corp overlay 经 DI 绑定
-        # BcsBotTokenProvider(ZDAS 真实实现);community 未绑 → NullBcsBotTokenProvider(去 event_subscriptions
-        # 后 HMAC 匿名建群亦成,不依赖 token;有则作 caller 身份 Bearer,带归属)。
+        # driver-bot session_token 取数(参考 ocb 直读 bcs_bots.session_token):
+        # 1) corp 可经 DI 显式 bind BcsBotTokenProvider 覆写(优先);
+        # 2) 默认 ZdasBcsBotTokenProvider(DatabasePlugin),corp 连到 agentclawdb_ds(bcs_bots 同库)→ 读 token 作 caller 身份 Bearer;
+        # 3) DatabasePlugin 未绑(纯内核/轻量测试)→ NullBcsBotTokenProvider(去 event_subscriptions 后 HMAC 匿名建群亦成,不阻断)。
         from agentclaw.community.core.task.task_runner.integration.bcs_bot_token_provider import (
-            BcsBotTokenProvider, NullBcsBotTokenProvider,
+            BcsBotTokenProvider, NullBcsBotTokenProvider, ZdasBcsBotTokenProvider,
         )
         try:
-            bot_token_provider = injector.get(BcsBotTokenProvider)
-            if bot_token_provider is None:
+            bot_token_provider = injector.get(BcsBotTokenProvider)  # corp 显式覆写优先
+        except Exception:  # noqa: BLE101 未绑定 → 走默认 ZDAS
+            bot_token_provider = None
+        if bot_token_provider is None:
+            try:
+                from agentclaw.community.plugin_api.database import DatabasePlugin
+                bot_token_provider = ZdasBcsBotTokenProvider(injector.get(DatabasePlugin))
+            except Exception:  # noqa: BLE101 DatabasePlugin 未绑(纯内核/轻量测试)→ Null
                 bot_token_provider = NullBcsBotTokenProvider()
-        except Exception:  # noqa: BLE101 未绑定 → Null(本地/singlebox/纯内核测试)
-            bot_token_provider = NullBcsBotTokenProvider()
         return TaskService(
             graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
             bcn=bcn, bcs_identity=bcs_identity, task_info_repo=task_info_repo,

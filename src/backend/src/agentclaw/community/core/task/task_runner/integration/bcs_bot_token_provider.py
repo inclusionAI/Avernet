@@ -13,8 +13,15 @@ token 来源:BCS 没有"取 bot token"的 HTTP 接口 —— token 在 bot 经 `
 """
 from __future__ import annotations
 
+import logging
 import time
-from typing import Callable, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol, runtime_checkable
+
+from sqlalchemy import text
+
+from agentclaw.community.plugin_api.database import DatabasePlugin
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -78,3 +85,54 @@ class CachingBcsBotTokenProvider:
         # 未命中也短缓存,避免反复查库打爆 DB。
         self._cache[bcs_bot_uuid] = ("", now + min(self._ttl_s, _DEFAULT_FAIL_TTL_S))
         return None
+
+
+class ZdasBcsBotTokenProvider:
+    """经 ZDAS ``agentclawdb_ds``(本仓 prod ``DatabasePlugin``,即 ``bcs_bots`` 所在库)直读
+    ``bcs_bots.session_token``(对齐 ocb ``ZdasBotTokenProvider``),套 ``CachingBcsBotTokenProvider`` 做 TTL 缓存。
+
+    prod corp ``DatabasePlugin.orm_session()`` 连到 ``agentclawdb_ds``,``bcs_bots`` 在同库 → 可查;
+    本地 SQLite 无 ``bcs_bots`` 表 → 查询抛错被吞 → 返 None(不发 Bearer,本地 BCS 忽略鉴权,无害)。
+
+    Args:
+        database_plugin: ``DatabasePlugin``(DI 注入;corp=真实 ZDAS,本地=SQLite)。``orm_session()`` 出 SQLAlchemy Session。
+        env: 可选环境列过滤(对齐 ocb 的 ``bcs_bots.env``);省略只按 ``bot_uuid`` 查。
+        ttl_s: 命中缓存有效期(秒),默认 300。
+        clock: 可注入单调时钟(默认 ``time.monotonic``),便于测试。
+    """
+
+    def __init__(
+        self,
+        database_plugin: DatabasePlugin,
+        *,
+        env: str | None = None,
+        ttl_s: float = 300.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._db = database_plugin
+        self._env = env
+        self._caching = CachingBcsBotTokenProvider(self._query_token, ttl_s=ttl_s, clock=clock)
+
+    def get_token(self, bcs_bot_uuid: str) -> str | None:
+        return self._caching.get_token(bcs_bot_uuid)
+
+    def _query_token(self, bcs_bot_uuid: str) -> str | None:
+        sql = "SELECT session_token FROM bcs_bots WHERE bot_uuid = :uuid"
+        params: dict[str, str] = {"uuid": bcs_bot_uuid}
+        if self._env:
+            sql += " AND env = :env"
+            params["env"] = self._env
+        sql += " LIMIT 1"
+        try:
+            with self._db.orm_session() as session:
+                row: Any = session.execute(text(sql), params).first()
+        except Exception:  # noqa: BLE001 本地无 bcs_bots 表 / 查询失败 → None(不发 Bearer,降级不阻断建群)
+            logger.warning(
+                "[task][bcs_bot_token] 读 bcs_bots.session_token 失败 bot_uuid=%s(本地无此表属正常)",
+                bcs_bot_uuid, exc_info=True,
+            )
+            return None
+        if row is None:
+            return None
+        token = row[0]
+        return str(token) if token else None
