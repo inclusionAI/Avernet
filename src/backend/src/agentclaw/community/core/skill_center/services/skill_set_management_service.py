@@ -142,9 +142,10 @@ class SkillSetManagementService:
         description: str | None,
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        # Creating an inactive SkillSet is metadata-only: it neither changes
-        # the effective capability projection nor has a compensating runtime
-        # action, so it does not enter the Pool edit boundary.
+        # A newly created empty SkillSet is active by default, matching the
+        # legacy create semantics. With no members it does not change the
+        # effective capability projection, so it does not enter the Pool edit
+        # boundary or require a runtime action.
         item = self._repository.create_set(
             bot_id=bot_id,
             owner_id=str(bot["owner_id"]),
