@@ -47,13 +47,14 @@ _TASK = DiscoveredTask(
     bot_id="test-bot",
     owner_id="test-owner",
     dt=_DT,
-    project_name="TestSkill",
-    description="A test task",
-    business_scenario="testing",
+    title="TestSkill",
+    instruction="A test task",
+    background="testing",
     discovery_basis="unit test",
-    work_item_url="http://example.com/123",
     priority="high",
     status="pending_confirmation",
+    objective="Unit-test discovery objective",
+    acceptances=[{"id": "a1", "description": "acceptance one"}],
 )
 
 _SESSION = DiscoverySession(
@@ -111,20 +112,24 @@ class TestTaskReader:
         init_discovered_tasks_db(db, [
             {
                 "task_id": "t1", "bot_id": "bot-001", "owner_id": "user-001",
-                "dt": _DT, "project_name": "Task1", "description": "d1",
-                "business_scenario": "s1", "discovery_basis": "b1",
+                "dt": _DT, "title": "Task1", "instruction": "d1",
+                "background": "s1", "discovery_basis": "b1",
                 "status": "pending_confirmation",
+                "objective": "Objective-1",
+                "acceptances": [{"id": "ac1", "description": "acc-1"}],
             },
             {
                 "task_id": "t2", "bot_id": "bot-002", "owner_id": "user-001",
-                "dt": _DT, "project_name": "Task2", "description": "d2",
-                "business_scenario": "s2", "discovery_basis": "b2",
+                "dt": _DT, "title": "Task2", "instruction": "d2",
+                "background": "s2", "discovery_basis": "b2",
                 "status": "pending_confirmation",
+                "objective": "",
+                "acceptances": [],
             },
             {
                 "task_id": "t3", "bot_id": "bot-001", "owner_id": "user-001",
-                "dt": _DT, "project_name": "Task3", "description": "d3",
-                "business_scenario": "s3", "discovery_basis": "b3",
+                "dt": _DT, "title": "Task3", "instruction": "d3",
+                "background": "s3", "discovery_basis": "b3",
                 "status": "confirmed",  # not pending
             },
         ])
@@ -136,7 +141,9 @@ class TestTaskReader:
         tasks = reader.read_pending_tasks_for_bot("bot-001", "user-001", _DT)
         assert len(tasks) == 1
         assert tasks[0].bot_id == "bot-001"
-        assert tasks[0].project_name == "Task1"
+        assert tasks[0].title == "Task1"
+        assert tasks[0].objective == "Objective-1"
+        assert tasks[0].acceptances == [{"id": "ac1", "description": "acc-1"}]
 
     def test_read_pending_for_wrong_bot(self, tmp_path):
         db = self._setup_db(tmp_path)
@@ -300,7 +307,6 @@ class TestCronRelaySessionInitiatorHelpers:
         inst = self._make_initiator()
         prompt = inst._build_discovery_prompt([_TASK])
         assert "TestSkill" in prompt
-        assert "http://example.com/123" in prompt
         assert "是否确认执行" in prompt
 
     def test_build_session_url(self):
@@ -364,7 +370,7 @@ class TestCronRelaySessionInitiatorTitleUpdate:
         mock_cli.post.assert_awaited_once()
         call_kwargs = mock_cli.post.call_args
         assert "/api/sessions/cron_001/update" in call_kwargs.args[0]
-        assert call_kwargs.kwargs["params"]["title"] == "[DreamMode] TestSkill"
+        assert call_kwargs.kwargs["params"]["title"] == "[DreamMode-任务发现] TestSkill"
         # WebSocket injection also ran (Step 3)
         inst._ws_send_message.assert_awaited_once()
 
@@ -429,7 +435,7 @@ class TestCronRelaySessionInitiatorTitleUpdate:
         inst._ws_send_message.assert_not_called()
 
     def test_title_format_single_task(self):
-        """Single task title: [DreamMode] {project_name}."""
+        """Single task title: [DreamMode-任务发现] {title}."""
         inst = self._make_initiator()
         inst._extract_engine_target = AsyncMock(return_value=None)
 
@@ -443,10 +449,10 @@ class TestCronRelaySessionInitiatorTitleUpdate:
         asyncio.run(_capture_title())
         forward_call = inst._cron_relay.forward_request.call_args
         body = forward_call.kwargs["body"]
-        assert body["title"] == "[DreamMode] TestSkill"
+        assert body["title"] == "[DreamMode-任务发现] TestSkill"
 
     def test_title_format_multi_task(self):
-        """Multiple tasks title: [DreamMode] 发现 N 件可能有意义的事情."""
+        """Multiple tasks title: [DreamMode-任务发现] 发现 N 件可能有意义的事情."""
         inst = self._make_initiator()
         inst._extract_engine_target = AsyncMock(return_value=None)
 
@@ -458,7 +464,7 @@ class TestCronRelaySessionInitiatorTitleUpdate:
 
         forward_call = inst._cron_relay.forward_request.call_args
         body = forward_call.kwargs["body"]
-        assert body["title"] == "[DreamMode] 发现 2 件可能有意义的事情"
+        assert body["title"] == "[DreamMode-任务发现] 发现 2 件可能有意义的事情"
 
 
 # ---------------------------------------------------------------------------

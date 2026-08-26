@@ -21,6 +21,9 @@ if TYPE_CHECKING:
         TaskNodeRunInfoRecord,
         TaskNodeRunInfoUpdate,
     )
+    from agentclaw.community.core.task.task_discovery.lock_models import (
+        TaskDiscoveryLockRecord,
+    )
 
 
 @runtime_checkable
@@ -364,4 +367,71 @@ class TaskActionLogRepositoryProtocol(Protocol):
         offset: int = 0,
     ) -> list["TaskActionLogRecord"]:
         """Return bounded diagnostic action history."""
+        ...
+
+
+@runtime_checkable
+class TaskDiscoveryLockRepositoryProtocol(Protocol):
+    """Protocol for the task-discovery per-bot distributed lock repository.
+
+    The lock is keyed on ``(env, bot_id, discovery_date)`` and backed by a
+    UNIQUE constraint on ``ac_task_discovery_lock`` — that constraint is the
+    guard. A single unified ORM body
+    (``TaskDiscoveryLockRepository``) runs on both prod OceanBase and local
+    SQLite via the injected DatabasePlugin.
+
+    This is structurally identical to ``BotRestartLockRepositoryProtocol``,
+    differing only in the lock key dimensions: ``discovery_date`` replaces
+    ``entity_id``, and ``holder`` (hostname) replaces ``holder_user_id``.
+    """
+
+    @abstractmethod
+    def acquire(
+        self,
+        env: str,
+        bot_id: str,
+        discovery_date: str,
+        holder: str,
+    ) -> Optional["TaskDiscoveryLockRecord"]:
+        """Acquire the lock by inserting a row.
+
+        Stamps a random ``lock_token`` (fencing token) on the row and returns
+        the inserted record (carrying that token) on success, or ``None`` if a
+        row for ``(env, bot_id, discovery_date)`` already exists (UNIQUE
+        violation). The caller must keep the token and pass it to ``release``
+        so a delete only ever removes the exact row it acquired.
+        """
+        ...
+
+    @abstractmethod
+    def get_if_stale(
+        self,
+        env: str,
+        bot_id: str,
+        discovery_date: str,
+        ttl_seconds: int,
+    ) -> Optional["TaskDiscoveryLockRecord"]:
+        """Return the lock row only if it is older than ``ttl_seconds``.
+
+        Staleness is evaluated DB-side (comparing ``gmt_create`` against the
+        database clock) to avoid app/DB clock-skew. Returns ``None`` when no
+        row exists or the existing row is still fresh.
+        """
+        ...
+
+    @abstractmethod
+    def release(
+        self,
+        env: str,
+        bot_id: str,
+        discovery_date: str,
+        lock_token: str,
+    ) -> bool:
+        """Release the lock by hard-deleting the row — only if it's still ours.
+
+        Compare-and-delete: ``DELETE WHERE (env, bot_id, discovery_date)
+        matches AND lock_token = :lock_token``. The token guard prevents
+        deleting a row that was reaped and re-acquired by another instance
+        after this holder lost interest.
+        """
         ...
