@@ -26,6 +26,7 @@ from agentclaw.community.core.mcp.services.detail_fanout import (
     server_code_of,
 )
 from agentclaw.community.core.mcp.services.passport_scope import (
+    merge_passport_cli_items,
     passport_mcp_codes_from_entries,
     passport_mcp_items_from_entries,
 )
@@ -33,7 +34,7 @@ from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
 from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepository
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
-from agentclaw.community.plugin_api.passport import CliItem, PassportPlugin
+from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
@@ -48,32 +49,6 @@ logger = get_logger()
 # 一个:desired state 投递(caller 给定列表)与 collect 后投递,可能并发打同一台设备。
 _DESIRED_STATE_DETAIL_CONCURRENCY = 10
 _COLLECTED_DETAIL_CONCURRENCY = 5
-
-
-def _merge_cli_items(
-    current: list[CliItem] | None,
-    defaults: list[CliItem] | None,
-) -> list[CliItem]:
-    """Merge passport CLI scope with default CLI items, de-duped by cli_code.
-
-    The passport update API treats resourceManifest as an overwrite. During MCP
-    sync we must send the complete CLI scope as well as MCPs. If the passport
-    service returns a temporarily-empty CLI list right after bot creation,
-    preserving the engine defaults here prevents a later MCP sync from clearing
-    them. Existing passport values win on duplicate cli_code so user/provider
-    metadata is not overwritten by static defaults.
-    """
-    merged: list[CliItem] = []
-    seen: set[str] = set()
-    for item in (current or []) + (defaults or []):
-        if not isinstance(item, dict):
-            continue
-        cli_code = item.get("cli_code")
-        if not cli_code or cli_code in seen:
-            continue
-        seen.add(cli_code)
-        merged.append(dict(item))
-    return merged
 
 
 @dataclass
@@ -508,6 +483,15 @@ class MCPSyncService:
             mcp_items = passport_mcp_items_from_entries(
                 active_mcps,
                 identity_modes=identity_modes,
+            )
+            # 当前 Passport MCP 参数不含 token；保留完整条目以定位 TCAuth 前置校验失败值。
+            logger.info(
+                "[MCPSyncService] Passport update request: "
+                "operation=caller_mcp_identity_sync, bot_id=%s, user_id=%s, "
+                "mcp_items=%s",
+                bot_id,
+                user_id,
+                mcp_items,
             )
             self.passport_update.update_mcp_identity_to_agent_principal(
                 bot_id=bot_id,
@@ -952,7 +936,7 @@ class MCPSyncService:
             if template_config
             else None,
         )
-        cli_items = _merge_cli_items(current_cli_items, default_cli_items)
+        cli_items = merge_passport_cli_items(current_cli_items, default_cli_items)
         if default_cli_items:
             logger.info(
                 "[MCPSyncService] 合并默认 CLI 范围: bot_id=%s, current_clis=%s, "
@@ -967,14 +951,27 @@ class MCPSyncService:
 
         try:
             # resource_scope 是完整快照：MCP 身份与 CLI 都必须回传，避免覆盖丢失授权。
+            resource_scope = {
+                "mcp_codes": synced_server_codes,
+                "mcp_items": mcp_items,
+                "cli_items": cli_items,
+            }
+            # 当前 Passport MCP 参数不含 token；保留完整请求以定位 TCAuth 前置校验失败值。
+            logger.info(
+                "[MCPSyncService] Passport update request: "
+                "operation=mcp_scope_refresh, bot_id=%s, user_id=%s, "
+                "resource_scope=%s, bot_name=%s, bot_desc=%s, engine_type=%s",
+                bot_id,
+                user_id,
+                resource_scope,
+                bot_name,
+                bot_desc,
+                engine_type,
+            )
             self.passport_update.update_passport(
                 bot_id=bot_id,
                 user_id=user_id,
-                resource_scope={
-                    "mcp_codes": synced_server_codes,
-                    "mcp_items": mcp_items,
-                    "cli_items": cli_items,
-                },
+                resource_scope=resource_scope,
                 bot_name=bot_name,
                 bot_desc=bot_desc,
                 engine_type=engine_type,
