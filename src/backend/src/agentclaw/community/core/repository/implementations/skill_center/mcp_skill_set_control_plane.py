@@ -63,6 +63,7 @@ class McpSkillSetControlPlaneCommands:
 
     def add_mcp(
         self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
+        name: str, description: str | None, icon: str | None,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> SkillSetMutation:
@@ -93,7 +94,8 @@ class McpSkillSetControlPlaneCommands:
             if owner is not None:
                 raise SkillSetControlPlaneConflictError("RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET")
             session.add(SkillSetMCPServer(
-                skill_set_id=row.id, server_code=server_code, name=server_code,
+                skill_set_id=row.id, server_code=server_code, name=name,
+                description=description, icon=icon,
                 user_id=row.user_id, env=get_current_env(),
                 avernet_tenant=get_current_avernet_tenant(),
             ))
