@@ -1430,49 +1430,31 @@ impl BcsConfig {
     pub fn from_file(path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let content = std::fs::read_to_string(path)?;
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let path_display = path.display().to_string();
 
-        match ext.to_lowercase().as_str() {
-            "json" => {
-                let mut config: Self = serde_json::from_str(&content)?;
-                let local_path_base_dir = local_path_base_dir_for_config_file(path);
-                normalize_local_paths(&mut config, &local_path_base_dir);
-                validate_loaded_config_for_environment(
-                    &config,
-                    crate::config_loader::Environment::resolve(),
-                )?;
-                Ok(config)
-            }
-            "toml" => {
-                let mut config: Self = toml::from_str(&content)?;
-                let local_path_base_dir = local_path_base_dir_for_config_file(path);
-                normalize_local_paths(&mut config, &local_path_base_dir);
-                validate_loaded_config_for_environment(
-                    &config,
-                    crate::config_loader::Environment::resolve(),
-                )?;
-                Ok(config)
-            }
-            _ => {
-                // Try JSON first, then TOML
-                if let Ok(mut config) = serde_json::from_str::<Self>(&content) {
-                    let local_path_base_dir = local_path_base_dir_for_config_file(path);
-                    normalize_local_paths(&mut config, &local_path_base_dir);
-                    validate_loaded_config_for_environment(
-                        &config,
-                        crate::config_loader::Environment::resolve(),
-                    )?;
-                    return Ok(config);
-                }
-                let mut config: Self = toml::from_str(&content)?;
-                let local_path_base_dir = local_path_base_dir_for_config_file(path);
-                normalize_local_paths(&mut config, &local_path_base_dir);
-                validate_loaded_config_for_environment(
-                    &config,
-                    crate::config_loader::Environment::resolve(),
-                )?;
-                Ok(config)
-            }
-        }
+        // Parse to a JSON `Value`, expand `${VAR}` references, then deserialize.
+        // Routing through `Value` (instead of parsing straight into `Self`) keeps
+        // env-reference expansion consistent with the multi-env loader path and
+        // applies it to standalone/single-file configs too.
+        let parse_and_expand = |fmt: &str| -> Result<Self, Box<dyn std::error::Error>> {
+            let mut value = crate::config_loader::parse_config_content(fmt, &content, &path_display)?;
+            crate::config_loader::expand_env_vars(&mut value)?;
+            Ok(serde_json::from_value(value)?)
+        };
+
+        let mut config = match ext.to_lowercase().as_str() {
+            "json" => parse_and_expand("json")?,
+            "toml" => parse_and_expand("toml")?,
+            _ => parse_and_expand("json").or_else(|_| parse_and_expand("toml"))?,
+        };
+
+        let local_path_base_dir = local_path_base_dir_for_config_file(path);
+        normalize_local_paths(&mut config, &local_path_base_dir);
+        validate_loaded_config_for_environment(
+            &config,
+            crate::config_loader::Environment::resolve(),
+        )?;
+        Ok(config)
     }
 
     /// Validate `api_keys` (Part B Task 3, spec §9.6.2):
@@ -1616,6 +1598,47 @@ mod tests {
         unsafe {
             std::env::remove_var(key);
         }
+    }
+
+    #[test]
+    fn from_file_expands_env_references_in_string_fields() {
+        safe_set_var("BCS_TEST_FROM_FILE_TOKEN", "expanded-via-from-file");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bcs-config.toml");
+        std::fs::write(
+            &path,
+            r#"
+bots_base_dir = "/bots"
+botchat_url = "${BCS_TEST_FROM_FILE_TOKEN}"
+"#,
+        )
+        .unwrap();
+
+        let config = BcsConfig::from_file(&path).unwrap();
+        assert_eq!(config.botchat_url.as_deref(), Some("expanded-via-from-file"));
+        safe_remove_var("BCS_TEST_FROM_FILE_TOKEN");
+    }
+
+    #[test]
+    fn from_file_errors_when_a_required_env_reference_is_unset() {
+        safe_remove_var("BCS_TEST_FROM_FILE_MISSING");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bcs-config.toml");
+        std::fs::write(
+            &path,
+            r#"
+bots_base_dir = "/bots"
+botchat_url = "${BCS_TEST_FROM_FILE_MISSING}"
+"#,
+        )
+        .unwrap();
+
+        let result = BcsConfig::from_file(&path);
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("BCS_TEST_FROM_FILE_MISSING"),
+            "error should name the missing var: {err}"
+        );
     }
 
     #[test]
