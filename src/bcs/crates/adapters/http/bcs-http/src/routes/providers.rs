@@ -660,7 +660,7 @@ async fn require_provider_bot_attributes_access(
         .map_err(provider_error)?;
 
     // COSEC: Attribute access is fail-closed: only an authenticated Provider
-    // explicitly listed for backend operations may reach its own active Bot.
+    // explicitly listed for backend operations may manage BCS Bot attributes.
     if !state
         .allowed_switch_provider_ids
         .iter()
@@ -678,35 +678,6 @@ async fn require_provider_bot_attributes_access(
         });
     }
 
-    let binding = state
-        .services
-        .provider_bot_core
-        .get_provider_bot_binding_by_bot_uuid(bot_uuid)
-        .await
-        .map_err(provider_error)?
-        .ok_or_else(|| ProviderRouteError {
-            status: StatusCode::NOT_FOUND,
-            message: format!("bot not found: {bot_uuid}"),
-        })?;
-    if binding.disabled {
-        return Err(ProviderRouteError {
-            status: StatusCode::NOT_FOUND,
-            message: format!("bot not found: {bot_uuid}"),
-        });
-    }
-    if binding.provider_id != provider_id {
-        warn!(
-            provider_id,
-            bot_uuid,
-            binding_provider_id = binding.provider_id,
-            failure = "provider_bot_binding_mismatch",
-            "Provider Bot attributes access rejected"
-        );
-        return Err(ProviderRouteError {
-            status: StatusCode::FORBIDDEN,
-            message: "provider does not own bot".to_string(),
-        });
-    }
     Ok(())
 }
 
