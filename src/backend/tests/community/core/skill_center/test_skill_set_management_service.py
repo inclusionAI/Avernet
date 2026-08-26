@@ -2027,8 +2027,9 @@ async def test_projection_fails_closed_without_a_bot_primary_key():
     """
     passport = _RuntimePassport()
     identity = _RuntimeCallerIdentity({"mcp.weather": McpCallType.CALLER})
+    factory = _RuntimeFactory()
     runtime = BotRuntimeProjector(
-        factory=_RuntimeFactory(),
+        factory=factory,
         bot_repo=_PkLessRuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
@@ -2041,6 +2042,12 @@ async def test_projection_fails_closed_without_a_bot_primary_key():
     with pytest.raises(SkillSetRuntimeReconcileError):
         await runtime.project(bot_id="bot-1", owner_id="true-owner")
 
+    # Closed means nothing was written, not merely that it stopped: the
+    # device allow-list and the symlink sync both precede the Passport call,
+    # and a mid-write abort would leave the device holding forward state that
+    # the compensating projection could not undo.
+    assert factory.service.mcp_codes is None
+    assert factory.service.desired_skills is None
     assert passport.calls == []
     assert identity.calls == []
 

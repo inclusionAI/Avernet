@@ -20,12 +20,17 @@ Paths are relative to `src/backend/src/agentclaw/community/` unless noted.
       resolves by last-module-wins, silently. Also declared the new import in
       the module's Context Boundary (`core/skill_center/README.md`), without
       which the Rule-22 architecture test fails backend CI.
-- [x] 1.2 Add `BotRuntimeProjector._passport_mcp_items(*, bot, engine, codes)`:
-      read `list_draft_call_types(int(bot["id"]), engine)`, emit
-      `{"mcp_code": code, "identity_mode": mode}` per code, defaulting to
-      `"owner"` when the Bot has no row for that code. `McpCallType` is a
-      `StrEnum` (`core/caller_identity/models.py:16`), so normalise with
-      `str(...)` rather than assuming a `.value` attribute exists.
+- [x] 1.2 Resolve MCP execution identity for the Passport scope. Shipped in
+      two pieces rather than the single method this task described:
+      `_resolve_mcp_identity_modes(*, bot, bot_id, engine)` reads
+      `list_draft_call_types(int(bot["id"]), engine)` during **plan
+      resolution**, and `_passport_mcp_items(*, identity_modes, bot_id,
+      engine, codes)` colours the declared codes with it. The read had to move
+      upstream: at the Passport call it would abort after the device
+      allow-list was already written, and the compensating projection would
+      hit the same failure and be unable to counter-project.
+      Normalisation lives in `passport_scope._normalized_identity_mode`, shared
+      with `passport_mcp_items_from_entries`, rather than a second copy here.
 - [x] 1.3 Thread `bot` into `_apply_non_skill_projection` — `_resolve_plan`
       already returns it, and all three entry points (`project`,
       `project_mcp_and_cli`, `project_for_cleanup`) hold it.

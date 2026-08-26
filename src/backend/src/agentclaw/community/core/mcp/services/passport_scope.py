@@ -63,7 +63,7 @@ def passport_mcp_codes_from_entries(
     return codes
 
 
-def normalized_identity_mode(raw: object) -> str:
+def _normalized_identity_mode(raw: object) -> str:
     """Normalize one stored execution identity to the wire vocabulary.
 
     Shared by both scope builders so the identity contract has exactly one
@@ -97,7 +97,7 @@ def passport_mcp_items_from_codes(
     return [
         {
             "mcp_code": code,
-            "identity_mode": normalized_identity_mode(identity_modes.get(code, "owner")),
+            "identity_mode": _normalized_identity_mode(identity_modes.get(code, "owner")),
         }
         for code in mcp_codes
     ]
@@ -116,7 +116,7 @@ def passport_mcp_items_from_entries(
         code = _server_code(mcp)
         if not code or _is_local_mcp_entry(mcp, code, local_codes):
             continue
-        normalized_mode = normalized_identity_mode(identity_modes.get(code, "owner"))
+        normalized_mode = _normalized_identity_mode(identity_modes.get(code, "owner"))
         items.append({
             "mcp_code": code,
             "mcp_name": _optional_text(

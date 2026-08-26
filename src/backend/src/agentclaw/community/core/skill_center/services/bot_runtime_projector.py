@@ -81,9 +81,6 @@ class BotRuntimeProjector:
         self._pool_runtime = pool_runtime
         self._pool_layouts = pool_layouts
         self._passport = passport
-        # The Passport manifest is overwrite-style per resource list, so the
-        # projector cannot send MCP scope without also sending each MCP's
-        # execution identity — see ``_passport_mcp_items``.
         self._caller_identity_repo = caller_identity_repo
 
     async def snapshot_skill_mappings(
@@ -119,7 +116,14 @@ class BotRuntimeProjector:
         owner_id: str,
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None:
-        service, bot, engine, projection, effective_cli_items = self._resolve_plan(
+        (
+            service,
+            bot,
+            engine,
+            projection,
+            effective_cli_items,
+            identity_modes,
+        ) = self._resolve_plan(
             bot_id=bot_id,
             owner_id=owner_id,
             retired_mappings=retired_mappings,
@@ -135,7 +139,7 @@ class BotRuntimeProjector:
         )
         await self._apply_non_skill_projection(
             service=service,
-            bot=bot,
+            identity_modes=identity_modes,
             engine=engine,
             bot_id=bot_id,
             owner_id=owner_id,
@@ -150,13 +154,20 @@ class BotRuntimeProjector:
         owner_id: str,
     ) -> None:
         """Rebuild MCP/CLI when a cutover task exclusively owns Skill mappings."""
-        service, bot, engine, projection, effective_cli_items = self._resolve_plan(
+        (
+            service,
+            bot,
+            engine,
+            projection,
+            effective_cli_items,
+            identity_modes,
+        ) = self._resolve_plan(
             bot_id=bot_id,
             owner_id=owner_id,
         )
         await self._apply_non_skill_projection(
             service=service,
-            bot=bot,
+            identity_modes=identity_modes,
             engine=engine,
             bot_id=bot_id,
             owner_id=owner_id,
@@ -176,9 +187,14 @@ class BotRuntimeProjector:
         Local/Repo removal.  Center requires the Pool v3 contract and is never
         permitted on this compatibility path.
         """
-        service, bot, engine, projection, effective_cli_items = (
-            self._resolve_cleanup_plan(bot_id=bot_id, owner_id=owner_id)
-        )
+        (
+            service,
+            bot,
+            engine,
+            projection,
+            effective_cli_items,
+            identity_modes,
+        ) = self._resolve_cleanup_plan(bot_id=bot_id, owner_id=owner_id)
         if any(mapping.corpus == "center" for mapping in projection.skill_mappings):
             raise SkillSetRuntimeReconcileError()
         if not service.sync_runtime(
@@ -187,7 +203,7 @@ class BotRuntimeProjector:
             raise SkillSetRuntimeReconcileError()
         await self._apply_non_skill_projection(
             service=service,
-            bot=bot,
+            identity_modes=identity_modes,
             engine=engine,
             bot_id=bot_id,
             owner_id=owner_id,
@@ -223,6 +239,43 @@ class BotRuntimeProjector:
             raise LocalSkillNotFoundError()
         return self._build_plan(bot=bot, bot_id=bot_id, owner_id=owner_id)
 
+    def _resolve_mcp_identity_modes(
+        self, *, bot: dict, bot_id: str, engine: str
+    ) -> Mapping[str, object]:
+        """Read each MCP's execution identity for this Bot.
+
+        Part of plan resolution rather than delivery: the Passport manifest is
+        overwrite-style, so a projection that cannot establish identity must
+        not have written anything yet when it gives up.
+
+        A missing primary key fails the projection rather than defaulting.
+        Every persisted Bot carries one (``BotModel.to_dict``), so its absence
+        means the record is not what this path assumes — and on a privilege
+        boundary, guessing Owner is precisely the silent demotion this whole
+        change exists to prevent.
+        """
+        bot_pk = bot.get("id")
+        if bot_pk is None:
+            logger.error(
+                "[BotRuntimeProjector] Bot record has no primary key, refusing "
+                "to project MCP identity: bot_id=%s, engine=%s",
+                bot_id, engine,
+            )
+            raise SkillSetRuntimeReconcileError()
+        try:
+            return self._caller_identity_repo.list_draft_call_types(
+                int(bot_pk), engine
+            )
+        except Exception as exc:
+            # Name the Bot and engine: the generic reconcile error carries
+            # neither, and a stale row here blocks every SkillSet mutation.
+            logger.error(
+                "[BotRuntimeProjector] MCP execution identity unreadable: "
+                "bot_id=%s, engine=%s",
+                bot_id, engine, exc_info=True,
+            )
+            raise SkillSetRuntimeReconcileError() from exc
+
     def _build_plan(
         self,
         *,
@@ -254,6 +307,13 @@ class BotRuntimeProjector:
             # Reject before querying or writing any external MCP, Passport, or
             # runtime boundary. Teclaw Center delivery belongs to Phase 2.
             raise SkillSetRuntimeReconcileError()
+        # Resolved here, with the other pre-flight checks, because it can fail:
+        # doing it at the Passport call would abort after the device allow-list
+        # was already written, and the compensating projection would then hit
+        # the same failure and be unable to counter-project.
+        identity_modes = self._resolve_mcp_identity_modes(
+            bot=bot, bot_id=bot_id, engine=engine
+        )
         # The legacy SkillSet service remains the authority for effective
         # System Defaults during Phase 1.  It resolves template presets and
         # applies ac_default_skillset_mcp_exclusion; rebuilding defaults from
@@ -303,7 +363,14 @@ class BotRuntimeProjector:
             )
         )
 
-        return service, bot, engine, projection, effective_cli_items
+        return (
+            service,
+            bot,
+            engine,
+            projection,
+            effective_cli_items,
+            identity_modes,
+        )
 
     async def _apply_skill_projection(
         self,
@@ -368,9 +435,14 @@ class BotRuntimeProjector:
             raise SkillSetRuntimeReconcileError()
 
     def _passport_mcp_items(
-        self, *, bot: dict, bot_id: str, engine: str, codes: list[str]
+        self,
+        *,
+        identity_modes: Mapping[str, object],
+        bot_id: str,
+        engine: str,
+        codes: list[str],
     ) -> list[McpScopeItem]:
-        """Build the MCP scope with an explicit execution identity per entry.
+        """Colour the declared MCP codes with their execution identity.
 
         ``updatePassport`` replaces each resource list wholesale, and the
         Passport port fills a missing ``identity_mode`` with ``"owner"``
@@ -378,35 +450,13 @@ class BotRuntimeProjector:
         identity therefore does not "leave identity alone" — it asserts Owner
         for every MCP and silently discards Caller configuration that
         ``update_mcp_identity_to_agent_principal`` wrote through the same
-        field. So the modes are resolved here, on every projection.
+        field.
 
-        The source is the sparse per-Bot call-config table: a Bot with no row
-        for a code runs it as Owner.
-
-        Missing the Bot's primary key fails the projection rather than
-        defaulting. Every persisted Bot carries one (``BotModel.to_dict``), so
-        its absence means the record is not what this path assumes — and on a
-        privilege boundary, guessing Owner is precisely the silent demotion
-        this method exists to prevent. Every other unreadable input here fails
-        closed too.
+        The codes decide the scope; ``identity_modes`` — resolved during plan
+        resolution, see ``_resolve_mcp_identity_modes`` — only colours them,
+        so a stale row for an MCP this Bot no longer holds cannot re-grant it.
         """
-        if not codes:
-            # Nothing to declare, so nothing to resolve — skip the query
-            # rather than paying it on every projection with an empty or
-            # entirely LOCAL/stdio MCP scope.
-            return []
-        bot_pk = bot.get("id")
-        if bot_pk is None:
-            logger.error(
-                "[BotRuntimeProjector] Bot record has no primary key, refusing "
-                "to project MCP identity: bot_id=%s, engine=%s, mcps=%s",
-                bot_id, engine, len(codes),
-            )
-            raise SkillSetRuntimeReconcileError()
-        modes = self._caller_identity_repo.list_draft_call_types(
-            int(bot_pk), engine
-        )
-        items = passport_mcp_items_from_codes(codes, identity_modes=modes)
+        items = passport_mcp_items_from_codes(codes, identity_modes=identity_modes)
         caller_count = sum(
             1 for item in items if item.get("identity_mode") == "caller"
         )
@@ -425,7 +475,7 @@ class BotRuntimeProjector:
         self,
         *,
         service,
-        bot: dict,
+        identity_modes: Mapping[str, object],
         engine: str,
         bot_id: str,
         owner_id: str,
@@ -439,24 +489,24 @@ class BotRuntimeProjector:
 
         try:
             passport_codes = filter_passport_mcp_codes(projection.mcp_server_codes)
-            # ``resource_scope`` is overwrite-style per list, and a code sent
-            # without ``mcp_items`` does not keep its existing identity: the
-            # Passport port substitutes a bare item and defaults its
-            # ``identity_mode`` to Owner, which is then written explicitly.
-            # So ``mcp_items`` is mandatory here, not an optimisation -- drop
-            # it and every projection silently demotes Caller MCPs to Owner.
+            # Mandatory, not an optimisation — see ``_passport_mcp_items``.
+            mcp_items = self._passport_mcp_items(
+                identity_modes=identity_modes,
+                bot_id=bot_id,
+                engine=engine,
+                codes=passport_codes,
+            )
             self._passport.update_passport(
                 bot_id=bot_id,
                 user_id=owner_id,
                 engine_type=engine,
                 resource_scope={
-                    "mcp_codes": passport_codes,
-                    "mcp_items": self._passport_mcp_items(
-                        bot=bot,
-                        bot_id=bot_id,
-                        engine=engine,
-                        codes=passport_codes,
-                    ),
+                    # Derived from the items rather than passed separately:
+                    # ``unpack_resource_scope`` ignores ``mcp_codes`` once
+                    # ``mcp_items`` is present, so two independent lists could
+                    # silently diverge and only one would reach AgentPass.
+                    "mcp_codes": [item["mcp_code"] for item in mcp_items],
+                    "mcp_items": mcp_items,
                     "cli_items": effective_cli_items,
                 },
             )
