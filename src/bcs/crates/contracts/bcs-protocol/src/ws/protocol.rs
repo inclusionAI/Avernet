@@ -933,6 +933,7 @@ pub fn build_chat_inject_frame(
     from_bot_owner: Option<String>,
     group_type: Option<String>,
     bcs_session_id: Option<&str>,
+    quote: Option<&bcs_domain::QuotedMessage>,
 ) -> BcsFrame {
     let (group_context, text) = build_message_payload(
         group,
@@ -946,6 +947,7 @@ pub fn build_chat_inject_frame(
         from_bot_owner,
         GroupContextDeliveryType::Inject,
         group_type,
+        quote,
     );
     let supports_session_field = protocol_version >= 3;
     let wire_id = legacy_aware_wire_group_id(session_id, bcs_session_id, supports_session_field);
@@ -1011,6 +1013,7 @@ pub fn build_chat_send_frame(
     from_bot_owner: Option<String>,
     group_type: Option<String>,
     bcs_session_id: Option<&str>,
+    quote: Option<&bcs_domain::QuotedMessage>,
 ) -> BcsFrame {
     let (group_context, text) = build_message_payload(
         group,
@@ -1024,6 +1027,7 @@ pub fn build_chat_send_frame(
         from_bot_owner,
         GroupContextDeliveryType::Send,
         group_type,
+        quote,
     );
     // Protocol version >= 3: bcs_group_id stays the real group id,
     // bcs_session_id is set explicitly on the params.
@@ -1092,6 +1096,7 @@ pub fn build_direct_chat_send_frame(
     thinking: &Option<String>,
     protocol_version: u32,
     bcs_session_id: Option<&str>,
+    quote: Option<&bcs_domain::QuotedMessage>,
 ) -> BcsFrame {
     let group_context = build_direct_bot_context(
         session_id,
@@ -1110,7 +1115,7 @@ pub fn build_direct_chat_send_frame(
         bcs_group_id: wire_id.to_string(),
         message: MessageContent {
             role: "user".to_string(),
-            content: vec![ContentBlock::text(content.to_string())],
+            content: vec![ContentBlock::text(direct_text_with_quote(content, quote))],
             timestamp: now_ms(),
         },
         channel: ChannelInfo {
@@ -1161,6 +1166,7 @@ pub fn build_direct_chat_inject_frame(
     attachments: &Option<Vec<Attachment>>,
     protocol_version: u32,
     bcs_session_id: Option<&str>,
+    quote: Option<&bcs_domain::QuotedMessage>,
 ) -> BcsFrame {
     let group_context = build_direct_bot_context(
         session_id,
@@ -1179,7 +1185,7 @@ pub fn build_direct_chat_inject_frame(
         bcs_group_id: wire_id.to_string(),
         message: MessageContent {
             role: "user".to_string(),
-            content: vec![ContentBlock::text(content.to_string())],
+            content: vec![ContentBlock::text(direct_text_with_quote(content, quote))],
             timestamp: now_ms(),
         },
         channel: ChannelInfo {
@@ -1211,6 +1217,15 @@ pub fn build_direct_chat_inject_frame(
         "chat.inject",
         Some(payload),
     ))
+}
+
+/// Direct-bot frames have no `[BCS Group Context]` header, so a quoted reply is
+/// prepended as a `[引用消息]` section ahead of the user's new text.
+fn direct_text_with_quote(content: &str, quote: Option<&bcs_domain::QuotedMessage>) -> String {
+    match quote {
+        Some(quoted) => format!("[引用消息]\n{}\n\n{}", quoted.content, content),
+        None => content.to_string(),
+    }
 }
 
 fn build_direct_bot_context(
@@ -1287,6 +1302,7 @@ fn build_message_payload(
     from_bot_owner: Option<String>,
     delivery_type: GroupContextDeliveryType,
     group_type: Option<String>,
+    quote: Option<&bcs_domain::QuotedMessage>,
 ) -> (GroupContext, String) {
     let raw_text = if is_self {
         content.to_string()
@@ -1310,11 +1326,14 @@ fn build_message_payload(
     );
     apply_sender_display_name(&mut group_context, from_bot_id, from_bot_name);
     let text = if protocol_version >= 2 {
-        format!(
-            "{}\n\n[消息内容]\n{}",
-            group_context.format_header(),
-            raw_text
-        )
+        let mut sections = vec![group_context.format_header()];
+        if let Some(quoted) = quote {
+            sections.push(format!("[引用消息]\n{}", quoted.content));
+        }
+        sections.push(format!("[消息内容]\n{}", raw_text));
+        sections.join("\n\n")
+    } else if let Some(quoted) = quote {
+        format!("«引用»\n{}\n{}", quoted.content, raw_text)
     } else {
         raw_text
     };
@@ -2069,7 +2088,7 @@ mod tests {
         let session_id = "grp-test:channel_dingtalk_abc12345";
         let frame = build_chat_send_frame(
             "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target", &tags,
-            &None, &None, false, 3, None, None, Some(session_id),
+            &None, &None, false, 3, None, None, Some(session_id), None,
         );
         match frame {
             BcsFrame::Request(req) => {
@@ -2093,7 +2112,7 @@ mod tests {
         let ctx = test_group_context_input();
         let frame = build_chat_send_frame(
             "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target", &[],
-            &None, &None, false, 2, None, None, Some("grp-test:abc12345"),
+            &None, &None, false, 2, None, None, Some("grp-test:abc12345"), None,
         );
         match frame {
             BcsFrame::Request(req) => {
@@ -2113,7 +2132,7 @@ mod tests {
         let ctx = test_group_context_input();
         let frame = build_chat_send_frame(
             "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target", &[],
-            &None, &None, false, 2, None, None, Some("grp-test:00000000"),
+            &None, &None, false, 2, None, None, Some("grp-test:00000000"), None,
         );
         match frame {
             BcsFrame::Request(req) => {
@@ -2131,7 +2150,7 @@ mod tests {
         let ctx = test_group_context_input();
         let frame = build_chat_send_frame(
             "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target", &[],
-            &None, &None, false, 3, None, None, None,
+            &None, &None, false, 3, None, None, None, None,
         );
         match frame {
             BcsFrame::Request(req) => {
@@ -2148,7 +2167,7 @@ mod tests {
         let ctx = test_group_context_input();
         let frame = build_chat_inject_frame(
             "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target",
-            &[], &None, false, 2, None, None, Some("grp-test:00000000"),
+            &[], &None, false, 2, None, None, Some("grp-test:00000000"), None,
         );
         match frame {
             BcsFrame::Request(req) => {
@@ -2167,7 +2186,7 @@ mod tests {
         let tags = vec!["draft".to_string(), "tenant-a".to_string()];
         let frame = build_chat_inject_frame(
             "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target",
-            &tags, &None, false, 3, None, None, Some(session_id),
+            &tags, &None, false, 3, None, None, Some(session_id), None,
         );
         match frame {
             BcsFrame::Request(req) => {
@@ -2181,5 +2200,78 @@ mod tests {
             }
             _ => panic!("expected Request frame"),
         }
+    }
+
+    fn frame_text(frame: BcsFrame) -> String {
+        match frame {
+            BcsFrame::Request(req) => {
+                let params = req.params.expect("params");
+                params["message"]["content"][0]["text"]
+                    .as_str()
+                    .expect("text block")
+                    .to_string()
+            }
+            _ => panic!("expected Request frame"),
+        }
+    }
+
+    #[test]
+    fn chat_send_renders_quote_section_for_protocol_v2() {
+        let ctx = test_group_context_input();
+        let quote = bcs_domain::QuotedMessage {
+            content: "https://ting.alipay.com/x?id=3600005".to_string(),
+        };
+        let frame = build_chat_send_frame(
+            "r1", "grp-test", &ctx, "asdasd", "human_1", "张三", &[], "target", &[],
+            &None, &None, false, 2, None, None, None, Some(&quote),
+        );
+        let text = frame_text(frame);
+        assert!(text.contains("[引用消息]\nhttps://ting.alipay.com/x?id=3600005"));
+        assert!(text.contains("[消息内容]"));
+        // 引用段应在 [消息内容] 之前,用户新文本在 [消息内容] 之后。
+        let quote_idx = text.find("[引用消息]").expect("quote section");
+        let content_idx = text.find("[消息内容]").expect("content section");
+        assert!(quote_idx < content_idx);
+        assert!(text.contains("asdasd"));
+    }
+
+    #[test]
+    fn chat_send_without_quote_has_no_quote_section() {
+        let ctx = test_group_context_input();
+        let frame = build_chat_send_frame(
+            "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target", &[],
+            &None, &None, false, 2, None, None, None, None,
+        );
+        let text = frame_text(frame);
+        assert!(!text.contains("[引用消息]"));
+        assert!(text.contains("[消息内容]"));
+    }
+
+    #[test]
+    fn chat_send_quote_for_protocol_v1_uses_fallback_format() {
+        let ctx = test_group_context_input();
+        let quote = bcs_domain::QuotedMessage {
+            content: "原文".to_string(),
+        };
+        let frame = build_chat_send_frame(
+            "r1", "grp-test", &ctx, "asdasd", "human_1", "张三", &[], "target", &[],
+            &None, &None, false, 1, None, None, None, Some(&quote),
+        );
+        let text = frame_text(frame);
+        assert!(text.contains("«引用»\n原文"));
+        assert!(text.contains("asdasd"));
+    }
+
+    #[test]
+    fn direct_chat_send_prepends_quote() {
+        let quote = bcs_domain::QuotedMessage {
+            content: "被引用的话".to_string(),
+        };
+        let frame = build_direct_chat_send_frame(
+            "r1", "sess-1", "asdasd", "human_1", "张三", "target", &[],
+            &None, &None, 3, None, Some(&quote),
+        );
+        let text = frame_text(frame);
+        assert!(text.starts_with("[引用消息]\n被引用的话\n\nasdasd"));
     }
 }

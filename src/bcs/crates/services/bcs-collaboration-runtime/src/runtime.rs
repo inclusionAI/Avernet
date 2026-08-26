@@ -868,6 +868,7 @@ impl CollaborationRuntime {
             None,
             Some("state_machine".to_string()),
             Some(&run.session_id),
+            None,
         );
         if let Some(timeout_ms) = node_run.node_timeout_ms {
             if let BcsFrame::Request(request) = &mut frame {

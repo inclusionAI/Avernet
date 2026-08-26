@@ -566,6 +566,7 @@ fn web_send_cmd() -> WebSendCommand {
         message: "hello".to_string(),
         mentions: vec![],
         attachments: None,
+        quoted_message: None,
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,

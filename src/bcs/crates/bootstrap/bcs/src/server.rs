@@ -510,6 +510,7 @@ impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher 
                 message: cmd.content,
                 mentions: Vec::new(),
                 attachments: None,
+                quoted_message: None,
                 thinking: None,
                 idempotency_key: Some(idempotency_key),
                 source_im_message_id: None,

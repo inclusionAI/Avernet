@@ -32,6 +32,8 @@ pub struct WebSendCommand {
     pub message: String,
     pub mentions: Vec<String>,
     pub attachments: Option<Vec<Attachment>>,
+    /// 引用回复的原消息(text 型),由 channel 入站透传,无引用则为 None。
+    pub quoted_message: Option<bcs_domain::QuotedMessage>,
     pub thinking: Option<String>,
     pub idempotency_key: Option<String>,
     /// Original IM message id when this command came from a channel ingress.

@@ -45,6 +45,16 @@ impl Attachment {
     }
 }
 
+/// A quoted/replied-to message carried from a channel inbound event.
+///
+/// The original sender is not carried: channels (e.g. DingTalk `repliedMsg`)
+/// only expose an encrypted sender id, not a display name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuotedMessage {
+    /// The quoted message original text.
+    pub content: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Attachment, AttachmentType};

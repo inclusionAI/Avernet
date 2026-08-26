@@ -1189,6 +1189,7 @@ impl ChannelService for BcsChannelService {
                     message: msg.text,
                     mentions: Vec::new(),
                     attachments: msg.attachments,
+                    quoted_message: msg.quoted_message,
                     thinking: None,
                     idempotency_key: Some(dispatch_msg_id.clone()),
                     source_im_message_id: Some(dispatch_msg_id.clone()),
@@ -5362,6 +5363,7 @@ mod tests {
             attachments: None,
             is_at_bot: true,
             msg_id: "msg_meta".to_string(),
+            quoted_message: None,
         };
         let meta = channel_meta(
             &ResolvedInboundContext {
@@ -5996,6 +5998,7 @@ mod tests {
             attachments: None,
             is_at_bot: true,
             msg_id: msg_id.to_string(),
+            quoted_message: None,
         }
     }
 
@@ -6017,6 +6020,7 @@ mod tests {
             attachments: None,
             is_at_bot,
             msg_id: msg_id.to_string(),
+            quoted_message: None,
         }
     }
 

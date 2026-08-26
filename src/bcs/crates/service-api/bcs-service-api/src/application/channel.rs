@@ -117,6 +117,8 @@ pub struct InboundMessage {
     pub is_at_bot: bool,
     /// 去重用。
     pub msg_id: String,
+    /// 引用回复的原消息(text 型;channel 适配器提取,无引用则为 None)。
+    pub quoted_message: Option<bcs_domain::QuotedMessage>,
 }
 
 /// 创建 binding 入参。

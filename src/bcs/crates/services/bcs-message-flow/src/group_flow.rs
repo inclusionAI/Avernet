@@ -491,9 +491,10 @@ fn persisted_inbound_content(
     content: &str,
     attachments: Option<&[Attachment]>,
     mentions: &[String],
+    quoted_message: Option<&bcs_domain::QuotedMessage>,
 ) -> Value {
     let attachments = attachments.filter(|items| !items.is_empty());
-    if attachments.is_none() && mentions.is_empty() {
+    if attachments.is_none() && mentions.is_empty() && quoted_message.is_none() {
         return Value::String(content.to_string());
     }
     let mut stored = serde_json::json!({ "text": content });
@@ -510,6 +511,9 @@ fn persisted_inbound_content(
             .map(|mention| Value::String(mention.clone()))
             .collect::<Vec<_>>()
             .into();
+    }
+    if let Some(quoted) = quoted_message {
+        stored["quoted_message"] = serde_json::json!({ "content": quoted.content });
     }
     stored
 }
@@ -533,7 +537,7 @@ mod attachment_persistence_tests {
             expires_at: None,
         };
 
-        let persisted = persisted_inbound_content("look", Some(&[attachment]), &[]);
+        let persisted = persisted_inbound_content("look", Some(&[attachment]), &[], None);
 
         assert_eq!(persisted["text"], "look");
         assert_eq!(persisted["attachments"][0]["attachment_id"], "att-1");
@@ -547,6 +551,7 @@ mod attachment_persistence_tests {
             "@Driver please review",
             None,
             &["bot-driver".to_string()],
+            None,
         );
 
         assert_eq!(persisted["text"], "@Driver please review");
@@ -556,9 +561,21 @@ mod attachment_persistence_tests {
 
     #[test]
     fn plain_text_without_attachments_or_mentions_stays_a_string() {
-        let persisted = persisted_inbound_content("plain chat", None, &[]);
+        let persisted = persisted_inbound_content("plain chat", None, &[], None);
 
         assert_eq!(persisted, serde_json::Value::String("plain chat".to_string()));
+    }
+
+    #[test]
+    fn quoted_message_is_persisted_with_content() {
+        let quoted = bcs_domain::QuotedMessage {
+            content: "原消息内容".to_string(),
+        };
+
+        let persisted = persisted_inbound_content("asdasd", None, &[], Some(&quoted));
+
+        assert_eq!(persisted["text"], "asdasd");
+        assert_eq!(persisted["quoted_message"]["content"], "原消息内容");
     }
 }
 
@@ -697,7 +714,12 @@ pub async fn handle_web_send(
         &cmd.from_actor_id,
         sender_type,
         "chat",
-        persisted_inbound_content(&cmd.message, cmd.attachments.as_deref(), &cmd.mentions),
+        persisted_inbound_content(
+            &cmd.message,
+            cmd.attachments.as_deref(),
+            &cmd.mentions,
+            cmd.quoted_message.as_ref(),
+        ),
         cmd.idempotency_key.as_deref(),
         None,
         "", // run_id: user messages don't associate with bot runs
@@ -1101,6 +1123,7 @@ pub async fn handle_group_chat(
             message: cmd.message,
             mentions: Vec::new(),
             attachments: None,
+            quoted_message: None,
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
@@ -1228,6 +1251,7 @@ pub async fn handle_persistent_group_send(
         message: cmd.content.clone(),
         mentions: decision.mentions.clone(),
         attachments: None,
+        quoted_message: None,
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
@@ -1594,6 +1618,7 @@ pub async fn handle_group_callback(
         message: cmd.message.clone(),
         mentions: decision.mentions.clone(),
         attachments: None,
+        quoted_message: None,
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
@@ -2429,6 +2454,7 @@ async fn frame_for_target(
                     &cmd.thinking,
                     protocol_version,
                     cmd.session_id.as_deref(),
+                    cmd.quoted_message.as_ref(),
                 );
             }
             let protocol_group = group_context_input(group);
@@ -2449,6 +2475,7 @@ async fn frame_for_target(
                 from_bot_owner,
                 group_type_wire(group.group_strategy),
                 cmd.session_id.as_deref(),
+                cmd.quoted_message.as_ref(),
             )
         }
         DeliveryType::Inject => {
@@ -2464,6 +2491,7 @@ async fn frame_for_target(
                     &wire_attachments,
                     protocol_version,
                     cmd.session_id.as_deref(),
+                    cmd.quoted_message.as_ref(),
                 );
             }
             let protocol_group = group_context_input(group);
@@ -2483,6 +2511,7 @@ async fn frame_for_target(
                 from_bot_owner,
                 group_type_wire(group.group_strategy),
                 cmd.session_id.as_deref(),
+                cmd.quoted_message.as_ref(),
             )
         }
     }
