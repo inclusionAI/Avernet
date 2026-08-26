@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping, Protocol, runtime_checkable
+import re
+from typing import Protocol, runtime_checkable
 
 from agentclaw.community.plugin_api.base import Plugin
 
@@ -94,6 +95,13 @@ class SkillCenterVisibility(str, Enum):
 
     PUBLIC = "PUBLIC"
     PRIVATE = "PRIVATE"
+
+
+class SkillCenterReadScope(str, Enum):
+    """Explicit trust scope for version metadata and package reads."""
+
+    PUBLIC = "PUBLIC"
+    TEAM = "TEAM"
 
 
 @dataclass(frozen=True)
@@ -192,15 +200,16 @@ class SkillCenterTag:
 class SkillCenterSkill:
     skill_code: str
     skill_name: str
+    access_level: SkillCenterAccessLevel
     description: str | None = None
     skill_id: str | None = None
     creator_id: str | None = None
+    creator_work_no: str | None = None
     creator_name: str | None = None
     latest_version_number: str | None = None
     official_version_number: str | None = None
     updated_at: str | None = None
     icon_url: str | None = None
-    access_level: SkillCenterAccessLevel | None = None
     belong_to: SkillCenterBelongTo | None = None
     owner_name: str | None = None
     homepage_url: str | None = None
@@ -215,12 +224,30 @@ class SkillCenterSkill:
     is_test: bool | None = None
     network_types: tuple[str, ...] = ()
     antcode_url: str | None = None
-    team_id: str | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class SkillCenterTeamSkill(SkillCenterSkill):
+    """Team-scoped Skill result whose tenant identity is never inferred."""
+
+    team_id: str
+    skill_status: str | None = None
+
+    def __post_init__(self) -> None:
+        _require(self.team_id, "team_id")
 
 
 @dataclass(frozen=True)
 class SkillCenterSkillPage:
     items: tuple[SkillCenterSkill, ...]
+    total: int
+    page_num: int
+    page_size: int
+
+
+@dataclass(frozen=True)
+class SkillCenterTeamSkillPage:
+    items: tuple[SkillCenterTeamSkill, ...]
     total: int
     page_num: int
     page_size: int
@@ -237,6 +264,8 @@ class SkillCenterPublishSubmitRequest:
     icon_url: str | None = None
     tags: tuple[str, ...] = ()
     visibility: SkillCenterVisibility = SkillCenterVisibility.PRIVATE
+    creator_name: str | None = None
+    creator_work_no: str | None = None
 
     def __post_init__(self) -> None:
         _require(self.team_id, "team_id")
@@ -269,10 +298,32 @@ class SkillCenterPublishStatusRequest:
 
 
 @dataclass(frozen=True)
+class SkillCenterCheckFinding:
+    """One stable finding translated from an SC validation report."""
+
+    name: str
+    status: str
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class SkillCenterStandardCheckResult:
+    findings: tuple[SkillCenterCheckFinding, ...] = ()
+
+
+@dataclass(frozen=True)
+class SkillCenterSecurityCheckReport:
+    risk_level: str | None = None
+    findings: tuple[SkillCenterCheckFinding, ...] = ()
+
+
+@dataclass(frozen=True)
 class SkillCenterPublishStatus:
     skill_code: str
     version_number: str
     status: SkillCenterPublishState
+    is_completed: bool
+    is_success: bool
     message: str | None = None
     skill_name: str | None = None
     upstream_status: str | None = None
@@ -280,28 +331,32 @@ class SkillCenterPublishStatus:
     source: str | None = None
     released_at: str | None = None
     error_message: str | None = None
-    standard_check_result: Mapping[str, object] | None = None
-    security_check_report: Mapping[str, object] | None = None
+    standard_check_result: SkillCenterStandardCheckResult | None = None
+    security_check_report: SkillCenterSecurityCheckReport | None = None
 
     @property
     def completed(self) -> bool:
-        return self.status is not SkillCenterPublishState.PENDING
+        return self.is_completed
 
     @property
-    def succeeded(self) -> bool | None:
-        if self.status is SkillCenterPublishState.PENDING:
-            return None
-        return self.status is SkillCenterPublishState.PUBLISHED
+    def succeeded(self) -> bool:
+        return self.is_success
 
 
 @dataclass(frozen=True)
 class SkillCenterVersionListRequest:
-    team_id: str
     skill_code: str
+    scope: SkillCenterReadScope
+    team_id: str | None = None
 
     def __post_init__(self) -> None:
-        _require(self.team_id, "team_id")
         _require(self.skill_code, "skill_code")
+        if self.scope is SkillCenterReadScope.TEAM:
+            _require(self.team_id or "", "team_id")
+        elif self.team_id is not None:
+            raise ValueError("team_id must be omitted for PUBLIC reads")
+        if self.team_id is not None:
+            _require(self.team_id, "team_id")
 
 
 @dataclass(frozen=True)
@@ -323,14 +378,20 @@ class SkillCenterMcpService:
 
 @dataclass(frozen=True)
 class SkillCenterExactDownloadRequest:
-    team_id: str
     skill_code: str
     version_number: str
+    scope: SkillCenterReadScope
+    team_id: str | None = None
 
     def __post_init__(self) -> None:
-        _require(self.team_id, "team_id")
         _require(self.skill_code, "skill_code")
         _require(self.version_number, "version_number")
+        if self.scope is SkillCenterReadScope.TEAM:
+            _require(self.team_id or "", "team_id")
+        elif self.team_id is not None:
+            raise ValueError("team_id must be omitted for PUBLIC reads")
+        if self.team_id is not None:
+            _require(self.team_id, "team_id")
 
 
 @dataclass(frozen=True)
@@ -338,20 +399,27 @@ class SkillCenterExactDownload:
     skill_code: str
     version_number: str
     download_url: str
+    sha256: str
     office_download_url: str | None = None
     intranet_download_url: str | None = None
-    sha256: str | None = None
     mcp_services: tuple[SkillCenterMcpService, ...] = ()
+
+    def __post_init__(self) -> None:
+        if re.fullmatch(r"[0-9a-fA-F]{64}", self.sha256) is None:
+            raise ValueError("sha256 must be a 64-character hexadecimal digest")
 
 
 @runtime_checkable
 class SkillCenterGateway(Plugin, Protocol):
     """Transport/config/auth adapter boundary for the new SC lifecycle.
 
-    Team Skill operations require a non-empty request-level ``team_id``. Public
-    market operations deliberately have no Team. Implementations issue at most
-    one publish submission; this contract never chooses retry, Attempt,
-    ``RESULT_UNKNOWN``, Version creation, or materialization policy.
+    Team catalogue and publication operations require a non-empty request-level
+    ``team_id``. Version listing and exact download require an explicit
+    ``PUBLIC`` or ``TEAM`` scope; Public Reference reads omit Team because
+    ``skill_code`` is globally unique. Public market operations deliberately
+    have no Team. Implementations issue at most one publish submission; this
+    contract never chooses retry, Attempt, ``RESULT_UNKNOWN``, Version creation,
+    or materialization policy.
     """
 
     def create_team(self, request: SkillCenterTeamCreateRequest) -> SkillCenterTeam: ...
@@ -372,11 +440,11 @@ class SkillCenterGateway(Plugin, Protocol):
 
     def list_team_skills(
         self, request: SkillCenterTeamSkillListRequest
-    ) -> SkillCenterSkillPage: ...
+    ) -> SkillCenterTeamSkillPage: ...
 
     def get_team_skill(
         self, request: SkillCenterTeamSkillDetailRequest
-    ) -> SkillCenterSkill | None: ...
+    ) -> SkillCenterTeamSkill | None: ...
 
     def submit_publish(
         self, request: SkillCenterPublishSubmitRequest
