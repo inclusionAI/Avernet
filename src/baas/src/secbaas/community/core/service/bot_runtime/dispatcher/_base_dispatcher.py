@@ -134,4 +134,11 @@ class BotBaseDispatcher:
         if paas_device_id is None:
             raise RuntimeError(f"Device {device.device_uuid} has no provider_device_id")
 
+        logger.info(
+            f"Monitor: bot_uuid={bot_uuid}, tenant={tenant}, env={env}, "
+            f"selection_method={selection_method}, "
+            f"device_affinity={device_affinity}, "
+            f"provider_device_id={paas_device_id}"
+        )
+
         return bot, device, paas_device_id
