@@ -40,9 +40,10 @@ class OrgUserIdentity(BaseModel):
         "API. Non-delegable self-service operations derive it from this "
         "verified identity instead."
     )
-    username: str = Field(
-        description="The login name the identity provider resolved for the "
-        "caller."
+    username: str | None = Field(
+        description="The login name, when the identity/directory source "
+        "supplied one; null otherwise (whoami off the signed principal; a "
+        "directory lookup off the staff directory)."
     )
     display_name: str | None = Field(
         description="Short display name, when the identity provider supplied "
