@@ -160,14 +160,14 @@ config path including the HTTP/2 flag; Group 3 validates.
 
 ## Follow-ups for the human (not code tasks)
 
-- [x] F1 Confirm the origins offer `h2`. **`secbaas-prod.alipay.com` → `ALPN
-      protocol: h2`**, probed from inside the corp network. (A sandbox probe is
-      worthless here — its TLS is terminated by an egress gateway that reports
-      its own ALPN.)
-- [x] F1b Same probe against `agentclawproxy-prod.alipay.com` — **`ALPN
-      protocol: h2`**. Both target upstreams negotiate HTTP/2, so F3's flip has a
-      known payoff. Scope note: agentclawproxy is a proxy, so this covers the
-      backend→proxy hop (the one this pool holds), not proxy→container.
+- [x] F1 Confirm the BaaS origin offers `h2` — **it does**, probed from inside
+      the corporate network. (A sandbox probe is worthless here: its TLS is
+      terminated by an egress gateway that reports its own ALPN.) Hostnames are
+      deliberately not recorded in this repo — see `spec.md`.
+- [x] F1b Same probe against the proxy origin — **also `h2`**. Both target
+      upstreams negotiate HTTP/2, so F3's flip has a known payoff. Scope note:
+      that origin is a proxy, so this covers the backend→proxy hop (the one this
+      pool holds), not proxy→container.
 - [ ] F2 Mirror the `pyproject.toml` httpx-extra change into the corp manifest,
       which the community manifest documents itself as tracking by hand.
 - [ ] F3 Roll `http2: true` out per environment AND per qualifier (pre first),
