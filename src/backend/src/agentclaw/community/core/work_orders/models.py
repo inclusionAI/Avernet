@@ -57,7 +57,6 @@ class WorkOrderEventType(StrEnum):
     SPACE_JOIN_APPLIED = "SPACE_JOIN_APPLIED"
     SPACE_JOIN_REVIEWED = "SPACE_JOIN_REVIEWED"
     SPACE_MEMBER_ADDED = "SPACE_MEMBER_ADDED"
-    SPACE_MEMBER_REMOVED = "SPACE_MEMBER_REMOVED"
     BOT_COLLABORATOR_APPLIED = "BOT_COLLABORATOR_APPLIED"
     BOT_COLLABORATOR_REVIEWED = "BOT_COLLABORATOR_REVIEWED"
     BOT_MEMBER_ADDED = "BOT_MEMBER_ADDED"
@@ -72,13 +71,14 @@ class WorkOrderEventType(StrEnum):
     HUMAN2BOT_PUBLIC_ORDER_COMPLETED = "HUMAN2BOT_PUBLIC_ORDER_COMPLETED"
     BOT2BOT_PUBLIC_ORDER_CREATED = "BOT2BOT_PUBLIC_ORDER_CREATED"
     BOT2BOT_PUBLIC_ORDER_COMPLETED = "BOT2BOT_PUBLIC_ORDER_COMPLETED"
+    SPACE_MEMBER_REMOVED = "SPACE_MEMBER_REMOVED"
+    TASK_DISCOVERED = "TASK_DISCOVERED"
 
 
 EVENT_CATEGORIES: dict[WorkOrderEventType, NotificationCategory] = {
     WorkOrderEventType.SPACE_JOIN_APPLIED: NotificationCategory.APPROVAL,
     WorkOrderEventType.SPACE_JOIN_REVIEWED: NotificationCategory.NOTICE,
     WorkOrderEventType.SPACE_MEMBER_ADDED: NotificationCategory.NOTICE,
-    WorkOrderEventType.SPACE_MEMBER_REMOVED: NotificationCategory.NOTICE,
     WorkOrderEventType.BOT_COLLABORATOR_APPLIED: NotificationCategory.APPROVAL,
     WorkOrderEventType.BOT_COLLABORATOR_REVIEWED: NotificationCategory.NOTICE,
     WorkOrderEventType.BOT_MEMBER_ADDED: NotificationCategory.NOTICE,
@@ -93,6 +93,8 @@ EVENT_CATEGORIES: dict[WorkOrderEventType, NotificationCategory] = {
     WorkOrderEventType.HUMAN2BOT_PUBLIC_ORDER_COMPLETED: NotificationCategory.NOTICE,
     WorkOrderEventType.BOT2BOT_PUBLIC_ORDER_CREATED: NotificationCategory.NOTICE,
     WorkOrderEventType.BOT2BOT_PUBLIC_ORDER_COMPLETED: NotificationCategory.NOTICE,
+    WorkOrderEventType.SPACE_MEMBER_REMOVED: NotificationCategory.NOTICE,
+    WorkOrderEventType.TASK_DISCOVERED: NotificationCategory.NOTICE,
 }
 
 # Approval events are extracted from the single classification table so new

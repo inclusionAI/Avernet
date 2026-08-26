@@ -137,12 +137,14 @@ def _status_task(task_id: str) -> dict:
         "bot_id": "status-bot",
         "owner_id": "status-owner",
         "dt": "2026-08-20",
-        "project_name": task_id,
-        "description": "status coverage",
-        "business_scenario": "testing",
+        "title": task_id,
+        "instruction": "status coverage",
+        "background": "testing",
         "discovery_basis": "changed-line coverage",
         "priority": "medium",
         "status": "pending_confirmation",
+        "objective": f"目标:{task_id}",
+        "acceptances": [{"id": "c1", "description": "验收-1"}],
     }
 
 
@@ -156,7 +158,21 @@ def _seed_status_with_discovered_and_pending_tasks(world) -> None:
     )
     os.environ["TASK_DISCOVERY_DATA_FILE"] = str(_STATUS_COVERAGE_DB)
     service = world.get(DiscoveryService)
-    task = DiscoveredTask(**_status_task(_STATUS_DISCOVERED_TASK_ID))
+    _task_dto = _status_task(_STATUS_DISCOVERED_TASK_ID)
+    task = DiscoveredTask(
+        task_id=_task_dto["task_id"],
+        bot_id=_task_dto["bot_id"],
+        owner_id=_task_dto["owner_id"],
+        dt=_task_dto["dt"],
+        title=_task_dto["title"],
+        instruction=_task_dto["instruction"],
+        background=_task_dto["background"],
+        discovery_basis=_task_dto["discovery_basis"],
+        priority=_task_dto["priority"],
+        status=_task_dto["status"],
+        objective=_task_dto.get("objective", ""),
+        acceptances=list(_task_dto.get("acceptances", [])),
+    )
     service._discoveries[_STATUS_DISCOVERED_TASK_ID] = DiscoveryResult(
         task=task,
         session=DiscoverySession(
@@ -207,3 +223,57 @@ def _cleanup_status_coverage(response, world) -> None:
 )
 def get_status_happy_discovered_and_pending():
     """Status joins persisted tasks with process-local discovery results."""
+
+
+# ---- POST /api/v1/collaboration/tasks/discovery/reschedule ----
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/tasks/discovery/reschedule",
+    scenario="happy",
+    input=CaseInput(query_params={"cron": "30 14 * * *"}),
+    expect=ExpectSuccess(status=200),
+)
+def reschedule_happy():
+    """Happy path: valid cron expression accepted (scheduler may or may not be running)."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/tasks/discovery/reschedule",
+    scenario="error",
+    expect=ExpectError(status=422),
+)
+def reschedule_err_missing_cron():
+    """Error path: missing required cron query param -> FastAPI 422."""
+
+
+# ---- POST /api/v1/collaboration/tasks/discovery/dingtalk-config ----
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/tasks/discovery/dingtalk-config",
+    scenario="happy",
+    input=CaseInput(json_body={
+        "ak_id": "test-ak-id",
+        "ak_secret": "test-ak-secret",
+        "robot_code": "test-robot",
+        "card_template_id": "test-template.schema",
+    }),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True},
+    ),
+)
+def dingtalk_config_happy():
+    """Happy path: valid credentials injected successfully."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/tasks/discovery/dingtalk-config",
+    scenario="error",
+    expect=ExpectError(status=422),
+)
+def dingtalk_config_err_missing_body():
+    """Error path: missing required body -> FastAPI 422."""
