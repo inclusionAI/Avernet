@@ -19,7 +19,12 @@ from agentclaw.community.core.spaces.errors import (
     SpaceMemberAlreadyExistsError,
     SpaceNotFoundError,
 )
-from agentclaw.community.core.spaces.models import SpaceJoinStatus, SpaceRole, SpaceType
+from agentclaw.community.core.spaces.models import (
+    SpaceJoinStatus,
+    SpaceListScope,
+    SpaceRole,
+    SpaceType,
+)
 from agentclaw.community.core.spaces.repository.models import (
     SpaceMemberModel,
     SpaceModel,
@@ -312,6 +317,49 @@ def test_space_repository_full_member_lifecycle(db) -> None:
         env="dev",
     )
     assert readded.user_name is None
+
+
+def test_space_repository_accessible_scope_filters_by_active_membership_and_paginates(db) -> None:
+    spaces = SpaceRepository(db)
+    personal, _ = spaces.initialize_personal(user_id="user-1", env="dev")
+    joined = _team(spaces, name="Joined", creator="owner-1")
+    pending = _team(spaces, name="Pending", creator="owner-2")
+    inactive = _team(spaces, name="Inactive", creator="owner-3")
+    other_env = _team(spaces, name="Other Env", creator="owner-4")
+    spaces.add_member(
+        space_id=joined.id, user_id="user-1", role=SpaceRole.MEMBER,
+        creator_id="owner-1", env="dev"
+    )
+    spaces.add_member(
+        space_id=inactive.id, user_id="user-1", role=SpaceRole.MEMBER,
+        creator_id="owner-3", env="dev"
+    )
+    with db.transactional_orm_session() as session:
+        session.query(SpaceMemberModel).filter(
+            SpaceMemberModel.space_id == inactive.id,
+            SpaceMemberModel.user_id == "user-1",
+        ).update({SpaceMemberModel.status: "INACTIVE"})
+    spaces.add_member(
+        space_id=other_env.id, user_id="user-1", role=SpaceRole.MEMBER,
+        creator_id="owner-4", env="pre"
+    )
+
+    total, first_page = spaces.list_spaces(
+        user_id="user-1", env="dev", keyword=None, space_type=None,
+        offset=0, limit=2, scope=SpaceListScope.ACCESSIBLE
+    )
+    assert total == 2
+    assert {item.space.id for item in first_page} <= {personal.id, joined.id}
+
+    _, second_page = spaces.list_spaces(
+        user_id="user-1", env="dev", keyword=None, space_type=None,
+        offset=1, limit=2, scope=SpaceListScope.ACCESSIBLE
+    )
+    assert len(second_page) == 1
+    assert {item.space.id for item in first_page + second_page} == {personal.id, joined.id}
+    assert pending.id not in {item.space.id for item in first_page + second_page}
+    assert inactive.id not in {item.space.id for item in first_page + second_page}
+    assert other_env.id not in {item.space.id for item in first_page + second_page}
 
 
 def test_space_repository_marks_pending_join_request_as_applying(db) -> None:
