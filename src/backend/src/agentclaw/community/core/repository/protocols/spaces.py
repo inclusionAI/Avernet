@@ -7,6 +7,7 @@ from typing import ContextManager, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.spaces.models import (
+        SpaceListScope,
         PersonalSpaceLookupRecord,
         SpaceMemberRecord,
         SpaceMemberSummaryRecord,
@@ -76,6 +77,7 @@ class SpaceRepositoryProtocol(Protocol):
         space_type: str | None,
         offset: int,
         limit: int,
+        scope: SpaceListScope = "all",
     ) -> tuple[int, list[SpaceSummaryRecord]]: ...
 
     @abstractmethod

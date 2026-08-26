@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from uuid import uuid4
 
 from injector import inject
-from sqlalchemy import func, or_
+from sqlalchemy import exists, func, or_
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
@@ -18,6 +18,7 @@ from agentclaw.community.core.spaces.errors import (
 from agentclaw.community.core.spaces.models import (
     PersonalSpaceLookupRecord,
     SpaceJoinStatus,
+    SpaceListScope,
     SpaceMemberSummaryRecord,
     SpaceRole,
     SpaceSummaryRecord,
@@ -297,16 +298,39 @@ class SpaceRepository(SpaceRepositoryProtocol):
         space_type: str | None,
         offset: int,
         limit: int,
+        scope: SpaceListScope = SpaceListScope.ALL,
     ):
+        scope = SpaceListScope(scope)
         with self._db.orm_session() as db:
-            query = db.query(self._Space).filter(
+            filters = [
                 self._Space.env == env,
                 self._Space.deleted_at.is_(None),
-                or_(
-                    self._Space.space_type != SpaceType.PERSONAL.value,
-                    self._Space.personal_owner_id == user_id,
-                ),
-            )
+            ]
+            if scope is SpaceListScope.ACCESSIBLE:
+                active_membership = exists().where(
+                    self._Member.space_id == self._Space.id,
+                    self._Member.user_id == user_id,
+                    self._Member.env == env,
+                    self._Member.status == "ACTIVE",
+                )
+                filters.append(
+                    or_(
+                        (
+                            self._Space.space_type == SpaceType.PERSONAL.value
+                        )
+                        & (self._Space.personal_owner_id == user_id),
+                        (self._Space.space_type == SpaceType.TEAM.value)
+                        & active_membership,
+                    )
+                )
+            else:
+                filters.append(
+                    or_(
+                        self._Space.space_type != SpaceType.PERSONAL.value,
+                        self._Space.personal_owner_id == user_id,
+                    )
+                )
+            query = db.query(self._Space).filter(*filters)
             if keyword:
                 query = query.filter(self._Space.name.ilike(f"%{keyword}%"))
             if space_type:
