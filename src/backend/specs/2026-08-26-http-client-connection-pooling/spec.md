@@ -50,20 +50,24 @@ show.
 
 Because they are TLS, ALPN negotiation is possible, and HTTP/2 is worth having.
 
-**What is not established:** whether those origins actually offer `h2` via ALPN.
-An ALPN probe from the development sandbox returned `h2`, but the certificate
-issuer was `O = Anthropic, CN = Egress Gateway SDS Issuing CA` — the sandbox's
-egress gateway terminated TLS, so that answer describes the gateway, not
-secbaas/agentclawproxy. Verifiable from inside the corp network with:
+**ALPN support, confirmed.** Probed from inside the corp network:
 
 ```
-openssl s_client -connect secbaas-prod.alipay.com:443 -alpn h2,http/1.1 </dev/null 2>/dev/null | grep ALPN
+$ openssl s_client -connect secbaas-prod.alipay.com:443 -alpn h2,http/1.1 </dev/null 2>/dev/null | grep ALPN
+ALPN protocol: h2
 ```
 
-This uncertainty is why HTTP/2 ships **behind a config flag, defaulting off**
-(see Scope). If the origins do not offer `h2`, httpx falls back to HTTP/1.1
-silently and the flag is a no-op — so the uncertainty costs correctness nothing,
-only benefit.
+So the BaaS origin negotiates HTTP/2 today and multiplexing will actually
+engage there. (An equivalent probe from the development sandbox is worthless and
+should not be repeated: its TLS is terminated by an egress gateway whose
+certificate issuer is `O = Anthropic, CN = Egress Gateway SDS Issuing CA`, so it
+reports the gateway's ALPN, not the origin's.)
+
+**Still unprobed: `agentclawproxy-prod.alipay.com`** — which matters *more* than
+secbaas, since it fronts the parallel container calls this whole change is for.
+Same one-liner against that host settles it. Not a blocker either way: httpx
+falls back to HTTP/1.1 silently where `h2` is not offered, so an unprobed host
+costs correctness nothing, only benefit.
 
 ## What each half buys
 
@@ -118,16 +122,22 @@ that is discarded after one request.
 - `timeout` moves from the (now shared) client constructor to the per-request
   call, preserving the existing per-call timeout budget.
 
-**Why `http2` defaults to off.** Pooling is the large, well-understood win and
-should not wait on the smaller, less-certain one. Three things argue for
-flipping HTTP/2 separately, per environment, after pooling has been watched in
-production: origin ALPN support is unverified (above); the corp send-hook
-wrapper on httpx has never been exercised under h2 and cannot be exercised by
-community or singlebox CI (see Risks); and the `general` client carries LLM SSE
-streams alongside container calls, so a wire-protocol change there touches two
-very different traffic shapes at once. Flipping it is one config line in a pre
-environment, then prod — no code change. **This default is the decision most
-worth confirming at review**; shipping it on is a one-word change to this spec.
+**Why `http2` defaults to off.** With secbaas's ALPN support now confirmed, the
+original first reason for holding back is gone — multiplexing *will* engage. Two
+reasons remain, and both are about staging rather than doubt:
+
+1. The corp send-hook wrapper on httpx has never been exercised under h2, and
+   neither community nor singlebox CI can exercise it (see Risks). It is the one
+   component in this change's blast radius that cannot be tested before
+   production.
+2. The `general` client carries LLM SSE streams alongside container calls, so
+   flipping the protocol there changes two very different traffic shapes at
+   once — while `baas` could be flipped alone.
+
+Defaulting off buys a staged rollout for one config line in a pre environment,
+and pooling — the larger, certain win — lands immediately either way. **This
+default is the decision most worth confirming at review**; shipping it on is a
+one-word change to this spec.
 
 **Out of scope**
 
