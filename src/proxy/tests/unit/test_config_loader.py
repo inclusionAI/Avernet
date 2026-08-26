@@ -30,6 +30,21 @@ class TestEnvPlaceholders:
         loaded = ConfigLoader.load()
         assert loaded.app_name == "sandboxproxy"
 
+    def test_default_with_nested_braces(self, tmp_path: Path, monkeypatch) -> None:
+        cfg = tmp_path / "application.yaml"
+        _write(
+            cfg,
+            "user_config:\n"
+            "  baas:\n"
+            "    device_props_path: ${VAR:-/api/v1/devices/{provider_device_id}/props}\n",
+        )
+        monkeypatch.setenv("SANDBOXPROXY_CONFIG_PATH", str(cfg))
+        loaded = ConfigLoader.load()
+        assert (
+            loaded.user_config.baas["device_props_path"]
+            == "/api/v1/devices/{provider_device_id}/props"
+        )
+
 
 class TestConfigLoad:
     def test_app_name(self) -> None:

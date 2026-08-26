@@ -26,7 +26,7 @@ class ConfigLoader:
     """Load and merge sandbox-proxy configuration."""
 
     ENV_INTERP = re.compile(
-        r"\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::-(?P<default>[^}]*))?\}"
+        r"\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::-(?P<default>.*))?\}"
     )
 
     @classmethod
