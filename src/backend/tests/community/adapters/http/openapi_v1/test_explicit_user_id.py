@@ -303,6 +303,13 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/dashboard"),
 }
 
+# Read-only operations that accept a user_id as a caller-selected filter rather
+# than as the authenticated user's acting scope. They still require the query
+# parameter, but must not advertise the owner-mismatch 403.
+_USER_ID_FILTER_ONLY = {
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/list"),
+}
+
 # Operations that are user-scoped but deliberately non-delegable. They derive
 # the actor from the verified human principal and therefore publish no
 # caller-selectable ``user_id``. They may still document a domain-specific 403
@@ -430,6 +437,7 @@ def _user_scoped(path: str, method: str) -> bool:
         not path.startswith(_LOGS_PREFIX)
         and (method, path) not in _NO_USER_DIMENSION
         and (method, path) not in _AUTHENTICATED_SELF
+        and (method, path) not in _USER_ID_FILTER_ONLY
     )
 
 
@@ -443,6 +451,18 @@ def test_every_user_scoped_operation_requires_user_id_in_the_query():
         if parameter is None or parameter["in"] != "query" or not parameter["required"]:
             offenders.append(f"{method.upper()} {path} -> {parameter}")
     assert not offenders, f"operations not naming their user in the query: {offenders}"
+
+
+def test_filter_only_operations_require_user_id_without_owner_scope_403():
+    """Caller-selected filters remain required query parameters, not owner scopes."""
+    schema = _schema()
+    for method, path in _USER_ID_FILTER_ONLY:
+        operation = schema["paths"][path][method]
+        parameter = _param(operation, USER_ID_QUERY)
+        assert parameter is not None, f"{method.upper()} {path}"
+        assert parameter["in"] == "query", f"{method.upper()} {path}"
+        assert parameter["required"] is True, f"{method.upper()} {path}"
+        assert "403" not in operation["responses"], f"{method.upper()} {path}"
 
 
 def test_the_pinned_number_of_operations_take_it():
@@ -487,9 +507,9 @@ def test_the_pinned_number_of_operations_take_it():
     # Bot editor requests add one. The BCS publish-to-users route moved from the
     # internal /bots/{bot_id}/public-bcs path to the external contract path
     # /collaboration/bots/{bot_uuid}/public (same op count, {bot_uuid} not {bot_id}).
-    # The task public surface adds one more: GET .../collaboration/tasks/list
-    # (execute/dashboard have no user dimension — see _NO_USER_DIMENSION).
-    assert len(taking) == 181
+    # Task listing has a user_id filter, but is not owner-scoped; it is covered
+    # by _USER_ID_FILTER_ONLY and therefore excluded from this owner-scope count.
+    assert len(taking) == 180
 
 
 def test_the_exempt_operations_take_none():

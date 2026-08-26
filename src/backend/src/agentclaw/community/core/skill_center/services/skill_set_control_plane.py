@@ -141,9 +141,10 @@ class SkillSetControlPlaneService:
         description: str | None,
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        # Creating an inactive SkillSet is metadata-only: it neither changes
-        # the effective capability projection nor has a compensating runtime
-        # action, so it does not enter the Pool edit boundary.
+        # A newly created empty SkillSet is active by default, matching the
+        # legacy create semantics. With no members it does not change the
+        # effective capability projection, so it does not enter the Pool edit
+        # boundary or require a runtime action.
         item = self._repository.create_set(
             bot_id=bot_id,
             owner_id=str(bot["owner_id"]),
@@ -411,6 +412,11 @@ class SkillSetControlPlaneService:
         runtime_required = self._set_is_active(
             bot=bot, bot_id=bot_id, set_id=set_id
         )
+        detail = self._mcp_center.get_mcp_detail(server_code)
+        if detail is None:
+            raise SkillSetControlPlaneNotFoundError(
+                f"MCP server '{server_code}' not found"
+            )
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
@@ -422,6 +428,9 @@ class SkillSetControlPlaneService:
                 owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 server_code=server_code,
+                name=str(detail.get("name") or server_code),
+                description=detail.get("description"),
+                icon=detail.get("icon"),
                 engine_type=self._engine(bot),
                 default_engine_types=self._default_engine_types(bot),
             ),

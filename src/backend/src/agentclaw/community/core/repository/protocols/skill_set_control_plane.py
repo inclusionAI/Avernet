@@ -137,6 +137,9 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
         owner_id: str,
         set_id: str,
         server_code: str,
+        name: str,
+        description: str | None,
+        icon: str | None,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> SkillSetMutation: ...

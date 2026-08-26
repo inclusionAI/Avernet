@@ -247,7 +247,8 @@ class TestCreateDevice:
             status="RUNNING",
             template_id="tpl-123",
             sandbox_id="sandbox-abc123",
-            ttl_expiration_time=1750000000000,
+            ttl_expiration_time="2025-06-15 23:06:40",
+            ttl_expiration_timestamp=1750000000000,
         )
         mock_service.create_device.return_value = mock_result
 
@@ -259,7 +260,8 @@ class TestCreateDevice:
 
         assert isinstance(result, ArcaCreationResult)
         assert result.sandbox_id == "sandbox-abc123@42"
-        assert result.ttl_expiration_time == 1750000000000
+        assert result.ttl_expiration_time == "2025-06-15 23:06:40"
+        assert result.ttl_expiration_timestamp == 1750000000000
 
         # Verify template resolution with explicit UUID
         facade._device_template_service.get_default_or_explicit_template.assert_called_once_with(
@@ -288,14 +290,16 @@ class TestCreateDevice:
             status="RUNNING",
             template_id="tpl-123",
             sandbox_id="sandbox-default",
-            ttl_expiration_time=1750000000000,
+            ttl_expiration_time="2025-06-15 23:06:40",
+            ttl_expiration_timestamp=1750000000000,
         )
         mock_service.create_device.return_value = mock_result
 
         result = await facade.create_device(tenant_name="test-tenant")
 
         assert result.sandbox_id == "sandbox-default@42"
-        assert result.ttl_expiration_time == 1750000000000
+        assert result.ttl_expiration_time == "2025-06-15 23:06:40"
+        assert result.ttl_expiration_timestamp == 1750000000000
 
         # Service should resolve template with None template_uuid
         facade._device_template_service.get_default_or_explicit_template.assert_called_once_with(

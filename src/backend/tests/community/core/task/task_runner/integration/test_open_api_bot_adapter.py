@@ -19,7 +19,7 @@ class _Key:
 def _adapter(handler):
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(transport=transport, base_url="http://b:8890")
-    return OpenApiBotAdapter(_Key(), http_client=client)
+    return OpenApiBotAdapter(_Key(), http_client=client, ensure_grant=True)
 
 
 def _run(coro):
@@ -50,7 +50,7 @@ def test_ensure_grant_falls_back_to_api_key_prefix_when_unset():
 
     transport = httpx.MockTransport(h)
     client = httpx.AsyncClient(transport=transport, base_url="http://b:8890")
-    a = OpenApiBotAdapter(_KeyNoPrefix(), http_client=client)
+    a = OpenApiBotAdapter(_KeyNoPrefix(), http_client=client, ensure_grant=True)
     _run(a.ensure_grant("bot9:ent1"))  # 已 allowed → 不走 grant
     assert seen["get_path"] == "/api/v1/api-keys/ak123456/allowed-bots"
 
@@ -248,3 +248,19 @@ def test_send_message_raises_on_nonzero_business_code():
 
     with pytest.raises(OpenApiError):
         _run(_adapter(h).send_message(bot_id="bot9:ent1", message="hi", metadata={}))
+
+
+def test_ensure_grant_skipped_by_default():
+    # 默认 ensure_grant=False(OOB 预授权模式):不发 allowed-bots GET/grant,直接 return。
+    # admin allowed-bots 端点只认 Human Cookie,corp 无 cookie 时 Bearer-only 会 500;
+    # prod 假定 bot 已 OOB 预授权 → ensure_grant 默认跳过,直进 send_message(dispatch 端点认 Bearer)。
+    seen: dict = {}
+
+    def h(req):
+        seen["path"] = req.url.path
+        return httpx.Response(200, json={"data": {"allowed_bots": []}})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(h), base_url="http://b:8890")
+    a = OpenApiBotAdapter(_Key(), http_client=client)  # 默认 ensure_grant=False
+    _run(a.ensure_grant("bot9:ent1"))
+    assert "allowed-bots" not in seen.get("path", ""), f"默认应跳过 ensure_grant,却发了 {seen.get('path')!r}"

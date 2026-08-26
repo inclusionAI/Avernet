@@ -7,6 +7,7 @@
 本模块依赖：
   - BotService — list_bots() 遍历所有用户 bot，get_bot() 校验 ownership
   - CronRelayService — forward_request() 创建 session，list_all_crons() 查 cron
+  - WorkOrderService — create_work_order_event() 投递工单通知
 
 参考：core/bot_dormant/protocols.py
 """
@@ -38,4 +39,19 @@ class CronRelayServiceProtocol(Protocol):
     async def list_all_crons(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
-__all__ = ["BotServiceProtocol", "CronRelayServiceProtocol"]
+@runtime_checkable
+class WorkOrderServiceProtocol(Protocol):
+    """工单服务接口 — 供 task_discovery 投递 NOTICE 工单通知事件。
+
+    DI 桥接 api/ 层的 WorkOrderServiceProtocol 到本协议（structurally
+    satisfied），避免 core/ 直接 import api/。
+    """
+
+    def create_work_order_event(self, *args: Any, **kwargs: Any) -> Any: ...
+
+
+__all__ = [
+    "BotServiceProtocol",
+    "CronRelayServiceProtocol",
+    "WorkOrderServiceProtocol",
+]
