@@ -10,17 +10,37 @@ use bcs_service_api::{
     RedactedToken, ServiceError, WebSendCommand,
     ServiceResult, Session, SessionHistoryCommand, SessionKind, SessionManagementService,
     SessionStatus, SessionUseCaseError,
+    SystemMessageEvent, SystemMessageService,
     interceptor::{BlockReason, InterceptorDecision, MessageInterceptor, OutboundMessage},
     port::{EventRecordFactoryPort, NewEvent},
 };
 use serde_json::json;
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 #[path = "../../../test-support/message_flow_contract_support.rs"]
 mod support;
 
 struct BlockingInterceptor;
+
+#[derive(Default)]
+struct RecordingSystemMessage {
+    events: Mutex<Vec<SystemMessageEvent>>,
+}
+
+#[async_trait::async_trait]
+impl SystemMessageService for RecordingSystemMessage {
+    async fn notify(
+        &self,
+        _group_id: &str,
+        event: SystemMessageEvent,
+        _session_id: &str,
+        _session_participants: &[Participant],
+    ) -> ServiceResult<usize> {
+        self.events.lock().await.push(event);
+        Ok(1)
+    }
+}
 
 #[async_trait::async_trait]
 impl MessageInterceptor for BlockingInterceptor {
@@ -1487,6 +1507,52 @@ async fn web_send_delivers_to_registered_provider_target_without_ws_connection()
     let targets = support.bot_delivery.targets().await;
     assert_eq!(targets.len(), 1);
     assert!(targets[0].is_http_provider());
+}
+
+#[tokio::test]
+async fn failed_provider_web_send_uses_unified_system_message() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    install_provider_driver_group(&support, "provider-owner").await;
+    support.bot_delivery.fail_for("bot-provider").await;
+    let system_message = Arc::new(RecordingSystemMessage::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_system_message(system_message.clone());
+
+    let outcome = flow
+        .handle_web_send(WebSendCommand {
+            caller: CallerContext::Human(HumanActor {
+                actor_id: "human_1".to_string(),
+                staff_no: "1".to_string(),
+            }),
+            group_id: "group-provider".to_string(),
+            session_id: Some("group-provider:abcdef12".to_string()),
+            from_actor_id: "human_1".to_string(),
+            from_name: Some("Human One".to_string()),
+            message: "hello".to_string(),
+            mentions: vec![],
+            attachments: None,
+            thinking: None,
+            idempotency_key: None,
+            source_im_message_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.failed_count, 1);
+    let events = system_message.events.lock().await;
+    assert_eq!(events.len(), 1);
+    let SystemMessageEvent::GenericNotification { message, .. } = &events[0] else {
+        panic!("expected generic notification");
+    };
+    assert_eq!(message, "消息投递失败，请稍后重试。");
 }
 
 #[tokio::test]
