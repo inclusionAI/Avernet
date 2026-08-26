@@ -62,12 +62,19 @@ on the closed client reaches ``LLM``'s retry layer, which classifies it as
 connection-level (no ``.response``) and retries, and the retry would build a
 *new* pool after teardown that nothing will ever close.
 
-So a request racing teardown fails, and it fails loudly: the caller is still
-awaiting it (``LLM._do_request`` awaits the ``to_thread`` future and re-raises),
-and ``RuntimeError`` is not an ``httpx.HTTPError``, so a handler catching
-transport errors will not catch it. That is the accepted cost of not reopening
-connections after teardown said we were done. Guarding it properly would mean
-tracking in-flight requests, which this seam does not otherwise need.
+A request racing teardown therefore fails. How loudly depends on the caller:
+``RuntimeError`` is not an ``httpx.HTTPError``, so a handler catching transport
+errors will not catch it — but ``LLM.chat()`` catches ``Exception`` broadly,
+reads no ``.response`` off it, classifies it connection-level, and burns its
+retry backoff (~8s of sleeps) before returning its ``[llm disabled]`` sentinel.
+So on that path the failure is swallowed and shutdown is delayed rather than
+surfaced.
+
+That is the accepted cost of not reopening connections after teardown released
+them. The alternative — letting the retry rebuild the pool — leaks a live pool
+past shutdown, which is worse. Doing better would mean either tracking in-flight
+requests here (bookkeeping this seam does not otherwise need) or teaching this
+seam about a particular caller's retry classifier, which is backwards.
 """
 from __future__ import annotations
 

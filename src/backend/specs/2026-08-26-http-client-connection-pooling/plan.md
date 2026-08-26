@@ -187,10 +187,17 @@ the outer client-closing `with` is removed.
 
 **Teardown.** `close()` swaps `self._client` to `None` under the lock and closes
 the old client outside it (`client.close()` can block; the lock must not be held
-across it). It is idempotent, and a call arriving after `close()` lazily builds
-a fresh pool rather than raising — deliberately forgiving, because `teardown()`
-runs in shutdown phase 2 and a straggler call should not turn into a
-`RuntimeError` during shutdown.
+across it). It is idempotent and **terminal**: it latches `_closed`, and a later
+call raises rather than building a fresh pool.
+
+Terminal rather than forgiving, which reverses this plan's original reasoning.
+Forgiving looked kinder — a straggler would not see a `RuntimeError` during
+shutdown — but code review traced where it leads: teardown closes the pool, an
+in-flight `asyncio.to_thread` worker gets httpx's own `RuntimeError`, its
+caller's retry layer classifies that connection-level and retries, and the retry
+builds a **new** pool after shutdown that nothing will ever close. Reopening
+connections to an upstream that teardown just released is worse than a loud
+failure on a request that should not be in flight.
 
 `async def teardown(self)` calls `close()`. Discovery is automatic: the four
 qualified bindings are `@singleton`, `discover_lifecycle_participants` walks
@@ -442,8 +449,10 @@ the assumptions table above:
   pooled client and `close()` is never called on it; a following `get` reuses the
   same instance (criterion 7). This is the only remaining check on `stream`, and
   it covers plumbing rather than streaming behavior.
-- `test_close_is_idempotent_and_rebuilds_on_next_use` — `close()` twice does not
-  raise; a later call works (criterion 8).
+- `test_close_is_idempotent_and_terminal` — `close()` twice does not raise, and
+  a later call raises rather than building a second pool (criterion 8).
+- `test_teardown_latches_against_a_retrying_caller` — a retry loop hammering a
+  closed client never resurrects the pool (criterion 8).
 - `test_teardown_closes_the_pool` — `await client.teardown()` closes the
   underlying client (criterion 8).
 - `test_concurrent_first_calls_build_exactly_one_client` — N threads racing
