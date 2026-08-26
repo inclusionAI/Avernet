@@ -2077,6 +2077,9 @@ def test_a_default_set_mcp_member_cannot_join_an_ordinary_set():
             owner_id="owner",
             set_id=str(ordinary.id),
             server_code="mcp.default-member",
+            name="mcp.default-member",
+            description=None,
+            icon=None,
             engine_type="openclaw",
             default_engine_types=("openclaw",),
         )
