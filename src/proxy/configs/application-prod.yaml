@@ -9,9 +9,6 @@
 # SANDBOXPROXY_BAAS_HOST=http://baas:8888).
 
 user_config:
-  aliyun_ack_cluster:
-    api_server: ${ALIYUN_ACK_API_SERVER:-https://ack.avernet-inc.com}
-
   baas:
     host: ${SANDBOXPROXY_BAAS_HOST:-http://baas.avernet-inc.com}
     device_props_path: ${SANDBOXPROXY_BAAS_DEVICE_PROPS_PATH:-/api/v1/devices/provider-device/{provider_device_id}/props}
