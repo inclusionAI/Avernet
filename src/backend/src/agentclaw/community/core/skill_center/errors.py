@@ -166,5 +166,12 @@ class SkillSetControlPlaneLockUnavailableError(DomainError):
         super().__init__(detail)
 
 
-class McpPermissionDeniedError(Exception):
+class SkillSetManagedResourceError(DomainError):
+    """A Direct command targets a resource managed by an ordinary SkillSet."""
+
+
+class McpPermissionDeniedError(DomainError):
     """The actor cannot install or activate the addressed MCP server."""
+
+    def __init__(self, detail: str = "MCP permission denied") -> None:
+        super().__init__(detail)
