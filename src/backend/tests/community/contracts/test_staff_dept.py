@@ -37,7 +37,6 @@ from agentclaw.community.plugin_api.staff_dept import (
     StaffDeptInfo,
     StaffDeptPlugin,
 )
-from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
     reset_principal_verifier_config_cache,
@@ -93,37 +92,6 @@ def _app_bound_to(staff_dept: StaffDeptPlugin) -> FastAPI:
     return app
 
 
-def test_local_whoami_is_present_with_null_dept(app_with_testing_modules) -> None:
-    """Local impl: all-``None`` dept → 200, identity still returned, plugin hit."""
-    init_principal_verifier_config(
-        _SecretResolver(), "gateway_principal_signing_key", strict=False
-    )
-    try:
-        client = _http_client(app_with_testing_modules)
-        resp = client.get("/openapi/v1/org/user", headers={PRINCIPAL_HEADER: _token()})
-        assert resp.status_code == 200, resp.text
-        data = resp.json()["data"]
-        assert data["user_id"] == _USER["id"]
-        assert data["username"] == _USER["username"]
-        assert data["tenant"] == DEFAULT_AVERNET_TENANT
-        # local/community impl returns "no dept" — null, but present, not a failure.
-        assert data["dept_no"] is None
-        assert data["dept_name"] is None
-        assert data["dept_path"] is None
-
-        # Plugin-hit: the local ``MockSeam`` impl recorded the lookup. Resolve it
-        # off the attached injector and assert the call was made for our workNo.
-        injector = getattr(app_with_testing_modules.state, "injector", None)
-        assert injector is not None
-        local = injector.get(StaffDeptPlugin)
-        assert any(
-            getattr(c, "kwargs", {}).get("work_no") == _USER["id"]
-            for c in local.calls_to("get_dept_by_work_no")
-        )
-    finally:
-        reset_principal_verifier_config_cache()
-
-
 def test_community_staff_dept_reports_no_dept(community_world) -> None:
     """The community column wires a real ``NoStaffDept`` → all-``None``."""
     plugin = community_world.get(StaffDeptPlugin)
@@ -132,58 +100,6 @@ def test_community_staff_dept_reports_no_dept(community_world) -> None:
     assert info.dept_no is None
     assert info.dept_name is None
     assert info.dept_path is None
-
-
-def test_wired_real_dept_propagates() -> None:
-    """A wired impl that returns dept values — they reach the whoami response."""
-
-    class _Real:
-        def get_dept_by_work_no(self, *, work_no: str) -> StaffDeptInfo:
-            return StaffDeptInfo(
-                dept_no="D-7",
-                dept_name="Platform Engineering",
-                dept_path="Ant Group/Platform",
-            )
-
-    init_principal_verifier_config(
-        _SecretResolver(), "gateway_principal_signing_key", strict=False
-    )
-    try:
-        client = _http_client(_app_bound_to(_Real()))
-        resp = client.get("/openapi/v1/org/user", headers={PRINCIPAL_HEADER: _token()})
-        assert resp.status_code == 200, resp.text
-        data = resp.json()["data"]
-        assert data["dept_no"] == "D-7"
-        assert data["dept_name"] == "Platform Engineering"
-        assert data["dept_path"] == "Ant Group/Platform"
-    finally:
-        reset_principal_verifier_config_cache()
-
-
-def test_directory_down_surfaces_5xx() -> None:
-    """Infra failure (``DeptLookupError``) → 5xx, identity NOT returned.
-
-    The failure mode the contract most needs pinned: "directory down" must stay
-    distinct from "no dept" (200 + null) and from auth failure (401).
-    """
-
-    class _Down:
-        def get_dept_by_work_no(self, *, work_no: str) -> StaffDeptInfo:
-            raise DeptLookupError("master-data service unreachable")
-
-    init_principal_verifier_config(
-        _SecretResolver(), "gateway_principal_signing_key", strict=False
-    )
-    try:
-        client = _http_client(_app_bound_to(_Down()))
-        resp = client.get("/openapi/v1/org/user", headers={PRINCIPAL_HEADER: _token()})
-        assert resp.status_code == 502, resp.text
-        # Fixed message, no identity leaked, no dept values invented.
-        body = resp.json()
-        assert body.get("data") is None
-        assert "unavailable" in body.get("message", "").lower()
-    finally:
-        reset_principal_verifier_config_cache()
 
 
 class _SecretResolver:

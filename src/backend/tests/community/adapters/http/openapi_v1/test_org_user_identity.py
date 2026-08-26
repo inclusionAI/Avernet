@@ -1,21 +1,15 @@
-"""``GET /openapi/v1/org/user`` — the user-identity read, by behaviour.
+"""``GET /openapi/v1/org/user`` — the directory-identity read, by behaviour.
 
-The one operation whose answer *is* the end user, so the properties worth
-pinning are about where that answer comes from and who gets one at all:
-
-- a caller naming an end user gets **the principal's** identity back — the
-  subject id, username and profile attributes the gateway signed, never
-  anything the request supplied;
-- the tenant in the answer is the tenant the request was scoped by: the
-  internal default for a first-party user-only set, the asserted one when a
-  machine principal rides along;
-- an application acting alone is refused with the same ``401`` an
-  unauthenticated caller gets (the sweep in ``test_app_only_refusals.py``
-  covers this operation too; the test here pins the byte-identity).
+A REQUIRED ``?user_id=`` names the work number whose identity+department to
+return; the answer comes from the staff directory (the gateway signs only the
+caller, so another user's identity is read off HR, not the principal). A human
+caller may name any user — there is no self-only 403; an app-only caller is
+refused (byte-identical 401 to an unauthenticated caller, pinned below).
 
 Wiring-level properties — the ``REFUSED`` table entry, the
-``refuse_app_only_caller`` declaration, the absent ``user_id`` parameter —
-are held by ``test_admission_inventory.py`` and ``test_explicit_user_id.py``.
+``refuse_app_only_caller`` declaration, the REQUIRED ``user_id`` parameter and
+its "opposite contract" carve-out — are held by ``test_admission_inventory.py``
+and ``test_explicit_user_id.py``.
 """
 
 from __future__ import annotations
@@ -104,9 +98,9 @@ def client():
     """The whole public surface, with no services bound.
 
     No injector is attached, so the staff-dept reader resolves to ``None`` and
-    the dept fields stay null — the unwired/singlebox shape. Mounting the full
-    surface rather than the one group means the route answers behind exactly
-    the dependencies production mounts it behind.
+    the looked-up identity+dept fields stay null — the unwired/singlebox shape.
+    Mounting the full surface rather than the one group means the route answers
+    behind exactly the dependencies production mounts it behind.
     """
     from agentclaw.community.adapters.http.app import _unhandled_exception_handler
 
@@ -117,84 +111,25 @@ def client():
     return TestClient(app, raise_server_exceptions=False)
 
 
-def test_a_user_reads_the_identity_the_gateway_signed(client):
-    """The full subject comes back, off the principal and nothing else."""
-    token = _token(
-        user={
-            "id": USER,
-            "username": "alice@example.com",
-            "display_name": "Alice",
-            "full_name": "Alice Zhang",
-        }
-    )
+def test_a_missing_user_id_is_a_validation_failure(client):
+    """``?user_id=`` is required — its absence is a 422, never a whoami.
 
-    response = client.get("/openapi/v1/org/user", headers={PRINCIPAL_HEADER: token})
-
-    assert response.status_code == 200, response.text
-    data = response.json()["data"]
-    assert data == {
-        "user_id": USER,
-        "username": "alice@example.com",
-        "display_name": "Alice",
-        "full_name": "Alice Zhang",
-        # A user-only set asserts no tenant and scopes to the internal default.
-        "tenant": DEFAULT_AVERNET_TENANT,
-        # Department is not on the signed principal; the staff-dept reader is
-        # ``None`` here (no injector), so the fields answer null — the unwired
-        # shape. The wired case is covered in test_staff_dept.py.
-        "dept_no": None,
-        "dept_name": None,
-        "dept_path": None,
-    }
-
-
-def test_absent_profile_attributes_answer_null_not_invented(client):
-    """The optional fields are the contract's absence, not a fabrication."""
+    The endpoint is a directory lookup keyed on the passed id; there is no
+    absent-param fall-back to the verified principal's own identity.
+    """
     token = _token(user={"id": USER, "username": "alice@example.com"})
 
     response = client.get("/openapi/v1/org/user", headers={PRINCIPAL_HEADER: token})
 
-    assert response.status_code == 200, response.text
-    data = response.json()["data"]
-    assert data["display_name"] is None
-    assert data["full_name"] is None
+    assert response.status_code == 422, response.text
 
 
-def test_an_app_riding_along_does_not_change_whose_identity_it_is(client):
-    """A human request with an App on the wire is still the human's whoami —
-    and it lands in the App's asserted tenant, like every request it rides."""
-    token = _token(
-        user={"id": USER, "username": "alice@example.com"}, include_app=True
-    )
+def test_a_user_id_param_drives_a_directory_lookup_of_that_user(client):
+    """The passed ``user_id`` is authoritative — not ignored, and not a 403.
 
-    response = client.get("/openapi/v1/org/user", headers={PRINCIPAL_HEADER: token})
-
-    assert response.status_code == 200, response.text
-    data = response.json()["data"]
-    assert data["user_id"] == USER
-    assert data["tenant"] == TENANT
-
-
-def test_an_app_alone_is_refused_like_an_unauthenticated_caller(client):
-    """Byte for byte: no oracle for 'right credential, wrong identity type'."""
-    refused = client.get(
-        "/openapi/v1/org/user",
-        headers={PRINCIPAL_HEADER: _token(user=None, include_app=True)},
-    )
-    unauthenticated = client.get("/openapi/v1/org/user")
-
-    assert refused.status_code == 401, refused.text
-    assert unauthenticated.status_code == 401, unauthenticated.text
-    assert refused.json()["message"] == unauthenticated.json()["message"]
-    assert refused.json()["code"] == unauthenticated.json()["code"]
-
-
-def test_a_user_id_param_triggers_a_directory_lookup_of_that_user(client):
-    """``?user_id=X`` is a directory lookup, not ignored — and it is NOT a 403.
-
-    The relaxation: a human caller may name any user. Unwired (no injector),
-    the reader resolves to None, so the looked-up user's identity+dept answer
-    null — but ``user_id`` echoes the requested id, and the call is 200, never 403.
+    The relaxation: a human caller may name any user. Unwired (no injector), the
+    reader resolves to None, so the looked-up user's identity+dept answer null —
+    but ``user_id`` echoes the requested id and the call is 200, never 403.
     """
     token = _token(user={"id": USER, "username": "alice@example.com"})
 
@@ -208,12 +143,13 @@ def test_a_user_id_param_triggers_a_directory_lookup_of_that_user(client):
     data = response.json()["data"]
     assert data["user_id"] == "someone-else"
     assert data["username"] is None
+    assert data["tenant"] == DEFAULT_AVERNET_TENANT
     assert data["dept_no"] is None
     assert data["dept_name"] is None
     assert data["dept_path"] is None
 
 
-def test_with_user_id_equal_self_still_returns_200_not_403(client):
+def test_with_user_id_equal_self_returns_200_not_403(client):
     """Naming yourself is accepted — the param is a directory filter, not a
     self-confirm seam, so there is no mismatch-403 path on this operation."""
     token = _token(user={"id": USER, "username": "alice@example.com"})
@@ -226,3 +162,23 @@ def test_with_user_id_equal_self_still_returns_200_not_403(client):
 
     assert response.status_code == 200, response.text
     assert response.json()["data"]["user_id"] == USER
+
+
+def test_an_app_alone_is_refused_like_an_unauthenticated_caller(client):
+    """Byte for byte: no oracle for 'right credential, wrong identity type'.
+
+    ``?user_id=`` is passed so the only thing refusing the call is the
+    principal — the param is required, but auth outranks it: an unauthenticated
+    or app-only caller is 401 either way.
+    """
+    refused = client.get(
+        "/openapi/v1/org/user",
+        headers={PRINCIPAL_HEADER: _token(user=None, include_app=True)},
+        params={"user_id": USER},
+    )
+    unauthenticated = client.get("/openapi/v1/org/user", params={"user_id": USER})
+
+    assert refused.status_code == 401, refused.text
+    assert unauthenticated.status_code == 401, unauthenticated.text
+    assert refused.json()["message"] == unauthenticated.json()["message"]
+    assert refused.json()["code"] == unauthenticated.json()["code"]

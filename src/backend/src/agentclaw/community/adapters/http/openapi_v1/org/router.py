@@ -47,7 +47,6 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
-from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     refuse_app_only_caller,
     USER_ID_QUERY,
@@ -110,87 +109,39 @@ async def get_user_identity(
     request: Request,
     principal: PrincipalDep,
     user_id: Annotated[
-        str | None,
+        str,
         Query(
             alias=USER_ID_QUERY,
-            # min_length only (mirrors require_user_id): a blank value must not
-            # read as whoami — it names nobody and is a 422. No upper bound: the
-            # identity boundary has none (GatewayUser.id is unconstrained).
+            # min_length only (mirrors require_user_id): a blank value names
+            # nobody and is a 422. No upper bound: the identity boundary has
+            # none (GatewayUser.id is unconstrained).
             min_length=1,
             description=(
-                "Optional directory filter — whose identity+department to "
-                "return. ABSENT means whoami: return the verified caller's own "
-                "identity, as before. PRESENT switches to a directory lookup of "
-                "that user; any authenticated human caller may name any user — "
-                "this is the OPPOSITE contract to the `user_id` on every other "
-                "operation (which is who the call acts for and must equal the "
-                "caller, 403 otherwise). There is no self-only 403 here. An "
-                "app-only caller is still refused."
+                "Required directory filter — the work number of the user whose "
+                "identity+department to return. The answer comes from the staff "
+                "directory, not the verified principal. Any authenticated human "
+                "caller may name any user — this is the OPPOSITE contract to the "
+                "`user_id` on every other operation (which is who the call acts "
+                "for and must equal the caller, 403 otherwise); there is no "
+                "self-only 403 here. An app-only caller is refused."
             ),
         ),
-    ] = None,
+    ],
 ) -> Envelope[OrgUserIdentity]:
-    """Return the end user the caller's credential names, or — when
-    `user_id` is present — the identity+dept of the user it names.
+    """Return the identity+department of the user named by `user_id`.
 
-    Without the parameter this is the whoami: the identity the gateway resolved
-    and signed (the id to use as `user_id` elsewhere), with dept looked up
-    through the staff-dept service by the caller's work number. With the
-    parameter it is a directory lookup: that user's identity **and** dept come
-    from the staff directory (the gateway signs only the caller, so another
-    user's identity is read off HR, not the principal). The two branches read
-    different sources by design and are not asserted equal even for `self`.
+    A directory lookup, not a whoami: `user_id` is required and authoritative,
+    and that user's identity **and** department come from the staff directory
+    (the gateway signs only the caller, so another user's identity is read off
+    HR, not the principal). There is no absent-param fall-back to the caller's
+    own identity.
 
     A reader that is not wired leaves the looked-up fields null (200); a real
     reader returns them, or an all-null info when the person has no record/no
     dept. A reader that fails (directory down) raises and surfaces as 5xx — so
     "no record" and "directory down" stay distinguishable, the same split the
-    whoami dept read makes.
+    `org/dept` search makes.
     """
-    if user_id is None:
-        # whoami — UNCHANGED. Identity off the verified principal; dept via
-        # get_dept_by_work_no(work_no=user.id). ``getattr`` so a bare FastAPI()
-        # test app with no injector + a hand-constructed principal lands in the
-        # fail-closed branch rather than on an AttributeError.
-        user = getattr(principal, "user", None)
-        if user is None:
-            # Unreachable behind ``refuse_app_only_caller`` for a verified caller;
-            # kept as the fail-closed answer for a hand-constructed principal.
-            raise MissingPrincipalError("principal names no end user")
-
-        dept_no = None
-        dept_name = None
-        dept_path = None
-        reader = _staff_dept_reader(request)
-        if reader is not None:
-            # ``get_dept_by_work_no`` is a sync Plugin method (mirrors antprocess's
-            # sync surface); bridge to the async handler via ``asyncio.to_thread``.
-            # ``DeptLookupError`` is deliberately not caught — infra failure
-            # surfaces as a 5xx distinct from the all-``None`` "no dept" return.
-            info = await asyncio.to_thread(
-                reader.get_dept_by_work_no, work_no=user.id
-            )
-            dept_no = info.dept_no
-            dept_name = info.dept_name
-            dept_path = info.dept_path
-
-        return envelope(
-            OrgUserIdentity(
-                user_id=user.id,
-                username=user.username,
-                display_name=user.display_name,
-                full_name=user.full_name,
-                tenant=principal.tenant,
-                # Optional profile data off the staff directory, null when the
-                # reader is unwired or the person has no dept (200); a directory
-                # failure raised above rather than landing null here.
-                dept_no=dept_no,
-                dept_name=dept_name,
-                dept_path=dept_path,
-            ),
-            request,
-        )
-
     # directory lookup — relaxed: a human caller may name any user. Identity
     # AND dept come from the staff directory (the gateway signs only the
     # caller). No self-only 403: this is the opposite-contract user_id, carved
@@ -200,7 +151,7 @@ async def get_user_identity(
     reader = _staff_dept_reader(request)
     if reader is not None:
         # ``DeptLookupError`` deliberately not caught — infra failure surfaces as
-        # 5xx, distinct from the all-None "no record" 200, like the whoami read.
+        # 5xx, distinct from the all-None "no record" 200, like the org/dept read.
         info = await asyncio.to_thread(reader.get_user_by_work_no, work_no=user_id)
     return envelope(
         OrgUserIdentity(

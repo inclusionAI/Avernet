@@ -301,12 +301,11 @@ _NO_USER_DIMENSION = {
 #: seam. Same spelling, opposite contract: elsewhere ``user_id`` is *who this
 #: call acts for* and must be the caller (403 otherwise); here it is *whose
 #: identity to return*, and any authenticated human caller may name any user.
-#: So it is OPTIONAL, carries no 403, and stays out of both _NO_USER_DIMENSION
+#: So it is REQUIRED, carries no 403, and stays out of both _NO_USER_DIMENSION
 #: (it takes the param) and the user-scoped-required rule (the param is not
 #: self-confirm). Mirrors /bots/logs/traces' carve-out (the first opposite-
-#: contract spelling). The whoami no-param branch is unchanged: the param's
-#: *absence* is still today's discover-your-id flow; only its *presence* is
-#: the directory lookup.
+#: contract spelling). There is no whoami fall-back: the param names whose
+#: identity to return, and its absence is a 422.
 _DIRECTORY_USER_ID = {("get", f"{PUBLIC_API_PREFIX}/org/user")}
 
 # Operations that are user-scoped but deliberately non-delegable. They derive
@@ -539,22 +538,22 @@ def test_bot_logs_keeps_its_own_meaning_of_user_id():
     )
 
 
-def test_org_user_directory_filter_is_optional_without_403():
-    """``GET /org/user`` may take an OPTIONAL ``user_id`` — opposite contract.
+def test_org_user_directory_filter_is_required_without_403():
+    """``GET /org/user`` takes a REQUIRED ``user_id`` — opposite contract.
 
     Same spelling, opposite meaning: elsewhere ``user_id`` is *who this call
     acts for* and must be the caller (403 otherwise); here it is *whose
     identity to return*, a directory filter any authenticated human caller may
-    name any user for — so it is OPTIONAL and carries no 403. The whoami
-    no-param branch is unchanged. Mirrors the /bots/logs/traces carve-out, the
+    name any user for — so it is REQUIRED (no whoami fall-back; absence is a
+    422) and carries no 403. Mirrors the /bots/logs/traces carve-out, the
     first opposite-contract spelling.
     """
     schema = _schema()
     operation = schema["paths"][f"{PUBLIC_API_PREFIX}/org/user"]["get"]
     parameter = _param(operation, USER_ID_QUERY)
-    assert parameter is not None, "GET /org/user carries the optional user_id"
+    assert parameter is not None, "GET /org/user carries the required user_id"
     assert parameter["in"] == "query"
-    assert parameter["required"] is False
+    assert parameter["required"] is True
     assert "403" not in operation["responses"]
 
 
