@@ -159,8 +159,8 @@ class MCPConfigService:
         server_code: str,
         old_config: Optional[dict[str, Any]],
     ) -> None:
-        """回滚到旧配置。若 old_config 为 None，则删除该记录。"""
-        if old_config is not None:
+        """回滚到旧配置。若 old_config 为 None 或 {}，则删除该记录。"""
+        if old_config:
             self.update_user_unified_config(
                 user_id=user_id,
                 server_code=server_code,
