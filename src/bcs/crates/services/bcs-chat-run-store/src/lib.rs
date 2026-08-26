@@ -12,8 +12,10 @@
 //! `docs/superpowers/specs/2026-08-27-bcs-run-governance-design.md`.
 
 pub mod memory;
+pub mod sql;
 
 pub use memory::MemoryChatRunRepo;
+pub use sql::SqlChatRunRepo;
 
 pub use bcs_service_api::port::repo::{
     CasOutcome, ChatRunCompletionPolicy, ChatRunRecord, ChatRunRepoError, ChatRunRepoPort,

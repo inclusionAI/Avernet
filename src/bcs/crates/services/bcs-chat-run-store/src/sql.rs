@@ -1,0 +1,632 @@
+//! SQL-backed `ChatRunRepoPort` with a Redis hot cache for streaming content.
+//!
+//! Authority split (see spec):
+//! - MySQL/SQLite is authoritative for state, version, ownership, timestamps,
+//!   terminal content, and is the auditable record.
+//! - The Redis cache holds only the streaming overlay (`{version, state,
+//!   accumulated_content, content_truncated}`) so per-token deltas never hit
+//!   the DB. Reads merge DB (authoritative structure) with the cache overlay
+//!   when the cache version is ahead (i.e. streaming advanced it past the DB).
+//!
+//! The port's `expected_version` is used by memory-mode CAS; the SQL impl gates
+//! transitions on the non-terminal state guard (`state NOT IN (...)`) plus
+//! `version = version + 1`, which is robust to the cache/DB version drift
+//! inherent in streaming-only cache writes. Concurrent terminals resolve to
+//! exactly one winner via the same state guard.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+
+use bcs_cache_api::{CachePlugin, CacheSetMode};
+use bcs_db_api::{db_get_column, db_get_column_opt, DbPlugin, DbSqlFlavor, DbStatement, DbValue};
+use bcs_service_api::port::repo::{
+    CasOutcome, ChatRunCompletionPolicy, ChatRunRecord, ChatRunRepoError, ChatRunRepoPort,
+    ChatRunState,
+};
+use bcs_service_api::{ChatResponseMode, ChatRunMetricCount, DirectChatClientKind};
+
+const TERMINAL_STATES: &str = "'completed','failed','cancelled'";
+
+/// SQL-backed direct chat run repository.
+pub struct SqlChatRunRepo {
+    db: Arc<dyn DbPlugin>,
+    flavor: DbSqlFlavor,
+    cache: Arc<dyn CachePlugin>,
+    key_prefix: String,
+    schema_ready: AtomicBool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct StreamingOverlay {
+    version: u64,
+    state: String,
+    accumulated_content: String,
+    content_truncated: bool,
+}
+
+impl SqlChatRunRepo {
+    pub fn new(
+        db: Arc<dyn DbPlugin>,
+        flavor: DbSqlFlavor,
+        cache: Arc<dyn CachePlugin>,
+        key_prefix: String,
+    ) -> Self {
+        Self {
+            db,
+            flavor,
+            cache,
+            key_prefix,
+            schema_ready: AtomicBool::new(false),
+        }
+    }
+
+    fn cache_key(&self, run_id: &str) -> String {
+        format!("{}chat_run:{}", self.key_prefix, run_id)
+    }
+
+    async fn ensure_schema(&self) -> Result<(), ChatRunRepoError> {
+        if self.schema_ready.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let create = "CREATE TABLE IF NOT EXISTS bcs_chat_runs (\
+            run_id TEXT NOT NULL,\
+            bot_uuid TEXT NOT NULL,\
+            from_bot_id TEXT NOT NULL,\
+            session_key TEXT NOT NULL,\
+            state TEXT NOT NULL,\
+            accumulated_content TEXT,\
+            error_message TEXT,\
+            created_at_ms INTEGER NOT NULL,\
+            updated_at_ms INTEGER NOT NULL,\
+            completed_at_ms INTEGER,\
+            expires_at_ms INTEGER NOT NULL,\
+            version INTEGER NOT NULL,\
+            content_truncated INTEGER NOT NULL DEFAULT 0,\
+            client TEXT,\
+            response_mode TEXT NOT NULL,\
+            completion_policy TEXT NOT NULL,\
+            delivery_ack_at_ms INTEGER,\
+            PRIMARY KEY (run_id))";
+        self.db
+            .execute(DbStatement::new(create))
+            .await
+            .map_err(backend)?;
+        if self.flavor == DbSqlFlavor::Sqlite {
+            for stmt in [
+                "CREATE INDEX IF NOT EXISTS idx_chat_runs_expires ON bcs_chat_runs(state, expires_at_ms)",
+                "CREATE INDEX IF NOT EXISTS idx_chat_runs_completed ON bcs_chat_runs(state, completed_at_ms)",
+                "CREATE INDEX IF NOT EXISTS idx_chat_runs_from_bot ON bcs_chat_runs(from_bot_id)",
+            ] {
+                let _ = self.db.execute(DbStatement::new(stmt)).await;
+            }
+        }
+        self.schema_ready.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
+    async fn read_db(&self, run_id: &str) -> Result<Option<ChatRunRecord>, ChatRunRepoError> {
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                "SELECT run_id, bot_uuid, from_bot_id, session_key, state, accumulated_content, \
+                 error_message, created_at_ms, updated_at_ms, completed_at_ms, expires_at_ms, \
+                 version, content_truncated, client, response_mode, completion_policy, \
+                 delivery_ack_at_ms FROM bcs_chat_runs WHERE run_id = ?",
+                vec![DbValue::from(run_id)],
+            ))
+            .await
+            .map_err(backend)?;
+        Ok(rows
+            .into_iter()
+            .next()
+            .map(|row| row_to_record(&row))
+            .transpose()?)
+    }
+
+    async fn read_overlay(&self, run_id: &str) -> Option<StreamingOverlay> {
+        match self.cache.get_value(&self.cache_key(run_id)).await {
+            Ok(Some(bytes)) => serde_json::from_slice(&bytes).ok(),
+            _ => None,
+        }
+    }
+
+    async fn write_overlay(&self, run_id: &str, overlay: &StreamingOverlay, expires_at_ms: u64) {
+        let now = now_ms();
+        let ttl_ms = expires_at_ms.saturating_sub(now).max(1000);
+        if let Ok(bytes) = serde_json::to_vec(overlay) {
+            let _ = self
+                .cache
+                .set_value(
+                    &self.cache_key(run_id),
+                    bytes,
+                    Some(Duration::from_millis(ttl_ms)),
+                    CacheSetMode::Upsert,
+                )
+                .await;
+        }
+    }
+
+    async fn delete_overlay(&self, run_id: &str) {
+        let _ = self.cache.delete(&self.cache_key(run_id)).await;
+    }
+
+    /// Merge the authoritative DB record with the streaming overlay when the
+    /// overlay version is ahead (streaming advanced it past the DB) and the run
+    /// is still non-terminal.
+    fn merge(record: ChatRunRecord, overlay: Option<StreamingOverlay>) -> ChatRunRecord {
+        let Some(overlay) = overlay else {
+            return record;
+        };
+        if record.state.is_terminal() || overlay.version <= record.version {
+            return record;
+        }
+        let mut merged = record;
+        merged.version = overlay.version;
+        merged.state = parse_state(&overlay.state).unwrap_or(merged.state);
+        merged.accumulated_content = overlay.accumulated_content;
+        merged.content_truncated = overlay.content_truncated;
+        merged
+    }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn backend(err: impl std::fmt::Display) -> ChatRunRepoError {
+    ChatRunRepoError::Backend(err.to_string())
+}
+
+fn state_str(state: ChatRunState) -> &'static str {
+    match state {
+        ChatRunState::Pending => "pending",
+        ChatRunState::Submitted => "submitted",
+        ChatRunState::Running => "running",
+        ChatRunState::Completed => "completed",
+        ChatRunState::Failed => "failed",
+        ChatRunState::Cancelled => "cancelled",
+    }
+}
+
+fn parse_state(value: &str) -> Option<ChatRunState> {
+    match value {
+        "pending" => Some(ChatRunState::Pending),
+        "submitted" => Some(ChatRunState::Submitted),
+        "running" => Some(ChatRunState::Running),
+        "completed" => Some(ChatRunState::Completed),
+        "failed" => Some(ChatRunState::Failed),
+        "cancelled" => Some(ChatRunState::Cancelled),
+        _ => None,
+    }
+}
+
+fn response_mode_str(mode: ChatResponseMode) -> &'static str {
+    match mode {
+        ChatResponseMode::Full => "full",
+        ChatResponseMode::AfterLastToolCall => "after-last-tool-call",
+    }
+}
+
+fn parse_response_mode(value: &str) -> ChatResponseMode {
+    match value {
+        "after-last-tool-call" => ChatResponseMode::AfterLastToolCall,
+        _ => ChatResponseMode::Full,
+    }
+}
+
+fn completion_policy_str(policy: ChatRunCompletionPolicy) -> &'static str {
+    match policy {
+        ChatRunCompletionPolicy::WaitForFinal => "wait_for_final",
+        ChatRunCompletionPolicy::DetachDeliveryAck => "detach_delivery_ack",
+    }
+}
+
+fn parse_completion_policy(value: &str) -> ChatRunCompletionPolicy {
+    match value {
+        "detach_delivery_ack" => ChatRunCompletionPolicy::DetachDeliveryAck,
+        _ => ChatRunCompletionPolicy::WaitForFinal,
+    }
+}
+
+fn client_kind(client: Option<&str>) -> DirectChatClientKind {
+    match client.map(str::trim).filter(|s| !s.is_empty()) {
+        None => DirectChatClientKind::None,
+        Some("http-chat") => DirectChatClientKind::HttpChat,
+        Some("http-chat-async") => DirectChatClientKind::HttpChatAsync,
+        Some(raw) if raw.starts_with("bcs-cli") => DirectChatClientKind::BcsCli,
+        Some(_) => DirectChatClientKind::Unknown,
+    }
+}
+
+fn row_to_record(row: &bcs_db_api::DbRow) -> Result<ChatRunRecord, ChatRunRepoError> {
+    let run_id: String = db_get_column(row, "run_id").map_err(backend)?;
+    let bot_uuid: String = db_get_column(row, "bot_uuid").map_err(backend)?;
+    let from_bot_id: String = db_get_column(row, "from_bot_id").map_err(backend)?;
+    let session_key: String = db_get_column(row, "session_key").map_err(backend)?;
+    let state: String = db_get_column(row, "state").map_err(backend)?;
+    let accumulated_content: Option<String> =
+        db_get_column_opt::<String>(row, "accumulated_content").map_err(backend)?;
+    let error_message: Option<String> =
+        db_get_column_opt::<String>(row, "error_message").map_err(backend)?;
+    let created_at_ms: u64 = db_get_column(row, "created_at_ms").map_err(backend)?;
+    let updated_at_ms: u64 = db_get_column(row, "updated_at_ms").map_err(backend)?;
+    let completed_at_ms: Option<u64> =
+        db_get_column_opt::<u64>(row, "completed_at_ms").map_err(backend)?;
+    let expires_at_ms: u64 = db_get_column(row, "expires_at_ms").map_err(backend)?;
+    let version: u64 = db_get_column(row, "version").map_err(backend)?;
+    let content_truncated: bool = db_get_column(row, "content_truncated").map_err(backend)?;
+    let client: Option<String> = db_get_column_opt::<String>(row, "client").map_err(backend)?;
+    let response_mode: String = db_get_column(row, "response_mode").map_err(backend)?;
+    let completion_policy: String = db_get_column(row, "completion_policy").map_err(backend)?;
+    let delivery_ack_at_ms: Option<u64> =
+        db_get_column_opt::<u64>(row, "delivery_ack_at_ms").map_err(backend)?;
+
+    Ok(ChatRunRecord {
+        run_id,
+        bot_uuid,
+        from_bot_id,
+        session_key,
+        state: parse_state(&state).unwrap_or(ChatRunState::Pending),
+        accumulated_content: accumulated_content.unwrap_or_default(),
+        error_message,
+        created_at_ms,
+        updated_at_ms,
+        completed_at_ms,
+        expires_at_ms,
+        version,
+        content_truncated,
+        client,
+        response_mode: parse_response_mode(&response_mode),
+        completion_policy: parse_completion_policy(&completion_policy),
+        delivery_ack_at_ms,
+    })
+}
+
+/// Classify a CAS update that affected 0 rows by reading the current row.
+async fn classify_cas_failure(
+    db: &dyn DbPlugin,
+    run_id: &str,
+) -> Result<CasOutcome, ChatRunRepoError> {
+    let rows = db
+        .query(DbStatement::with_params(
+            "SELECT run_id, bot_uuid, from_bot_id, session_key, state, accumulated_content, \
+             error_message, created_at_ms, updated_at_ms, completed_at_ms, expires_at_ms, \
+             version, content_truncated, client, response_mode, completion_policy, \
+             delivery_ack_at_ms FROM bcs_chat_runs WHERE run_id = ?",
+            vec![DbValue::from(run_id.to_string())],
+        ))
+        .await
+        .map_err(backend)?;
+    match rows
+        .into_iter()
+        .next()
+        .map(|r| row_to_record(&r))
+        .transpose()?
+    {
+        None => Ok(CasOutcome::Conflict(None)),
+        Some(record) => {
+            if record.state.is_terminal() {
+                Ok(CasOutcome::Terminal(Some(record)))
+            } else {
+                Ok(CasOutcome::Conflict(Some(record)))
+            }
+        }
+    }
+}
+
+const SELECT_COLS: &str = "run_id, bot_uuid, from_bot_id, session_key, state, accumulated_content, \
+     error_message, created_at_ms, updated_at_ms, completed_at_ms, expires_at_ms, \
+     version, content_truncated, client, response_mode, completion_policy, delivery_ack_at_ms";
+
+async fn read_full(db: &dyn DbPlugin, run_id: &str) -> Result<Option<ChatRunRecord>, ChatRunRepoError> {
+    let rows = db
+        .query(DbStatement::with_params(
+            &format!("SELECT {SELECT_COLS} FROM bcs_chat_runs WHERE run_id = ?"),
+            vec![DbValue::from(run_id.to_string())],
+        ))
+        .await
+        .map_err(backend)?;
+    Ok(rows
+        .into_iter()
+        .next()
+        .map(|r| row_to_record(&r))
+        .transpose()?)
+}
+
+#[async_trait]
+impl ChatRunRepoPort for SqlChatRunRepo {
+    async fn create(&self, record: ChatRunRecord) -> Result<(), ChatRunRepoError> {
+        self.ensure_schema().await?;
+        let stmt = DbStatement::with_params(
+            "INSERT INTO bcs_chat_runs (run_id, bot_uuid, from_bot_id, session_key, state, \
+             accumulated_content, error_message, created_at_ms, updated_at_ms, completed_at_ms, \
+             expires_at_ms, version, content_truncated, client, response_mode, completion_policy, \
+             delivery_ack_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            vec![
+                DbValue::from(record.run_id.clone()),
+                DbValue::from(record.bot_uuid.clone()),
+                DbValue::from(record.from_bot_id.clone()),
+                DbValue::from(record.session_key.clone()),
+                DbValue::from(state_str(record.state)),
+                DbValue::from(record.accumulated_content.clone()),
+                record.error_message.clone().map(DbValue::from).unwrap_or(DbValue::Null),
+                DbValue::from(record.created_at_ms as i64),
+                DbValue::from(record.updated_at_ms as i64),
+                record.completed_at_ms.map(|v| DbValue::from(v as i64)).unwrap_or(DbValue::Null),
+                DbValue::from(record.expires_at_ms as i64),
+                DbValue::from(record.version as i64),
+                DbValue::from(record.content_truncated),
+                record.client.clone().map(DbValue::from).unwrap_or(DbValue::Null),
+                DbValue::from(response_mode_str(record.response_mode)),
+                DbValue::from(completion_policy_str(record.completion_policy)),
+                record.delivery_ack_at_ms.map(|v| DbValue::from(v as i64)).unwrap_or(DbValue::Null),
+            ],
+        );
+        match self.db.execute(stmt).await {
+            Ok(_) => {
+                self.write_overlay(
+                    &record.run_id,
+                    &StreamingOverlay {
+                        version: record.version,
+                        state: state_str(record.state).to_string(),
+                        accumulated_content: record.accumulated_content.clone(),
+                        content_truncated: record.content_truncated,
+                    },
+                    record.expires_at_ms,
+                )
+                .await;
+                Ok(())
+            }
+            Err(err) if err.is_duplicate_key() => {
+                Err(ChatRunRepoError::DuplicateRunId(record.run_id))
+            }
+            Err(err) => Err(backend(err)),
+        }
+    }
+
+    async fn get(&self, run_id: &str) -> Result<Option<ChatRunRecord>, ChatRunRepoError> {
+        let Some(record) = self.read_db(run_id).await? else {
+            // No DB row; not even created here.
+            return Ok(None);
+        };
+        let overlay = self.read_overlay(run_id).await;
+        Ok(Some(Self::merge(record, overlay)))
+    }
+
+    async fn compare_and_set_state(
+        &self,
+        run_id: &str,
+        _expected_version: u64,
+        new: ChatRunRecord,
+    ) -> Result<CasOutcome, ChatRunRepoError> {
+        let now = now_ms();
+        let stmt = DbStatement::with_params(
+            &format!(
+                "UPDATE bcs_chat_runs SET state = ?, updated_at_ms = ?, delivery_ack_at_ms = ?, \
+                 version = version + 1 WHERE run_id = ? AND state NOT IN ({TERMINAL_STATES})"
+            ),
+            vec![
+                DbValue::from(state_str(new.state)),
+                DbValue::from(now as i64),
+                new.delivery_ack_at_ms.map(|v| DbValue::from(v as i64)).unwrap_or(DbValue::Null),
+                DbValue::from(run_id.to_string()),
+            ],
+        );
+        let result = self.db.execute(stmt).await.map_err(backend)?;
+        if result.affected_rows > 0 {
+            let updated = read_full(self.db.as_ref(), run_id).await?.unwrap_or(new.clone());
+            self.write_overlay(
+                run_id,
+                &StreamingOverlay {
+                    version: updated.version,
+                    state: state_str(updated.state).to_string(),
+                    accumulated_content: updated.accumulated_content.clone(),
+                    content_truncated: updated.content_truncated,
+                },
+                updated.expires_at_ms,
+            )
+            .await;
+            Ok(CasOutcome::Applied(updated))
+        } else {
+            classify_cas_failure(self.db.as_ref(), run_id).await
+        }
+    }
+
+    async fn compare_and_set_terminal(
+        &self,
+        run_id: &str,
+        _expected_version: u64,
+        new: ChatRunRecord,
+    ) -> Result<CasOutcome, ChatRunRepoError> {
+        let now = now_ms();
+        let completed_at = new.completed_at_ms.unwrap_or(now);
+        let stmt = DbStatement::with_params(
+            &format!(
+                "UPDATE bcs_chat_runs SET state = ?, accumulated_content = ?, error_message = ?, \
+                 updated_at_ms = ?, completed_at_ms = ?, content_truncated = ?, \
+                 version = version + 1 WHERE run_id = ? AND state NOT IN ({TERMINAL_STATES})"
+            ),
+            vec![
+                DbValue::from(state_str(new.state)),
+                DbValue::from(new.accumulated_content.clone()),
+                new.error_message.clone().map(DbValue::from).unwrap_or(DbValue::Null),
+                DbValue::from(now as i64),
+                DbValue::from(completed_at as i64),
+                DbValue::from(new.content_truncated),
+                DbValue::from(run_id.to_string()),
+            ],
+        );
+        let result = self.db.execute(stmt).await.map_err(backend)?;
+        if result.affected_rows > 0 {
+            self.delete_overlay(run_id).await;
+            let updated = read_full(self.db.as_ref(), run_id).await?.unwrap_or(new);
+            Ok(CasOutcome::Applied(updated))
+        } else {
+            classify_cas_failure(self.db.as_ref(), run_id).await
+        }
+    }
+
+    async fn append_streaming_content(
+        &self,
+        run_id: &str,
+        expected_version: u64,
+        accumulated: String,
+        truncated: bool,
+    ) -> Result<bool, ChatRunRepoError> {
+        // Base the overlay on the current overlay if present, else the DB row.
+        let mut overlay = match self.read_overlay(run_id).await {
+            Some(existing) => existing,
+            None => {
+                let Some(record) = self.read_db(run_id).await? else {
+                    return Ok(false);
+                };
+                StreamingOverlay {
+                    version: record.version,
+                    state: state_str(record.state).to_string(),
+                    accumulated_content: record.accumulated_content.clone(),
+                    content_truncated: record.content_truncated,
+                }
+            }
+        };
+        if overlay.version != expected_version {
+            return Ok(false);
+        }
+        let expires_at_ms = self
+            .read_db(run_id)
+            .await?
+            .map(|record| record.expires_at_ms)
+            .unwrap_or(0);
+        if expires_at_ms == 0 {
+            return Ok(false);
+        }
+        let flipped = overlay.state == "pending";
+        overlay.version += 1;
+        if flipped {
+            overlay.state = "running".to_string();
+        }
+        overlay.accumulated_content = accumulated;
+        overlay.content_truncated = truncated;
+        self.write_overlay(run_id, &overlay, expires_at_ms).await;
+        Ok(true)
+    }
+
+    async fn list_active(&self, now_ms: u64) -> Result<Vec<ChatRunRecord>, ChatRunRepoError> {
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                &format!(
+                    "SELECT {SELECT_COLS} FROM bcs_chat_runs \
+                     WHERE state NOT IN ({TERMINAL_STATES}) AND expires_at_ms < ?"
+                ),
+                vec![DbValue::from(now_ms as i64)],
+            ))
+            .await
+            .map_err(backend)?;
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row_to_record(&row)?);
+        }
+        Ok(records)
+    }
+
+    async fn delete_expired_terminal(
+        &self,
+        now_ms: u64,
+        retention_ms: u64,
+    ) -> Result<Vec<String>, ChatRunRepoError> {
+        let cutoff = now_ms.saturating_sub(retention_ms);
+        let select = DbStatement::with_params(
+            &format!(
+                "SELECT run_id FROM bcs_chat_runs \
+                 WHERE state IN ({TERMINAL_STATES}) AND completed_at_ms < ?"
+            ),
+            vec![DbValue::from(cutoff as i64)],
+        );
+        let rows = self.db.query(select).await.map_err(backend)?;
+        let ids: Vec<String> = rows
+            .into_iter()
+            .filter_map(|row| db_get_column::<String>(&row, "run_id").ok())
+            .collect();
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Delete one-by-one reusing the same cutoff guard to stay portable across
+        // SQLite/MySQL (no parameterized IN-list with variable arity).
+        for id in &ids {
+            let _ = self
+                .db
+                .execute(DbStatement::with_params(
+                    &format!(
+                        "DELETE FROM bcs_chat_runs \
+                         WHERE run_id = ? AND state IN ({TERMINAL_STATES}) AND completed_at_ms < ?"
+                    ),
+                    vec![DbValue::from(id.clone()), DbValue::from(cutoff as i64)],
+                ))
+                .await;
+            self.delete_overlay(id).await;
+        }
+        Ok(ids)
+    }
+
+    async fn metric_counts(&self) -> Result<Vec<ChatRunMetricCount>, ChatRunRepoError> {
+        let rows = self
+            .db
+            .query(DbStatement::new(
+                "SELECT state, client, COUNT(*) AS c FROM bcs_chat_runs GROUP BY state, client",
+            ))
+            .await
+            .map_err(backend)?;
+        let mut counts: Vec<ChatRunMetricCount> = Vec::new();
+        for row in rows {
+            let state_str: String = db_get_column(&row, "state").map_err(backend)?;
+            let client: Option<String> = db_get_column_opt::<String>(&row, "client").map_err(backend)?;
+            let count: u64 = db_get_column::<i64>(&row, "c").map_err(backend)? as u64;
+            let state = match state_str.as_str() {
+                "pending" => bcs_service_api::DirectChatRunState::Pending,
+                "submitted" => bcs_service_api::DirectChatRunState::Submitted,
+                "running" => bcs_service_api::DirectChatRunState::Running,
+                "completed" => bcs_service_api::DirectChatRunState::Completed,
+                "failed" => bcs_service_api::DirectChatRunState::Failed,
+                _ => bcs_service_api::DirectChatRunState::Cancelled,
+            };
+            let client_kind = client_kind(client.as_deref());
+            if let Some(existing) = counts
+                .iter_mut()
+                .find(|c| c.state == state && c.client_kind == client_kind)
+            {
+                existing.count = existing.count.saturating_add(count);
+            } else {
+                counts.push(ChatRunMetricCount {
+                    state,
+                    client_kind,
+                    count,
+                });
+            }
+        }
+        Ok(counts)
+    }
+
+    async fn list_client_kinds(
+        &self,
+    ) -> Result<std::collections::HashMap<String, DirectChatClientKind>, ChatRunRepoError> {
+        let rows = self
+            .db
+            .query(DbStatement::new("SELECT run_id, client FROM bcs_chat_runs"))
+            .await
+            .map_err(backend)?;
+        let mut map = std::collections::HashMap::new();
+        for row in rows {
+            let run_id: String = db_get_column(&row, "run_id").map_err(backend)?;
+            let client: Option<String> = db_get_column_opt::<String>(&row, "client").map_err(backend)?;
+            map.insert(run_id, client_kind(client.as_deref()));
+        }
+        Ok(map)
+    }
+}
