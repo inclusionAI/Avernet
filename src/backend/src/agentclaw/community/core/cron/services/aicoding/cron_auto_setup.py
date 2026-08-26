@@ -261,6 +261,8 @@ class CronAutoSetupService:
             "name": cron_name,
             "schedule": cron_expr,
             "command": command,
+            "owner_id": owner_id,
+            "bot_id": bot_id,
             "timezone": DEFAULT_CRON_TIMEZONE,
             "enabled": True,
             "timeout_secs": DEFAULT_CRON_TIMEOUT_SECS,  # 写入 payload.timeout_secs，默认 1 小时，不再 86400

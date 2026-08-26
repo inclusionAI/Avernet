@@ -135,6 +135,8 @@ def _job_from_dict(data: dict[str, Any]) -> CronJob:
         enabled=data.get("enabled", True),
         schedule=schedule,
         payload=payload,
+        owner_id=data.get("owner_id"),
+        bot_id=data.get("bot_id"),
         session_target=data.get("sessionTarget", "isolated"),
         state=state,
         notify=notify,
@@ -252,6 +254,8 @@ def _build_add_params(request: CreateJobRequest) -> dict[str, Any]:
         "name": request.name,
         "schedule": openclaw_schedule,
         "payload": openclaw_payload,
+        "owner_id": request.owner_id,
+        "bot_id": request.bot_id,
         "sessionTarget": request.session_target,
         "enabled": request.enabled,
     }

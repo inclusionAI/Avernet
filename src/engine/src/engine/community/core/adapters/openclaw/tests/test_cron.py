@@ -45,6 +45,8 @@ def _make_raw_job(
     state: dict | None = None,
     schedule: dict | None = None,
     payload: dict | None = None,
+    owner_id: str | None = None,
+    bot_id: str | None = None,
 ) -> dict[str, Any]:
     return {
         "id": job_id,
@@ -52,6 +54,8 @@ def _make_raw_job(
         "enabled": enabled,
         "schedule": schedule or {"kind": "cron", "expr": "0 8 * * *"},
         "payload": payload or {"kind": "agentTurn"},
+        "owner_id": owner_id,
+        "bot_id": bot_id,
         "sessionTarget": "isolated",
         "state": state or {},
         "delivery": delivery,
@@ -276,6 +280,8 @@ async def test_add_job_serialises_request_and_returns_cron_job():
         name="hourly",
         schedule={"kind": "cron", "expr": "0 * * * *"},
         payload={"kind": "agentTurn"},
+        owner_id="owner-1",
+        bot_id="bot-1",
         enabled=True,
         notify=None,
     )
@@ -287,10 +293,22 @@ async def test_add_job_serialises_request_and_returns_cron_job():
     params = call["params"]
     assert params["name"] == "hourly"
     assert params["schedule"] == {"kind": "cron", "expr": "0 * * * *"}
+    assert params["owner_id"] == "owner-1"
+    assert params["bot_id"] == "bot-1"
     # delivery should be present (no notify → mode none, no accountId)
     assert params["delivery"]["mode"] == "none"
     assert "accountId" not in params["delivery"]
     assert "to" not in params["delivery"]
+
+
+@pytest.mark.asyncio
+async def test_get_job_preserves_owner_and_bot_ids():
+    port = _FakeCronPort(get_result=_make_raw_job(owner_id="owner-9", bot_id="bot-9"))
+    adapter = OpenClawCronAdapter(port)
+    job = await adapter.get_job("job-001")
+    assert job is not None
+    assert job.owner_id == "owner-9"
+    assert job.bot_id == "bot-9"
 
 
 @pytest.mark.asyncio

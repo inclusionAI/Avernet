@@ -19,6 +19,8 @@ class CronJob(BaseModel):
     enabled: bool = True
     schedule: dict[str, Any]
     payload: dict[str, Any]
+    owner_id: Optional[str] = None
+    bot_id: Optional[str] = None
     session_target: str = "isolated"
     state: dict[str, Any] = Field(default_factory=dict)
     notify: Optional[CronNotifyConfig] = None
@@ -52,6 +54,8 @@ class CreateJobRequest(BaseModel):
     name: str
     schedule: dict[str, Any]
     payload: dict[str, Any]
+    owner_id: Optional[str] = None
+    bot_id: Optional[str] = None
     session_target: str = "isolated"
     enabled: bool = True
     notify: Optional[CronNotifyConfig] = None
