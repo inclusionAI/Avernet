@@ -55,8 +55,58 @@ def _block(name: str) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
+_TRUE_SCALARS = frozenset({"true", "yes", "on", "1"})
+_FALSE_SCALARS = frozenset({"false", "no", "off", "0"})
+
+
+def _coerce(block: dict[str, Any], key: str, cast, fallback, where: str):
+    """One config value, cast defensively, falling back on anything unusable.
+
+    An empty or malformed YAML scalar (``max_connections:`` with no value,
+    ``keepalive_expiry: ~``) would otherwise raise inside the provider. That is
+    not a loud failure: ``discover_lifecycle_participants`` swallows a provider
+    exception, so all four HttpClient bindings would vanish at boot with no log
+    line, and the first outbound call would die somewhere unrelated. A bad pool
+    ceiling has to stay inert, as the block's docs promise.
+    """
+    if key not in block:
+        return fallback
+    raw = block[key]
+    if raw is None:
+        logger.warning(
+            "ConfigModule: %s.%s is empty; using %r.", where, key, fallback
+        )
+        return fallback
+    try:
+        return cast(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "ConfigModule: %s.%s=%r is not a valid %s; using %r.",
+            where, key, raw, cast.__name__, fallback,
+        )
+        return fallback
+
+
+def _as_bool(raw: Any) -> bool:
+    """Strict-ish boolean: YAML may hand back a string, and ``bool("false")``
+    is ``True`` — which would silently enable a wire-protocol change that the
+    design requires to be opt-in."""
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        text = raw.strip().lower()
+        if text in _TRUE_SCALARS:
+            return True
+        if text in _FALSE_SCALARS:
+            return False
+        raise ValueError(f"not a boolean: {raw!r}")
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    raise TypeError(f"not a boolean: {type(raw).__name__}")
+
+
 def _pool_policy(
-    block: dict[str, Any], base: cfg.HttpClientPoolPolicy
+    block: dict[str, Any], base: cfg.HttpClientPoolPolicy, where: str = "http_client"
 ) -> cfg.HttpClientPoolPolicy:
     """One transport policy from a YAML mapping, per-field fallback to ``base``.
 
@@ -66,12 +116,20 @@ def _pool_policy(
     policy, so ``for_qualifier`` never has to merge at the call site.
     """
     return cfg.HttpClientPoolPolicy(
-        max_connections=int(block.get("max_connections", base.max_connections)),
-        max_keepalive_connections=int(
-            block.get("max_keepalive_connections", base.max_keepalive_connections)
+        max_connections=_coerce(
+            block, "max_connections", int, base.max_connections, where
         ),
-        keepalive_expiry=float(block.get("keepalive_expiry", base.keepalive_expiry)),
-        http2=bool(block.get("http2", base.http2)),
+        max_keepalive_connections=_coerce(
+            block,
+            "max_keepalive_connections",
+            int,
+            base.max_keepalive_connections,
+            where,
+        ),
+        keepalive_expiry=_coerce(
+            block, "keepalive_expiry", float, base.keepalive_expiry, where
+        ),
+        http2=_coerce(block, "http2", _as_bool, base.http2, where),
     )
 
 
@@ -545,14 +603,25 @@ class ConfigModule(Module):
         if isinstance(raw_overrides, dict):
             for name, body in raw_overrides.items():
                 if isinstance(body, dict):
-                    overrides[str(name)] = _pool_policy(dict(body), defaults)
+                    overrides[str(name)] = _pool_policy(
+                        dict(body), defaults, f"http_client.overrides.{name}"
+                    )
                 else:
                     logger.warning(
                         "ConfigModule: http_client.overrides.%s is not a mapping "
-                        "(%r); ignoring it and using the shared defaults.",
+                        "(%s); ignoring it — that binding uses the shared defaults.",
                         name,
                         type(body).__name__,
                     )
+        elif raw_overrides:
+            # Dropping every override is the bigger misconfiguration, so it must
+            # not be the quieter one.
+            logger.warning(
+                "ConfigModule: http_client.overrides is not a mapping (%s); "
+                "ignoring ALL per-qualifier overrides — every binding uses the "
+                "shared defaults.",
+                type(raw_overrides).__name__,
+            )
         return cfg.HttpClientPoolConfig(defaults=defaults, overrides=overrides)
 
     @singleton
