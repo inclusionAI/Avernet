@@ -23,7 +23,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from agentclaw.community.plugins.http_client import HttpxClient
+from agentclaw.community.plugins.http_client import _DiscardingCookieJar, HttpxClient
 
 
 @contextmanager
@@ -226,8 +226,14 @@ def test_response_and_transport_errors_propagate():
 
 
 def test_pool_timeout_classifies_as_a_boundary_timeout():
-    """Pool exhaustion is the one new failure mode pooling introduces. It must
-    surface as an existing boundary error rather than a new type."""
+    """Pool exhaustion is the one new failure mode pooling introduces, and it
+    must surface as an existing boundary error rather than a new type.
+
+    Scope: this pins that a raised ``PoolTimeout`` is caught by the
+    ``HttpClientTimeoutError`` alias and propagates through ``_request``
+    unwrapped. It does NOT exercise a real pool running out of connections —
+    ``MockTransport`` bypasses httpcore's pool entirely, so provoking a genuine
+    ``PoolTimeout`` would need a real server and a timing-sensitive test."""
     from agentclaw.community.plugin_api.http_client import HttpClientTimeoutError
 
     client = HttpxClient(base_url="http://svc.test")
@@ -286,3 +292,120 @@ def test_teardown_without_a_pool_is_a_noop():
     with _patched_httpx() as (ctor, _inner):
         asyncio.run(client.teardown())
     ctor.assert_not_called()
+
+
+# ── real-client behaviour ────────────────────────────────────────────────────
+#
+# The tests above patch ``httpx.Client`` and so pin only what ``HttpxClient``
+# asks httpx to do. These drive a REAL ``httpx.Client`` over an
+# ``httpx.MockTransport`` by seeding the pool directly, which needs no
+# constructor seam — the production class keeps exactly the arguments the
+# composition root passes. That matters most for ``stream()``, which the pooling
+# rewrite changed and which nothing else exercises end to end.
+
+
+def _seeded(handler, base_url: str = "http://svc.test") -> HttpxClient:
+    """An ``HttpxClient`` whose pool is a real client over ``MockTransport``."""
+    client = HttpxClient(base_url=base_url)
+    client._client = httpx.Client(
+        base_url=base_url,
+        transport=httpx.MockTransport(handler),
+        cookies=_DiscardingCookieJar(),
+    )
+    return client
+
+
+def test_real_client_stream_yields_a_streaming_response():
+    """``stream`` drives a real client end to end: SSE lines arrive and
+    ``raise_for_status`` works inside the block."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = 'data: {"choices": [{"delta": {"content": "hi"}}]}\ndata: [DONE]\n'
+        return httpx.Response(200, content=body.encode())
+
+    client = _seeded(handler, "http://llm.local")
+    try:
+        with client.stream("POST", "/v1/chat/completions", json={"model": "x"}) as resp:
+            assert resp.status_code == 200
+            resp.raise_for_status()
+            lines = [ln for ln in resp.iter_lines() if ln]
+        assert any('"content": "hi"' in ln for ln in lines)
+        assert any(ln.startswith("data: [DONE]") for ln in lines)
+        # The pool survives the stream and still serves ordinary calls.
+        assert client.get("/after").status_code == 200
+    finally:
+        client.close()
+
+
+def test_real_client_stream_propagates_status_errors():
+    """``raise_for_status`` inside the block surfaces unchanged."""
+    client = _seeded(lambda _r: httpx.Response(500, text="boom"), "http://llm.local")
+    try:
+        with pytest.raises(httpx.HTTPStatusError):
+            with client.stream("POST", "/v1/chat/completions", json={}) as resp:
+                resp.raise_for_status()
+    finally:
+        client.close()
+
+
+def test_real_client_does_not_replay_cookies_between_calls():
+    """Regression: a pooled client keeps a cookie jar for its whole lifetime, so
+    without an explicit discard one caller's ``Set-Cookie`` rides along on every
+    later caller's request. The ``general`` binding carries per-user credentials
+    to a shared upstream, so that would leak one user's session to the next."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"set-cookie": "session=USER_A_SECRET; Path=/"},
+            json={"cookie_sent": request.headers.get("cookie", "")},
+        )
+
+    client = _seeded(handler)
+    try:
+        assert client.get("/first").json()["cookie_sent"] == ""
+        assert client.get("/second").json()["cookie_sent"] == "", (
+            "a Set-Cookie from an earlier call leaked onto a later one"
+        )
+        assert dict(client._client.cookies) == {}
+    finally:
+        client.close()
+
+
+def test_real_client_sends_the_documented_wire_shape():
+    """End-to-end guard that the kwargs forwarded to httpx are actually valid —
+    the patched-client tests would not catch a misspelled kwarg."""
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["method"] = request.method
+        seen["header"] = request.headers.get("h")
+        seen["body"] = request.content
+        return httpx.Response(200, json={})
+
+    client = _seeded(handler)
+    try:
+        client.post("/api/v1/bots", params={"t": "1"}, json={"a": 1},
+                    headers={"h": "v"}, timeout=9.0)
+    finally:
+        client.close()
+    assert seen["method"] == "POST"
+    assert seen["url"] == "http://svc.test/api/v1/bots?t=1"
+    assert seen["header"] == "v"
+    assert b'"a"' in seen["body"]
+
+
+def test_real_client_absolute_url_ignores_base_url():
+    """The ``general`` binding's contract, against a real client rather than a
+    mock: an absolute URL must not be prefixed with ``base_url``."""
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json={})
+
+    client = _seeded(handler, base_url="")
+    try:
+        client.get("http://container.test:20010/api/file/list")
+    finally:
+        client.close()
+    assert seen["url"] == "http://container.test:20010/api/file/list"
