@@ -63,7 +63,7 @@ config path including the HTTP/2 flag; Group 3 validates.
       upstreams, off by default). Update the class docstring and the `stream`
       docstring line that still says "Mirrors `post`'s short-lived-client
       pattern".
-- [ ] 1.8 Rewrite `tests/community/plugins/test_http_client.py` per the plan's
+- [x] 1.8 Rewrite `tests/community/plugins/test_http_client.py` per the plan's
       test list: pool reuse, configured limits, http2 default-off + forwarded,
       per-request timeout, absolute URL bypasses `base_url`, `None`-omission,
       multipart kwargs, verb dispatch, error propagation,
