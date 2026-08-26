@@ -123,6 +123,41 @@ Lazy rather than eager because `discover_lifecycle_participants` resolves every
 binding at boot; eager construction would open pools for upstreams a given
 deployment never calls.
 
+`transport` stays `Any | None = None`. It is **never** wired by DI — all four
+providers construct `HttpxClient(base_url=…)` bare — and is passed only by
+`test_http_client_stream.py`, which injects an `httpx.MockTransport`. So `None`
+is the production value on every path, and the `if self._transport is not None`
+guard is what keeps httpx building its own pooled `HTTPTransport` (a `transport=None`
+kwarg passed explicitly would *not* be equivalent — `_init_transport` branches on
+the argument being absent vs. `None`-valued only by identity, so passing it
+unconditionally is a needless risk for no gain).
+
+**Pool topology — one client per binding, not per base_url.** Worth stating
+precisely, because the two are only the same for three of the four qualifiers:
+
+| Binding | `base_url` | Origins its pool spans |
+| --- | --- | --- |
+| `baas` | secbaas host | one |
+| `bcn` | BCN host | one |
+| `masa_agent_eval` | eval host | one |
+| `general` | `""` — callers pass absolute URLs | **many**: agentclawproxy, LLM endpoints, container IPs |
+
+Within a single `httpx.Client`, httpcore binds each connection to exactly one
+origin (`can_handle_request` is `origin == self._origin`), so *reuse* is
+per-origin and the `general` client will hold separate connections per host it
+talks to. But the ceiling is pool-wide, not per-origin —
+`connection_pool.py:324` gates new connections on
+`len(self._connections) < self._max_connections`, where `self._connections` is
+the entire pool.
+
+**Consequence:** the `general` client's 100-connection budget is *shared* across
+agentclawproxy, every LLM endpoint, and every container IP. That is the single
+place where one-policy-for-all-four is most likely to need revisiting, and it is
+the same client the spec already flags for mixing SSE streams with ordinary
+calls. It is still the right starting point — 100 is generous and the numbers are
+configurable — but if any qualifier ends up wanting its own ceiling, this is the
+one, and the per-qualifier follow-up named in `spec.md` is where it goes.
+
 **Request path.** `_request` keeps its `None`-omitting `kwargs` assembly
 verbatim — that is what acceptance criterion 4 pins — and changes only its last
 two lines. The `with httpx.Client(...) as client:` block goes away; `timeout`

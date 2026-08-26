@@ -68,6 +68,11 @@ config path including the HTTP/2 flag; Group 3 validates.
       multipart kwargs, verb dispatch, error propagation,
       stream-leaves-pool-open, idempotent close, teardown closes, concurrent
       first calls build one client.
+- [ ] 1.8b `plugin_api/http_client.py`: fix the now-false impl note in the module
+      docstring — "``prod`` → ``HttpxClient(base_url)`` — a real ``httpx.Client``
+      per call." becomes a pooled-client description. Docstring only; the
+      Protocol, its signatures and the conformance contract are untouched, so
+      this is not a contract change.
 - [ ] 1.9 Run `tests/community/plugins/test_http_client.py` and
       `tests/community/core/harness/services/test_http_client_stream.py`
       (the latter unedited — it is the regression guard). Both green.
