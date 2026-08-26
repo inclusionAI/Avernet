@@ -3,43 +3,41 @@
 ## 构建镜像
 
 ```bash
+ssh xhunter@30.183.96.56
 cd /path/to/Avernet
 git checkout dev_mohan_bcsfuse_deploy_aliyun
 git pull
 
-export DOCKER_REGISTRY=avernet-registry.cn-beijing.cr.aliyuncs.com/avernet
-export DOCKER_TAG=20260826
-./docker/build_image.sh bcsfuse
+./docker/build-image.sh docker/bcsfuse.Dockerfile \
+  --image avernet-registry.cn-beijing.cr.aliyuncs.com/avernet/service-bcsfuse \
+  --tag 20260826
 ```
 
-镜像名：`avernet-registry.cn-beijing.cr.aliyuncs.com/avernet/bcsfuse:20260826`
+## 推送镜像
+
+```bash
+docker push avernet-registry.cn-beijing.cr.aliyuncs.com/avernet/service-bcsfuse:20260826
+```
 
 ## 准备运行时配置
 
-把 [`bcsfuse.env.example`](./bcsfuse.env.example) 复制到你的部署目录：
-
 ```bash
 cp docker/bcsfuse.env.example /home/xhunter/avernet-deploy/bcsfuse.env
+# Edit /home/xhunter/avernet-deploy/bcsfuse.env and fill in REPLACE_WITH_* values.
 ```
 
-填入真实值（数据库密码、Token 等）。**不要把真实值提交到 git**。
-
-## Kubernetes 部署
-
-把 [`bcsfuse-deployment.example.yaml`](./bcsfuse-deployment.example.yaml) 复制到部署目录并替换占位符：
+## 执行部署
 
 ```bash
-cp docker/bcsfuse-deployment.example.yaml /home/xhunter/avernet-deploy/bcsfuse-deployment.yaml
+cd /home/xhunter/avernet-deploy
+./deploy.sh bcsfuse avernet-registry.cn-beijing.cr.aliyuncs.com/avernet/service-bcsfuse:20260826
 ```
 
-执行部署：
+---
+
+Alternative: use the helper script to generate a `bcsfuse-deployment.yaml` directly:
 
 ```bash
-kubectl apply -f /home/xhunter/avernet-deploy/bcsfuse-deployment.yaml
+python docker/generate_deploy_config.py /home/xhunter/avernet-deploy \
+  avernet-registry.cn-beijing.cr.aliyuncs.com/avernet/service-bcsfuse:20260826
 ```
-
-## 安全提示
-
-- 敏感配置必须放在 Kubernetes Secret 里，不要写入镜像或 ConfigMap。
-- 生产环境建议使用阿里云 KMS / Opaque Secret + RBAC 限制读取。
-- `.env.local` 文件已 `.gitignore`，不要提交到仓库。
