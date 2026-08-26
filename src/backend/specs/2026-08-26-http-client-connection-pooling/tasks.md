@@ -32,32 +32,32 @@ config path including the HTTP/2 flag; Group 3 validates.
 
 ## Group 1 — Pool the client
 
-- [ ] 1.1 `plugins/http_client.py`: add `threading` import, `LifecycleBase`
+- [x] 1.1 `plugins/http_client.py`: add `threading` import, `LifecycleBase`
       import, and the module-level `DEFAULT_MAX_CONNECTIONS = 100`,
       `DEFAULT_MAX_KEEPALIVE_CONNECTIONS = 20`, `DEFAULT_KEEPALIVE_EXPIRY = 5.0`,
       `DEFAULT_HTTP2 = False` constants (mirroring `HttpClientPoolConfig`).
-- [ ] 1.2 `HttpxClient` declares `LifecycleBase` as a base
+- [x] 1.2 `HttpxClient` declares `LifecycleBase` as a base
       (`class HttpxClient(LifecycleBase, HttpClient)`); `__init__` **drops the
       `transport` parameter**, gains the four keyword-only policy arguments,
       builds `self._limits = httpx.Limits(...)`, stores `self._http2`, and
       initialises `self._lock = threading.Lock()` /
       `self._client: httpx.Client | None = None`. `base_url` is unchanged.
-- [ ] 1.3 Add `_pooled_client()` — double-checked lazy construction under the
+- [x] 1.3 Add `_pooled_client()` — double-checked lazy construction under the
       lock, passing `base_url` + `limits` + `http2`. No `client_kwargs` dict and
       no conditional guard remain. The lock guards construction only and is never
       held across a request.
-- [ ] 1.4 Add `close()` (swap `self._client` to `None` under the lock, close the
+- [x] 1.4 Add `close()` (swap `self._client` to `None` under the lock, close the
       old client *outside* the lock, idempotent) and `async def teardown()`
       delegating to it.
-- [ ] 1.5 `_request`: delete the `client_kwargs` / `with httpx.Client(...)`
+- [x] 1.5 `_request`: delete the `client_kwargs` / `with httpx.Client(...)`
       block; return
       `self._pooled_client().request(method, path, timeout=timeout, **kwargs)`.
       The `None`-omitting `kwargs` assembly above it is unchanged.
-- [ ] 1.6 `stream`: same substitution —
+- [x] 1.6 `stream`: same substitution —
       `with self._pooled_client().stream(method, path, timeout=timeout, **kwargs) as resp: yield resp`.
       The client-closing outer `with` is removed; the inner one stays so the
       connection returns to the pool.
-- [ ] 1.7 Rewrite the module docstring: pooled design, the `keepalive_expiry`
+- [x] 1.7 Rewrite the module docstring: pooled design, the `keepalive_expiry`
       vs upstream-idle-timeout hazard, streams occupying pool slots, and the
       HTTP/2 semantics (ALPN-only negotiation, inert against plaintext
       upstreams, off by default). Update the class docstring and the `stream`
