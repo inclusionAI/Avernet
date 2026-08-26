@@ -27,6 +27,13 @@ internal_dependencies:
 
 Changing a Protocol signature breaks every local + prod impl + the contract-test suite (Rule 25). `SkillCenterGateway` is separate from the legacy `SkillCenterClient`: its typed request objects carry no endpoint or credential configuration, every Team Skill operation requires a request-level Team ID, and its adapters do not own publication retries or domain state. Adding a new Protocol requires updating BOUNDARY_SIGNIFICANT_MODULES if it joins a new module, and adding paired impls (Rule 20).
 
+The Gateway models the governed SC wire without exposing its envelope or field
+names: public catalogue search/detail and tags, Team create/lookup and paged
+Skill listing/detail, one-shot publish submission and status diagnostics,
+non-paged version listing, and exact download metadata. Catalogue DTOs retain
+stable SC facts needed by presentation and lazy Reference flows; presentation
+aliases and TeamClaw persistence remain above this seam.
+
 `SkillCenterGateway` is an outbound, trusted-service integration executed in the
 Backend process. It may call only the configured Skill Center endpoint with
 composition-root-provided service credentials; it may not access TeamClaw

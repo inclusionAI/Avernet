@@ -8,20 +8,26 @@ from agentclaw.community.core.skill_center.services.skill_center_gateway_service
     SkillCenterGatewayService,
 )
 from agentclaw.community.plugin_api.skill_center_gateway import (
+    SkillCenterAccessLevel,
+    SkillCenterBelongTo,
     SkillCenterExactDownloadRequest,
     SkillCenterGateway,
     SkillCenterGatewayError,
     SkillCenterGatewayErrorCode,
     SkillCenterPublicSkillDetailRequest,
     SkillCenterPublicSkillSearchRequest,
+    SkillCenterSortOrder,
     SkillCenterPublishStatusRequest,
     SkillCenterPublishState,
     SkillCenterPublishSubmitRequest,
+    SkillCenterSkill,
+    SkillCenterSkillPage,
     SkillCenterTeamCreateRequest,
     SkillCenterTeamLookupRequest,
     SkillCenterTeamSkillDetailRequest,
     SkillCenterTeamSkillListRequest,
     SkillCenterVersionListRequest,
+    SkillCenterVisibility,
 )
 
 
@@ -34,6 +40,7 @@ def _all_gateway_requests() -> tuple[tuple[str, object], ...]:
         ("get_team_by_ref", SkillCenterTeamLookupRequest("TC", "space-1")),
         ("search_public_skills", SkillCenterPublicSkillSearchRequest()),
         ("get_public_skill", SkillCenterPublicSkillDetailRequest("skill")),
+        ("list_public_tags", None),
         ("list_team_skills", SkillCenterTeamSkillListRequest("team-1")),
         (
             "get_team_skill",
@@ -69,11 +76,12 @@ def test_gateway_consumer_round_trips_team_publish_and_exact_version(world) -> N
         )
     )
 
-    assert service.get_team_by_ref(
-        SkillCenterTeamLookupRequest(
-            ref_source="TEAMCLAW", ref_source_id="space-7"
+    assert (
+        service.get_team_by_ref(
+            SkillCenterTeamLookupRequest(ref_source="TEAMCLAW", ref_source_id="space-7")
         )
-    ) == team
+        == team
+    )
 
     submitted = service.submit_publish(
         SkillCenterPublishSubmitRequest(
@@ -88,9 +96,7 @@ def test_gateway_consumer_round_trips_team_publish_and_exact_version(world) -> N
     assert submitted.version_number == "2"
 
     detail = service.get_team_skill(
-        SkillCenterTeamSkillDetailRequest(
-            team_id=team.team_id, skill_code="skill-uuid"
-        )
+        SkillCenterTeamSkillDetailRequest(team_id=team.team_id, skill_code="skill-uuid")
     )
     assert detail is not None
     assert detail.skill_name == "Risk Review"
@@ -107,13 +113,16 @@ def test_gateway_consumer_round_trips_team_publish_and_exact_version(world) -> N
     )
     assert status.status == "PUBLISHED"
     assert status.status is SkillCenterPublishState.PUBLISHED
+    assert status.upstream_status == "PUBLISHED"
+    assert status.status_description == "已发布"
+    assert status.skill_name == "Risk Review"
     assert status.completed is True
     assert status.succeeded is True
-    assert service.list_versions(
-        SkillCenterVersionListRequest(
-            team_id=team.team_id, skill_code="skill-uuid"
-        )
-    ).items[0].version_number == "2"
+    versions = service.list_versions(
+        SkillCenterVersionListRequest(team_id=team.team_id, skill_code="skill-uuid")
+    )
+    assert versions[0].version_number == "2"
+    assert versions[0].note is None
     download = service.get_exact_download(
         SkillCenterExactDownloadRequest(
             team_id=team.team_id,
@@ -122,6 +131,10 @@ def test_gateway_consumer_round_trips_team_publish_and_exact_version(world) -> N
         )
     )
     assert download.version_number == "2"
+    assert download.download_url.startswith("file://")
+    assert download.office_download_url == download.download_url
+    assert download.intranet_download_url == download.download_url
+    assert download.mcp_services == ()
 
     assert [call.method for call in gateway.calls] == [
         "create_team",
@@ -154,6 +167,113 @@ def test_gateway_consumer_routes_public_market_without_a_team(world) -> None:
     ]
 
 
+def test_gateway_public_catalog_preserves_documented_filters_and_metadata(
+    world,
+) -> None:
+    service = world.get(SkillCenterGatewayService)
+    gateway = world.get(SkillCenterGateway)
+    request = SkillCenterPublicSkillSearchRequest(
+        keyword="skill",
+        tags=("研发效能",),
+        official_only=True,
+        recommended_only=False,
+        sort_by=SkillCenterSortOrder.DOWNLOAD,
+        creator_name="示例用户",
+        creator_work_no="123456",
+        page_num=2,
+        page_size=50,
+    )
+    documented_skill = SkillCenterSkill(
+        skill_id="123",
+        skill_code="my-skill",
+        skill_name="技能名称",
+        description="技能描述",
+        creator_id="522152",
+        creator_name="示例用户",
+        latest_version_number="1.0.0",
+        official_version_number="1.0.0",
+        updated_at="2026-04-10T14:30:00.000+08:00",
+        icon_url="https://example.invalid/icon.png",
+        access_level=SkillCenterAccessLevel.PUBLIC,
+        belong_to=SkillCenterBelongTo.PERSONAL,
+        owner_name="示例用户",
+        homepage_url="https://example.invalid/skill/my-skill",
+        office_download_url="https://example.invalid/office.zip",
+        intranet_download_url="https://example.invalid/intranet.zip",
+        sha256="abc123",
+        tags=("研发效能",),
+        favorite_count=10,
+        download_count=100,
+        is_official=True,
+        is_recommended=False,
+        is_test=False,
+        network_types=("OFFICE",),
+        antcode_url=None,
+    )
+
+    gateway.set_override(
+        "search_public_skills",
+        lambda actual: SkillCenterSkillPage(
+            items=(documented_skill,),
+            total=1,
+            page_num=actual.page_num,
+            page_size=actual.page_size,
+        ),
+    )
+
+    result = service.search_public_skills(request)
+
+    assert result.items == (documented_skill,)
+    assert result.items[0].skill_code == "my-skill"
+    assert result.items[0].tags == ("研发效能",)
+    assert result.items[0].office_download_url.endswith("office.zip")
+    assert gateway.calls_to("search_public_skills")[0].args == (request,)
+
+
+def test_local_gateway_round_trips_documented_public_skill_and_tags(world) -> None:
+    service = world.get(SkillCenterGatewayService)
+    team = service.create_team(
+        SkillCenterTeamCreateRequest("space-doc", "Docs", "TEAMCLAW", "space-doc")
+    )
+    service.submit_publish(
+        SkillCenterPublishSubmitRequest(
+            team_id=team.team_id,
+            skill_code="yuque-doc-skill",
+            skill_name="语雀文档处理",
+            version_number="v1.0",
+            package_url="https://example.invalid/yuque.zip",
+            description="读写语雀文档",
+            icon_url="https://example.invalid/icon.png",
+            tags=("研发效能",),
+            visibility=SkillCenterVisibility.PUBLIC,
+        )
+    )
+
+    page = service.search_public_skills(
+        SkillCenterPublicSkillSearchRequest(
+            keyword="语雀",
+            tags=("研发效能",),
+            sort_by=SkillCenterSortOrder.LATEST,
+        )
+    )
+    detail = service.get_public_skill(
+        SkillCenterPublicSkillDetailRequest("yuque-doc-skill")
+    )
+    tags = service.list_public_tags()
+
+    assert page.items == (detail,)
+    assert detail is not None
+    assert detail.skill_id is not None
+    assert detail.skill_code == "yuque-doc-skill"
+    assert detail.skill_name == "语雀文档处理"
+    assert detail.icon_url == "https://example.invalid/icon.png"
+    assert detail.access_level is SkillCenterAccessLevel.PUBLIC
+    assert detail.belong_to is SkillCenterBelongTo.TEAM
+    assert detail.tags == ("研发效能",)
+    assert detail.latest_version_number == "v1.0"
+    assert [tag.name for tag in tags] == ["研发效能"]
+
+
 def test_gateway_consumer_propagates_stable_error_without_retry(world) -> None:
     service = world.get(SkillCenterGatewayService)
     gateway = world.get(SkillCenterGateway)
@@ -163,6 +283,8 @@ def test_gateway_consumer_propagates_stable_error_without_retry(world) -> None:
             SkillCenterGatewayError(
                 SkillCenterGatewayErrorCode.TIMEOUT,
                 "publish outcome is unknown",
+                upstream_code="SC_TIMEOUT",
+                trace_id="trace-publish-timeout",
             )
         ),
     )
@@ -178,6 +300,8 @@ def test_gateway_consumer_propagates_stable_error_without_retry(world) -> None:
         service.submit_publish(request)
 
     assert raised.value.code is SkillCenterGatewayErrorCode.TIMEOUT
+    assert raised.value.upstream_code == "SC_TIMEOUT"
+    assert raised.value.trace_id == "trace-publish-timeout"
     assert len(gateway.calls_to("submit_publish")) == 1
 
 
@@ -227,6 +351,18 @@ def test_team_scoped_requests_reject_empty_team_id(factory) -> None:
         factory()
 
 
+def test_publish_request_rejects_more_than_one_sc_tag() -> None:
+    with pytest.raises(ValueError, match="at most one tag"):
+        SkillCenterPublishSubmitRequest(
+            team_id="team-1",
+            skill_code="skill",
+            skill_name="Skill",
+            version_number="1",
+            package_url="https://example.invalid/package.zip",
+            tags=("研发效能", "代码辅助"),
+        )
+
+
 @pytest.mark.parametrize(("operation", "gateway_request"), _all_gateway_requests())
 def test_community_gateway_fails_closed_as_unavailable(
     community_world, operation: str, gateway_request: object
@@ -234,6 +370,9 @@ def test_community_gateway_fails_closed_as_unavailable(
     gateway = community_world.get(SkillCenterGateway)
 
     with pytest.raises(SkillCenterGatewayError) as raised:
-        getattr(gateway, operation)(gateway_request)
+        if gateway_request is None:
+            getattr(gateway, operation)()
+        else:
+            getattr(gateway, operation)(gateway_request)
 
     assert raised.value.code is SkillCenterGatewayErrorCode.UNAVAILABLE
