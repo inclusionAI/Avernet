@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 
+use crate::principal::RequestAuthHeaders;
 use crate::ServiceResult;
 
 /// Notification kind emitted from the friend-connect workflow.
@@ -23,6 +24,7 @@ pub struct FriendConnectNotificationCommand {
     pub target_bot_id: String,
     pub recipient_user_ids: Vec<String>,
     pub message: Option<String>,
+    pub request_auth: Option<RequestAuthHeaders>,
 }
 
 #[async_trait]

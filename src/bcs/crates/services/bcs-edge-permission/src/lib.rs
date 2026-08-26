@@ -26,6 +26,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use uuid::Uuid;
 use bcs_domain::actor::ActorKind;
 use bcs_domain::edge_permission::{
     AdmissionReason, AdmissionResult, AuthzContext, AuthzGrantRef, EdgeGrant, EdgeStatus,
@@ -40,12 +41,21 @@ use bcs_service_api::port::{
     FriendConnectNotificationCommand, FriendConnectNotificationKind,
     FriendConnectNotificationPort,
 };
+use bcs_service_api::RequestAuthHeaders;
 use bcs_service_api::port::repo::{
     BotActorConfigRepoPort, EdgeGrantRepoPort, PermissionProfileRepoPort,
     PermissionRequestRepoPort,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
-use uuid::Uuid;
+use bcs_user_directory_api::UserDirectoryPlugin;
+
+/// Generate a fresh external request id (a bare UUID v4, simple form — no
+/// prefix). The internal bigint PK (`permission_requests.id`) is assigned by
+/// the DB; this string is the client-facing stable id stored in the
+/// `request_id` column.
+fn new_request_id() -> String {
+    Uuid::new_v4().simple().to_string()
+}
 
 /// DB-backed `ConnectService` implementation.
 ///
@@ -58,6 +68,7 @@ pub struct DbConnectService {
     profiles: Arc<dyn PermissionProfileRepoPort>,
     requests: Arc<dyn PermissionRequestRepoPort>,
     bot_config: Arc<dyn BotActorConfigRepoPort>,
+    user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     friend_connect_notification: Arc<dyn FriendConnectNotificationPort>,
     env: String,
 }
@@ -68,6 +79,7 @@ impl DbConnectService {
         profiles: Arc<dyn PermissionProfileRepoPort>,
         requests: Arc<dyn PermissionRequestRepoPort>,
         bot_config: Arc<dyn BotActorConfigRepoPort>,
+        user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
         friend_connect_notification: Arc<dyn FriendConnectNotificationPort>,
         env: String,
     ) -> Self {
@@ -76,6 +88,7 @@ impl DbConnectService {
             profiles,
             requests,
             bot_config,
+            user_directory,
             friend_connect_notification,
             env,
         }
@@ -105,17 +118,12 @@ fn normalize_policy_value(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
 
-fn is_private_visibility(value: &str) -> bool {
-    matches!(normalize_policy_value(value).as_str(), "private")
+fn department_matches_allowlist_entry(actual: &str, allowed: &str) -> bool {
+    actual == allowed || actual.starts_with(&format!("{allowed}-"))
 }
 
-fn bot_friend_ext_department_code(friend_ext: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
-    friend_ext
-        .get("department_code")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
+fn is_private_visibility(value: &str) -> bool {
+    matches!(normalize_policy_value(value).as_str(), "private")
 }
 
 fn bot_friend_ext_no_check_scope_friend_deps(
@@ -136,17 +144,6 @@ fn bot_friend_ext_no_check_scope_friend_deps(
         .unwrap_or_default()
 }
 
-/// Fresh opaque id for a new edge grant. UUID v4 — collision-safe, unlike a
-/// formatted `from_to` id which collides on re-create after revoke.
-fn new_edge_id() -> String {
-    format!("eg_{}", Uuid::new_v4().simple())
-}
-
-/// Fresh opaque id for a new permission request.
-fn new_request_id() -> String {
-    format!("req_{}", Uuid::new_v4().simple())
-}
-
 #[async_trait]
 impl ConnectService for DbConnectService {
     async fn create_connect(
@@ -154,6 +151,7 @@ impl ConnectService for DbConnectService {
         caller: &str,
         to_bot: &str,
         message: Option<String>,
+        request_auth: Option<RequestAuthHeaders>,
     ) -> ServiceResult<ConnectResult> {
         // 1. Self-add guard.
         if caller == to_bot {
@@ -240,6 +238,7 @@ impl ConnectService for DbConnectService {
                         to_bot,
                         self.target_notification_recipients(&cfg),
                         message.as_deref(),
+                        request_auth.clone(),
                     )
                     .await?;
                     Ok(ConnectResult {
@@ -279,7 +278,7 @@ impl ConnectService for DbConnectService {
         }
     }
 
-    async fn approve(&self, request_id: &str, decider: &str) -> ServiceResult<Vec<String>> {
+    async fn approve(&self, request_id: &str, decider: &str) -> ServiceResult<Vec<u64>> {
         let req = self
             .requests
             .get(request_id, &self.env)
@@ -300,7 +299,7 @@ impl ConnectService for DbConnectService {
                     "approve: request {} is not a connect request (kind={:?})",
                     req.request_id, req.request_kind
                 ),
-                request_id: Some(req.request_id.clone()),
+                request_id: Some(req.request_id.to_string()),
             });
         }
 
@@ -319,12 +318,12 @@ impl ConnectService for DbConnectService {
         let forward_edge = edge_ids.first().cloned();
         if let Some(eid) = forward_edge.as_ref() {
             self.requests
-                .backfill_edge_id(&req.request_id, &self.env, eid)
+                .backfill_edge_id(req.request_id.as_str(), &self.env, *eid)
                 .await?;
         }
         self.requests
             .decide(
-                &req.request_id,
+                req.request_id.as_str(),
                 &self.env,
                 RequestStatus::Approved,
                 decider,
@@ -341,12 +340,12 @@ impl ConnectService for DbConnectService {
             for r in reverse_pending {
                 if let Some(eid) = reverse_edge.as_ref() {
                     self.requests
-                        .backfill_edge_id(&r.request_id, &self.env, eid)
+                        .backfill_edge_id(r.request_id.as_str(), &self.env, *eid)
                         .await?;
                 }
                 self.requests
                     .decide(
-                        &r.request_id,
+                        r.request_id.as_str(),
                         &self.env,
                         RequestStatus::Approved,
                         decider,
@@ -381,7 +380,7 @@ impl ConnectService for DbConnectService {
 
         self.requests
             .decide(
-                &req.request_id,
+                req.request_id.as_str(),
                 &self.env,
                 RequestStatus::Rejected,
                 decider,
@@ -400,7 +399,7 @@ impl ConnectService for DbConnectService {
             for r in reverse_pending {
                 self.requests
                     .decide(
-                        &r.request_id,
+                        r.request_id.as_str(),
                         &self.env,
                         RequestStatus::Rejected,
                         decider,
@@ -432,7 +431,7 @@ impl ConnectService for DbConnectService {
                         "cancel: request {} is approved (cancel not allowed; use revoke_friend)",
                         req.request_id
                     ),
-                    request_id: Some(req.request_id.clone()),
+                    request_id: Some(req.request_id.to_string()),
                 });
             }
         }
@@ -442,7 +441,7 @@ impl ConnectService for DbConnectService {
         let decider = req.created_by.as_str();
         self.requests
             .decide(
-                &req.request_id,
+                req.request_id.as_str(),
                 &self.env,
                 RequestStatus::Cancelled,
                 decider,
@@ -461,7 +460,7 @@ impl ConnectService for DbConnectService {
             for r in reverse_pending {
                 self.requests
                     .decide(
-                        &r.request_id,
+                        r.request_id.as_str(),
                         &self.env,
                         RequestStatus::Cancelled,
                         decider,
@@ -480,12 +479,12 @@ impl ConnectService for DbConnectService {
             .ok_or_else(|| ServiceError::FriendRequestNotFound(request_id.to_string()))
     }
 
-    async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<Vec<String>> {
+    async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<Vec<u64>> {
         // D12 friend edges are `grant_ref_id == target.default` (caller→target)
         // or `grant_ref_id == caller.default` (target→caller, Bot↔Bot). Revoke
         // exactly those friend edges; leave other (profile/rules) edges alone.
         // Returns the revoked edge_ids (B4c fix — previously a count).
-        let mut revoked: Vec<String> = Vec::new();
+        let mut revoked: Vec<u64> = Vec::new();
 
         // Forward: caller → target, ref == target's default profile id.
         if let Some(target_default) = self
@@ -500,7 +499,7 @@ impl ConnectService for DbConnectService {
             for g in forward {
                 if g.grant_ref_id == target_default && g.grant_kind == GrantKind::PermissionProfile
                 {
-                    self.edge_grants.revoke_grant(&g.edge_id, &self.env).await?;
+                    self.edge_grants.revoke_grant(g.edge_id, &self.env).await?;
                     revoked.push(g.edge_id);
                 }
             }
@@ -520,7 +519,7 @@ impl ConnectService for DbConnectService {
             for g in reverse {
                 if g.grant_ref_id == caller_default && g.grant_kind == GrantKind::PermissionProfile
                 {
-                    self.edge_grants.revoke_grant(&g.edge_id, &self.env).await?;
+                    self.edge_grants.revoke_grant(g.edge_id, &self.env).await?;
                     revoked.push(g.edge_id);
                 }
             }
@@ -642,18 +641,20 @@ impl DbConnectService {
         }
     }
 
-    async fn resolve_actor_department_code(&self, actor_id: &str) -> Option<String> {
-        let cfg = match self.bot_config.get(actor_id, &self.env).await {
-            Some(cfg) => cfg,
-            None => return None,
+    async fn resolve_user_department_code(&self, actor_id: &str) -> Option<String> {
+        let user_directory = self.user_directory.as_ref()?;
+        let staff_no = match actor_kind_of(actor_id) {
+            ActorKind::Human => actor_id.strip_prefix("human_")?.to_string(),
+            ActorKind::Bot => {
+                let cfg = self.bot_config.get(actor_id, &self.env).await?;
+                cfg.created_by?
+            }
         };
-        if let Some(code) = bot_friend_ext_department_code(&cfg.friend_ext) {
-            return Some(code);
-        }
-        let owner_id = cfg.created_by.as_deref()?;
-        let owner_actor_id = format!("human_{owner_id}");
-        let owner_cfg = self.bot_config.get(&owner_actor_id, &self.env).await?;
-        bot_friend_ext_department_code(&owner_cfg.friend_ext)
+        user_directory
+            .lookup_department_by_staff_no(&staff_no)
+            .await
+            .ok()
+            .flatten()
     }
 
     async fn caller_department_matches_friend_allowlist(
@@ -665,10 +666,12 @@ impl DbConnectService {
         if allowlist.is_empty() {
             return false;
         }
-        let Some(caller_department) = self.resolve_actor_department_code(caller).await else {
+        let Some(caller_department) = self.resolve_user_department_code(caller).await else {
             return false;
         };
-        allowlist.contains(&caller_department)
+        allowlist
+            .iter()
+            .any(|allowed| department_matches_allowlist_entry(&caller_department, allowed))
     }
 
     fn target_notification_recipients(
@@ -686,6 +689,7 @@ impl DbConnectService {
         target_bot_id: &str,
         recipient_user_ids: Vec<String>,
         message: Option<&str>,
+        request_auth: Option<RequestAuthHeaders>,
     ) -> ServiceResult<()> {
         if recipient_user_ids.is_empty() {
             return Ok(());
@@ -699,6 +703,7 @@ impl DbConnectService {
                 target_bot_id: target_bot_id.to_string(),
                 recipient_user_ids,
                 message: message.map(ToOwned::to_owned),
+                request_auth,
             })
             .await
     }
@@ -734,10 +739,10 @@ impl DbConnectService {
         let mut ids = Vec::new();
 
         // Forward: caller → to_bot.
-        let fwd_id = new_request_id();
+        let fwd_request_id = new_request_id();
         self.requests
             .insert(PermissionRequest {
-                request_id: fwd_id.clone(),
+                request_id: fwd_request_id.clone(),
                 edge_id: None,
                 env: self.env.clone(),
                 from_id: caller.to_string(),
@@ -753,14 +758,14 @@ impl DbConnectService {
                 decided_at: None,
             })
             .await?;
-        ids.push(fwd_id);
+        ids.push(fwd_request_id);
 
         // Reverse: to_bot → caller (Bot↔Bot only).
         if caller_kind == ActorKind::Bot && target_kind == ActorKind::Bot {
-            let rev_id = new_request_id();
+            let rev_request_id = new_request_id();
             self.requests
                 .insert(PermissionRequest {
-                    request_id: rev_id.clone(),
+                    request_id: rev_request_id.clone(),
                     edge_id: None,
                     env: self.env.clone(),
                     from_id: to_bot.to_string(),
@@ -776,7 +781,7 @@ impl DbConnectService {
                     decided_at: None,
                 })
                 .await?;
-            ids.push(rev_id);
+            ids.push(rev_request_id);
         }
 
         Ok(ids)
@@ -800,7 +805,7 @@ impl DbConnectService {
         to_bot: &str,
         caller_kind: ActorKind,
         target_kind: ActorKind,
-    ) -> ServiceResult<(Vec<String>, [String; 2])> {
+    ) -> ServiceResult<(Vec<u64>, [u64; 2])> {
         let mut edge_ids = Vec::new();
 
         // Forward target default profile.
@@ -808,15 +813,15 @@ impl DbConnectService {
         let target_default = self.default_profile_id_of(to_bot).await?;
 
         // Forward edge: caller → to_bot (ref = to_bot.default).
-        let fwd_edge_id = new_edge_id();
-        self.edge_grants
+        let fwd_edge_id = self
+            .edge_grants
             .insert_grant(EdgeGrant {
-                edge_id: fwd_edge_id.clone(),
+                edge_id: 0,
                 env: self.env.clone(),
                 from_id: caller.to_string(),
                 to_id: to_bot.to_string(),
                 grant_kind: GrantKind::PermissionProfile,
-                grant_ref_id: target_default.clone(),
+                grant_ref_id: target_default,
                 rules: None,
                 status: EdgeStatus::Approved,
                 originator_policy_type: OriginatorPolicyType::Any,
@@ -825,22 +830,22 @@ impl DbConnectService {
             .await?;
         edge_ids.push(fwd_edge_id);
 
-        let mut default_refs = [target_default, String::new()];
+        let mut default_refs = [target_default, 0];
 
         // Reverse edge: to_bot → caller (ref = caller.default), Bot↔Bot only.
         if caller_kind == ActorKind::Bot && target_kind == ActorKind::Bot {
             self.profiles.ensure_default_profile(caller, &self.env).await?;
             let caller_default = self.default_profile_id_of(caller).await?;
 
-            let rev_edge_id = new_edge_id();
-            self.edge_grants
+            let rev_edge_id = self
+                .edge_grants
                 .insert_grant(EdgeGrant {
-                    edge_id: rev_edge_id.clone(),
+                    edge_id: 0,
                     env: self.env.clone(),
                     from_id: to_bot.to_string(),
                     to_id: caller.to_string(),
                     grant_kind: GrantKind::PermissionProfile,
-                    grant_ref_id: caller_default.clone(),
+                    grant_ref_id: caller_default,
                     rules: None,
                     status: EdgeStatus::Approved,
                     originator_policy_type: OriginatorPolicyType::Any,
@@ -857,7 +862,7 @@ impl DbConnectService {
     /// Resolve a bot's default profile id, preferring the edge-grant cache and
     /// falling back to the profile store. Errors if still missing after an
     /// `ensure_default_profile` (caller's responsibility to ensure first).
-    async fn default_profile_id_of(&self, bot_id: &str) -> ServiceResult<String> {
+    async fn default_profile_id_of(&self, bot_id: &str) -> ServiceResult<u64> {
         if let Some(id) = self
             .edge_grants
             .get_default_profile_id(bot_id, &self.env)
@@ -888,23 +893,23 @@ impl DbConnectService {
         caller_kind: ActorKind,
         target_kind: ActorKind,
         decider: &str,
-        edge_ids: &[String],
-        default_refs: &[String; 2],
+        edge_ids: &[u64],
+        default_refs: &[u64; 2],
         message: Option<&str>,
     ) -> ServiceResult<Vec<String>> {
         let mut request_ids = Vec::new();
 
         // Forward approved snapshot.
-        let fwd_req_id = new_request_id();
+        let fwd_request_id = new_request_id();
         self.requests
             .insert(PermissionRequest {
-                request_id: fwd_req_id.clone(),
-                edge_id: Some(edge_ids[0].clone()),
+                request_id: fwd_request_id.clone(),
+                edge_id: Some(edge_ids[0]),
                 env: self.env.clone(),
                 from_id: caller.to_string(),
                 to_id: to_bot.to_string(),
                 request_kind: RequestKind::Connect,
-                requested_ref_id: Some(default_refs[0].clone()),
+                requested_ref_id: Some(default_refs[0]),
                 requested_rules: None,
                 message: message.map(|s| s.to_string()),
                 status: RequestStatus::Approved,
@@ -915,23 +920,23 @@ impl DbConnectService {
                 decided_at: None,
             })
             .await?;
-        request_ids.push(fwd_req_id);
+        request_ids.push(fwd_request_id);
 
         // Reverse approved snapshot (Bot↔Bot only).
         if caller_kind == ActorKind::Bot
             && target_kind == ActorKind::Bot
             && edge_ids.len() == 2
         {
-            let rev_req_id = new_request_id();
+            let rev_request_id = new_request_id();
             self.requests
                 .insert(PermissionRequest {
-                    request_id: rev_req_id.clone(),
-                    edge_id: Some(edge_ids[1].clone()),
+                    request_id: rev_request_id.clone(),
+                    edge_id: Some(edge_ids[1]),
                     env: self.env.clone(),
                     from_id: to_bot.to_string(),
                     to_id: caller.to_string(),
                     request_kind: RequestKind::Connect,
-                    requested_ref_id: Some(default_refs[1].clone()),
+                    requested_ref_id: Some(default_refs[1]),
                     requested_rules: None,
                     message: None,
                     status: RequestStatus::Approved,
@@ -941,7 +946,7 @@ impl DbConnectService {
                     decided_at: None,
                 })
                 .await?;
-            request_ids.push(rev_req_id);
+            request_ids.push(rev_request_id);
         }
 
         Ok(request_ids)
@@ -1147,7 +1152,7 @@ impl AdmissionService for DbAdmissionService {
             // resolve via the profile store keyed by the target bot. Non-default
             // profile edges leave revision/digest None (acceptable at T14).
             let (revision, digest) = if g.grant_kind == GrantKind::PermissionProfile
-                && self.is_default_profile_ref(&g.grant_ref_id, to, env).await
+                && self.is_default_profile_ref(g.grant_ref_id, to, env).await
             {
                 self.profiles
                     .get_active_default(to, env)
@@ -1200,7 +1205,7 @@ impl AdmissionService for DbAdmissionService {
 impl DbAdmissionService {
     /// Is `ref_id` the default profile id of `bot`? Used to decide whether to
     /// enrich revision/digest for a permission_profile edge ref.
-    async fn is_default_profile_ref(&self, ref_id: &str, bot: &str, env: &str) -> bool {
+    async fn is_default_profile_ref(&self, ref_id: u64, bot: &str, env: &str) -> bool {
         if let Some(cached) = self.edge_grants.get_default_profile_id(bot, env).await {
             return cached == ref_id;
         }
@@ -1235,19 +1240,18 @@ mod tests {
 
         db.execute(DbStatement::new(
             "CREATE TABLE edge_grants (\
-                edge_id VARCHAR(128) NOT NULL, \
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
                 env VARCHAR(32) NOT NULL, \
                 from_id VARCHAR(128) NOT NULL, \
                 to_id VARCHAR(128) NOT NULL, \
                 grant_kind VARCHAR(32) NOT NULL, \
-                grant_ref_id VARCHAR(128) NOT NULL, \
+                grant_ref_id BIGINT NOT NULL, \
                 rules TEXT, \
                 status VARCHAR(16) NOT NULL DEFAULT 'approved', \
                 originator_policy_type VARCHAR(32) NOT NULL DEFAULT 'any', \
                 originator_policy_data TEXT, \
                 gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
                 gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-                PRIMARY KEY (edge_id), \
                 UNIQUE (from_id, to_id, env, grant_ref_id))",
         ))
         .await
@@ -1255,7 +1259,7 @@ mod tests {
 
         db.execute(DbStatement::new(
             "CREATE TABLE permission_profiles (\
-                permission_profile_id VARCHAR(128) NOT NULL, \
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
                 bot_id VARCHAR(128) NOT NULL, \
                 env VARCHAR(32) NOT NULL, \
                 name VARCHAR(128) NOT NULL DEFAULT 'default', \
@@ -1268,21 +1272,21 @@ mod tests {
                 created_by VARCHAR(128) NOT NULL, \
                 updated_by VARCHAR(128), \
                 gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-                PRIMARY KEY (permission_profile_id))",
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
         ))
         .await
         .expect("create permission_profiles");
 
         db.execute(DbStatement::new(
             "CREATE TABLE permission_requests (\
-                request_id VARCHAR(128) NOT NULL, \
-                edge_id VARCHAR(128), \
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                request_id VARCHAR(64) NOT NULL, \
+                edge_id BIGINT, \
                 env VARCHAR(32) NOT NULL, \
                 from_id VARCHAR(128) NOT NULL, \
                 to_id VARCHAR(128) NOT NULL, \
                 request_kind VARCHAR(32) NOT NULL, \
-                requested_ref_id VARCHAR(128), \
+                requested_ref_id BIGINT, \
                 requested_rules TEXT, \
                 message TEXT, \
                 status VARCHAR(16) NOT NULL DEFAULT 'pending', \
@@ -1291,8 +1295,7 @@ mod tests {
                 decided_by VARCHAR(128), \
                 decided_at TEXT, \
                 gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
-                PRIMARY KEY (request_id))",
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
         ))
         .await
         .expect("create permission_requests");
@@ -1334,6 +1337,50 @@ mod tests {
             profiles.clone(),
             requests.clone(),
             bot_config.clone(),
+            None,
+            Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
+            "dev".to_string(),
+        )
+    }
+
+    #[derive(Clone, Default)]
+    struct StaticUserDirectoryPlugin {
+        departments: Arc<std::collections::HashMap<String, String>>,
+    }
+
+    #[async_trait]
+    impl UserDirectoryPlugin for StaticUserDirectoryPlugin {
+        async fn lookup_by_staff_no(
+            &self,
+            staff_no: &str,
+        ) -> Result<Option<bcs_user_directory_api::UserDirectoryProfile>, bcs_user_directory_api::UserDirectoryError> {
+            Ok(Some(bcs_user_directory_api::UserDirectoryProfile {
+                staff_no: staff_no.to_string(),
+                nick_name: None,
+            }))
+        }
+
+        async fn lookup_department_by_staff_no(
+            &self,
+            staff_no: &str,
+        ) -> Result<Option<String>, bcs_user_directory_api::UserDirectoryError> {
+            Ok(self.departments.get(staff_no).cloned())
+        }
+    }
+
+    fn service_with_departments(
+        edge_grants: &Arc<dyn EdgeGrantRepoPort>,
+        profiles: &Arc<dyn PermissionProfileRepoPort>,
+        requests: &Arc<dyn PermissionRequestRepoPort>,
+        bot_config: &Arc<dyn BotActorConfigRepoPort>,
+        departments: Arc<dyn UserDirectoryPlugin>,
+    ) -> DbConnectService {
+        DbConnectService::new(
+            edge_grants.clone(),
+            profiles.clone(),
+            requests.clone(),
+            bot_config.clone(),
+            Some(departments),
             Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
             "dev".to_string(),
         )
@@ -1364,6 +1411,7 @@ mod tests {
             profiles.clone(),
             requests.clone(),
             bot_config.clone(),
+            None,
             notification,
             "dev".to_string(),
         )
@@ -1440,7 +1488,7 @@ mod tests {
         let (eg, pp, rq, bc, _db) = assemble().await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("bot_a:1", "bot_a:1", None)
+            .create_connect("bot_a:1", "bot_a:1", None, None)
             .await
             .expect_err("self-add rejected");
         assert!(matches!(err, ServiceError::CannotAddSelf), "got {err:?}");
@@ -1451,7 +1499,7 @@ mod tests {
         let (eg, pp, rq, bc, _db) = assemble().await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("human_1", "human_2", None)
+            .create_connect("human_1", "human_2", None, None)
             .await
             .expect_err("human→human rejected");
         assert!(
@@ -1465,7 +1513,7 @@ mod tests {
         let (eg, pp, rq, bc, _db) = assemble().await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("x:1", "human_2", None)
+            .create_connect("x:1", "human_2", None, None)
             .await
             .expect_err("bot→human rejected");
         assert!(
@@ -1479,7 +1527,7 @@ mod tests {
         let (eg, pp, rq, bc, _db) = assemble().await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("human_1", "x:missing", None)
+            .create_connect("human_1", "x:missing", None, None)
             .await
             .expect_err("missing bot → BotNotFound");
         assert!(
@@ -1494,7 +1542,7 @@ mod tests {
         seed_bot(&db, "x:hidden", "public", "protected", "OPEN", "hidden", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("human_1", "x:hidden", None)
+            .create_connect("human_1", "x:hidden", None, None)
             .await
             .expect_err("hidden → BotHidden");
         assert!(matches!(err, ServiceError::BotHidden(_)), "got {err:?}");
@@ -1506,7 +1554,7 @@ mod tests {
         seed_bot(&db, "x:priv", "private", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("human_1", "x:priv", None)
+            .create_connect("human_1", "x:priv", None, None)
             .await
             .expect_err("private → PrivateBotCannotCollaborate");
         assert!(
@@ -1521,7 +1569,7 @@ mod tests {
         seed_bot(&db, "x:nha", "protected", "private", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("human_1", "x:nha", None)
+            .create_connect("human_1", "x:nha", None, None)
             .await
             .expect_err("user_visibility=private → Forbidden for human caller");
         assert!(matches!(err, ServiceError::Forbidden(_)), "got {err:?}");
@@ -1533,7 +1581,7 @@ mod tests {
         seed_bot(&db, "x:pub", "public", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let res = svc
-            .create_connect("human_1", "x:pub", None)
+            .create_connect("human_1", "x:pub", None, None)
             .await
             .expect("public+auto → Approved");
         assert_eq!(res.status, ConnectStatus::Approved);
@@ -1545,19 +1593,58 @@ mod tests {
         assert_eq!(active.len(), 1, "public auto should create a durable edge");
         let r = rq.get(&res.request_ids[0], "dev").await.expect("approved req");
         assert_eq!(r.status, RequestStatus::Approved);
-        assert_eq!(r.edge_id.as_deref(), Some(res.edge_ids[0].as_str()));
+        assert_eq!(r.edge_id, Some(res.edge_ids[0]));
     }
 
 
     #[tokio::test]
-    async fn dept_free_allowlist_auto_approves_when_human_department_matches() {
+    async fn dept_free_allowlist_stays_pending_with_noop_department_port() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        let mut human_friend_ext = serde_json::Map::new();
-        human_friend_ext.insert(
-            "department_code".to_string(),
-            serde_json::Value::String("TECH".to_string()),
+        seed_bot(
+            &db,
+            "human_1",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("owner_1"),
+        )
+        .await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "no_check_scope_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::Value::String(
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施".to_string(),
+            )]),
         );
         seed_bot_with_friend_ext(
+            &db,
+            "x:dept_noop",
+            "protected",
+            "protected",
+            "DEPT_FREE",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let svc = service(&eg, &pp, &rq, &bc);
+        let res = svc
+            .create_connect("human_1", "x:dept_noop", None, None)
+            .await
+            .expect("noop department port should not auto-approve");
+        assert_eq!(res.status, ConnectStatus::Pending);
+        assert!(!res.auto_accepted);
+        assert_eq!(res.request_ids.len(), 1);
+        assert!(res.edge_ids.is_empty());
+        let req = rq.get(&res.request_ids[0], "dev").await.expect("pending req");
+        assert_eq!(req.status, RequestStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn dept_free_allowlist_auto_approves_when_human_department_matches() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(
             &db,
             "human_1",
             "protected",
@@ -1565,13 +1652,14 @@ mod tests {
             "APPROVAL",
             "online",
             Some("85020"),
-            human_friend_ext,
         )
         .await;
         let mut target_friend_ext = serde_json::Map::new();
         target_friend_ext.insert(
             "no_check_scope_friend_deps".to_string(),
-            serde_json::Value::Array(vec![serde_json::Value::String("TECH".to_string())]),
+            serde_json::Value::Array(vec![serde_json::Value::String(
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施".to_string(),
+            )]),
         );
         seed_bot_with_friend_ext(
             &db,
@@ -1584,11 +1672,17 @@ mod tests {
             target_friend_ext,
         )
         .await;
-        let svc = service(&eg, &pp, &rq, &bc);
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "1".to_string(),
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施-系统智能".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
         let res = svc
-            .create_connect("human_1", "x:dept", None)
+            .create_connect("human_1", "x:dept", None, None)
             .await
-            .expect("dept_free hit → Approved");
+            .expect("dept_free ancestor hit → Approved");
         assert_eq!(res.status, ConnectStatus::Approved);
         assert!(res.auto_accepted);
         assert_eq!(res.edge_ids.len(), 1);
@@ -1598,14 +1692,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dept_free_allowlist_miss_keeps_pending() {
+    async fn dept_free_allowlist_auto_approves_when_department_port_matches() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        let mut human_friend_ext = serde_json::Map::new();
-        human_friend_ext.insert(
-            "department_code".to_string(),
-            serde_json::Value::String("SALES".to_string()),
-        );
-        seed_bot_with_friend_ext(
+        seed_bot(
             &db,
             "human_1",
             "protected",
@@ -1613,13 +1702,110 @@ mod tests {
             "APPROVAL",
             "online",
             Some("85020"),
-            human_friend_ext,
         )
         .await;
         let mut target_friend_ext = serde_json::Map::new();
         target_friend_ext.insert(
             "no_check_scope_friend_deps".to_string(),
-            serde_json::Value::Array(vec![serde_json::Value::String("TECH".to_string())]),
+            serde_json::Value::Array(vec![serde_json::Value::String(
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施-系统智能".to_string(),
+            )]),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "x:dept_from_port",
+            "protected",
+            "protected",
+            "DEPT_FREE",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "1".to_string(),
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施-系统智能".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+
+        let res = svc
+            .create_connect("human_1", "x:dept_from_port", None, None)
+            .await
+            .expect("dept_free exact match from department port → Approved");
+
+        assert_eq!(res.status, ConnectStatus::Approved);
+        assert!(res.auto_accepted);
+    }
+
+    #[tokio::test]
+    async fn dept_free_bot_applicant_falls_back_to_owner_department_port() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(
+            &db,
+            "x:applicant",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("owner_1"),
+        )
+        .await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "no_check_scope_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::Value::String(
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施".to_string(),
+            )]),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "x:target",
+            "protected",
+            "protected",
+            "DEPT_FREE",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "owner_1".to_string(),
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施-系统智能".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+
+        let res = svc
+            .create_connect("x:applicant", "x:target", None, None)
+            .await
+            .expect("bot applicant owner ancestor dept from department port → Approved");
+
+        assert_eq!(res.status, ConnectStatus::Approved);
+        assert!(res.auto_accepted);
+    }
+
+    #[tokio::test]
+    async fn dept_free_allowlist_miss_keeps_pending() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(
+            &db,
+            "human_1",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("85020"),
+        )
+        .await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "no_check_scope_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::Value::String(
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施".to_string(),
+            )]),
         );
         seed_bot_with_friend_ext(
             &db,
@@ -1632,9 +1818,15 @@ mod tests {
             target_friend_ext,
         )
         .await;
-        let svc = service(&eg, &pp, &rq, &bc);
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "1".to_string(),
+                "蚂蚁集团-其他事业群-销售部".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
         let res = svc
-            .create_connect("human_1", "x:dept_miss", None)
+            .create_connect("human_1", "x:dept_miss", None, None)
             .await
             .expect("dept_free miss → Pending");
         assert_eq!(res.status, ConnectStatus::Pending);
@@ -1646,13 +1838,15 @@ mod tests {
 
     #[tokio::test]
     async fn pending_friend_request_emits_notification_to_target_owner() {
+
         let (eg, pp, rq, bc, db) = assemble().await;
         seed_bot(&db, "x:pending_notify", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let recorder = RecordingFriendConnectNotificationPort::default();
         let events = recorder.events.clone();
         let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        let request_auth = RequestAuthHeaders { authorization: Some("Bearer user-token".to_string()), cookie: Some("session=abc".to_string()) };
         let res = svc
-            .create_connect("human_1", "x:pending_notify", Some("hi".into()))
+            .create_connect("human_1", "x:pending_notify", Some("hi".into()), Some(request_auth.clone()))
             .await
             .expect("manual pending");
         assert_eq!(res.status, ConnectStatus::Pending);
@@ -1666,6 +1860,7 @@ mod tests {
         assert_eq!(event.target_bot_id, "x:pending_notify");
         assert_eq!(event.recipient_user_ids, vec!["85020".to_string()]);
         assert_eq!(event.message.as_deref(), Some("hi"));
+        assert_eq!(event.request_auth, Some(request_auth));
     }
 
     #[tokio::test]
@@ -1676,11 +1871,11 @@ mod tests {
         let events = recorder.events.clone();
         let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
         let first = svc
-            .create_connect("human_1", "x:pending_idem", None)
+            .create_connect("human_1", "x:pending_idem", None, None)
             .await
             .expect("first pending");
         let second = svc
-            .create_connect("human_1", "x:pending_idem", None)
+            .create_connect("human_1", "x:pending_idem", None, None)
             .await
             .expect("idempotent pending");
         assert_eq!(first.request_ids, second.request_ids);
@@ -1693,7 +1888,7 @@ mod tests {
         seed_bot(&db, "x:man", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let res = svc
-            .create_connect("human_1", "x:man", Some("hi".into()))
+            .create_connect("human_1", "x:man", Some("hi".into()), None)
             .await
             .expect("manual → Pending");
         assert_eq!(res.status, ConnectStatus::Pending);
@@ -1701,8 +1896,8 @@ mod tests {
         assert!(res.edge_ids.is_empty());
         // default profile should NOT have been seeded (no edge built).
         assert!(pp.get_active_default("x:man", "dev").await.is_none());
-        let id = &res.request_ids[0];
-        let r = rq.get(id, "dev").await.expect("pending request exists");
+        let id = res.request_ids[0].clone();
+        let r = rq.get(&id, "dev").await.expect("pending request exists");
         assert_eq!(r.status, RequestStatus::Pending);
         assert_eq!(r.from_id, "human_1");
         assert_eq!(r.to_id, "x:man");
@@ -1715,7 +1910,7 @@ mod tests {
         seed_bot(&db, "x:auto1", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let res = svc
-            .create_connect("human_1", "x:auto1", None)
+            .create_connect("human_1", "x:auto1", None, None)
             .await
             .expect("auto → Approved");
         assert_eq!(res.status, ConnectStatus::Approved);
@@ -1734,7 +1929,7 @@ mod tests {
         let r = rq.get(&res.request_ids[0], "dev").await.expect("approved req");
         assert_eq!(r.status, RequestStatus::Approved);
         assert_eq!(r.decided_by.as_deref(), Some("auto"));
-        assert_eq!(r.edge_id.as_deref(), Some(res.edge_ids[0].as_str()));
+        assert_eq!(r.edge_id, Some(res.edge_ids[0]));
     }
 
     #[tokio::test]
@@ -1744,7 +1939,7 @@ mod tests {
         seed_bot(&db, "x:botB", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let res = svc
-            .create_connect("x:botA", "x:botB", None)
+            .create_connect("x:botA", "x:botB", None, None)
             .await
             .expect("Bot↔Bot auto → Approved");
         assert_eq!(res.status, ConnectStatus::Approved);
@@ -1772,12 +1967,12 @@ mod tests {
         seed_bot(&db, "x:idem", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let first = svc
-            .create_connect("human_1", "x:idem", None)
+            .create_connect("human_1", "x:idem", None, None)
             .await
             .expect("first connect");
         assert_eq!(first.status, ConnectStatus::Approved);
         let second = svc
-            .create_connect("human_1", "x:idem", None)
+            .create_connect("human_1", "x:idem", None, None)
             .await
             .expect("second connect idempotent");
         assert_eq!(second.status, ConnectStatus::Approved);
@@ -1794,12 +1989,12 @@ mod tests {
         seed_bot(&db, "x:pend", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let first = svc
-            .create_connect("human_1", "x:pend", None)
+            .create_connect("human_1", "x:pend", None, None)
             .await
             .expect("first manual");
         assert_eq!(first.status, ConnectStatus::Pending);
         let second = svc
-            .create_connect("human_1", "x:pend", None)
+            .create_connect("human_1", "x:pend", None, None)
             .await
             .expect("second idempotent");
         assert_eq!(second.status, ConnectStatus::Pending);
@@ -1813,18 +2008,18 @@ mod tests {
         seed_bot(&db, "x:appr", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("human_1", "x:appr", None)
+            .create_connect("human_1", "x:appr", None, None)
             .await
             .expect("manual pending");
         assert_eq!(pending.status, ConnectStatus::Pending);
-        let rid = &pending.request_ids[0];
+        let rid = pending.request_ids[0].clone();
 
-        let edge_ids = svc.approve(rid, "85020").await.expect("approve ok");
+        let edge_ids = svc.approve(&rid, "85020").await.expect("approve ok");
         assert_eq!(edge_ids.len(), 1, "Human→Bot approve: 1 edge");
         // Original pending request is now approved + edge_id backfilled.
-        let r = rq.get(rid, "dev").await.expect("request still exists");
+        let r = rq.get(&rid, "dev").await.expect("request still exists");
         assert_eq!(r.status, RequestStatus::Approved);
-        assert_eq!(r.edge_id.as_deref(), Some(edge_ids[0].as_str()));
+        assert_eq!(r.edge_id, Some(edge_ids[0]));
         assert!(eg.has_friend_edge("human_1", "x:appr", "dev").await);
     }
 
@@ -1838,12 +2033,12 @@ mod tests {
         seed_bot(&db, "x:nodupe", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("human_1", "x:nodupe", None)
+            .create_connect("human_1", "x:nodupe", None, None)
             .await
             .expect("manual pending");
-        let rid = &pending.request_ids[0];
+        let rid = pending.request_ids[0].clone();
 
-        svc.approve(rid, "85020").await.expect("approve ok");
+        svc.approve(&rid, "85020").await.expect("approve ok");
 
         // The bot's inbox (to_id=x:nodupe) should contain exactly 1 request
         // for this connect (the original, now approved) — not 2.
@@ -1863,17 +2058,17 @@ mod tests {
         seed_bot(&db, "x:bbB", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("x:bbA", "x:bbB", None)
+            .create_connect("x:bbA", "x:bbB", None, None)
             .await
             .expect("manual pending Bot↔Bot");
         assert_eq!(pending.request_ids.len(), 2);
-        let fwd_id = &pending.request_ids[0];
+        let fwd_id = pending.request_ids[0].clone();
 
-        let edge_ids = svc.approve(fwd_id, "owner").await.expect("approve ok");
+        let edge_ids = svc.approve(&fwd_id, "owner").await.expect("approve ok");
         assert_eq!(edge_ids.len(), 2, "Bot↔Bot approve: 2 edges");
 
         // BOTH pending requests are now approved (single accept, §4.1).
-        let fwd = rq.get(fwd_id, "dev").await.expect("fwd present");
+        let fwd = rq.get(&fwd_id, "dev").await.expect("fwd present");
         let rev = rq
             .get(&pending.request_ids[1], "dev")
             .await
@@ -1889,14 +2084,14 @@ mod tests {
         seed_bot(&db, "x:rej", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("human_1", "x:rej", None)
+            .create_connect("human_1", "x:rej", None, None)
             .await
             .expect("manual pending");
-        let rid = &pending.request_ids[0];
-        svc.reject(rid, "85020", Some("no thanks".into()))
+        let rid = pending.request_ids[0].clone();
+        svc.reject(&rid, "85020", Some("no thanks".into()))
             .await
             .expect("reject ok");
-        let r = rq.get(rid, "dev").await.expect("request present");
+        let r = rq.get(&rid, "dev").await.expect("request present");
         assert_eq!(r.status, RequestStatus::Rejected);
         assert!(r.edge_id.is_none());
         let active = eg.list_active_grants("human_1", "x:rej", "dev").await;
@@ -1910,7 +2105,7 @@ mod tests {
         seed_bot(&db, "x:rbB", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("x:rbA", "x:rbB", None)
+            .create_connect("x:rbA", "x:rbB", None, None)
             .await
             .expect("pending");
         svc.reject(&pending.request_ids[0], "owner", None)
@@ -1928,17 +2123,17 @@ mod tests {
         seed_bot(&db, "x:canc", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("human_1", "x:canc", None)
+            .create_connect("human_1", "x:canc", None, None)
             .await
             .expect("pending");
-        let rid = &pending.request_ids[0];
-        svc.cancel(rid).await.expect("cancel ok");
-        let r = rq.get(rid, "dev").await.expect("request still exists");
+        let rid = pending.request_ids[0].clone();
+        svc.cancel(&rid).await.expect("cancel ok");
+        let r = rq.get(&rid, "dev").await.expect("request still exists");
         assert_eq!(r.status, RequestStatus::Cancelled);
         // cancelling an already-cancelled request is idempotent (B4e): Ok, not
         // an error. Spec says "已 rejected/cancelled 幂等".
-        svc.cancel(rid).await.expect("idempotent cancel ok");
-        let r2 = rq.get(rid, "dev").await.expect("request still exists");
+        svc.cancel(&rid).await.expect("idempotent cancel ok");
+        let r2 = rq.get(&rid, "dev").await.expect("request still exists");
         assert_eq!(r2.status, RequestStatus::Cancelled);
     }
 
@@ -1948,7 +2143,7 @@ mod tests {
         seed_bot(&db, "x:unf", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let created = svc
-            .create_connect("human_1", "x:unf", None)
+            .create_connect("human_1", "x:unf", None, None)
             .await
             .expect("auto connect");
         assert_eq!(created.edge_ids.len(), 1);
@@ -1965,7 +2160,7 @@ mod tests {
         seed_bot(&db, "x:uA", "protected", "protected", "OPEN", "online", Some("85020")).await;
         seed_bot(&db, "x:uB", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
-        svc.create_connect("x:uA", "x:uB", None).await.expect("connect");
+        svc.create_connect("x:uA", "x:uB", None, None).await.expect("connect");
         assert!(eg.has_friend_edge("x:uA", "x:uB", "dev").await);
 
         let n = svc.revoke_friend("x:uA", "x:uB").await.expect("revoke ok");
@@ -1980,15 +2175,15 @@ mod tests {
         let (eg, pp, rq, bc, db) = assemble().await;
         seed_bot(&db, "x:keep", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
-        svc.create_connect("human_1", "x:keep", None).await.expect("connect");
+        svc.create_connect("human_1", "x:keep", None, None).await.expect("connect");
         // Manually insert a writer-profile edge with a different ref id.
         eg.insert_grant(EdgeGrant {
-            edge_id: "eg_writer_1".to_string(),
+            edge_id: 4001,
             env: "dev".to_string(),
             from_id: "human_1".to_string(),
             to_id: "x:keep".to_string(),
             grant_kind: GrantKind::PermissionProfile,
-            grant_ref_id: "pp_x:keep_writer".to_string(), // NOT the default
+            grant_ref_id: 4002, // NOT the default
             rules: None,
             status: EdgeStatus::Approved,
             originator_policy_type: OriginatorPolicyType::Any,
@@ -2001,7 +2196,7 @@ mod tests {
         assert_eq!(n.len(), 1, "only the friend (default) edge revoked");
         let active = eg.list_active_grants("human_1", "x:keep", "dev").await;
         assert_eq!(active.len(), 1, "writer edge survives");
-        assert_eq!(active[0].grant_ref_id, "pp_x:keep_writer");
+        assert_eq!(active[0].grant_ref_id, 4002);
     }
 
     #[tokio::test]
@@ -2010,8 +2205,8 @@ mod tests {
         seed_bot(&db, "x:lf1", "protected", "protected", "OPEN", "online", Some("85020")).await;
         seed_bot(&db, "x:lf2", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
-        svc.create_connect("human_1", "x:lf1", None).await.expect("c1");
-        svc.create_connect("human_1", "x:lf2", None).await.expect("c2");
+        svc.create_connect("human_1", "x:lf1", None, None).await.expect("c1");
+        svc.create_connect("human_1", "x:lf2", None, None).await.expect("c2");
 
         let friends = svc.list_friends("human_1").await.expect("list ok");
         let ids: Vec<String> = friends.iter().map(|f| f.actor_id.clone()).collect();
@@ -2031,7 +2226,7 @@ mod tests {
         seed_bot(&db, "x:lr", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("human_1", "x:lr", None)
+            .create_connect("human_1", "x:lr", None, None)
             .await
             .expect("pending");
         // The bot's inbox should list the pending request received.
@@ -2073,7 +2268,7 @@ mod tests {
         let svc = service(&eg, &pp, &rq, &bc);
         // Create 3 separate human callers connecting to the same bot.
         for h in ["human_a", "human_b", "human_c"] {
-            svc.create_connect(h, "x:pg", None).await.expect("pending");
+            svc.create_connect(h, "x:pg", None, None).await.expect("pending");
         }
         let page1 = svc
             .list_requests("x:pg", RequestDirection::Received, None, 1, 2)
@@ -2135,7 +2330,7 @@ mod tests {
         // Seed a friend edge by going through ConnectService (auto path),
         // which also ensures the target default profile and builds the edge.
         let conn = service(&eg, &pp, &rq, &bc);
-        conn.create_connect("human_1", "x:fr", None)
+        conn.create_connect("human_1", "x:fr", None, None)
             .await
             .expect("connect");
         assert!(eg.has_friend_edge("human_1", "x:fr", "dev").await);
@@ -2198,7 +2393,7 @@ mod tests {
         seed_bot(&db, "x:az", "protected", "protected", "OPEN", "online", Some("85020")).await;
         // Seed an approved friend edge.
         let conn = service(&eg, &pp, &rq, &bc);
-        conn.create_connect("human_1", "x:az", None)
+        conn.create_connect("human_1", "x:az", None, None)
             .await
             .expect("connect");
 
@@ -2261,12 +2456,12 @@ mod tests {
         // then insert a Rules edge (grant_kind=Rules, arbitrary ref) from→to.
         pp.ensure_default_profile("x:rules", "dev").await.expect("ensure default");
         eg.insert_grant(EdgeGrant {
-            edge_id: "eg_rules_1".to_string(),
+            edge_id: 5001,
             env: "dev".to_string(),
             from_id: "human_1".to_string(),
             to_id: "x:rules".to_string(),
             grant_kind: GrantKind::Rules,
-            grant_ref_id: "rules_ref_1".to_string(),
+            grant_ref_id: 5003,
             rules: None,
             status: EdgeStatus::Approved,
             originator_policy_type: OriginatorPolicyType::Any,
@@ -2300,12 +2495,12 @@ mod tests {
         seed_bot(&db, "x:radm", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         pp.ensure_default_profile("x:radm", "dev").await.expect("ensure default");
         eg.insert_grant(EdgeGrant {
-            edge_id: "eg_radm_1".to_string(),
+            edge_id: 5002,
             env: "dev".to_string(),
             from_id: "human_1".to_string(),
             to_id: "x:radm".to_string(),
             grant_kind: GrantKind::Rules,
-            grant_ref_id: "rules_ref_2".to_string(),
+            grant_ref_id: 5004,
             rules: None,
             status: EdgeStatus::Approved,
             originator_policy_type: OriginatorPolicyType::Any,
@@ -2335,10 +2530,10 @@ mod tests {
         seed_bot(&db, "x:sa", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("human_1", "x:sa", Some("hi".into()))
+            .create_connect("human_1", "x:sa", Some("hi".into()), None)
             .await
             .expect("pending");
-        let rid = &pending.request_ids[0];
+        let rid = pending.request_ids[0].clone();
 
         // Sent: the human caller's outbox has the pending request.
         let sent = svc
@@ -2346,7 +2541,7 @@ mod tests {
             .await
             .expect("sent ok");
         assert_eq!(sent.total, 1);
-        assert_eq!(sent.items[0].request_id, *rid);
+        assert_eq!(sent.items[0].request_id, rid);
         assert_eq!(sent.items[0].from_id, "human_1");
 
         // Sent + Approved filter ⇒ empty (still pending).
@@ -2369,11 +2564,11 @@ mod tests {
             .await
             .expect("all ok");
         assert_eq!(all.total, 1);
-        assert_eq!(all.items[0].request_id, *rid);
+        assert_eq!(all.items[0].request_id, rid);
 
         // Approve, then All from the bot's view: inbox (1 approved) ∪ sent
         // (the bot sent nothing) ⇒ total 1, status approved.
-        svc.approve(rid, "85020").await.expect("approve");
+        svc.approve(&rid, "85020").await.expect("approve");
         let all_bot = svc
             .list_requests("x:sa", RequestDirection::All, None, 1, 20)
             .await
@@ -2392,7 +2587,7 @@ mod tests {
         seed_bot(&db, "x:btB", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("x:btA", "x:btB", None)
+            .create_connect("x:btA", "x:btB", None, None)
             .await
             .expect("pending bot↔bot");
         assert_eq!(pending.request_ids.len(), 2);

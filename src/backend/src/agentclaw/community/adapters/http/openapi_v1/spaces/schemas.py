@@ -121,6 +121,10 @@ class SpaceItem(_UtcResponseModel):
     creator_user_id: str = Field(
         description="Identifier of the user who created the Space."
     )
+    creator_user_name: str | None = Field(
+        default=None,
+        description="Snapshot of the creator's user name, when available.",
+    )
     current_user_role: SpaceRole | None = Field(
         description="Current user's role, or null when the user has not joined."
     )
@@ -246,7 +250,8 @@ class AddSpaceMemberRequest(BaseModel):
     member_user_name: str | None = Field(
         default=None,
         max_length=128,
-        description="Snapshot of the member's user name; may be omitted.",
+        description="Legacy compatibility field; ignored. The backend resolves the "
+        "member nickname from member_user_id.",
     )
     role: SpaceRole = Field(
         default=SpaceRole.MEMBER,

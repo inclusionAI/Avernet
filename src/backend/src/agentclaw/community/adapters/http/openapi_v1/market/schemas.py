@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from agentclaw.community.adapters.http.openapi_v1.mcp.schemas import McpServerDetail
 
 _STRICT = ConfigDict(extra="forbid", populate_by_name=True)
 _UPSTREAM_ITEM = ConfigDict(extra="allow", populate_by_name=True)
@@ -25,7 +27,7 @@ class SkillMarketSearchRequest(BaseModel):
 
 
 class McpMarketSearchRequest(BaseModel):
-    """Search the MCP marketplace."""
+    """Search the MCP marketplace with the legacy catalogue filters."""
 
     model_config = _STRICT
 
@@ -37,6 +39,39 @@ class McpMarketSearchRequest(BaseModel):
     page_num: int = Field(default=1, ge=1, description="One-based page number.")
     page_size: int = Field(
         default=20, ge=1, le=100, description="Maximum MCP servers returned per page."
+    )
+    server_codes: list[str] | None = Field(
+        default=None, max_length=100, description="Filter by MCP server codes."
+    )
+    platform_server_codes: list[str] | None = Field(
+        default=None, max_length=100, description="Filter by platform MCP server codes."
+    )
+    run_modes: list[str] | None = Field(
+        default=None, max_length=20, description="Filter by MCP run modes."
+    )
+    statuses: list[str] | None = Field(
+        default=None, max_length=20, description="Filter by publication statuses."
+    )
+    transport_protocols: list[str] | None = Field(
+        default=None, max_length=20, description="Filter by supported transport protocols."
+    )
+    host_platforms: list[str] | None = Field(
+        default=None, max_length=50, description="Filter by host platforms."
+    )
+    owners: list[str] | None = Field(
+        default=None, max_length=100, description="Filter by owner user or employee identifiers."
+    )
+    network_types: list[str] | None = Field(
+        default=None, max_length=20, description="Filter by visible network types (INTERNET or OFFICE)."
+    )
+    categories: list[str] | None = Field(
+        default=None, max_length=100, description="Filter by marketplace categories."
+    )
+    tenants: list[str] | None = Field(
+        default=None, max_length=100, description="Filter by tenant codes."
+    )
+    tags: list[str] | None = Field(
+        default=None, max_length=100, description="Filter by marketplace tags."
     )
 
 
@@ -123,6 +158,12 @@ class SkillCenterTag(BaseModel):
         default_factory=list, description="Nested child tags."
     )
 
+    @field_validator("children", mode="before")
+    @classmethod
+    def normalize_children(cls, value):
+        """Normalize Skill Center leaf tags from ``null`` to an empty list."""
+        return [] if value is None else value
+
 
 class SkillMarketItem(BaseModel):
     """A Skill record from the built-in marketplace."""
@@ -148,21 +189,8 @@ class SkillMarketItem(BaseModel):
     )
 
 
-class McpMarketItem(BaseModel):
-    """An MCP server visible in the public marketplace."""
-
-    server_code: str = Field(description="Stable marketplace code of the MCP server.")
-    name: str = Field(description="Display name of the MCP server.")
-    description: str | None = Field(
-        default=None, description="Human-readable purpose of the MCP server."
-    )
-    network_types: list[str] = Field(
-        default_factory=list,
-        description="Network environments supported by the server.",
-    )
-    transport_protocol: str | None = Field(
-        default=None, description="Transport protocol advertised by the MCP server."
-    )
+class McpMarketItem(McpServerDetail):
+    """A lossless snake-case equivalent of one legacy MCP market-list item."""
 
 
 class SkillCenterMarketItem(BaseModel):

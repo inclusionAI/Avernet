@@ -345,7 +345,7 @@ _DEFERRED_OPERATIONS = frozenset(
         ("GET", "/openapi/v1/bots/{bot_id}/harness/dim-report"),
         ("POST", "/openapi/v1/bots/{bot_id}/harness/preview"),
         ("POST", "/openapi/v1/bots/{bot_id}/harness/rollback"),
-        # Checked in local_skill_query_service / local_skill_upload_service,
+        # Checked in skill_query_service / local_skill_upload_service,
         # which also keep six retiring skills addresses checked — four of them
         # unreachable by the seam, since the skill id resolves its own bot
         # inside the handler. Migrating these three would uncover those six.
@@ -715,7 +715,7 @@ def test_bot_id_anywhere_on_the_path_is_accepted():
 #: Every entry here must *also* be one the seam could not adjudicate anyway —
 #: asserted below, so this cannot become a place to park a twin that simply was
 #: not migrated. These four reach ``_bot_behind``, which calls
-#: ``local_skill_query_service.get_local_skill`` and therefore
+#: ``skill_query_service.get_local_skill`` and therefore
 #: ``_require_view_access`` — a MEMBER check on the bot the skill record names.
 #: This feature does not touch that module; deferring the three current skills
 #: rows that share it is precisely what keeps it in place.
@@ -861,7 +861,7 @@ def test_the_check_the_exempted_twins_rely_on_still_exists():
     locks: name the function, and fail if it stops doing the thing.
     """
     query_service = importlib.import_module(
-        "agentclaw.community.core.skill_center.services.local_skill_query_service"
+        "agentclaw.community.core.skill_center.services.skill_query_service"
     )
     legacy_skills = importlib.import_module(
         "agentclaw.community.adapters.http.openapi_v1.deprecated.skills"
@@ -872,14 +872,14 @@ def test_the_check_the_exempted_twins_rely_on_still_exists():
         "they no longer reach the check they are exempted on account of"
     )
 
-    get_source = inspect.getsource(query_service.LocalSkillQueryService.get_local_skill)
+    get_source = inspect.getsource(query_service.SkillQueryService.get_local_skill)
     assert "_require_view_access" in get_source, (
         "get_local_skill no longer calls _require_view_access, so _bot_behind "
         "reaches no collaborator check and the four exempted legacy skills "
         "twins are unguarded — the ends of the chain being intact is not enough"
     )
 
-    source = inspect.getsource(query_service.LocalSkillQueryService._require_view_access)
+    source = inspect.getsource(query_service.SkillQueryService._require_view_access)
     assert "check_collaborator_permission" in source, (
         "_require_view_access no longer performs a collaborator check, so the "
         "four legacy skills twins exempted in _TWINS_CHECKED_INDEPENDENTLY are "
@@ -895,7 +895,7 @@ def test_the_asset_service_check_the_unseamed_surfaces_rely_on_still_exists():
     """The seven ``{skill_id}`` rows moved; their service check deliberately did not.
 
     Task 8 deleted ``can_manage_bot`` outright, because the hook had exactly one
-    caller family and the seam replaced all of it. ``bot_skill_asset_service``
+    caller family and the seam replaced all of it. ``skill_query_service``
     is not that: its two permission sites are reached from three surfaces and
     the seam covers only one of them.
 
@@ -917,12 +917,12 @@ def test_the_asset_service_check_the_unseamed_surfaces_rely_on_still_exists():
     at the same bar.
     """
     asset_service = importlib.import_module(
-        "agentclaw.community.core.skill_center.services.bot_skill_asset_service"
+        "agentclaw.community.core.skill_center.services.skill_query_service"
     )
 
     guarded = {
         "_resolve_local": inspect.getsource(
-            asset_service.BotSkillAssetService._resolve_local
+            asset_service.SkillQueryService._resolve_local
         ),
         "_RepoAssetAdapter.resolve": inspect.getsource(
             asset_service._RepoAssetAdapter.resolve

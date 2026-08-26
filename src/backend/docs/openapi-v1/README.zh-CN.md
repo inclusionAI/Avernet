@@ -796,6 +796,33 @@ Bot 核心路由已接到内部服务上。这里保留下来，是作为其余�
 | GET | `/openapi/v1/bots/{bot_id}/engine/config` | 读取引擎配置（自由格式 JSON） | `Envelope[dict]` |
 | PUT | `/openapi/v1/bots/{bot_id}/engine/config` | 写入引擎配置（自由格式 JSON） | `Envelope[dict]` |
 
+#### 创建 Application Coding Bot
+
+Application Coding 使用 `engine=claude_code`，模板专属参数统一收在 `engine_properties.template` 下，不平铺到 Bot 创建请求顶层：
+
+```json
+{
+  "bot_name": "my-app-coding-bot",
+  "bot_desc": "application coding bot",
+  "engine": "claude_code",
+  "cluster_name": "ACRA",
+  "bot_type": "personal",
+  "engine_properties": {
+    "template": {
+      "devflow_workflow": "app-flow",
+      "yuque_kb_repos": [],
+      "code_repos": [],
+      "bot_template_config": {
+        "preset_capabilities": {},
+        "ext_config": {"thetaKey": "value"}
+      }
+    }
+  }
+}
+```
+
+若创建返回 202，POST `/{bot_id}/auth-status` 时必须原样回传同一个 `engine_properties` 对象。旧的顶层 `template_type` / `template_config` 不属于公共契约，会返回 422。HTTP adapter 会把 `engine_properties.template` 转换为内部创建契约；它不会与服务端派生的运行时 `extra_properties` 混用。
+
 #### 变更归属业务空间
 
 `PUT /openapi/v1/bots/{bot_id}/space` 显式要求查询参数 `user_id`，请求体必须包含
@@ -818,7 +845,7 @@ Space/协作团队共同建设 Migration Application Service。需重新生成
 `src/gateway/configs/schemas/bots.openapi.json`，并把 schema 与匹配的路由/鉴权配置同步到独立
 维护的 OCB/Sofapy Gateway；Avernet 现有宽泛的 `/openapi/v1/bots/**` 规则已覆盖该路径。
 
-_bots 上**刻意不暴露**的字段：创建时的 `engine_options`（下游目前没有任何代码会读
+_bots 上**刻意不暴露**的字段：创建时的顶层 `template_type`/`template_config` 和 `engine_options`（下游目前没有任何代码会读
 `BotCreateSpec.extra_properties`，暴露它等于承诺一个服务端其实会忽略的东西），以及更新时的
 `cluster_name`/`engine_options`。有了 `extra="forbid"`，这些字段现在会得到 422，而不是被
 悄悄丢弃。_
@@ -866,6 +893,28 @@ Bot 范围的 draft 钉钉渠道配置。每个操作都显式要求 `user_id`�
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/permissions` | 查询调用者对该服务器的权限 | `Envelope[McpPermission]` |
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | 读取调用者的统一服务器配置 | `Envelope[McpConfig]` |
 | PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | 写入配置（下发到设备） | `Envelope[McpConfig]` |
+
+统一市场搜索还提供 `POST /openapi/v1/bots/market/mcp-servers`。JSON 请求支持老市场
+列表的完整筛选集合：`keyword`、`page_num`、`page_size`、`server_codes`、
+`platform_server_codes`、`run_modes`、`statuses`、`transport_protocols`、
+`host_platforms`、`owners`、`network_types`、`categories`、`tenants` 和 `tags`。
+请求的网络类型会与公共允许范围（`INTERNET`、`OFFICE`）取交集；如果只请求不可见网络，
+直接返回空页。每个 `McpMarketItem` 都是老接口 `GET /api/mcp/market/list` 对应条目的
+无损 snake_case 等价数据，标签和未来市场扩展字段均保留，同时继续执行相同的 `extInfo`
+删除规则。
+
+`McpServerDetail` 是老接口 `GET /api/mcp/market/detail` 业务数据的 snake_case
+等价响应。除轻量列表字段和 `tools` 外，显式契约覆盖老市场详情的 `source`、`icon`、
+`docs`、`endpoints`、`vendor`、`status`、`run_mode`、`host_platform`、
+`platform_server_code`、`host_app_name`、`category`、`site`、市场 `tenant`、
+`access_level`、`stdio_configs`、业务/架构编码、负责人、标签、代码仓库和启动渠道等字段。
+
+兼容要求是不丢业务内容：endpoint `headers`、人员 `user_id`、可见 MCP 中的所有 endpoint、
+历史异常值以及未来市场扩展字段都会保留。已知市场对象字段从 camelCase 转为 snake_case；
+endpoint header 名、环境变量名和 tool 声明等不透明映射保持原始 key。与老接口一致，tool
+input schema 中的 `extInfo` 仍会删除；如果 MCP 声明的所有网络类型均不在允许范围内，详情
+仍按不存在处理。permissions 操作仍是调用者权限判断的权威接口，但为保持老详情数据兼容，
+市场记录中的 `access_level` 也会在详情中保留。
 
 _已定案的决策（PR #610）：路径保持嵌套（`/openapi/v1/bots/mcp/...`）；写入体去掉了
 `sync_mode`（不存在单设备下发路径 —— `extra="forbid"` 让它变成 422）；下发设备失败会回滚

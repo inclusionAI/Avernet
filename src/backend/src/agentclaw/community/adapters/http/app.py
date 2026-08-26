@@ -363,6 +363,7 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerMcpSyncError,
 )
 from agentclaw.community.core.skill_center.errors import (  # noqa: E402
+    LocalSkillNotReadyError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
@@ -507,6 +508,32 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
     return JSONResponse(
         status_code=status,
         content={"detail": exc.detail},
+        headers=_trace_headers(request),
+    )
+
+
+@app.exception_handler(LocalSkillNotReadyError)
+async def _local_skill_not_ready_handler(
+    request: Request, exc: LocalSkillNotReadyError,
+) -> JSONResponse:
+    """The activation family's readiness refusal, mapped like a conflict.
+
+    The shared mutation flow raises this before any write when the Bot cannot
+    safely accept a mutation. ``/openapi/v1`` maps it to 409 in its own table;
+    it is a plain ``Exception`` (not a ``DomainError``), so without this
+    handler the legacy ``/api`` activation routes would answer an unhandled
+    500 for a well-understood 4xx situation.
+    """
+    logger.warning(
+        "[LocalSkillNotReadyError 409] %s %s%s",
+        request.method, request.url.path, params_suffix(request),
+    )
+    public = _public_mapped_error(request, exc)
+    if public is not None:
+        return public
+    return JSONResponse(
+        status_code=409,
+        content={"detail": "Bot is not ready"},
         headers=_trace_headers(request),
     )
 

@@ -122,6 +122,11 @@ from agentclaw.community.core.bot_inventory.errors import (
     BotInventoryPermissionError,
     BotInventoryUpstreamError,
 )
+from agentclaw.community.core.bot_management.errors import (
+    ApplicationCodingUnavailableError,
+    BotCombinationUnsupportedError,
+    BotTemplateInvalidError,
+)
 from agentclaw.community.core.bot_dormant.activate_service import InvalidBotStateError
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
@@ -209,14 +214,12 @@ from agentclaw.community.core.skill_center.errors import (
     RepositoryCatalogSyncFailedError,
     RepositoryCatalogSyncInProgressError,
     SkillEngineNotSupportedError,
-    SkillManagedBySkillSetError,
     SkillParameterValidationError,
     SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
-    SkillSetManagedResourceError,
     SkillSetAccessDeniedError,
     McpPermissionDeniedError,
     LocalSkillTooLargeError,
@@ -558,7 +561,6 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Another SkillSet mutation holds this Bot's fence",
     ),
     SkillSetRuntimeReconcileError: (502, "Skill runtime synchronization failed"),
-    SkillSetManagedResourceError: (409, "Skill is managed by a SkillSet"),
     LocalSkillOwnerAmbiguousError: (409, "Ambiguous Local Skill owner"),
     LocalSkillInvalidPackageError: (400, "Invalid Skill package"),
     LocalSkillNotReadyError: (409, "Bot is not ready"),
@@ -575,7 +577,6 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Skill update service is temporarily unavailable",
     ),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
-    SkillManagedBySkillSetError: (409, "Skill is managed by a SkillSet"),
     SkillRuntimeNameConflictError: (409, "Skill runtime name conflicts with an active Skill"),
     SkillEngineNotSupportedError: (409, "Skill is not supported by this bot type and engine"),
     RepositoryCatalogNotFoundError: (404, "Not found"),
@@ -753,12 +754,10 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillStorageError: 502101,
     SkillParameterValidationError: 422101,
     LocalSkillRuntimeSyncError: 502102,
-    SkillManagedBySkillSetError: 409105,
     SkillRuntimeNameConflictError: 409106,
     SkillEngineNotSupportedError: 409107,
     RepositoryCatalogSyncInProgressError: 409108,
     RepositoryCatalogSyncFailedError: 502103,
-    SkillSetManagedResourceError: 409202,
     SkillSetControlPlaneLockUnavailableError: 409209,
     SkillSetAccessDeniedError: 403201,
     McpPermissionDeniedError: 403202,
@@ -767,6 +766,10 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
 _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {
     "RESOURCE_DIRECT_ACTIVE": (409201, "Resource is directly active"),
     "RESOURCE_MANAGED_BY_SKILL_SET": (409202, "Resource is managed by a SkillSet"),
+    "RESOURCE_MANAGED_BY_PLATFORM_POLICY": (
+        409210,
+        "Resource is managed by the platform Default policy",
+    ),
     "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET": (409203, "Resource belongs to another SkillSet"),
     "SYSTEM_DEFAULT_IMMUTABLE": (409204, "System Default SkillSet is immutable"),
     "SKILL_SET_ACTIVE": (409205, "Active SkillSet cannot be deleted"),

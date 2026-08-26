@@ -13,7 +13,11 @@ from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
 
 from secbaas.community.api import ApiResponse
-from secbaas.community.api.device_manage import DeviceResponse, DeviceService
+from secbaas.community.api.device_manage import (
+    DeviceResponse,
+    DeviceService,
+    ProviderDevicePropsResponse,
+)
 from secbaas.community.bootstrap import ApplicationContainer, Provide
 from secbaas.community.logger import get_logger
 
@@ -95,5 +99,63 @@ async def get_device_info(
                 "error": "INTERNAL_ERROR",
                 "message": str(e),
                 "device_uuid": device_uuid,
+            },
+        )
+
+
+@router.get(
+    "/provider-device/{provider_device_id}/props",
+    response_model=ApiResponse[ProviderDevicePropsResponse],
+    responses={
+        404: {"model": DeviceNotFoundResponse, "description": "Device not found"},
+        500: {"model": DeviceNotFoundResponse, "description": "Internal server error"},
+    },
+    summary="Get provider device props by provider_device_id",
+    description="Get the stored provider_device_props for a device by its PaaS provider device ID.",
+)
+@inject
+async def get_provider_device_props(
+    provider_device_id: Annotated[
+        str,
+        Path(description="PaaS provider device ID (e.g., ALIYUN_ACK_DEFAULT-abc@0)"),
+    ],
+    device_service: DeviceService = Depends(
+        Provide[ApplicationContainer.services.device_service]
+    ),
+) -> ApiResponse[ProviderDevicePropsResponse]:
+    logger.info(
+        f"Getting provider device props via device router: "
+        f"provider_device_id={provider_device_id}"
+    )
+
+    try:
+        result = device_service.get_provider_device_props(
+            provider_device_id=provider_device_id
+        )
+
+        if result is None:
+            logger.info(f"Provider device not found: {provider_device_id}")
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "DEVICE_NOT_FOUND",
+                    "message": f"Provider device not found: {provider_device_id}",
+                    "device_uuid": None,
+                },
+            )
+
+        return ApiResponse(data=result)
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.error(f"Unexpected error getting provider device props: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "INTERNAL_ERROR",
+                "message": str(e),
+                "device_uuid": None,
             },
         )

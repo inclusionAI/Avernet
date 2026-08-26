@@ -423,14 +423,15 @@ class SkillsPoolSkillRepositoryProtocol(Protocol):
     ) -> list[RegisteredSkillAsset]: ...
 
     @abstractmethod
-    def list_bot_active_assets(
+    def list_bot_installed_assets(
         self,
         *,
         env: str,
         bot_id: str,
         owner_id: str,
-        engine: str,
-    ) -> list[RegisteredSkillAsset]: ...
+    ) -> list[RegisteredSkillAsset]:
+        """The pure Installation→``ac_skill`` join; the reader's backing read."""
+        ...
 
 
 @runtime_checkable

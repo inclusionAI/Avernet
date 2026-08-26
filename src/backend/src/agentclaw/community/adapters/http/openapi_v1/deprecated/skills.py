@@ -55,11 +55,11 @@ from agentclaw.community.adapters.http.openapi_v1.skills.schemas import (
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
+from agentclaw.community.api.skill_query_service import (
+    SkillQueryServiceProtocol,
 )
-from agentclaw.community.api.bot_skill_asset_service import (
-    BotSkillAssetServiceProtocol,
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
 )
 from agentclaw.community.di import Injected
 
@@ -212,7 +212,7 @@ legacy_route(
 
 
 async def _bot_behind(
-    query_service: LocalSkillQueryServiceProtocol,
+    query_service: SkillQueryServiceProtocol,
     caller,
     *,
     skill_id: str,
@@ -234,11 +234,8 @@ async def get_skill_legacy(
     user_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
-    query_service: LocalSkillQueryServiceProtocol = Injected(
-        LocalSkillQueryServiceProtocol
-    ),
-    asset_service: BotSkillAssetServiceProtocol = Injected(
-        BotSkillAssetServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
     ),
 ) -> Envelope[Skill]:
     """Get public metadata for one Local Skill; the Skill ID selects its Bot.
@@ -255,7 +252,7 @@ async def get_skill_legacy(
         user_id=user_id,
         caller=caller,
         request=request,
-        asset_service=asset_service,
+        query_service=query_service,
     )
 
 
@@ -267,11 +264,8 @@ async def delete_skill_legacy(
     delete_service: LocalSkillDeleteServiceProtocol = Injected(
         LocalSkillDeleteServiceProtocol
     ),
-    query_service: LocalSkillQueryServiceProtocol = Injected(
-        LocalSkillQueryServiceProtocol
-    ),
-    asset_service: BotSkillAssetServiceProtocol = Injected(
-        BotSkillAssetServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
     ),
 ) -> Envelope[Deleted]:
     """Delete a skill by id.
@@ -289,7 +283,7 @@ async def delete_skill_legacy(
         caller=caller,
         request=request,
         delete_service=delete_service,
-        asset_service=asset_service,
+        query_service=query_service,
     )
 
 
@@ -299,11 +293,11 @@ def _state_shim(handler, verb: str):
         user_id: UserIdDep,
         caller: ActingCallerDep,
         request: Request,
-        query_service: LocalSkillQueryServiceProtocol = Injected(
-            LocalSkillQueryServiceProtocol
+        query_service: SkillQueryServiceProtocol = Injected(
+            SkillQueryServiceProtocol
         ),
-        asset_service: BotSkillAssetServiceProtocol = Injected(
-            BotSkillAssetServiceProtocol
+        direct_activation: DirectActivationServiceProtocol = Injected(
+            DirectActivationServiceProtocol
         ),
     ) -> Envelope[SkillState]:
         bot_id, owner_id = await _bot_behind(
@@ -316,7 +310,8 @@ def _state_shim(handler, verb: str):
             user_id=user_id,
             caller=caller,
             request=request,
-            asset_service=asset_service,
+            query_service=query_service,
+            direct_activation=direct_activation,
         )
 
     shim.__name__ = f"{handler.__name__}_legacy"

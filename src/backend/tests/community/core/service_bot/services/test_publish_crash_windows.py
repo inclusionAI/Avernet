@@ -162,7 +162,7 @@ def _flow(*, ledger, baas, build_service, publish_service=None):
         channel_overrides_reader=reader,
         task_queue_service=Mock(),
         publish_operation_repo=ledger,
-        active_skillset_materializer=Mock(),
+        capability_reader=Mock(),
     )
     # ARCA delivery (no config_artifact) → compose_live no-ops to (delivery, None).
     svc._ext_state.owner_id = Mock(return_value="u1")

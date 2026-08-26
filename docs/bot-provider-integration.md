@@ -104,6 +104,7 @@ Core downstream body fields:
 | `method` | All methods | Downstream method name. |
 | `to_bot.provider_id` | `chat.send` / `chat.inject` / `chat.history` / `chat.abort` | Target Provider ID. The Provider must verify that it matches itself. |
 | `to_bot.provider_bot_ref` | Same as above | Provider-local bot identifier used to route to the Provider's bot runtime. |
+| `to_bot.tags` | `chat.send` / `chat.inject` | Target participant's session-scoped routing tags. Omitted or empty when no tags are configured. |
 | `session_id` | `chat.send` / `chat.inject` / `chat.history` / `chat.abort` | Session identifier. The Provider maintains context by this value. |
 | `message` | `chat.send` / `chat.inject` | Current downstream message. |
 | `timeout_ms` | `chat.send` / `chat.inject` / `chat.history` | Downstream operation timeout. For direct A2A `chat.send` submitted by `bcs-cli chat`, BCS sends a fixed 2-hour execution budget (`7200000` ms), independent of the CLI polling timeout. |

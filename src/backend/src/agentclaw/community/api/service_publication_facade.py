@@ -17,6 +17,15 @@ class ServicePublicationFacadeProtocol(Protocol):
         self, bot_id: str, *, actor_id: str, owner_id: str
     ) -> dict[str, Any]: ...
 
+    def upgrade_publication(
+        self,
+        bot_id: str,
+        publication_id: int,
+        *,
+        actor_id: str,
+        owner_id: str,
+    ) -> dict[str, Any]: ...
+
     def get_service_config(
         self, bot_id: str, *, actor_id: str, owner_id: str
     ) -> dict[str, Any]: ...

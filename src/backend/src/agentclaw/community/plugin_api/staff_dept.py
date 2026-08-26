@@ -27,6 +27,18 @@ from agentclaw.community.plugin_api.base import Plugin
 
 
 @dataclass(frozen=True)
+class StaffProfileInfo:
+    """Basic employee profile data returned by the staff directory."""
+
+    work_no: str
+    nick_name: str | None = None
+
+
+class StaffProfileLookupError(RuntimeError):
+    """Raised when the staff profile infrastructure cannot be queried."""
+
+
+@dataclass(frozen=True)
 class StaffDeptInfo:
     """A person's department identity, read from the staff directory.
 
@@ -35,6 +47,31 @@ class StaffDeptInfo:
     not supply a value, and they are null rather than invented when absent.
     """
 
+    dept_no: Optional[str] = None
+    dept_name: Optional[str] = None
+    dept_path: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class UserIdentityInfo:
+    """A person's identity + department, read from the staff directory for an
+    arbitrary work number.
+
+    Every field except ``work_no`` is ``str | None``: ``None`` is an
+    intentional contract state (the directory genuinely supplies no value),
+    null rather than invented when absent. An all-``None`` info (identity and
+    dept all null) means "looked up, no record" — the ``200`` + null answer,
+    distinct from a :class:`DeptLookupError` ("directory down", 5xx). Used by
+    the ``GET /openapi/v1/org/user?user_id=`` directory-lookup branch to return
+    another user's identity + dept; the whoami no-param branch still reads
+    identity off the verified principal and uses ``get_dept_by_work_no`` for
+    dept only (self identity is authoritative from the signed principal).
+    """
+
+    work_no: str
+    username: Optional[str] = None
+    display_name: Optional[str] = None
+    full_name: Optional[str] = None
     dept_no: Optional[str] = None
     dept_name: Optional[str] = None
     dept_path: Optional[str] = None
@@ -69,6 +106,10 @@ class StaffDeptPlugin(Plugin, Protocol):
     failure, 5xx).
     """
 
+    def get_profile_by_work_no(self, *, work_no: str) -> StaffProfileInfo:
+        """Return the employee profile, or a null nickname when absent."""
+        ...
+
     def get_dept_by_work_no(self, *, work_no: str) -> StaffDeptInfo:
         """Return the department for ``work_no``, or an all-``None`` info.
 
@@ -76,6 +117,19 @@ class StaffDeptPlugin(Plugin, Protocol):
         ``StaffDeptInfo()`` — "no dept", not a failure. A real impl that reached
         the service and found no record / a record with no dept returns the same
         all-``None`` shape. Only an unreachable or erroring service raises.
+        """
+        ...
+
+    def get_user_by_work_no(self, *, work_no: str) -> UserIdentityInfo:
+        """Return the identity+department for ``work_no``, or an all-``None`` info.
+
+        Implementations with no staff service (community / local) return
+        ``UserIdentityInfo(work_no=work_no)`` — "no record", not a failure. A
+        real impl that reached the service and found no record returns the same
+        all-``None`` shape. Only an unreachable or erroring service raises
+        :class:`DeptLookupError` — so the caller answers "no record" (200 +
+        null) apart from "directory down" (5xx), the same split
+        ``get_dept_by_work_no`` makes.
         """
         ...
 

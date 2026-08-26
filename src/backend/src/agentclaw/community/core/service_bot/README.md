@@ -26,7 +26,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skills_pool    # repository contracts consumed by this module
-  - agentclaw.community.core.skill_center.services.active_skillset_installation_materializer # lazy active SkillSet Installation materialization before a new artifact build
+  - agentclaw.community.core.skill_center.capability_state_contract    # installation flush before a new artifact build
   - agentclaw.community.core.common_config
   - agentclaw.community.core.bot_collaborator    # collaborator permission and edit-lock enforcement for public lifecycle operations
   - agentclaw.community.core.bot_inventory.policies    # shared engine/deploy-mode combination policy for service upgrades
@@ -45,6 +45,7 @@ internal_dependencies:
   - agentclaw.community.di
   - agentclaw.community.kernel.bot_config
   - agentclaw.community.kernel.device_dto    # neutral OutBound / ResourceSpecification DTOs (B6)
+  - agentclaw.community.kernel.deploy_runtime    # DeployRuntime — names which composer shapes the create-bot payload
   - agentclaw.community.kernel.lifecycle    # PublishTaskLifecycle registers durable task handlers
   - agentclaw.community.log
   - agentclaw.community.plugin_api.approval_workflow           # antprocess approval workflow for publish approval

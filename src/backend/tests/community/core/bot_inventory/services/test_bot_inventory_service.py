@@ -24,6 +24,7 @@ from agentclaw.community.core.bot_inventory.services.lifecycle_view import (
 )
 from agentclaw.community.core.bot_inventory.types import (
     BotAction,
+    BotInventoryKind,
     BusinessSpaceRef,
     DeployMode,
     DisplayState,
@@ -193,15 +194,74 @@ def test_service_bot_expands_to_publication_cards_before_pagination() -> None:
         keyword=None,
         engine=None,
         deploy_mode=DeployMode.CLOUD,
+        is_service=True,
         page=1,
         page_size=10,
     )
 
-    assert total == 3
+    assert total == 2
+    assert {item.bot_id for item in items} == {"s1"}
     service_items = [item for item in items if item.bot_id == "s1"]
     assert [item.publication_id for item in service_items] == [4, 3]
     assert [item.card_id for item in service_items] == ["service:s1:4", "service:s1:3"]
     lifecycle_port.cards_for_bots.assert_called_once_with(bots=[service_row])
+
+
+@pytest.mark.unit
+def test_non_service_filter_excludes_service_cards_before_total(service) -> None:
+    inventory, bot, _ = service
+    service_row = {
+        **CLOUD,
+        "id": 10,
+        "bot_id": "s1",
+        "bot_name": "Service",
+        "bot_type": "service",
+    }
+    bot.list_bots_by_conditions.return_value = {
+        "total": 2,
+        "items": [CLOUD, service_row],
+    }
+
+    items, total = inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=None,
+        deploy_mode=None,
+        is_service=False,
+        page=1,
+        page_size=10,
+    )
+
+    assert total == 2
+    assert {item.bot_id for item in items} == {"c1", "l1"}
+
+
+@pytest.mark.unit
+def test_local_deploy_with_service_filter_returns_empty_without_source_calls(
+    service,
+) -> None:
+    inventory, bot, desktop = service
+
+    items, total = inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.LOCAL,
+        is_service=True,
+        page=1,
+        page_size=10,
+    )
+
+    assert total == 0
+    assert items == []
+    bot.list_bots_by_conditions.assert_not_called()
+    desktop.list_user_bots.assert_not_called()
 
 
 @pytest.mark.unit
@@ -382,3 +442,71 @@ def test_team_space_lists_all_owners_and_scopes_actions_by_bot_permission() -> N
         "delete": "Bot editor permission required",
     }
     assert all(item.space == team_space for item in items)
+
+
+def test_actions_for_level_keeps_edit_for_non_service_editors() -> None:
+    """Non-service cards: collaborators (MEMBER/ADMIN) keep the edit action —
+    the skills/skill-sets endpoints gate on PermissionLevel.MEMBER — while
+    owner-scoped actions stay disabled; NONE is view-only; OWNER is unchanged.
+    """
+    actions = (BotAction.VIEW, BotAction.EDIT, BotAction.RESTART, BotAction.DELETE)
+
+    owner_actions, owner_disabled = BotInventoryService._actions_for_level(
+        kind=BotInventoryKind.PERSONAL_CLOUD,
+        actions=actions,
+        disabled={},
+        level=PermissionLevel.OWNER,
+    )
+    assert owner_actions == actions
+    assert owner_disabled == {}
+
+    for level in (PermissionLevel.MEMBER, PermissionLevel.ADMIN):
+        kept_actions, disabled = BotInventoryService._actions_for_level(
+            kind=BotInventoryKind.PERSONAL_CLOUD,
+            actions=actions,
+            disabled={},
+            level=level,
+        )
+        assert kept_actions == (BotAction.VIEW, BotAction.EDIT)
+        assert disabled == {
+            "restart": "Bot editor permission required",
+            "delete": "Bot editor permission required",
+        }
+
+    none_actions, none_disabled = BotInventoryService._actions_for_level(
+        kind=BotInventoryKind.PERSONAL_CLOUD,
+        actions=actions,
+        disabled={},
+        level=PermissionLevel.NONE,
+    )
+    assert none_actions == (BotAction.VIEW,)
+    assert none_disabled == {
+        "edit": "Bot editor permission required",
+        "restart": "Bot editor permission required",
+        "delete": "Bot editor permission required",
+    }
+
+
+def test_service_upgrade_action_requires_admin() -> None:
+    actions = (BotAction.VIEW, BotAction.UPGRADE, BotAction.DELETE)
+
+    member_actions, member_disabled = BotInventoryService._actions_for_level(
+        kind=BotInventoryKind.SERVICE,
+        actions=actions,
+        disabled={},
+        level=PermissionLevel.MEMBER,
+    )
+    assert member_actions == (BotAction.VIEW,)
+    assert member_disabled == {
+        "delete": "Bot Owner permission required",
+        "upgrade": "Bot Admin permission required",
+    }
+
+    admin_actions, admin_disabled = BotInventoryService._actions_for_level(
+        kind=BotInventoryKind.SERVICE,
+        actions=actions,
+        disabled={},
+        level=PermissionLevel.ADMIN,
+    )
+    assert admin_actions == (BotAction.VIEW, BotAction.UPGRADE)
+    assert admin_disabled == {"delete": "Bot Owner permission required"}

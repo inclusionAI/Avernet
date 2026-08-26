@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timedelta
 from typing import Any
 
 from secbaas.community.api.device_manage import (
@@ -23,6 +22,7 @@ from secbaas.community.api.device_manage import (
     EncryptableHeaderRule,
     EncryptableOutBoundRule,
     OutBoundOperationRule,
+    ProviderDevicePropsResponse,
     TeClawCreateConfig,  # noqa: F401 used in update_device TECLAW branch
 )
 from secbaas.community.api.template_manage import (
@@ -546,23 +546,16 @@ class DefaultDeviceService(DeviceService):
         device_template_service: DeviceTemplateManageService,
         secret_plugin: SecretStorePlugin,
         callback_handler: DeviceCallbackHandler,
-        schedule_repo: Any = None,
     ) -> None:
         """Initialize DefaultDeviceService with injected dependencies.
 
         All arguments are required per R-14 wiring principle.
-
-        Args:
-            schedule_repo: Optional TtlRenewalScheduleRepository (enterprise-only,
-                None in community). When provided, ARCA container create/stop/destroy
-                hooks register and update the baas_arca_ttl_renewal_schedule table.
         """
         self._paas_facade = paas_facade
         self._secret_plugin = secret_plugin
         self._repository = repository
         self._device_template_service = device_template_service
         self._callback_handler = callback_handler
-        self._schedule_repo = schedule_repo
 
     def create_device(
         self,
@@ -1062,43 +1055,6 @@ class DefaultDeviceService(DeviceService):
                 provider_device_id=provider_device_id,
                 provider_device_props=provider_device_props,
             )
-
-            # --- ARCA TTL renewal schedule registration (INTG-01) ---
-            # Register newly created ARCA container in baas_arca_ttl_renewal_schedule
-            # so the DeadlineRenewalScheduler can track its TTL expiration. Only
-            # ARCA platform because other platforms have different TTL semantics.
-            if (
-                provider_type == "ARCA"
-                and provider_device_id
-                and self._schedule_repo is not None
-            ):
-                try:
-                    ttl_expiration_time = provider_device_props.get(
-                        "ttl_expiration_time"
-                    )
-                    if ttl_expiration_time is not None:
-                        expiration_dt = datetime.fromtimestamp(
-                            ttl_expiration_time / 1000
-                        )
-                        next_renew_at = expiration_dt - timedelta(hours=12)
-                        self._schedule_repo.register(
-                            get_current_env(),
-                            sandbox_id=provider_device_id,
-                            source_table="baas_device",
-                            source_id=record.id,
-                            next_renew_at=next_renew_at,
-                        )
-                except Exception:
-                    logger.critical(
-                        f"[arca_ttl] Failed to register schedule for device "
-                        f"{device_uuid}: sandbox_id={provider_device_id}, "
-                        f"source_id={record.id}",
-                        exc_info=True,
-                    )
-                    logger.info(
-                        "[arca_ttl_metrics] register_error=1 device_uuid=%s",
-                        device_uuid,
-                    )
 
         except Exception as e:
             # PaaS creation failure fast path: set FAILED immediately, no callback
@@ -2175,23 +2131,6 @@ class DefaultDeviceService(DeviceService):
             )
             logger.info(f"Device {device_uuid} status updated to RELEASED")
 
-            # --- ARCA TTL renewal schedule cleanup (INTG-02) ---
-            # Mark schedule entry as STOPPED when ARCA container is destroyed.
-            # No try-except: set_status failure means DB is down (system-level
-            # failure), and device destroy should not be blocked by schedule
-            # cleanup failures.
-            if (
-                record.provider_type == "ARCA"
-                and record.provider_device_id
-                and self._schedule_repo is not None
-            ):
-                self._schedule_repo.set_status(
-                    get_current_env(),
-                    source_table="baas_device",
-                    source_id=record.id,
-                    status="STOPPED",
-                )
-
             # Soft-delete device record by UUID (only for normal destroy)
             repo.soft_delete_by_device_uuid(
                 device_uuid=device_uuid, tenant=tenant, env=env, modifier=modifier
@@ -2342,23 +2281,9 @@ class DefaultDeviceService(DeviceService):
             tenant=tenant,
             env=env,
             status=DeviceStatus.STOPPED.value,
+            modifier=modifier,
         )
         logger.info(f"Device {device_uuid} status updated to STOPPED")
-
-        # --- ARCA TTL renewal schedule cleanup (INTG-02) ---
-        # Mark schedule entry as STOPPED when ARCA container is stopped.
-        # Same defensive posture as destroy hook: bare call, no try-except.
-        if (
-            record.provider_type == "ARCA"
-            and record.provider_device_id
-            and self._schedule_repo is not None
-        ):
-            self._schedule_repo.set_status(
-                get_current_env(),
-                source_table="baas_device",
-                source_id=record.id,
-                status="STOPPED",
-            )
 
         error_message = "; ".join(error_parts) if error_parts else None
 
@@ -2409,3 +2334,38 @@ class DefaultDeviceService(DeviceService):
             f"tenant={record.tenant}, env={record.env}"
         )
         return device_record_to_response(record)
+
+    def get_provider_device_props(
+        self,
+        provider_device_id: str,
+    ) -> ProviderDevicePropsResponse | None:
+        """Get provider_device_props by exact provider_device_id.
+
+        Queries the baas_device record by the indexed provider_device_id
+        column. Returns None when no matching, non-deleted record exists.
+
+        Args:
+            provider_device_id: PaaS provider device ID (e.g. ``ALIYUN_ACK_DEFAULT-abc@0``)
+
+        Returns:
+            ProviderDevicePropsResponse, or None if not found/deleted
+        """
+        logger.info(
+            f"Getting provider device props: provider_device_id={provider_device_id}"
+        )
+
+        record = self._repository.get_by_provider_device_id(
+            provider_device_id=provider_device_id
+        )
+
+        if not record:
+            logger.info(f"Provider device not found: {provider_device_id}")
+            return None
+
+        return ProviderDevicePropsResponse(
+            provider_device_id=record.provider_device_id
+            if record.provider_device_id
+            else provider_device_id,
+            status=record.status,
+            provider_device_props=record.provider_device_props or None,
+        )

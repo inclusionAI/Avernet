@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bcs_protocol::{
-    BCN_PROVIDER_ID_HEADER, PatchProviderRequest, ProviderAuthModeDto,
+    BCN_PROVIDER_ID_HEADER, PatchProviderBotRequest, PatchProviderRequest, ProviderAuthModeDto,
     ProviderBotConnectionModeDto, ProviderCoordinationConfigDto, ProviderCoordinationModeDto,
     ProviderInfoResponse, ProviderOrganizationManagementConfigDto, RegisterProviderBotRequest,
     RegisterProviderBotResponse, RegisterProviderRequest, RegisterProviderResponse,
@@ -20,26 +20,14 @@ use bcs_service_api::{
     ProviderBotTaskModesFilter, ProviderCoordinationConfig, ProviderOrganizationManagementConfig,
     ProviderRecord, RegisterProviderBotCommand, RegisterProviderCommand, ServiceError,
     SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult, TaskModeMatch,
-    UpdateProviderCommand,
+    UpdateProviderBotCommand, UpdateProviderCommand,
 };
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value, json};
 use tracing::{info, warn};
 
-use crate::mapping::capabilities::to_core_skill;
+use crate::mapping::capabilities::{to_core_skill, to_wire_skill};
 use crate::state::HttpAppState;
-
-#[derive(Debug, serde::Deserialize)]
-pub struct ProviderStreamGrayRequest {
-    pub enabled: Option<bool>,
-    pub created_by: Option<Vec<String>>,
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct ProviderStreamGrayResponse {
-    pub enabled: bool,
-    pub created_by: Vec<String>,
-}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -135,37 +123,6 @@ pub async fn register_provider(
         provider_id: outcome.provider_id,
         provider_admin_token: outcome.provider_admin_token,
         bcs_to_provider_token: outcome.bcs_to_provider_token,
-    }))
-}
-
-pub async fn get_provider_stream_gray(
-    State(state): State<HttpAppState>,
-) -> Result<Json<ProviderStreamGrayResponse>, ProviderRouteError> {
-    let snapshot = state.provider_stream_gray_list.snapshot();
-    Ok(Json(ProviderStreamGrayResponse {
-        enabled: snapshot.enabled,
-        created_by: snapshot.created_by,
-    }))
-}
-
-pub async fn put_provider_stream_gray(
-    State(state): State<HttpAppState>,
-    Json(req): Json<ProviderStreamGrayRequest>,
-) -> Result<Json<ProviderStreamGrayResponse>, ProviderRouteError> {
-    let old = state.provider_stream_gray_list.snapshot();
-    let updated = state
-        .provider_stream_gray_list
-        .update(req.enabled, req.created_by);
-    info!(
-        old_enabled = old.enabled,
-        new_enabled = updated.enabled,
-        old_created_by = ?old.created_by,
-        new_created_by = ?updated.created_by,
-        "provider stream gray list updated"
-    );
-    Ok(Json(ProviderStreamGrayResponse {
-        enabled: updated.enabled,
-        created_by: updated.created_by,
     }))
 }
 
@@ -287,16 +244,44 @@ pub async fn list_provider_bots(
 }
 
 /// `GET /providers/{provider_id}/bots/by-task-modes` — internal (non-OpenAPI)
-/// roster consumed by backend task discovery/dispatch. Mirrors
-/// `list_provider_bots` admin-token validation, then intersects the provider's
-/// bot bindings with bots whose control-plane toggles satisfy the filter.
+/// roster consumed by backend task discovery/dispatch. Admission mirrors
+/// `switch_bot_delivery`: the Bearer must authenticate the path provider admin
+/// and that `provider_id` must be in `allowed_switch_provider_ids`. The roster
+/// is env-scoped — it returns all current-env bots whose control-plane toggles
+/// satisfy the filter, and is intentionally not intersected with provider bot
+/// bindings.
 pub async fn list_provider_bots_by_task_modes(
     State(state): State<HttpAppState>,
     Path(provider_id): Path<String>,
     headers: HeaderMap,
     Query(params): Query<TaskModesQueryParams>,
 ) -> Result<Json<Value>, ProviderRouteError> {
-    let provider_admin_token = bearer_token(&headers)?;
+    let token = bearer_token(&headers)?;
+
+    let provider = state
+        .services
+        .provider_core
+        .authenticate_provider_admin(&token)
+        .await
+        .map_err(provider_error)?;
+
+    if provider.provider_id != provider_id {
+        return Err(ProviderRouteError {
+            status: StatusCode::FORBIDDEN,
+            message: "provider_id_mismatch".to_string(),
+        });
+    }
+
+    if !state.allowed_switch_provider_ids.contains(&provider_id) {
+        return Err(ProviderRouteError {
+            status: StatusCode::FORBIDDEN,
+            message: format!(
+                "provider '{}' is not allowed to access the task-mode roster",
+                provider_id
+            ),
+        });
+    }
+
     let filter = ProviderBotTaskModesFilter {
         task_claim_mode: parse_task_mode_toggle("task_claim_mode", &params.task_claim_mode)?,
         task_dream_mode: parse_task_mode_toggle("task_dream_mode", &params.task_dream_mode)?,
@@ -313,7 +298,7 @@ pub async fn list_provider_bots_by_task_modes(
     let items = state
         .services
         .provider_management
-        .list_provider_bots_by_task_modes(&provider_id, &provider_admin_token, filter)
+        .list_provider_bots_by_task_modes(filter)
         .await
         .map_err(provider_error)?;
     let items: Vec<Value> = items.into_iter().map(roster_item_to_json).collect();
@@ -438,6 +423,45 @@ fn delete_provider_bot_response(
         body["message"] = json!(message);
     }
     Json(body)
+}
+
+pub async fn patch_provider_bot(
+    State(state): State<HttpAppState>,
+    Path((provider_id, provider_bot_ref)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(req): Json<PatchProviderBotRequest>,
+) -> Result<Json<Value>, ProviderRouteError> {
+    let provider_admin_token = bearer_token(&headers)?;
+    let outcome = state
+        .services
+        .provider_management
+        .update_provider_bot(UpdateProviderBotCommand {
+            provider_id,
+            provider_admin_token,
+            provider_bot_ref,
+            name: req.name,
+            summary: req.summary,
+            domains: req.domains,
+            skills: req
+                .skills
+                .map(|skills| skills.into_iter().map(to_core_skill).collect()),
+            scopes: req.scopes,
+            visibility: req.visibility,
+        })
+        .await
+        .map_err(provider_error)?;
+
+    Ok(Json(json!({
+        "bot_uuid": outcome.bot_uuid,
+        "provider_id": outcome.provider_id,
+        "provider_bot_ref": outcome.provider_bot_ref,
+        "name": outcome.name,
+        "summary": outcome.summary,
+        "domains": outcome.domains,
+        "skills": outcome.skills.into_iter().map(to_wire_skill).collect::<Vec<_>>(),
+        "scopes": outcome.scopes,
+        "visibility": outcome.visibility,
+    })))
 }
 
 pub async fn resolve_agentpass_bot(
@@ -593,7 +617,7 @@ async fn require_provider_bot_attributes_access(
         .map_err(provider_error)?;
 
     // COSEC: Attribute access is fail-closed: only an authenticated Provider
-    // explicitly listed for backend operations may reach its own active Bot.
+    // explicitly listed for backend operations may manage BCS Bot attributes.
     if !state
         .allowed_switch_provider_ids
         .iter()
@@ -611,35 +635,6 @@ async fn require_provider_bot_attributes_access(
         });
     }
 
-    let binding = state
-        .services
-        .provider_bot_core
-        .get_provider_bot_binding_by_bot_uuid(bot_uuid)
-        .await
-        .map_err(provider_error)?
-        .ok_or_else(|| ProviderRouteError {
-            status: StatusCode::NOT_FOUND,
-            message: format!("bot not found: {bot_uuid}"),
-        })?;
-    if binding.disabled {
-        return Err(ProviderRouteError {
-            status: StatusCode::NOT_FOUND,
-            message: format!("bot not found: {bot_uuid}"),
-        });
-    }
-    if binding.provider_id != provider_id {
-        warn!(
-            provider_id,
-            bot_uuid,
-            binding_provider_id = binding.provider_id,
-            failure = "provider_bot_binding_mismatch",
-            "Provider Bot attributes access rejected"
-        );
-        return Err(ProviderRouteError {
-            status: StatusCode::FORBIDDEN,
-            message: "provider does not own bot".to_string(),
-        });
-    }
     Ok(())
 }
 
@@ -833,6 +828,11 @@ fn roster_item_to_json(item: ProviderBotRosterItem) -> Value {
         "env": item.env,
         "task_claim_mode": item.task_claim_mode,
         "task_dream_mode": item.task_dream_mode,
+        "updated_at": item.updated_at,
+        "visibility": item.visibility,
+        "created_by": item.created_by,
+        "status": item.status,
+        "user_visibility": item.user_visibility,
     })
 }
 

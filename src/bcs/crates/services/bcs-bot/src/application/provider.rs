@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -10,7 +9,7 @@ use bcs_service_api::{
     ProviderManagementService, ProviderRecord, RegisterProviderBotCommand,
     RegisterProviderBotOutcome, RegisterProviderBotParams, RegisterProviderCommand,
     RegisterProviderOutcome, RelationCoreService, ServiceError, ServiceResult,
-    UpdateProviderCommand,
+    UpdateProviderBotCommand, UpdateProviderBotOutcome, UpdateProviderCommand,
 };
 use bcs_user_directory_api::UserDirectoryPlugin;
 
@@ -306,23 +305,14 @@ impl ProviderManagementService for ProviderManagement {
 
     async fn list_provider_bots_by_task_modes(
         &self,
-        provider_id: &str,
-        provider_admin_token: &str,
         filter: ProviderBotTaskModesFilter,
     ) -> ServiceResult<Vec<ProviderBotRosterItem>> {
         let control_plane = self.control_plane.clone().ok_or_else(|| {
             ServiceError::InternalError("control-plane core not configured".to_string())
         })?;
-        // Reuse the same admin-token validation path as `list_provider_bots`.
-        // A bad/missing token surfaces as Unauthorized from the provider bot core.
-        let bindings = self
-            .provider_bot_core
-            .list_provider_bots(provider_id, provider_admin_token)
-            .await?;
-        let allowed_uuids: HashSet<String> = bindings
-            .into_iter()
-            .map(|binding| binding.bot_uuid)
-            .collect();
+        // Env-scoped task-mode roster. Provider admission (admin token +
+        // `allowed_switch_provider_ids`) is enforced by the route; this use
+        // case intentionally does not intersect with provider bot bindings.
         let env = bcs_config::resolve_env_str();
         let views = control_plane
             .list_by_task_modes(BotTaskModesQuery {
@@ -334,13 +324,17 @@ impl ProviderManagementService for ProviderManagement {
             .await?;
         let items = views
             .into_iter()
-            .filter(|view| allowed_uuids.contains(&view.record.bot_id))
             .map(|view| ProviderBotRosterItem {
                 bot_id: view.record.bot_id,
                 name: view.record.name,
                 env: view.record.env,
                 task_claim_mode: view.record.task_claim_mode,
                 task_dream_mode: view.record.task_dream_mode,
+                updated_at: view.record.updated_at,
+                visibility: view.record.visibility,
+                created_by: view.record.created_by,
+                status: view.record.status,
+                user_visibility: view.record.user_visibility,
             })
             .collect();
         Ok(items)
@@ -419,6 +413,38 @@ impl ProviderManagementService for ProviderManagement {
                 disabled,
             )
             .await
+    }
+
+    async fn update_provider_bot(
+        &self,
+        command: UpdateProviderBotCommand,
+    ) -> ServiceResult<UpdateProviderBotOutcome> {
+        let result = self
+            .provider_bot_core
+            .update_provider_bot(
+                &command.provider_id,
+                &command.provider_admin_token,
+                &command.provider_bot_ref,
+                command.name,
+                command.summary,
+                command.domains,
+                command.skills,
+                command.scopes,
+                command.visibility,
+            )
+            .await?;
+        let capabilities = result.capabilities;
+        Ok(UpdateProviderBotOutcome {
+            bot_uuid: result.binding.bot_uuid,
+            provider_id: result.binding.provider_id,
+            provider_bot_ref: result.binding.provider_bot_ref,
+            name: capabilities.name,
+            summary: capabilities.summary,
+            domains: capabilities.domains,
+            skills: capabilities.skills,
+            scopes: capabilities.scopes,
+            visibility: capabilities.visibility,
+        })
     }
 }
 

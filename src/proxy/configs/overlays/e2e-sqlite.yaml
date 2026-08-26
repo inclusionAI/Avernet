@@ -1,0 +1,13 @@
+# SQLite E2E overlay — self-contained e2e config using stub plugins.
+# Select via: SOFAPY_CONFIG_OVERLAY=e2e-sqlite
+# Overrides the base application.yaml so the e2e/ASGI suites can drive the real
+# app (create_app -> bootstrap_app) without external ACK/BaaS/Teclaw
+# dependencies or a real JWT secret. Production configs keep the prefix resolver
+# and baas relay client.
+workers: 1
+user_config:
+  plugins:
+    resolver: stub
+    relay_client: stub
+  jwt:
+    secret: ${SANDBOXPROXY_JWT_SECRET:-e2e-sqlite-secret-not-for-prod}

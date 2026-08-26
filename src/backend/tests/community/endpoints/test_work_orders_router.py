@@ -99,6 +99,12 @@ def _seed_joinable_space(world) -> None:
     )
 
 
+def _seed_personal_space(world) -> None:
+    """Personal Space id 1 rejects join requests by domain policy."""
+    _enable_public_auth(world)
+    world.get(SpaceServiceProtocol).initialize_personal(user_id=_USER_ID)
+
+
 def _seed_bot_editor_request(world) -> None:
     _enable_public_auth(world)
 
@@ -190,7 +196,6 @@ def create_work_order_event_wrong_user():
     seed=_seed_joinable_space,
     input=CaseInput(
         path_params={"space_id": 1},
-        query_params={"user_id": _USER_ID},
         json_body={"reason": "please let me join"},
         headers=_principal_headers(),
     ),
@@ -209,14 +214,33 @@ def create_space_join_request_happy():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/bots/spaces/{space_id}/join-requests",
-    scenario="wrong_user",
-    seed=_enable_public_auth,
-    input=_mismatched_user(
-        path_params={"space_id": 1}, json_body={"reason": "please let me join"}
+    scenario="forged_query_is_ignored",
+    seed=_seed_joinable_space,
+    input=CaseInput(
+        path_params={"space_id": 1},
+        query_params={"user_id": "someone-else", "user_name": "forged"},
+        json_body={"reason": "please let me join"},
+        headers=_principal_headers(),
     ),
-    expect=ExpectError(status=403),
+    expect=ExpectSuccess(status=201),
 )
-def create_space_join_request_wrong_user():
+def create_space_join_request_ignores_forged_query():
+    """The framework owns invocation."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/spaces/{space_id}/join-requests",
+    scenario="personal_space_rejected",
+    seed=_seed_personal_space,
+    input=CaseInput(
+        path_params={"space_id": 1},
+        json_body={"reason": "please let me join"},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectError(status=409),
+)
+def create_space_join_request_rejects_personal_space():
     """The framework owns invocation."""
 
 

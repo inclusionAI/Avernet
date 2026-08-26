@@ -119,7 +119,9 @@ def test_create_join_request_uses_principal_and_returns_created(
     work_order_service.create_space_join_request.return_value = _work_order()
 
     response = client.post(
-        "/openapi/v1/bots/spaces/7/join-requests", json={"reason": "join"}
+        "/openapi/v1/bots/spaces/7/join-requests",
+        params={"user_id": None},
+        json={"reason": "join"},
     )
 
     assert response.status_code == 201
@@ -130,6 +132,25 @@ def test_create_join_request_uses_principal_and_returns_created(
     }
     work_order_service.create_space_join_request.assert_called_once_with(
         space_id=7, applicant_user_id="owner-1", reason="join"
+    )
+
+
+def test_create_join_request_ignores_forged_legacy_identity_query(
+    client, work_order_service
+):
+    work_order_service.create_space_join_request.return_value = _work_order()
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/join-requests",
+        params={"user_id": "someone-else", "user_name": "forged"},
+        json={"reason": "join"},
+    )
+
+    assert response.status_code == 201
+    work_order_service.create_space_join_request.assert_called_once_with(
+        space_id=7,
+        applicant_user_id="owner-1",
+        reason="join",
     )
 
 
@@ -297,12 +318,14 @@ def test_list_work_orders_maps_plain_and_notification_items(client, work_order_s
     assert items[0]["notification_id"] is None
     assert items[0]["title"] == "空间加入申请待审批"
     assert items[0]["content"] is None
+    assert items[0]["gmt_created"] == "2026-08-18T01:02:03Z"
     assert items[0]["gmt_modified"] == "2026-08-18T02:03:04Z"
     assert items[1]["item_id"] == "NOTIFICATION_21"
     assert items[1]["item_type"] == "NOTICE"
     assert items[1]["notification_id"] == 21
     assert items[1]["title"] == "空间加入申请已通过"
     assert items[1]["content"] == {"message": "approved"}
+    assert items[1]["gmt_created"] == "2026-08-18T01:02:03Z"
     assert items[1]["gmt_modified"] == "2026-08-18T03:04:05Z"
     work_order_service.list_items.assert_called_once()
     assert work_order_service.list_items.call_args.kwargs == {

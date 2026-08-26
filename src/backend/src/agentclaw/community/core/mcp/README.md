@@ -40,8 +40,10 @@ consumes:
   - "MCPAuthPlugin"
   - "MCPCenterPlugin"
   - "PassportPlugin"
+  - "CallerIdentityRepositoryProtocol"
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.identity # Caller identity overrides used for Passport scope sync
   - agentclaw.community.core.default_capabilities
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.config
@@ -50,7 +52,7 @@ internal_dependencies:
   - agentclaw.community.di.modules
   - agentclaw.community.log
   - agentclaw.community.plugin_api.device_mcp_sync
-  - agentclaw.community.plugin_api.device_sync
+  - agentclaw.community.plugin_api.device_sync_dispatcher
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.mcp_auth
   - agentclaw.community.plugin_api.mcp_center

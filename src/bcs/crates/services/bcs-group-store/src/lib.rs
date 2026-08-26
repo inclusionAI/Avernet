@@ -87,6 +87,14 @@ fn assert_empty_logical_db(logical_db: &str) -> DbResult<()> {
     }
 }
 
+fn transaction_lock_row_is_missing(error: &DbError) -> bool {
+    matches!(
+        error,
+        DbError::InvalidInput(message)
+            if message.contains("references missing row 0 from step 0")
+    )
+}
+
 fn db_timestamp_from_millis(timestamp_ms: u64) -> ServiceResult<String> {
     let timestamp_ms = i64::try_from(timestamp_ms)
         .map_err(|_| ServiceError::InternalError("Group timestamp is out of range".to_string()))?;
@@ -94,6 +102,35 @@ fn db_timestamp_from_millis(timestamp_ms: u64) -> ServiceResult<String> {
         .single()
         .map(|timestamp| timestamp.to_rfc3339_opts(SecondsFormat::Millis, true))
         .ok_or_else(|| ServiceError::InternalError("Group timestamp is invalid".to_string()))
+}
+
+fn routing_policy_json(policy: Option<&RoutingPolicy>, delivery: DefaultDelivery) -> String {
+    let mut policy = policy.cloned().unwrap_or_default();
+    policy.default_bot_final_delivery = delivery;
+    serde_json::to_string(&policy).expect("RoutingPolicy contains only JSON-compatible values")
+}
+
+fn parse_stored_routing_policy_json(
+    stored_json: Option<&str>,
+) -> ServiceResult<Option<RoutingPolicy>> {
+    Ok(match stored_json {
+        Some(json) => Some(
+            serde_json::from_str::<RoutingPolicy>(json).map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "deserialize routing_policy_json before patch: {error}"
+                ))
+            })?,
+        ),
+        _ => None,
+    })
+}
+
+fn patch_stored_routing_policy_json(
+    stored_json: Option<&str>,
+    delivery: DefaultDelivery,
+) -> ServiceResult<String> {
+    let policy = parse_stored_routing_policy_json(stored_json)?;
+    Ok(routing_policy_json(policy.as_ref(), delivery))
 }
 
 fn group_version_update_step(
@@ -535,6 +572,34 @@ impl MySqlGroupStore {
                 }
             }
         })
+    }
+
+    async fn load_raw_routing_policy_json(
+        &self,
+        group_id: &str,
+    ) -> ServiceResult<Option<Option<String>>> {
+        let rows = self
+            .db
+            .query_with(
+                &self.logical_db,
+                "SELECT routing_policy_json FROM bcs_groups WHERE group_id = ? AND env = ?",
+                vec![Value::from(group_id), Value::from(self.env.as_str())],
+            )
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "load Group '{group_id}' routing_policy_json: {error}"
+                ))
+            })?;
+        let Some(row) = rows.first() else {
+            return Ok(None);
+        };
+        let json = db_get_column_opt(row, "routing_policy_json").map_err(|error| {
+            ServiceError::InternalError(format!(
+                "load Group '{group_id}' routing_policy_json: {error}"
+            ))
+        })?;
+        Ok(Some(json))
     }
 
     fn deserialize_opening_message(
@@ -1253,6 +1318,22 @@ impl GroupRepoPort for MySqlGroupStore {
                 request_id: None,
             });
         }
+        let routing_policy_snapshot = match &command.mutation {
+            GroupEventfulMutation::PatchMutableFields(patch)
+                if patch.default_bot_final_delivery.is_some() =>
+            {
+                Some(
+                    self.load_raw_routing_policy_json(&command.group_id)
+                        .await?
+                        .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?,
+                )
+            }
+            _ => None,
+        };
+        let authoritative_routing_policy = routing_policy_snapshot
+            .as_ref()
+            .map(|stored_json| parse_stored_routing_policy_json(stored_json.as_deref()))
+            .transpose()?;
         let current = self
             .try_get(&command.group_id)
             .await?
@@ -1271,25 +1352,41 @@ impl GroupRepoPort for MySqlGroupStore {
             });
         }
         let mut terminal = current;
+        if let Some(policy) = authoritative_routing_policy {
+            terminal.routing_policy = policy;
+        }
         apply_db_group_mutation_candidate(&mut terminal, &command.mutation, command.mutated_at_ms)?;
         let mutated_at = db_timestamp_from_millis(command.mutated_at_ms)?;
-        let lock_sql = match self.flavor {
-            DbSqlFlavor::Mysql => {
-                "SELECT group_id FROM bcs_groups WHERE env = ? AND group_id = ? \
-                 AND version = ? AND record_status = 'active' FOR UPDATE"
+        let routing_policy_guard = match self.flavor {
+            DbSqlFlavor::Mysql if routing_policy_snapshot.is_some() => {
+                " AND routing_policy_json <=> ?"
             }
-            DbSqlFlavor::Sqlite => {
-                "SELECT group_id FROM bcs_groups WHERE env = ? AND group_id = ? \
-                 AND version = ? AND record_status = 'active'"
+            DbSqlFlavor::Sqlite if routing_policy_snapshot.is_some() => {
+                " AND routing_policy_json IS ?"
             }
+            _ => "",
         };
+        let lock_sql = match self.flavor {
+            DbSqlFlavor::Mysql => format!(
+                "SELECT group_id FROM bcs_groups WHERE env = ? AND group_id = ? \
+                 AND version = ? AND record_status = 'active'{routing_policy_guard} FOR UPDATE"
+            ),
+            DbSqlFlavor::Sqlite => format!(
+                "SELECT group_id FROM bcs_groups WHERE env = ? AND group_id = ? \
+                 AND version = ? AND record_status = 'active'{routing_policy_guard}"
+            ),
+        };
+        let mut lock_params = vec![
+            Value::from(self.env.as_str()),
+            Value::from(command.group_id.as_str()),
+            Value::from(command.expected_version),
+        ];
+        if let Some(stored_json) = &routing_policy_snapshot {
+            lock_params.push(Value::from(stored_json.as_deref()));
+        }
         let mut steps = vec![DbTransactionStep::Query(DbStatement::with_params(
             lock_sql,
-            vec![
-                Value::from(self.env.as_str()),
-                Value::from(command.group_id.as_str()),
-                Value::from(command.expected_version),
-            ],
+            lock_params,
         ))];
         let group_id = DbTransactionParam::query_result(0, 0, "group_id");
 
@@ -1323,14 +1420,10 @@ impl GroupRepoPort for MySqlGroupStore {
                     params.push(DbTransactionParam::value(visibility.as_str()));
                 }
                 if let Some(delivery) = patch.default_bot_final_delivery {
-                    assignments.push(match self.flavor {
-                        DbSqlFlavor::Mysql => "routing_policy_json = JSON_SET(COALESCE(routing_policy_json, JSON_OBJECT()), '$.default_bot_final_delivery', ?)".to_string(),
-                        DbSqlFlavor::Sqlite => "routing_policy_json = json_set(COALESCE(routing_policy_json, '{}'), '$.default_bot_final_delivery', ?)".to_string(),
-                    });
-                    params.push(DbTransactionParam::value(match delivery {
-                        DefaultDelivery::SendToDriver => "send_to_driver",
-                        DefaultDelivery::InjectObservers => "inject_observers",
-                    }));
+                    let policy_json =
+                        routing_policy_json(terminal.routing_policy.as_ref(), delivery);
+                    assignments.push("routing_policy_json = ?".to_string());
+                    params.push(DbTransactionParam::value(policy_json));
                 }
                 if assignments.is_empty() {
                     return Err(ServiceError::Conflict(
@@ -1549,9 +1642,18 @@ impl GroupRepoPort for MySqlGroupStore {
                 ),
             ));
         }
-        self.db.plugin().transaction(steps).await.map_err(|error| {
-            ServiceError::InternalError(format!("Eventful Group mutation failed: {error}"))
-        })?;
+        if let Err(error) = self.db.plugin().transaction(steps).await {
+            if routing_policy_snapshot.is_some() && transaction_lock_row_is_missing(&error) {
+                self.cache.write().await.remove(&command.group_id);
+                return Err(ServiceError::Conflict(format!(
+                    "Group '{}' routing policy changed concurrently",
+                    command.group_id
+                )));
+            }
+            return Err(ServiceError::InternalError(format!(
+                "Eventful Group mutation failed: {error}"
+            )));
+        }
         self.cache.write().await.remove(&command.group_id);
         if deleting {
             return Ok(terminal);
@@ -1566,9 +1668,20 @@ impl GroupRepoPort for MySqlGroupStore {
         id: &str,
         patch: GroupMutableFieldsPatch,
     ) -> ServiceResult<()> {
-        if self.try_get(id).await?.is_none() {
-            return Err(ServiceError::GroupNotFound(id.to_string()));
-        }
+        let routing_policy_snapshot = match patch.default_bot_final_delivery {
+            Some(delivery) => Some((
+                delivery,
+                self.load_raw_routing_policy_json(id)
+                    .await?
+                    .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?,
+            )),
+            None => {
+                self.try_get(id)
+                    .await?
+                    .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
+                None
+            }
+        };
 
         let mut assignments = Vec::new();
         let mut params = Vec::new();
@@ -1595,31 +1708,38 @@ impl GroupRepoPort for MySqlGroupStore {
             assignments.push("visibility = ?".to_string());
             params.push(Value::from(visibility.as_str()));
         }
-        if let Some(delivery) = patch.default_bot_final_delivery {
-            let expression = match self.flavor {
-                DbSqlFlavor::Mysql => {
-                    "routing_policy_json = JSON_SET(COALESCE(routing_policy_json, JSON_OBJECT()), '$.default_bot_final_delivery', ?)"
-                }
-                DbSqlFlavor::Sqlite => {
-                    "routing_policy_json = json_set(COALESCE(routing_policy_json, '{}'), '$.default_bot_final_delivery', ?)"
-                }
-            };
-            assignments.push(expression.to_string());
-            params.push(Value::from(match delivery {
-                DefaultDelivery::SendToDriver => "send_to_driver",
-                DefaultDelivery::InjectObservers => "inject_observers",
-            }));
+        let mut guard_routing_policy = false;
+        if let Some((delivery, stored_json)) = &routing_policy_snapshot {
+            let policy_json = patch_stored_routing_policy_json(stored_json.as_deref(), *delivery)?;
+            if stored_json.as_deref() != Some(policy_json.as_str()) {
+                assignments.push("routing_policy_json = ?".to_string());
+                params.push(Value::from(policy_json));
+                guard_routing_policy = true;
+            }
         }
         if assignments.is_empty() {
+            if routing_policy_snapshot.is_some() {
+                self.cache.write().await.remove(id);
+            }
             return Ok(());
         }
         assignments.push(self.flavor.set_modified_now().to_string());
         params.push(Value::from(id));
         params.push(Value::from(self.env.as_str()));
-        let sql = format!(
+        let mut sql = format!(
             "UPDATE bcs_groups SET {} WHERE group_id = ? AND env = ?",
             assignments.join(", ")
         );
+        if guard_routing_policy {
+            sql.push_str(match self.flavor {
+                DbSqlFlavor::Mysql => " AND routing_policy_json <=> ?",
+                DbSqlFlavor::Sqlite => " AND routing_policy_json IS ?",
+            });
+            let stored_json = routing_policy_snapshot
+                .as_ref()
+                .and_then(|(_, stored_json)| stored_json.as_deref());
+            params.push(Value::from(stored_json));
+        }
         let affected_rows = self
             .db
             .execute_with(&self.logical_db, &sql, params)
@@ -1634,6 +1754,11 @@ impl GroupRepoPort for MySqlGroupStore {
         self.cache.write().await.remove(id);
         if affected_rows == 0 && self.try_get(id).await?.is_none() {
             return Err(ServiceError::GroupNotFound(id.to_string()));
+        }
+        if affected_rows == 0 && guard_routing_policy {
+            return Err(ServiceError::Conflict(format!(
+                "Group '{id}' routing policy changed concurrently"
+            )));
         }
         Ok(())
     }
@@ -3623,7 +3748,7 @@ impl GroupRepoPort for MySqlGroupStore {
 mod tests {
     use super::*;
     use bcs_db_api::{DbExecuteResult, DbHealth};
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, VecDeque};
     use std::sync::Mutex as StdMutex;
 
     #[derive(Default)]
@@ -3634,7 +3759,9 @@ mod tests {
         first_execute_affected_rows: u64,
         fail_queries: bool,
         query_rows: Vec<DbRow>,
+        query_results: StdMutex<VecDeque<Vec<DbRow>>>,
         transaction_error: Option<String>,
+        missing_transaction_lock_row: bool,
     }
 
     impl RecordingDbPlugin {
@@ -3667,6 +3794,14 @@ mod tests {
                 ..Self::default()
             }
         }
+
+        fn with_missing_transaction_lock_row(query_rows: Vec<DbRow>) -> Self {
+            Self {
+                query_rows,
+                missing_transaction_lock_row: true,
+                ..Self::default()
+            }
+        }
     }
 
     #[async_trait]
@@ -3674,6 +3809,14 @@ mod tests {
         async fn query(&self, _statement: DbStatement) -> DbResult<Vec<DbRow>> {
             if self.fail_queries {
                 return Err(DbError::Backend("database unavailable".to_string()));
+            }
+            if let Some(rows) = self
+                .query_results
+                .lock()
+                .expect("query results")
+                .pop_front()
+            {
+                return Ok(rows);
             }
             Ok(self.query_rows.clone())
         }
@@ -3693,6 +3836,11 @@ mod tests {
             &self,
             steps: Vec<DbTransactionStep>,
         ) -> DbResult<Vec<DbTransactionStepResult>> {
+            if self.missing_transaction_lock_row {
+                return Err(DbError::InvalidInput(
+                    "transaction parameter 2 references missing row 0 from step 0".to_string(),
+                ));
+            }
             if let Some(error) = &self.transaction_error {
                 return Err(DbError::Backend(error.clone()));
             }
@@ -3758,6 +3906,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn stored_routing_policy_patch_handles_defaults_and_rejects_invalid_json() {
+        let default_json = patch_stored_routing_policy_json(None, DefaultDelivery::InjectObservers)
+            .expect("serialize default routing policy");
+        let default_policy =
+            serde_json::from_str::<RoutingPolicy>(&default_json).expect("routing policy");
+        assert_eq!(
+            default_policy.default_bot_final_delivery,
+            DefaultDelivery::InjectObservers
+        );
+
+        for invalid_json in ["", "{invalid-json"] {
+            let error = patch_stored_routing_policy_json(
+                Some(invalid_json),
+                DefaultDelivery::InjectObservers,
+            )
+            .expect_err("invalid stored routing policy must not be overwritten");
+            assert!(error.to_string().contains("before patch"));
+        }
+    }
+
     #[tokio::test]
     async fn fallible_group_reads_propagate_database_failures() {
         let db = Arc::new(RecordingDbPlugin::failing_queries());
@@ -3790,6 +3959,150 @@ mod tests {
             .expect_err("patch preflight read must fail");
 
         assert!(error.to_string().contains("database unavailable"));
+
+        let routing_error = repo
+            .patch_mutable_fields(
+                "group-1",
+                GroupMutableFieldsPatch {
+                    default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("routing patch preflight read must fail");
+
+        assert!(routing_error.to_string().contains("database unavailable"));
+    }
+
+    #[tokio::test]
+    async fn mutable_patch_rejects_a_non_string_routing_policy_column() {
+        let malformed = DbRow::new(BTreeMap::from([(
+            "routing_policy_json".to_string(),
+            Value::from(7_i64),
+        )]));
+        let db = Arc::new(RecordingDbPlugin::with_query_rows(vec![malformed]));
+        let repo = MySqlGroupStore::new(db, "local".to_string());
+
+        let error = repo
+            .patch_mutable_fields(
+                "group-1",
+                GroupMutableFieldsPatch {
+                    default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("non-string routing policy must fail");
+
+        assert!(error.to_string().contains("routing_policy_json"));
+    }
+
+    #[tokio::test]
+    async fn mutable_patch_rejects_a_concurrent_routing_policy_change() {
+        let policy = RoutingPolicy {
+            mode: bcs_service_api::RoutingMode::Mention,
+            default_bot_final_delivery: DefaultDelivery::SendToDriver,
+            sender_routes: HashMap::new(),
+        };
+        let stored_policy_json =
+            serde_json::to_string(&policy).expect("serialize stored routing policy");
+        let routing_row = DbRow::new(BTreeMap::from([(
+            "routing_policy_json".to_string(),
+            Value::from(stored_policy_json.as_str()),
+        )]));
+        let group_row = DbRow::new(BTreeMap::from([
+            ("group_id".to_string(), Value::from("group-1")),
+            ("status".to_string(), Value::from("active")),
+            ("driver_bot".to_string(), Value::from("driver")),
+            (
+                "routing_policy_json".to_string(),
+                Value::from(stored_policy_json.as_str()),
+            ),
+        ]));
+        let db = Arc::new(RecordingDbPlugin {
+            query_results: StdMutex::new(VecDeque::from([
+                vec![routing_row],
+                vec![group_row],
+                Vec::new(),
+            ])),
+            ..Default::default()
+        });
+        let repo = MySqlGroupStore::new(db, "local".to_string());
+
+        let error = repo
+            .patch_mutable_fields(
+                "group-1",
+                GroupMutableFieldsPatch {
+                    default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("concurrent routing change must fail the guarded write");
+
+        assert!(
+            matches!(error, ServiceError::Conflict(message) if message.contains("concurrently"))
+        );
+    }
+
+    #[tokio::test]
+    async fn eventful_mutable_patch_reports_a_missing_routing_lock_as_a_conflict() {
+        let policy = RoutingPolicy {
+            mode: bcs_service_api::RoutingMode::Mention,
+            default_bot_final_delivery: DefaultDelivery::SendToDriver,
+            sender_routes: HashMap::new(),
+        };
+        let stored_policy_json =
+            serde_json::to_string(&policy).expect("serialize stored routing policy");
+        let routing_row = DbRow::new(BTreeMap::from([(
+            "routing_policy_json".to_string(),
+            Value::from(stored_policy_json),
+        )]));
+        let db = Arc::new(RecordingDbPlugin::with_missing_transaction_lock_row(vec![
+            routing_row,
+        ]));
+        let repo = MySqlGroupStore::new(db, "local".to_string());
+        let mut group = Group::new("group-1", "driver", Vec::new());
+        group.routing_policy = Some(policy);
+        let expected_version = group.version;
+        repo.cache.write().await.insert(group.id.clone(), group);
+
+        let error = repo
+            .commit_eventful_mutation(CommitGroupEventfulMutation {
+                group_id: "group-1".to_string(),
+                expected_version,
+                mutated_at_ms: 1,
+                mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch {
+                    default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+                    ..Default::default()
+                }),
+                event: None,
+            })
+            .await
+            .expect_err("a missing guarded lock row must be reported as a conflict");
+
+        assert!(
+            matches!(error, ServiceError::Conflict(message) if message.contains("concurrently"))
+        );
+        assert!(repo.cache.read().await.get("group-1").is_none());
+    }
+
+    #[tokio::test]
+    async fn mutable_patch_reports_a_missing_group() {
+        let repo = MySqlGroupStore::new(Arc::new(RecordingDbPlugin::default()), "local".into());
+
+        let error = repo
+            .patch_mutable_fields(
+                "missing-group",
+                GroupMutableFieldsPatch {
+                    default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("missing group must fail");
+
+        assert!(matches!(error, ServiceError::GroupNotFound(id) if id == "missing-group"));
     }
 
     #[tokio::test]
@@ -3950,10 +4263,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mutable_patch_uses_field_scoped_sql() {
-        let db = Arc::new(RecordingDbPlugin::with_first_execute_affected_rows(1));
+    async fn mutable_patch_serializes_routing_policy_before_sql() {
+        let mut policy = RoutingPolicy {
+            mode: bcs_service_api::RoutingMode::Mention,
+            default_bot_final_delivery: DefaultDelivery::SendToDriver,
+            sender_routes: HashMap::from([("driver".to_string(), vec!["observer".to_string()])]),
+        };
+        let stored_policy_json =
+            serde_json::to_string(&policy).expect("serialize stored routing policy");
+        let policy_row = DbRow::new(BTreeMap::from([(
+            "routing_policy_json".to_string(),
+            Value::from(stored_policy_json.as_str()),
+        )]));
+        let db = Arc::new(RecordingDbPlugin {
+            first_execute_affected_rows: 1,
+            query_rows: vec![policy_row],
+            ..Default::default()
+        });
         let repo = MySqlGroupStore::new(db.clone(), "local".to_string());
-        let group = Group::new("group-1", "driver", Vec::new());
+        let mut group = Group::new("group-1", "driver", Vec::new());
+        group.routing_policy = Some(policy.clone());
         repo.cache.write().await.insert(group.id.clone(), group);
 
         repo.patch_mutable_fields(
@@ -3971,17 +4300,21 @@ mod tests {
         assert_eq!(statements.len(), 1);
         let sql = statements[0].sql();
         assert!(sql.contains("label = ?"));
-        assert!(sql.contains("JSON_SET"));
-        assert!(sql.contains("$.default_bot_final_delivery"));
-        assert!(!sql.contains("sender_routes"));
+        assert!(sql.contains("routing_policy_json = ?"));
+        assert!(sql.contains("routing_policy_json <=> ?"));
+        assert!(!sql.contains("JSON_SET"));
+        assert!(!sql.contains("json_set"));
         assert!(!sql.contains("participants"));
+        policy.default_bot_final_delivery = DefaultDelivery::InjectObservers;
+        let policy_json = serde_json::to_string(&policy).expect("serialize routing policy");
         assert_eq!(
             statements[0].params(),
             &[
                 Value::from("Renamed"),
-                Value::from("inject_observers"),
+                Value::from(policy_json),
                 Value::from("group-1"),
                 Value::from("local"),
+                Value::from(stored_policy_json),
             ]
         );
     }

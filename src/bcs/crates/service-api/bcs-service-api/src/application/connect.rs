@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use bcs_domain::edge_permission::{FriendListEntry, PermissionRequest, RequestStatus};
 
 use crate::core::error::ServiceResult;
+use crate::principal::RequestAuthHeaders;
 
 /// Outcome of `create_connect`. Mirrors `POST /friends/request` response.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,7 +21,7 @@ pub enum ConnectStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectResult {
     pub request_ids: Vec<String>,
-    pub edge_ids: Vec<String>,
+    pub edge_ids: Vec<u64>,
     pub status: ConnectStatus,
     pub auto_accepted: bool,
 }
@@ -53,11 +54,12 @@ pub trait ConnectService: Send + Sync {
         caller: &str,
         to_bot: &str,
         message: Option<String>,
+        request_auth: Option<RequestAuthHeaders>,
     ) -> ServiceResult<ConnectResult>;
 
     /// Owner (or auto) approves; same-tx builds edge(s) + back-fills request.edge_id.
     /// Returns created edge_ids. Idempotent on already-approved.
-    async fn approve(&self, request_id: &str, decider: &str) -> ServiceResult<Vec<String>>;
+    async fn approve(&self, request_id: &str, decider: &str) -> ServiceResult<Vec<u64>>;
 
     async fn reject(
         &self,
@@ -74,7 +76,7 @@ pub trait ConnectService: Send + Sync {
 
     /// Unfriend: revoke friend edge(s) only (human→bot 1 / bot↔bot 2). Other edges untouched.
     /// Returns the revoked edge_ids.
-    async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<Vec<String>>;
+    async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<Vec<u64>>;
 
     /// Friend list (any direction, default-profile edge), enriched.
     async fn list_friends(&self, actor: &str) -> ServiceResult<Vec<FriendListEntry>>;

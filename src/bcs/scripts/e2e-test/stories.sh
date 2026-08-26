@@ -1347,15 +1347,15 @@ print(json.dumps({
 # User story: A provider operator publishes, governs, and retires a provider-backed agent.
 #
 # Flow:
-#   Register a provider -> configure stream rollout -> inspect and update metadata
+#   Register a provider -> inspect and update metadata
 #   -> publish and list an agent -> exercise runtime callbacks and guardrails
-#   -> disable and re-enable the provider -> retire the agent -> restore rollout state.
+#   -> disable and re-enable the provider -> retire the agent.
 #
 # Critical assertions:
 #   - Provider registration returns admin, callback, and runtime credentials as applicable.
 #   - Provider and agent identities remain stable across update and list operations.
 #   - Unknown callbacks and unauthorized delivery takeover fail with precise errors.
-#   - Disable/enable and retirement are observable, and temporary rollout state is restored.
+#   - Disable/enable and retirement are observable.
 story_provider_operator_publishes_agent() {
     info "Story: provider operator registers a provider, publishes an agent, and retires it"
 
@@ -1370,16 +1370,6 @@ story_provider_operator_publishes_agent() {
     assert_not_empty "provider registration returns admin token" "$admin_token"
     assert_not_empty "provider registration returns BCS callback token" "$bcs_token"
     [[ -n "$provider_id" && -n "$admin_token" ]] || return
-
-    api_get "/providers/stream-gray"
-    require_status "operator reads provider streaming rollout" "200" || return
-    assert_json_not_empty "stream rollout exposes enabled flag" "$RESPONSE" "enabled"
-
-    api_put "/providers/stream-gray" \
-        "{\"enabled\":true,\"created_by\":[\"${BCS_MOCK_USER_ID}\"]}"
-    require_status "operator enables streaming for the current owner" "200" || return
-    assert_json_eq "stream rollout is enabled" "$RESPONSE" "enabled" "true"
-    assert_json_array_contains "stream rollout contains current owner" "$RESPONSE" "created_by" "$BCS_MOCK_USER_ID"
 
     api_request_headers GET "/providers/${provider_id}" "" \
         "Authorization: Bearer ${admin_token}"
@@ -1408,6 +1398,18 @@ story_provider_operator_publishes_agent() {
     assert_json_eq "provider agent keeps provider ref" "$RESPONSE" "provider_bot_ref" "$provider_bot_ref"
     [[ -n "$provider_bot_uuid" && -n "$runtime_token" ]] || return
 
+    # PATCH /providers/{provider_id}/bots/{provider_bot_ref} updates the bot's
+    # capabilities in place without rotating bot_uuid or the runtime token.
+    api_request_headers PATCH "/providers/${provider_id}/bots/${provider_bot_ref}" \
+        '{"name":"Provider Review Agent (Senior)","domains":["release","audit"],"scopes":[]}' \
+        "Authorization: Bearer ${admin_token}"
+    require_status "operator patches provider bot capabilities" "200" || return
+    assert_json_eq "patch keeps provider bot id stable" "$RESPONSE" "bot_uuid" "$provider_bot_uuid"
+    assert_json_eq "patch keeps provider ref stable" "$RESPONSE" "provider_bot_ref" "$provider_bot_ref"
+    assert_json_eq "patch updates bot name" "$RESPONSE" "name" "Provider Review Agent (Senior)"
+    assert_json_eq "patch appends domain" "$RESPONSE" "domains" "[\"release\",\"audit\"]"
+    assert_json_eq "patch clears scopes" "$RESPONSE" "scopes" "[]"
+
     # This fixture Provider is intentionally not in the backend-only allowlist.
     # Exercise both endpoints and freeze the fail-closed boundary before any
     # attribute write can reach the shared control-plane service.
@@ -1434,19 +1436,14 @@ print("1" if any(i.get("bot_uuid") == target for i in d.get("items", [])) else "
 ' "$provider_bot_uuid" 2>/dev/null || echo 0)
     assert_eq "published provider agent appears in provider list" "$listed_bot" "1"
 
+    # by-task-modes is now admission-gated by the same backend-only allowlist
+    # as Bot attributes and delivery switch. This fixture Provider is
+    # intentionally not listed (standalone allowlist is empty), so the roster
+    # must fail closed (403) like the attribute reads above.
     api_request_headers GET "/providers/${provider_id}/bots/by-task-modes" "" \
         "Authorization: Bearer ${admin_token}"
-    require_status "operator lists task-mode roster" "200" || return
-    local roster_items
-    roster_items=$(printf '%s' "$RESPONSE" | python3 -c '
-import json,sys
-try:
-    d=json.load(sys.stdin)
-    print("1" if isinstance(d.get("items"), list) else "0")
-except Exception:
-    print("0")
-' 2>/dev/null || echo 0)
-    assert_eq "task-mode roster returns an items array" "$roster_items" "1"
+    require_status "unapproved provider cannot list task-mode roster" "403" || return
+    assert_contains "task-mode roster guardrail names provider allow-list" "$RESPONSE" "not allowed to access the task-mode roster"
 
     api_request_headers POST "/providers/agentpass/resolve" '{}' \
         "X-BCN-Provider-Id: ${provider_id}" \
@@ -1496,11 +1493,6 @@ except Exception:
         "Authorization: Bearer ${admin_token}"
     require_status "operator verifies provider agent retirement" "200" || return
     assert_json_eq "provider agent list is empty after retirement" "$RESPONSE" "items" "[]"
-
-    api_put "/providers/stream-gray" '{"enabled":false,"created_by":[]}'
-    require_status "operator restores provider streaming rollout" "200" || return
-    assert_json_eq "stream rollout is restored to disabled" "$RESPONSE" "enabled" "false"
-    assert_json_eq "stream rollout owner list is cleared" "$RESPONSE" "created_by" "[]"
 }
 
 _story_provider_manages_organization() {

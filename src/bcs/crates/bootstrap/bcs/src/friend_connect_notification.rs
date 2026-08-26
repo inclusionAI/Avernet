@@ -51,6 +51,25 @@ impl HttpFriendConnectNotificationPort {
         url.query_pairs_mut().append_pair("user_id", user_id);
         Ok(url)
     }
+
+    fn build_request(
+        &self,
+        command: &FriendConnectNotificationCommand,
+    ) -> Result<reqwest::RequestBuilder, ServiceError> {
+        let user_id = event_actor_user_id(command);
+        let url = self.work_order_url(&user_id)?;
+        let payload = FriendWorkOrderEventRequest::from_command(command);
+        let mut request = self.client.post(url);
+        if let Some(auth) = command.request_auth.as_ref() {
+            if let Some(cookie) = auth.cookie.as_deref() {
+                request = request.header(reqwest::header::COOKIE, cookie);
+            }
+            if let Some(authorization) = auth.authorization.as_deref() {
+                request = request.header(reqwest::header::AUTHORIZATION, authorization);
+            }
+        }
+        Ok(request.json(&payload))
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -196,7 +215,11 @@ impl FriendWorkOrderEventRequest {
             event_category: event_category_for(command.kind).to_string(),
             event_type: event_type.to_string(),
             biz_type: "BOT_FRIEND".to_string(),
-            biz_id: command.request_ids.first().cloned().unwrap_or_default(),
+            biz_id: command
+                .request_ids
+                .first()
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
             applicant_user_id,
             approver_user_ids,
             recipient_user_ids,
@@ -214,13 +237,8 @@ impl FriendConnectNotificationPort for HttpFriendConnectNotificationPort {
         if command.recipient_user_ids.is_empty() {
             return Ok(());
         }
-        let user_id = event_actor_user_id(&command);
-        let url = self.work_order_url(&user_id)?;
-        let payload = FriendWorkOrderEventRequest::from_command(&command);
         let response = self
-            .client
-            .post(url)
-            .json(&payload)
+            .build_request(&command)?
             .send()
             .await
             .map_err(|error| ServiceError::InternalError(format!(
@@ -254,28 +272,63 @@ mod tests {
             .notify(FriendConnectNotificationCommand {
                 kind: FriendConnectNotificationKind::Reviewed,
                 env: "dev".to_string(),
-                request_ids: vec!["req_3".to_string()],
+                request_ids: vec!["3".to_string()],
                 applicant_actor_id: "bot_1001".to_string(),
                 target_bot_id: "bot_2001".to_string(),
                 recipient_user_ids: Vec::new(),
                 message: Some("ignored".to_string()),
+                request_auth: None,
             })
             .await
             .expect("empty recipients should short-circuit");
     }
 
-    #[tokio::test]
-    async fn notify_returns_internal_error_when_backend_unreachable() {
-        let adapter = HttpFriendConnectNotificationPort::new("http://127.0.0.1:9").expect("valid url");
-        let result = adapter
-            .notify(FriendConnectNotificationCommand {
+    #[test]
+    fn builds_request_with_forwarded_auth_headers() {
+        let adapter = HttpFriendConnectNotificationPort::new("https://backend.example.com/api/")
+            .expect("valid url");
+        let request_auth = bcs_service_api::RequestAuthHeaders {
+            authorization: Some("Bearer user-token".to_string()),
+            cookie: Some("session=abc".to_string()),
+        };
+        let request = adapter
+            .build_request(&FriendConnectNotificationCommand {
                 kind: FriendConnectNotificationKind::ApprovalRequested,
                 env: "dev".to_string(),
-                request_ids: vec!["req_1".to_string()],
+                request_ids: vec!["1".to_string()],
                 applicant_actor_id: "human_1001".to_string(),
                 target_bot_id: "bot_2001".to_string(),
                 recipient_user_ids: vec!["user_2001".to_string()],
                 message: Some("please add me".to_string()),
+                request_auth: Some(request_auth.clone()),
+            })
+            .expect("build request")
+            .build()
+            .expect("materialize request");
+        assert_eq!(request.url().as_str(), "https://backend.example.com/openapi/v1/bots/work-orders/events?user_id=1001");
+        assert_eq!(request.headers().get(reqwest::header::AUTHORIZATION).and_then(|value| value.to_str().ok()), Some("Bearer user-token"));
+        assert_eq!(request.headers().get(reqwest::header::COOKIE).and_then(|value| value.to_str().ok()), Some("session=abc"));
+    }
+
+    #[tokio::test]
+    async fn notify_returns_internal_error_when_backend_is_unavailable() {
+        let mut adapter = HttpFriendConnectNotificationPort::new("http://127.0.0.1:9")
+            .expect("valid url");
+        adapter.client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_millis(100))
+            .build()
+            .expect("build test client");
+        let result = adapter
+            .notify(FriendConnectNotificationCommand {
+                kind: FriendConnectNotificationKind::ApprovalRequested,
+                env: "dev".to_string(),
+                request_ids: vec!["1".to_string()],
+                applicant_actor_id: "human_1001".to_string(),
+                target_bot_id: "bot_2001".to_string(),
+                recipient_user_ids: vec!["user_2001".to_string()],
+                message: Some("please add me".to_string()),
+                request_auth: None,
             })
             .await;
         assert!(matches!(result, Err(ServiceError::InternalError(message)) if message.contains("friend work-order create request failed")));
@@ -286,17 +339,18 @@ mod tests {
         let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::ApprovalRequested,
             env: "dev".to_string(),
-            request_ids: vec!["req_1".to_string()],
+            request_ids: vec!["1".to_string()],
             applicant_actor_id: "human_1001".to_string(),
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
             message: Some("please add me".to_string()),
+            request_auth: None,
         });
 
         assert_eq!(payload.event_category, "APPROVAL");
         assert_eq!(payload.event_type, "HUMAN2BOT_FRIEND_APPLIED");
         assert_eq!(payload.biz_type, "BOT_FRIEND");
-        assert_eq!(payload.biz_id, "req_1");
+        assert_eq!(payload.biz_id, "1");
         assert_eq!(payload.applicant_user_id.as_deref(), Some("1001"));
         assert_eq!(payload.apply_reason.as_deref(), Some("please add me"));
         assert_eq!(payload.approver_user_ids, vec!["user_2001".to_string()]);
@@ -309,7 +363,7 @@ mod tests {
         assert_eq!(
             payload.biz_data,
             Some(serde_json::json!({
-                "request_ids": ["req_1"],
+                "request_ids": ["1"],
                 "applicant_actor_id": "human_1001",
                 "target_bot_id": "bot_2001",
                 "notification_kind": "approval_requested",
@@ -323,11 +377,12 @@ mod tests {
         let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::AutoApproved,
             env: "dev".to_string(),
-            request_ids: vec!["req_2".to_string()],
+            request_ids: vec!["2".to_string()],
             applicant_actor_id: "bot_1001".to_string(),
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
             message: None,
+            request_auth: None,
         });
 
         assert_eq!(payload.event_category, "NOTICE");
@@ -343,11 +398,12 @@ mod tests {
         let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::ApprovalRequested,
             env: "dev".to_string(),
-            request_ids: vec!["req_4".to_string()],
+            request_ids: vec!["4".to_string()],
             applicant_actor_id: "bot_1001".to_string(),
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
             message: Some("bot-to-bot".to_string()),
+            request_auth: None,
         });
 
         assert_eq!(payload.event_category, "APPROVAL");
@@ -368,11 +424,12 @@ mod tests {
         let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::Reviewed,
             env: "dev".to_string(),
-            request_ids: vec!["req_5".to_string()],
+            request_ids: vec!["5".to_string()],
             applicant_actor_id: "human_1001".to_string(),
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
             message: Some("handled".to_string()),
+            request_auth: None,
         });
 
         assert_eq!(payload.event_category, "NOTICE");
@@ -404,22 +461,24 @@ mod tests {
         let pending = FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::ApprovalRequested,
             env: "dev".to_string(),
-            request_ids: vec!["req_1".to_string()],
+            request_ids: vec!["1".to_string()],
             applicant_actor_id: "human_1001".to_string(),
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
             message: None,
+            request_auth: None,
         };
         assert_eq!(event_actor_user_id(&pending), "1001");
 
         let notice = FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::Reviewed,
             env: "dev".to_string(),
-            request_ids: vec!["req_1".to_string()],
+            request_ids: vec!["1".to_string()],
             applicant_actor_id: "bot_1001".to_string(),
             target_bot_id: "bot_2001".to_string(),
             recipient_user_ids: vec!["user_2001".to_string()],
             message: None,
+            request_auth: None,
         };
         assert_eq!(event_actor_user_id(&notice), "user_2001");
     }

@@ -12,8 +12,20 @@ import time
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
+)
+from agentclaw.community.api.skill_set_management_service import (
+    SkillSetManagementServiceProtocol,
+)
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.services.direct_activation_service import (
+    DirectActivationService,
+)
+from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
+    PlatformDefaultMcpPolicy,
 )
 from agentclaw.community.core.skill_center.authorization_hook import (
     BotCapabilityAuthorizationHookProtocol,
@@ -23,12 +35,12 @@ from agentclaw.community.core.repository.protocols.bot import (
     BotRepository,
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
-    SkillSetControlPlaneRepositoryProtocol,
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
-    SkillSetControlPlaneService,
+from agentclaw.community.core.skill_center.services.skill_set_management_service import (
+    SkillSetManagementService,
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
@@ -68,7 +80,7 @@ class _Runtime:
     async def snapshot_skill_mappings(self, **_kwargs):
         return ()
 
-    async def reconcile(
+    async def project(
         self, *, bot_id: str, owner_id: str, retired_mappings=()
     ) -> None:
         self.calls.append((bot_id, owner_id))
@@ -123,7 +135,7 @@ def _seed(world, *, member: bool = False) -> None:
                 "active_engine": "openclaw",
             }
         )
-        repository = world.get(SkillSetControlPlaneRepositoryProtocol)
+        repository = world.get(CapabilityDesiredStateRepositoryProtocol)
         skill_set = repository.create_set(
             bot_id=_BOT_ID,
             owner_id=_OWNER,
@@ -153,8 +165,8 @@ def _seed(world, *, member: bool = False) -> None:
                 engine_type="openclaw",
             )
     runtime = _Runtime()
-    control_plane = SkillSetControlPlaneService(
-        repository=world.get(SkillSetControlPlaneRepositoryProtocol),
+    control_plane = SkillSetManagementService(
+        repository=world.get(CapabilityDesiredStateRepositoryProtocol),
         bot_repo=world.get(BotRepository),
         runtime=runtime,
         legacy_factory=world.get(SkillSetServiceFactory),
@@ -163,9 +175,26 @@ def _seed(world, *, member: bool = False) -> None:
         audit_log_repo=world.get(BotCollabLogRepositoryProtocol),
         mcp_center=world.get(MCPCenterPlugin),
         mcp_auth=world.get(MCPAuthPlugin),
+        ext_info_provider=lambda _bot_id: None,
     )
     world.injector.binder.bind(
-        SkillSetControlPlaneServiceProtocol, to=control_plane, scope=None
+        SkillSetManagementServiceProtocol, to=control_plane, scope=None
+    )
+    # The direct-activation routes share the recording runtime, so
+    # ``_assert_reconciled`` observes their projection the same way.
+    direct = DirectActivationService(
+        world.get(CapabilityDesiredStateRepositoryProtocol),
+        world.get(BotRepository),
+        world.get(SkillRepository),
+        runtime,
+        world.get(BotCapabilityAuthorizationHookProtocol),
+        world.get(BotCollabLogRepositoryProtocol),
+        world.get(MCPCenterPlugin),
+        world.get(BotCapabilityStateReaderProtocol),
+        PlatformDefaultMcpPolicy(lambda _bot_id: None),
+    )
+    world.injector.binder.bind(
+        DirectActivationServiceProtocol, to=direct, scope=None
     )
 
 
@@ -176,7 +205,7 @@ def _seed_member(world) -> None:
 def _seed_active(world) -> None:
     _seed_member(world)
     with avernet_tenant_scope(_TENANT):
-        world.get(SkillSetControlPlaneRepositoryProtocol).set_active(
+        world.get(CapabilityDesiredStateRepositoryProtocol).set_skill_set_active(
             bot_id=_BOT_ID,
             owner_id=_OWNER,
             set_id="1",
@@ -186,7 +215,7 @@ def _seed_active(world) -> None:
 
 
 def _assert_reconciled(_response, world) -> None:
-    assert world.get(SkillSetControlPlaneServiceProtocol)._runtime.calls == [
+    assert world.get(SkillSetManagementServiceProtocol)._runtime.calls == [
         (_BOT_ID, _OWNER)
     ]
 
@@ -474,7 +503,7 @@ def deactivate_error():
 def _seed_mcp_member(world) -> None:
     _seed(world)
     with avernet_tenant_scope(_TENANT):
-        world.get(SkillSetControlPlaneRepositoryProtocol).add_mcp(
+        world.get(CapabilityDesiredStateRepositoryProtocol).add_mcp(
             bot_id=_BOT_ID,
             owner_id=_OWNER,
             set_id="1",
@@ -560,4 +589,198 @@ def deactivate_direct_mcp_happy():
 
 @_case("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate", "missing_bot", ExpectError(status=404), seed=lambda world: init_principal_verifier_config(_Resolver(), "test-key", strict=False))
 def deactivate_direct_mcp_error():
+    pass
+
+
+# ── Default-Set exclusion wire (restored opt-out, spec E.11) ─────────
+
+
+_DEFAULT_SET_PARAMS = {
+    "bot_id": _BOT_ID,
+    "set_id": "2",
+    "skill_id": "1",
+    "server_code": "mcp.default",
+}
+
+
+def _seed_default_member(world) -> None:
+    """The Bot's own Default Set holding skill 1 and one MCP, both flushed."""
+    from agentclaw.community.core.models.mcp import (
+        BotMCPInstallation,
+        SkillSetMCPServer,
+    )
+    from agentclaw.community.core.models.skill import (
+        BotSkillInstallation,
+        SkillSet,
+        SkillSetSkill,
+    )
+    from agentclaw.community.plugin_api.database import DatabasePlugin
+    from agentclaw.community.utils.env_utils import get_current_env
+
+    _seed(world)
+    with avernet_tenant_scope(_TENANT):
+        env = get_current_env()
+        with world.get(DatabasePlugin).transactional_orm_session() as session:
+            default = SkillSet(
+                name="Default",
+                user_id=_OWNER,
+                bolt_id=_BOT_ID,
+                engine_type="openclaw",
+                is_default=True,
+                is_active=True,
+                env=env,
+            )
+            session.add(default)
+            session.flush()
+            assert str(default.id) == _DEFAULT_SET_PARAMS["set_id"]
+            session.add_all(
+                [
+                    SkillSetSkill(
+                        skill_set_id=default.id, skill_id=1, env=env
+                    ),
+                    SkillSetMCPServer(
+                        skill_set_id=default.id,
+                        server_code="mcp.default",
+                        name="Default MCP",
+                        env=env,
+                    ),
+                    BotSkillInstallation(
+                        bot_id=_BOT_ID, owner_id=_OWNER, skill_id=1, env=env
+                    ),
+                    BotMCPInstallation(
+                        bot_id=_BOT_ID,
+                        owner_id=_OWNER,
+                        server_code="mcp.default",
+                        env=env,
+                    ),
+                ]
+            )
+
+
+def _seed_excluded_default_member(world) -> None:
+    _seed_default_member(world)
+    with avernet_tenant_scope(_TENANT):
+        world.get(CapabilityDesiredStateRepositoryProtocol).exclude_default_skill(
+            bot_id=_BOT_ID, owner_id=_OWNER, set_id="2", skill_id="1",
+            engine_type="openclaw", default_engine_types=("openclaw",),
+        )
+
+
+def _seed_excluded_default_mcp(world) -> None:
+    _seed_default_member(world)
+    with avernet_tenant_scope(_TENANT):
+        world.get(CapabilityDesiredStateRepositoryProtocol).exclude_default_mcp(
+            bot_id=_BOT_ID, owner_id=_OWNER, set_id="2",
+            server_code="mcp.default",
+            engine_type="openclaw", default_engine_types=("openclaw",),
+        )
+
+
+def _excluded_skill_ids(world) -> set[int]:
+    with avernet_tenant_scope(_TENANT):
+        return world.get(
+            CapabilityDesiredStateRepositoryProtocol
+        ).excluded_default_skill_ids(bot_id=_BOT_ID, owner_id=_OWNER, set_id="2")
+
+
+def _excluded_mcp_codes(world) -> set[str]:
+    with avernet_tenant_scope(_TENANT):
+        return world.get(
+            CapabilityDesiredStateRepositoryProtocol
+        ).excluded_default_mcp_codes(bot_id=_BOT_ID, owner_id=_OWNER, set_id="2")
+
+
+def _assert_skill_excluded(_response, world) -> None:
+    assert _excluded_skill_ids(world) == {1}
+    _assert_reconciled(_response, world)
+
+
+def _assert_skill_unexcluded(_response, world) -> None:
+    assert _excluded_skill_ids(world) == set()
+    _assert_reconciled(_response, world)
+
+
+def _assert_mcp_excluded(_response, world) -> None:
+    assert _excluded_mcp_codes(world) == {"mcp.default"}
+    _assert_reconciled(_response, world)
+
+
+def _assert_mcp_unexcluded(_response, world) -> None:
+    assert _excluded_mcp_codes(world) == set()
+    _assert_reconciled(_response, world)
+
+
+@_case(
+    "DELETE",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}",
+    "excludes_default_member",
+    ExpectSuccess(status=200, json_contains={"data": {"changed": True}}),
+    seed=_seed_default_member,
+    path_params=_DEFAULT_SET_PARAMS,
+    extra=(_assert_skill_excluded,),
+)
+def remove_default_member_excludes():
+    """Removing a Default-Set member writes the per-Bot exclusion (E.11)."""
+
+
+@_case(
+    "PUT",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}",
+    "unexcludes_default_member",
+    ExpectSuccess(status=200, json_contains={"data": {"changed": True}}),
+    seed=_seed_excluded_default_member,
+    path_params=_DEFAULT_SET_PARAMS,
+    extra=(_assert_skill_unexcluded,),
+)
+def add_excluded_default_member_unexcludes():
+    """Adding an excluded member back removes the exclusion, never the API."""
+
+
+@_case(
+    "PUT",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}",
+    "default_membership_stays_immutable",
+    ExpectError(status=409, json_contains={"code": 409204}),
+    seed=_seed_default_member,
+    path_params=_DEFAULT_SET_PARAMS,
+)
+def add_new_default_member_refused():
+    """A non-excluded skill cannot join the Default Set."""
+
+
+@_case(
+    "DELETE",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}",
+    "excludes_default_mcp",
+    ExpectSuccess(status=200, json_contains={"data": {"changed": True}}),
+    seed=_seed_default_member,
+    path_params=_DEFAULT_SET_PARAMS,
+    extra=(_assert_mcp_excluded,),
+)
+def remove_default_mcp_excludes():
+    pass
+
+
+@_case(
+    "PUT",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}",
+    "unexcludes_default_mcp",
+    ExpectSuccess(status=200, json_contains={"data": {"changed": True}}),
+    seed=_seed_excluded_default_mcp,
+    path_params=_DEFAULT_SET_PARAMS,
+    extra=(_assert_mcp_unexcluded,),
+)
+def add_excluded_default_mcp_unexcludes():
+    pass
+
+
+@_case(
+    "PUT",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}",
+    "default_mcp_membership_stays_immutable",
+    ExpectError(status=409, json_contains={"code": 409204}),
+    seed=_seed_default_member,
+    path_params={**_DEFAULT_SET_PARAMS, "server_code": "mcp.never-member"},
+)
+def add_new_default_mcp_refused():
     pass

@@ -17,6 +17,9 @@ from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.devices.services.baas_invoke_transport import (
+    build_desktop_client,
+)
 from agentclaw.community.core.devices.services.device_context import UnknownProviderError
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.log import get_logger
@@ -44,6 +47,12 @@ class DefaultDeviceFileSystemResolver:
         self._bot_repo = bot_repo
         self._binding_repo = binding_repo
         self._sandbox_client = sandbox_client
+        # One pooled HTTP client shared by every desktop transport this resolver
+        # mints. Owned here because this resolver is a singleton, so the pool's
+        # lifetime is the process without a module-level lazy singleton. Built
+        # eagerly and cheaply — ``httpx.Client`` opens no connection until its
+        # first request — so desktop bots never pay a TLS handshake per file.
+        self._desktop_client = build_desktop_client()
 
     def __call__(
         self, ctx: "DeviceContext", path_mapper: Callable[[str], str]
@@ -72,6 +81,7 @@ class DefaultDeviceFileSystemResolver:
                     bot_uuid=conn_info["paas_device_id"],
                     engine_port=engine_port,
                     headers=conn_info.get("headers", {}),
+                    client=self._desktop_client,
                 )
                 logger.info(
                     "[DEVICE-PLUGIN-DEBUG] → DesktopBaasDeviceFileSystem(paas_device_id=%s)",

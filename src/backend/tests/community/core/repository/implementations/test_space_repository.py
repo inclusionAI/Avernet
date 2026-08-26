@@ -36,11 +36,11 @@ def db():
     reset_for_tests()
 
 
-def _team(spaces: SpaceRepository, name="Team", creator="owner-1"):
+def _team(spaces: SpaceRepository, name="Team", creator="owner-1", suffix=""):
     with spaces.create_team_transaction(
-        name=name, creator_id=creator, env="dev"
+        name=name, creator_id=creator, creator_user_name=None, env="dev"
     ) as row:
-        row.sc_team_id = f"sc-{name}-{creator}"
+        row.sc_team_id = f"sc-{name}-{creator}{suffix}"
         return row
 
 
@@ -53,7 +53,9 @@ def test_create_personal_transaction_preserves_unrelated_integrity_error() -> No
     repository.get_personal_space = MagicMock(return_value=None)
 
     with pytest.raises(IntegrityError) as raised:
-        with repository.create_personal_transaction(user_id="user-1", env="dev"):
+        with repository.create_personal_transaction(
+            user_id="user-1", creator_user_name=None, env="dev"
+        ):
             pass
 
     assert raised.value is original
@@ -69,7 +71,9 @@ def test_create_personal_transaction_translates_unique_race() -> None:
     repository.get_personal_space = MagicMock(return_value=object())
 
     with pytest.raises(SpaceAlreadyExistsError, match="personal space already exists"):
-        with repository.create_personal_transaction(user_id="user-1", env="dev"):
+        with repository.create_personal_transaction(
+            user_id="user-1", creator_user_name=None, env="dev"
+        ):
             pass
 
 
@@ -79,7 +83,7 @@ def test_initialize_personal_recovers_after_concurrent_unique_race() -> None:
     repository.get_personal_space = MagicMock(side_effect=[None, winner])
 
     @contextmanager
-    def conflicting_transaction(*, user_id: str, env: str):
+    def conflicting_transaction(*, user_id: str, creator_user_name: str | None, env: str):
         raise SpaceAlreadyExistsError("personal space already exists")
         yield  # pragma: no cover - contextmanager requires a generator
 
@@ -96,7 +100,7 @@ def test_initialize_personal_reraises_race_when_winner_is_not_visible() -> None:
     repository.get_personal_space = MagicMock(side_effect=[None, None])
 
     @contextmanager
-    def conflicting_transaction(*, user_id: str, env: str):
+    def conflicting_transaction(*, user_id: str, creator_user_name: str | None, env: str):
         raise SpaceAlreadyExistsError("personal space already exists")
         yield  # pragma: no cover - contextmanager requires a generator
 
@@ -112,6 +116,69 @@ def test_personal_sc_binding_rejects_missing_space(db) -> None:
     with pytest.raises(SpaceNotFoundError, match="personal space 999 not found"):
         with repository.personal_sc_team_binding_transaction(space_id=999, env="dev"):
             pass
+
+
+def test_space_creation_persists_creator_user_name_and_lists_it(db) -> None:
+    repository = SpaceRepository(db)
+    with repository.create_personal_transaction(
+        user_id="personal-1", creator_user_name="Personal Creator", env="dev"
+    ) as personal:
+        personal.sc_team_id = "sc-personal"
+    with repository.create_team_transaction(
+        name="Team", creator_id="team-owner", creator_user_name="Team Creator", env="dev"
+    ) as team:
+        team.sc_team_id = "sc-team"
+
+    assert repository.get_member(
+        space_id=personal.id, user_id="personal-1", env="dev"
+    ).user_name == "Personal Creator"
+    assert repository.get_member(
+        space_id=team.id, user_id="team-owner", env="dev"
+    ).user_name == "Team Creator"
+
+    _, summaries = repository.list_spaces(
+        user_id="team-owner", env="dev", keyword=None, space_type=None, offset=0, limit=20
+    )
+    assert next(item for item in summaries if item.space.id == team.id).creator_user_name == "Team Creator"
+
+
+def test_get_team_space_by_name_filters_creator_environment_type_and_deleted_rows(db) -> None:
+    repository = SpaceRepository(db)
+    matching = _team(repository, name="Same", creator="owner-1")
+    _team(repository, name="Same", creator="owner-2")
+    _team(repository, name="Same", creator="owner-1", suffix="-duplicate")
+
+    with repository.create_personal_transaction(
+        user_id="owner-1", creator_user_name=None, env="dev"
+    ) as personal:
+        personal.sc_team_id = "sc-personal"
+
+    with repository.create_team_transaction(
+        name="Same", creator_id="owner-1", creator_user_name=None, env="pre"
+    ) as other_env:
+        other_env.sc_team_id = "sc-pre"
+
+    with db.transactional_orm_session() as session:
+        session.query(SpaceModel).filter(SpaceModel.id == matching.id).update(
+            {SpaceModel.deleted_at: datetime(2026, 8, 25, 12, 0, 0)}
+        )
+
+    result = repository.get_team_space_by_name(
+        creator_id="owner-1", name="Same", env="dev"
+    )
+    assert result is not None
+    assert result.created_by == "owner-1"
+    assert result.name == "Same"
+    assert result.space_type is SpaceType.TEAM
+    assert repository.get_team_space_by_name(
+        creator_id="owner-1", name="Same", env="pre"
+    ).id == other_env.id
+    assert repository.get_team_space_by_name(
+        creator_id="missing", name="Same", env="dev"
+    ) is None
+    assert repository.get_team_space_by_name(
+        creator_id="owner-1", name="个人空间", env="dev"
+    ) is None
 
 
 def test_space_repository_full_member_lifecycle(db) -> None:
@@ -142,7 +209,9 @@ def test_space_repository_full_member_lifecycle(db) -> None:
         == "sc-Team-owner-1"
     )
     assert repository.get_space(space_id=999, env="dev") is None
-    assert repository.get_space_by_code(space_code=team.space_code, env="dev") == team
+    assert repository.get_space_by_code(space_code=team.space_code, env="dev").model_dump(
+        exclude={"gmt_created", "gmt_modified"}
+    ) == team.model_dump(exclude={"gmt_created", "gmt_modified"})
     assert repository.get_space_by_code(space_code="missing", env="dev") is None
 
     other_env_personal, _ = repository.initialize_personal(

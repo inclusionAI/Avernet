@@ -118,18 +118,11 @@ def initialize_services(container: containers.DeclarativeContainer) -> None:
     logger.info("Building authenticator …")
     plugins = container.plugins()
     from ._authn import build_authenticator
-    from ._configs import DatabaseConfig
     from ._database import initialize_database
 
     # Initialise the DI-selected database plugin so DB-backed auth strategies
     # and credential issuer/registrar share one ready DataSourcePlugin.
-    initialize_database(
-        plugins.database(),
-        DatabaseConfig(
-            plugin_type=container.config.plugins.database.plugin_database(),
-            db_url=container.config.plugins.database.database_url(),
-        ),
-    )
+    initialize_database(plugins.database())
 
     container.authenticator.override(
         providers.Singleton(

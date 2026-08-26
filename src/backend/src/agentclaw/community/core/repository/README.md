@@ -95,8 +95,8 @@ provides:
   - RenderScreenRepository
   - TemplateRepository
   - UserMCPConfigRepository
-  - SkillSetControlPlaneRepositoryProtocol
-  - SkillSetControlPlaneRepository
+  - CapabilityDesiredStateRepositoryProtocol
+  - CapabilityDesiredStateRepository
   # spaces / market_favorites
   - SpaceRepositoryProtocol
   - MarketFavoriteRepositoryProtocol
@@ -134,10 +134,13 @@ provides:
   - TaskQueueRepositoryProtocol
   # task
   - TaskInfoRepositoryProtocol
+  - TaskGraphRepositoryProtocol
+  - TaskActionLogRepositoryProtocol
   - TaskNodeRepositoryProtocol
   - TaskNodeRunInfoRepositoryProtocol
   - TaskNodeRelationRepositoryProtocol
   - TaskCallbackRepositoryProtocol
+  - TaskDiscoveryLockRepositoryProtocol
   # publishing
   - BotPublishRepositoryProtocol
   - PublishOperationRepository    # an ABC, not a Protocol — same role, same surface
@@ -147,7 +150,6 @@ provides:
   - SkillMemberRepository
   - SkillPropagationLogRepository
   - SkillRepository
-  - SkillInstallationRepositoryProtocol
   - SpaceSkillRepository
   - SkillSetRepository
   # skills_pool
@@ -194,16 +196,18 @@ provides:
   - OrmPublishOperationRepository
   # skill_center
   - SpaceSkillRepository
-  - SkillInstallationRepository
   # skills_pool
   - SkillsPoolLayoutRepository
   - SkillsPoolRolloutRepository
   # task
   - TaskInfoRepository
+  - TaskGraphRepository
+  - TaskActionLogRepository
   - TaskNodeRepository
   - TaskNodeRunInfoRepository
   - TaskNodeRelationRepository
   - TaskCallbackRepository
+  - TaskDiscoveryLockRepository
 consumes:
   - DatabasePlugin                # the per-profile session seam, injected into every implementation
   - get_current_env               # environment scoping (utils.env_utils)

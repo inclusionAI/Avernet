@@ -53,6 +53,7 @@ class BotInventoryService:
         keyword: str | None,
         engine: str | None,
         deploy_mode: DeployMode | None,
+        is_service: bool | None = None,
         bot_ids: list[str] | None = None,
         page: int,
         page_size: int,
@@ -66,6 +67,14 @@ class BotInventoryService:
                 engine=engine,
                 bot_ids=bot_ids,
             )
+            if is_service is True:
+                cloud_rows = [
+                    row for row in cloud_rows if row.get("bot_type") == "service"
+                ]
+            elif is_service is False:
+                cloud_rows = [
+                    row for row in cloud_rows if row.get("bot_type") != "service"
+                ]
             service_rows = [
                 row for row in cloud_rows if row.get("bot_type") == "service"
             ]
@@ -95,8 +104,10 @@ class BotInventoryService:
                     )
                     for lifecycle_card in service_cards.get(bot_id, ())
                 )
-        if deploy_mode in (None, DeployMode.LOCAL) and (
-            space is None or space.kind == "personal"
+        if (
+            is_service is not True
+            and deploy_mode in (None, DeployMode.LOCAL)
+            and (space is None or space.kind == "personal")
         ):
             cards.extend(
                 self._to_local_item(row, owner_id, space, PermissionLevel.OWNER)
@@ -344,16 +355,37 @@ class BotInventoryService:
         if level >= PermissionLevel.OWNER:
             return actions, disabled
         if kind is BotInventoryKind.SERVICE and level >= PermissionLevel.MEMBER:
-            allowed = tuple(action for action in actions if action is not BotAction.DELETE)
+            allowed = tuple(
+                action
+                for action in actions
+                if action is not BotAction.DELETE
+                and not (
+                    action is BotAction.UPGRADE and level < PermissionLevel.ADMIN
+                )
+            )
             if BotAction.DELETE in actions:
                 disabled.setdefault(
                     BotAction.DELETE.value, "Bot Owner permission required"
                 )
+            if BotAction.UPGRADE in actions and level < PermissionLevel.ADMIN:
+                disabled.setdefault(
+                    BotAction.UPGRADE.value, "Bot Admin permission required"
+                )
             return allowed, disabled
+        # MEMBER is defined as "edit content only": editing (skills/skill-sets,
+        # whose endpoints gate on PermissionLevel.MEMBER) stays available to
+        # collaborators on every card kind, while the owner-scoped actions
+        # (restart/delete/update...) remain disabled. NONE keeps view-only.
+        kept = [
+            action
+            for action in actions
+            if action is BotAction.EDIT and level >= PermissionLevel.MEMBER
+        ]
         for action in actions:
-            if action is not BotAction.VIEW:
-                disabled.setdefault(action.value, "Bot editor permission required")
-        return (BotAction.VIEW,), disabled
+            if action is BotAction.VIEW or action in kept:
+                continue
+            disabled.setdefault(action.value, "Bot editor permission required")
+        return (BotAction.VIEW, *kept), disabled
 
 
 def _as_mapping(value: Any) -> Mapping[str, Any]:

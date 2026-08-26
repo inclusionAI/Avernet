@@ -58,9 +58,6 @@ class SystemConfigKey(StrEnum):
     """
 
     # Add more system config keys here as needed
-    # Example:
-    # ARCA_DEFAULT_TIMEOUT = "arca.default_timeout"
-    # ARCA_BASE_URL = "arca.base_url"
 
     # Chunk cleanup configuration
     CHUNK_CLEANUP_ENABLED = "bot_run.chunk_cleanup_enabled"
@@ -79,4 +76,15 @@ class SystemConfigKey(StrEnum):
     Usage: When enabled, BCN requests (metadata.bot_options.from_bcn == "true")
     use QueueTaskMessageDispatcher instead of TaskMessageDispatcher, unless
     overridden by a more specific dispatcher_route config.
+    """
+
+    # ── 评测环境开关配置 ──────────────────────────────────────────────────
+
+    EVAL_ENV_ENABLED = "bot_run.eval_env_enabled"
+    """评测环境路由开关，关闭时降级走 online 生产路由。
+
+    Value: "true" or "false" (default: "false")
+    Usage: 当 Default/Eval 区服务 Bot 出现部署失败、服务不可用等异常时，
+    关闭此开关使 eval 生命周期阶段的请求降级走 online 生产路由，
+    避免 eval 路由指向不可用的评测容器。
     """

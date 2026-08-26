@@ -85,6 +85,7 @@ X-BCN-Timestamp: <unix-ms>
 | `method` | 全部 | 下行方法名。 |
 | `to_bot.provider_id` | `chat.send` / `chat.inject` / `chat.history` / `chat.abort` | 目标 Provider ID，Provider 必须校验它与自身一致。 |
 | `to_bot.provider_bot_ref` | 同上 | Provider 内部 bot 标识，用于路由到自己的 bot runtime。 |
+| `to_bot.tags` | `chat.send` / `chat.inject` | 目标参与者在当前 Session 中配置的路由标签；未配置时省略或为空列表。 |
 | `session_id` | `chat.send` / `chat.inject` / `chat.history` / `chat.abort` | 会话标识，Provider 按它维护上下文。 |
 | `message` | `chat.send` / `chat.inject` | 当前下发消息。 |
 | `timeout_ms` | `chat.send` / `chat.inject` / `chat.history` | 下游操作超时。对于 `bcs-cli chat` 发起的 A2A 直聊 `chat.send`，BCS 固定下发 2 小时执行预算（`7200000` 毫秒），与 CLI 的轮询超时相互独立。 |

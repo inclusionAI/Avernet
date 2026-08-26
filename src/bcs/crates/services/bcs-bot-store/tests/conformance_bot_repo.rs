@@ -2,11 +2,14 @@ use std::sync::Arc;
 
 use bcs_bot_store::{PersistentBotRepo, MemoryBotRepo};
 use bcs_cache_local::InMemoryCachePlugin;
-use bcs_db_api::{DbPlugin, DbStatement, DbValue as Value};
+use bcs_db_api::{
+    DbError, DbExecuteResult, DbHealth, DbPlugin, DbRow, DbStatement, DbTransactionStep,
+    DbTransactionStepResult, DbValue as Value,
+};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCapabilities, BotMetricsSnapshotPort, BotRepoPort,
-    ConnectStreamError, mock_token,
+    ConnectStreamError, ServiceError, Skill, mock_token,
 };
 use bcs_test_support::contract::port::bot_metrics_snapshot_port_contract_tests;
 use bcs_test_support::contract::repo::bot_repo_port_contract_tests;
@@ -95,6 +98,61 @@ async fn persistent_bot_repo_unregister_marks_is_deleted_and_filters_default_rea
 }
 
 #[tokio::test]
+async fn persistent_bot_repo_list_active_fails_closed_when_tombstone_query_fails() {
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    let inner_db = sqlite_db().await;
+    let db = Arc::new(FailActiveBotIdsQueryDb {
+        inner: inner_db.clone(),
+    });
+    let repo = PersistentBotRepo::with_plugins(cache, db);
+    repo.register_with_owner_and_token(
+        "soft-delete-bot".to_string(),
+        BotCapabilities {
+            name: Some("Soft Delete Bot".to_string()),
+            visibility: "public".to_string(),
+            ..Default::default()
+        },
+        "11111111",
+        "soft-delete-token",
+    )
+    .await
+    .expect("register bot");
+
+    assert!(repo.unregister("soft-delete-bot").await);
+
+    repo.register_with_owner_and_token(
+        "soft-delete-bot".to_string(),
+        BotCapabilities {
+            name: Some("Re-registered Soft Delete Bot".to_string()),
+            visibility: "public".to_string(),
+            ..Default::default()
+        },
+        "11111111",
+        "new-soft-delete-token",
+    )
+    .await
+    .expect("re-register bot into memory");
+
+    assert_eq!(
+        inner_db
+            .query(DbStatement::with_params(
+                "SELECT is_deleted FROM bcs_bots WHERE bot_uuid = ? AND env = ?",
+                vec![
+                    Value::from("soft-delete-bot"),
+                    Value::from(bcs_config::resolve_env_str()),
+                ],
+            ))
+            .await
+            .expect("query soft deleted row")[0]
+            .get("is_deleted")
+            .and_then(Value::as_i64),
+        Some(1)
+    );
+
+    assert!(repo.list_active().await.is_empty());
+}
+
+#[tokio::test]
 async fn persistent_bot_repo_register_after_soft_delete_does_not_clear_is_deleted_column() {
     let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
@@ -164,6 +222,39 @@ async fn memory_bot_repo_passes_bot_metrics_snapshot_contract() {
     seed_metrics_actors(&repo).await;
     bot_metrics_snapshot_port_contract_tests(&repo).await;
     assert_metrics_actors_counted(&repo).await;
+}
+
+
+struct FailActiveBotIdsQueryDb {
+    inner: Arc<dyn DbPlugin>,
+}
+
+#[async_trait::async_trait]
+impl DbPlugin for FailActiveBotIdsQueryDb {
+    async fn query(&self, statement: DbStatement) -> bcs_db_api::DbResult<Vec<DbRow>> {
+        if statement
+            .sql()
+            .starts_with("SELECT bot_uuid FROM bcs_bots WHERE env = ? AND COALESCE(is_deleted, 0) = 0")
+        {
+            return Err(DbError::Backend("injected active bot ids query failure".to_string()));
+        }
+        self.inner.query(statement).await
+    }
+
+    async fn execute(&self, statement: DbStatement) -> bcs_db_api::DbResult<DbExecuteResult> {
+        self.inner.execute(statement).await
+    }
+
+    async fn transaction(
+        &self,
+        steps: Vec<DbTransactionStep>,
+    ) -> bcs_db_api::DbResult<Vec<DbTransactionStepResult>> {
+        self.inner.transaction(steps).await
+    }
+
+    async fn health_check(&self) -> bcs_db_api::DbResult<DbHealth> {
+        self.inner.health_check().await
+    }
 }
 
 async fn seed_metrics_actors(repo: &dyn BotRepoPort) {
@@ -369,6 +460,234 @@ async fn connect_or_promote_streaming_refuses_real_token_connected_with_already_
         .expect_err("live bot already connected");
     assert!(matches!(err, ConnectStreamError::AlreadyConnected(id) if id == "live-bot:alice"));
     assert_eq!(repo.load_token("live-bot:alice").await.as_deref(), Some(first.as_str()));
+}
+
+#[tokio::test]
+async fn persistent_repo_update_capabilities_replaces_in_memory_and_db() {
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    let db = sqlite_db().await;
+    let repo = PersistentBotRepo::with_plugins(cache, db.clone());
+
+    repo.register(
+        "update-cap-bot".to_string(),
+        BotCapabilities {
+            name: Some("Update Cap Bot".to_string()),
+            domains: vec!["before".to_string()],
+            skills: vec![Skill::new("before_skill")],
+            scopes: vec!["before_scope".to_string()],
+            visibility: "public".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("register bot");
+
+    // update_capabilities replaces capabilities wholesale (no empty-array skip,
+    // unlike register). Clear fields and assert it takes effect in the live
+    // in-memory registry, not only in the DB column.
+    repo.update_capabilities(
+        "update-cap-bot",
+        BotCapabilities {
+            name: Some("Update Cap Bot".to_string()),
+            domains: vec![],
+            skills: vec![Skill::new("after_skill")],
+            scopes: vec![],
+            visibility: "protected".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("update_capabilities");
+
+    let stored = repo.get("update-cap-bot").await.expect("bot present");
+    assert!(
+        stored.capabilities.domains.is_empty(),
+        "domains must be cleared in memory (register would skip empty arrays)"
+    );
+    assert!(stored.capabilities.scopes.is_empty());
+    assert_eq!(
+        stored
+            .capabilities
+            .skills
+            .iter()
+            .map(|s| s.name.clone())
+            .collect::<Vec<_>>(),
+        vec!["after_skill".to_string()]
+    );
+    assert_eq!(stored.capabilities.visibility, "protected");
+
+    let db_reader = PersistentBotRepo::with_plugins(
+        Arc::new(InMemoryCachePlugin::new()),
+        db,
+    );
+    let persisted = db_reader
+        .get("update-cap-bot")
+        .await
+        .expect("bot persisted");
+    assert!(persisted.capabilities.domains.is_empty());
+    assert!(persisted.capabilities.scopes.is_empty());
+    assert_eq!(persisted.capabilities.visibility, "protected");
+}
+
+#[tokio::test]
+async fn persistent_repo_update_capabilities_updates_db_when_memory_is_absent() {
+    let db = sqlite_db().await;
+    let registering_repo = PersistentBotRepo::with_plugins(
+        Arc::new(InMemoryCachePlugin::new()),
+        db.clone(),
+    );
+    registering_repo
+        .register(
+            "db-only-update-cap-bot".to_string(),
+            BotCapabilities {
+                name: Some("Before DB-only Update".to_string()),
+                domains: vec!["before".to_string()],
+                visibility: "private".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("register bot in database");
+
+    // A separate repository instance models a pod that shares the database
+    // but has never loaded this bot into its process-local registry.
+    let updating_repo = PersistentBotRepo::with_plugins(
+        Arc::new(InMemoryCachePlugin::new()),
+        db.clone(),
+    );
+    updating_repo
+        .update_capabilities(
+            "db-only-update-cap-bot",
+            BotCapabilities {
+                name: Some("After DB-only Update".to_string()),
+                domains: vec![],
+                skills: vec![Skill::new("after_skill")],
+                visibility: "protected".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("database-only capability update must succeed");
+
+    let verifying_repo = PersistentBotRepo::with_plugins(
+        Arc::new(InMemoryCachePlugin::new()),
+        db,
+    );
+    let stored = verifying_repo
+        .get("db-only-update-cap-bot")
+        .await
+        .expect("updated bot remains in database");
+    assert_eq!(
+        stored.capabilities.name.as_deref(),
+        Some("After DB-only Update")
+    );
+    assert!(stored.capabilities.domains.is_empty());
+    assert_eq!(
+        stored
+            .capabilities
+            .skills
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["after_skill"]
+    );
+    assert_eq!(stored.capabilities.visibility, "protected");
+}
+
+#[tokio::test]
+async fn persistent_repo_update_capabilities_updates_memory_without_inserting_db_row() {
+    let db = sqlite_db().await;
+    let repo = PersistentBotRepo::with_plugins(
+        Arc::new(InMemoryCachePlugin::new()),
+        db.clone(),
+    );
+    repo.register(
+        "memory-only-update-cap-bot".to_string(),
+        BotCapabilities {
+            name: Some("Before Memory-only Update".to_string()),
+            domains: vec!["before".to_string()],
+            visibility: "private".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("register bot");
+    db.execute(DbStatement::with_params(
+        "DELETE FROM bcs_bots WHERE bot_uuid = ? AND env = ?",
+        vec![
+            Value::from("memory-only-update-cap-bot"),
+            Value::from(bcs_config::resolve_env_str()),
+        ],
+    ))
+    .await
+    .expect("remove only the database representation");
+
+    repo.update_capabilities(
+        "memory-only-update-cap-bot",
+        BotCapabilities {
+            name: Some("After Memory-only Update".to_string()),
+            domains: vec![],
+            skills: vec![Skill::new("memory_after_skill")],
+            visibility: "protected".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("memory-only capability update must succeed");
+
+    let stored = repo
+        .get("memory-only-update-cap-bot")
+        .await
+        .expect("bot remains in memory");
+    assert_eq!(
+        stored.capabilities.name.as_deref(),
+        Some("After Memory-only Update")
+    );
+    assert!(stored.capabilities.domains.is_empty());
+    assert_eq!(stored.capabilities.visibility, "protected");
+
+    let rows = db
+        .query(DbStatement::with_params(
+            "SELECT 1 FROM bcs_bots WHERE bot_uuid = ? AND env = ?",
+            vec![
+                Value::from("memory-only-update-cap-bot"),
+                Value::from(bcs_config::resolve_env_str()),
+            ],
+        ))
+        .await
+        .expect("query database representation");
+    assert!(rows.is_empty(), "update must not recreate a missing DB row");
+}
+
+#[tokio::test]
+async fn persistent_repo_update_capabilities_returns_not_found_for_unknown_bot() {
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    let db = sqlite_db().await;
+    let repo = PersistentBotRepo::with_plugins(cache, db.clone());
+
+    let err = repo
+        .update_capabilities(
+            "never-registered",
+            BotCapabilities {
+                name: Some("Ghost".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect_err("unknown bot must error");
+    assert!(matches!(err, ServiceError::BotNotFound(id) if id == "never-registered"));
+
+    let rows = db
+        .query(DbStatement::with_params(
+            "SELECT 1 FROM bcs_bots WHERE bot_uuid = ? AND env = ?",
+            vec![
+                Value::from("never-registered"),
+                Value::from(bcs_config::resolve_env_str()),
+            ],
+        ))
+        .await
+        .expect("query unknown bot");
+    assert!(rows.is_empty(), "unknown bot update must not insert a DB row");
 }
 
 async fn sqlite_db() -> Arc<dyn DbPlugin> {

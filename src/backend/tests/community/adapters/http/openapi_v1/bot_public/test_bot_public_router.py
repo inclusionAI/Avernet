@@ -37,6 +37,7 @@ def _bot() -> dict[str, Any]:
     return {
         "id": 91,
         "bot_id": "catalog-bot",
+        "bot_uuid": "catalog-bot:owner-1",
         "entity_id": "owner-1",
         "bot_type": "service",
         "bot_name": "Catalog Bot",
@@ -139,6 +140,7 @@ def test_search_projects_only_catalog_fields(
         "items": [
             {
                 "bot_id": "catalog-bot",
+                "bot_uuid": "catalog-bot:owner-1",
                 "entity_id": "owner-1",
                 "bot_type": "service",
                 "name": "Catalog Bot",
@@ -333,6 +335,19 @@ def test_search_openapi_declares_optional_bcs_is_friend(app: FastAPI) -> None:
     ]
 
     assert is_friend["anyOf"] == [{"type": "boolean"}, {"type": "null"}]
+
+
+def test_search_openapi_declares_optional_bcs_preferred_bot_uuid(
+    app: FastAPI,
+) -> None:
+    bot_uuid = app.openapi()["components"]["schemas"]["PublicBot"]["properties"][
+        "bot_uuid"
+    ]
+
+    assert bot_uuid["anyOf"] == [{"type": "string"}, {"type": "null"}]
+    assert bot_uuid["description"] == (
+        "Catalog Search Bot UUID, preferring BCS with a Backend address fallback."
+    )
 
 
 def test_search_openapi_declares_optional_bcs_metadata_fields(app: FastAPI) -> None:

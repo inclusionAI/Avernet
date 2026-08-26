@@ -12,6 +12,11 @@ run_ci_pipeline() {
     echo "  GATEWAY CI Pipeline"
     echo "==========================================="
 
+    if ! run_check_format_ci; then
+        log_error "check-format-ci failed — aborting"
+        return 1
+    fi
+
     if ! run_check_basic; then
         log_error "check-basic failed — aborting"
         return 1

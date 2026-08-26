@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
 from agentclaw.community.core.skills_pool.mapping_intent import (
     build_logical_skill_mappings,
     merge_retired_logical_skill_mappings,
@@ -12,7 +16,6 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
 )
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
-from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
 from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 
@@ -38,13 +41,13 @@ class MappingConvergenceResult:
 async def converge_post_cutover_mappings(
     *,
     layouts: SkillsPoolLayoutRepositoryProtocol,
-    skills: SkillsPoolSkillRepositoryProtocol,
+    reader: BotCapabilityStateReaderProtocol,
     runtime: SkillsPoolRuntimeProtocol,
     scope: BotSkillLayoutScope,
     generation: str,
     lease_owner: str,
     user_id: str,
-    engine: str,
+    bot: Mapping[str, object],
     cutover_mappings: list[PoolSkillMapping],
     durable_retired_mappings: list[PoolSkillMapping],
     mapping_contract_version: str,
@@ -62,11 +65,8 @@ async def converge_post_cutover_mappings(
         )
     try:
         mappings = build_logical_skill_mappings(
-            skills.list_bot_active_assets(
-                env=scope.env,
-                bot_id=scope.bot_id,
-                owner_id=user_id,
-                engine=engine,
+            reader.active_skill_assets(
+                bot_id=scope.bot_id, owner_id=user_id, bot=bot
             )
         )
     except ValueError as error:
@@ -119,11 +119,8 @@ async def converge_post_cutover_mappings(
             )
         try:
             observed_mappings = build_logical_skill_mappings(
-                skills.list_bot_active_assets(
-                    env=scope.env,
-                    bot_id=scope.bot_id,
-                    owner_id=user_id,
-                    engine=engine,
+                reader.active_skill_assets(
+                    bot_id=scope.bot_id, owner_id=user_id, bot=bot
                 )
             )
         except ValueError as error:

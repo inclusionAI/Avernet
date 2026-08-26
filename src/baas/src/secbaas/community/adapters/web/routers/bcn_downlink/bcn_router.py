@@ -448,6 +448,7 @@ async def _dispatch_interaction_resolve(
                 values=tuple(answer.values),
                 question=answer.question,
                 header=answer.header,
+                custom_values=tuple(answer.custom_values or ()),
             )
             for question_id, answer in req.params.answers.items()
         }

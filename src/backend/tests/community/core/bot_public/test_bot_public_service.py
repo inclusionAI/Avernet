@@ -7,6 +7,7 @@ from agentclaw.community.core.bot_public.services.bot_public_service import (
     BotNotFoundError,
     BotPublicServiceError,
 )
+from agentclaw.community.plugin_api.approval_workflow import NO_WORKFLOW_MARKER
 from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogAddress,
     BotCatalogCaller,
@@ -38,8 +39,10 @@ def _make_service(
     skill_set_service_factory=None,
     device_context_resolver=None,
     device_sync_dispatcher=None,
+    bcsfuse_config=None,
     catalog_metadata_service=None,
 ):
+    resolver = device_context_resolver or MagicMock()
     return BotPublicService(
         bot_friend_repo=bot_friend_repo or MagicMock(),
         bot_repository=bot_repository or MagicMock(),
@@ -50,8 +53,9 @@ def _make_service(
         auth_relationship_plugin=auth_relationship_plugin or MagicMock(),
         publish_approval_plugin=publish_approval_plugin or MagicMock(),
         skill_set_service_factory=skill_set_service_factory or MagicMock(),
-        device_context_resolver=device_context_resolver or MagicMock(),
+        device_context_resolver_factory=lambda: resolver,
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
+        bcsfuse_config=bcsfuse_config or MagicMock(base_url="", base_url_pre=""),
         catalog_metadata_service=catalog_metadata_service or MagicMock(),
     )
 
@@ -207,6 +211,46 @@ class TestPublicBcsBot:
                 bot_uid="b1", owner_id="u1", public_scope="user",
                 operator=_make_operator(),
             )
+
+    def test_no_workflow_falls_through_to_skipped_with_agree_callback(self):
+        # community/local NoApprovalWorkflow reports "no approval capability"
+        # (NO_WORKFLOW_MARKER prefix) rather than a real rejection. The protocol
+        # promises callers fall through to direct publish, NOT fail — and the
+        # fall-through is treated as auto-approved (AGREE): public_bcs_bot runs
+        # the same persist + inline-callback path as corp's COMPLETED tenant so
+        # BCS friend_ext still gets an AGREE update, surfacing the *approval*
+        # outcome as state=SKIPPED (no approval step ran) instead of raising
+        # (which the old code did for any success=False — a 500 every community
+        # publish).
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": False,
+            "error_msg": NO_WORKFLOW_MARKER + "no approval workflow in the community build",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+        svc = _make_service(process_service=process, bot_repository=bot_repo)
+
+        with patch.object(svc, "handle_public_approval_callback") as cb:
+            result = svc.public_bcs_bot(
+                bot_uid="b1", owner_id="u1", public_scope="user",
+                operator=_make_operator(staff_id="op_user"),
+            )
+
+        process.start_approval.assert_called_once()
+        # Fall-through (NOT raise): approval step skipped, AGREE callback fired.
+        assert result["success"] is True
+        assert result["state"] == "SKIPPED"
+        assert result["puid"] is None
+        assert result["last_operate"] == "agree"
+        assert result["error_msg"].startswith(NO_WORKFLOW_MARKER)
+        cb.assert_called_once()
+        ckw = cb.call_args.kwargs
+        assert ckw["bot_id"] == "b1"
+        assert ckw["owner_id"] == "u1"
+        assert ckw["puid"] is None
+        assert ckw["last_operate"] == "agree"
+        assert ckw["public_scope"] == "user"
 
     def test_rejects_empty_owner_id(self):
         svc = _make_service()
@@ -412,7 +456,7 @@ class TestPublicBcsBot:
         # merge 仍保留已有 friend_ext 子键
         assert bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]["old"] == "x"
 
-    def test_agent_publish_stores_public_public_approval_block(self):
+    def test_agent_publish_stores_public_agent_approval_block(self):
         process = MagicMock()
         process.start_approval.return_value = {
             "success": True, "puid": "p1", "approval_url": "u1", "state": "PROCESSING",
@@ -429,9 +473,9 @@ class TestPublicBcsBot:
             visibility="public",
         )
         friend_ext = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]
-        # agent → public_public_approval subkey (NOT public_user_approval); same block shape
+        # agent → public_agent_approval subkey (NOT public_user_approval); same block shape
         assert "public_user_approval" not in friend_ext
-        block = friend_ext["public_public_approval"]
+        block = friend_ext["public_agent_approval"]
         assert block["puid"] == "p1"
         assert block["approval_url"] == "u1"
         assert block["view_friend_deps"] == [{"deptNo": "D1", "deptName": "Tech"}]
@@ -463,11 +507,11 @@ class TestPublicBcsBot:
         assert block["puid"] == "p1"
         assert block["visibility"] == "public"
 
-    def test_callback_cancel_updates_public_public_approval_for_agent(self):
+    def test_callback_cancel_updates_public_agent_approval_for_agent(self):
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
             "friend_ext": {
-                "public_public_approval": {"puid": "p1", "status": "PROCESSING"}
+                "public_agent_approval": {"puid": "p1", "status": "PROCESSING"}
             }
         }
         svc = _make_service(bcn_service=bcn)
@@ -475,7 +519,7 @@ class TestPublicBcsBot:
             bot_id="b", owner_id="u", puid="p1",
             last_operate="CANCEL", public_scope="agent",
         )
-        block = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]["public_public_approval"]
+        block = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]["public_agent_approval"]
         assert block["status"] == "CANCEL"
 
     def test_callback_agree_user_writes_block_visibility_to_user_visibility(self):
@@ -512,7 +556,7 @@ class TestPublicBcsBot:
     def test_callback_agree_agent_public_when_friend_check_open(self):
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
-            "friend_ext": {"public_public_approval": {"puid": "p1", "status": "PROCESSING"}},
+            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING"}},
             "friend_check_in_strategy": "OPEN",
         }
         svc = _make_service(bcn_service=bcn)
@@ -521,14 +565,14 @@ class TestPublicBcsBot:
             last_operate="AGREE", public_scope="agent",
         )
         body = bcn.patch_attributes.call_args.kwargs["body"]
-        assert body["friend_ext"]["public_public_approval"]["status"] == "AGREE"
+        assert body["friend_ext"]["public_agent_approval"]["status"] == "AGREE"
         # agent: visibility 由 friend_check_in_strategy=OPEN → public
         assert body["visibility"] == "public"
 
     def test_callback_agree_agent_protected_when_friend_check_not_open(self):
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
-            "friend_ext": {"public_public_approval": {"puid": "p1", "status": "PROCESSING"}},
+            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING"}},
             "friend_check_in_strategy": "APPROVAL",
         }
         svc = _make_service(bcn_service=bcn)
@@ -565,7 +609,7 @@ class TestPublicBcsBot:
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
             "friend_ext": {
-                "public_public_approval": {
+                "public_agent_approval": {
                     "puid": "p1", "status": "PROCESSING",
                     "view_friend_deps": [{"deptNo": "D2", "deptName": "Sales"}],
                 }
@@ -648,7 +692,7 @@ class TestPublicBotUnpublish:
         updated = {**bot, "public": "0"}
         bot_repo.update_by_owner.return_value = updated
 
-        svc = _make_service(bot_repository=bot_repo)
+        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test", base_url_pre="http://bcsfuse.pre.test"))
         result = svc.public_bot("bot1", "owner1", "0", "caller", "0", _make_operator())
 
         assert result["public"] == "0"
@@ -690,6 +734,69 @@ class TestPublicBotUnpublish:
 # ---------------------------------------------------------------------------
 # public_bot – caller mode (direct update)
 # ---------------------------------------------------------------------------
+
+class TestPublicBotBCSFuseSync:
+    @patch("agentclaw.community.core.bot_public.services.bot_public_service.urlopen")
+    @patch("agentclaw.community.core.bot_public.services.bot_public_service.BotPublicService._sync_access_mode_and_relations")
+    @patch("agentclaw.community.utils.env_utils.is_local_mode", return_value=True)
+    def test_public_calls_bcsfuse_online_best_effort(self, _mock_local, mock_sync_rel, mock_urlopen):
+        bot_repo = MagicMock()
+        bot = _make_bot(public="0", ext={"permission_owner": "caller"})
+        bot_repo.get_by_id_and_owner.return_value = bot
+        bot_repo.update_by_owner.return_value = {**bot, "public": "1"}
+
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        mock_urlopen.return_value = response
+
+        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test", base_url_pre="http://bcsfuse.pre.test"))
+        result = svc.public_bot("bot1", "owner1", "1", "caller", "0", _make_operator())
+
+        assert result["public"] == "1"
+        request = mock_urlopen.call_args.args[0]
+        assert request.full_url == "http://bcsfuse.test/api/v1/workers/bot1/online"
+        assert request.get_method() == "PUT"
+        mock_sync_rel.assert_called_once_with("bot1", "owner1", "OPEN", "1")
+
+    @patch("agentclaw.community.core.bot_public.services.bot_public_service.urlopen")
+    @patch("agentclaw.community.core.bot_public.services.bot_public_service.BotPublicService._sync_access_mode_and_relations")
+    @patch("agentclaw.community.utils.env_utils.is_local_mode", return_value=True)
+    def test_unpublish_calls_bcsfuse_offline_best_effort(self, _mock_local, mock_sync_rel, mock_urlopen):
+        bot_repo = MagicMock()
+        bot = _make_bot(public="1", ext={"permission_owner": "caller"})
+        bot_repo.get_by_id_and_owner.return_value = bot
+        bot_repo.update_by_owner.return_value = {**bot, "public": "0"}
+
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        mock_urlopen.return_value = response
+
+        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test", base_url_pre="http://bcsfuse.pre.test"))
+        result = svc.public_bot("bot1", "owner1", "0", "caller", "0", _make_operator())
+
+        assert result["public"] == "0"
+        request = mock_urlopen.call_args.args[0]
+        assert request.full_url == "http://bcsfuse.test/api/v1/workers/bot1/offline"
+        assert request.get_method() == "PUT"
+        mock_sync_rel.assert_called_once_with("bot1", "owner1", "RESTRICTED", "0")
+
+    @patch("agentclaw.community.core.bot_public.services.bot_public_service.urlopen", side_effect=RuntimeError("bcsfuse down"))
+    @patch("agentclaw.community.core.bot_public.services.bot_public_service.BotPublicService._sync_access_mode_and_relations")
+    @patch("agentclaw.community.utils.env_utils.is_local_mode", return_value=True)
+    def test_bcsfuse_failure_does_not_block_public_flow(self, _mock_local, mock_sync_rel, _mock_urlopen):
+        bot_repo = MagicMock()
+        bot = _make_bot(public="0", ext={"permission_owner": "caller"})
+        bot_repo.get_by_id_and_owner.return_value = bot
+        bot_repo.update_by_owner.return_value = {**bot, "public": "1"}
+
+        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test", base_url_pre="http://bcsfuse.pre.test"))
+        result = svc.public_bot("bot1", "owner1", "1", "caller", "0", _make_operator())
+
+        assert result["public"] == "1"
+        mock_sync_rel.assert_called_once_with("bot1", "owner1", "OPEN", "1")
+
 
 class TestPublicBotCallerMode:
     @patch("agentclaw.community.core.bot_public.services.bot_public_service.BotPublicService.sync_bot_config_to_device")
@@ -881,7 +988,7 @@ class TestHandlePublicApprovalCallback:
         assert result["success"] is False
         assert "Unknown" in result["message"]
 
-    def test_agree_update_fails_returns_failure(self):
+    def test_agree_calls_bcsfuse_online_best_effort(self):
         bot_repo = MagicMock()
         bot = _make_bot(ext={
             "public_approval": {
@@ -891,10 +998,43 @@ class TestHandlePublicApprovalCallback:
             }
         })
         bot_repo.get_by_id_and_owner.return_value = bot
-        bot_repo.update_by_owner.return_value = None  # failure
-        svc = _make_service(bot_repository=bot_repo)
-        result = svc.handle_public_approval_callback("bot1", "owner1", "puid1", "agree")
-        assert result["success"] is False
+        bot_repo.update_by_owner.return_value = {**bot}
+        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test", base_url_pre="http://bcsfuse.pre.test"))
+
+        with (
+            patch.object(svc, "_sync_access_mode_and_relations_or_raise"),
+            patch("agentclaw.community.core.bot_public.services.bot_public_service.urlopen") as mock_urlopen,
+        ):
+            response = MagicMock()
+            response.__enter__.return_value = response
+            response.status = 200
+            mock_urlopen.return_value = response
+            result = svc.handle_public_approval_callback("bot1", "owner1", "puid1", "agree")
+
+        assert result["success"] is True
+        request = mock_urlopen.call_args.args[0]
+        assert request.full_url == "http://bcsfuse.test/api/v1/workers/bot1/online"
+
+    def test_agree_bcsfuse_failure_does_not_block_callback(self):
+        bot_repo = MagicMock()
+        bot = _make_bot(ext={
+            "public_approval": {
+                "puid": "puid1", "status": "PROCESSING",
+                "permission_owner": "caller", "public": "1",
+                "friend_approval": "0", "applicant": "op_user"
+            }
+        })
+        bot_repo.get_by_id_and_owner.return_value = bot
+        bot_repo.update_by_owner.return_value = {**bot}
+        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test", base_url_pre="http://bcsfuse.pre.test"))
+
+        with (
+            patch.object(svc, "_sync_access_mode_and_relations_or_raise"),
+            patch("agentclaw.community.core.bot_public.services.bot_public_service.urlopen", side_effect=RuntimeError("bcsfuse down")),
+        ):
+            result = svc.handle_public_approval_callback("bot1", "owner1", "puid1", "agree")
+
+        assert result["success"] is True
 
     # -- public_scope: new-version publish short-circuits the legacy ac_bots path --
 
@@ -1347,6 +1487,7 @@ class TestSearchPublicBotsByKeyword:
 
         assert result["total"] == 1
         assert [bot["bot_id"] for bot in result["items"]] == ["bot-1"]
+        assert [bot["bot_uuid"] for bot in result["items"]] == ["bot-1:entity-1"]
         metadata.search_public_bot_metadata.assert_called_once_with(
             search="agent",
             page=3,
@@ -1359,6 +1500,31 @@ class TestSearchPublicBotsByKeyword:
             page=1,
             page_size=2,
         )
+
+    def test_catalog_search_prefers_validated_bcs_bot_uuid(self):
+        metadata = MagicMock()
+        metadata.search_public_bot_metadata.return_value = [
+            BotCatalogMetadata(
+                BotCatalogAddress("bot-1", "entity-1"),
+                "bot",
+                bot_uuid=" bot-1 : entity-1 ",
+            )
+        ]
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (
+            1,
+            [_make_catalog_bot("bot-1", "entity-1")],
+        )
+        svc = _make_service(
+            bot_repository=repository, catalog_metadata_service=metadata
+        )
+
+        result = svc.search_catalog_public_bots_by_keyword(
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace-bcs-bot-uuid",
+        )
+
+        assert result["items"][0]["bot_uuid"] == " bot-1 : entity-1 "
 
     def test_catalog_search_preserves_bcs_is_friend_on_its_exact_address(self):
         metadata = MagicMock()
@@ -1381,7 +1547,11 @@ class TestSearchPublicBotsByKeyword:
         )
 
         assert result["items"] == [
-            {**_make_catalog_bot("shared", "entity-a"), "is_friend": False}
+            {
+                **_make_catalog_bot("shared", "entity-a"),
+                "bot_uuid": "shared:entity-a",
+                "is_friend": False,
+            }
         ]
 
     def test_catalog_search_preserves_requested_bcs_metadata_on_its_exact_address(self):
@@ -1419,6 +1589,7 @@ class TestSearchPublicBotsByKeyword:
         assert result["items"] == [
             {
                 **_make_catalog_bot("shared", "entity-a"),
+                "bot_uuid": "shared:entity-a",
                 "is_friend": False,
                 "visibility": "protected",
                 "is_online": False,

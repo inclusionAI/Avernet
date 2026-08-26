@@ -49,6 +49,8 @@ paths:
     $ref: ./openapi/friendships.yaml#/FriendConnectionsPath
   /openapi/v1/collaboration/groups:
     $ref: ./openapi/groups.yaml#/GroupsPath
+  /openapi/v1/collaboration/public-groups:
+    $ref: ./openapi/groups.yaml#/PublicGroupsPath
   /openapi/v1/collaboration/groups/{group_id}:
     $ref: ./openapi/groups.yaml#/GroupPath
   /openapi/v1/collaboration/groups/{group_id}/participants:

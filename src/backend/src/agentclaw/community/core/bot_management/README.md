@@ -1,13 +1,16 @@
 # `agentclaw.community.core.bot_management`
 
-Bot lifecycle, repository, engine resolution, render-screen models, and skill-set switching.
+Bot lifecycle, creation policy, repository, engine resolution, render-screen models, and skill-set switching.
 
 ## Context Boundary
 
 ```yaml
-purpose: "Bot lifecycle, repository, engine resolution, render-screen models, and skill-set switching."
+purpose: "Bot lifecycle, creation policy, repository, engine resolution, render-screen models, and skill-set switching."
 provides:
   - "BotService"
+  - "BotCreateContext"
+  - "BotCreateDeploymentMode"
+  - "PreparedBotCreate"
   - "BotRepository protocol + impl"
   - "EngineResolver"
   - "DataInitService"

@@ -97,12 +97,7 @@ if __name__ == "__main__":  # pragma: no cover - entrypoint wiring; profile gate
                 f"{_loopback_bypass},{_existing}" if _existing else _loopback_bypass
             )
 
-        # 1. Install the local infrastructure stubs BEFORE any other agentclaw
-        # imports (the community/local stub installer for the company runtime).
-        from agentclaw.community.local import patch_sofapy_for_local
-        patch_sofapy_for_local()
-
-        # 2. Select the Profile-owned YAML overlay before the first config read.
+        # 1. Select the Profile-owned YAML overlay before the first config read.
         # The HTTP composition root repeats this registration when it is imported
         # so direct ASGI imports keep the same bootstrap contract.
         from agentclaw.community.di.config_bootstrap import register_config_provider
@@ -112,15 +107,22 @@ if __name__ == "__main__":  # pragma: no cover - entrypoint wiring; profile gate
         logger.info("runtime config (local)")
         logger.info(json.dumps(config.model_dump(), ensure_ascii=False, indent=2))
 
-        # 3. Start uvicorn directly.
+        # 2. Start uvicorn directly.
         # Schema bootstrap, event-listener subscription, and every other
         # startup hook run through the Lifecycle Protocol dispatched by
         # ``_app_lifespan`` in adapters/http/app.py (R11). Nothing to
         # register here.
+        #
+        # The listen address is env-driven so a container can be told which port
+        # to serve without a rebuild; the defaults are what the local scripts and
+        # every existing launch site already use, so an unset environment behaves
+        # exactly as before.
         import uvicorn
         from agentclaw.community.adapters.http.app import app
-        logger.info("Starting uvicorn on 0.0.0.0:8888")
-        uvicorn.run(app, host="0.0.0.0", port=8888)
+        _host = os.getenv("BACKEND_HOST") or "0.0.0.0"
+        _port = int(os.getenv("BACKEND_PORT") or 8888)
+        logger.info("Starting uvicorn on %s:%d", _host, _port)
+        uvicorn.run(app, host=_host, port=_port)
     else:
         # Corp / prod profiles boot via the company runner from the corp
         # entrypoint, which is not part of the community distribution. Fail fast

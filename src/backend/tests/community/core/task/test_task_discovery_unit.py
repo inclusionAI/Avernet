@@ -5,6 +5,7 @@ Covers:
   - SqliteTaskReader.read_pending_tasks_for_bot
   - DiscoveryService with SessionInitiator (mocked)
   - CronRelaySessionInitiator._build_discovery_prompt / _build_session_url
+  - CronRelaySessionInitiator.initiate_session Step 2.5 title update (success/fail/exception)
   - TaskDiscoveryScheduler startup/shutdown
 """
 from __future__ import annotations
@@ -46,13 +47,14 @@ _TASK = DiscoveredTask(
     bot_id="test-bot",
     owner_id="test-owner",
     dt=_DT,
-    project_name="TestSkill",
-    description="A test task",
-    business_scenario="testing",
+    title="TestSkill",
+    instruction="A test task",
+    background="testing",
     discovery_basis="unit test",
-    work_item_url="http://example.com/123",
     priority="high",
     status="pending_confirmation",
+    objective="Unit-test discovery objective",
+    acceptances=[{"id": "a1", "description": "acceptance one"}],
 )
 
 _SESSION = DiscoverySession(
@@ -110,20 +112,24 @@ class TestTaskReader:
         init_discovered_tasks_db(db, [
             {
                 "task_id": "t1", "bot_id": "bot-001", "owner_id": "user-001",
-                "dt": _DT, "project_name": "Task1", "description": "d1",
-                "business_scenario": "s1", "discovery_basis": "b1",
+                "dt": _DT, "title": "Task1", "instruction": "d1",
+                "background": "s1", "discovery_basis": "b1",
                 "status": "pending_confirmation",
+                "objective": "Objective-1",
+                "acceptances": [{"id": "ac1", "description": "acc-1"}],
             },
             {
                 "task_id": "t2", "bot_id": "bot-002", "owner_id": "user-001",
-                "dt": _DT, "project_name": "Task2", "description": "d2",
-                "business_scenario": "s2", "discovery_basis": "b2",
+                "dt": _DT, "title": "Task2", "instruction": "d2",
+                "background": "s2", "discovery_basis": "b2",
                 "status": "pending_confirmation",
+                "objective": "",
+                "acceptances": [],
             },
             {
                 "task_id": "t3", "bot_id": "bot-001", "owner_id": "user-001",
-                "dt": _DT, "project_name": "Task3", "description": "d3",
-                "business_scenario": "s3", "discovery_basis": "b3",
+                "dt": _DT, "title": "Task3", "instruction": "d3",
+                "background": "s3", "discovery_basis": "b3",
                 "status": "confirmed",  # not pending
             },
         ])
@@ -135,7 +141,9 @@ class TestTaskReader:
         tasks = reader.read_pending_tasks_for_bot("bot-001", "user-001", _DT)
         assert len(tasks) == 1
         assert tasks[0].bot_id == "bot-001"
-        assert tasks[0].project_name == "Task1"
+        assert tasks[0].title == "Task1"
+        assert tasks[0].objective == "Objective-1"
+        assert tasks[0].acceptances == [{"id": "ac1", "description": "acc-1"}]
 
     def test_read_pending_for_wrong_bot(self, tmp_path):
         db = self._setup_db(tmp_path)
@@ -299,7 +307,6 @@ class TestCronRelaySessionInitiatorHelpers:
         inst = self._make_initiator()
         prompt = inst._build_discovery_prompt([_TASK])
         assert "TestSkill" in prompt
-        assert "http://example.com/123" in prompt
         assert "是否确认执行" in prompt
 
     def test_build_session_url(self):
@@ -307,6 +314,157 @@ class TestCronRelaySessionInitiatorHelpers:
         url = inst._build_session_url("sess-456", "bot-001")
         assert "sess-456" in url
         assert "bot-001" in url
+
+    def test_build_session_url_encodes_colons(self):
+        inst = self._make_initiator()
+        url = inst._build_session_url("agent:main:cron_001", "bot-001")
+        assert "agent%3Amain%3Acron_001" in url
+        assert "/assistant?botId=bot-001" in url
+
+
+# ---------------------------------------------------------------------------
+# CronRelaySessionInitiator — initiate_session Step 2.5 title update
+# ---------------------------------------------------------------------------
+
+class TestCronRelaySessionInitiatorTitleUpdate:
+    """Cover the _initiate_session Step 2.5 title-update paths (success/fail/exception)."""
+
+    def _make_initiator(self):
+        cron_relay = MagicMock()
+        cron_relay.forward_request = AsyncMock(return_value={
+            "success": True,
+            "data": {"id": "cron_001"},
+        })
+        inst = CronRelaySessionInitiator(
+            cron_relay=cron_relay,
+            frontend_url="http://localhost:8000",
+        )
+        inst._backend_url = "http://localhost:8888"
+        inst._wait_for_reply = False
+        return inst
+
+    def _run(self, coro):
+        return asyncio.get_event_loop().run_until_complete(coro)
+
+    def test_title_update_success_http200(self):
+        """Step 2.5: engine returns HTTP 200 — title update succeeds."""
+        inst = self._make_initiator()
+        inst._extract_engine_target = AsyncMock(return_value="localhost:20010")
+        inst._ws_send_message = AsyncMock()
+
+        success_resp = MagicMock()
+        success_resp.status_code = 200
+        with patch("agentclaw.community.core.task.task_discovery.session_initiator.httpx.AsyncClient") as mock_client_cls:
+            mock_cli = AsyncMock()
+            mock_cli.__aenter__ = AsyncMock(return_value=mock_cli)
+            mock_cli.__aexit__ = AsyncMock(return_value=None)
+            mock_cli.post = AsyncMock(return_value=success_resp)
+            mock_client_cls.return_value = mock_cli
+
+            session = asyncio.run(inst.initiate_session(
+                [_TASK], bot_id="test-bot", owner_id="test-owner", agent_id="test-bot",
+            ))
+
+        assert session.session_id == "cron_001"
+        # title update was called (Step 2.5)
+        mock_cli.post.assert_awaited_once()
+        call_kwargs = mock_cli.post.call_args
+        assert "/api/sessions/cron_001/update" in call_kwargs.args[0]
+        assert call_kwargs.kwargs["params"]["title"] == "[DreamMode-任务发现] TestSkill"
+        # WebSocket injection also ran (Step 3)
+        inst._ws_send_message.assert_awaited_once()
+
+    def test_title_update_failed_non200(self):
+        """Step 2.5: engine returns HTTP 500 — title update fails (non-fatal)."""
+        inst = self._make_initiator()
+        inst._extract_engine_target = AsyncMock(return_value="localhost:20010")
+        inst._ws_send_message = AsyncMock()
+
+        fail_resp = MagicMock()
+        fail_resp.status_code = 500
+        fail_resp.text = "internal server error"
+        with patch("agentclaw.community.core.task.task_discovery.session_initiator.httpx.AsyncClient") as mock_client_cls:
+            mock_cli = AsyncMock()
+            mock_cli.__aenter__ = AsyncMock(return_value=mock_cli)
+            mock_cli.__aexit__ = AsyncMock(return_value=None)
+            mock_cli.post = AsyncMock(return_value=fail_resp)
+            mock_client_cls.return_value = mock_cli
+
+            session = asyncio.run(inst.initiate_session(
+                [_TASK], bot_id="test-bot", owner_id="test-owner", agent_id="test-bot",
+            ))
+
+        # session still created despite title update failure (non-fatal)
+        assert session.session_id == "cron_001"
+        inst._ws_send_message.assert_awaited_once()
+
+    def test_title_update_exception_non_fatal(self):
+        """Step 2.5: httpx raises — exception caught, session still created."""
+        inst = self._make_initiator()
+        inst._extract_engine_target = AsyncMock(return_value="localhost:20010")
+        inst._ws_send_message = AsyncMock()
+
+        with patch("agentclaw.community.core.task.task_discovery.session_initiator.httpx.AsyncClient") as mock_client_cls:
+            mock_cli = AsyncMock()
+            mock_cli.__aenter__ = AsyncMock(return_value=mock_cli)
+            mock_cli.__aexit__ = AsyncMock(return_value=None)
+            mock_cli.post = AsyncMock(side_effect=ConnectionError("refused"))
+            mock_client_cls.return_value = mock_cli
+
+            session = asyncio.run(inst.initiate_session(
+                [_TASK], bot_id="test-bot", owner_id="test-owner", agent_id="test-bot",
+            ))
+
+        # session still created despite title update exception (non-fatal)
+        assert session.session_id == "cron_001"
+        inst._ws_send_message.assert_awaited_once()
+
+    def test_title_update_skipped_when_no_engine_target(self):
+        """Step 2.5 skipped (along with Step 3) when engine target is None."""
+        inst = self._make_initiator()
+        inst._extract_engine_target = AsyncMock(return_value=None)
+        inst._ws_send_message = AsyncMock()
+
+        with patch("agentclaw.community.core.task.task_discovery.session_initiator.httpx.AsyncClient") as mock_client_cls:
+            session = asyncio.run(inst.initiate_session(
+                [_TASK], bot_id="test-bot", owner_id="test-owner", agent_id="test-bot",
+            ))
+            mock_client_cls.assert_not_called()
+
+        assert session.session_id == "cron_001"
+        inst._ws_send_message.assert_not_called()
+
+    def test_title_format_single_task(self):
+        """Single task title: [DreamMode-任务发现] {title}."""
+        inst = self._make_initiator()
+        inst._extract_engine_target = AsyncMock(return_value=None)
+
+        async def _capture_title():
+            inst._ws_send_message = AsyncMock()
+            with patch("agentclaw.community.core.task.task_discovery.session_initiator.httpx.AsyncClient"):
+                await inst.initiate_session(
+                    [_TASK], bot_id="test-bot", owner_id="test-owner", agent_id="test-bot",
+                )
+
+        asyncio.run(_capture_title())
+        forward_call = inst._cron_relay.forward_request.call_args
+        body = forward_call.kwargs["body"]
+        assert body["title"] == "[DreamMode-任务发现] TestSkill"
+
+    def test_title_format_multi_task(self):
+        """Multiple tasks title: [DreamMode-任务发现] 发现 N 件可能有意义的事情."""
+        inst = self._make_initiator()
+        inst._extract_engine_target = AsyncMock(return_value=None)
+
+        task2 = replace(_TASK, task_id="discover_task_2")
+        with patch("agentclaw.community.core.task.task_discovery.session_initiator.httpx.AsyncClient"):
+            asyncio.run(inst.initiate_session(
+                [_TASK, task2], bot_id="test-bot", owner_id="test-owner", agent_id="test-bot",
+            ))
+
+        forward_call = inst._cron_relay.forward_request.call_args
+        body = forward_call.kwargs["body"]
+        assert body["title"] == "[DreamMode-任务发现] 发现 2 件可能有意义的事情"
 
 
 # ---------------------------------------------------------------------------

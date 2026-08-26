@@ -69,11 +69,6 @@ fn build_api_routes() -> Router<HttpAppState> {
             post(routes::providers::resolve_agentpass_bot),
         )
         .route(
-            "/providers/stream-gray",
-            get(routes::providers::get_provider_stream_gray)
-                .put(routes::providers::put_provider_stream_gray),
-        )
-        .route(
             "/providers/{provider_id}",
             get(routes::providers::get_provider).patch(routes::providers::patch_provider),
         )
@@ -149,7 +144,8 @@ fn build_api_routes() -> Router<HttpAppState> {
         )
         .route(
             "/providers/{provider_id}/bots/{bot_uuid}",
-            delete(routes::providers::delete_provider_bot),
+            delete(routes::providers::delete_provider_bot)
+                .patch(routes::providers::patch_provider_bot),
         )
         .route(
             "/providers/{provider_id}/bots/{bot_uuid}/attributes",

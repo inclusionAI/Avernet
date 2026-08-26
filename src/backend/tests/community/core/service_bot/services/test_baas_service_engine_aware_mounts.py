@@ -8,6 +8,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentclaw.community.core.common_config import CommonWhiteListService
+from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
+    ManagedDeployConfigComposer,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService, Storage
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
 from agentclaw.community.core.workspace.engines.aicoding import AICodingSandboxProvider
@@ -37,17 +40,34 @@ def _make_storage_path() -> MagicMock:
     return sp
 
 
+def _make_composer(storage_path=None, bot_repo=None) -> ManagedDeployConfigComposer:
+    """Mounts and storage are the managed image's layout, so they now live on
+    ``ManagedDeployConfigComposer``. Tests of that layout target it directly."""
+    return ManagedDeployConfigComposer(
+        storage_path=storage_path or _make_storage_path(),
+        sandbox_registry=_make_registry(),
+        bot_repo=bot_repo or MagicMock(),
+    )
+
+
 def _make_service(storage_path=None, bot_repo=None, common_whitelist_service=None) -> BaasService:
     startup_script_reader = MagicMock()
     startup_script_reader.get_body.return_value = ""
+    storage_path = storage_path or _make_storage_path()
+    bot_repo = bot_repo or MagicMock()
     return BaasService(
+        # Same collaborators as the service: the payload tests below assert on
+        # what the composer builds from them.
+        deploy_composer=_make_composer(
+            storage_path=storage_path, bot_repo=bot_repo
+        ),
         baas_api_base="http://test",
         tenant="test",
         template_uuid="test",
-        bot_repo=bot_repo or MagicMock(),
+        bot_repo=bot_repo,
         bot_publish_repo=MagicMock(),
         system_config_service=MagicMock(),
-        storage_path=storage_path or _make_storage_path(),
+        storage_path=storage_path,
         device_binding_repo=MagicMock(),
         default_ttl_minutes=10080,
         sandbox_registry=_make_registry(),
@@ -88,9 +108,9 @@ def _skills_repo_mount(entries):
 class TestSetupDirectoryEngineAware:
     def test_default_mount_points(self):
         """验证默认返回 bolt_data、skills-repo 和 agentclaw-sys 三个挂载点。"""
-        service = _make_service()
+        composer = _make_composer()
 
-        entries = service._setup_directory(
+        entries = composer._setup_directory(
             entity_id="u1",
             entity_type="staff",
             bot_id="b1",
@@ -108,9 +128,9 @@ class TestSetupDirectoryEngineAware:
 
     def test_claude_code_engine_type_same_mounts(self):
         """claude_code 引擎类型的挂载点与 openclaw 相同。"""
-        service = _make_service()
+        composer = _make_composer()
 
-        entries = service._setup_directory(
+        entries = composer._setup_directory(
             entity_id="u1",
             entity_type="staff",
             bot_id="b1",
@@ -130,9 +150,9 @@ class TestSetupDirectoryEngineAware:
         """空引擎类型的挂载点也与默认相同。"""
         bot_repo = MagicMock()
         bot_repo.get_by_id_and_owner.return_value = None
-        service = _make_service(bot_repo=bot_repo)
+        composer = _make_composer(bot_repo=bot_repo)
 
-        entries = service._setup_directory(
+        entries = composer._setup_directory(
             entity_id="u1",
             entity_type="staff",
             bot_id="b1",
@@ -147,9 +167,9 @@ class TestSetupDirectoryEngineAware:
         assert skills_repo.permission == "READ_ONLY"
 
     def test_custom_mount_path_is_appended(self):
-        service = _make_service()
+        composer = _make_composer()
 
-        entries = service._setup_directory(
+        entries = composer._setup_directory(
             entity_id="u1",
             entity_type="staff",
             bot_id="b1",
@@ -168,9 +188,9 @@ class TestSetupDirectoryEngineAware:
 @pytest.mark.unit
 class TestSetupSessionsDirEngineAware:
     def test_openclaw_sessions_path_unchanged(self):
-        service = _make_service()
+        composer = _make_composer()
 
-        storage = service._setup_sessions_dir(
+        storage = composer._setup_sessions_dir(
             entity_id="u1",
             entity_type="staff",
             bot_id="b1",
@@ -184,9 +204,9 @@ class TestSetupSessionsDirEngineAware:
         # claude_code 的 sessions 目录由独立的 claude_code_session_root
         # 决定，并以 /projects 结尾——与 sandbox 内 ~/.claude/projects 对齐，
         # 而不再复用 claude_code_root 下的 /agents 约定。
-        service = _make_service()
+        composer = _make_composer()
 
-        storage = service._setup_sessions_dir(
+        storage = composer._setup_sessions_dir(
             entity_id="u1",
             entity_type="staff",
             bot_id="b1",
@@ -198,9 +218,9 @@ class TestSetupSessionsDirEngineAware:
     def test_empty_engine_type_falls_back_to_openclaw(self):
         bot_repo = MagicMock()
         bot_repo.get_by_id_and_owner.return_value = None
-        service = _make_service(bot_repo=bot_repo)
+        composer = _make_composer(bot_repo=bot_repo)
 
-        storage = service._setup_sessions_dir(
+        storage = composer._setup_sessions_dir(
             entity_id="u1",
             entity_type="staff",
             bot_id="b1",
@@ -209,8 +229,8 @@ class TestSetupSessionsDirEngineAware:
 
         assert storage.path == "/home/admin/.openclaw/agents"
 
-    def test_baas_service_delegates_sessions_dir_to_provider(self):
-        """验证 BaasService 直接透传 provider.get_sessions_dir 的返回值,
+    def test_composer_delegates_sessions_dir_to_provider(self):
+        """验证 composer 直接透传 provider.get_sessions_dir 的返回值,
         不再持有任何引擎相关子路径约定（如 /agents 拼接）。
         """
         from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
@@ -222,28 +242,13 @@ class TestSetupSessionsDirEngineAware:
         registry = EngineSandboxRegistry()
         registry.register(custom_provider)
 
-        startup_script_reader = MagicMock()
-        startup_script_reader.get_body.return_value = ""
-        service = BaasService(
-            baas_api_base="http://test",
-            tenant="test",
-            template_uuid="test",
-            bot_repo=MagicMock(),
-            bot_publish_repo=MagicMock(),
-            system_config_service=MagicMock(),
+        composer = ManagedDeployConfigComposer(
             storage_path=_make_storage_path(),
-            device_binding_repo=MagicMock(),
-            default_ttl_minutes=10080,
             sandbox_registry=registry,
-            http_client=LocalHttpClient(),
-            general_http_client=LocalHttpClient(base_url=""),
-            common_whitelist_service=MagicMock(),
-            secret_resolver=MagicMock(),
-            outbound_rule_provider=MagicMock(),
-            startup_script_reader=startup_script_reader,
+            bot_repo=MagicMock(),
         )
 
-        storage = service._setup_sessions_dir(
+        storage = composer._setup_sessions_dir(
             entity_id="u1",
             entity_type="staff",
             bot_id="b1",
@@ -275,7 +280,7 @@ class TestBuildCreateBotPayloadStorageWhitelist:
         whitelist = MagicMock(spec=CommonWhiteListService)
         whitelist.is_bot_feature_enabled.return_value = False
         service = _make_service(common_whitelist_service=whitelist)
-        service._setup_sessions_dir = MagicMock(
+        service._deploy_composer._setup_sessions_dir = MagicMock(
             return_value=Storage(
                 type="nas",
                 storage_id="sessions-storage",
@@ -284,7 +289,7 @@ class TestBuildCreateBotPayloadStorageWhitelist:
                 path="/home/admin/.openclaw/agents",
             )
         )
-        service._setup_home_dir_storage = MagicMock(
+        service._deploy_composer._setup_home_dir_storage = MagicMock(
             return_value=Storage(
                 type="nas",
                 storage_id="home-storage",
@@ -301,13 +306,13 @@ class TestBuildCreateBotPayloadStorageWhitelist:
         assert whitelist.is_bot_feature_enabled.call_args.kwargs["param_code"] == "engine_dir_mount_whitelist"
         assert whitelist.is_bot_feature_enabled.call_args.kwargs["owner_id"] == "owner1"
         assert whitelist.is_bot_feature_enabled.call_args.kwargs["bot_id"] == "b1"
-        service._setup_sessions_dir.assert_called_once_with(
+        service._deploy_composer._setup_sessions_dir.assert_called_once_with(
             entity_id="u1",
             entity_type="staff",
             bot_id="b1",
             engine_type="openclaw",
         )
-        service._setup_home_dir_storage.assert_not_called()
+        service._deploy_composer._setup_home_dir_storage.assert_not_called()
         storage = payload["config"]["deploy_config"]["storage"]
         assert storage["path"] == "/home/admin/.openclaw/agents"
         assert storage["storage_id"] == "sessions-storage"
@@ -316,7 +321,7 @@ class TestBuildCreateBotPayloadStorageWhitelist:
         whitelist = MagicMock(spec=CommonWhiteListService)
         whitelist.is_bot_feature_enabled.return_value = True
         service = _make_service(common_whitelist_service=whitelist)
-        service._setup_sessions_dir = MagicMock(
+        service._deploy_composer._setup_sessions_dir = MagicMock(
             return_value=Storage(
                 type="nas",
                 storage_id="sessions-storage",
@@ -325,7 +330,7 @@ class TestBuildCreateBotPayloadStorageWhitelist:
                 path="/home/admin/.openclaw/agents",
             )
         )
-        service._setup_home_dir_storage = MagicMock(
+        service._deploy_composer._setup_home_dir_storage = MagicMock(
             return_value=Storage(
                 type="nas",
                 storage_id="home-storage",
@@ -337,14 +342,14 @@ class TestBuildCreateBotPayloadStorageWhitelist:
 
         payload = self._build_payload(service)
 
-        service._setup_home_dir_storage.assert_called_once_with(
+        service._deploy_composer._setup_home_dir_storage.assert_called_once_with(
             entity_id="u1",
             entity_type="staff",
             bot_id="b1",
             engine_type="openclaw",
             device_scoped_home_storage=False,
         )
-        service._setup_sessions_dir.assert_not_called()
+        service._deploy_composer._setup_sessions_dir.assert_not_called()
         storage = payload["config"]["deploy_config"]["storage"]
         assert storage["path"] == "/home/admin"
         assert storage["storage_id"] == "home-storage"
@@ -353,7 +358,7 @@ class TestBuildCreateBotPayloadStorageWhitelist:
         whitelist = MagicMock(spec=CommonWhiteListService)
         whitelist.is_bot_feature_enabled.side_effect = RuntimeError("config unavailable")
         service = _make_service(common_whitelist_service=whitelist)
-        service._setup_sessions_dir = MagicMock(
+        service._deploy_composer._setup_sessions_dir = MagicMock(
             return_value=Storage(
                 type="nas",
                 storage_id="sessions-storage",
@@ -362,19 +367,19 @@ class TestBuildCreateBotPayloadStorageWhitelist:
                 path="/home/admin/.openclaw/agents",
             )
         )
-        service._setup_home_dir_storage = MagicMock()
+        service._deploy_composer._setup_home_dir_storage = MagicMock()
 
         payload = self._build_payload(service)
 
-        service._setup_sessions_dir.assert_called_once()
-        service._setup_home_dir_storage.assert_not_called()
+        service._deploy_composer._setup_sessions_dir.assert_called_once()
+        service._deploy_composer._setup_home_dir_storage.assert_not_called()
         assert payload["config"]["deploy_config"]["storage"]["path"] == "/home/admin/.openclaw/agents"
 
     def test_empty_migration_path_uses_explicit_home_storage_without_whitelist_check(self):
         service = _make_service(common_whitelist_service=MagicMock(spec=CommonWhiteListService))
         service._should_mount_home_dir_storage = MagicMock(return_value=True)
-        service._setup_sessions_dir = MagicMock()
-        service._setup_home_dir_storage = MagicMock(
+        service._deploy_composer._setup_sessions_dir = MagicMock()
+        service._deploy_composer._setup_home_dir_storage = MagicMock(
             return_value=Storage(
                 type="nas",
                 storage_id="home-storage",
@@ -400,8 +405,8 @@ class TestBuildCreateBotPayloadStorageWhitelist:
         )
 
         service._should_mount_home_dir_storage.assert_not_called()
-        service._setup_sessions_dir.assert_not_called()
-        service._setup_home_dir_storage.assert_called_once_with(
+        service._deploy_composer._setup_sessions_dir.assert_not_called()
+        service._deploy_composer._setup_home_dir_storage.assert_called_once_with(
             entity_id="u1",
             entity_type="staff",
             bot_id="b1",
@@ -421,47 +426,45 @@ def test_should_mount_home_dir_storage_returns_false_without_whitelist_service()
     assert service._should_mount_home_dir_storage(owner_id="owner1", bot_id="b1") is False
 
 
-def test_setup_bot_storage_resolves_whitelist_when_mount_flag_unspecified():
-    service = _make_service(common_whitelist_service=MagicMock(spec=CommonWhiteListService))
-    service._should_mount_home_dir_storage = MagicMock(return_value=True)
-    service._setup_home_dir_storage = MagicMock(
-        return_value=Storage(
-            type="nas",
-            storage_id="home-storage",
-            quota="1Gi",
-            permission="0777",
-            path="/home/admin",
-        )
-    )
-    service._setup_sessions_dir = MagicMock()
+def test_unspecified_mount_flag_is_resolved_once_and_reaches_both_halves():
+    """The ``nas_mount`` read moved up to ``_build_create_bot_payload``.
 
-    storage = service._setup_bot_storage(
-        entity_id="u1",
-        entity_type="staff",
+    It used to happen inside the mount builder and then again inside the
+    storage builder, each on its own ``None``. Now the composer is handed the
+    answer: one payload makes one whitelist read, and the mounts cannot end up
+    disagreeing with the storage about where this bot's data lives.
+    """
+    whitelist = MagicMock(spec=CommonWhiteListService)
+    whitelist.is_bot_feature_enabled.return_value = True
+    service = _make_service(common_whitelist_service=whitelist)
+
+    payload = service._build_create_bot_payload(
+        bot={
+            "bot_id": "b1",
+            "bot_name": "bot-one",
+            "entity_id": "u1",
+            "entity_type": "staff",
+            "active_engine": "openclaw",
+        },
         owner_id="owner1",
-        bot_id="b1",
-        engine_type="openclaw",
+        request_id="req1",
+        device_count=1,
+        migration_path="",
     )
 
-    service._should_mount_home_dir_storage.assert_called_once_with(
-        owner_id="owner1",
-        bot_id="b1",
-    )
-    service._setup_home_dir_storage.assert_called_once_with(
-        entity_id="u1",
-        entity_type="staff",
-        bot_id="b1",
-        engine_type="openclaw",
-        device_scoped_home_storage=False,
-    )
-    service._setup_sessions_dir.assert_not_called()
-    assert storage.path == "/home/admin"
+    whitelist.is_bot_feature_enabled.assert_called_once()
+    deploy_config = payload["config"]["deploy_config"]
+    assert deploy_config["storage"]["path"] == "/home/admin"
+    assert [mp["local_dir"] for mp in deploy_config["mount_points"]] == [
+        "/mnt/sys",
+        "/opt/nfs/bot-data",
+    ]
 
 
 def test_setup_home_dir_storage_uses_home_admin_path_and_engine_aware_storage_id():
-    service = _make_service()
+    composer = _make_composer()
 
-    storage = service._setup_home_dir_storage(
+    storage = composer._setup_home_dir_storage(
         entity_id="u1",
         entity_type="staff",
         bot_id="b1",
@@ -477,9 +480,9 @@ def test_setup_home_dir_storage_uses_home_admin_path_and_engine_aware_storage_id
 
 @pytest.mark.parametrize("stage", ["verify", "online"])
 def test_setup_bot_storage_uses_device_scoped_home_storage_for_service_release_stages(stage):
-    service = _make_service()
+    composer = _make_composer()
 
-    storage = service._setup_bot_storage(
+    storage = composer._setup_bot_storage(
         entity_id="u1",
         entity_type="staff",
         owner_id="owner1",
@@ -496,9 +499,9 @@ def test_setup_bot_storage_uses_device_scoped_home_storage_for_service_release_s
 
 @pytest.mark.unit
 def test_setup_bot_storage_keeps_static_storage_id_for_service_draft():
-    service = _make_service()
+    composer = _make_composer()
 
-    storage = service._setup_bot_storage(
+    storage = composer._setup_bot_storage(
         entity_id="u1",
         entity_type="staff",
         owner_id="owner1",
@@ -518,7 +521,7 @@ def test_build_create_bot_payload_rewrites_migration_path_to_opt_when_mount_home
     whitelist = MagicMock(spec=CommonWhiteListService)
     whitelist.is_bot_feature_enabled.return_value = True
     service = _make_service(common_whitelist_service=whitelist)
-    service._setup_home_dir_storage = MagicMock(
+    service._deploy_composer._setup_home_dir_storage = MagicMock(
         return_value=Storage(
             type="nas",
             storage_id="home-storage",

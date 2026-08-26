@@ -27,6 +27,21 @@ def _signing_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE", _TEST_KEY)
 
 
+@pytest.fixture(autouse=True)
+def _schema_creation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Enable schema creation before ``create_app()``.
+
+    The community default leaves ``create_schema`` / ``seed_data`` false
+    (matching BaaS); the ``e2e-sqlite`` overlay flips them on so these DB-write
+    tests get a freshly provisioned in-memory schema. The process-global
+    container is reset so each test re-bootstraps against the overlay.
+    """
+    import gateway.community.bootstrap as bootstrap_mod
+
+    bootstrap_mod._container = None
+    monkeypatch.setenv("SOFAPY_CONFIG_OVERLAY", "e2e-sqlite")
+
+
 async def test_issue_access_key_via_http() -> None:
     app = create_app()
     transport = ASGITransport(app=app)

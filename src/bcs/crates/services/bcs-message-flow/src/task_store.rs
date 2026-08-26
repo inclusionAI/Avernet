@@ -57,6 +57,27 @@ impl TaskStore {
         self.record_response_text_with_final(task_id, text, false).await;
     }
 
+    /// Append one authoritative streaming delta to the task response.
+    ///
+    /// Unlike [`Self::record_response_text`], this does not try to infer
+    /// whether `delta` is a cumulative snapshot. SSE `delta_text` frames are
+    /// already incremental, including when MessageTracker starts a new chat
+    /// segment after a thinking or approval boundary.
+    pub async fn record_response_delta(&self, task_id: &str, delta: &str) {
+        if delta.is_empty() {
+            return;
+        }
+        let mut tasks = self.tasks.write().await;
+        let Some(entry) = tasks.get_mut(task_id) else {
+            return;
+        };
+        if entry.response_mode == ChatResponseMode::Full {
+            return;
+        }
+        entry.response_full_content.push_str(delta);
+        entry.response_content.push_str(delta);
+    }
+
     pub async fn record_final_response_text(&self, task_id: &str, text: &str) {
         self.record_response_text_with_final(task_id, text, true).await;
     }

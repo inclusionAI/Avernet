@@ -115,7 +115,7 @@ async def test_list_is_readable_without_editor_permission():
     }
     bots.get_bot.assert_called_once_with("bot-1", "owner-1")
     service.list_render_screens.assert_called_once_with(
-        bot_id="bot-1", owner_id="owner-1"
+        bot_id="bot-1", owner_id="owner-1", current_user_id="viewer-1"
     )
 
 
@@ -132,7 +132,7 @@ async def test_member_editor_can_create_update_and_delete():
     )
     service = Mock()
     service.create_render_screen.return_value = 7
-    service.get_render_screen.side_effect = [
+    service.authorize_render_screen_record.side_effect = [
         created_record,
         created_record,
         updated_record,
@@ -180,6 +180,7 @@ async def test_member_editor_can_create_update_and_delete():
         name="dashboard",
         cdn_url="https://cdn.example.com/dashboard.js",
         creator_id="member-1",
+        current_user_id="member-1",
     )
     service.update_render_screen.assert_called_once_with(
         record_id=7,
@@ -289,13 +290,12 @@ def test_removed_team_editor_cannot_mutate():
     "overrides",
     [
         {"bot_id": "other-bot"},
-        {"owner_id": "other-owner"},
         {"env": "pre"},
     ],
 )
-def test_record_id_is_bound_to_bot_owner_and_environment(overrides):
+def test_record_id_is_bound_to_bot_and_environment(overrides):
     service = Mock()
-    service.get_render_screen.return_value = _record(**overrides)
+    service.authorize_render_screen_record.return_value = _record(**overrides)
 
     with pytest.raises(RenderScreenNotFoundError):
         require_scoped_record(
@@ -303,6 +303,37 @@ def test_record_id_is_bound_to_bot_owner_and_environment(overrides):
             record_id=7,
             bot_id="bot-1",
             owner_id="owner-1",
+            actor_id="member-1",
+        )
+
+
+def test_record_owner_mismatch_is_allowed_for_shared_bots():
+    service = Mock()
+    service.authorize_render_screen_record.return_value = _record(owner_id="other-owner")
+
+    record = require_scoped_record(
+        service,
+        record_id=7,
+        bot_id="bot-1",
+        owner_id="owner-1",
+        actor_id="member-1",
+    )
+
+    assert record.owner_id == "other-owner"
+
+
+
+def test_record_missing_is_masked_as_not_found():
+    service = Mock()
+    service.authorize_render_screen_record.side_effect = ValueError("not found")
+
+    with pytest.raises(RenderScreenNotFoundError):
+        require_scoped_record(
+            service,
+            record_id=7,
+            bot_id="bot-1",
+            owner_id="owner-1",
+            actor_id="member-1",
         )
 
 

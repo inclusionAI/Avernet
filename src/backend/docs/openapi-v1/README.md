@@ -1325,6 +1325,33 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}/startup-script` | Set/replace it; takes effect next start | `Envelope[StartupScript]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/startup-script` | Clear it | `Envelope[Deleted]` |
 
+#### Creating an Application Coding Bot
+
+Application Coding uses `engine=claude_code` and keeps template-specific creation parameters under `engine_properties.template` rather than flattening them into the Bot request:
+
+```json
+{
+  "bot_name": "my-app-coding-bot",
+  "bot_desc": "application coding bot",
+  "engine": "claude_code",
+  "cluster_name": "ACRA",
+  "bot_type": "personal",
+  "engine_properties": {
+    "template": {
+      "devflow_workflow": "app-flow",
+      "yuque_kb_repos": [],
+      "code_repos": [],
+      "bot_template_config": {
+        "preset_capabilities": {},
+        "ext_config": {"thetaKey": "value"}
+      }
+    }
+  }
+}
+```
+
+If create returns 202, echo the same `engine_properties` object in the POST `/{bot_id}/auth-status` body. Legacy top-level `template_type` / `template_config` are not public contract fields and return 422. The HTTP adapter maps `engine_properties.template` to the internal creation contract; it is not the server-derived runtime `extra_properties` envelope.
+
 #### Owning Business Space reassignment
 
 `PUT /openapi/v1/bots/{bot_id}/space` explicitly requires `user_id` and a JSON
@@ -1500,7 +1527,7 @@ that one design choice, and none of it is visible in the OpenAPI document.
   that restarts a container in place, the sequence does not re-run and
   neither does the script.
 
-_Deliberately **not** exposed on bots: `engine_options` on create (nothing
+_Deliberately **not** exposed on bots: top-level `template_type`/`template_config` and `engine_options` on create (nothing
 downstream reads `BotCreateSpec.extra_properties` yet, so advertising it would
 promise something the server ignores), and `cluster_name`/`engine_options` on
 update. With `extra="forbid"` these are now a 422 rather than a silent drop._
@@ -1557,6 +1584,36 @@ internal router so both surfaces answer identically); owner-scoped via
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/permissions` | Caller's permission for a server | `Envelope[McpPermission]` |
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Read caller's unified server config | `Envelope[McpConfig]` |
 | PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Write config (pushed to devices) | `Envelope[McpConfig]` |
+
+The unified marketplace search also exposes
+`POST /openapi/v1/bots/market/mcp-servers`. Its JSON request supports the full
+legacy catalogue filter set: `keyword`, `page_num`, `page_size`, `server_codes`,
+`platform_server_codes`, `run_modes`, `statuses`, `transport_protocols`,
+`host_platforms`, `owners`, `network_types`, `categories`, `tenants`, and
+`tags`. Requested network types are intersected with the public allowlist
+(`INTERNET`, `OFFICE`); a request containing only hidden network types returns
+an empty page. Each `McpMarketItem` is a lossless snake-case equivalent of the
+corresponding legacy `GET /api/mcp/market/list` item, including tags and future
+catalogue extension fields, while retaining the same `extInfo` removal rule.
+
+`McpServerDetail` is the snake-case equivalent of the legacy
+`GET /api/mcp/market/detail` business payload. In addition to the lightweight
+list fields and `tools`, its explicit schema covers the legacy catalogue fields,
+including `source`, `icon`, `docs`, `endpoints`, `vendor`, `status`, `run_mode`,
+`host_platform`, `platform_server_code`, `host_app_name`, `category`, `site`,
+marketplace `tenant`, `access_level`, `stdio_configs`, business/domain codes,
+ownership records, tags, repository metadata, and launch channels.
+
+Compatibility is lossless: endpoint `headers`, identity `user_id`, endpoint
+records on every network present in an otherwise visible server, malformed
+legacy values, and future catalogue extension fields are retained. Known
+catalogue object keys are translated from camelCase to snake_case; opaque maps
+such as endpoint headers, environment-variable names, and tool declarations keep
+their original keys. As on the legacy route, tool input-schema `extInfo` is
+removed, and a server whose declared network types are all outside the API's
+allowlist still resolves as not found. The permissions operation remains the
+authoritative caller-specific permission check even though catalogue
+`access_level` is also retained in detail for legacy payload compatibility.
 
 _Delivered decisions (PR #610): paths stay nested (`/openapi/v1/bots/mcp/...`);
 `sync_mode` dropped from the write body (no single-device push path — `extra=

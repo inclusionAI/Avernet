@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+from agentclaw.community.plugin_api.device_sync_dispatcher import (
     DeviceSyncDispatcher,
 )
 from agentclaw.community.di.container import build_injector
@@ -20,7 +20,7 @@ from agentclaw.community.plugin_api.outbound_rules import OutboundRuleProvider
 from agentclaw.community.plugins.community.device_adapter_transport import (
     CommunityDeviceAdapterTransport,
 )
-from agentclaw.community.plugins.community.device_sync import (
+from agentclaw.community.plugins.community.device_sync_dispatcher import (
     CommunityDeviceSyncDispatcher,
 )
 from agentclaw.community.plugins.community.health_probe import CommunityHealthProbe

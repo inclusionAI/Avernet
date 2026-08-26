@@ -445,6 +445,27 @@ class TestGetByProviderDeviceIdLike:
         assert result is None
 
 
+# ==================== get_by_provider_device_id (exact) ====================
+
+
+class TestGetByProviderDeviceId:
+    def test_found(self, repository, mock_session):
+        model = _make_mock_device_model(id_val=8, provider_device_id="sandbox-abc-123")
+        mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = model
+
+        result = repository.get_by_provider_device_id("sandbox-abc-123")
+
+        assert result is not None
+        assert result.provider_device_id == "sandbox-abc-123"
+        model.to_record.assert_called_once()
+
+    def test_not_found(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
+
+        result = repository.get_by_provider_device_id("nonexistent")
+        assert result is None
+
+
 # ==================== get_by_provider_device_id_prefix ====================
 
 
@@ -706,6 +727,27 @@ class TestUpdateStatusByDeviceUuid:
         update_dict = call_kwargs[0][0]
         assert update_dict["status"] == "UPDATING"
         assert "gmt_modified" in update_dict
+        assert "modifier" not in update_dict
+
+    def test_updates_with_modifier(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
+
+        result = repository.update_status_by_device_uuid(
+            "DEVICE-UUID",
+            "test_tenant",
+            "prod",
+            "STOPPED",
+            modifier="expire_sandbox_timer",
+        )
+
+        assert result == 1
+        call_kwargs = (
+            mock_session.query.return_value.filter.return_value.update.call_args
+        )
+        update_dict = call_kwargs[0][0]
+        assert update_dict["status"] == "STOPPED"
+        assert "gmt_modified" in update_dict
+        assert update_dict["modifier"] == "expire_sandbox_timer"
 
     def test_not_found_returns_zero(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.update.return_value = 0
@@ -714,6 +756,63 @@ class TestUpdateStatusByDeviceUuid:
             "MISSING", "test_tenant", "prod", "DELETED"
         )
         assert result == 0
+
+
+# ==================== list_expired_paginated ====================
+
+
+class TestListExpiredPaginated:
+    def _mock_query_chain(self, mock_session, rows, dialect="mysql"):
+        """Configure the chain `query().filter().order_by().limit().all()` and the
+        dialect name used by ``list_expired_paginated`` for SQL branching."""
+        mock_session.bind.dialect.name = dialect
+        mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = rows
+
+    def test_returns_expired_rows_mysql(self, repository, mock_session):
+        model = _make_mock_device_model(id_val=7, device_uuid="DEVICE-EXPIRED")
+        self._mock_query_chain(mock_session, [model], dialect="mysql")
+
+        result = repository.list_expired_paginated(
+            limit=100, grace_seconds=0, default_ttl_minutes=10080
+        )
+
+        assert len(result) == 1
+        assert result[0]["id"] == 7
+        assert result[0]["device_uuid"] == "DEVICE-EXPIRED"
+        assert result[0]["status"] == "ACTIVE"
+        assert result[0]["provider_device_props"] == {}
+        model.to_record.assert_called_once()
+
+    def test_returns_expired_rows_sqlite(self, repository, mock_session):
+        model = _make_mock_device_model(id_val=8, device_uuid="DEVICE-EXPIRED-SQLITE")
+        self._mock_query_chain(mock_session, [model], dialect="sqlite")
+
+        result = repository.list_expired_paginated(
+            limit=100, grace_seconds=30, default_ttl_minutes=10080
+        )
+
+        assert len(result) == 1
+        assert result[0]["id"] == 8
+        assert result[0]["device_uuid"] == "DEVICE-EXPIRED-SQLITE"
+        model.to_record.assert_called_once()
+
+    def test_empty_result(self, repository, mock_session):
+        self._mock_query_chain(mock_session, [], dialect="mysql")
+
+        result = repository.list_expired_paginated(limit=100)
+
+        assert result == []
+
+    def test_pagination_passes_last_id(self, repository, mock_session):
+        model_a = _make_mock_device_model(id_val=21, device_uuid="D-21")
+        model_b = _make_mock_device_model(id_val=22, device_uuid="D-22")
+        self._mock_query_chain(mock_session, [model_a, model_b], dialect="mysql")
+
+        result = repository.list_expired_paginated(last_id=20, limit=10)
+
+        assert [r["id"] for r in result] == [21, 22]
+        model_a.to_record.assert_called_once()
+        model_b.to_record.assert_called_once()
 
 
 # ==================== list_devices ====================

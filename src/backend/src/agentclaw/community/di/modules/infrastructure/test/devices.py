@@ -56,6 +56,9 @@ from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapte
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 from agentclaw.community.plugins.local.local_device_lifecycle import LocalDeviceLifecycle
+from agentclaw.community.plugins.local.skill_symlink_sync import (
+    LocalSkillSymlinkSynchronizer,
+)
 
 
 logger = get_logger()
@@ -83,6 +86,11 @@ def configure_local_device_test_runtime(binder: Binder) -> None:
     )
     binder.bind(LocalDeviceAccessor, to=LocalDeviceAccessor, scope=singleton)
     binder.bind(DeviceAccessor, to=LocalDeviceAccessor, scope=singleton)
+    binder.bind(
+        LocalSkillSymlinkSynchronizer,
+        to=LocalSkillSymlinkSynchronizer,
+        scope=singleton,
+    )
     binder.bind(LocalDeviceLifecycle, to=LocalDeviceLifecycle, scope=singleton)
 
 

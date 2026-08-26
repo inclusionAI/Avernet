@@ -13,6 +13,9 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
+from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
+    ManagedDeployConfigComposer,
+)
 from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
     BaasServiceError,
@@ -23,6 +26,11 @@ from agentclaw.community.plugins.local.http_client import LocalHttpClient
 def _make_service() -> tuple[BaasService, LocalHttpClient]:
     http = LocalHttpClient(base_url="http://baas.test")
     service = BaasService(
+        deploy_composer=ManagedDeployConfigComposer(
+            storage_path=MagicMock(),
+            sandbox_registry=MagicMock(),
+            bot_repo=MagicMock(),
+        ),
         startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://baas.test",
         tenant="tnt",

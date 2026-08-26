@@ -17,6 +17,9 @@ from agentclaw.community.core.skills_pool.aicoding_retirement import (
     is_aicoding_active_mapping_reconciliation_candidate,
     is_trusted_aicoding_repo_retirement_resume,
 )
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
 from agentclaw.community.core.skills_pool.active_aicoding_bridge_repair import (
     ActiveAICodingBridgeRepairStatus,
     request_active_aicoding_bridge_repair,
@@ -71,11 +74,13 @@ class SkillsPoolReconcileService:
         bot_repository: BotRepository,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         skill_repository: SkillsPoolSkillRepositoryProtocol,
+        reader: BotCapabilityStateReaderProtocol,
         runtime: SkillsPoolRuntimeProtocol,
     ) -> None:
         self._bots = bot_repository
         self._layouts = layout_repository
         self._skills = skill_repository
+        self._reader = reader
         self._runtime = runtime
 
     async def reconcile(
@@ -317,11 +322,8 @@ class SkillsPoolReconcileService:
             owner_id=user_id,
             bot_id=scope.bot_id,
         )
-        active_assets = self._skills.list_bot_active_assets(
-            env=scope.env,
-            bot_id=scope.bot_id,
-            owner_id=user_id,
-            engine=engine,
+        active_assets = self._reader.active_skill_assets(
+            bot_id=scope.bot_id, owner_id=user_id, bot=bot
         )
         try:
             local_names = [local_skill_name(asset) for asset in local_assets]
@@ -634,13 +636,13 @@ class SkillsPoolReconcileService:
 
         convergence = await converge_post_cutover_mappings(
             layouts=self._layouts,
-            skills=self._skills,
+            reader=self._reader,
             runtime=self._runtime,
             scope=scope,
             generation=generation,
             lease_owner=lease_owner,
             user_id=user_id,
-            engine=engine,
+            bot=bot,
             cutover_mappings=mappings,
             durable_retired_mappings=durable_retired_mappings,
             mapping_contract_version=mapping_contract_version,
@@ -821,9 +823,9 @@ class SkillsPoolReconcileService:
             return await self._reconcile_active_aicoding_repo_bridges(
                 scope=scope,
                 state=state,
+                bot=bot,
                 bot_id=scope.bot_id,
                 user_id=str(owner_id),
-                logical_engine=engine,
                 layout_engine=layout_engine,
                 initial_probe=probe,
             )
@@ -849,11 +851,8 @@ class SkillsPoolReconcileService:
         if bot.get("bot_type") == "desktop":
             try:
                 mappings = build_logical_skill_mappings(
-                    self._skills.list_bot_active_assets(
-                        env=scope.env,
-                        bot_id=scope.bot_id,
-                        owner_id=str(owner_id),
-                        engine=engine,
+                    self._reader.active_skill_assets(
+                        bot_id=scope.bot_id, owner_id=str(owner_id), bot=bot
                     )
                 )
                 mapping_contract_version = mapping_contract_for(
@@ -901,20 +900,21 @@ class SkillsPoolReconcileService:
         *,
         scope: BotSkillLayoutScope,
         state: BotSkillLayoutState,
+        bot: dict,
         bot_id: str,
         user_id: str,
-        logical_engine: str,
         layout_engine: str,
         initial_probe: RuntimeLayoutProbeResult,
     ) -> SkillsPoolReconcileResult:
         repair = await request_active_aicoding_bridge_repair(
             skills=self._skills,
+            reader=self._reader,
             runtime=self._runtime,
             scope=scope,
             state=state,
+            bot=bot,
             bot_id=bot_id,
             user_id=user_id,
-            logical_engine=logical_engine,
             layout_engine=layout_engine,
             initial_probe=initial_probe,
         )

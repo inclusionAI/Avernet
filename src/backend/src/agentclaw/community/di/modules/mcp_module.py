@@ -31,6 +31,9 @@ from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.identity import (
+    CallerIdentityRepositoryProtocol,
+)
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -44,7 +47,7 @@ from agentclaw.community.core.skill_center.factories import SkillSetServiceFacto
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
-from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository as UnifiedUserMCPConfigRepository
 
 
@@ -66,9 +69,8 @@ class McpModule(Module):
         binder.bind(MCPMarketService, to=MCPMarketService, scope=singleton)
         binder.bind(MCPAuthService, to=MCPAuthService, scope=singleton)
         binder.bind(MCPConfigService, to=MCPConfigService, scope=singleton)
-        # MCP delivery now rides the ``DeviceSyncPlugin`` boundary (folded in
-        # from the former ``DeviceMCPSyncPlugin``); ``MCPSyncService`` resolves a
-        # per-bot plugin via ``DeviceContextResolver`` + ``DeviceSyncDispatcher``.
+        # MCP delivery uses the per-bot Core ``DeviceSync`` selected through
+        # ``DeviceContextResolver`` + ``DeviceSyncDispatcher``.
         # No separate device-MCP-sync binding.
         # Single unified ORM repository for both runtimes — differs only
         # by the injected ``DatabasePlugin`` (``orm_session()``). No
@@ -116,6 +118,7 @@ class McpModule(Module):
         passport_update: PassportPlugin,
         mcp_config_service: MCPConfigService,
         bot_repository: BotRepository,
+        caller_identity_repository: CallerIdentityRepositoryProtocol,
         injector: Injector,
     ) -> MCPSyncService:
         """Cycle break: lazy thunks for ``DeviceContextResolver`` /
@@ -133,6 +136,7 @@ class McpModule(Module):
             passport_update=passport_update,
             mcp_config_service=mcp_config_service,
             bot_repository=bot_repository,
+            caller_identity_repository=caller_identity_repository,
             resolver_provider=lambda: injector.get(DeviceContextResolver),
             device_sync_dispatcher_provider=lambda: injector.get(DeviceSyncDispatcher),
         )

@@ -89,7 +89,7 @@ async def list_render_screens(
     # ``bot_access._level`` has already resolved ``(bot_id, owner_id)`` and
     # refused on absence before the handler is entered.
     resolve_readable_bot(bot_service, bot_id=bot_id, owner_id=owner_id)
-    records = service.list_render_screens(bot_id=bot_id, owner_id=owner_id)
+    records = service.list_render_screens(bot_id=bot_id, owner_id=owner_id, current_user_id=actor_id)
     items = [_screen(record) for record in records]
     return envelope(RenderScreenList(total=len(items), items=items), request)
 
@@ -116,6 +116,7 @@ async def create_render_screen(
             name=body.name,
             cdn_url=str(body.cdn_url),
             creator_id=actor_id,
+            current_user_id=actor_id,
         )
     except ValueError as exc:
         raise RenderScreenConflictError("render screen conflict") from exc
@@ -124,6 +125,7 @@ async def create_render_screen(
         record_id=record_id,
         bot_id=bot_id,
         owner_id=owner_id,
+        actor_id=actor_id,
     )
     return created(_screen(record), request)
 
@@ -148,6 +150,7 @@ async def update_render_screen(
         record_id=render_screen_id,
         bot_id=bot_id,
         owner_id=owner_id,
+        actor_id=actor_id,
     )
     try:
         service.update_render_screen(
@@ -162,6 +165,7 @@ async def update_render_screen(
         record_id=render_screen_id,
         bot_id=bot_id,
         owner_id=owner_id,
+        actor_id=actor_id,
     )
     return envelope(_screen(updated), request)
 
@@ -185,6 +189,7 @@ async def delete_render_screen(
         record_id=render_screen_id,
         bot_id=bot_id,
         owner_id=owner_id,
+        actor_id=actor_id,
     )
     try:
         service.delete_render_screen(record_id=render_screen_id)

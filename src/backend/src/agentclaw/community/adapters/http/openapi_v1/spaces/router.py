@@ -101,6 +101,7 @@ def _space_item(record: SpaceSummaryRecord) -> SpaceItem:
         space_name=record.space.name,
         space_type=record.space.space_type,
         creator_user_id=record.space.created_by,
+        creator_user_name=record.creator_user_name,
         current_user_role=record.current_user_role,
         join_status=record.join_status,
         member_count=record.member_count,
@@ -301,7 +302,6 @@ async def add_space_member(
         space_id=space_id,
         actor_id=user_id,
         user_id=body.member_user_id,
-        user_name=body.member_user_name,
         role=DomainSpaceRole(body.role),
     )
     return created(

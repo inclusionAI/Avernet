@@ -568,6 +568,7 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                         sandbox_id=suffixed_id,  # Suffix applied per D-04
                         resources=result.resources,
                         ttl_in_minutes=result.ttl_in_minutes,
+                        ttl_expiration_time=result.ttl_expiration_time,
                         envs=result.envs,
                         snapshot_id=result.snapshot_id,
                         metadata=result.metadata,

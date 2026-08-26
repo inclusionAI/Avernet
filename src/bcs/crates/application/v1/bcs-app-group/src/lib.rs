@@ -12,12 +12,13 @@ use bcs_service_api::application::v1::{
     DeleteGroup, DeleteGroupParticipant, DeleteResult, DirectMessageGroupDetail,
     DirectMessageGroupSummary, GetGroup, GroupDetail, GroupEventSubscriptionProvisioner,
     GroupKindFilter, GroupService, GroupStatus, GroupStrategy as V1GroupStrategy, GroupSummary,
-    GroupVisibility, HumanPrincipal, InlineGroupEventSubscriptionRequest, ListGroups,
-    ManagerWorkerConfiguration, Membership, MembershipFilter, NormalGroupSummary, Page,
-    Participant as V1Participant, PreparedGroupEventSubscriptions, Principal,
+    GroupVisibility, HumanPrincipal, IdentityPolicy, InlineGroupEventSubscriptionRequest,
+    ListGroups, ListPublicGroups, ManagerWorkerConfiguration, Membership, MembershipFilter,
+    NormalGroupSummary, Page, Participant as V1Participant, PreparedGroupEventSubscriptions,
+    Principal,
     StateMachineConfiguration, StateMachineDefinition, StateMachineDefinitionReference,
     StateMachineParticipantBinding, UpdateGroup, UpdateGroupParticipant,
-    require_authenticated_user, require_human,
+    require_authenticated_user, require_human, select_principal,
 };
 use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
 use bcs_service_api::types::{EventActor, EventActorType};
@@ -444,41 +445,6 @@ impl GroupServiceImpl {
         }
     }
 
-    async fn can_read_group_detail(
-        &self,
-        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
-        group: &DomainGroup,
-    ) -> Result<bool, ApplicationError> {
-        let user = require_authenticated_user(caller)?;
-        let human_actor_id = format!("human_{}", user.id);
-        if group
-            .participants
-            .iter()
-            .any(|participant| {
-                participant.actor_kind == ActorKind::Human
-                    && participant.bot_uuid == human_actor_id
-            })
-        {
-            return Ok(true);
-        }
-        let owned_bot_ids = self
-            .registry
-            .try_list_bots_by_creator(&user.id)
-            .await
-            .map_err(map_service_error)?
-            .into_iter()
-            .filter(|bot| bot.actor_kind == ActorKind::Bot)
-            .map(|bot| bot.bot_uuid)
-            .collect::<HashSet<_>>();
-        Ok(group
-            .participants
-            .iter()
-            .any(|participant| {
-                participant.actor_kind == ActorKind::Bot
-                    && owned_bot_ids.contains(&participant.bot_uuid)
-            }))
-    }
-
     async fn ensure_collaboration_eligible(
         &self,
         principal: &Principal,
@@ -530,10 +496,46 @@ impl GroupServiceImpl {
         )))
     }
 
-    /// The authenticated human caller may act as itself or as an owned Bot
-    /// originator. Anything else is forbidden. This is stricter than legacy
-    /// `authorize_originator` (which lets any human designate any originator);
-    /// it is a V1 gate and legacy `POST /groups` is unaffected.
+    async fn can_read_group_detail(
+        &self,
+        principal: &Principal,
+        group: &DomainGroup,
+    ) -> Result<bool, ApplicationError> {
+        let principal_actor_id = principal.actor_id();
+        if group
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == principal_actor_id)
+        {
+            return Ok(true);
+        }
+        match principal {
+            Principal::Bot(_) => Ok(Self::group_management_actor_ids(group)
+                .iter()
+                .any(|actor_id| actor_id == &principal_actor_id)),
+            Principal::Human(human) => {
+                let owned_bot_ids = self
+                    .registry
+                    .try_list_bots_by_creator(&human.subject.id)
+                    .await
+                    .map_err(map_service_error)?
+                    .into_iter()
+                    .filter(|bot| bot.actor_kind == ActorKind::Bot)
+                    .map(|bot| bot.bot_uuid)
+                    .collect::<HashSet<_>>();
+                Ok(group.participants.iter().any(|participant| {
+                    participant.actor_kind == ActorKind::Bot
+                        && owned_bot_ids.contains(&participant.bot_uuid)
+                }))
+            }
+        }
+    }
+
+    /// The effective Human principal may act as itself or as an owned Bot
+    /// originator. The effective Bot principal may act only as itself. Anything
+    /// else is forbidden. This is stricter than legacy `authorize_originator`
+    /// (which lets any human designate any originator); it is a V1 gate and
+    /// legacy `POST /groups` is unaffected.
     async fn authorize_originator(
         &self,
         principal: &Principal,
@@ -544,7 +546,7 @@ impl GroupServiceImpl {
         }
         let bot = self.load_bot(originator).await.map_err(|error| match error {
             ApplicationError::NotFound { .. } => ApplicationError::forbidden(format!(
-                "Authenticated User cannot act as originator '{originator}'"
+                "Authenticated Principal cannot act as originator '{originator}'"
             )),
             other => other,
         })?;
@@ -560,7 +562,7 @@ impl GroupServiceImpl {
             }
         }
         Err(ApplicationError::forbidden(format!(
-            "Authenticated User cannot act as originator '{originator}'"
+            "Authenticated Principal cannot act as originator '{originator}'"
         )))
     }
 
@@ -794,6 +796,7 @@ impl GroupServiceImpl {
         caller: &bcs_service_api::application::v1::AuthenticatedCaller,
         group_id: &str,
     ) -> Result<DomainGroup, ApplicationError> {
+        let principal = select_principal(caller, IdentityPolicy::HumanOrOwnedBot)?;
         let group = self
             .groups
             .try_get(group_id)
@@ -811,9 +814,11 @@ impl GroupServiceImpl {
                 format!("Group '{group_id}' was not found"),
             ));
         }
-        if !self.can_read_group_detail(caller, &group).await? {
+        if group.visibility != visibility_name(GroupVisibility::Public)
+            && !self.can_read_group_detail(&principal, &group).await?
+        {
             return Err(ApplicationError::forbidden(
-                "Neither the Human Actor nor an owned Bot is a Group Participant",
+                "The selected Principal has no readable relation to this Group",
             ));
         }
         Ok(group)
@@ -1006,6 +1011,7 @@ impl GroupServiceImpl {
                 group_id: group.id,
                 version: group.version,
                 name: group.label,
+                context: group.context,
                 status,
                 visibility,
                 membership,
@@ -1021,6 +1027,7 @@ impl GroupServiceImpl {
             group_id: group.id,
             version: group.version,
             name: group.label,
+            context: group.context,
             status,
             visibility,
             membership,
@@ -1597,8 +1604,8 @@ impl GroupServiceImpl {
     async fn create_without_eventing(
         &self,
         command: CreateGroup,
+        principal: Principal,
     ) -> Result<CreateGroupOutcome, ApplicationError> {
-        let principal = require_human(&command.caller)?;
         match command.group {
             CreateGroupSpec::Collaboration(request) => Ok(CreateGroupOutcome {
                 group: self
@@ -1735,6 +1742,65 @@ impl GroupService for GroupServiceImpl {
         })
     }
 
+    async fn list_public_groups(
+        &self,
+        command: ListPublicGroups,
+    ) -> Result<Page<GroupSummary>, ApplicationError> {
+        if command.limit == 0 || command.limit > 100 {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "limit must be between 1 and 100",
+            ));
+        }
+        let q = command
+            .q
+            .as_deref()
+            .map(str::trim)
+            .filter(|query| !query.is_empty());
+        let n = self
+            .groups
+            .count_filtered(None, Some("public"), q)
+            .await;
+        const SAFETY_CAP: u64 = 1000;
+        if n > SAFETY_CAP {
+            tracing::warn!(
+                count = n,
+                cap = SAFETY_CAP,
+                "public group plaza candidate set truncated to SAFETY_CAP"
+            );
+        }
+        let candidates = self
+            .groups
+            .list_paginated_filtered(0, n.min(SAFETY_CAP), None, Some("public"), q)
+            .await;
+        let filtered = candidates
+            .into_iter()
+            .filter(|group| group.record_status == "active")
+            .filter(|group| {
+                command.strategy.is_none_or(|strategy| {
+                    group.group_kind == GroupKind::Normal
+                        && project_strategy(group.group_strategy) == strategy
+                })
+            })
+            .collect::<Vec<_>>();
+        let total = filtered.len() as u64;
+        let page = filtered
+            .into_iter()
+            .skip(saturating_usize(command.offset))
+            .take(saturating_usize(command.limit))
+            .collect::<Vec<_>>();
+        let mut items = Vec::with_capacity(page.len());
+        for group in page {
+            items.push(self.project_summary(group, "", Membership::None).await?);
+        }
+        Ok(Page {
+            items,
+            total,
+            offset: command.offset,
+            limit: command.limit,
+        })
+    }
+
     async fn create(&self, command: CreateGroup) -> Result<GroupDetail, ApplicationError> {
         Ok(self
             .create_with_event_subscriptions(command, Vec::new())
@@ -1755,16 +1821,16 @@ impl GroupService for GroupServiceImpl {
         command: CreateGroup,
         event_subscriptions: Vec<InlineGroupEventSubscriptionRequest>,
     ) -> Result<CreateGroupOutcome, ApplicationError> {
+        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
         let Some(provisioner) = self.event_subscription_provisioner.as_ref().cloned() else {
             if event_subscriptions.is_empty() {
-                return self.create_without_eventing(command).await;
+                return self.create_without_eventing(command, principal).await;
             }
             return Err(ApplicationError::internal(
                 "Group Event Subscription provisioning is not configured",
             ));
         };
         let CreateGroup { caller, group } = command;
-        let principal = require_human(&caller)?;
         let state_machine = matches!(
             &group,
             CreateGroupSpec::Collaboration(CreateCollaborationGroup {
@@ -1955,7 +2021,7 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn update(&self, command: UpdateGroup) -> Result<GroupDetail, ApplicationError> {
-        let principal = require_human(&command.caller)?;
+        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
         let mutation_actor = event_actor_for_principal(&principal);
         if command.patch.is_empty() {
             return Err(ApplicationError::invalid(
@@ -2066,7 +2132,7 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn delete(&self, command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
-        let principal = require_human(&command.caller)?;
+        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
         let Some(group) = self
             .groups
             .try_get(&command.group_id)
@@ -2105,10 +2171,18 @@ impl GroupService for GroupServiceImpl {
                 deleted: false,
             });
         };
-        let manage_actor_id = if command.acting_bot_id.is_some() {
-            let acting_actor_id = self
-                .resolve_view_actor(&command.caller, command.acting_bot_id.as_deref())
-                .await?;
+        let manage_actor_id = if let Some(requested) = command.acting_bot_id.as_deref() {
+            let acting_actor_id = match &principal {
+                Principal::Human(_) => {
+                    self.resolve_view_actor(&command.caller, Some(requested)).await?
+                }
+                Principal::Bot(bot) if requested == bot.bot_uuid => requested.to_string(),
+                Principal::Bot(_) => {
+                    return Err(ApplicationError::forbidden(
+                        "The explicit acting Bot must identify the authenticated Bot",
+                    ));
+                }
+            };
             let management_actor_ids = Self::group_management_actor_ids(&group);
             if !management_actor_ids
                 .iter()

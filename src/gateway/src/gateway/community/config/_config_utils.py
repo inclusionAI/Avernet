@@ -10,12 +10,17 @@ from ._models import Config
 _config: Config | None = None
 
 
-def get_config(*, reload: bool = False) -> Config:
+def get_config(*, strict: bool = False, reload: bool = False) -> Config:
     """Return the singleton ``Config``, loading it on first call.
 
-    Pass ``reload=True`` to force a fresh load from disk.
+    Pass ``strict=True`` to raise ``KeyError`` on an unresolvable placeholder
+    with no default (BaaS-aligned); the default is backward compatible
+    (unresolvable placeholders pass through for their config consumer). Pass
+    ``reload=True`` to force a fresh load from disk.
     """
     global _config  # noqa: PLW0603
+    if strict:
+        return ConfigLoader.load(strict=True)
     if _config is None or reload:
         _config = ConfigLoader.load()
     return _config

@@ -1,0 +1,22 @@
+# Proxy production overlay — env-driven host overrides for deployed editions.
+# Loaded on top of application.yaml when SERVER_ENV=prod (see
+# sandboxproxy.community.config._config_loader.ConfigLoader).
+#
+# Hosts that point at in-cluster or environment-specific endpoints are
+# parameterized as ${NAME:-default} so a deployment sets them via env without
+# editing this file. Defaults mirror the community placeholders in
+# application.yaml; a k8s deployment overrides them to Service DNS (e.g.
+# SANDBOXPROXY_BAAS_HOST=http://baas:8888).
+
+user_config:
+  baas:
+    host: ${SANDBOXPROXY_BAAS_HOST:-http://baas.avernet-inc.com}
+    device_props_path: ${SANDBOXPROXY_BAAS_DEVICE_PROPS_PATH:-/api/v1/devices/provider-device/{provider_device_id}/props}
+
+  teclaw:
+    host: ${SANDBOXPROXY_TECLAW_HOST:-http://teclaw.avernet-inc.com}
+
+# 中间件配置总览
+module_config:
+  web:
+    port: 8080

@@ -13,12 +13,16 @@ from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import Status
     from agentclaw.community.core.task.repository.types import (
+        TaskActionLogRecord,
         TaskCallbackRecord,
         TaskInfoRecord,
         TaskNodeRecord,
         TaskNodeRelationRecord,
         TaskNodeRunInfoRecord,
         TaskNodeRunInfoUpdate,
+    )
+    from agentclaw.community.core.task.task_discovery.lock_models import (
+        TaskDiscoveryLockRecord,
     )
 
 
@@ -232,4 +236,202 @@ class TaskCallbackRepositoryProtocol(Protocol):
         """Latest callback for ``main_session_id`` (``gmt_modified``/``id`` desc); ``None`` if absent.
 
         dashboard 按 root 节点的 BCS ``session_id`` 反查 ``task_callback.execution_graph`` 挂图级用。"""
+        ...
+
+    @abstractmethod
+    def find_by_event_id(self, event_id: str) -> Optional["TaskCallbackRecord"]:
+        """Return the callback row for ``event_id`` or ``None``.
+
+        Backs event-idempotent callback handling: a non-``None`` row with
+        ``process_status == "PROCESSED"`` means the event was already applied
+        and must be acknowledged without replaying the graph mutation."""
+        ...
+
+@runtime_checkable
+class TaskGraphRepositoryProtocol(Protocol):
+    """Aggregate persistence contract for a complete task graph."""
+
+    @abstractmethod
+    def load_graph(self, task_id: str):
+        """Hydrate a complete ``TaskExecutionGraph`` or return ``None``."""
+        ...
+
+    @abstractmethod
+    def create_graph(self, graph, *, runtime_status: "Status"):
+        """Persist initial graph state and return its version."""
+        ...
+
+    @abstractmethod
+    def save_graph(
+        self,
+        graph,
+        *,
+        expected_version: int,
+        runtime_status: "Status",
+        action_events: list,
+        instance_id: str | None = None,
+        callback_audit: "TaskCallbackRecord | None" = None,
+    ) -> int:
+        """Persist graph state and action events with optimistic concurrency.
+
+        When ``callback_audit`` is supplied, the inbound callback audit row is
+        written (``process_status='PROCESSED'``) in the **same** transaction as
+        the graph mutation, so the audit and the graph effect commit atomically
+        and an already-processed ``event_id`` is never re-applied."""
+        ...
+
+    @abstractmethod
+    def get_version(self, task_id: str) -> int | None:
+        """Return the current graph version for a task."""
+        ...
+
+    @abstractmethod
+    def next_action_seq(self, task_id: str, node_id: str) -> int:
+        """Return the next append-only action sequence for a node."""
+        ...
+
+    @abstractmethod
+    def load_action_logs(
+        self,
+        task_id: str,
+        *,
+        node_id: str | None = None,
+        limit: int = 200,
+    ) -> dict[str, list]:
+        """Load bounded action history grouped by node for diagnostics."""
+        ...
+
+    @abstractmethod
+    def list_recoverable(self, *, limit: int = 100) -> list[str]:
+        """Return non-terminal tasks whose recovery lease is expired."""
+        ...
+
+    @abstractmethod
+    def acquire_lease(
+        self,
+        task_id: str,
+        *,
+        instance_id: str,
+        lease_seconds: int,
+    ) -> bool:
+        """Claim a recovery lease for one task."""
+        ...
+
+    @abstractmethod
+    def heartbeat(
+        self,
+        task_id: str,
+        *,
+        instance_id: str,
+        lease_seconds: int,
+    ) -> bool:
+        """Extend a lease owned by this instance."""
+        ...
+
+    @abstractmethod
+    def release_lease(self, task_id: str, *, instance_id: str) -> bool:
+        """Release a lease owned by this instance."""
+        ...
+
+    @abstractmethod
+    def claim_bbs_owner(self, task_id: str, bot_id: str) -> bool:
+        """Atomically claim the BBS relay root owner across instances.
+
+        Returns ``True`` if ``bot_id`` now holds the claim (first claimer or
+        idempotent re-claim), ``False`` if another bot already holds it.
+        """
+        ...
+
+    @abstractmethod
+    def release_bbs_owner(self, task_id: str, bot_id: str) -> bool:
+        """Release a BBS relay claim held by ``bot_id``."""
+        ...
+
+
+@runtime_checkable
+class TaskActionLogRepositoryProtocol(Protocol):
+    """Append-only persistence contract for high-volume task actions."""
+
+    @abstractmethod
+    def append_many(self, events: list["TaskActionLogRecord"]) -> int:
+        """Append action records atomically and return the inserted count."""
+        ...
+
+    @abstractmethod
+    def list_by_task(
+        self,
+        task_id: str,
+        *,
+        node_id: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list["TaskActionLogRecord"]:
+        """Return bounded diagnostic action history."""
+        ...
+
+
+@runtime_checkable
+class TaskDiscoveryLockRepositoryProtocol(Protocol):
+    """Protocol for the task-discovery per-bot distributed lock repository.
+
+    The lock is keyed on ``(env, bot_id, discovery_date)`` and backed by a
+    UNIQUE constraint on ``ac_task_discovery_lock`` — that constraint is the
+    guard. A single unified ORM body
+    (``TaskDiscoveryLockRepository``) runs on both prod OceanBase and local
+    SQLite via the injected DatabasePlugin.
+
+    This is structurally identical to ``BotRestartLockRepositoryProtocol``,
+    differing only in the lock key dimensions: ``discovery_date`` replaces
+    ``entity_id``, and ``holder`` (hostname) replaces ``holder_user_id``.
+    """
+
+    @abstractmethod
+    def acquire(
+        self,
+        env: str,
+        bot_id: str,
+        discovery_date: str,
+        holder: str,
+    ) -> Optional["TaskDiscoveryLockRecord"]:
+        """Acquire the lock by inserting a row.
+
+        Stamps a random ``lock_token`` (fencing token) on the row and returns
+        the inserted record (carrying that token) on success, or ``None`` if a
+        row for ``(env, bot_id, discovery_date)`` already exists (UNIQUE
+        violation). The caller must keep the token and pass it to ``release``
+        so a delete only ever removes the exact row it acquired.
+        """
+        ...
+
+    @abstractmethod
+    def get_if_stale(
+        self,
+        env: str,
+        bot_id: str,
+        discovery_date: str,
+        ttl_seconds: int,
+    ) -> Optional["TaskDiscoveryLockRecord"]:
+        """Return the lock row only if it is older than ``ttl_seconds``.
+
+        Staleness is evaluated DB-side (comparing ``gmt_create`` against the
+        database clock) to avoid app/DB clock-skew. Returns ``None`` when no
+        row exists or the existing row is still fresh.
+        """
+        ...
+
+    @abstractmethod
+    def release(
+        self,
+        env: str,
+        bot_id: str,
+        discovery_date: str,
+        lock_token: str,
+    ) -> bool:
+        """Release the lock by hard-deleting the row — only if it's still ours.
+
+        Compare-and-delete: ``DELETE WHERE (env, bot_id, discovery_date)
+        matches AND lock_token = :lock_token``. The token guard prevents
+        deleting a row that was reaped and re-acquired by another instance
+        after this holder lost interest.
+        """
         ...

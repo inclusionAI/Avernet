@@ -104,3 +104,45 @@ def test_publish_endpoint_rejects_invalid_public_scope(make_client):
     )
 
     assert response.status_code == 422, response.text  # pydantic validation Envelope
+
+
+def test_publish_response_locks_to_declared_fields_drops_extras(make_client):
+    """The public BcsPublishResult is locked to its declared fields.
+
+    Across public_bcs_bot's three return paths the raw service dict carries
+    keys the response must NOT surface: the prod approval reply uses camelCase
+    ``lastOperate``, the no-workflow synthesis uses snake ``last_operate``, and
+    the private direct path adds ``visibility`` / ``visibility_field``. None of
+    these are declared on BcsPublishResult — and ``last_operate`` is removed from
+    the contract altogether — so the response must drop every casing/extra and
+    keep only {success, puid, approval_url, state, error_msg}.
+    """
+    result = {
+        "success": True,
+        "puid": "p1",
+        "approval_url": "u1",
+        "state": "COMPLETED",
+        "error_msg": None,
+        "last_operate": "agree",          # snake (no-workflow synthesis path)
+        "lastOperate": "AGREE",            # camel (prod approval reply contract)
+        "visibility": "private",          # private direct path
+        "visibility_field": "user_visibility",
+    }
+    client, _svc = make_client(result)
+
+    response = client.post(
+        "/openapi/v1/collaboration/bots/b1:entity1/public",
+        json={"public_scope": "user", "visibility": "public"},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    # declared fields survive
+    assert data["success"] is True, data
+    assert data["puid"] == "p1", data
+    assert data["state"] == "COMPLETED", data
+    # last_operate (removed) and lastOperate (camel leak) are both absent
+    assert "last_operate" not in data, data
+    assert "lastOperate" not in data, data
+    # no extras surface at all — the response is locked to the declared fields
+    assert set(data) <= {"success", "puid", "approval_url", "state", "error_msg"}, data

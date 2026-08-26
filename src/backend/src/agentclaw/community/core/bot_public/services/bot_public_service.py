@@ -6,11 +6,16 @@ import json
 import re
 import time
 import threading
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
-from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlugin
+from agentclaw.community.plugin_api.approval_workflow import (
+    NO_WORKFLOW_MARKER,
+    ApprovalWorkflowPlugin,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
@@ -18,6 +23,7 @@ from agentclaw.community.utils.avernet_tenant import (
     bind_current_avernet_tenant,
     get_current_avernet_tenant,
 )
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.repository.models import BotFriendQueryKey, BotFriendStatus, ApprovalStatus, ApprovalType
 from agentclaw.community.core.operator_context import OperatorContext
@@ -40,10 +46,11 @@ if TYPE_CHECKING:
     # BotPublicService is @provider-constructed (bot_public_module), so
     # this annotation is never resolved at runtime.
     from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+    from agentclaw.community.di.config import BcsFuseConfig
     # ``DeviceSyncDispatcher`` 类源头在 plugins/prod/,但 core/ 不得依赖
     # plugins/(arch lint)。镜像 ``ChannelService`` 借 ``DeviceFilesystemDispatcher``
     # 的解法:类型注解走 di/modules/ 转出口(di 是合法的 composition 层)。
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+    from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.bot_publish_approval import (
     BotPublishApprovalPlugin,
@@ -64,6 +71,14 @@ def _resolve_access_mode(public: str, friend_approval: str) -> str:
     return "RESTRICTED"
 
 
+def _is_workflow_unavailable(result: Dict[str, Any]) -> bool:
+    """True when ``start_approval`` returned "no approval capability" rather
+    than a real rejection. No-workflow impls prepend ``NO_WORKFLOW_MARKER`` to
+    ``error_msg`` (see ``plugin_api/approval_workflow.py``); callers must treat
+    this as a fall-through to direct publish, not a failure."""
+    return (result.get("error_msg") or "").startswith(NO_WORKFLOW_MARKER)
+
+
 # BCS-publish destination label for the approval prompt, keyed by public_scope.
 _BCS_PUBLISH_SCENE: dict[str, str] = {
     "user": "加好友场景",
@@ -78,10 +93,10 @@ _BCS_VISIBILITY_FIELD_BY_SCOPE: dict[str, str] = {
 }
 
 # 慢连路径(走工单)在 BCS friend_ext 下记录工单的 sub-key 随 public_scope 联动:
-# user → public_user_approval; agent → public_public_approval。内层 block 形状一致。
+# user → public_user_approval; agent → public_agent_approval。内层 block 形状一致。
 _BCS_APPROVAL_KEY_BY_SCOPE: dict[str, str] = {
     "user": "public_user_approval",
-    "agent": "public_public_approval",
+    "agent": "public_agent_approval",
 }
 
 # AGREE 回调时把 public_*_approval 子块里的 view_friend_deps 提到 friend_ext 顶层,
@@ -133,8 +148,9 @@ class BotPublicService:
         auth_relationship_plugin: AuthRelationshipPlugin,
         publish_approval_plugin: BotPublishApprovalPlugin,
         skill_set_service_factory: "SkillSetServiceFactory",
-        device_context_resolver: DeviceContextResolver,
+        device_context_resolver_factory: "Callable[[], DeviceContextResolver]",
         device_sync_dispatcher: "DeviceSyncDispatcher",
+        bcsfuse_config: "BcsFuseConfig",
         catalog_metadata_service: BotCatalogMetadataServiceProtocol,
     ) -> None:
         self._bot_friend_repo = bot_friend_repo
@@ -148,8 +164,12 @@ class BotPublicService:
         self._skill_set_service_factory = skill_set_service_factory
         # Task 2.1: resolver + dispatcher 替代 device_sync_supplier 在
         # sync_bot_config_to_device 路径上的角色。Task 6 收口后 supplier 已删。
-        self._resolver = device_context_resolver
+        # Lazy: DeviceContextResolver's conn-info builders transitively reach
+        # DeviceService, which (corp) depends on BotPublicService itself —
+        # eager injection here would cycle. Resolved at call time instead.
+        self._resolver_factory = device_context_resolver_factory
         self._device_sync_dispatcher = device_sync_dispatcher
+        self._bcsfuse_config = bcsfuse_config
         self._catalog_metadata_service = catalog_metadata_service
         self._sync_lock = threading.Lock()
         self._syncing_bots: set[str] = set()
@@ -356,6 +376,66 @@ class BotPublicService:
 
         logger.info(f"[_rebuild_auth_relationships] Rebuild done: bot_id={bot_id}, owner_id={owner_id}, total={len(keep_work_nos)}")
 
+    def _resolve_bcsfuse_base_url(self) -> str:
+        """Resolve the configured BCSFuse base URL for the current env."""
+        base_url = self._bcsfuse_config.base_url
+        if get_current_env() == "pre" and self._bcsfuse_config.base_url_pre:
+            base_url = self._bcsfuse_config.base_url_pre
+        return base_url.rstrip("/")
+
+    def _sync_bcsfuse_runtime_state(self, bot_id: str, public: str) -> None:
+        """Best-effort sync bot visibility to BCSFuse runtime state."""
+        base_url = self._resolve_bcsfuse_base_url()
+        if not base_url:
+            logger.info(
+                "[_sync_bcsfuse_runtime_state] Skip BCSFuse sync: no base_url configured, "
+                "bot_id=%s public=%s",
+                bot_id,
+                public,
+            )
+            return
+
+        runtime_state = "online" if public == "1" else "offline"
+        url = f"{base_url}/api/v1/workers/{bot_id}/{runtime_state}"
+        request = Request(url, data=b"", method="PUT")
+        request.add_header("Content-Type", "application/json")
+
+        try:
+            with urlopen(request, timeout=15) as response:
+                logger.info(
+                    "[_sync_bcsfuse_runtime_state] Synced BCSFuse runtime state: "
+                    "bot_id=%s runtime_state=%s status=%s",
+                    bot_id,
+                    runtime_state,
+                    getattr(response, "status", "unknown"),
+                )
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+            logger.warning(
+                "[_sync_bcsfuse_runtime_state] BCSFuse HTTP error ignored: "
+                "bot_id=%s runtime_state=%s status=%s body=%s",
+                bot_id,
+                runtime_state,
+                exc.code,
+                body,
+            )
+        except URLError as exc:
+            logger.warning(
+                "[_sync_bcsfuse_runtime_state] BCSFuse URL error ignored: "
+                "bot_id=%s runtime_state=%s reason=%s",
+                bot_id,
+                runtime_state,
+                exc.reason,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[_sync_bcsfuse_runtime_state] BCSFuse sync failed but ignored: "
+                "bot_id=%s runtime_state=%s error=%s",
+                bot_id,
+                runtime_state,
+                exc,
+            )
+
     def public_bot(self, bot_id: str, owner_id: str, public: str, permission_owner: str, friend_approval: str, operator: OperatorContext) -> Dict[str, Any]:
         """
         公开/取消公开 Bot。
@@ -518,10 +598,35 @@ class BotPublicService:
             biz_type="botpublic",
             context=context,
         )
+        # The protocol promises no-workflow callers fall through to direct
+        # publish (NOT a failure). In the community build NoApprovalWorkflow
+        # (and local LocalAntProcessService) report "no approval capability" —
+        # distinguished from a real rejection by the NO_WORKFLOW_MARKER prefix
+        # on error_msg. We treat that as auto-approved (AGREE): synthesize a
+        # COMPLETED result so the persist + inline-callback path below drives
+        # the BCS friend_ext update (status AGREE + visibility flip) exactly
+        # like corp's auto-completed tenant, instead of raising (which the old
+        # code did for any success=False — turning every community publish into
+        # a 500). No real ticket was created, so puid stays None;
+        # _apply_callback_decision keys the BCS write off public_scope, not
+        # puid. The returned state is reported SKIPPED (the approval step was
+        # skipped) even though the BCS update did run — see the
+        # ``workflow_unavailable`` handling before the return.
+        workflow_unavailable = False
         if not approval_result.get("success"):
-            raise BotPublicServiceError(
-                f"创建审批失败: {approval_result.get('error_msg')}"
-            )
+            if not _is_workflow_unavailable(approval_result):
+                raise BotPublicServiceError(
+                    f"创建审批失败: {approval_result.get('error_msg')}"
+                )
+            workflow_unavailable = True
+            approval_result = {
+                "success": True,
+                "state": "COMPLETED",
+                "lastOperate": "AGREE",
+                "puid": None,
+                "approval_url": None,
+                "error_msg": approval_result.get("error_msg"),
+            }
         # 记录工单信息到 BCS friend_ext.public_user_approval (PROCESSING):
         # GET→merge→PATCH (Provider 管理 API, 同 BcnService 鉴权). 失败不中断已建工单.
         try:
@@ -555,6 +660,18 @@ class BotPublicService:
                 logger.warning(
                     "[public_bcs_bot] COMPLETED inline callback failed: %s", exc
                 )
+        # The no-workflow fall-through reused the persist + AGREE inline-callback
+        # path above to drive the BCS update; surface the *approval* outcome as
+        # SKIPPED (no approval step ran) rather than the synthesized COMPLETED.
+        if workflow_unavailable:
+            return {
+                "success": True,
+                "state": "SKIPPED",
+                "puid": None,
+                "approval_url": None,
+                "last_operate": "agree",
+                "error_msg": approval_result.get("error_msg"),
+            }
         return approval_result
 
     def _publish_callbacks(self) -> BotPublishCallbacks:
@@ -610,6 +727,7 @@ class BotPublicService:
         self._sync_access_mode_and_relations(
             bot_id, owner_id, access_mode, public,
         )
+        self._sync_bcsfuse_runtime_state(bot_id, public)
         logger.info(
             "[bot_service.public_bot] %s: bot_id=%s public=%s "
             "owner=%s operator=%s",
@@ -792,10 +910,16 @@ class BotPublicService:
         public/protected 仍走工单, 见 public_bcs_bot 主流程。
         """
         field = _BCS_VISIBILITY_FIELD_BY_SCOPE[public_scope]
-        self._bcn_service.patch_attributes(bot_uuid=bot_uid, body={field: "private"})
+        patched = self._bcn_service.patch_attributes(
+            bot_uuid=bot_uid, body={field: "private"}
+        )
+        # patch_attributes returns {"skipped": True} when community has no BCS
+        # provider creds (non prod/pre); report that truthfully as SKIPPED
+        # instead of faking COMPLETED.
+        skipped = isinstance(patched, dict) and bool(patched.get("skipped"))
         return {
             "success": True,
-            "state": "COMPLETED",
+            "state": "SKIPPED" if skipped else "COMPLETED",
             "puid": None,
             "approval_url": None,
             "visibility": "private",
@@ -809,7 +933,7 @@ class BotPublicService:
 
         public_scope 非空即新版发布回调 (caller 保证 bot_id == bot_uid):
         - 把 (_BCS_APPROVAL_KEY_BY_SCOPE) 对应的 friend_ext 子块
-          (public_user_approval/public_public_approval) 的 status 写成 last_operate
+          (public_user_approval/public_agent_approval) 的 status 写成 last_operate
           (AGREE/DISAGREE/CANCEL)。
         - AGREE 时同时翻 BCS 可见性字段 (_BCS_VISIBILITY_FIELD_BY_SCOPE):
             - public_scope=user → user_visibility = block.visibility (block 存的请求值,
@@ -883,7 +1007,7 @@ class BotPublicService:
         if public_scope:
             # New-version callback (public_scope 非空 → bot_id 即 bot_uid):
             # GET friend_ext → 按 public_scope 子块 (public_user_approval/
-            # public_public_approval) 写 status = last_operate → PATCH 回。
+            # public_agent_approval) 写 status = last_operate → PATCH 回。
             try:
                 return self._apply_callback_decision(
                     bot_uid=bot_id, public_scope=public_scope, last_operate=last_operate
@@ -951,6 +1075,7 @@ class BotPublicService:
             self._sync_access_mode_and_relations_or_raise(
                 bot_id, owner_id, access_mode, public_value,
             )
+            self._sync_bcsfuse_runtime_state(bot_id, public_value)
             logger.info(f"[bot_service.handle_public_approval_callback] Approval agreed: bot_id={bot_id}, public={public_value}")
             return {"success": True, "public": public_value, "message": "Public status updated"}
         elif last_operate_upper == "DISAGREE":
@@ -992,9 +1117,8 @@ class BotPublicService:
             # Skip device sync in local mode: the engine's /api/bot/config endpoint writes
             # ROLE/VISIBILITY to a flat file that nothing on the engine side actually reads.
             # Locally it fails because /home/admin/.credentials doesn't exist on macOS.
-            # Task 2.1: 走 resolver + dispatcher,binding/conn_info 由 resolver
-            # 内部查 — caller 不再透传 binding_id / nick_name。
-            # Mode never reaches this service — Rule 14.
+            # Binding and connection details are resolved inside the device
+            # context resolver; callers only provide the bot and owner identity.
             self.sync_bot_config_to_device(
                 bot_id=bot_id,
                 user_id=owner_id,
@@ -1014,22 +1138,17 @@ class BotPublicService:
     ) -> Dict[str, Any]:
         """通过 BaaS/Arca/Teclaw 链路把 bot config 同步到容器。
 
-        Task 2.1: 走 resolver + DeviceSyncDispatcher 收口,入参精简为
-        ``(bot_id, user_id, public, permission_owner)`` — binding 由
-        resolver 内部查,nick_name 死参兜底成 user_id(plugin 内不读)。
-
-        Rule 14: this service is mode-blind. Resolver/dispatcher 替代
-        旧 ``DeviceSyncPluginSupplier.for_binding``。无 binding /
-        无可用 provider 时 resolver 抛 ``DeviceNotBoundError`` /
-        ``UnknownProviderError``,我们捕获并转 ``{"success": False, ...}``
-        — 与旧 ``DeviceSyncUnavailableError`` 的 wire shape 对齐。
+        The resolver owns binding and connection lookup; the dispatcher selects
+        the provider-specific Core ``DeviceSync`` service. Missing bindings or
+        unsupported providers are converted to the established failure-result
+        shape instead of escaping to the caller.
         """
         from agentclaw.community.core.devices.services.device_context import (
             DeviceNotBoundError,
             UnknownProviderError,
         )
         try:
-            ctx = self._resolver.resolve_for_bot(bot_id, user_id)
+            ctx = self._resolver_factory().resolve_for_bot(bot_id, user_id)
         except (DeviceNotBoundError, UnknownProviderError) as e:
             logger.warning(
                 "[bot_service.sync_bot_config_to_device] bot=%s no syncable device: %s",
@@ -1492,6 +1611,11 @@ class BotPublicService:
             if bot is None:
                 continue
             metadata_item = metadata_by_address[address]
+            # COSEC: The BCS value reached this service only after the adapter
+            # validated its composite address; fall back only to the exact joined Backend address.
+            bot["bot_uuid"] = metadata_item.bot_uuid or (
+                f"{address.bot_id}:{address.entity_id}"
+            )
             for field_name in (
                 "is_friend",
                 "visibility",

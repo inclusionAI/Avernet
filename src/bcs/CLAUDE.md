@@ -516,6 +516,10 @@ bcs-cli create-group --driver zhangsan --participants "lisi,wangwu"
 # Create a manager-worker group; participants are assigned the worker role
 bcs-cli create-group --manager zhangsan --participants "lisi,wangwu"
 
+# Attach Provider routing tags to any participant, including the manager
+bcs-cli create-group --manager zhangsan --participants "lisi,wangwu" \
+  --participant-tag zhangsan=tenant-a --participant-tag lisi=worker-tag
+
 # Validate and create a custom collaboration group
 bcs-cli collaboration validate workflow.yaml
 bcs-cli collaboration create workflow.yaml --driver zhangsan \

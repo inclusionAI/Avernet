@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
-from secbaas.community.plugins.secret import AliyunKmsSecretStorePlugin
-from secbaas.community.plugins.secret.kms import KmsSecretStoreConfig
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
 from secbaas.community.spi.secret import SecretStorePlugin
 
@@ -55,56 +51,3 @@ class TestStubSecretStorePlugin(SecretStorePluginContract):
             secrets={"baas/app/plain": "plain-value"},
             kv_secrets={"baas/app/kv": ("user", "pass")},
         )
-
-
-class TestAliyunKmsSecretStorePluginConformance(SecretStorePluginContract):
-    def setup_method(self) -> None:
-        self.plugin = AliyunKmsSecretStorePlugin(
-            KmsSecretStoreConfig(
-                endpoint="kms.cn-hangzhou.aliyuncs.com",
-                region_id="cn-hangzhou",
-                access_key_id="LTAI-test",
-                access_key_secret="secret-test",
-                sm4_key_secret_name="baas/chain/sm4",
-                proxypass_secret_name="baas/proxypass",
-            ),
-            client_factory=_MockFactory(
-                {
-                    "baas/app/plain": "plain-value",
-                    "baas/app/kv": "user:pass",
-                    "baas/chain/sm4": "cmF3c2tleQ==",
-                    "baas/proxypass": "proxypass-secret",
-                }
-            ),
-        )
-
-
-class _MockBody:
-    def __init__(self, secret_data: str) -> None:
-        self.secret_data = secret_data
-
-
-class _MockResponse:
-    body: Any
-
-    def __init__(self, secret_data: str) -> None:
-        self.body = _MockBody(secret_data)
-
-
-class _MockClient:
-    def __init__(self, values: dict[str, str]) -> None:
-        self._values = values
-
-    def get_secret_value(self, request: Any) -> _MockResponse:
-        name = request.secret_name
-        if name not in self._values:
-            raise RuntimeError(f"secret {name} not found")
-        return _MockResponse(self._values[name])
-
-
-class _MockFactory:
-    def __init__(self, values: dict[str, str]) -> None:
-        self._client = _MockClient(values)
-
-    def get_client(self) -> _MockClient:
-        return self._client

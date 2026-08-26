@@ -102,7 +102,7 @@ pub use application::collaboration_template::{
     ListCollaborationTemplatesQuery,
 };
 pub use application::principal::{
-    AdminActor, BotActor, CallerContext, HumanActor, IntegrationClient,
+    AdminActor, BotActor, CallerContext, HumanActor, IntegrationClient, RequestAuthHeaders,
 };
 pub use bot_runtime_use_cases::{
     BotRuntimeConnectCommand, BotRuntimeConnectOutcome, BotRuntimeConnectionService,
@@ -168,7 +168,8 @@ pub use application::{
     ProviderEventIngestService,
     ProviderCoordinationEventKind, ProviderCoordinationIntent, ProviderManagementService,
     RegisterProviderBotCommand, RegisterProviderBotOutcome, RegisterProviderCommand,
-    RegisterProviderOutcome, UpdateProviderCommand, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
+    RegisterProviderOutcome, UpdateProviderBotCommand, UpdateProviderBotOutcome,
+    UpdateProviderCommand, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     CreateOrganizationCommand,
     OrganizationAuth, OrganizationManagementService, OrganizationMemberAuth,
     PutOrganizationMemberCommand, UpdateOrganizationCommand,
@@ -255,7 +256,8 @@ pub use core::{
     GroupMessage, GroupMessageType, GroupMutableFieldsPatch, GroupStatus, GroupStrategy, MessageRole,
     Participant, ParticipantKind, ParticipantMode, ParticipantRole, ProposalCoreService,
     ProviderBotCoreService, ProviderCoreService, RegisterProviderBotParams, RegisteredBot,
-    RegisteredProvider, AuthorizedOrganizationPair, OrganizationCandidateBot, OrganizationCandidateBotDetail, OrganizationCandidateBotPage,
+    RegisteredProvider, UpdateProviderBotCoreResult, AuthorizedOrganizationPair,
+    OrganizationCandidateBot, OrganizationCandidateBotDetail, OrganizationCandidateBotPage,
     OrganizationCandidatePageQuery, OrganizationCandidateQuery,
     OrganizationCoreService, OrganizationMemberBotDetail, OrganizationMemberDetail,
     OrganizationMemberPageQuery, OrganizationMemberProfile, OrganizationMemberProfilePatch,

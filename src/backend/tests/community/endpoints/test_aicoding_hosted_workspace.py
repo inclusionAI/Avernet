@@ -95,7 +95,7 @@ def _seed_app_coding_bot_with_member_collaborator(world):
         "bot_id": "bot_app_coding_collab",
         "bot_name": "AppBotCollab",
         "owner_id": "u_owner",
-        "bot_type": "personal",
+        "bot_type": "service",
         "status": "ACTIVE",
         "entity_id": "u_owner",
         "entity_type": "staff",
@@ -184,6 +184,28 @@ def create_dima_workspace_ok_for_claude_code_non_app_coding():
 )
 def create_dima_workspace_allows_member_collaborator():
     """MEMBER collaborator can create DIMA workspace for the owner's coding bot."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/aicoding/bot/{bot_id}/dima-workspace",
+    scenario="member_collaborator_self_resolved",
+    input=CaseInput(
+        path_params={"bot_id": "bot_app_coding_collab"},
+        query_params={"user_id": "u_member"},
+        headers={"x-user-id": "u_member"},
+    ),
+    seed=_seed_app_coding_bot_with_member_collaborator,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "data": {"dima_space_id": "W_STUB_bot_app_coding_collab"},
+        },
+    ),
+)
+def create_dima_workspace_allows_member_collaborator_self_resolved():
+    """协作者用自己的 user_id 访问时，也能通过协作者关系解析到真实 owner。"""
 
 
 @endpoint_test(

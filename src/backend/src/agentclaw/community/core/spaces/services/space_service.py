@@ -21,12 +21,20 @@ from agentclaw.community.core.spaces.models import (
     SpaceSummaryRecord,
     SpaceType,
 )
+from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,
     SkillCenterTeamCreateRequest,
     SkillCenterTeamQueryRequest,
 )
+from agentclaw.community.plugin_api.staff_dept import (
+    StaffDeptPlugin,
+    StaffProfileLookupError,
+)
 from agentclaw.community.utils.env_utils import get_current_env
+
+
+logger = get_logger()
 
 
 # SC registers OCB Space ids under this stable external-source namespace.
@@ -41,9 +49,26 @@ class SpaceService:
         self,
         repository: SpaceRepositoryProtocol,
         skill_center_client: SkillCenterClient,
+        staff_dept: StaffDeptPlugin,
     ) -> None:
         self._repository = repository
         self._skill_center_client = skill_center_client
+        self._staff_dept = staff_dept
+
+    def _get_creator_user_name(self, *, user_id: str) -> str | None:
+        try:
+            profile = self._staff_dept.get_profile_by_work_no(work_no=user_id)
+        except StaffProfileLookupError:
+            logger.warning(
+                "staff profile lookup failed; creating space without creator name",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
+            return None
+        if profile.nick_name is None:
+            return None
+        normalized = profile.nick_name.strip()
+        return normalized[:128] or None
 
     def initialize_personal(self, *, user_id: str) -> tuple[SpaceRecord, bool]:
         env = get_current_env()
@@ -51,9 +76,10 @@ class SpaceService:
         if existing is not None:
             return self._ensure_personal_sc_team_binding(existing, env=env), False
 
+        creator_user_name = self._get_creator_user_name(user_id=user_id)
         try:
             with self._repository.create_personal_transaction(
-                user_id=user_id, env=env
+                user_id=user_id, creator_user_name=creator_user_name, env=env
             ) as record:
                 result = self._skill_center_client.create_team(
                     SkillCenterTeamCreateRequest(
@@ -128,8 +154,22 @@ class SpaceService:
         normalized = name.strip()
         if not normalized or len(normalized) > 128:
             raise SpaceNameInvalidError("space name must contain 1-128 characters")
+        env = get_current_env()
+        if (
+            self._repository.get_team_space_by_name(
+                creator_id=creator_id, name=normalized, env=env
+            )
+            is not None
+        ):
+            raise SpaceAlreadyExistsError(
+                "a team space with the same name already exists for this creator"
+            )
+        creator_user_name = self._get_creator_user_name(user_id=creator_id)
         with self._repository.create_team_transaction(
-            name=normalized, creator_id=creator_id, env=get_current_env()
+            name=normalized,
+            creator_id=creator_id,
+            creator_user_name=creator_user_name,
+            env=env,
         ) as record:
             result = self._skill_center_client.create_team(
                 SkillCenterTeamCreateRequest(

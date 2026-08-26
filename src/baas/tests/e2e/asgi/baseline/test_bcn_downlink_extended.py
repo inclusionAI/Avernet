@@ -68,7 +68,8 @@ _INTERACTION_RESOLVE_BODY: dict = {
             "components": {
                 "header": "Components",
                 "question": "Which components?",
-                "values": ["web", "worker"],
+                "values": ["web"],
+                "customValues": ["scheduler"],
             }
         },
     },
@@ -149,6 +150,7 @@ class TestInteractionResolve:
         assert response.status_code == 200
         assert response.json() == {"ok": True, "retryable": None, "error": None}
         assert captured["input"].answers["components"].values == ()
+        assert captured["input"].answers["components"].custom_values == ("scheduler",)
         assert captured["input"].answers["components"].header == "Components"
 
 

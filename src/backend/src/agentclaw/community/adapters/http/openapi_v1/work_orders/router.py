@@ -8,10 +8,15 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
+from agentclaw.community.adapters.http.openapi_v1.dependencies import (
+    Principal,
+    require_principal,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors import GrantNotResolvableError
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     UserIdDep,
+    caller_owner_id,
     refuse_app_only_caller,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -69,6 +74,7 @@ PageNoQuery = Annotated[int, Query(ge=1, description="One-based page number.")]
 PageSizeQuery = Annotated[
     int, Query(ge=1, le=100, description="Maximum items returned per page.")
 ]
+PrincipalDep = Annotated[Principal, Depends(require_principal)]
 _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
 
@@ -112,6 +118,11 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
             gmt_created=notification.gmt_created,
             gmt_modified=notification.gmt_modified,
         )
+    created = (
+        notification.gmt_created
+        if notification is not None
+        else work_order.gmt_created
+    )
     modified = (
         notification.gmt_modified
         if notification is not None
@@ -158,7 +169,7 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
         read_at=notification.read_at if notification is not None else None,
         env=work_order.env,
         can_approve=item.can_approve,
-        gmt_created=work_order.gmt_created,
+        gmt_created=created,
         gmt_modified=modified,
     )
 
@@ -204,16 +215,17 @@ async def create_bot_editor_request(
     "/openapi/v1/bots/spaces/{space_id}/join-requests",
     status_code=201,
     response_model=Envelope[SpaceJoinRequestCreated],
+    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def create_space_join_request(
     space_id: PositiveIdPath,
     body: CreateSpaceJoinRequest,
     request: Request,
-    caller: ActingCallerDep,
+    principal: PrincipalDep,
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[SpaceJoinRequestCreated]:
-    actor_id = _require_user_delegation(caller)
+    actor_id = caller_owner_id(principal)
     record = service.create_space_join_request(
         space_id=space_id,
         applicant_user_id=actor_id,

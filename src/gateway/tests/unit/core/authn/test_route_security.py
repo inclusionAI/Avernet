@@ -33,6 +33,53 @@ def test_shipped_config_admits_a_machine_caller_on_the_public_api() -> None:
     assert req[PrincipalType.APP] is Presence.OPTIONAL
 
 
+def test_shipped_config_uses_human_or_owned_bot_for_group_creation() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    requirement = rs.resolve("POST", "/openapi/v1/collaboration/groups")
+
+    assert requirement == {
+        PrincipalType.USER: Presence.OPTIONAL,
+        PrincipalType.APP: Presence.REQUIRED,
+        PrincipalType.BOT: Presence.OPTIONAL,
+    }
+
+    # The exact POST override must not relax other Group operations.
+    sibling = rs.resolve("GET", "/openapi/v1/collaboration/groups")
+    assert sibling == {
+        PrincipalType.USER: Presence.REQUIRED,
+        PrincipalType.APP: Presence.REQUIRED,
+    }
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/openapi/v1/collaboration/groups/group-1"),
+        ("PATCH", "/openapi/v1/collaboration/groups/group-1"),
+        ("DELETE", "/openapi/v1/collaboration/groups/group-1"),
+        ("POST", "/openapi/v1/collaboration/groups/group-1/sessions"),
+        ("GET", "/openapi/v1/collaboration/sessions/session-1"),
+        ("PATCH", "/openapi/v1/collaboration/sessions/session-1"),
+        ("DELETE", "/openapi/v1/collaboration/sessions/session-1"),
+    ],
+)
+def test_shipped_config_uses_human_or_owned_bot_for_resource_operations(
+    method: str, path: str
+) -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    requirement = RouteSecurity.from_table(
+        raw["user_config"]["route_security"]
+    ).resolve(method, path)
+
+    assert requirement == {
+        PrincipalType.USER: Presence.OPTIONAL,
+        PrincipalType.APP: Presence.REQUIRED,
+        PrincipalType.BOT: Presence.OPTIONAL,
+    }
+
+
 @pytest.mark.parametrize(
     ("method", "path"),
     [
@@ -115,9 +162,7 @@ def test_shipped_config_still_requires_a_user_where_a_human_is_required(
         ("POST", "/openapi/v1/bots/bot-123/iam-token"),
     ],
 )
-def test_iam_operations_do_not_resolve_an_app_identity(
-    method: str, path: str
-) -> None:
+def test_iam_operations_do_not_resolve_an_app_identity(method: str, path: str) -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     req = RouteSecurity.from_table(raw["user_config"]["route_security"]).resolve(
         method, path
@@ -276,8 +321,11 @@ def test_shipped_config_collects_all_optional_file_identities_and_keeps_share_pu
         == {}
     )
     sibling = rs.resolve("GET", "/openapi/v1/collaboration/sessions/session-1")
-    assert sibling is not None
-    assert sibling[PrincipalType.USER] is Presence.REQUIRED
+    assert sibling == {
+        PrincipalType.USER: Presence.OPTIONAL,
+        PrincipalType.APP: Presence.REQUIRED,
+        PrincipalType.BOT: Presence.OPTIONAL,
+    }
     assert sibling[PrincipalType.APP] is Presence.REQUIRED
 
 

@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 790" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1000" height="790" fill="#ffffff"/>
+  <text x="500" y="28" text-anchor="middle" font-size="15" font-weight="700" fill="#1f2937">skill_center — target architecture: Installation as the single source of truth</text>
+
+  <!-- policy consultation bus -->
+  <path d="M 195 58 L 195 48 L 830 48 L 830 58 M 520 58 L 520 48" fill="none" stroke="#d97706" stroke-width="1.3" stroke-dasharray="5 4"/>
+  <text x="700" y="43" text-anchor="middle" font-size="10.5" fill="#b45309">both command services consult the ownership rules (R1–R3)</text>
+
+  <!-- Band 1: command services + policy -->
+  <rect x="40" y="58" width="310" height="96" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.3"/>
+  <text x="195" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">SkillSetManagementService</text>
+  <text x="195" y="99" text-anchor="middle" font-size="11" fill="#475569">Set CRUD · activate / deactivate / sync / all</text>
+  <text x="195" y="114" text-anchor="middle" font-size="11" fill="#475569">skill &amp; MCP membership · Default exclusions</text>
+  <text x="195" y="129" text-anchor="middle" font-size="11" fill="#475569">ACL · audit · then runtime projection ¹</text>
+
+  <rect x="380" y="58" width="280" height="96" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.3"/>
+  <text x="520" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">DirectActivationService</text>
+  <text x="520" y="99" text-anchor="middle" font-size="11" fill="#475569">activate / deactivate ONE capability</text>
+  <text x="520" y="114" text-anchor="middle" font-size="11" fill="#475569">skill or MCP — same semantics</text>
+  <text x="520" y="129" text-anchor="middle" font-size="11" fill="#475569">legal only when no Set governs it (R1) · then ¹</text>
+
+  <rect x="700" y="58" width="260" height="96" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.3"/>
+  <text x="830" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#b45309">CapabilityOwnershipPolicy · new</text>
+  <text x="830" y="99" text-anchor="middle" font-size="11" fill="#78350f">R1  in any reaching Set ⇒ no direct control</text>
+  <text x="830" y="114" text-anchor="middle" font-size="11" fill="#78350f">R2  direct-active ⇒ cannot join a Set</text>
+  <text x="830" y="129" text-anchor="middle" font-size="11" fill="#78350f">R3  one Set per capability</text>
+
+  <!-- services -> UoW -->
+  <line x1="195" y1="154" x2="270" y2="186" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="520" y1="154" x2="450" y2="186" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
+
+  <!-- services -> projector trigger (left-margin elbow) -->
+  <path d="M 40 132 L 24 132 L 24 468 L 34 468" fill="none" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <text x="14" y="300" font-size="10.5" fill="#475569" transform="rotate(-90 14 300)" text-anchor="middle">¹ triggered after every mutation</text>
+
+  <!-- Band 2: the one UoW repository -->
+  <rect x="40" y="190" width="640" height="76" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.3"/>
+  <text x="360" y="212" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">CapabilityDesiredStateRepository — the one unit of work (the one writer)</text>
+  <text x="360" y="231" text-anchor="middle" font-size="11" fill="#475569">composes per-table command modules (one owner per table's SQL) in one transaction</text>
+  <text x="360" y="246" text-anchor="middle" font-size="11" fill="#475569">Set state · membership · exclusions · installations — plus flush_installations(bot) = the lazy flush</text>
+
+  <!-- UoW -> tables -->
+  <line x1="200" y1="266" x2="200" y2="302" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="560" y1="266" x2="680" y2="302" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
+
+  <!-- Band 3: tables -->
+  <rect x="40" y="306" width="340" height="84" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.3"/>
+  <text x="210" y="328" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">SkillSet configuration</text>
+  <text x="210" y="347" text-anchor="middle" font-size="11" fill="#475569">ac_skill_set (is_active · is_default)</text>
+  <text x="210" y="362" text-anchor="middle" font-size="11" fill="#475569">ac_skill_set_skill · ac_skill_set_mcp</text>
+  <text x="210" y="377" text-anchor="middle" font-size="11" fill="#475569">ac_default_skillset_*_exclusion</text>
+
+  <rect x="560" y="306" width="340" height="84" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="730" y="328" text-anchor="middle" font-size="13" font-weight="700" fill="#1d4ed8">Installation — single source of truth</text>
+  <text x="730" y="347" text-anchor="middle" font-size="11" fill="#1e40af">ac_bot_skill_installation</text>
+  <text x="730" y="362" text-anchor="middle" font-size="11" fill="#1e40af">ac_bot_mcp_installation</text>
+  <text x="730" y="377" text-anchor="middle" font-size="11" fill="#1e40af">active-only desired state · not backfilled</text>
+
+  <!-- flush arrow between table groups -->
+  <text x="468" y="332" text-anchor="middle" font-size="11" font-weight="700" fill="#2563eb">lazy flush (repair)</text>
+  <text x="468" y="346" text-anchor="middle" font-size="10.5" fill="#2563eb">Installation agrees with Set state</text>
+  <line x1="384" y1="356" x2="552" y2="356" stroke="#2563eb" stroke-width="1.6" marker-end="url(#arrowBlue)"/>
+
+  <!-- tables -> reader -->
+  <line x1="730" y1="390" x2="730" y2="426" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowBlue)"/>
+  <text x="748" y="412" font-size="10.5" fill="#2563eb">read</text>
+
+  <!-- Band 4: projector + reader -->
+  <rect x="40" y="430" width="440" height="76" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.3"/>
+  <text x="260" y="450" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">BotRuntimeProjector · renamed ¹</text>
+  <text x="260" y="468" text-anchor="middle" font-size="11" fill="#475569">runtime projection: desired state → running engine</text>
+  <text x="260" y="483" text-anchor="middle" font-size="11" fill="#475569">reads via the reader · adds default-MCP policy + CLIs</text>
+  <text x="260" y="498" text-anchor="middle" font-size="11" fill="#475569">resolves one snapshot (RuntimeProjectionResolver) · verifies, fails closed</text>
+
+  <rect x="560" y="430" width="340" height="76" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="730" y="452" text-anchor="middle" font-size="13" font-weight="700" fill="#1d4ed8">BotCapabilityStateReader · new</text>
+  <text x="730" y="471" text-anchor="middle" font-size="11" fill="#1e40af">flush (DB-side only) → then read Installation</text>
+  <text x="730" y="486" text-anchor="middle" font-size="11" fill="#1e40af">active_skill_assets · active_mcp_server_codes</text>
+
+  <!-- reader -> projector (data) -->
+  <line x1="556" y1="468" x2="486" y2="468" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowBlue)"/>
+  <text x="521" y="459" text-anchor="middle" font-size="10.5" fill="#2563eb">active state</text>
+
+  <!-- projector -> engine -->
+  <line x1="260" y1="506" x2="260" y2="542" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
+
+  <!-- Band 5: engine runtime -->
+  <rect x="40" y="546" width="440" height="52" rx="8" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.3"/>
+  <text x="260" y="566" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1f2937">Engine runtime (the Bot's device)</text>
+  <text x="260" y="584" text-anchor="middle" font-size="11" fill="#475569">symlinks / Pool mappings · MCP config + allow-list · Passport scope</text>
+
+  <!-- reader -> consumers -->
+  <line x1="730" y1="506" x2="730" y2="626" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
+
+  <!-- Band 6: other consumers -->
+  <rect x="40" y="630" width="920" height="86" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.3"/>
+  <text x="500" y="652" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">Other consumers of the reader — one projection everywhere</text>
+  <text x="60" y="672" font-size="11" fill="#475569">· skills_pool convergence / recovery / reconcile   · Service-Bot build stage   · direct-activation name-conflict guard</text>
+  <text x="60" y="688" font-size="11" fill="#475569">· SkillQueryService (OpenAPI listing &amp; detail)   · SkillSetService.get_active_skills → symlink mappings, teclaw config-compose</text>
+  <text x="60" y="704" font-size="11" fill="#475569">· collect_bot_active_mcps = default MCP policy (engine/template − exclusions) ∪ installed MCPs</text>
+
+  <!-- terminology footnote -->
+  <text x="60" y="744" font-size="10.5" fill="#64748b">Two different syncs — <tspan font-weight="700">flush</tspan>: DB-side repair, Set configuration → Installation; never touches a device (the reader's job).</text>
+  <text x="60" y="760" font-size="10.5" fill="#64748b"><tspan font-weight="700">¹ runtime projection</tspan>: BotRuntimeProjector (renamed from BotRuntimeProjectionReconciler) pushes Installation-backed state to the engine — triggered synchronously by both command services after every mutation, compensated on failure.</text>
+</svg>

@@ -35,6 +35,7 @@ class MCPMarketService:
         network_types: Optional[list[str]] = None,
         categories: Optional[list[str]] = None,
         tenants: Optional[list[str]] = None,
+        tags: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """Query MCP server list from MCP Center."""
         return self.mcp_center.get_mcp_list(
@@ -51,6 +52,7 @@ class MCPMarketService:
             network_types=network_types,
             categories=categories,
             tenants=tenants,
+            tags=tags,
         )
 
     def get_mcp_detail(

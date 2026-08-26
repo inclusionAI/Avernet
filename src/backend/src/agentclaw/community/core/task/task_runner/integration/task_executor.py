@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from agentclaw.community.core.task.domain.models import TaskNode, TaskNodePatch
+from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 
@@ -37,40 +38,46 @@ _BCN_EVENT_CALLBACK_PATH = "/api/v1/collaboration/tasks/callback/report"
 
 class TaskExecutor:
     def __init__(self, *, bot, bcs, formatter, context, sink, poller,
-                 identity_resolver=None, graph=None, bot_public=None,
-                 api_base_url: str = "") -> None:
+                 identity_resolver=None, graph=None,
+                 api_base_url: str = "", bcn: BcnService | None = None) -> None:
         """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None;
         context: TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。
         graph: TaskGraphService|None,动态派发后把 group_id/session_id/run_id 落节点 run_info.extend_props
-        (dashboard 可见);None 时跳过(单测/无图路径)。R0 骨架允许 None;bbs 路径不依赖任何端口。
-        bot_public: BotPublicServiceProtocol|None(TEMP e2e),供 bbs_runner ``notify`` 按关键字取 dream bot roster
-        (替代 bcs.list_bots_by_task_modes,免 provider_id + task_dream_mode PATCH)。
+        (dashboard 可见);None 时跳过(单测/无图路径)。R0 骨架允许 None。
+        bbs_runner 通过注入的 BcnService.list_bots_by_task_modes(复用统一 provider 身份)查询任务模式候选。
         api_base_url: 任务后端 base url,传给 bbs_runner 拼发给胜出 bot 的任务消息。"""
         self._bot = bot
         self._bcs = bcs
+        self._bcn = bcn
         self._formatter = formatter
         self._context = context
         self._sink = sink
         self._poller = poller
         self._identity_resolver = identity_resolver
         self._graph = graph
-        self._bot_public = bot_public
         self._api_base_url = api_base_url
         self._group_meta: dict[str, dict[str, Any]] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
 
     async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[bool]:
         sem = asyncio.Semaphore(_DISPATCH_CONCURRENCY)
+        logger.info("[task][task-executor] dispatch 入口 nodes=%s modes=%s",
+                    [n.node_id for n in toDoTaskList], [n.run_info.run_mode for n in toDoTaskList])
 
         async def _one(node: TaskNode) -> bool:
             mode = node.run_info.run_mode
             if mode == "bbs":
-                logger.info("[task_executor] bbs node dispatched (no-op): task=%s node=%s assignee=%s",
+                logger.info("[task][task_executor] bbs node dispatched (no-op): task=%s node=%s assignee=%s",
                             node.task_id, node.node_id, node.run_info.assignee)
                 return True
             if mode == "single_bot":
+                logger.info("[task][task-executor] >>> 投递 single_bot task=%s node=%s bot=%s → ensure_grant+send_message",
+                            node.task_id, node.node_id, node.run_info.assignee)
                 return await self._dispatch_single_bot(node, sem)
             if mode == "coop_group":
+                logger.info("[task][task-executor] >>> 投递 coop_group task=%s node=%s → form_coop_group(create_group)",
+                            node.task_id, node.node_id)
                 return await self._dispatch_coop_group(node, sem)
+            logger.warning("[task][task-executor] node=%s 未知 run_mode=%s → 不投递", node.node_id, mode)
             return False
 
         return list(await asyncio.gather(*[_one(n) for n in toDoTaskList]))
@@ -90,7 +97,12 @@ class TaskExecutor:
                 )
                 run_id = sent.run_id
                 session_id = sent.session_id
-            except (OpenApiAuthError, OpenApiBadRequestError):
+            except (OpenApiAuthError, OpenApiBadRequestError) as exc:
+                logger.warning(
+                    "[task][task-executor] single_bot 派发失败(OpenAPI %s)task=%s node=%s bot=%s: %s "
+                    "→ 留 PENDING 交 harness;grep [task][openapi_bot] 看具体哪步(http)失败",
+                    type(exc).__name__, node.task_id, node.node_id, bot_id, exc,
+                )
                 return False
             self._poller.register(SingleBotHandle(
                 loop_task_id=loop_task_id, run_id=run_id, bot_id=bot_id,
@@ -179,7 +191,7 @@ class TaskExecutor:
                 f"group bindings reference bots outside GroupFormation.bot_ids: {unknown}"
             )
         logger.info(
-            "[task_executor] form_coop_group start collab=%s bot_ids=%s referenced_ids=%s manager_bot_id=%s originator_bot_id=%s",
+            "[task][task_executor] form_coop_group start collab=%s bot_ids=%s referenced_ids=%s manager_bot_id=%s originator_bot_id=%s",
             mode,
             bot_ids,
             referenced_ids,
@@ -190,12 +202,12 @@ class TaskExecutor:
             resolved = self._identity_resolver.resolve_many(referenced_ids)
         except Exception:
             logger.exception(
-                "[task_executor] form_coop_group identity resolution failed collab=%s bot_ids=%s referenced_ids=%s",
+                "[task][task_executor] form_coop_group identity resolution failed collab=%s bot_ids=%s referenced_ids=%s",
                 mode, bot_ids, referenced_ids,
             )
             raise
         logger.info(
-            "[task_executor] form_coop_group identities resolved collab=%s resolved=%s",
+            "[task][task_executor] form_coop_group identities resolved collab=%s resolved=%s",
             mode, resolved,
         )
 
@@ -295,11 +307,18 @@ class TaskExecutor:
         # 任务描述(目标)→ BCS 创建群的 context 字段。BCS ``resolve_session_topic`` 把 group.context
         # 兜底注入 <GroupContext> 的 `目标` 行(session input 为空时,如建群 BotJoined)。
         _task_context = gf.extend_props.get("task_context")
+        # 任务验收 push 链路:协作群叶子派发期注入 loop_task_id,此处写入群 context,
+        # 供 driver/owner bot 按 acceptance 段4 自验收后 push 回投 /callback/report
+        # (loop_task_id 定位执行节点;backend 取本 TaskExecutor 的 api_base_url,不写死)。
+        _loop_task_id = gf.extend_props.get("loop_task_id")
+        if _loop_task_id and self._api_base_url:
+            _task_context = ((_task_context or "") +
+                             f"\n[task-loop] loop_task_id={_loop_task_id}; backend={self._api_base_url}")
         if _task_context:
             req_kwargs["context"] = _task_context
         req = BcsCreateGroupRequest(**req_kwargs)
         logger.info(
-            "[task_executor] form_coop_group create_group request collab=%s driver_bot=%s participants=%s group_strategy=%s has_definition=%s has_bindings=%s",
+            "[task][task_executor] form_coop_group create_group request collab=%s driver_bot=%s participants=%s group_strategy=%s has_definition=%s has_bindings=%s",
             mode,
             req.driver_bot,
             req.participants,
@@ -311,12 +330,12 @@ class TaskExecutor:
             res = await self._bcs.create_group(req)
         except Exception:
             logger.exception(
-                "[task_executor] form_coop_group create_group failed collab=%s driver_bot=%s participants=%s group_strategy=%s",
+                "[task][task_executor] form_coop_group create_group failed collab=%s driver_bot=%s participants=%s group_strategy=%s",
                 mode, req.driver_bot, req.participants, req.group_strategy,
             )
             raise
         logger.info(
-            "[task_executor] form_coop_group create_group succeeded collab=%s group_id=%s session_id=%s run_id=%s",
+            "[task][task_executor] form_coop_group create_group succeeded collab=%s group_id=%s session_id=%s run_id=%s",
             mode, res.group_id, res.session_id, res.run_id,
         )
         self._group_meta[res.group_id] = {
@@ -355,7 +374,7 @@ class TaskExecutor:
         from agentclaw.community.core.task.task_runner.integration import bbs_runner
         await bbs_runner.notify(
             execution_graph=execution_graph,
-            bot_public=self._bot_public, bot=self._bot,
+            bcn=self._bcn, bot=self._bot,
             graph=self._graph,
             backend_url=self._api_base_url,
             skill_name=bbs_runner._BBS_SKILL_NAME,

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use bcs_domain::{
-    ProviderAuthMode, ProviderBotBinding, ProviderBotConnectionMode, ProviderCoordinationConfig,
-    ProviderOrganizationManagementConfig, ProviderRecord, Skill,
+    ActorStatus, ProviderAuthMode, ProviderBotBinding, ProviderBotConnectionMode,
+    ProviderCoordinationConfig, ProviderOrganizationManagementConfig, ProviderRecord, Skill,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -9,6 +9,7 @@ use serde_json::{Map, Value};
 use crate::{ServiceResult, TaskModeMatch};
 
 use super::message_flow::{BotEventOutcome, ChatEventState, ProviderEventIngestCommand};
+use super::v1::UserVisibility;
 
 /// Default lifetime for an HTTP Provider `chat.send` callback correlation.
 pub const DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS: u64 = 3 * 60 * 60 * 1_000;
@@ -114,6 +115,39 @@ pub struct DeleteProviderBotOutcome {
     pub deleted: bool,
 }
 
+/// Command for partially updating a provider-managed bot.
+///
+/// Each `Option` is a PATCH field: `Some` replaces (empty `Vec` clears),
+/// `None` leaves the existing value. `provider_bot_ref` and the resolved
+/// `bot_uuid` are identifiers and are not changed by this command.
+#[derive(Debug, Clone)]
+pub struct UpdateProviderBotCommand {
+    pub provider_id: String,
+    pub provider_admin_token: String,
+    pub provider_bot_ref: String,
+    pub name: Option<String>,
+    pub summary: Option<String>,
+    pub domains: Option<Vec<String>>,
+    pub skills: Option<Vec<Skill>>,
+    pub scopes: Option<Vec<String>>,
+    pub visibility: Option<String>,
+}
+
+/// Result of updating a provider-managed bot: the post-update capabilities
+/// projected onto the unchanged binding identifiers.
+#[derive(Debug, Clone)]
+pub struct UpdateProviderBotOutcome {
+    pub bot_uuid: String,
+    pub provider_id: String,
+    pub provider_bot_ref: String,
+    pub name: Option<String>,
+    pub summary: Option<String>,
+    pub domains: Vec<String>,
+    pub skills: Vec<Skill>,
+    pub scopes: Vec<String>,
+    pub visibility: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ProviderBotEventCommand {
     pub provider_id: String,
@@ -193,6 +227,11 @@ pub enum ProviderBotEventError {
 /// Provider-scoped roster item projected from the bot control-plane by the two
 /// task-mode toggles. Returned by the internal (non-OpenAPI) provider roster
 /// route consumed by backend task discovery/dispatch.
+///
+/// Identity + task-mode toggles come from the control-plane `record`; the
+/// lifecycle/access attributes (`updated_at`, `visibility`, `created_by`,
+/// `status`, `user_visibility`) are projected from the same record so backend
+/// task discovery/dispatch can select bots without a second lookup.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderBotRosterItem {
     pub bot_id: String,
@@ -200,6 +239,11 @@ pub struct ProviderBotRosterItem {
     pub env: String,
     pub task_claim_mode: bool,
     pub task_dream_mode: bool,
+    pub updated_at: u64,
+    pub visibility: String,
+    pub created_by: Option<String>,
+    pub status: ActorStatus,
+    pub user_visibility: UserVisibility,
 }
 
 /// Task-mode filter for the provider roster. `None` toggles mean "do not filter
@@ -249,13 +293,12 @@ pub trait ProviderManagementService: Send + Sync {
         provider_admin_token: &str,
     ) -> ServiceResult<Vec<ProviderBotBinding>>;
 
-    /// List the provider's bots whose control-plane toggles satisfy `filter`.
-    /// Mirrors `list_provider_bots` admin-token validation, then intersects the
-    /// provider's bot bindings with the task-mode matches resolved server-side.
+    /// List the current-env bots whose control-plane toggles satisfy `filter`.
+    /// Admission (provider admin token + `allowed_switch_provider_ids`) is
+    /// enforced by the route; this use case performs the env-scoped task-mode
+    /// query and does not intersect with provider bot bindings.
     async fn list_provider_bots_by_task_modes(
         &self,
-        provider_id: &str,
-        provider_admin_token: &str,
         filter: ProviderBotTaskModesFilter,
     ) -> ServiceResult<Vec<ProviderBotRosterItem>>;
 
@@ -263,6 +306,11 @@ pub trait ProviderManagementService: Send + Sync {
         &self,
         command: DeleteProviderBotCommand,
     ) -> ServiceResult<DeleteProviderBotOutcome>;
+
+    async fn update_provider_bot(
+        &self,
+        command: UpdateProviderBotCommand,
+    ) -> ServiceResult<UpdateProviderBotOutcome>;
 
     async fn set_provider_disabled(
         &self,

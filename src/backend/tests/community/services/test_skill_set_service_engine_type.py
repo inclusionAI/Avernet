@@ -31,6 +31,7 @@ class TestSkillSetServiceEngineTypeThreading:
             bot_repo=MagicMock(),
 
             path_factory=MagicMock(),
+            reader=MagicMock(**{"active_mcp_server_codes.return_value": frozenset()}),
         )
         return service
 
@@ -84,13 +85,21 @@ class TestSkillSetServiceEngineTypeThreading:
         call_kwargs = mock_skill_set_repo.get_all_active_skill_sets.call_args.kwargs
         assert call_kwargs.get("engine_type") == "claude-code"
 
-    def test_get_symlink_mappings_passes_engine_type(self, skill_set_service, mock_skill_set_repo, mock_skill_repo):
-        """get_symlink_mappings should pass engine_type to repo.get_all_active_skill_sets."""
-        mock_skill_set_repo.get_all_active_skill_sets.return_value = []
+    def test_get_symlink_mappings_reads_through_the_capability_reader(
+        self, skill_set_service
+    ):
+        """get_symlink_mappings answers from the flush-then-read reader.
+
+        Engine scoping happens inside the reader's flush (the projector test
+        pins the layout-engine precedence); this seam only addresses the Bot.
+        """
+        reader = MagicMock()
+        reader.active_skill_assets.return_value = ()
+        skill_set_service._reader = reader
         skill_set_service.get_symlink_mappings(user_id="u1", bolt_id="b1")
-        mock_skill_set_repo.get_all_active_skill_sets.assert_called_once()
-        call_kwargs = mock_skill_set_repo.get_all_active_skill_sets.call_args.kwargs
-        assert call_kwargs.get("engine_type") == "claude-code"
+        reader.active_skill_assets.assert_called_once_with(
+            bot_id="b1", owner_id="u1"
+        )
 
     async def test_get_symlink_mappings_keeps_known_legacy_moltis_paths(
         self, skill_set_service
@@ -187,17 +196,6 @@ class TestSkillSetServiceEngineTypeThreading:
             path_factory=MagicMock(),
         )
         assert service.engine_type == "openclaw"
-
-    async def test_remove_skill_from_set_passes_engine_type(self, skill_set_service, mock_skill_set_repo):
-        """remove_skill_from_set should pass engine_type to repo.get_all_active_skill_sets."""
-        mock_skill_set_repo.get_by_id.return_value = {"id": "1", "is_default": False, "bolt_id": "b1"}
-        mock_skill_set_repo.remove_skill_from_set.return_value = True
-        mock_skill_set_repo.get_all_active_skill_sets.return_value = []
-        await skill_set_service.remove_skill_from_set("1", "s1")
-        mock_skill_set_repo.get_all_active_skill_sets.assert_called_once()
-        call_kwargs = mock_skill_set_repo.get_all_active_skill_sets.call_args.kwargs
-        assert call_kwargs.get("engine_type") == "claude-code"
-
 
 def _make_skill_set_service_for_default_selection(
     tmp_path, *, engine_type, runtime_engine_type, default_skill_set_selection_policy=None

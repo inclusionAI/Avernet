@@ -85,18 +85,34 @@ def test_supported_filesystem_matrix_uses_real_skillset_mapping_service(
     from agentclaw.community.core.skill_center.services.skill_set_service import (
         SkillSetService,
     )
+    from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
 
     fixture = LegacySkillFixtureFactory(tmp_path).create(case)
-    skill_set_repo = MagicMock()
-    skill_set_repo.get_all_active_skill_sets.return_value = [{"id": "legacy-set"}]
-    skill_set_repo.get_skills_in_set.return_value = [
-        {"id": "repo", "name": "repo-skill", "git_path": fixture.repo_locator},
-        {"id": "local", "name": "local-skill", "git_path": fixture.local_locator},
-        {"id": "bot", "name": "bot-local-skill", "git_path": fixture.bot_local_locator},
-    ]
+
+    class _FixtureReader:
+        """Installation is the source of truth: the mapping seam reads the
+        capability state reader, so the legacy fixtures are answered as the
+        flushed Installation projection."""
+
+        def active_skill_assets(self, *, bot_id, owner_id, bot=None):
+            assert (bot_id, owner_id) == ("fixture-bot", "fixture-owner")
+            return (
+                RegisteredSkillAsset(
+                    skill_id=1, name="repo-skill", git_path=fixture.repo_locator
+                ),
+                RegisteredSkillAsset(
+                    skill_id=2, name="local-skill", git_path=fixture.local_locator
+                ),
+                RegisteredSkillAsset(
+                    skill_id=3,
+                    name="bot-local-skill",
+                    git_path=fixture.bot_local_locator,
+                ),
+            )
+
     service = SkillSetService(
         skill_repo=MagicMock(),
-        skill_set_repo=skill_set_repo,
+        skill_set_repo=MagicMock(),
         mcp_center=MagicMock(),
         mcp_config_service=MagicMock(),
         skill_service=MagicMock(),
@@ -105,6 +121,7 @@ def test_supported_filesystem_matrix_uses_real_skillset_mapping_service(
         entity_id="fixture-owner",
         bot_id="fixture-bot",
         engine_type="aicoding" if case.image == "aicoding" else case.engine,
+        reader=_FixtureReader(),
     )
     active = fixture.root / "active-skills"
     service._pool_layout_paths = lambda *_: (

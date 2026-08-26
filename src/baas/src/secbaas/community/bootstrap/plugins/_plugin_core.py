@@ -20,22 +20,27 @@ from dependency_injector import containers, providers
 from secbaas.community.api.device_manage import K8sCredentials
 from secbaas.community.plugins.auth.oauth import OAuthPlugin
 from secbaas.community.plugins.auth.stub import StubAuthPlugin
+from secbaas.community.plugins.bot.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.bot_service import (
     AiohttpBotServicePlugin,
     LocalBotServicePlugin,
     StubBotServicePlugin,
 )
+from secbaas.community.plugins.cache.redis import RedisCachePlugin
 from secbaas.community.plugins.cache.stub import StubCachePlugin
 from secbaas.community.plugins.database.mariadb.mariadb_orm import MariaDbOrmPlugin
 from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
+from secbaas.community.plugins.eval_env import (
+    NoopEvalBindingResolver,
+    NoopEvalConsistencyCheck,
+    NoopEvalSessionLog,
+)
 from secbaas.community.plugins.file_transfer import NoopFileTransferBackend
 from secbaas.community.plugins.sandbox.arca import (
-    AliyunAckSandboxPlugin,
     StubArcaSandboxPlugin,
 )
 from secbaas.community.plugins.sandbox.arca.aliyun_ack import (
-    AliyunAckTemplateConfig,
-    build_aliyun_ack_template,
+    aliyun_ack_plugin_factory,
 )
 from secbaas.community.plugins.sandbox.arca.local_proc import (
     LocalProcessArcaSandboxPlugin,
@@ -54,21 +59,9 @@ from secbaas.community.plugins.sandbox.k8s import (
 )
 from secbaas.community.plugins.sandbox.k8s.real import K8sClientManager
 from secbaas.community.plugins.sandbox.poolab import StubPoolabSandboxPlugin
-from secbaas.community.plugins.sandbox.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
-from secbaas.community.plugins.secret import AliyunKmsSecretStorePlugin
+from secbaas.community.plugins.secret.env import EnvSecretStorePlugin
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
-
-
-def _build_aliyun_ack_templates(
-    raw_templates: dict | None,
-) -> dict[str, AliyunAckTemplateConfig]:
-    """Build the typed AliyunAckTemplateConfig map from the DI config dict."""
-    out = {}
-    for ack_id, raw in (raw_templates or {}).items():
-        if isinstance(raw, dict):
-            out[ack_id] = build_aliyun_ack_template(ack_id, raw)
-    return out
 
 
 class PluginContainer(containers.DeclarativeContainer):
@@ -79,20 +72,33 @@ class PluginContainer(containers.DeclarativeContainer):
     cache_plugin = providers.Selector(
         config.plugins.cache,
         stub=providers.Singleton(StubCachePlugin),
+        redis=providers.Singleton(
+            RedisCachePlugin,
+            url=config.cache_redis.url,
+            socket_timeout=config.cache_redis.socket_timeout,
+            socket_connect_timeout=config.cache_redis.socket_connect_timeout,
+        ),
     )
 
     plugin_database = providers.Selector(
-        config.plugins.database.plugin_database,
-        SQLITE_ORM=providers.Singleton(SqliteOrmPlugin),
-        MARIADB_ORM=providers.Singleton(MariaDbOrmPlugin),
+        config.plugins.database,
+        sqlite=providers.Singleton(
+            SqliteOrmPlugin,
+            database_url=config.database.database_url,
+            create_schema=config.database.create_schema,
+            seed_data=config.database.seed_data,
+        ),
+        mariadb=providers.Singleton(
+            MariaDbOrmPlugin,
+            database_url=config.database.database_url,
+            create_schema=config.database.create_schema,
+            seed_data=config.database.seed_data,
+        ),
     )
 
     secret_plugin = providers.Selector(
         config.plugins.secret,
-        aliyun_kms=providers.Singleton(
-            AliyunKmsSecretStorePlugin,
-            config=config.plugins.secret_aliyun_kms,
-        ),
+        env=providers.Singleton(EnvSecretStorePlugin),
         stub=providers.Singleton(StubSecretStorePlugin),
     )
 
@@ -107,18 +113,13 @@ class PluginContainer(containers.DeclarativeContainer):
         stub=providers.Singleton(StubAuthPlugin),
     )
 
-    arca_ack_templates_map = providers.Callable(
-        _build_aliyun_ack_templates,
-        raw_templates=config.aliyun_ack_template,
-    )
-
     arca_sandbox_plugin_factory = providers.Selector(
         config.plugins.sandbox.arca,
         stub=providers.Object(StubArcaSandboxPlugin),
         local_proc=providers.Object(LocalProcessArcaSandboxPlugin),
-        aliyun_ack=providers.Factory(
-            AliyunAckSandboxPlugin,
-            ack_templates=arca_ack_templates_map,
+        aliyun_ack=providers.Singleton(
+            aliyun_ack_plugin_factory,
+            default_images=config.sandbox_images,
             arca_utils=arca_utils,
         ),
     )
@@ -134,7 +135,7 @@ class PluginContainer(containers.DeclarativeContainer):
     )
 
     teclaw_bot_plugin_factory = providers.Selector(
-        config.plugins.sandbox.teclaw,
+        config.plugins.bot.teclaw,
         stub=providers.Object(StubTeClawBotPlugin),
     )
 
@@ -171,6 +172,20 @@ class PluginContainer(containers.DeclarativeContainer):
     file_transfer_backend = providers.Selector(
         config.plugins.file_transfer,
         stub=providers.Singleton(NoopFileTransferBackend),
+    )
+
+    # 评测环境 Plugin（stub=空操作, real=由 OCB 企业层通过 register_plugin_option 注入）
+    eval_binding_resolver = providers.Selector(
+        config.plugins.eval_env,
+        stub=providers.Singleton(NoopEvalBindingResolver),
+    )
+    eval_consistency_check = providers.Selector(
+        config.plugins.eval_env,
+        stub=providers.Singleton(NoopEvalConsistencyCheck),
+    )
+    eval_session_log = providers.Selector(
+        config.plugins.eval_env,
+        stub=providers.Singleton(NoopEvalSessionLog),
     )
 
 

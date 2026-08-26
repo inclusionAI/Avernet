@@ -1,10 +1,16 @@
 """MariaDB ORM plugin — SQLAlchemy with the MariaDB/MySQL dialect.
 
-Wire up as ``plugins.database.plugin_database: MARIADB_ORM`` with the
-``mariadb_*`` connection settings (or a ``database_url``).  Uses
-``mysql+aiomysql`` for the async path and ``mysql+mysqlconnector`` for the
-sync ORM path — MariaDB is wire-compatible with the MySQL protocol, so the
-same driver dialects used by ``core/database/_manager.py`` apply.
+Wire up as ``plugins.database.plugin_database: MARIADB_ORM`` with the three
+``database_url`` / ``database_user`` / ``database_passwd`` settings, where
+``database_url`` is a plain ``host:port/database`` string and credentials are
+supplied separately. Uses ``mysql+aiomysql`` for the async path and
+``mysql+mysqlconnector`` for the sync ORM path — MariaDB is wire-compatible
+with the MySQL protocol, so the same driver dialects used by
+``core/database/_manager.py`` apply.
+
+Runtime env injection (e.g. ``${DATABASE_URL}`` in YAML) is owned by
+``ConfigLoader._expand_env_placeholders``; this plugin never reads
+``os.environ`` directly (AGENTS.md: raw env access belongs to config loading).
 """
 
 from __future__ import annotations
@@ -19,101 +25,35 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session, sessionmaker
 
 from secbaas.community.logger import get_logger
-from secbaas.community.spi.database import DatabasePluginConfig, DataSourcePlugin
+from secbaas.community.spi.database import DataSourcePlugin
 
 logger = get_logger("database")
 
 
-def _build_async_url(
-    host: str, port: int, database: str, user: str, password: str
-) -> str:
-    """Build a ``mysql+aiomysql://`` URL from structured connection settings."""
-    return (
-        f"mysql+aiomysql://{user}:{password}@{host}:{port}/{database}?charset=utf8mb4"
-    )
-
-
-def _build_sync_url(
-    host: str, port: int, database: str, user: str, password: str
-) -> str:
-    """Build a ``mysql+mysqlconnector://`` URL from structured connection settings."""
-    return f"mysql+mysqlconnector://{user}:{password}@{host}:{port}/{database}?charset=utf8mb4"
-
-
 class MariaDbOrmPlugin(DataSourcePlugin):
-    def __init__(self, database_url: str | None = None) -> None:
+    def __init__(
+        self,
+        database_url: str = "",
+        *,
+        create_schema: bool = True,
+        seed_data: bool = True,
+    ) -> None:
         """Create a MariaDB plugin.
 
         Args:
-            database_url: Optional ``mysql+...://`` URL.  If omitted, the URL is
-                derived from the ``DatabaseConfig`` passed to ``init_database``.
-                The engines are built lazily in ``init_database`` so that a bare
-                ``MariaDbOrmPlugin()`` (as used by contract tests) can still be
-                constructed without a live server.
+            database_url: Full ``mysql+aiomysql://user:pass@host:port/db?charset=utf8mb4``
+                URL. If empty, engines are not built (``init_database`` will raise).
+            create_schema: Whether to run ``create_all()`` on ``init_database``.
+            seed_data: Whether to run ``seed()`` on ``init_database``.
         """
         self._database_url = database_url
+        self._create_schema = create_schema
+        self._seed_data = seed_data
         self._sync_engine: Engine | None = None
         self._async_engine = None
         self._sync_session_factory = None
         self._async_session_factory = None
         logger.info("MariaDbOrmPlugin constructed (engines created on init_database)")
-
-    def _resolve_url(self, config: DatabasePluginConfig) -> str:
-        """Resolve the async MariaDB URL from config/env/URL override.
-
-        Env vars take precedence and match the existing ``DATABASE_URL``
-        convention: ``MARIADB_HOST`` / ``MARIADB_PORT`` / ``MARIADB_DATABASE`` /
-        ``MARIADB_USER`` / ``MARIADB_PASSWORD``.
-
-        The generic ``db_url`` (from the base ``application.yaml``) may point at
-        SQLite by default; it is only honored here when it is explicitly a
-        MySQL-compatible URL, so a MariaDB backend never resolves to SQLite.
-        """
-        import os
-
-        env_url = os.environ.get("DATABASE_URL")
-        if env_url:
-            return env_url
-
-        if self._database_url:
-            return self._database_url
-
-        host = (
-            os.environ.get("MARIADB_HOST")
-            or getattr(config, "mariadb_host", None)
-            or "127.0.0.1"
-        )
-        port = int(
-            os.environ.get("MARIADB_PORT")
-            or getattr(config, "mariadb_port", None)
-            or 3306
-        )
-        database = (
-            os.environ.get("MARIADB_DATABASE")
-            or getattr(config, "mariadb_database", "")
-            or ""
-        )
-        user = (
-            os.environ.get("MARIADB_USER") or getattr(config, "mariadb_user", "") or ""
-        )
-        password = (
-            os.environ.get("MARIADB_PASSWORD")
-            or getattr(config, "mariadb_password", "")
-            or ""
-        )
-        if database:
-            return _build_async_url(host, port, database, user, password)
-
-        db_url = getattr(config, "db_url", "")
-        if db_url and not db_url.startswith("sqlite://"):
-            return db_url
-
-        if not database:
-            raise RuntimeError(
-                "MariaDB backend requires a database — set MARIADB_DATABASE, "
-                "plugins.database.mariadb_database, or a mysql+:// database_url"
-            )
-        return _build_async_url(host, port, database, user, password)
 
     def _init_engines(self, async_url: str) -> None:
         """Build sync (mysqlconnector) and async (aiomysql) engines.
@@ -158,18 +98,12 @@ class MariaDbOrmPlugin(DataSourcePlugin):
         logger.info("MariaDbOrmPlugin engines initialized")
 
     def create_all(self) -> None:
-        """Create all ORM tables.
-
-        Imports every known ORM model module (same set as SqliteOrmPlugin) so
-        that ``Base.metadata`` is populated, then calls
-        ``Base.metadata.create_all()`` using the native MySQL/MariaDB dialect.
-        No SQLite shims are applied — MariaDB keeps native JSON columns and
-        ``BIGINT`` primary keys.
-        """
+        """Create all ORM tables using native MySQL/MariaDB dialect."""
         _orm_models = [
             "secbaas.community.core.repository.ac_bot._orm_model",
             "secbaas.community.core.repository.ac_bot_publish._orm_model",
             "secbaas.community.core.repository.api_gateway._orm_model",
+            "secbaas.community.core.repository.arca_ttl._orm_model",
             "secbaas.community.core.repository.bot._orm_model",
             "secbaas.community.core.repository.bot_device_rel._orm_model",
             "secbaas.community.core.repository.bot_run._orm_model",
@@ -196,7 +130,6 @@ class MariaDbOrmPlugin(DataSourcePlugin):
         from secbaas.community.spi.database import Base
 
         Base.metadata.create_all(self._sync_engine)
-
         logger.info("MariaDbOrmPlugin: tables created")
 
     def sync_connection(self, datasource_name: str) -> AbstractContextManager[Any]:
@@ -247,35 +180,33 @@ class MariaDbOrmPlugin(DataSourcePlugin):
             await session.close()
 
     def seed(self, session: Session) -> None:
-        """Insert seed data required for the application to function.
-
-        Reuses the shared backend-agnostic seed logic (default tenant and ARCA
-        device template) that the SQLite backend uses, so both backends start
-        with identical seed data.
-        """
+        """Insert seed data (default tenant and ARCA device template)."""
         from secbaas.community.plugins.database.seed import seed_database
 
         seed_database(session)
 
-    def init_database(self, config: DatabasePluginConfig) -> None:
-        """Configure engines, create schema, seed data, and register.
+    def init_database(self) -> None:
+        """Build engines, create schema, seed data, and register with db_manager.
 
-        Resolves the async URL from ``DATABASE_URL`` env, ``config.db_url``, or
-        the structured ``mariadb_*`` settings.  Then builds the sync + async
-        engines, creates the schema, seeds, and registers with ``db_manager``.
-        Credentials are never logged.
+        Uses the URL and flags resolved at construction time. Called by
+        ``DatabaseManagerLifecycle.start()`` after the plugin is resolved
+        from the DI container.
         """
-        async_url = self._resolve_url(config)
-        self._init_engines(async_url)
+        if not self._database_url:
+            raise RuntimeError(
+                "MariaDB backend requires database_url "
+                "(format: host:port/database or full mysql+...:// URL)"
+            )
+        self._init_engines(self._database_url)
 
-        if getattr(config, "create_schema", True):
+        if self._create_schema:
             self.create_all()
         else:
             logger.info(
                 "MariaDbOrmPlugin: schema creation disabled (create_schema=false)"
             )
 
-        if getattr(config, "seed_data", True):
+        if self._seed_data:
             with self.orm_session() as session:
                 self.seed(session)
         else:
@@ -286,7 +217,7 @@ class MariaDbOrmPlugin(DataSourcePlugin):
         db_manager.init_plugin(self)
         logger.info(
             "init_database: MariaDbOrmPlugin registered with db_manager (database=%s)",
-            self._resolve_database_label(async_url),
+            self._resolve_database_label(self._database_url),
         )
 
     @staticmethod

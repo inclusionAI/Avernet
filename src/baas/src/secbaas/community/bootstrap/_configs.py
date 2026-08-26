@@ -7,14 +7,11 @@ Pydantic models provide typed defaults with field-level validation.
 Source: application.yaml -> user_config -> container.config.from_pydantic() + from_dict()
 """
 
-from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-from secbaas.community.spi.database import PluginDatabaseType
 
 if TYPE_CHECKING:
     from ._container import ApplicationContainer
@@ -31,27 +28,20 @@ class ConfigKey(StrEnum):
     WEB_PORT = "web_port"
 
     # Plugin selectors (values: "real" | "stub")
-    PLUGIN_CRYPTO = "plugins.crypto"
     PLUGIN_SECRET = "plugins.secret"
     PLUGIN_AUTH = "plugins.auth"
-    PLUGIN_SCHEDULER = "plugins.scheduler"
     PLUGIN_CACHE = "plugins.cache"
     PLUGIN_SANDBOX_ARCA = "plugins.sandbox.arca"
     PLUGIN_SANDBOX_DESKTOP = "plugins.sandbox.desktop"
-    PLUGIN_SANDBOX_TECLAW = "plugins.sandbox.teclaw"
+    PLUGIN_BOT_TECLAW = "plugins.bot.teclaw"
     PLUGIN_SANDBOX_K8S = "plugins.sandbox.k8s"
     PLUGIN_SANDBOX_DOCKER = "plugins.sandbox.docker"
 
     # Database
-    PLUGIN_DATABASE = "plugins.database.plugin_database"
-    DATABASE_URL = "plugins.database.database_url"
-    CREATE_SCHEMA = "plugins.database.create_schema"
-    SEED_DATA = "plugins.database.seed_data"
-    MARIADB_HOST = "plugins.database.mariadb_host"
-    MARIADB_PORT = "plugins.database.mariadb_port"
-    MARIADB_DATABASE = "plugins.database.mariadb_database"
-    MARIADB_USER = "plugins.database.mariadb_user"
-    MARIADB_PASSWORD = "plugins.database.mariadb_password"
+    PLUGIN_DATABASE = "plugins.database"
+    DATABASE_URL = "database.database_url"
+    CREATE_SCHEMA = "database.create_schema"
+    SEED_DATA = "database.seed_data"
 
     # Bot service (ClawBotService + BaasBotService)
     BOT_SERVICE_PROXY_BASE_URL = "bot_service.proxy_base_url"
@@ -82,9 +72,6 @@ class ConfigKey(StrEnum):
     BOT_RUNNER_PER_KEY_MAX = "bot_runner.per_key_max"
     BOT_RUNNER_QUEUE_MAX = "bot_runner.queue_max"
     BOT_RUNNER_ACQUIRE_TIMEOUT = "bot_runner.acquire_timeout"
-
-    # Arca / sandbox
-    ARCA_ENABLED = "arca.enabled"
 
     # BCN downlink protocol
     BCN_API_KEY_PREFIX = "bcn.api_key.prefix"
@@ -143,11 +130,6 @@ class EnvVar(StrEnum):
 
     ENV_PLUGIN_DATABASE = "PLUGIN_DATABASE"
     DATABASE_URL = "DATABASE_URL"
-    MARIADB_HOST = "MARIADB_HOST"
-    MARIADB_PORT = "MARIADB_PORT"
-    MARIADB_DATABASE = "MARIADB_DATABASE"
-    MARIADB_USER = "MARIADB_USER"
-    MARIADB_PASSWORD = "MARIADB_PASSWORD"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -176,6 +158,13 @@ class ConfigSchema(BaseSettings):
             _CONFIG_SCHEMAS[section] = cls
 
 
+class BotPluginConfig(BaseSettings):
+    """Bot plugin selection — all stub by default (community-safe)."""
+
+    model_config = _CFG
+    teclaw: str = Field(default="stub", pattern=r"^(real|stub)$")
+
+
 class SandboxPluginConfig(BaseSettings):
     """Sandbox plugin selection — all stub by default (community-safe).
 
@@ -187,48 +176,48 @@ class SandboxPluginConfig(BaseSettings):
         default="stub", pattern=r"^(arca_sdk|stub|local_proc|aliyun_ack)$"
     )
     desktop: str = Field(default="stub", pattern=r"^(real|stub)$")
-    teclaw: str = Field(default="stub", pattern=r"^(real|stub)$")
     k8s: str = Field(default="stub", pattern=r"^(real|stub)$")
     docker: str = Field(default="stub", pattern=r"^(real|stub)$")
     poolab: str = Field(default="stub", pattern=r"^(real|stub)$")
 
 
-class DatabasePluginConfig(BaseSettings):
-    """Database plugin selection — SQLITE_ORM by default (community-safe).
+class CacheRedisConfig(ConfigSchema):
+    """Redis cache plugin configuration. Only used when ``cache`` is ``redis``."""
 
-    ``MARIADB_ORM`` requires the ``mariadb_*`` connection fields (host, port,
-    database, user, password) or a ``database_url``. Credentials may be
-    supplied via environment variables (see ``EnvVar``).
-    """
-
-    model_config = _CFG
-    plugin_database: str = Field(default="SQLITE_ORM")
-    database_url: str = ""
-    create_schema: bool = Field(default=False)
-    seed_data: bool = Field(default=False)
-    mariadb_host: str = "127.0.0.1"
-    mariadb_port: int = Field(default=3306)
-    mariadb_database: str = ""
-    mariadb_user: str = ""
-    mariadb_password: str = ""
+    config_section = "cache_redis"
+    url: str = "redis://localhost:6379/0"
+    socket_timeout: float = Field(default=5.0, gt=0)
+    socket_connect_timeout: float = Field(default=5.0, gt=0)
 
 
 class PluginConfig(ConfigSchema):
     """Default plugin selection -- all stub by default."""
 
     config_section = "plugins"
-    crypto: str = Field(default="stub", pattern=r"^(real|stub)$")
-    secret: str = Field(default="stub", pattern=r"^(real|stub|aliyun_kms)$")
-    secret_aliyun_kms: dict = Field(default_factory=dict)
+    secret: str = Field(default="stub", pattern=r"^(real|stub|env)$")
     auth: str = Field(default="stub", pattern=r"^(buservice|oauth|stub)$")
-    scheduler: str = Field(default="stub", pattern=r"^(real|stub)$")
-    cache: str = Field(default="stub", pattern=r"^(real|stub)$")
+    cache: str = Field(default="stub", pattern=r"^(redis|stub)$")
     bot_service: str = Field(default="stub", pattern=r"^(real|local|stub)$")
 
     engine_adapter: str = Field(default="stub", pattern=r"^(real|stub)$")
     file_transfer: str = Field(default="stub", pattern=r"^(real|stub)$")
-    database: DatabasePluginConfig = Field(default_factory=DatabasePluginConfig)
+    database: str = Field(default="sqlite", pattern=r"^(sqlite|mariadb)$")
     sandbox: SandboxPluginConfig = Field(default_factory=SandboxPluginConfig)
+    bot: BotPluginConfig = Field(default_factory=BotPluginConfig)
+
+
+class DatabaseSectionConfig(ConfigSchema):
+    """Top-level ``database`` section — connection params for the selected plugin.
+
+    ``database_url`` is a full connection URL:
+    - ``sqlite``: ``sqlite:///:memory:`` or ``sqlite:////tmp/secbaas.db``
+    - ``mariadb``: ``mysql+aiomysql://user:pass@host:port/db?charset=utf8mb4``
+    """
+
+    config_section = "database"
+    database_url: str = ""
+    create_schema: bool = Field(default=False)
+    seed_data: bool = Field(default=False)
 
 
 class FileTransferPollerConfigSchema(ConfigSchema):
@@ -440,21 +429,6 @@ def load_container_config() -> dict:
         user_config[ConfigKey.WEB_PORT.value] = cfg.module_config.web.port
 
     return user_config
-
-
-@dataclass
-class DatabaseConfig:
-    """Configuration for database plugin initialisation."""
-
-    plugin_type: PluginDatabaseType
-    db_url: str = ""
-    create_schema: bool = False
-    seed_data: bool = False
-    mariadb_host: str = "127.0.0.1"
-    mariadb_port: int = 3306
-    mariadb_database: str = ""
-    mariadb_user: str = ""
-    mariadb_password: str = ""
 
 
 def init_container_config(container: "ApplicationContainer") -> None:

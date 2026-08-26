@@ -229,6 +229,7 @@ class InteractionResolveAnswer(BaseModel):
     values: list[str]
     question: str
     header: str
+    custom_values: list[str] | None = Field(default=None, alias="customValues")
 
     @field_validator("question", "header")
     @classmethod
@@ -236,6 +237,7 @@ class InteractionResolveAnswer(BaseModel):
         if not value.strip():
             raise ValueError("interaction answer text fields must be non-empty")
         return value
+
 
 class InteractionResolveParams(BaseModel):
     """BCS Provider 2.0 kind-specific interaction resolution."""

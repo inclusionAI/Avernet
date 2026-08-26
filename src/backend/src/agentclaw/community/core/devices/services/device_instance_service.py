@@ -20,6 +20,7 @@ from agentclaw.community.core.devices.errors import (
 from agentclaw.community.core.devices.models import DeviceBindingStatus, OperatorContext
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.plugin_api.eval_env import DYNAMIC_ENV_TAG_KEY
 from agentclaw.community.core.devices.services.device_service import (
     BAAS_DEVICE_PROVIDER,
     DeviceService,
@@ -44,6 +45,10 @@ class BotPublishNotFoundError(RuntimeError):
 
 class BindingNotFoundError(RuntimeError):
     """binding_id 无效或不支持实例查询。"""
+
+
+class EvalBindingNotFoundError(RuntimeError):
+    """bot_id + default_tag 找不到匹配的评测沙箱 binding。"""
 
 
 class InstanceHealthStatus:
@@ -136,6 +141,99 @@ class DeviceInstanceService:
             f"binding_id={online_binding_id} (publish_id={record.id})"
         )
         return int(online_binding_id)
+
+    def _resolve_eval_binding_id(
+        self, *, bot_id: str, default_tag: str,
+    ) -> int:
+        """从 bot_id + default_tag 解析评测沙箱 binding_id。
+
+        通过 bot_repo 获取生产 bot 的 entity 信息，列出该 entity 的
+        所有活跃 binding，在 ``device_props`` 中按
+        ``AGENTCLAW_DEFAULT_TAG + bot_id + default_tag`` 精确匹配。
+        无精确匹配时回退到第一个包含 AGENTCLAW_DEFAULT_TAG 的 binding。
+
+        Raises:
+            EvalBindingNotFoundError: 找不到匹配的评测沙箱 binding
+        """
+        _DEFAULT_ENV_TAG_KEY = DYNAMIC_ENV_TAG_KEY
+        env = env_utils.get_current_env()
+
+        # 步骤 1：获取 bot 信息以拿到 entity_id / owner_id
+        if self._bot_repo is None:
+            raise EvalBindingNotFoundError(
+                f"BotRepository not available; cannot resolve eval binding for bot_id={bot_id}"
+            )
+        bot = self._bot_repo.get_by_id(bot_id)
+        if not bot:
+            raise EvalBindingNotFoundError(
+                f"Bot not found: bot_id={bot_id}"
+            )
+
+        entity_id = bot.get("entity_id", "")
+        owner_id = bot.get("owner_id", entity_id)
+        query_ids = {owner_id}
+        if entity_id and entity_id != owner_id:
+            query_ids.add(entity_id)
+
+        # 步骤 2：遍历所有 binding，匹配 AGENTCLAW_DEFAULT_TAG + bot_id
+        all_bindings: list[DeviceBindingRecord] = []
+        seen_ids: set[int] = set()
+        for qid in query_ids:
+            try:
+                _page_size = 200
+                _page = 1
+                while True:
+                    _total, _rows = self._repo.list_bindings(
+                        env=env,
+                        entity_id=qid,
+                        entity_type=None,
+                        status=None,
+                        page=_page,
+                        page_size=_page_size,
+                    )
+                    for b in _rows:
+                        if b.status == "RELEASED":
+                            continue
+                        if b.id not in seen_ids:
+                            all_bindings.append(b)
+                            seen_ids.add(b.id)
+                    if _page * _page_size >= _total:
+                        break
+                    _page += 1
+            except Exception as e:
+                logger.warning(
+                    f"[_resolve_eval_binding_id] query entity_id={qid} failed: {e}"
+                )
+
+        # 步骤 3：按 AGENTCLAW_DEFAULT_TAG 过滤
+        matched = []
+        fallback = []
+        for b in all_bindings:
+            device_props = b.device_props or {}
+            tag_value = device_props.get(_DEFAULT_ENV_TAG_KEY, "")
+            if not tag_value:
+                continue
+            # bot_id 过滤
+            if "bot_id" in device_props and device_props["bot_id"] != bot_id:
+                continue
+            if tag_value == default_tag:
+                matched.append(b)
+            else:
+                fallback.append(b)
+
+        # 精确匹配优先；无精确匹配时回退第一个
+        result_bindings = matched if matched else fallback
+        if not result_bindings:
+            raise EvalBindingNotFoundError(
+                f"No eval binding found for bot_id={bot_id}, default_tag={default_tag}, env={env}"
+            )
+
+        binding = result_bindings[0]
+        logger.info(
+            f"[_resolve_eval_binding_id] bot_id={bot_id}, default_tag={default_tag} "
+            f"-> binding_id={binding.id}"
+        )
+        return binding.id
 
     def _validate_binding_for_instances(
         self, binding_id: int

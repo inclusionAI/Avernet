@@ -33,6 +33,15 @@ from secbaas.community.core.repository.bot_run import BotRunRecord
 # ── helpers ──────────────────────────────────────────────────
 
 
+def _make_eval_session_log():
+    """创建 mock EvalSessionLogProtocol，extract_eval_headers 原样返回 metadata。"""
+    mock = MagicMock()
+    mock.extract_eval_headers.side_effect = (
+        lambda *, metadata, x_eval_id, x_default_tag: metadata
+    )
+    return mock
+
+
 def _make_api_key_record(app_type="system", app_id="bot-1:entity-1", tenant="t1"):
     return APIKeyRecord(
         id=1,
@@ -144,6 +153,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
         assert exc.value.status_code == 403
         detail = exc.value.detail
@@ -170,6 +180,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
             mock_policy.assert_called_once_with(api_key, "bot-1:entity-1")
         assert result.code == 0
@@ -198,6 +209,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
         assert result.code == 0
 
@@ -222,6 +234,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
             mock_policy.assert_called_once_with(api_key, "bot-1:123")
 
@@ -248,6 +261,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
 
     @pytest.mark.asyncio
@@ -271,6 +285,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
         assert result.code == 0
 
@@ -295,6 +310,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
         assert result.code == 0
 
@@ -319,6 +335,7 @@ class TestDeliverMessage:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
         assert result.code == OpenAPICode.BUSINESS_ERROR
         assert result.message == "Session not exist"
@@ -346,6 +363,7 @@ class TestDeliverMessage:
                     api_key_record=api_key,
                     context=ctx,
                     bot_runner=mock_runner,
+                    eval_session_log=_make_eval_session_log(),
                 )
         assert exc.value.status_code == 404
         assert exc.value.detail["code"] == 60001
@@ -374,6 +392,7 @@ class TestDeliverMessage:
                     api_key_record=api_key,
                     context=ctx,
                     bot_runner=mock_runner,
+                    eval_session_log=_make_eval_session_log(),
                 )
         assert exc.value.status_code == 503
         assert exc.value.detail["code"] == 60001
@@ -402,6 +421,7 @@ class TestDeliverMessage:
                     api_key_record=api_key,
                     context=ctx,
                     bot_runner=mock_runner,
+                    eval_session_log=_make_eval_session_log(),
                 )
         assert exc.value.status_code == 400
         assert exc.value.detail["code"] == OpenAPICode.BUSINESS_ERROR
@@ -428,6 +448,7 @@ class TestDeliverMessage:
                     api_key_record=api_key,
                     context=ctx,
                     bot_runner=mock_runner,
+                    eval_session_log=_make_eval_session_log(),
                 )
         assert exc.value.status_code == 500
         assert exc.value.detail["code"] == 50001
@@ -457,6 +478,7 @@ class TestDeliverMessageCallbackUrl:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
 
         call_kwargs = mock_runner.deliver_message.call_args.kwargs
@@ -482,6 +504,7 @@ class TestDeliverMessageCallbackUrl:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
 
         call_kwargs = mock_runner.deliver_message.call_args.kwargs
@@ -509,6 +532,7 @@ class TestDeliverMessageCallbackUrl:
                 api_key_record=api_key,
                 context=ctx,
                 bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
             )
 
         call_kwargs = mock_runner.deliver_message.call_args.kwargs
@@ -549,6 +573,7 @@ class TestDeliverMessageStream:
                 context=ctx,
                 bot_runner=mock_runner,
                 converter_factory=_make_converter_factory(),
+                eval_session_log=_make_eval_session_log(),
             )
         assert exc.value.status_code == 403
 
@@ -580,6 +605,7 @@ class TestDeliverMessageStream:
                 context=ctx,
                 bot_runner=mock_runner,
                 converter_factory=_make_converter_factory(),
+                eval_session_log=_make_eval_session_log(),
             )
         assert isinstance(result, StreamingResponse)
         assert result.media_type == "text/event-stream"
@@ -607,6 +633,7 @@ class TestDeliverMessageStream:
                     context=ctx,
                     bot_runner=mock_runner,
                     converter_factory=_make_converter_factory(),
+                    eval_session_log=_make_eval_session_log(),
                 )
         assert exc.value.status_code == 400
 
@@ -632,6 +659,7 @@ class TestDeliverMessageStream:
                     context=ctx,
                     bot_runner=mock_runner,
                     converter_factory=_make_converter_factory(),
+                    eval_session_log=_make_eval_session_log(),
                 )
         assert exc.value.status_code == 404
 
@@ -657,6 +685,7 @@ class TestDeliverMessageStream:
                 context=ctx,
                 bot_runner=mock_runner,
                 converter_factory=_make_converter_factory(),
+                eval_session_log=_make_eval_session_log(),
             )
         call_kwargs = mock_runner.deliver_message_stream.call_args.kwargs
         assert call_kwargs["metadata"]["stream"] == "true"
@@ -689,6 +718,7 @@ class TestDeliverMessageStream:
                 context=ctx,
                 bot_runner=mock_runner,
                 converter_factory=_make_converter_factory(),
+                eval_session_log=_make_eval_session_log(),
             )
 
         items = []

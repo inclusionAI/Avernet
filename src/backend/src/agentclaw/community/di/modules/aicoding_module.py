@@ -22,6 +22,12 @@ from agentclaw.community.core.aicoding.services.workspace_hosting_workitem_servi
     WorkspaceHostingWorkItemService,
 )
 from agentclaw.community.core.aicoding.services.workspace_service import WorkspaceService
+from agentclaw.community.core.aicoding.protocols import (
+    AicodingBotResolutionServiceProtocol,
+)
+from agentclaw.community.core.aicoding.services.bot_resolution_service import (
+    AicodingBotResolutionService,
+)
 from agentclaw.community.core.aicoding.services.architect_rebind_service import (
     ArchitectRebindService,
 )
@@ -37,6 +43,8 @@ class AICodingModule(Module):
 
     def configure(self, binder: Binder) -> None:
         binder.bind(WorkspaceService, to=WorkspaceService, scope=singleton)
+        binder.bind(AicodingBotResolutionService, to=AicodingBotResolutionService, scope=singleton)
+        binder.bind(AicodingBotResolutionServiceProtocol, to=AicodingBotResolutionService, scope=singleton)
         binder.bind(DataProxyService, to=DataProxyService, scope=singleton)
         binder.bind(
             WorkspaceHostingWorkItemService,

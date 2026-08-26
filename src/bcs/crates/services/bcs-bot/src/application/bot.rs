@@ -358,14 +358,14 @@ impl BotQueryService for Bot {
 
         let mut filtered: Vec<RegisteredBot> = self
             .registry
-            .list_active()
+            .list_all_bots()
             .await
             .into_iter()
             .filter(|bot| {
                 command.requester_actor_id.as_deref() != Some(bot.bot_uuid.as_str())
             })
-            .filter(|bot| match command.visibility.as_deref() {
-                Some(want) => bot.capabilities.visibility == want,
+            .filter(|bot| match command.visibility.as_ref() {
+                Some(wants) => wants.iter().any(|want| bot.capabilities.visibility == *want),
                 None => is_discover_visible(&bot.capabilities.visibility),
             })
             .filter(|bot| {

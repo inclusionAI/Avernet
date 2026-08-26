@@ -1112,7 +1112,7 @@ class DeviceService:
                 f"cost_ms={(_time.time() - _t_sync) * 1000:.0f}"
             )
             # Skill/MCP/CLI 的完整 desired-state 投影只由随后发布的
-            # DeviceActivatedEvent → BotRuntimeProjectionReconciler 执行。
+            # DeviceActivatedEvent → BotRuntimeProjector 执行。
             # 不再同时调用旧 MCP writer，否则一次激活会产生两次 Passport
             # 覆盖写和两轮设备推送，且先后顺序不可控。
             # data-init 触发已移至 report_device_status(status=SUCCEEDED) 回调
@@ -1299,11 +1299,15 @@ class DeviceService:
         port: int | None = None,
         ttl: int | None = None,
         device_uuid: str | None = None,
+        default_tag: str | None = None,
     ) -> DeviceConnectionInfo:
         """Get connection info by bot_id (hook — router overrides).
 
         Resolution from bot_id → runtime binding lives in the router; a plain
         provider does not implement it.
+
+        When ``default_tag`` is provided, the router resolves the
+        eval/default-env binding instead of the production runtime binding.
         """
         raise NotImplementedError(
             f"{type(self).__name__} does not support bot_id connection entry"

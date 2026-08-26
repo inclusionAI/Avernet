@@ -245,6 +245,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/restart"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/retry"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"): Check(PermissionLevel.OWNER),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade"): Check(PermissionLevel.ADMIN),
     ("DELETE", "/openapi/v1/bots/{bot_id}/local"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local/auth-status"): OWNER_SCOPED,
@@ -333,7 +334,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skills"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.local_skill_query_service"),
+        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.skill_query_service"),
     ("POST", "/openapi/v1/bots/{bot_id}/skills"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.local_skill_upload_service"),
     ("POST", "/openapi/v1/bots/{bot_id}/skills/upload-folder"):

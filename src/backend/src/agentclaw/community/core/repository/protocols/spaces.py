@@ -28,7 +28,7 @@ class SpaceRepositoryProtocol(Protocol):
 
     @abstractmethod
     def create_personal_transaction(
-        self, *, user_id: str, env: str
+        self, *, user_id: str, creator_user_name: str | None, env: str
     ) -> ContextManager[SpaceRecord]: ...
 
     @abstractmethod
@@ -37,8 +37,17 @@ class SpaceRepositoryProtocol(Protocol):
     ) -> ContextManager[SpaceRecord]: ...
 
     @abstractmethod
+    def get_team_space_by_name(
+        self, *, creator_id: str, name: str, env: str
+    ) -> SpaceRecord | None: ...
+
+    @abstractmethod
     def create_team_transaction(
-        self, *, name: str, creator_id: str, env: str
+        self, *,
+        name: str,
+        creator_id: str,
+        creator_user_name: str | None,
+        env: str,
     ) -> ContextManager[SpaceRecord]: ...
 
     @abstractmethod

@@ -37,6 +37,22 @@ BotVisibility:
     - private
   description: Discovery and collaboration visibility stored for the Bot.
 
+UserVisibility:
+  type: string
+  enum:
+    - public
+    - protected
+    - private
+  description: Human-side addability visibility used by friend connection policy.
+
+FriendCheckInStrategy:
+  type: string
+  enum:
+    - OPEN
+    - APPROVAL
+    - DEPT_FREE
+  description: Friend request approval strategy used by friend connection policy.
+
 BotStatus:
   type: string
   enum:
@@ -130,6 +146,9 @@ PhysicalBot:
     - updated_at
     - task_claim_mode
     - task_dream_mode
+    - user_visibility
+    - friend_ext
+    - friend_check_in_strategy
   properties:
     bot_id:
       type: string
@@ -178,6 +197,14 @@ PhysicalBot:
     task_dream_mode:
       type: boolean
       description: Task-dream opt-in toggle. Defaults to false when never set.
+    user_visibility:
+      $ref: "#/UserVisibility"
+    friend_ext:
+      type: object
+      additionalProperties: true
+      description: Friend connection policy extension, including department scopes.
+    friend_check_in_strategy:
+      $ref: "#/FriendCheckInStrategy"
   description: >-
     A physical software Bot. descriptor and reachability are normalized even
     when their legacy source columns are incomplete.
@@ -192,6 +219,9 @@ HumanBot:
     - visibility
     - status
     - env
+    - user_visibility
+    - friend_ext
+    - friend_check_in_strategy
     - created_at
     - updated_at
   properties:
@@ -217,6 +247,14 @@ HumanBot:
       minLength: 1
       description: >-
         Immutable creator staff_no. Omitted when a legacy row has no creator.
+    user_visibility:
+      $ref: "#/UserVisibility"
+    friend_ext:
+      type: object
+      additionalProperties: true
+      description: Friend connection policy extension, including department scopes.
+    friend_check_in_strategy:
+      $ref: "#/FriendCheckInStrategy"
     created_at:
       type: integer
       format: int64
@@ -521,6 +559,7 @@ Membership:
   enum:
     - direct
     - session_only
+    - none
 
 NormalGroupSummary:
   type: object
@@ -544,6 +583,8 @@ NormalGroupSummary:
     version:
       type: integer
     name:
+      type: string
+    context:
       type: string
     kind:
       const: normal
@@ -592,6 +633,8 @@ DirectMessageGroupSummary:
     version:
       type: integer
     name:
+      type: string
+    context:
       type: string
     kind:
       const: dm
@@ -1732,7 +1775,8 @@ FriendConnectionCreateResult:
     edge_ids:
       type: array
       items:
-        type: string
+        type: integer
+        format: int64
     status:
       $ref: "#/FriendConnectionCreateStatus"
     auto_accepted:
@@ -1751,7 +1795,8 @@ FriendConnectionRequest:
     request_id:
       type: string
     edge_id:
-      type: string
+      type: integer
+      format: int64
     from_actor:
       $ref: "#/FriendConnectionActor"
     to_actor:

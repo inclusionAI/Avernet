@@ -37,10 +37,15 @@ from agentclaw.community.adapters.http.skill_center.skills import (
 from agentclaw.community.api.runtime_layout_probe_service import (
     RuntimeLayoutProbeServiceProtocol,
 )
-from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
+from agentclaw.community.api.skill_query_service import SkillQueryServiceProtocol
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
+)
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     LocalSkillRuntimeSyncError,
+    SkillRuntimeNameConflictError,
+    SkillSetControlPlaneConflictError,
 )
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     LAYOUT_CONTRACT_VERSION,
@@ -98,20 +103,24 @@ def _skill_service_di_app(
         )
 
     mock_asset_service.resolve_legacy_skill_id.side_effect = _resolve_legacy
-    mock_asset_service.set_active = AsyncMock(
-        side_effect=(
-            LocalSkillRuntimeSyncError()
-            if runtime_uses_pool_paths
-            and device_sync_result
-            and not device_sync_result.get("success")
-            else None
-        ),
-        return_value={
-            "id": "1",
-            "name": "a",
-            "link_name": "a",
-            "git_path": "git://path/a",
-        },
+    _command_error = (
+        LocalSkillRuntimeSyncError()
+        if runtime_uses_pool_paths
+        and device_sync_result
+        and not device_sync_result.get("success")
+        else None
+    )
+    _command_result = {
+        "id": "1",
+        "name": "a",
+        "link_name": "a",
+        "git_path": "git://path/a",
+    }
+    mock_asset_service.activate_skill = AsyncMock(
+        side_effect=_command_error, return_value=_command_result
+    )
+    mock_asset_service.deactivate_skill = AsyncMock(
+        side_effect=_command_error, return_value=_command_result
     )
     mock_skill_service.asset_service = mock_asset_service
 
@@ -162,8 +171,7 @@ def _skill_service_di_app(
     app.include_router(skills_router)
     app.dependency_overrides[get_request_context] = lambda: mock_ctx
 
-    # New (Task 3): the skills endpoints now depend on
-    # DeviceContextResolver + DeviceSyncDispatcher (not the old supplier).
+    # The skills endpoints resolve DeviceContext before dispatching DeviceSync.
     mock_ctx_obj = MagicMock()
     mock_resolver = MagicMock()
     mock_resolver.resolve_for_bot.return_value = mock_ctx_obj
@@ -209,7 +217,7 @@ def _skill_service_di_app(
             from agentclaw.community.di.modules.skill_center_module import (
                 SkillSetServiceFactory,
             )
-            from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+            from agentclaw.community.plugin_api.device_sync_dispatcher import (
                 DeviceSyncDispatcher,
             )
 
@@ -234,7 +242,8 @@ def _skill_service_di_app(
                 RuntimeLayoutProbeServiceProtocol,
                 to=mock_runtime_layout_probe,
             )
-            binder.bind(BotSkillAssetServiceProtocol, to=mock_asset_service)
+            binder.bind(SkillQueryServiceProtocol, to=mock_asset_service)
+            binder.bind(DirectActivationServiceProtocol, to=mock_asset_service)
 
     injector = Injector([_TestModule()])
     attach_injector(app, injector)
@@ -919,147 +928,6 @@ class TestUploadSkillDesktopLiveStatus:
             mock_bot_service.resolve_desktop_live_status.assert_not_called()
 
 
-class TestActivateSkillAsyncAwait:
-    """Test that activate_skill endpoint properly awaits service.activate_skill.
-
-    BEFORE FIX: run_in_threadpool(service.activate_skill, ...) does not properly
-    schedule the async coroutine. The mock's await_count will be 0.
-
-    AFTER FIX: await service.activate_skill(...) is called directly.
-    The mock's await_count will be 1.
-    """
-
-    def test_activate_skill_awaits_service_method(self, mock_ctx):
-        with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
-            client.post(
-                "/api/skills/my-skill-id/activate",
-                json={"source_path": "git://some/path"},
-            )
-            assert mock_svc.asset_service.set_active.await_count == 1
-            assert mock_svc.activate_skill.await_count == 0
-
-    def test_activate_skill_passes_correct_args(self, mock_ctx):
-        """user_id/bolt_id must be passed as kwargs (not positional).
-
-        Regression guard for the source_path-vs-user_id misalignment bug:
-        before the fix, the endpoint called
-        ``service.activate_skill(actual_skill_id, request.source_path)`` —
-        that second positional argument lands in ``user_id``, poisoning
-        the device_fs router. The fix uses kwargs to make the contract
-        explicit and unambiguous.
-        """
-        with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
-            client.post(
-                "/api/skills/my-skill-id/activate",
-                json={"source_path": "git://some/path"},
-            )
-            mock_svc.asset_service.set_active.assert_awaited_once_with(
-                skill_id="1",
-                bot_id=mock_ctx.bot_id,
-                owner_id=mock_ctx.user_id,
-                user_id=mock_ctx.user_id,
-                active=True,
-            )
-
-    def test_pool_activate_merges_requested_locator_into_mapping_publish(
-        self, mock_ctx
-    ):
-        with _skill_service_di_app(mock_ctx, runtime_uses_pool_paths=True) as (
-            client,
-            _,
-            mock_set_svc,
-        ):
-            response = client.post(
-                "/api/skills/1120709/activate",
-                json={
-                    "source_path": "local:///pool/direct-local",
-                    "relative_path": "local:///pool/direct-local",
-                },
-            )
-
-            assert response.status_code == 200, response.text
-            mock_set_svc.get_symlink_mappings.assert_not_called()
-
-    def test_legacy_activate_keeps_existing_mapping_publish_contract(self, mock_ctx):
-        with _skill_service_di_app(mock_ctx) as (client, _, mock_set_svc):
-            response = client.post(
-                "/api/skills/1120709/activate",
-                json={
-                    "source_path": "local:///legacy/direct-local",
-                    "relative_path": "local:///legacy/direct-local",
-                },
-            )
-
-            assert response.status_code == 200, response.text
-            mock_set_svc.get_symlink_mappings.assert_not_called()
-
-    def test_activate_skill_fails_when_runtime_mapping_sync_fails(self, mock_ctx):
-        with _skill_service_di_app(
-            mock_ctx,
-            device_sync_result={"success": False, "message": "source missing"},
-            runtime_uses_pool_paths=True,
-        ) as (client, mock_svc, _):
-            response = client.post(
-                "/api/skills/my-skill-id/activate",
-                json={"source_path": "local://skills-local/my-skill"},
-            )
-
-            assert response.status_code == 502
-            assert response.json()["detail"] == (
-                "Failed to synchronize activated skills to runtime"
-            )
-            mock_svc.asset_service.set_active.assert_awaited_once()
-
-
-# ── deactivate_skill ─────────────────────────────────────────────────────────
-
-
-class TestDeactivateSkillAsyncAwait:
-    """Test that deactivate_skill endpoint properly awaits service.deactivate_skill.
-
-    BEFORE FIX: service.deactivate_skill(skill_id) is called WITHOUT await,
-    returning a coroutine that is never awaited. The mock's await_count will be 0.
-
-    AFTER FIX: await service.deactivate_skill(skill_id) is called.
-    The mock's await_count will be 1.
-    """
-
-    def test_deactivate_skill_awaits_service_method(self, mock_ctx):
-        with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
-            client.post("/api/skills/my-skill-id/deactivate")
-            assert mock_svc.asset_service.set_active.await_count == 1
-            assert mock_svc.deactivate_skill.await_count == 0
-
-    def test_deactivate_skill_passes_correct_skill_id(self, mock_ctx):
-        """user_id/bolt_id must be passed as kwargs (not positional)."""
-        with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
-            client.post("/api/skills/my-skill-id/deactivate")
-            mock_svc.asset_service.set_active.assert_awaited_once_with(
-                skill_id="1",
-                bot_id=mock_ctx.bot_id,
-                owner_id=mock_ctx.user_id,
-                user_id=mock_ctx.user_id,
-                active=False,
-            )
-
-    def test_deactivate_skill_fails_when_runtime_mapping_sync_fails(self, mock_ctx):
-        with _skill_service_di_app(
-            mock_ctx,
-            device_sync_result={"success": False, "message": "runtime unavailable"},
-            runtime_uses_pool_paths=True,
-        ) as (client, mock_svc, _):
-            response = client.post("/api/skills/my-skill-id/deactivate")
-
-            assert response.status_code == 502
-            assert response.json()["detail"] == (
-                "Failed to synchronize deactivated skills to runtime"
-            )
-            mock_svc.asset_service.set_active.assert_awaited_once()
-
-
-# ── activate_skills_batch ─────────────────────────────────────────────────────
-
-
 class TestActivateSkillsBatchAsyncAwait:
     """The legacy batch wire delegates every item to Direct control plane."""
 
@@ -1069,7 +937,7 @@ class TestActivateSkillsBatchAsyncAwait:
                 "/api/skills/market/activate-batch",
                 json={"skill_paths": ["git://path/a", "git://path/b"]},
             )
-            assert mock_svc.asset_service.set_active.await_count == 2
+            assert mock_svc.asset_service.activate_skill.await_count == 2
             assert mock_svc.activate_skills_batch.await_count == 0
 
     def test_activate_skills_batch_passes_correct_skill_paths(self, mock_ctx):
@@ -1095,20 +963,18 @@ class TestActivateSkillsBatchAsyncAwait:
                     user_id=mock_ctx.user_id,
                 ),
             ]
-            assert mock_svc.asset_service.set_active.await_args_list == [
+            assert mock_svc.asset_service.activate_skill.await_args_list == [
                 call(
                     skill_id="1",
                     bot_id="default",
                     owner_id=mock_ctx.user_id,
-                    user_id=mock_ctx.user_id,
-                    active=True,
+                    actor_id=mock_ctx.user_id,
                 ),
                 call(
                     skill_id="2",
                     bot_id="default",
                     owner_id=mock_ctx.user_id,
-                    user_id=mock_ctx.user_id,
-                    active=True,
+                    actor_id=mock_ctx.user_id,
                 ),
             ]
 
@@ -1130,7 +996,54 @@ class TestActivateSkillsBatchAsyncAwait:
             assert response.status_code == 200, response.text
             assert len(response.json()["data"]["success"]) == 1
             assert response.json()["data"]["failed"][0]["path"] == "git://path/b"
-            mock_svc.asset_service.set_active.assert_awaited_once()
+            mock_svc.asset_service.activate_skill.assert_awaited_once()
+
+    def test_batch_keeps_refused_items_as_partial_success(self, mock_ctx):
+        """R1 refusals and the one-name invariant fail one item, never the batch.
+
+        The Direct control plane surfaces both as raises; the historical batch
+        wire promises the success/failed lists for exactly these outcomes.
+        """
+        with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
+            ids = {"git://path/a": "1", "git://path/b": "2", "git://path/c": "3"}
+            mock_svc.asset_service.resolve_legacy_skill_id.side_effect = (
+                lambda **kwargs: ids[kwargs["skill_reference"]]
+            )
+
+            async def _activate(**kwargs):
+                if kwargs["skill_id"] == "2":
+                    raise SkillSetControlPlaneConflictError(
+                        "RESOURCE_MANAGED_BY_SKILL_SET"
+                    )
+                if kwargs["skill_id"] == "3":
+                    raise SkillRuntimeNameConflictError()
+                return {
+                    "id": kwargs["skill_id"],
+                    "name": "path-a",
+                    "git_path": "git://path/a",
+                }
+
+            mock_svc.asset_service.activate_skill.side_effect = _activate
+
+            response = client.post(
+                "/api/skills/market/activate-batch",
+                json={
+                    "skill_paths": [
+                        "git://path/a",
+                        "git://path/b",
+                        "git://path/c",
+                    ]
+                },
+            )
+
+            assert response.status_code == 200, response.text
+            data = response.json()["data"]
+            assert [item["id"] for item in data["success"]] == ["1"]
+            assert [item["path"] for item in data["failed"]] == [
+                "git://path/b",
+                "git://path/c",
+            ]
+            assert data["failed"][0]["error"] == "RESOURCE_MANAGED_BY_SKILL_SET"
 
     def test_activate_skills_batch_fails_when_runtime_mapping_sync_fails(
         self, mock_ctx
@@ -1149,4 +1062,4 @@ class TestActivateSkillsBatchAsyncAwait:
             assert response.json()["detail"] == (
                 "Failed to synchronize activated skills to runtime"
             )
-            mock_svc.asset_service.set_active.assert_awaited_once()
+            mock_svc.asset_service.activate_skill.assert_awaited_once()

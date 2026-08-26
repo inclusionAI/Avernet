@@ -84,11 +84,12 @@ pub struct BotQueryByIdsResult {
 }
 
 /// Request for `GET /bots/search`: name/summary fuzzy search + visibility
-/// + actor-status filtering over the active bot registry.
+/// + actor-status filtering over the bot registry.
 ///
 /// `visibility`: `None` → return `public` + `protected` bots (default visible
-/// scope); `Some(v)` → return only bots with that visibility (including
-/// `"private"` when explicitly requested). The delivery adapter decides the
+/// scope); `Some(values)` → return only bots whose visibility is one of those
+/// values (including `"private"` when explicitly requested). An empty values
+/// list intentionally matches no bots. The delivery adapter decides the
 /// effective scope per its auth state.
 ///
 /// `requester_actor_id`: when present, the caller is excluded from its own
@@ -100,7 +101,7 @@ pub struct BotQueryByIdsResult {
 #[derive(Debug, Clone, Default)]
 pub struct SearchBotsCommand {
     pub q: Option<String>,
-    pub visibility: Option<String>,
+    pub visibility: Option<Vec<String>>,
     pub status: Option<ActorStatus>,
     pub requester_actor_id: Option<String>,
     pub tc_bot: Option<bool>,

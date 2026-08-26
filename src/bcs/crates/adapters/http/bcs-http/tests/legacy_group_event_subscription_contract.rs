@@ -5,7 +5,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use bcs_auth_api::{AuthPluginChain, AuthPrincipal};
+use bcs_auth_api::{AuthConfig, AuthPluginChain, AuthPrincipal};
 use bcs_auth_local::StaticAuthPlugin;
 use bcs_http::{
     router::build_router,
@@ -133,6 +133,45 @@ fn test_router(service: Arc<RecordingGroupService>) -> axum::Router {
     build_router(state)
 }
 
+fn bot_test_router(service: Arc<RecordingGroupService>) -> axum::Router {
+    let principal = AuthPrincipal {
+        bot_uuid: Some("caller-bot".to_string()),
+        ..Default::default()
+    };
+    let auth_chain = Arc::new(AuthPluginChain::new(vec![Box::new(
+        StaticAuthPlugin::with_principal(principal),
+    )]));
+    let state = HttpAppState::new(Services::builder().build_for_test())
+        .with_group_application(service)
+        .with_auth_chain(auth_chain.clone(), AuthConfig::default())
+        .with_user_identity(Arc::new(ChainUserIdentityPort::new(auth_chain)))
+        .with_strict_container_validation(true);
+    build_router(state)
+}
+
+fn inline_subscription_body() -> Body {
+    Body::from(
+        json!({
+            "label": "Webhook group",
+            "driver_bot": "driver-bot",
+            "participants": [{
+                "bot_uuid": "driver-bot",
+                "role": "driver"
+            }],
+            "group_strategy": "chat",
+            "event_subscriptions": [{
+                "name": "group-webhook",
+                "event_filters": ["group.*"],
+                "sink": {
+                    "type": "webhook",
+                    "url": "http://127.0.0.1:28082/events"
+                }
+            }]
+        })
+        .to_string(),
+    )
+}
+
 #[tokio::test]
 async fn legacy_create_group_delegates_inline_subscriptions_to_v1_application() {
     let service = Arc::new(RecordingGroupService::default());
@@ -203,4 +242,57 @@ async fn legacy_create_group_delegates_inline_subscriptions_to_v1_application() 
         }
         CreateGroupSpec::DirectMessage(_) => panic!("expected collaboration group"),
     }
+}
+
+#[tokio::test]
+async fn legacy_bot_create_with_inline_subscriptions_preserves_container_validation() {
+    let service = Arc::new(RecordingGroupService::default());
+    let response = bot_test_router(service.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/groups")
+                .header("content-type", "application/json")
+                .header("X-BCS-Bot-Token", "valid-bot-token")
+                .header("x-agentclaw-bolt-id", "caller-bot")
+                .body(inline_subscription_body())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let (command, subscriptions) = service
+        .create
+        .lock()
+        .expect("create lock")
+        .take()
+        .expect("create command");
+    assert_eq!(
+        command.caller.bot.as_ref().map(|bot| bot.bot_uuid.as_str()),
+        Some("caller-bot")
+    );
+    assert!(command.caller.user.is_none());
+    assert_eq!(subscriptions.len(), 1);
+}
+
+#[tokio::test]
+async fn legacy_bot_create_with_inline_subscriptions_rejects_mismatched_container() {
+    let service = Arc::new(RecordingGroupService::default());
+    let response = bot_test_router(service.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/groups")
+                .header("content-type", "application/json")
+                .header("X-BCS-Bot-Token", "valid-bot-token")
+                .header("x-agentclaw-bolt-id", "different-container")
+                .body(inline_subscription_body())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(service.create.lock().expect("create lock").is_none());
 }

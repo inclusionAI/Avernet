@@ -15,12 +15,13 @@ use bcs_group::{GroupConfig, GroupCore, GroupManagement, MemoryGroupRepo};
 use bcs_group_store::MySqlGroupStore;
 use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity, BotFinalDelivery,
-    ChatConfiguration, CollaborationConfiguration, CreateCollaborationGroup,
+    ApplicationError, AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity,
+    BotFinalDelivery, ChatConfiguration, CollaborationConfiguration, CreateCollaborationGroup,
     CreateDirectMessageGroup, CreateGroup, CreateGroupSpec, CreateParticipant, DeleteGroup,
     EventSinkInput, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupEventSubscriptionProvisioner,
     GroupKindFilter, GroupPatch, GroupService, GroupStrategy as V1GroupStrategy, GroupSummary,
-    GroupVisibility, InlineGroupEventSubscriptionRequest, ListGroups, Membership, MembershipFilter,
+    GroupVisibility, InlineGroupEventSubscriptionRequest, ListGroups, ListPublicGroups,
+    Membership, MembershipFilter,
     PendingGroupEventSubscriptions, PreparedGroupEventSubscriptions, UpdateGroup,
 };
 use bcs_service_api::types::{EventActor, EventActorType, EventPayload, OpeningMessage};
@@ -715,6 +716,21 @@ fn bot_principal(bot_uuid: &str) -> AuthenticatedCaller {
     human_principal_with_profile(bot_uuid, bot_uuid, None, None)
 }
 
+fn authenticated_bot_principal(bot_uuid: &str, owner_id: &str) -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: Some("tenant-a".into()),
+        user: None,
+        bot: Some(AuthenticatedBotIdentity {
+            bot_uuid: bot_uuid.into(),
+            owner_id: owner_id.into(),
+            app_id: 7,
+            agent_code: format!("agent-{bot_uuid}"),
+        }),
+        app: None,
+        access_key: None,
+    }
+}
+
 fn inline_group_subscription() -> InlineGroupEventSubscriptionRequest {
     InlineGroupEventSubscriptionRequest {
         name: "group-create-events".to_string(),
@@ -1206,6 +1222,39 @@ async fn group_detail_accepts_human_or_exact_owned_bot_participation_only() {
 }
 
 #[tokio::test]
+async fn get_public_group_readable_without_participation() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+    let mut group = normal_group(
+        "public-plaza-detail",
+        "driver",
+        vec![Participant::bot("driver", ParticipantRole::Driver)],
+        GroupStrategy::Chat,
+        1,
+    );
+    group.visibility = "public".to_string();
+    fixture
+        .groups
+        .upsert(group)
+        .await
+        .expect("store public Group");
+
+    let detail = fixture
+        .service
+        .get(GetGroup {
+            caller: bot_principal("alice"),
+            group_id: "public-plaza-detail".into(),
+        })
+        .await
+        .expect("public Group is readable without participation or owned Bot");
+    let GroupDetail::Collaboration(detail) = detail else {
+        panic!("expected collaboration detail");
+    };
+    assert_eq!(detail.group_id, "public-plaza-detail");
+    assert!(matches!(detail.visibility, GroupVisibility::Public));
+}
+
+#[tokio::test]
 async fn group_detail_propagates_owned_bot_lookup_database_failure() {
     let bots = Arc::new(BotCore::with_repo(Arc::new(
         PersistentBotRepo::with_plugins(Arc::new(InMemoryCachePlugin::new()), Arc::new(FailingDb)),
@@ -1451,6 +1500,186 @@ async fn eventing_enabled_create_without_inline_subscription_still_finalizes_eve
         .expect("provisioner lock");
     assert_eq!(prepared.len(), 1);
     assert_eq!(finalized.as_slice(), prepared.as_slice());
+}
+
+#[tokio::test]
+async fn bot_caller_creates_reads_updates_and_deletes_group() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("caller-bot").await;
+    fixture.add_public_bot("driver").await;
+    let caller = authenticated_bot_principal("caller-bot", "owner-1");
+    let mut command = collaboration_create_command();
+    command.caller = caller.clone();
+
+    let detail = fixture
+        .service
+        .create(command)
+        .await
+        .expect("Bot Principal creates Group");
+
+    let GroupDetail::Collaboration(detail) = detail else {
+        panic!("expected collaboration Group");
+    };
+    assert_eq!(detail.originator_actor_id, "caller-bot");
+    let group_id = detail.group_id;
+
+    let read = fixture
+        .service
+        .get(GetGroup {
+            caller: caller.clone(),
+            group_id: group_id.clone(),
+        })
+        .await
+        .expect("Bot Principal reads its Group");
+    let GroupDetail::Collaboration(read) = read else {
+        panic!("expected collaboration Group");
+    };
+    assert_eq!(read.group_id, group_id);
+
+    let updated = fixture
+        .service
+        .update(UpdateGroup {
+            caller: caller.clone(),
+            group_id: group_id.clone(),
+            patch: GroupPatch {
+                name: Some("Bot managed".into()),
+                context: None,
+                opening_message: None,
+                visibility: None,
+                delivery_policy: None,
+            },
+        })
+        .await
+        .expect("Bot Principal updates its Group");
+    let GroupDetail::Collaboration(updated) = updated else {
+        panic!("expected collaboration Group");
+    };
+    assert_eq!(updated.name.as_deref(), Some("Bot managed"));
+
+    let deleted = fixture
+        .service
+        .delete(DeleteGroup {
+            caller,
+            group_id,
+            acting_bot_id: Some("caller-bot".into()),
+        })
+        .await
+        .expect("Bot Principal deletes its Group");
+    assert!(deleted.deleted);
+}
+
+#[tokio::test]
+async fn unrelated_bot_cannot_read_update_or_delete_group() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("caller-bot").await;
+    fixture.add_public_bot("driver").await;
+    let mut command = collaboration_create_command();
+    command.caller = authenticated_bot_principal("caller-bot", "owner-1");
+    let created = fixture
+        .service
+        .create(command)
+        .await
+        .expect("create Group as Bot");
+    let GroupDetail::Collaboration(created) = created else {
+        panic!("expected collaboration Group");
+    };
+    let group_id = created.group_id;
+
+    let read = fixture
+        .service
+        .get(GetGroup {
+            caller: authenticated_bot_principal("outsider", "owner-2"),
+            group_id: group_id.clone(),
+        })
+        .await;
+    assert!(matches!(read, Err(ApplicationError::Forbidden { .. })));
+
+    let update = fixture
+        .service
+        .update(UpdateGroup {
+            caller: authenticated_bot_principal("outsider", "owner-2"),
+            group_id: group_id.clone(),
+            patch: GroupPatch {
+                name: Some("forged".into()),
+                context: None,
+                opening_message: None,
+                visibility: None,
+                delivery_policy: None,
+            },
+        })
+        .await;
+    assert!(matches!(update, Err(ApplicationError::Forbidden { .. })));
+
+    let delete = fixture
+        .service
+        .delete(DeleteGroup {
+            caller: authenticated_bot_principal("outsider", "owner-2"),
+            group_id,
+            acting_bot_id: None,
+        })
+        .await;
+    assert!(matches!(delete, Err(ApplicationError::Forbidden { .. })));
+}
+
+#[tokio::test]
+async fn bot_caller_creates_group_when_eventing_is_enabled() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("caller-bot").await;
+    fixture.add_public_bot("driver").await;
+    let provisioner = Arc::new(RecordingGroupProvisioner::new(fixture.groups.clone()));
+    let fixture = fixture.with_event_subscription_provisioner(provisioner.clone());
+    let mut command = collaboration_create_command();
+    command.caller = authenticated_bot_principal("caller-bot", "owner-1");
+
+    let outcome = fixture
+        .service
+        .create_with_event_subscriptions(command, vec![inline_group_subscription()])
+        .await
+        .expect("Bot Principal creates Group with inline Subscription");
+
+    let GroupDetail::Collaboration(detail) = outcome.group else {
+        panic!("expected collaboration Group");
+    };
+    assert_eq!(detail.originator_actor_id, "caller-bot");
+    assert_eq!(
+        provisioner
+            .prepared_group_ids
+            .lock()
+            .expect("provisioner lock")
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn mismatched_human_and_bot_caller_is_rejected_before_provisioning() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+    let provisioner = Arc::new(RecordingGroupProvisioner::new(fixture.groups.clone()));
+    let fixture = fixture.with_event_subscription_provisioner(provisioner.clone());
+    let mut command = collaboration_create_command();
+    command.caller = authenticated_bot_principal("caller-bot", "another-owner");
+    command.caller.user = Some(AuthenticatedUserIdentity {
+        id: "owner-1".into(),
+        username: "owner-1".into(),
+        display_name: None,
+        full_name: None,
+    });
+
+    let error = fixture
+        .service
+        .create(command)
+        .await
+        .expect_err("mismatched User/Bot ownership must be rejected");
+
+    assert!(matches!(error, ApplicationError::Forbidden { .. }));
+    assert!(
+        provisioner
+            .prepared_group_ids
+            .lock()
+            .expect("provisioner lock")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -4078,6 +4307,291 @@ mod originator_v1_policy {
         assert!(
             matches!(err, ApplicationError::InvalidInput { ref code, .. } if code == "invalid_originator"),
             "got {err:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn list_public_groups_returns_all_public_and_excludes_private() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver-a", "driver-b"] {
+        fixture.add_public_bot(bot).await;
+    }
+
+    // driver-b 公开群；driver-a 私有群（caller 不是任何群的参与者）
+    for (group_id, visibility, updated_at) in [
+        ("pub-recent", "public", 30),
+        ("priv-hidden", "private", 20),
+        ("pub-older", "public", 10),
+    ] {
+        let mut group = normal_group(
+            group_id,
+            if group_id.starts_with("pub") { "driver-b" } else { "driver-a" },
+            vec![Participant::bot(
+                if group_id.starts_with("pub") { "driver-b" } else { "driver-a" },
+                ParticipantRole::Driver,
+            )],
+            GroupStrategy::Chat,
+            updated_at,
+        );
+        group.visibility = visibility.into();
+        fixture.groups.upsert(group).await.expect("store Group");
+    }
+
+    let page = fixture
+        .service
+        .list_public_groups(ListPublicGroups {
+            offset: 0,
+            limit: 20,
+            q: None,
+            strategy: None,
+        })
+        .await
+        .expect("list public groups");
+
+    assert_eq!(page.total, 2);
+    assert_eq!(page.items.len(), 2);
+    for item in &page.items {
+        match item {
+            GroupSummary::Normal(summary) => {
+                assert_eq!(summary.membership, Membership::None);
+                assert!(summary.group_id.starts_with("pub"));
+            }
+            other => panic!("expected normal summary, got {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn list_summaries_include_group_context() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "target"] {
+        fixture.add_public_bot(bot).await;
+    }
+    let mut group = normal_group(
+        "ctx-group",
+        "driver",
+        vec![
+            Participant::bot("driver", ParticipantRole::Driver),
+            Participant::bot("target", ParticipantRole::Consultant),
+        ],
+        GroupStrategy::Chat,
+        10,
+    );
+    group.visibility = "public".into();
+    group.context = Some("plaza context".to_string());
+    fixture.groups.upsert(group).await.expect("store Group");
+
+    let public_page = fixture
+        .service
+        .list_public_groups(ListPublicGroups {
+            offset: 0,
+            limit: 10,
+            q: None,
+            strategy: None,
+        })
+        .await
+        .expect("list public groups");
+    assert_eq!(public_page.items.len(), 1);
+    match &public_page.items[0] {
+        GroupSummary::Normal(summary) => {
+            assert_eq!(summary.context.as_deref(), Some("plaza context"));
+        }
+        other => panic!("expected normal summary, got {other:?}"),
+    }
+
+    let page = fixture
+        .service
+        .list_groups(ListGroups {
+            caller: bot_principal("target"),
+            view_bot_id: Some("target".into()),
+            offset: 0,
+            limit: 10,
+            q: None,
+            visibility: None,
+            membership: MembershipFilter::Direct,
+            kind: GroupKindFilter::All,
+            strategy: None,
+        })
+        .await
+        .expect("list groups");
+    assert_eq!(page.items.len(), 1);
+    match &page.items[0] {
+        GroupSummary::Normal(summary) => {
+            assert_eq!(summary.context.as_deref(), Some("plaza context"));
+        }
+        other => panic!("expected normal summary, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn list_public_groups_filters_by_strategy() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+
+    for (group_id, strategy) in [
+        ("chat-group", GroupStrategy::Chat),
+        ("sm-group", GroupStrategy::StateMachine),
+    ] {
+        let mut group = normal_group(
+            group_id,
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+            strategy,
+            10,
+        );
+        group.visibility = "public".into();
+        fixture.groups.upsert(group).await.expect("store Group");
+    }
+
+    let page = fixture
+        .service
+        .list_public_groups(ListPublicGroups {
+            offset: 0,
+            limit: 20,
+            q: None,
+            strategy: Some(V1GroupStrategy::StateMachine),
+        })
+        .await
+        .expect("list state_machine public groups");
+
+    assert_eq!(page.total, 1);
+    match &page.items[0] {
+        GroupSummary::Normal(summary) => assert_eq!(summary.group_id, "sm-group"),
+        other => panic!("expected normal summary, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn list_public_groups_paginates_and_reports_filtered_total() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+
+    for idx in 0..5 {
+        let mut group = normal_group(
+            &format!("pub-{idx}"),
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+            GroupStrategy::Chat,
+            10 + idx,
+        );
+        group.visibility = "public".into();
+        fixture.groups.upsert(group).await.expect("store Group");
+    }
+
+    let page = fixture
+        .service
+        .list_public_groups(ListPublicGroups {
+            offset: 1,
+            limit: 2,
+            q: None,
+            strategy: None,
+        })
+        .await
+        .expect("paginated public groups");
+
+    assert_eq!(page.total, 5);
+    assert_eq!(page.items.len(), 2);
+    assert_eq!(page.offset, 1);
+    assert_eq!(page.limit, 2);
+}
+
+#[tokio::test]
+async fn list_public_groups_filters_by_label_query() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+
+    for group_id in ["plaza-alpha", "plaza-beta", "other-gamma"] {
+        let mut group = normal_group(
+            group_id,
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+            GroupStrategy::Chat,
+            10,
+        );
+        group.visibility = "public".into();
+        fixture.groups.upsert(group).await.expect("store Group");
+    }
+
+    let page = fixture
+        .service
+        .list_public_groups(ListPublicGroups {
+            offset: 0,
+            limit: 20,
+            q: Some("plaza".into()),
+            strategy: None,
+        })
+        .await
+        .expect("label-filtered public groups");
+
+    assert_eq!(page.total, 2);
+    let mut ids: Vec<_> = page
+        .items
+        .iter()
+        .map(|item| match item {
+            GroupSummary::Normal(s) => s.group_id.clone(),
+            other => panic!("expected normal, got {other:?}"),
+        })
+        .collect();
+    ids.sort();
+    assert_eq!(ids, vec!["plaza-alpha", "plaza-beta"]);
+}
+
+#[tokio::test]
+async fn list_public_groups_excludes_inactive_records() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+
+    for (group_id, status) in [("active-one", "active"), ("deleted-one", "deleted")] {
+        let mut group = normal_group(
+            group_id,
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+            GroupStrategy::Chat,
+            10,
+        );
+        group.visibility = "public".into();
+        group.record_status = status.into();
+        fixture.groups.upsert(group).await.expect("store Group");
+    }
+
+    let page = fixture
+        .service
+        .list_public_groups(ListPublicGroups {
+            offset: 0,
+            limit: 20,
+            q: None,
+            strategy: None,
+        })
+        .await
+        .expect("active-only public groups");
+
+    assert_eq!(page.total, 1);
+    match &page.items[0] {
+        GroupSummary::Normal(summary) => assert_eq!(summary.group_id, "active-one"),
+        other => panic!("expected normal summary, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn list_public_groups_rejects_out_of_range_limit() {
+    let fixture = Fixture::new().await;
+
+    for invalid_limit in [0u64, 101] {
+        let result = fixture
+            .service
+            .list_public_groups(ListPublicGroups {
+                offset: 0,
+                limit: invalid_limit,
+                q: None,
+                strategy: None,
+            })
+            .await;
+        assert!(result.is_err(), "limit {invalid_limit} should be rejected");
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, ApplicationError::InvalidInput { .. }),
+            "expected InvalidInput for limit {invalid_limit}, got {err:?}"
         );
     }
 }

@@ -41,6 +41,7 @@ pub enum GroupStrategy {
 pub enum Membership {
     Direct,
     SessionOnly,
+    None,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +116,8 @@ pub struct NormalGroupSummary {
     pub version: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
     pub status: GroupStatus,
     pub visibility: GroupVisibility,
     pub membership: Membership,
@@ -132,6 +135,8 @@ pub struct DirectMessageGroupSummary {
     pub version: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
     pub status: GroupStatus,
     pub visibility: GroupVisibility,
     pub membership: Membership,
@@ -263,6 +268,14 @@ pub struct ListGroups {
     pub visibility: Option<GroupVisibility>,
     pub membership: MembershipFilter,
     pub kind: GroupKindFilter,
+    pub strategy: Option<GroupStrategy>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ListPublicGroups {
+    pub offset: u64,
+    pub limit: u64,
+    pub q: Option<String>,
     pub strategy: Option<GroupStrategy>,
 }
 
@@ -445,6 +458,8 @@ pub struct UpdateGroup {
 pub struct DeleteGroup {
     pub caller: AuthenticatedCaller,
     pub group_id: String,
+    /// Optional management perspective. Human callers may select an owned Bot;
+    /// Bot callers may select only themselves.
     pub acting_bot_id: Option<String>,
 }
 
@@ -481,6 +496,16 @@ pub trait GroupService: Send + Sync {
         &self,
         command: ListGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError>;
+
+    async fn list_public_groups(
+        &self,
+        command: ListPublicGroups,
+    ) -> Result<Page<GroupSummary>, ApplicationError> {
+        let _ = command;
+        Err(ApplicationError::internal(
+            "list_public_groups not configured",
+        ))
+    }
 
     async fn create(&self, command: CreateGroup) -> Result<GroupDetail, ApplicationError>;
 
@@ -528,4 +553,22 @@ pub trait GroupService: Send + Sync {
         &self,
         command: DeleteGroupParticipant,
     ) -> Result<DeleteResult, ApplicationError>;
+}
+
+#[cfg(test)]
+mod membership_none_tests {
+    use super::Membership;
+    use serde_json::json;
+
+    #[test]
+    fn none_serializes_to_snake_case_none() {
+        let value = serde_json::to_value(Membership::None).expect("serialize");
+        assert_eq!(value, json!("none"));
+    }
+
+    #[test]
+    fn none_round_trips_through_wire() {
+        let parsed: Membership = serde_json::from_value(json!("none")).expect("deserialize");
+        assert_eq!(parsed, Membership::None);
+    }
 }

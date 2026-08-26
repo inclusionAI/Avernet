@@ -10,6 +10,8 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 from agentclaw.community.adapters.http.auth.dependencies import require_operator
+from agentclaw.community.adapters.http.auth.dependencies import get_current_user
+from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotService,
@@ -26,6 +28,8 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
     DeviceLimitError,
 )
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
+from agentclaw.community.core.errors import Unauthorized
 from agentclaw.community.plugin_api.passport import PassportError, PassportPlugin
 from agentclaw.community.plugin_api.auth import AuthPlugin
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
@@ -1414,6 +1418,23 @@ class TestRepairDefaultPassportForOthers:
 # ---------------------------------------------------------------------------
 
 class TestCreateBot:
+    def test_application_coding_policy_error_is_mapped_before_passport(self, client):
+        tc, svc, passport = client
+        svc.is_workspace_hosting_available.return_value = False
+
+        resp = tc.post(
+            "/api/bots",
+            json={
+                "bot_name": "Coding Bot",
+                "engine_type": "claude_code",
+                "template_type": "applicationCoding",
+            },
+        )
+
+        assert resp.json()["error_code"] == 503
+        passport.apply_first_agent_passport.assert_not_called()
+        passport.apply_agent_passport.assert_not_called()
+
     def test_needs_authorization_when_no_token(self, client):
         tc, svc, passport = client
         passport.apply_first_agent_passport.return_value = {"iframe_url": "http://auth", "token": None}
@@ -1927,6 +1948,86 @@ class TestGetBotDetailByOwner:
         assert data["success"] is False
         assert data["error_code"] == 404
 
+
+# ---------------------------------------------------------------------------
+# GET /api/bots/{bot_id}/classification
+# ---------------------------------------------------------------------------
+
+
+def _authenticated_user() -> AuthenticatedUser:
+    return AuthenticatedUser(
+        id="caller-id",
+        staffId="caller",
+        operatorName="caller",
+        nickName="Caller",
+    )
+
+
+class TestGetBotClassification:
+    def test_authenticated_user_can_read_minimal_cross_owner_classification(
+        self, client
+    ):
+        tc, svc, _passport = client
+        tc.app.dependency_overrides[get_current_user] = _authenticated_user
+        svc.get_bot_classification.return_value = {
+            "bot_id": "other-service-bot",
+            "bot_type": "service",
+        }
+
+        response = tc.get("/api/bots/other-service-bot/classification")
+
+        assert response.json() == {
+            "success": True,
+            "message": "OK",
+            "error_code": 200,
+            "data": {
+                "bot_id": "other-service-bot",
+                "bot_type": "service",
+            },
+        }
+        svc.get_bot_classification.assert_called_once_with("other-service-bot")
+
+    def test_missing_bot_returns_404_envelope(self, client):
+        tc, svc, _passport = client
+        tc.app.dependency_overrides[get_current_user] = _authenticated_user
+        svc.get_bot_classification.return_value = None
+
+        response = tc.get("/api/bots/missing/classification")
+
+        assert response.json() == {
+            "success": False,
+            "message": "Bot不存在: missing",
+            "error_code": 404,
+            "data": None,
+        }
+
+    def test_ambiguous_bot_id_returns_409_envelope(self, client):
+        tc, svc, _passport = client
+        tc.app.dependency_overrides[get_current_user] = _authenticated_user
+        svc.get_bot_classification.side_effect = BotLookupAmbiguousError
+
+        response = tc.get("/api/bots/default/classification")
+
+        assert response.json() == {
+            "success": False,
+            "message": "Bot ID 无法唯一定位: default",
+            "error_code": 409,
+            "data": None,
+        }
+
+    def test_unauthenticated_user_is_rejected(self, client):
+        tc, _svc, _passport = client
+
+        async def reject_unauthenticated_user():
+            raise Unauthorized("missing login context")
+
+        tc.app.dependency_overrides[
+            get_current_user
+        ] = reject_unauthenticated_user
+
+        response = tc.get("/api/bots/service-bot/classification")
+
+        assert response.status_code == 401
 
 # ---------------------------------------------------------------------------
 # GET /api/bots/search/domain-bots

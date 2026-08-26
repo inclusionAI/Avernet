@@ -700,12 +700,6 @@ _UNGRANTED_APP_CASES = {
         ),
         "assert_starved": lambda response: response.status_code == 404,
     },
-    ("POST", "/openapi/v1/bots/spaces/{space_id}/join-requests"): {
-        "request": lambda client: client.post(
-            "/openapi/v1/bots/spaces/1/join-requests", json={"reason": "join"}
-        ),
-        "assert_starved": lambda response: response.status_code == 404,
-    },
     ("POST", "/openapi/v1/bots/{bot_id}/editor-requests"): {
         "request": lambda client: client.post(
             "/openapi/v1/bots/bot-1/editor-requests",

@@ -50,8 +50,30 @@ class _McpMarket:
                 {
                     "serverCode": "mcp.calendar",
                     "name": "Calendar MCP",
+                    "category": "office",
+                    "tags": ["calendar", "productivity"],
                     "networkTypes": ["INTERNET"],
                     "transportProtocol": "STREAMABLE_HTTP",
+                    "endpoints": [
+                        {
+                            "networkType": "INTERNET",
+                            "transportProtocol": "STREAMABLE_HTTP",
+                            "headers": {"X-Custom-Header": "opaque"},
+                        }
+                    ],
+                    "tools": [
+                        {
+                            "name": "create_event",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "title": {"type": "string"},
+                                    "extInfo": {"internal": True},
+                                },
+                            },
+                        }
+                    ],
+                    "futureCatalogueField": {"nestedValue": "retained"},
                 }
             ],
         }
@@ -161,7 +183,89 @@ def test_mcp_market_reuses_market_service_mapping():
     assert mcp.kwargs["page_num"] == 3
     assert mcp.kwargs["page_size"] == 10
     assert mcp.kwargs["search_key"] == "calendar"
-    assert response.json()["data"]["items"][0]["server_code"] == "mcp.calendar"
+    item = response.json()["data"]["items"][0]
+    assert item["server_code"] == "mcp.calendar"
+    assert item["category"] == "office"
+    assert item["tags"] == ["calendar", "productivity"]
+    assert item["endpoints"][0]["headers"] == {"X-Custom-Header": "opaque"}
+    assert item["tools"][0]["inputSchema"]["properties"] == {
+        "title": {"type": "string"}
+    }
+    assert item["future_catalogue_field"] == {"nested_value": "retained"}
+
+
+def test_mcp_market_forwards_legacy_filters_including_tags():
+    client, _, mcp, _ = _client()
+
+    response = client.post(
+        "/openapi/v1/bots/market/mcp-servers",
+        params={"user_id": "user-1"},
+        json={
+            "keyword": "calendar",
+            "page_num": 2,
+            "page_size": 5,
+            "server_codes": ["mcp.calendar"],
+            "platform_server_codes": ["platform.calendar"],
+            "run_modes": ["REMOTE"],
+            "statuses": ["ONLINE"],
+            "transport_protocols": ["STREAMABLE_HTTP"],
+            "host_platforms": ["serverless"],
+            "owners": ["10001"],
+            "network_types": ["INTERNET", "INTRANET"],
+            "categories": ["office"],
+            "tenants": ["default"],
+            "tags": ["calendar", "productivity"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert mcp.kwargs == {
+        "page_num": 2,
+        "page_size": 5,
+        "search_key": "calendar",
+        "server_codes": ["mcp.calendar"],
+        "platform_server_codes": ["platform.calendar"],
+        "run_modes": ["REMOTE"],
+        "statuses": ["ONLINE"],
+        "transport_protocols": ["STREAMABLE_HTTP"],
+        "host_platforms": ["serverless"],
+        "owners": ["10001"],
+        "network_types": ["INTERNET"],
+        "categories": ["office"],
+        "tenants": ["default"],
+        "tags": ["calendar", "productivity"],
+    }
+
+    request_schema = client.app.openapi()["components"]["schemas"][
+        "McpMarketSearchRequest"
+    ]
+    assert {
+        "server_codes",
+        "platform_server_codes",
+        "run_modes",
+        "statuses",
+        "transport_protocols",
+        "host_platforms",
+        "owners",
+        "network_types",
+        "categories",
+        "tenants",
+        "tags",
+    } <= request_schema["properties"].keys()
+
+
+def test_mcp_market_returns_empty_page_when_requested_network_is_not_visible():
+    client, _, mcp, _ = _client()
+
+    response = client.post(
+        "/openapi/v1/bots/market/mcp-servers",
+        params={"user_id": "user-1"},
+        json={"network_types": ["INTRANET"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {"total": 0, "items": []}
+    assert mcp.kwargs is None
 
 
 def test_skill_center_market_forces_public_scope_and_hides_team_id():
@@ -208,6 +312,29 @@ def test_skill_center_market_rejects_caller_supplied_team_id():
 
     assert response.status_code == 422
     assert sc.request is None
+
+
+def test_skill_center_tags_normalizes_null_children_to_empty_lists():
+    tag = {
+        "id": 1,
+        "name": "研发效能",
+        "description": None,
+        "iconUrl": None,
+        "parentId": None,
+        "tagLevel": 1,
+        "children": None,
+    }
+
+    client, _, _, sc = _client()
+    sc.get_market_tags = lambda: [tag]
+
+    response = client.get(
+        "/openapi/v1/bots/market/skill-center/tags",
+        params={"user_id": "user-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"][0]["children"] == []
 
 
 def test_skill_center_tags_returns_nested_tag_tree_without_changing_search_contract():

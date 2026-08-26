@@ -1,11 +1,17 @@
 # Permissive Ask-User Answers Design
 
+> **Boundary clarification (2026-08-26):** BaaS continues to preserve empty
+> and blank Provider input for compatibility. The public Frontend-to-BCS
+> contract now uses only `values: []` for a skipped question and rejects empty
+> or whitespace-only string elements. See
+> `src/bcs/docs/plans/2026-08-26-ask-user-empty-array-skip-design.md`.
+
 ## Context
 
 The BaaS BCN downlink currently rejects ask-user answers whose `values` array
-is empty or contains an empty or whitespace-only string. BCS now treats these
-shapes as an explicit skipped answer and allows arbitrary custom strings, so
-the BaaS Provider boundary must preserve the same contract through to Engine.
+is empty or contains an empty or whitespace-only string. The BaaS Provider
+boundary must preserve these shapes through to Engine for compatibility; BCS
+uses the narrower Frontend skip contract described above.
 
 ## Goals
 

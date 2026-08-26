@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentclaw.community.api.work_order_service import WorkOrderServiceProtocol
 from agentclaw.community.core.spaces.errors import (
     PersonalSpaceInvariantError,
     SpaceCreatorInvariantError,
@@ -20,8 +21,14 @@ from agentclaw.community.core.spaces.models import (
     SpaceRecord,
     SpaceType,
 )
+from agentclaw.community.core.work_orders.models import NotificationCategory
 from agentclaw.community.core.spaces.services.space_member_service import (
     SpaceMemberService,
+)
+from agentclaw.community.plugin_api.staff_dept import (
+    StaffDeptPlugin,
+    StaffProfileInfo,
+    StaffProfileLookupError,
 )
 
 
@@ -63,15 +70,31 @@ def _member(
     )
 
 
-def _service(*, space: SpaceRecord | None = None):
+def _service(
+    *,
+    space: SpaceRecord | None = None,
+    staff_dept: StaffDeptPlugin | None = None,
+):
     repository = MagicMock()
     access = MagicMock()
     access.require_space_owner.return_value = (space or _space(), MagicMock())
-    return SpaceMemberService(repository, access), repository, access
+    work_orders = MagicMock(spec=WorkOrderServiceProtocol)
+    if staff_dept is None:
+        staff_dept = MagicMock(spec=StaffDeptPlugin)
+        staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+            work_no="member-1", nick_name=None
+        )
+    return (
+        SpaceMemberService(repository, access, staff_dept, work_orders),
+        repository,
+        access,
+        staff_dept,
+        work_orders,
+    )
 
 
 def test_list_members_checks_membership_and_normalizes_pagination() -> None:
-    service, repository, access = _service()
+    service, repository, access, _, _ = _service()
     repository.list_members.return_value = (0, [])
 
     assert service.list_members(
@@ -89,7 +112,7 @@ def test_list_members_checks_membership_and_normalizes_pagination() -> None:
 
 
 def test_list_members_turns_blank_keyword_into_none() -> None:
-    service, repository, _ = _service()
+    service, repository, _, _, _ = _service()
     repository.list_members.return_value = (0, [])
 
     service.list_members(
@@ -99,22 +122,26 @@ def test_list_members_turns_blank_keyword_into_none() -> None:
     assert repository.list_members.call_args.kwargs["keyword"] is None
 
 
-def test_add_member_propagates_requested_role_to_repository() -> None:
-    service, repository, _ = _service()
+def test_add_member_resolves_nickname_and_propagates_requested_role() -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="owner-2", nick_name="  Owner Two  "
+    )
+    service, repository, _, _, _ = _service(staff_dept=staff_dept)
     repository.get_member.return_value = None
     repository.add_member.return_value = _member(
-        user_id="owner-2", role=SpaceRole.OWNER
+        user_id="owner-2", user_name="Owner Two", role=SpaceRole.OWNER
     )
 
     record = service.add_member(
         space_id=7,
         actor_id="owner-1",
         user_id=" owner-2 ",
-        user_name="  Owner Two  ",
         role=SpaceRole.OWNER,
     )
 
     assert record.role is SpaceRole.OWNER
+    staff_dept.get_profile_by_work_no.assert_called_once_with(work_no="owner-2")
     repository.add_member.assert_called_once_with(
         space_id=7,
         user_id="owner-2",
@@ -125,9 +152,15 @@ def test_add_member_propagates_requested_role_to_repository() -> None:
     )
 
 
-@pytest.mark.parametrize("user_name", [None, "", "   "])
-def test_add_member_normalizes_missing_or_blank_user_name_to_none(user_name) -> None:
-    service, repository, _ = _service()
+@pytest.mark.parametrize("nickname", [None, "", "   "])
+def test_add_member_falls_back_to_user_id_when_nickname_is_missing(
+    nickname: str | None,
+) -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="member-1", nick_name=nickname
+    )
+    service, repository, _, _, _ = _service(staff_dept=staff_dept)
     repository.get_member.return_value = None
     repository.add_member.return_value = _member()
 
@@ -135,31 +168,49 @@ def test_add_member_normalizes_missing_or_blank_user_name_to_none(user_name) -> 
         space_id=7,
         actor_id="owner-1",
         user_id="member-1",
-        user_name=user_name,
         role=SpaceRole.MEMBER,
     )
 
-    assert repository.add_member.call_args.kwargs["user_name"] is None
+    assert repository.add_member.call_args.kwargs["user_name"] == "member-1"
 
 
-def test_add_member_rejects_user_name_over_128_characters() -> None:
-    service, repository, _ = _service()
+def test_add_member_falls_back_to_user_id_when_staff_lookup_fails() -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.side_effect = StaffProfileLookupError("down")
+    service, repository, _, _, _ = _service(staff_dept=staff_dept)
+    repository.get_member.return_value = None
 
-    with pytest.raises(SpaceMemberInvalidError, match="at most 128"):
-        service.add_member(
-            space_id=7,
-            actor_id="owner-1",
-            user_id="member-1",
-            user_name="x" * 129,
-            role=SpaceRole.MEMBER,
-        )
+    service.add_member(
+        space_id=7,
+        actor_id="owner-1",
+        user_id="member-1",
+        role=SpaceRole.MEMBER,
+    )
 
-    repository.add_member.assert_not_called()
+    assert repository.add_member.call_args.kwargs["user_name"] == "member-1"
+
+
+def test_add_member_truncates_staff_nickname_to_128_characters() -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="member-1", nick_name="花" * 129
+    )
+    service, repository, _, _, _ = _service(staff_dept=staff_dept)
+    repository.get_member.return_value = None
+
+    service.add_member(
+        space_id=7,
+        actor_id="owner-1",
+        user_id="member-1",
+        role=SpaceRole.MEMBER,
+    )
+
+    assert repository.add_member.call_args.kwargs["user_name"] == "花" * 128
 
 
 @pytest.mark.parametrize("user_id", ["", "   "])
 def test_add_member_rejects_blank_user_id(user_id: str) -> None:
-    service, _, _ = _service()
+    service, _, _, staff_dept, _ = _service()
 
     with pytest.raises(SpaceMemberInvalidError, match="user id is empty"):
         service.add_member(
@@ -169,9 +220,13 @@ def test_add_member_rejects_blank_user_id(user_id: str) -> None:
             role=SpaceRole.MEMBER,
         )
 
+    staff_dept.get_profile_by_work_no.assert_not_called()
+
 
 def test_add_member_rejects_personal_space() -> None:
-    service, _, _ = _service(space=_space(space_type=SpaceType.PERSONAL))
+    service, _, _, staff_dept, _ = _service(
+        space=_space(space_type=SpaceType.PERSONAL)
+    )
 
     with pytest.raises(PersonalSpaceInvariantError, match="cannot add members"):
         service.add_member(
@@ -181,9 +236,11 @@ def test_add_member_rejects_personal_space() -> None:
             role=SpaceRole.MEMBER,
         )
 
+    staff_dept.get_profile_by_work_no.assert_not_called()
+
 
 def test_add_member_rejects_existing_member() -> None:
-    service, repository, _ = _service()
+    service, repository, _, staff_dept, _ = _service()
     repository.get_member.return_value = _member()
 
     with pytest.raises(SpaceMemberAlreadyExistsError, match="already exists"):
@@ -194,9 +251,11 @@ def test_add_member_rejects_existing_member() -> None:
             role=SpaceRole.MEMBER,
         )
 
+    staff_dept.get_profile_by_work_no.assert_not_called()
+
 
 def test_delete_member_returns_true_for_existing_non_creator() -> None:
-    service, repository, _ = _service()
+    service, repository, _, _, work_orders = _service()
     repository.delete_member.return_value = True
 
     assert (
@@ -206,10 +265,45 @@ def test_delete_member_returns_true_for_existing_non_creator() -> None:
     repository.delete_member.assert_called_once_with(
         space_id=7, user_id="member-1", env="dev"
     )
+    work_orders.create_work_order_event.assert_called_once_with(
+        event_category=NotificationCategory.NOTICE,
+        biz_type="SPACE",
+        biz_id="7",
+        event_type="SPACE_MEMBER_REMOVED",
+        applicant_user_id=None,
+        approver_user_ids=[],
+        recipient_user_ids=["member-1"],
+        title="你已被移出空间",
+        content={"legacy_value": "你已被移出空间「Team」。"},
+        apply_reason=None,
+        biz_data=None,
+        actor_id="owner-1",
+    )
+
+
+def test_delete_member_does_not_notify_when_target_is_missing() -> None:
+    service, repository, _, _, work_orders = _service()
+    repository.delete_member.return_value = False
+
+    with pytest.raises(SpaceMemberNotFoundError, match="not found"):
+        service.delete_member(space_id=7, actor_id="owner-1", user_id="member-1")
+
+    work_orders.create_work_order_event.assert_not_called()
+
+
+def test_delete_member_propagates_notification_failure() -> None:
+    service, repository, _, _, work_orders = _service()
+    repository.delete_member.return_value = True
+    work_orders.create_work_order_event.side_effect = RuntimeError("notification failed")
+
+    with pytest.raises(RuntimeError, match="notification failed"):
+        service.delete_member(space_id=7, actor_id="owner-1", user_id="member-1")
+
+    work_orders.create_work_order_event.assert_called_once()
 
 
 def test_delete_member_rejects_creator() -> None:
-    service, repository, _ = _service()
+    service, repository, _, _, _ = _service()
 
     with pytest.raises(SpaceCreatorInvariantError, match="cannot be removed"):
         service.delete_member(space_id=7, actor_id="owner-1", user_id="owner-1")
@@ -218,7 +312,7 @@ def test_delete_member_rejects_creator() -> None:
 
 
 def test_delete_member_reports_missing_target() -> None:
-    service, repository, _ = _service()
+    service, repository, _, _, _ = _service()
     repository.delete_member.return_value = False
 
     with pytest.raises(SpaceMemberNotFoundError, match="not found"):
@@ -226,7 +320,7 @@ def test_delete_member_reports_missing_target() -> None:
 
 
 def test_update_role_returns_summary_and_creator_flag() -> None:
-    service, repository, _ = _service()
+    service, repository, _, _, _ = _service()
     repository.update_member_role.return_value = _member(
         user_id="owner-1", role=SpaceRole.OWNER
     )
@@ -243,7 +337,7 @@ def test_update_role_returns_summary_and_creator_flag() -> None:
 
 
 def test_update_role_rejects_personal_space() -> None:
-    service, _, _ = _service(space=_space(space_type=SpaceType.PERSONAL))
+    service, _, _, _, _ = _service(space=_space(space_type=SpaceType.PERSONAL))
 
     with pytest.raises(PersonalSpaceInvariantError, match="immutable"):
         service.update_role(
@@ -255,7 +349,7 @@ def test_update_role_rejects_personal_space() -> None:
 
 
 def test_update_role_rejects_creator_demotion() -> None:
-    service, repository, _ = _service()
+    service, repository, _, _, _ = _service()
 
     with pytest.raises(SpaceCreatorInvariantError, match="cannot be demoted"):
         service.update_role(
@@ -269,7 +363,7 @@ def test_update_role_rejects_creator_demotion() -> None:
 
 
 def test_update_role_reports_missing_member() -> None:
-    service, repository, _ = _service()
+    service, repository, _, _, _ = _service()
     repository.update_member_role.return_value = None
 
     with pytest.raises(SpaceMemberNotFoundError, match="not found"):

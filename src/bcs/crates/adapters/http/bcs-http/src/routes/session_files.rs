@@ -518,7 +518,6 @@ pub async fn complete_upload(
         caller: application_caller(&caller),
         session_id: sid.clone(),
         file_id: file_id.clone(),
-        notification_content_url: file_download_url(&state, &sid, &file_id),
     };
     match application.complete(command).await {
         Ok(file) => (
@@ -788,23 +787,6 @@ pub async fn shared_file_content(
 }
 
 // ---------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------
-
-fn file_download_url(state: &HttpAppState, sid: &str, file_id: &str) -> String {
-    let base = state
-        .bcs_endpoint
-        .clone()
-        .unwrap_or_else(|| format!("http://{}:{}", state.bind, state.port));
-    format!(
-        "{}/sessions/{}/files/{}/content",
-        base,
-        urlencoding::encode(sid),
-        file_id,
-    )
-}
-
-// ---------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------
 
@@ -890,28 +872,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn file_download_url_uses_bcs_endpoint_when_set() {
-        let mut state = HttpAppState::new(Services::builder().build_for_test());
-        state.bcs_endpoint = Some("https://bcn.alipay.com".into());
-        let url = file_download_url(&state, "g1:abcd1234", "fid-1");
-        assert_eq!(
-            url,
-            "https://bcn.alipay.com/sessions/g1%3Aabcd1234/files/fid-1/content"
-        );
-    }
-
-    #[test]
-    fn file_download_url_falls_back_to_bind_port() {
-        let mut state = HttpAppState::new(Services::builder().build_for_test());
-        state.bcs_endpoint = None;
-        state.bind = "127.0.0.1".into();
-        state.port = 21000;
-        let url = file_download_url(&state, "g1:abcd1234", "fid-1");
-        assert_eq!(
-            url,
-            "http://127.0.0.1:21000/sessions/g1%3Aabcd1234/files/fid-1/content"
-        );
+    /// Test no-auth shared-content URL projector used by the upload-completion
+    /// notification assertions.
+    struct CompletionShareProjector;
+    impl bcs_service_api::application::v1::SessionFileInternalContentUrlProjector
+        for CompletionShareProjector
+    {
+        fn shared_content_url(&self, token: &str) -> String {
+            format!("http://test.local/sessions/shared-file/content?token={token}")
+        }
     }
 
     fn group_participant(bot_uuid: &str) -> Participant {
@@ -1059,6 +1028,7 @@ mod tests {
                 group_core.clone(),
                 registry.clone(),
                 system_messages.clone(),
+                Arc::new(CompletionShareProjector),
             ),
         );
         let services = Services::builder()
@@ -1606,15 +1576,13 @@ mod tests {
         // bot-a uploads; the session also has bot-b, so receivers must be [bot-b].
         let (file_id, _status) = upload_complete(&app, "hello.txt", b"hello").await;
 
-        // HttpAppState::new leaves bcs_endpoint=None -> http://127.0.0.1:21000.
-        let expected_url = format!(
-            "http://127.0.0.1:21000/sessions/{}/files/{}/content",
-            urlencoding::encode(&app.sid),
-            file_id,
+        // The download link in the notification is a no-auth share link (15-day
+        // TTL) instead of the authenticated content endpoint.
+        let expected_prefix = format!(
+            "Bot test-bot 上传了一个文件 hello.txt ({file_id}，5 B)，下载链接：",
         );
-        let expected_message = format!(
-            "Bot test-bot 上传了一个文件 hello.txt ({file_id}，5 B)，下载链接：{expected_url}"
-        );
+        let expected_share_prefix =
+            "http://test.local/sessions/shared-file/content?token=";
 
         let notifications = app.system_messages.notifications.lock().await;
         assert_eq!(notifications.len(), 1, "expected exactly one system message");
@@ -1625,7 +1593,14 @@ mod tests {
                 receivers,
             } => {
                 assert_eq!(group_id, "g1");
-                assert_eq!(message, &expected_message);
+                assert!(
+                    message.starts_with(&expected_prefix),
+                    "unexpected message: {message}",
+                );
+                assert!(
+                    message[expected_prefix.len()..].starts_with(expected_share_prefix),
+                    "expected a share link, got: {message}",
+                );
                 let receiver_ids: Vec<String> =
                     receivers.iter().map(|p| p.bot_uuid.clone()).collect();
                 assert_eq!(receiver_ids, vec!["bot-b".to_string()]);
