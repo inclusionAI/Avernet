@@ -303,13 +303,27 @@ is what makes a sparse override total: `overrides.baas: {http2: true}` resolves 
 the shared ceilings with `http2` flipped, so `for_qualifier` can return a whole
 policy without any merging at the call site.
 
-Unknown qualifier keys are not rejected. A typo (`overrides.bass`) silently does
-nothing rather than failing boot, which is the wrong trade in general — but the
-provider does no I/O and has no qualifier list to validate against, and boot-time
-failure on a config typo in a *pool ceiling* is worse than the default applying.
-The per-provider `logger.info` (Component 4) is the mitigation: the effective
-policy for every binding appears in boot logs, so a typo shows up as "the value I
-set isn't there.
+Unknown qualifier keys **are** rejected — the provider raises, naming the typo
+and the valid set. This reverses an earlier draft of this plan, which argued the
+provider "has no qualifier list to validate against". That was simply false: the
+four `QUALIFIER_*` constants are importable, and deriving `_HTTP_CLIENT_QUALIFIERS`
+from them keeps the config surface from drifting off the injector keys.
+
+The distinction that matters is key vs. value. A malformed *value* still names a
+real binding, so falling back to a working default is a sane reading of intent —
+that path stays inert. An unrecognised *key* cannot be honoured by any binding,
+so accepting it leaves the operator believing a ceiling was raised while the
+binding ran on the shared defaults, which is the failure this block exists to
+prevent. `ci.enforce.md` §E requires startup to fail early on invalid config, and
+`baas.deploy_runtime` in the same module already rejects an unknown value this
+way.
+
+For that raise to actually mean *startup*, `HttpClientPoolConfig` joins
+`container.py`'s eager-check allowlist. Without it the provider would raise only
+when something first resolved an `HttpClient` — in a dev boot, after
+`discover_lifecycle_participants` had already swallowed it. The per-provider
+`logger.info` (Component 4) remains the way to confirm what a *valid* override
+resolved to.
 
 Placed next to `masa_agent_eval`. Missing block ⇒ dataclass defaults, so no
 deployment needs a config change to adopt pooling, and enabling HTTP/2 later is

@@ -107,18 +107,50 @@ def test_override_can_set_every_field(resolve):
     )
 
 
-def test_unlisted_qualifier_falls_back_to_defaults(resolve):
-    """An unrecognised override key is inert by design — the provider has no
-    binding list to validate against, and failing boot over a typo in a pool
-    ceiling is the worse trade. ``HttpClientModule`` logs the resolved policy
-    per binding, which is where such a typo surfaces."""
-    conf = resolve({"max_connections": 77, "overrides": {"bass": {"http2": True}}})
-    assert conf.for_qualifier("baas").http2 is False
-    assert conf.for_qualifier("baas").max_connections == 77
+def test_unknown_qualifier_is_rejected(resolve):
+    """A misspelled qualifier must fail loudly, not vanish.
+
+    The valid set is closed, so `overrides.bass` cannot be honoured by any
+    binding — leaving it inert would let an operator believe a ceiling had been
+    raised while the binding quietly ran on the shared defaults. ci.enforce.md
+    §E requires startup to fail early on invalid config, and
+    `baas.deploy_runtime` already rejects an unknown value the same way.
+    """
+    with pytest.raises(ValueError, match="unknown http_client.overrides qualifier"):
+        resolve({"max_connections": 77, "overrides": {"bass": {"http2": True}}})
+
+
+def test_unknown_qualifier_error_names_the_offender_and_the_valid_set(resolve):
+    """The message has to be actionable — an operator reading a boot failure
+    needs the typo and the alternatives, not just 'invalid config'."""
+    with pytest.raises(ValueError) as exc:
+        resolve({"overrides": {"bass": {}, "genrl": {}}})
+    msg = str(exc.value)
+    assert "'bass'" in msg and "'genrl'" in msg
+    for valid in ("'baas'", "'bcn'", "'general'", "'masa_agent_eval'"):
+        assert valid in msg
+
+
+def test_all_four_qualifiers_are_accepted(resolve):
+    """Guard against the valid set drifting from the injector keys."""
+    conf = resolve({
+        "overrides": {
+            "baas": {"http2": True},
+            "bcn": {"max_connections": 11},
+            "general": {"max_connections": 200},
+            "masa_agent_eval": {"keepalive_expiry": 1.0},
+        }
+    })
+    assert conf.for_qualifier("baas").http2 is True
+    assert conf.for_qualifier("bcn").max_connections == 11
+    assert conf.for_qualifier("general").max_connections == 200
+    assert conf.for_qualifier("masa_agent_eval").keepalive_expiry == 1.0
 
 
 def test_non_mapping_override_body_is_ignored(resolve):
-    """A scalar where a mapping belongs must not crash boot."""
+    """A scalar where a mapping belongs must not crash boot. Unlike an unknown
+    *key* — which cannot be honoured at all — a malformed body still names a
+    real binding, so falling back to the shared defaults is a sane reading."""
     conf = resolve({"overrides": {"baas": "true", "bcn": {"http2": True}}})
     assert conf.for_qualifier("baas") == conf.defaults
     assert conf.for_qualifier("bcn").http2 is True

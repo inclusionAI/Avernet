@@ -175,6 +175,7 @@ def eager_check_critical_bindings(injector: Injector) -> None:
     from agentclaw.community.api.bot_chat_service import OpenBotChatServiceProtocol
     from agentclaw.community.plugin_api.auth import AuthPlugin
     from agentclaw.community.plugin_api.database import DatabasePlugin
+    from agentclaw.community.di.config import HttpClientPoolConfig
 
     # Neutral critical bindings + any corp-only ones the corp composition root
     # registered (BuserviceSsoConfig / ArcaSandboxConfig). container.py names no
@@ -183,6 +184,11 @@ def eager_check_critical_bindings(injector: Injector) -> None:
         DatabasePlugin,
         AuthPlugin,
         OpenBotChatServiceProtocol,
+        # Every outbound HttpClient derives from this, and its provider rejects
+        # an unknown `http_client.overrides` qualifier by raising. Resolving it
+        # here is what turns that into "startup fails early on invalid config"
+        # (ci.enforce.md §E) instead of a failure at the first outbound call.
+        HttpClientPoolConfig,
         *get_eager_check_keys(),
     ]
 
