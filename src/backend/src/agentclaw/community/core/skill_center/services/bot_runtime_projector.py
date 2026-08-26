@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from injector import inject
 
@@ -278,10 +278,10 @@ class BotRuntimeProjector:
         except Exception as exc:
             # Name the Bot and engine: the generic reconcile error carries
             # neither, and a stale row here blocks every SkillSet mutation.
-            logger.error(
+            logger.exception(
                 "[BotRuntimeProjector] MCP execution identity unreadable: "
                 "bot_id=%s, engine=%s",
-                bot_id, engine, exc_info=True,
+                bot_id, engine,
             )
             raise SkillSetRuntimeReconcileError() from exc
 
