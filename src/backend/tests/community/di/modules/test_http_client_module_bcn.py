@@ -75,7 +75,12 @@ def test_override_for_this_qualifier_wins() -> None:
     shared defaults and the dataclass defaults, so a regression cannot hide
     behind a coincidence."""
     pool = cfg.HttpClientPoolConfig(
-        defaults=cfg.HttpClientPoolPolicy(max_connections=10, keepalive_expiry=9.0),
+        # defaults sets max_keepalive_connections to a NON-dataclass value that
+        # the override leaves unset. A merging implementation would surface 44
+        # here; whole-policy resolution surfaces the override's own 20.
+        defaults=cfg.HttpClientPoolPolicy(
+            max_connections=10, keepalive_expiry=9.0, max_keepalive_connections=44
+        ),
         overrides={
             QUALIFIER_BCN: cfg.HttpClientPoolPolicy(
                 max_connections=99, keepalive_expiry=3.5, http2=True
@@ -86,6 +91,9 @@ def test_override_for_this_qualifier_wins() -> None:
     assert client._limits.max_connections == 99
     assert client._limits.keepalive_expiry == 3.5
     assert client._http2 is True
+    assert client._limits.max_keepalive_connections == 20, (
+        "for_qualifier must return the override whole, not merged with defaults"
+    )
 
 
 def test_override_for_a_different_qualifier_is_ignored() -> None:
