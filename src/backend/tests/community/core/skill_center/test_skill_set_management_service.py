@@ -1897,6 +1897,15 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
             "engine_type": "openclaw",
             "resource_scope": {
                 "mcp_codes": ["mcp.template-preset", "mcp.weather"],
+                # Identity travels with every projection. Omitting mcp_items
+                # does not preserve existing identity: the Passport port
+                # substitutes bare items and writes identity_mode="owner"
+                # explicitly, so a Caller MCP would be demoted by any
+                # unrelated SkillSet mutation.
+                "mcp_items": [
+                    {"mcp_code": "mcp.template-preset", "identity_mode": "owner"},
+                    {"mcp_code": "mcp.weather", "identity_mode": "owner"},
+                ],
                 "cli_items": [{"cli_code": "kept-cli", "cli_name": "Kept"}],
             },
         }

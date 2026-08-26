@@ -22,7 +22,7 @@ Paths are relative to `src/backend/src/agentclaw/community/` unless noted.
 - [x] 1.3 Thread `bot` into `_apply_non_skill_projection` — `_resolve_plan`
       already returns it, and all three entry points (`project`,
       `project_mcp_and_cli`, `project_for_cleanup`) hold it.
-- [ ] 1.4 Add `"mcp_items"` to the `resource_scope` at
+- [x] 1.4 Add `"mcp_items"` to the `resource_scope` at
       `bot_runtime_projector.py:374`, built from the same
       `filter_passport_mcp_codes(...)` list already passed as `mcp_codes`.
 - [ ] 1.5 Tests: a `caller`-configured MCP round-trips as `caller`; an MCP

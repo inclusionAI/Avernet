@@ -430,14 +430,22 @@ class BotRuntimeProjector:
         ):
             raise SkillSetRuntimeReconcileError()
 
+        passport_codes = filter_passport_mcp_codes(projection.mcp_server_codes)
         try:
+            # ``resource_scope`` is overwrite-style per list, and a code sent
+            # without ``mcp_items`` does not keep its existing identity: the
+            # Passport port substitutes a bare item and defaults its
+            # ``identity_mode`` to Owner, which is then written explicitly.
+            # So ``mcp_items`` is mandatory here, not an optimisation -- drop
+            # it and every projection silently demotes Caller MCPs to Owner.
             self._passport.update_passport(
                 bot_id=bot_id,
                 user_id=owner_id,
                 engine_type=engine,
                 resource_scope={
-                    "mcp_codes": filter_passport_mcp_codes(
-                        projection.mcp_server_codes
+                    "mcp_codes": passport_codes,
+                    "mcp_items": self._passport_mcp_items(
+                        bot=bot, engine=engine, codes=passport_codes
                     ),
                     "cli_items": effective_cli_items,
                 },
