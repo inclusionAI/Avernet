@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -45,7 +46,7 @@ from agentclaw.community.plugins.community.notify_sender import (
     _env,
 )
 
-_DT = "2026-08-25"
+_DT = datetime.now().strftime("%Y-%m-%d")
 
 
 def _make_task(**overrides) -> DiscoveredTask:
