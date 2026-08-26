@@ -44,12 +44,17 @@ from injector import Injector, Module
 
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.admission import (
+    HARNESS_SCOPED_OPERATIONS,
     SKILL_SCOPED_OPERATIONS,
 )
 from agentclaw.community.adapters.http.openapi_v1.deprecated import SELF_CHECKED_ROUTES
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.api.collaborator_service import (
+    CollaboratorServiceProtocol,
+)
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
@@ -100,6 +105,39 @@ class _NoGrants:
 
     def list_for_app(self, **_kwargs):
         return []
+
+
+class _NoBot:
+    """The harness surface resolves the owner from the repository record."""
+
+    def get_by_id(self, bot_id: str):
+        return {
+            "id": 1,
+            "bot_id": bot_id,
+            "owner_id": USER,
+            "bot_name": "stub-bot",
+            "status": "ACTIVE",
+            "bot_type": "personal",
+        }
+
+
+class _NoCollaborators:
+    """No live collaborator relationship."""
+
+    def list_collaborators(self, **_kwargs):
+        return []
+
+    def check_collaborator_permission(self, **_kwargs):
+        return {"has_permission": False}
+
+    def get_permission_level(self, *_args, **_kwargs):
+        return "none"
+
+    def get_operable_permission_level(self, **_kwargs):
+        return "none"
+
+    def on_collaboration_changed(self, **_kwargs):
+        return None
 
 
 class _Services:
@@ -183,6 +221,8 @@ def client(services):
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotAppGrantServiceProtocol, to=_NoGrants())
+            binder.bind(BotRepository, to=_NoBot())
+            binder.bind(CollaboratorServiceProtocol, to=_NoCollaborators())
             binder.bind(CronRelayServiceProtocol, to=services)
             for protocol in (
                 SkillQueryServiceProtocol,
@@ -201,11 +241,13 @@ def client(services):
 
 
 def _concrete(path: str) -> str:
-    """A callable URL for a route template, with the bot named in the query.
+    """A callable URL for a route template.
 
-    ``bot_id`` is appended unconditionally: the retiring collection addresses
-    require it there, and on a route that does not declare it an extra query
-    parameter is ignored — so one spelling serves every row.
+    Path parameters are interpolated directly. ``user_id`` and an extra
+    ``bot_id`` query parameter are appended for routes that need them:
+    the retiring collection addresses require ``bot_id`` in the query, and
+    on a route that does not declare it an extra query parameter is ignored.
+    Harness paths already carry ``bot_id`` in the path.
     """
     filled = "/".join(
         {"{skill_id}": SKILL, "{routine_id}": "r-1", "{bot_id}": BOT}.get(
@@ -213,13 +255,19 @@ def _concrete(path: str) -> str:
         )
         for segment in path.split("/")
     )
-    return f"{filled}?user_id={USER}&bot_id={BOT}"
+    query = f"?user_id={USER}"
+    if "{bot_id}" not in path:
+        query += f"&bot_id={BOT}"
+    return f"{filled}{query}"
 
 
-#: Both sets, because they are the same risk with different lifetimes: the
-#: retiring addresses go with the deprecated package, the four skill-addressed
-#: ones are the current contract.
-SELF_CHECKED = sorted(set(SELF_CHECKED_ROUTES) | set(SKILL_SCOPED_OPERATIONS))
+#: All three sets, because they are the same risk with different lifetimes:
+#: the retiring addresses go with the deprecated package, the four skill-
+#: addressed ones are the current contract, and the harness operations resolve
+#: the bot owner from the repository record rather than from a wire parameter.
+SELF_CHECKED = sorted(
+    set(SELF_CHECKED_ROUTES) | set(SKILL_SCOPED_OPERATIONS) | set(HARNESS_SCOPED_OPERATIONS)
+)
 
 #: What each write needs on the wire to get past validation and reach the point
 #: where a missing grant check would show. A row that 422s would pass this test
@@ -232,6 +280,18 @@ BODIES: dict[tuple[str, str], dict] = {
             "command": "echo hi",
             "trigger": {"cron": "0 0 * * *"},
         }
+    },
+    ("POST", "/openapi/v1/bots/{bot_id}/harness/diagnose"): {
+        "json": {"entity_type": "staff", "entity_id": USER},
+    },
+    ("POST", "/openapi/v1/bots/{bot_id}/harness/preview"): {
+        "json": {"entity_type": "staff", "entity_id": USER, "patch_id_list": [1]},
+    },
+    ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"): {
+        "json": {"entity_type": "staff", "entity_id": USER, "patch_id_list": [1]},
+    },
+    ("POST", "/openapi/v1/bots/{bot_id}/harness/rollback"): {
+        "json": {"entity_type": "staff", "entity_id": USER, "patch_id": 1},
     },
     ("POST", "/openapi/v1/bots/skills/upload"): {
         "content": b"PK\x03\x04",

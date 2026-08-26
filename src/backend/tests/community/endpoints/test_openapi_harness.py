@@ -33,7 +33,11 @@ from agentclaw.community.core.harness.models import (
     Layer,
     PatchDefinition,
 )
-from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import (
+    BotAppGrantRepositoryProtocol,
+    BotRepository,
+    CollaboratorRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.harness import (
     HarnessPatchRepository,
     HarnessScanRecordRepository,
@@ -57,6 +61,8 @@ _ENTITY_TYPE = "staff"
 # The per-test SQLite database is fresh for every case, so the first row in
 # ac_harness_patch is always id 1 — the same convention the skills cases use
 # for their first seeded Skill.
+_APP_ID = 99
+_COLLABORATOR = "harness-collaborator"
 _PATCH_ID = 1
 _PATCH_CONTENT = json.dumps(
     [
@@ -100,7 +106,42 @@ def _principal() -> str:
     )
 
 
+def _app_principal(caller_id: str = _COLLABORATOR) -> str:
+    """A gateway-signed principal naming an application and a delegating user."""
+    now = int(time.time())
+    return jwt.encode(
+        {
+            "iss": "gateway",
+            "aud": "backend",
+            "iat": now,
+            "exp": now + 3600,
+            "principals": [
+                {
+                    "type": "app",
+                    "tenant": "teamclaw",
+                    "app": {
+                        "app_id": _APP_ID,
+                        "app_name": "harness-partner",
+                        "owners": "platform-team",
+                        "tenant": "teamclaw",
+                    },
+                },
+                {
+                    "type": "user",
+                    "subject": {
+                        "id": caller_id,
+                        "username": f"{caller_id}@example.test",
+                    },
+                },
+            ],
+        },
+        _KEY,
+        algorithm="HS256",
+    )
+
+
 _HEADERS = {PRINCIPAL_HEADER: _principal()}
+_APP_HEADERS = {PRINCIPAL_HEADER: _app_principal()}
 _QUERY = {"user_id": _OWNER}
 _BODY_ENTITY = {"entity_type": _ENTITY_TYPE, "entity_id": _OWNER}
 
@@ -125,6 +166,42 @@ def _seed_bot(world) -> None:
 
 def _seed_no_bot(world) -> None:
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+
+
+def _seed_collaborator_grant(world, caller_id: str = _COLLABORATOR) -> None:
+    """Seed the bot, an admin collaborator, and a live app grant for them."""
+    _seed_bot(world)
+    bot = world.get(BotRepository).get_by_id(_BOT_ID)
+    world.get(CollaboratorRepositoryProtocol).insert(
+        {
+            "bot_pk": bot["id"],
+            "bot_id": _BOT_ID,
+            "owner_id": _OWNER,
+            "user_id": caller_id,
+            "user_name": caller_id,
+            "role": "admin",
+            "operator_id": _OWNER,
+        }
+    )
+    _insert_patch(world)
+    bind_overrides(
+        world,
+        PatchEngineProtocol,
+        {
+            "preview": _preview_ok,
+            "apply": _apply_ok,
+            "rollback_by_patch": _rollback_ok,
+        },
+    )
+    world.get(BotAppGrantRepositoryProtocol).grant(
+        {
+            "app_id": _APP_ID,
+            "app_name": "harness-partner",
+            "bot_id": _BOT_ID,
+            "user_id": caller_id,
+            "owner_id": _OWNER,
+        }
+    )
 
 
 def _insert_patch(world) -> None:
@@ -302,6 +379,46 @@ def preview_missing_patch_is_404():
 )
 def apply_marks_the_patch_applied():
     """With no prior record the handler plans one, applies, and flags the patch."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/harness/apply",
+    scenario="application_with_grant_applies_patch",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _COLLABORATOR},
+        headers=_APP_HEADERS,
+        json_body={**_BODY_ENTITY, "entity_id": _COLLABORATOR, "patch_id_list": [_PATCH_ID]},
+    ),
+    seed=_seed_collaborator_grant,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": {"success": True}},
+    ),
+)
+def apply_application_with_grant_is_allowed():
+    """An app-only caller with a live grant is admitted and controls the bot."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/harness/apply",
+    scenario="application_without_grant_is_refused",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _COLLABORATOR},
+        headers=_APP_HEADERS,
+        json_body={**_BODY_ENTITY, "entity_id": _COLLABORATOR, "patch_id_list": [_PATCH_ID]},
+    ),
+    seed=_seed_patch_with_engine,
+    expect=ExpectError(
+        status=404,
+        json_contains={"code": 404000, "message": "Not Found", "data": None},
+    ),
+)
+def apply_application_without_grant_is_refused():
+    """An app-only caller holding no grant is refused before the engine runs."""
 
 
 @endpoint_test(
