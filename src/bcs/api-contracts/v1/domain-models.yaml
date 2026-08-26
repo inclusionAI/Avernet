@@ -584,6 +584,8 @@ NormalGroupSummary:
       type: integer
     name:
       type: string
+    context:
+      type: string
     kind:
       const: normal
     status:
@@ -631,6 +633,8 @@ DirectMessageGroupSummary:
     version:
       type: integer
     name:
+      type: string
+    context:
       type: string
     kind:
       const: dm

@@ -4168,6 +4168,68 @@ async fn list_public_groups_returns_all_public_and_excludes_private() {
 }
 
 #[tokio::test]
+async fn list_summaries_include_group_context() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "target"] {
+        fixture.add_public_bot(bot).await;
+    }
+    let mut group = normal_group(
+        "ctx-group",
+        "driver",
+        vec![
+            Participant::bot("driver", ParticipantRole::Driver),
+            Participant::bot("target", ParticipantRole::Consultant),
+        ],
+        GroupStrategy::Chat,
+        10,
+    );
+    group.visibility = "public".into();
+    group.context = Some("plaza context".to_string());
+    fixture.groups.upsert(group).await.expect("store Group");
+
+    let public_page = fixture
+        .service
+        .list_public_groups(ListPublicGroups {
+            offset: 0,
+            limit: 10,
+            q: None,
+            strategy: None,
+        })
+        .await
+        .expect("list public groups");
+    assert_eq!(public_page.items.len(), 1);
+    match &public_page.items[0] {
+        GroupSummary::Normal(summary) => {
+            assert_eq!(summary.context.as_deref(), Some("plaza context"));
+        }
+        other => panic!("expected normal summary, got {other:?}"),
+    }
+
+    let page = fixture
+        .service
+        .list_groups(ListGroups {
+            caller: bot_principal("target"),
+            view_bot_id: Some("target".into()),
+            offset: 0,
+            limit: 10,
+            q: None,
+            visibility: None,
+            membership: MembershipFilter::Direct,
+            kind: GroupKindFilter::All,
+            strategy: None,
+        })
+        .await
+        .expect("list groups");
+    assert_eq!(page.items.len(), 1);
+    match &page.items[0] {
+        GroupSummary::Normal(summary) => {
+            assert_eq!(summary.context.as_deref(), Some("plaza context"));
+        }
+        other => panic!("expected normal summary, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn list_public_groups_filters_by_strategy() {
     let fixture = Fixture::new().await;
     fixture.add_public_bot("driver").await;
