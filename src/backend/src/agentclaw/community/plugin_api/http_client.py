@@ -30,7 +30,10 @@ A consumer injects the qualified key (``baas_http: Annotated[HttpClient,
 
 Impls (Rule 20/21):
 
-* ``prod`` → ``HttpxClient(base_url)`` — a real ``httpx.Client`` per call.
+* ``prod`` → ``HttpxClient(base_url)`` — one pooled, long-lived
+  ``httpx.Client`` per binding, with bounded ``httpx.Limits`` and optional
+  HTTP/2. Pool exhaustion surfaces as ``HttpClientTimeoutError``
+  (``httpx.PoolTimeout``) once the per-call ``timeout`` elapses.
 * ``local`` → ``LocalHttpClient(base_url)`` (``MockSeam``, flavor ``MOCK``) — an
   unstubbed call **raises** so a test can never silently hit the network.
 """

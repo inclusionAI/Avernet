@@ -69,7 +69,7 @@ config path including the HTTP/2 flag; Group 3 validates.
       multipart kwargs, verb dispatch, error propagation,
       stream-leaves-pool-open, idempotent close, teardown closes, concurrent
       first calls build one client.
-- [ ] 1.8b `plugin_api/http_client.py`: fix the now-false impl note in the module
+- [x] 1.8b `plugin_api/http_client.py`: fix the now-false impl note in the module
       docstring — "``prod`` → ``HttpxClient(base_url)`` — a real ``httpx.Client``
       per call." becomes a pooled-client description. Docstring only; the
       Protocol, its signatures and the conformance contract are untouched, so
@@ -176,5 +176,7 @@ config path including the HTTP/2 flag; Group 3 validates.
 - Cleartext `h2c` / prior-knowledge HTTP/2 (would require disabling HTTP/1.1).
 - Retry or circuit-breaking on `RemoteProtocolError` from a stale keep-alive
   connection. The seam's "swallows nothing" invariant stands.
-- Touching `plugin_api/http_client.py`, `LocalHttpClient`, or the `test` /
-  `corp_test` profile bindings.
+- Changing the `HttpClient` Protocol in `plugin_api/http_client.py` — its
+  signatures and the conformance contract stay put. (Task 1.8b corrects a stale
+  impl note in that file's module docstring; that is documentation, not contract.)
+- Touching `LocalHttpClient` or the `test` / `corp_test` profile bindings.
