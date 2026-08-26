@@ -142,8 +142,19 @@ class SeamBots:
     which would pass whatever the seam did.
     """
 
+    def __init__(self, owner_id: str = "actor") -> None:
+        self.owner_id = owner_id
+
     def get_by_id_and_owner(self, bot_id: str, owner_id: str):
         return {"id": 1, "bot_id": bot_id, "owner_id": owner_id, "env": "dev"}
+
+    def get_by_id(self, bot_id: str):
+        return {
+            "id": 1,
+            "bot_id": bot_id,
+            "owner_id": self.owner_id,
+            "env": "dev",
+        }
 
 
 class SeamCollaborators:
@@ -189,6 +200,20 @@ class SeamLocks:
             has_collaborators=False,
             is_owner=False,
         )
+
+
+def bind_edit_lock_seam(binder, *, locks=None):
+    """Wire the no-collaborator lock used by focused handler test apps."""
+    from injector import InstanceProvider  # noqa: PLC0415
+
+    from agentclaw.community.api.collaborator_lock_service import (  # noqa: PLC0415
+        CollaboratorLockServiceProtocol,
+    )
+
+    binder.bind(
+        CollaboratorLockServiceProtocol,
+        to=InstanceProvider(locks or SeamLocks()),
+    )
 
 
 def bind_bot_access_seam(

@@ -24,6 +24,7 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 from tests.community.adapters.http.openapi_v1.conftest import (
+    bind_edit_lock_seam,
     mount_public_error_handlers,
     user_scoped_client,
 )
@@ -127,6 +128,7 @@ def client(bot_repo, collaborator, scan_repo, patch_repo, record_repo, engine, l
             binder.bind(PatchPlannerProtocol, to=planner)
             binder.bind(PatchEngineProtocol, to=engine)
             binder.bind(PatchLibraryProtocol, to=lib)
+            bind_edit_lock_seam(binder)
 
     app = FastAPI()
     app.include_router(router)

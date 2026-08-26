@@ -35,6 +35,7 @@ from agentclaw.community.core.engine_runtime.errors import (
 )
 from agentclaw.community.core.services.identity import IdentityService
 from tests.community.adapters.http.openapi_v1.conftest import (
+    bind_edit_lock_seam,
     mount_public_error_handlers,
     user_scoped_client,
 )
@@ -100,6 +101,7 @@ def client(bot_service, engine_config, identity):
             binder.bind(BotServiceProtocol, to=bot_service)
             binder.bind(EngineConfigServiceProtocol, to=engine_config)
             binder.bind(IdentityService, to=identity)
+            bind_edit_lock_seam(binder)
 
     app = FastAPI()
     app.include_router(engine_config_router)

@@ -21,6 +21,7 @@ from agentclaw.community.core.service_bot.errors import (
     ServiceContainerNotFoundError,
     ServiceContainerUpstreamError,
     ServicePublicationConflictError,
+    ServicePublicationLockedError,
     ServicePublicationNotFoundError,
     ServicePublicationUnsupportedError,
 )
@@ -751,21 +752,23 @@ def test_service_config_read_handles_legacy_ext(deps):
 
 
 @pytest.mark.asyncio
-async def test_staging_lock_is_enforced_before_the_facade(deps, monkeypatch):
+async def test_staging_requires_collaborative_lock(deps, monkeypatch):
     monkeypatch.setattr(
         "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
         lambda: "dev",
     )
     row = record(1, PublishStatus.DRAFT)
     deps.publish_repo.list_by_source_bot.return_value = [row]
-    deps.flow_service.process = AsyncMock(
-        return_value=SimpleNamespace(model_dump=lambda: {"status": "building"})
+    deps.lock_service.get_lock_info.return_value = SimpleNamespace(
+        has_collaborators=True,
+        lock=SimpleNamespace(holder_user_id="other"),
     )
 
-    await deps.facade.advance("bot-1", "staging", actor_id="owner", owner_id="owner")
-
-    deps.lock_service.get_lock_info.assert_not_called()
-    deps.flow_service.process.assert_awaited_once_with(1, "owner")
+    with pytest.raises(ServicePublicationLockedError):
+        await deps.facade.advance(
+            "bot-1", "staging", actor_id="owner", owner_id="owner"
+        )
+    deps.flow_service.process.assert_not_called()
 
 
 @pytest.mark.asyncio

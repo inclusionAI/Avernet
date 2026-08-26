@@ -19,6 +19,7 @@ from injector import Injector, Module
 import importlib
 
 from tests.community.adapters.http.openapi_v1.conftest import (
+    bind_edit_lock_seam,
     mount_public_error_handlers,
     user_scoped_client,
 )
@@ -187,6 +188,7 @@ def client(
             binder.bind(SkillSetServiceFactoryProtocol, to=skill_set_factory)
             binder.bind(AuthRelationshipPlugin, to=auth_rel)
             binder.bind(BotStartupScriptServiceProtocol, to=startup_script)
+            bind_edit_lock_seam(binder)
             binder.bind(
                 BusinessSpaceContextProtocol,
                 to=NoopBusinessSpaceContext(),

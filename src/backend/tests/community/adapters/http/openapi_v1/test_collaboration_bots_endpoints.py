@@ -24,6 +24,7 @@ from agentclaw.community.core.gateway_principal import (
     VerifiedCaller,
 )
 from tests.community.adapters.http.openapi_v1.conftest import (
+    bind_edit_lock_seam,
     mount_public_error_handlers,
     user_scoped_client,
 )
@@ -57,6 +58,7 @@ def make_client():
         class _M(Module):
             def configure(self, binder):
                 binder.bind(BotPublicServiceProtocol, to=svc)
+                bind_edit_lock_seam(binder)
 
         app = FastAPI()
         app.include_router(collaboration_public_router)

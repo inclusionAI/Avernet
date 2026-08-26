@@ -10,6 +10,8 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
     Deleted,
     Envelope,
+    ErrorEnvelope,
+    error_example,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     OwnerIdDep,
@@ -174,7 +176,17 @@ def _action_route(
     return decorator
 
 
-@_action_route("/advance", "advance_service_lifecycle")
+@_action_route(
+    "/advance",
+    "advance_service_lifecycle",
+    responses={
+        423: {
+            "model": ErrorEnvelope,
+            "description": "A collaborator must hold the Bot edit lock before staging.",
+            **error_example(423, "Edit lock required"),
+        }
+    },
+)
 async def advance_lifecycle(
     bot_id: BotIdPath,
     body: LifecycleAdvanceRequest,

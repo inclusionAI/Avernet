@@ -18,7 +18,7 @@ import json
 import threading
 
 import pytest
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi_injector import attach_injector
 from injector import Injector, InstanceProvider, Module
 
@@ -29,7 +29,9 @@ from agentclaw.community.adapters.http.openapi_v1.access_log import (
 from agentclaw.community.adapters.http.openapi_v1.authorization import (
     Check,
     EDIT_LOCK,
+    OWNER_SCOPED_EDIT_LOCK,
     PublicAPIRoute,
+    ServiceChecked,
 )
 from agentclaw.community.api.collaborator_lock_service import (
     CollaboratorLockServiceProtocol,
@@ -81,6 +83,13 @@ class _Bots:
         if self.raises:
             raise RuntimeError("database is unavailable")
         if not self.exists or (bot_id, owner_id) != (BOT, self.owner):
+            return None
+        return {"id": 7, "bot_id": BOT, "owner_id": self.owner, "env": "test"}
+
+    def get_by_id(self, bot_id, **_):
+        if self.raises:
+            raise RuntimeError("database is unavailable")
+        if not self.exists or bot_id != BOT:
             return None
         return {"id": 7, "bot_id": BOT, "owner_id": self.owner, "env": "test"}
 
@@ -244,6 +253,39 @@ def _get(client, *, caller=CALLER, owner=OWNER):
 
 def _post(client, *, caller=CALLER, owner=OWNER):
     return client.post(URL, params={"user_id": caller, "owner_id": owner})
+
+
+def _scaffold_surface(rule, *, locks, dependencies=None):
+    """A mutation retaining its existing auth mode while adding the lock."""
+    bots = _Bots()
+    authz.AUTHORIZATION[("POST", PATH)] = rule
+    try:
+        router = APIRouter(route_class=PublicAPIRoute)
+
+        @router.post(PATH, dependencies=dependencies or [])
+        async def write(bot_id: str) -> dict:
+            return {"ok": "write"}
+
+        class _M(Module):
+            def configure(self, binder):
+                binder.bind(BotRepository, to=InstanceProvider(bots))
+                binder.bind(
+                    CollaboratorLockServiceProtocol,
+                    to=InstanceProvider(locks),
+                )
+                binder.bind(
+                    MemberManagementCapabilityProtocol,
+                    to=InstanceProvider(MemberManagementCapabilityService()),
+                )
+
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[require_principal] = lambda: {"user_id": CALLER}
+        mount_public_error_handlers(app)
+        attach_injector(app, Injector([_M()]))
+        return user_scoped_client(app, CALLER)
+    finally:
+        authz.AUTHORIZATION.pop(("POST", PATH), None)
 
 
 # ── the level check ──────────────────────────────────────────────────────────
@@ -672,6 +714,51 @@ def test_unadjudicable_log_bounds_the_addressed_bot(caplog):
 
 
 # ── optional edit lock ───────────────────────────────────────────────────────
+
+
+def test_owner_scoped_route_adds_lock_without_changing_owner_scope():
+    locks = _Locks(has_collaborators=True)
+    client = _scaffold_surface(OWNER_SCOPED_EDIT_LOCK, locks=locks)
+
+    response = client.post(URL, params={"user_id": CALLER})
+
+    assert response.status_code == 423
+    assert locks.calls == [
+        {"bot_id": BOT, "owner_id": CALLER, "user_id": CALLER}
+    ]
+
+
+def test_service_checked_route_resolves_the_bot_owner_for_the_lock():
+    locks = _Locks(has_collaborators=True, holder=CALLER)
+    client = _scaffold_surface(
+        ServiceChecked(PermissionLevel.ADMIN, "test.service", EDIT_LOCK),
+        locks=locks,
+    )
+
+    response = client.post(URL, params={"user_id": CALLER})
+
+    assert response.status_code == 200
+    assert locks.calls == [
+        {"bot_id": BOT, "owner_id": OWNER, "user_id": CALLER}
+    ]
+
+
+def test_scaffold_lock_runs_after_the_existing_authorization_dependency():
+    locks = _Locks(has_collaborators=True, holder=CALLER)
+
+    async def refuse_first() -> None:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    client = _scaffold_surface(
+        ServiceChecked(PermissionLevel.ADMIN, "test.service", EDIT_LOCK),
+        locks=locks,
+        dependencies=[Depends(refuse_first)],
+    )
+
+    response = client.post(URL, params={"user_id": CALLER})
+
+    assert response.status_code == 404
+    assert locks.calls == []
 
 
 def test_row_without_edit_lock_never_reads_the_lock_service():

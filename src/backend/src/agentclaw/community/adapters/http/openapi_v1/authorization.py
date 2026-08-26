@@ -143,15 +143,24 @@ class ServiceChecked:
 
     level: PermissionLevel
     where: str
+    edit_lock: _EditLock | None = None
+
+    def __post_init__(self) -> None:
+        if self.edit_lock not in (None, EDIT_LOCK):
+            raise ValueError(
+                "ServiceChecked's third argument must be EDIT_LOCK when the "
+                "operation requires the Bot edit lock."
+            )
 
 
 class _Scaffold:
     """A mode with nothing to parameterise, named for readable failures."""
 
-    __slots__ = ("_name", "__weakref__")
+    __slots__ = ("_name", "edit_lock", "__weakref__")
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, edit_lock: _EditLock | None = None) -> None:
         self._name = name
+        self.edit_lock = edit_lock
 
     def __repr__(self) -> str:  # pragma: no cover - diagnostics only
         return self._name
@@ -162,6 +171,7 @@ class _Scaffold:
 #: ``Check(level)`` once #906 / #907 decide the bar — which is a policy change,
 #: not a mechanical migration: collaborators start getting through.
 OWNER_SCOPED = _Scaffold("OWNER_SCOPED")
+OWNER_SCOPED_EDIT_LOCK = _Scaffold("OWNER_SCOPED", EDIT_LOCK)
 
 #: Scaffolding: a retiring address under ``deprecated/``. ``_relocate`` and
 #: ``_requery`` re-register the *replacement's own endpoint function* at the old
@@ -190,12 +200,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/metadata/queries"):
         NoCheck("tenant-wide display metadata for caller-supplied known bot ids"),
     # ── Bot-scoped operations ─────────────────────────────────────────────
-    ("DELETE", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
+    ("DELETE", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED_EDIT_LOCK,
     ("GET", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
-    ("PUT", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
+    ("PUT", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED_EDIT_LOCK,
     ("POST", "/openapi/v1/bots/{bot_id}/activate"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/modes"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/auth-status"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/authorized-apps"):
@@ -218,9 +228,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/connection"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.engine_runtime.connection"),
     ("GET", "/openapi/v1/bots/{bot_id}/containers"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"): Check(PermissionLevel.OWNER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"): Check(PermissionLevel.OWNER),
     ("GET", "/openapi/v1/bots/{bot_id}/data-init"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/data-init"): OWNER_SCOPED,
+    ("POST", "/openapi/v1/bots/{bot_id}/data-init"): OWNER_SCOPED_EDIT_LOCK,
     ("GET", "/openapi/v1/bots/{bot_id}/diagnostics/health"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
@@ -235,13 +245,13 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/engine/available"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/capabilities"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED,
-    ("PUT", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("PUT", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED_EDIT_LOCK,
+    ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/status"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"):
-        ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.harness.router"),
+        ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.harness.router", EDIT_LOCK),
     ("POST", "/openapi/v1/bots/{bot_id}/harness/diagnose"):
-        ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.harness.router"),
+        ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.harness.router", EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/harness/dim-history"):
         ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.harness.router"),
     ("GET", "/openapi/v1/bots/{bot_id}/harness/dim-report"):
@@ -252,7 +262,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.harness.router"),
     ("GET", "/openapi/v1/bots/{bot_id}/identity"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): OWNER_SCOPED,
-    ("PUT", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): OWNER_SCOPED,
+    ("PUT", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): OWNER_SCOPED_EDIT_LOCK,
     ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(PermissionLevel.OWNER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
@@ -270,32 +280,32 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/local/open-folder"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/local/restart"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/mcps"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
-    ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/models"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/nodes"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/passport"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/collaboration/bots/{bot_uuid}/public"): OWNER_SCOPED,
+    ("POST", "/openapi/v1/collaboration/bots/{bot_uuid}/public"): OWNER_SCOPED_EDIT_LOCK,
     ("GET", "/openapi/v1/bots/{bot_id}/render-screens"):
         NoCheck("share and group viewers must render panels without an Editor relation"),
-    ("POST", "/openapi/v1/bots/{bot_id}/render-screens"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
-    ("PATCH", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/resources"): OWNER_SCOPED,
+    ("POST", "/openapi/v1/bots/{bot_id}/render-screens"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(PermissionLevel.MEMBER),
+    ("PATCH", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/resources"): OWNER_SCOPED_EDIT_LOCK,
     ("GET", "/openapi/v1/bots/{bot_id}/resources"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/resources/download"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/resources/mkdir"): OWNER_SCOPED,
+    ("POST", "/openapi/v1/bots/{bot_id}/resources/mkdir"): OWNER_SCOPED_EDIT_LOCK,
     ("GET", "/openapi/v1/bots/{bot_id}/resources/preview"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/resources/stat"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/resources/upload"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/restart"): OWNER_SCOPED,
+    ("POST", "/openapi/v1/bots/{bot_id}/resources/upload"): OWNER_SCOPED_EDIT_LOCK,
+    ("POST", "/openapi/v1/bots/{bot_id}/restart"): OWNER_SCOPED_EDIT_LOCK,
     ("GET", "/openapi/v1/bots/{bot_id}/routines"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/routines"): OWNER_SCOPED,
-    ("DELETE", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"): OWNER_SCOPED,
+    ("POST", "/openapi/v1/bots/{bot_id}/routines"): OWNER_SCOPED_EDIT_LOCK,
+    ("DELETE", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"): OWNER_SCOPED_EDIT_LOCK,
     ("GET", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"): OWNER_SCOPED,
-    ("PATCH", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"): OWNER_SCOPED,
+    ("PATCH", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"): OWNER_SCOPED_EDIT_LOCK,
+    ("POST", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"): OWNER_SCOPED_EDIT_LOCK,
     ("GET", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/sessions"):
         ServiceChecked(PermissionLevel.MEMBER,
@@ -340,7 +350,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/resources"): Check(PermissionLevel.MEMBER),
     ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/activate"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/deactivate"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permission-requests"): Check(PermissionLevel.MEMBER),
@@ -354,14 +364,14 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/skills"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.skill_query_service"),
     ("POST", "/openapi/v1/bots/{bot_id}/skills"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.local_skill_upload_service"),
+        Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("POST", "/openapi/v1/bots/{bot_id}/skills/upload-folder"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.local_skill_upload_service"),
+        Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("PUT", "/openapi/v1/bots/{bot_id}/space"): OWNER_SCOPED,
@@ -496,7 +506,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
 
     # ── Retiring addresses in ``deprecated/`` ─────────────────────────────
     ("GET", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("PUT", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/approvals/{bot_id}/modes"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/connection/{bot_id}"): INHERITED,
     ("GET", "/openapi/v1/bots/engine/{bot_id}/available"): Check(PermissionLevel.MEMBER),
@@ -583,6 +593,7 @@ __all__ = [
     "INHERITED",
     "NoCheck",
     "OWNER_SCOPED",
+    "OWNER_SCOPED_EDIT_LOCK",
     "SCAFFOLDING_MODES",
     "UNMOUNTED_OPERATIONS",
     "ServiceChecked",
@@ -626,25 +637,37 @@ class PublicAPIRoute(APIRoute):
                 *(kwargs.get("dependencies") or []),
                 Depends(require_check(rule)),
             ]
-            if rule.edit_lock is EDIT_LOCK:
-                from agentclaw.community.adapters.http.openapi_v1.contracts import (
-                    ErrorEnvelope,
-                    error_example,
-                )
+        elif getattr(rule, "edit_lock", None) is EDIT_LOCK:
+            # Preserve the route's existing owner/service authorization and
+            # append only the legacy edit-lock requirement.
+            from agentclaw.community.adapters.http.openapi_v1.bot_access import (
+                require_scaffold_edit_lock,
+            )
 
-                responses = dict(kwargs.get("responses") or {})
-                responses.setdefault(
-                    423,
-                    {
-                        "model": ErrorEnvelope,
-                        "description": (
-                            "A Bot with collaborators requires the caller to "
-                            "hold its edit lock."
-                        ),
-                        **error_example(423, "Edit lock required"),
-                    },
-                )
-                kwargs["responses"] = responses
+            kwargs["dependencies"] = [
+                *(kwargs.get("dependencies") or []),
+                Depends(require_scaffold_edit_lock(rule)),
+            ]
+
+        if getattr(rule, "edit_lock", None) is EDIT_LOCK:
+            from agentclaw.community.adapters.http.openapi_v1.contracts import (
+                ErrorEnvelope,
+                error_example,
+            )
+
+            responses = dict(kwargs.get("responses") or {})
+            responses.setdefault(
+                423,
+                {
+                    "model": ErrorEnvelope,
+                    "description": (
+                        "A Bot with collaborators requires the caller to "
+                        "hold its edit lock."
+                    ),
+                    **error_example(423, "Edit lock required"),
+                },
+            )
+            kwargs["responses"] = responses
         super().__init__(path, endpoint, **kwargs)
 
 
