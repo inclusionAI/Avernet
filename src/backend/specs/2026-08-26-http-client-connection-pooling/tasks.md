@@ -23,11 +23,11 @@ config path including the HTTP/2 flag; Group 3 validates.
       each `source = { registry = "https://mirrors.aliyun.com/pypi/simple" }`
       with the sdist + wheel URLs and sha256 hashes recorded in `plan.md`
       Component 0.
-- [ ] 0.3 Verify the lock is internally consistent: `uv lock --check`. If the
+- [x] 0.3 Verify the lock is internally consistent: `uv lock --check`. If the
       mirror is unreachable for that command too, fall back to
       `uv pip install "httpx[http2]"` in the sandbox venv and state plainly in
       the PR that `uv lock --check` could not be run locally and CI is the gate.
-- [ ] 0.4 Confirm `import h2` works and `httpx.Client(http2=True)` constructs in
+- [x] 0.4 Confirm `import h2` works and `httpx.Client(http2=True)` constructs in
       the venv.
 
 ## Group 1 — Pool the client
