@@ -454,6 +454,8 @@ pub struct UpdateGroup {
 pub struct DeleteGroup {
     pub caller: AuthenticatedCaller,
     pub group_id: String,
+    /// Optional management perspective. Human callers may select an owned Bot;
+    /// Bot callers may select only themselves.
     pub acting_bot_id: Option<String>,
 }
 

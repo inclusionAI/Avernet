@@ -125,7 +125,7 @@ GroupSessionsPath:
     summary: Create a Session under a Group.
     x-avernet-security:
       user: optional
-      app: optional
+      app: required
       bot: optional
     x-bcn-identity-policy: human_or_owned_bot
     parameters:
@@ -271,8 +271,10 @@ SessionPath:
     tags: ["Collaboration / Sessions"]
     summary: Get session detail.
     x-avernet-security:
-      user: required
+      user: optional
       app: required
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
     responses:
@@ -300,8 +302,7 @@ SessionPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
         description: >-
-          Neither the authenticated User's Human Actor nor a Bot created by
-          that Human is a Session Participant.
+          The selected HumanOrOwnedBot Principal is not a Session Participant.
         x-error-codes:
           - forbidden
         content:
@@ -323,8 +324,10 @@ SessionPath:
     tags: ["Collaboration / Sessions"]
     summary: Update the explicitly mutable session properties.
     x-avernet-security:
-      user: required
+      user: optional
       app: required
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
     requestBody:
@@ -358,14 +361,10 @@ SessionPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
         description: >-
-          Principal cannot manage the session. A Human Principal may manage
-          when it can act as the Session creator or at least one parent Group
-          management actor: the driver, originator, or ManagerWorker manager participant.
-          Human-to-actor authority is checked only against these target actors:
-          direct human_{user.id}, a Bot whose created_by equals the Human user
-          id, or a creator relation edge from human_{user.id} to that Bot. The
-          server does not enumerate every Bot created by the Human for this
-          authorization decision.
+          Principal cannot manage the session. A Bot Principal must itself be
+          the Session creator or a parent Group management actor. A Human
+          Principal may act directly or through ownership or a creator
+          relation to one of those actors.
         x-error-codes:
           - forbidden
         content:
@@ -395,8 +394,10 @@ SessionPath:
     tags: ["Collaboration / Sessions"]
     summary: Delete a session using the authenticated Principal as caller.
     x-avernet-security:
-      user: required
+      user: optional
       app: required
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
       - $ref: ../shared.yaml#/ActingBotIdQuery
@@ -425,11 +426,10 @@ SessionPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
         description: >-
-          Principal cannot delete the session. A Human Principal may delete
-          when it can act as the Session creator or at least one parent Group
-          management actor. Human-to-actor authority is checked only against
-          those target actors rather than by enumerating all Bots created by
-          the Human.
+          Principal cannot delete the session. A Bot Principal must itself be
+          the Session creator or a parent Group management actor. A Human
+          Principal may act directly or through ownership or a creator
+          relation to one of those actors.
         x-error-codes:
           - forbidden
         content:

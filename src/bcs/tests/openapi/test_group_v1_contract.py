@@ -229,7 +229,7 @@ def test_group_create_inline_event_subscriptions_cannot_supply_scope() -> None:
         assert "event_subscriptions" not in response_variant["required"]
 
 
-def test_group_detail_uses_implicit_human_or_owned_bot_participant_access() -> None:
+def test_group_detail_uses_human_or_owned_bot_resource_access() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operation = contract["paths"][GROUP_PATH]["get"]
 
@@ -241,9 +241,9 @@ def test_group_detail_uses_implicit_human_or_owned_bot_participant_access() -> N
     forbidden = operation["responses"]["403"]
     assert forbidden["x-error-codes"] == ["forbidden"]
     description = forbidden["description"]
-    assert "Human Actor" in description
-    assert "created by that Human" in description
-    assert "Group Participant" in description
+    assert "HumanOrOwnedBot Principal" in description
+    assert "participant relation" in description
+    assert "Bot management actor" in description
 
 
 def test_contract_bundles_to_a_deterministic_document(
@@ -353,15 +353,34 @@ def test_delete_group_accepts_optional_acting_bot_id_query() -> None:
             "name": "acting_bot_id",
             "in": "query",
             "required": False,
-            "description": "Optional Bot identity perspective for the delete decision. Omit to evaluate the authenticated Human perspective.",
+            "description": "Optional Bot identity perspective for the delete decision. A Human caller may select an owned Bot; a Bot caller may select only itself. Omit to use the selected HumanOrOwnedBot Principal.",
             "schema": {"type": "string", "minLength": 1},
         }
     }
 
 
+def test_group_detail_and_mutations_use_human_or_owned_bot() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+
+    for method in ("get", "patch", "delete"):
+        operation = contract["paths"][GROUP_PATH][method]
+        assert operation["x-avernet-security"] == {
+            "user": "optional",
+            "app": "required",
+            "bot": "optional",
+        }
+        assert operation["x-bcn-identity-policy"] == "human_or_owned_bot"
+
+
 def test_create_group_request_defaults_private_visibility_and_chat_delivery() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operation = contract["paths"][GROUPS_PATH]["post"]
+    assert operation["x-avernet-security"] == {
+        "user": "optional",
+        "app": "required",
+        "bot": "optional",
+    }
+    assert operation["x-bcn-identity-policy"] == "human_or_owned_bot"
     request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
     create_group_schema = next(
         schema

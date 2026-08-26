@@ -5,7 +5,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use bcs_auth_api::{AuthPluginChain, AuthPrincipal};
+use bcs_auth_api::{AuthConfig, AuthPluginChain, AuthPrincipal};
 use bcs_auth_local::StaticAuthPlugin;
 use bcs_http::{
     router::build_router,
@@ -124,6 +124,22 @@ fn test_router(service: Arc<RecordingGroupService>) -> axum::Router {
     build_router(state)
 }
 
+fn bot_test_router(service: Arc<RecordingGroupService>) -> axum::Router {
+    let principal = AuthPrincipal {
+        bot_uuid: Some("caller-bot".to_string()),
+        ..Default::default()
+    };
+    let auth_chain = Arc::new(AuthPluginChain::new(vec![Box::new(
+        StaticAuthPlugin::with_principal(principal),
+    )]));
+    let state = HttpAppState::new(Services::builder().build_for_test())
+        .with_group_application(service)
+        .with_auth_chain(auth_chain.clone(), AuthConfig::default())
+        .with_user_identity(Arc::new(ChainUserIdentityPort::new(auth_chain)))
+        .with_strict_container_validation(true);
+    build_router(state)
+}
+
 fn service_returning(error: ApplicationError) -> Arc<RecordingGroupService> {
     Arc::new(RecordingGroupService {
         update: Mutex::new(None),
@@ -201,6 +217,58 @@ async fn legacy_patch_group_delegates_to_v1_group_application() {
             .bot_final_delivery,
         BotFinalDelivery::InjectObservers
     );
+}
+
+#[tokio::test]
+async fn legacy_bot_patch_group_preserves_container_validation() {
+    let service = Arc::new(RecordingGroupService::default());
+    let response = bot_test_router(service.clone())
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/groups/group-1")
+                .header("content-type", "application/json")
+                .header("X-BCS-Bot-Token", "valid-bot-token")
+                .header("x-agentclaw-bolt-id", "caller-bot")
+                .body(Body::from(json!({"name": "Renamed"}).to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let command = service
+        .update
+        .lock()
+        .expect("update lock")
+        .take()
+        .expect("update command");
+    assert_eq!(
+        command.caller.bot.as_ref().map(|bot| bot.bot_uuid.as_str()),
+        Some("caller-bot")
+    );
+    assert!(command.caller.user.is_none());
+}
+
+#[tokio::test]
+async fn legacy_bot_patch_group_rejects_mismatched_container() {
+    let service = Arc::new(RecordingGroupService::default());
+    let response = bot_test_router(service.clone())
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/groups/group-1")
+                .header("content-type", "application/json")
+                .header("X-BCS-Bot-Token", "valid-bot-token")
+                .header("x-agentclaw-bolt-id", "different-container")
+                .body(Body::from(json!({"name": "Renamed"}).to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(service.update.lock().expect("update lock").is_none());
 }
 
 #[tokio::test]

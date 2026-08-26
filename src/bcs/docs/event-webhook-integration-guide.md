@@ -121,6 +121,34 @@ Body 示例：
 - 未可靠接收时返回非 `2xx`，BCS 会按投递策略处理失败；
 - 如果依赖事件顺序，按 `stream.key` 分区，并按 `stream.sequence` 处理。
 
+### 2.1 正文是否包含 Bot 实际输出
+
+Event Subscription 的 `payload.mode` 默认为 `metadata_only`。该模式下，`output`、`result`、
+`summary`、`content` 等正文投影字段仍然存在，但 `included=false`，且不包含 `text` 或 `json`。
+需要接收 Bot 实际输出正文时，创建订阅时必须显式配置：
+
+```json
+{
+  "payload": {
+    "mode": "full"
+  }
+}
+```
+
+不同完成事件没有统一的 `output` 字段，接入方应按 `event_type` 读取：
+
+| 协作场景 | 完成事件 | `full` 模式的正文路径 | 正文语义 |
+| --- | --- | --- | --- |
+| 自定义协作群的单个节点 | `state_machine.node.completed` | `data.output.json` | 该节点本次成功 attempt 的 Bot 输出产物 |
+| 自定义协作群的整个 Run | `state_machine.run.completed` | `data.output.json` | 标记为 `final_output` 的节点产物；没有该标记时回退为最后一个有产物的节点 |
+| 任务协作群的单个 Worker 子任务 | `task.completed` | `data.result.text` | Worker 返回并被 BCS 接收的 final result |
+| 任务协作群的整个 Session | `session.completed` | `data.summary.json` | Manager 调用 `bcs_task_complete` 时提交的 `summary`，不保证等于 Manager 的原始 assistant 消息 |
+
+当前状态机生产方把文本产物编码为 `content_type=application/json` 的 JSON string，因此实际文本位于
+`json`；Task 生产方使用 `content_type=text/plain`，因此 Worker 结果位于 `text`。为了兼容后续生产方，
+接入方应先检查 `included` 和 `content_type`，再读取 `text` 或 `json`，不要假设所有正文都使用同一字段。
+即使使用 `full`，正文仍会经过敏感信息过滤和事件大小限制。
+
 ## 3. 自定义协作群执行一次状态机的事件链
 
 当创建 `collaboration.strategy=state_machine` 的自定义协作群、配置内联
@@ -196,6 +224,27 @@ state_machine.node.started          (attempt=n+1)
 示例配置使用 `payload.mode=metadata_only`，因此 `input`、`output` 等内容字段只包含
 `included`、`content_type`、`size_bytes`、`truncated` 等元数据，不包含正文。
 
+如果订阅配置为 `payload.mode=full`，`state_machine.run.completed.data` 示例为：
+
+```json
+{
+  "completed_at": "2026-08-18T10:09:00.000Z",
+  "output": {
+    "included": true,
+    "content_type": "application/json",
+    "size_bytes": 21,
+    "delivered_bytes": 21,
+    "json": "Release is approved",
+    "sha256": "b3a5821ebb0666e48177847ae100a95663b9ce786f5d4ba61c73b1ae5016e40f",
+    "truncated": false
+  },
+  "duration_ms": 540000
+}
+```
+
+这里的 `data.output.json` 是整个 Run 的最终对外产物，不是所有节点输出的拼接。需要每个节点的实际
+输出时，同时订阅并读取各个 `state_machine.node.completed.data.output`。
+
 ## 4. 任务协作群的事件
 
 任务协作群指 `collaboration.strategy=manager_worker` 的 Group。一次协作可以包含多个由 Manager
@@ -253,6 +302,41 @@ session.completed             (Manager 完成整个协作 Session 时一次)
     "truncated": false
   },
   "completed_at": "2026-08-18T10:02:00.000Z"
+}
+```
+
+订阅配置为 `payload.mode=full` 时，同一个 `task.completed.data.result` 会包含 Worker 的实际结果文本：
+
+```json
+{
+  "result": {
+    "included": true,
+    "content_type": "text/plain",
+    "size_bytes": 19,
+    "delivered_bytes": 19,
+    "text": "Worker final result",
+    "sha256": "4291e81b36766968b73a9c9268fbb4b73644b31f3d7e796ce3de5665319b2e78",
+    "truncated": false
+  }
+}
+```
+
+Manager 完成整个任务协作 Session 时产生的是 `session.completed`。它没有 `data.output`，最终汇总位于
+`data.summary`；`full` 模式示例为：
+
+```json
+{
+  "completed_by": "bcs-system",
+  "reason": "completed",
+  "summary": {
+    "included": true,
+    "content_type": "application/json",
+    "size_bytes": 59,
+    "delivered_bytes": 59,
+    "json": "All workers completed; publish the reviewed release plan.",
+    "sha256": "90c81b570bbdc08637ff28688d5af1bafb888fb5c3455dc89048e401bec97940",
+    "truncated": false
+  }
 }
 ```
 

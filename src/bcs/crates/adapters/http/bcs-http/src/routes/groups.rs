@@ -40,7 +40,9 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::error::HttpAdapterError;
-use crate::routes::group_messages::{application_caller, resolve_group_chat_caller};
+use crate::routes::group_messages::{
+    GroupChatCaller, application_caller, resolve_group_chat_caller,
+};
 use crate::state::HttpAppState;
 
 use super::{
@@ -445,9 +447,15 @@ async fn create_group_with_inline_subscriptions(
     req: CreateGroupRequest,
 ) -> Response {
     let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
-        Ok(caller) => application_caller(&caller),
+        Ok(caller) => caller,
         Err(error) => return error.into_response(),
     };
+    if let GroupChatCaller::Bot { bot_uuid } = &caller
+        && let Err(error) = validate_container_header(&state, &headers, bot_uuid)
+    {
+        return error.into_response();
+    }
+    let caller = application_caller(&caller);
     if let Err(error) = validate_legacy_opening_message(&req) {
         return error.into_response();
     }
@@ -968,9 +976,15 @@ pub async fn patch_group(
         }
     };
     let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
-        Ok(caller) => application_caller(&caller),
+        Ok(caller) => caller,
         Err(error) => return error.into_response(),
     };
+    if let GroupChatCaller::Bot { bot_uuid } = &caller
+        && let Err(error) = validate_container_header(&state, &headers, bot_uuid)
+    {
+        return error.into_response();
+    }
+    let caller = application_caller(&caller);
     let Some(application) = state.group_application.as_ref() else {
         return legacy_group_error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
