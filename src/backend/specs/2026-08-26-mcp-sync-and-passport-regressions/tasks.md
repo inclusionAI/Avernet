@@ -86,7 +86,7 @@ green at the end of this group *without* any test expectation changing.
       `_apply_non_skill_projection`; declare it on
       `core/skill_center/runtime_projection_contract.py` and
       `api/bot_runtime_projector.py`. Nothing reads it yet.
-- [ ] 2.3 `MutationProjectionFlow.apply` / `_mutate` accept and forward the
+- [x] 2.3 `MutationProjectionFlow.apply` / `_mutate` accept and forward the
       scope on the forward projection, and the inverted scope
       (`claimed_mcp` ↔ `released_mcp`) on the compensating one, mirroring how
       `retired_logical_skill_mappings` already swaps its arguments at

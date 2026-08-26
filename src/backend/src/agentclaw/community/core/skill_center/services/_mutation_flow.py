@@ -58,6 +58,7 @@ class MutationProjectionFlow:
         engine_type: str | None,
         mutation: Callable[[], DesiredStateMutation],
         runtime_required: bool = True,
+        scope: ProjectionScope = ProjectionScope.everything(),
     ) -> dict:
         """Run the command; return ``{**item, "changed": ..., **details}``.
 
@@ -65,6 +66,10 @@ class MutationProjectionFlow:
         an inactive-set membership change has no runtime projection to apply,
         preserving the legacy inactive draft contract. ``engine_type`` scopes
         a compensation's restore to the Sets the mutation could have touched.
+
+        ``scope`` is what this mutation changed, declared by the command that
+        knows it. It defaults to a full reconcile so an undeclared caller is
+        unchanged.
         """
         if not runtime_required:
             result = mutation()
@@ -83,6 +88,7 @@ class MutationProjectionFlow:
             engine_type=engine_type,
             mutation=result,
             previous_mappings=previous_mappings,
+            scope=scope,
         )
         return {**result.item, "changed": result.changed, **result.details}
 
@@ -94,6 +100,7 @@ class MutationProjectionFlow:
         engine_type: str | None,
         mutation: DesiredStateMutation,
         previous_mappings: Sequence[PoolSkillMapping],
+        scope: ProjectionScope = ProjectionScope.everything(),
     ) -> None:
         current_mappings: Sequence[PoolSkillMapping] = ()
         try:
@@ -108,6 +115,7 @@ class MutationProjectionFlow:
                     list(previous_mappings),
                     list(current_mappings),
                 ),
+                scope=scope,
             )
         except Exception as exc:
             self._repository.restore_desired_state(
@@ -124,6 +132,9 @@ class MutationProjectionFlow:
                         list(current_mappings),
                         list(previous_mappings),
                     ),
+                    # Same swap as the mappings above: what the forward
+                    # projection claimed is what this one releases.
+                    scope=scope.inverted(),
                 )
             except Exception as restore_error:
                 raise SkillSetRuntimeReconcileError() from restore_error

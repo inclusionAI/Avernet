@@ -19,6 +19,9 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
     InstallationFlushPlan,
 )
 from agentclaw.community.core.caller_identity.models import McpCallType
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ProjectionScope,
+)
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     SkillSetControlPlaneConflictError,
@@ -267,7 +270,12 @@ class _Runtime:
         return self._snapshots[len(self.snapshot_calls) - 1]
 
     async def project(
-        self, *, bot_id: str, owner_id: str, retired_mappings=()
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        retired_mappings=(),
+        scope: ProjectionScope = ProjectionScope.everything(),
     ) -> None:
         assert bot_id == "bot-1"
         self.owners.append(owner_id)
@@ -276,13 +284,20 @@ class _Runtime:
                 "bot_id": bot_id,
                 "owner_id": owner_id,
                 "retired_mappings": tuple(retired_mappings),
+                "scope": scope,
             }
         )
         if self._fail_first and len(self.owners) == 1:
             raise RuntimeError("runtime failed")
 
-    async def project_for_cleanup(self, *, bot_id: str, owner_id: str) -> None:
-        await self.project(bot_id=bot_id, owner_id=owner_id)
+    async def project_for_cleanup(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        scope: ProjectionScope = ProjectionScope.everything(),
+    ) -> None:
+        await self.project(bot_id=bot_id, owner_id=owner_id, scope=scope)
 
 
 class _Authorization:
@@ -741,6 +756,7 @@ async def test_collaborator_command_restores_desired_state_and_uses_true_owner()
             "bot_id": "bot-1",
             "owner_id": "true-owner",
             "retired_mappings": (),
+            "scope": ProjectionScope.everything(),
         },
         {
             "bot_id": "bot-1",
@@ -751,6 +767,7 @@ async def test_collaborator_command_restores_desired_state_and_uses_true_owner()
                     corpus="repo", relative_path="business/eva", link_name="eva"
                 ),
             ),
+            "scope": ProjectionScope.everything(),
         },
     ]
     assert len(repository.restore_calls) == 1
@@ -785,6 +802,7 @@ async def test_deactivate_retires_mappings_removed_from_the_runtime_projection()
             "bot_id": "bot-1",
             "owner_id": "true-owner",
             "retired_mappings": _Runtime._skill_mappings(),
+            "scope": ProjectionScope.everything(),
         }
     ]
 
@@ -1580,6 +1598,7 @@ async def test_existing_claude_code_skill_set_deactivate_uses_full_projection():
             "bot_id": "bot-1",
             "owner_id": "true-owner",
             "retired_mappings": _Runtime._skill_mappings(),
+            "scope": ProjectionScope.everything(),
         }
     ]
 
