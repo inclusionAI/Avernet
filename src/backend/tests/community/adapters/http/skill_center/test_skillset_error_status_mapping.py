@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 
 from agentclaw.community.core.errors import DomainError
 from agentclaw.community.core.skill_center.errors import (
+    McpPermissionDeniedError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
@@ -29,6 +30,7 @@ from agentclaw.community.core.skill_center.errors import (
 )
 
 _ROUTE_MAP: dict[str, type[DomainError]] = {
+    "mcp-denied": McpPermissionDeniedError,
     "notfound": SkillSetControlPlaneNotFoundError,
     "denied": SkillSetAccessDeniedError,
     "conflict": SkillSetControlPlaneConflictError,
@@ -92,6 +94,7 @@ def client() -> TestClient:
 @pytest.mark.parametrize(
     "which,expected_status,expected_detail",
     [
+        ("mcp-denied", 403, "MCP permission denied"),
         ("notfound", 404, "Skill set not found"),
         ("denied", 403, "Forbidden"),
         ("conflict", 400, "Skill set operation conflict"),
