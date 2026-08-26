@@ -1,5 +1,11 @@
 # BCN Ask-User Custom Values Design
 
+> **Frontend skip clarification (2026-08-26):** The Frontend-to-BCS contract
+> uses `values: []` as the only canonical skipped-answer representation. Empty
+> and whitespace-only string elements remain invalid at that boundary. BaaS
+> stays permissive for Provider-supplied `values`/`customValues`; see
+> `src/bcs/docs/plans/2026-08-26-ask-user-empty-array-skip-design.md`.
+
 ## Problem
 
 BCN currently places both declared option values and free-form "other" input in
@@ -47,6 +53,11 @@ value that does not exactly match a declared option; BCS returns a clear
 bot, interaction, and resolver identifiers. BCS remains the authority for
 `header` and `question` and overwrites client-supplied copies from the stored
 requested interaction.
+
+An empty Frontend `values` array is an explicit skip. BCS preserves it as
+Provider-facing `values: []` and does not generate `customValues` for that
+answer. `allowOther` constrains only submitted off-list strings, so it does not
+reject an empty array.
 
 BaaS requires non-empty `header` and `question` for every submitted answer. It
 does not infer custom input from an unknown `values` entry and does not derive

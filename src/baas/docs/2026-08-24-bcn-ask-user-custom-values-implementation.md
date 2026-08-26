@@ -1,5 +1,10 @@
 # BCN Ask-User Custom Values Implementation Plan
 
+> **Clarified (2026-08-26):** Step 4's non-empty rule applies to elements of a
+> non-empty Frontend `values` array. `values: []` is the canonical skipped
+> answer and is preserved without generating `customValues`; see
+> `src/bcs/docs/plans/2026-08-26-ask-user-empty-array-skip-design.md`.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Classify values-only Frontend ask-user answers in BCS and preserve explicit custom values through BaaS while producing Engine-compatible resolution frames.
@@ -22,9 +27,10 @@
 2. Add failing tests showing that missing `allowOther` means true and custom
    input is rejected only when `allowOther=false`.
 3. Run the focused `bcs-interaction` tests and confirm the expected failures.
-4. Update ask-user validation so Frontend supplies only non-empty `values`,
-   single-select cardinality is enforced, and off-list values are rejected only
-   by an explicit `allowOther=false`.
+4. Update ask-user validation so `values: []` represents a skip, every element
+   in a non-empty Frontend `values` array is non-empty, single-select/free-text
+   cardinality is zero or one, and off-list values are rejected only by an
+   explicit `allowOther=false`.
 5. Partition values by exact requested option value, generate `customValues`,
    and augment the answer with stored `question/header`.
 6. Log rejected resolutions with run/session/group/bot/interaction/resolver
