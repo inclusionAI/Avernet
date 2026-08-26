@@ -66,7 +66,9 @@ class RenderScreenService:
         return collaborator is not None
 
     def _resolve_scope(self, bot_id: str) -> str:
-        return resolve_render_screen_scope(self._require_bot(bot_id))
+        # Bots externally onboarded through BCN may not have an ac_bot record.
+        # Keep their historical behavior by falling back to owner scope.
+        return resolve_render_screen_scope(self._bot_repo.get_by_id(bot_id))
 
     def authorize_render_screen_bot(self, *, bot_id: str, user_id: str) -> str:
         """Resolve the scope and enforce collaborative access for coding bots."""
@@ -102,14 +104,7 @@ class RenderScreenService:
         current_user_id: str | None = None,
     ) -> list[RenderScreenRecord]:
         """查询某 Bot 下所有 CDN 配置（未删除）。"""
-        # BCN can contain externally onboarded bots that do not have a matching
-        # ac_bot management record. They can still participate in group chat, but
-        # they have no Avernet-managed CDN configuration. Treat that as an empty
-        # list rather than an authorization failure.
         bot = self._bot_repo.get_by_id(bot_id)
-        if not bot:
-            return []
-
         scope = resolve_render_screen_scope(bot)
         if scope == "bot":
             # 读放开：副屏 CDN 配置（库名 → CDN URL 映射）是非敏感渲染资源。
@@ -147,9 +142,9 @@ class RenderScreenService:
         if any(r.cdn_url == cdn_url for r in existing):
             raise ValueError(f"Duplicate cdn_url '{cdn_url}' for bot_id={bot_id}")
 
-        bot = self._require_bot(bot_id)
         record_owner_id = owner_id or creator_id
         if scope == "bot":
+            bot = self._require_bot(bot_id)
             record_owner_id = str(bot.get("owner_id") or record_owner_id)
 
         record_id = self._repo.insert(
