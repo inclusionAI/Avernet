@@ -16,6 +16,8 @@ from collections.abc import Iterable
 
 from injector import Injector, Module
 
+from agentclaw.community.di.config import HttpClientPoolConfig
+
 from agentclaw.community.di.modules.access_module import AccessModule
 from agentclaw.community.di.modules.aicoding_module import AICodingModule
 from agentclaw.community.di.modules.bot_app_grant_module import BotAppGrantModule
@@ -151,6 +153,21 @@ def build_injector(
         modules.extend(extra_modules)
     global _app_injector
     _app_injector = Injector(modules)
+
+    # Validate the outbound HTTP transport config on EVERY profile, not just
+    # the pre/prod eager check below.
+    #
+    # `http_client` rejects unknown keys by raising, and that raise has to land
+    # somewhere that stops a boot. `eager_check_critical_bindings` only runs on
+    # pre/prod (adapters/http/app.py), and on a dev / singlebox / community boot
+    # the raise would instead surface inside `discover_lifecycle_participants`,
+    # which swallows provider exceptions — so the app would start with no real
+    # HttpClient bindings at all and defer the failure to the first outbound
+    # request. Resolving here makes an invalid block fail the same way in every
+    # column. It is a pure dict read with no I/O, so it costs nothing when the
+    # config is valid, which is the only case that reaches production.
+    _app_injector.get(HttpClientPoolConfig)
+
     return _app_injector
 
 
@@ -175,7 +192,6 @@ def eager_check_critical_bindings(injector: Injector) -> None:
     from agentclaw.community.api.bot_chat_service import OpenBotChatServiceProtocol
     from agentclaw.community.plugin_api.auth import AuthPlugin
     from agentclaw.community.plugin_api.database import DatabasePlugin
-    from agentclaw.community.di.config import HttpClientPoolConfig
 
     # Neutral critical bindings + any corp-only ones the corp composition root
     # registered (BuserviceSsoConfig / ArcaSandboxConfig). container.py names no
@@ -184,10 +200,11 @@ def eager_check_critical_bindings(injector: Injector) -> None:
         DatabasePlugin,
         AuthPlugin,
         OpenBotChatServiceProtocol,
-        # Every outbound HttpClient derives from this, and its provider rejects
-        # an unknown `http_client.overrides` qualifier by raising. Resolving it
-        # here is what turns that into "startup fails early on invalid config"
-        # (ci.enforce.md §E) instead of a failure at the first outbound call.
+        # Kept for parity with the rest of this allowlist; `build_injector`
+        # already resolves this on every profile, which is what actually makes
+        # an invalid `http_client` block fail at startup (ci.enforce.md §E)
+        # rather than at the first outbound call. This entry only ensures the
+        # pre/prod aggregate names it alongside the other critical bindings.
         HttpClientPoolConfig,
         *get_eager_check_keys(),
     ]

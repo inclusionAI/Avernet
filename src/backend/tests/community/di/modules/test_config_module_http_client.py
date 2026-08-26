@@ -273,3 +273,51 @@ def test_non_binary_numeric_http2_does_not_override_a_configured_true(resolve):
     override must not silently turn http2 off where it was deliberately on."""
     conf = resolve({"http2": True, "overrides": {"baas": {"http2": 7}}})
     assert conf.for_qualifier("baas").http2 is True
+
+
+# ── unknown policy keys ──────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "block,offender",
+    [
+        ({"max_conections": 250}, "max_conections"),
+        ({"keepalive": 5}, "keepalive"),
+        ({"http_2": True}, "http_2"),
+        ({"overrides": {"baas": {"htttp2": True}}}, "htttp2"),
+        ({"overrides": {"baas": {"max_conections": 5}}}, "max_conections"),
+    ],
+)
+def test_unknown_policy_key_is_rejected(resolve, block, offender):
+    """`_pool_policy` probes only the names it knows, so a misspelled field
+    would otherwise be discarded in silence and the process would boot on
+    inherited defaults while looking configured — the same failure as an
+    unknown qualifier, one level down."""
+    with pytest.raises(ValueError) as exc:
+        resolve(block)
+    assert offender in str(exc.value)
+
+
+def test_overrides_is_only_valid_at_the_top_level(resolve):
+    """Nesting `overrides` inside an override body is a misunderstanding of the
+    shape, not a policy field — it must not be silently swallowed."""
+    with pytest.raises(ValueError, match="overrides"):
+        resolve({"overrides": {"baas": {"overrides": {"bcn": {}}}}})
+
+
+def test_valid_keys_are_all_accepted_together(resolve):
+    """Guard the allowlist against drifting from HttpClientPoolPolicy's fields."""
+    conf = resolve({
+        "max_connections": 250,
+        "max_keepalive_connections": 40,
+        "keepalive_expiry": 12.5,
+        "http2": True,
+        "overrides": {"baas": {
+            "max_connections": 10,
+            "max_keepalive_connections": 2,
+            "keepalive_expiry": 1.0,
+            "http2": False,
+        }},
+    })
+    assert conf.defaults.max_connections == 250
+    assert conf.for_qualifier("baas").http2 is False
