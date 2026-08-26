@@ -465,15 +465,15 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # ── Task public surface (execute/dashboard/list; mounted via the gateway
     # ── `collaboration-tasks` domain → backend). Tasks address no bot, so the
     # ── bot-level `Check` does not apply; the caller identity is resolved by
-    # ── the gateway spanner + `_PUBLIC_AUTH`, and `list` is scoped by
-    # ── `UserIdDep` (owner_user_id). `NoCheck` is the settled mode here, not a
+    # ── the gateway spanner + `_PUBLIC_AUTH`; `list` uses caller-selected
+    # ── user_id only as a task-record filter. `NoCheck` is the settled mode here, not a
     # ── placeholder — see `admission.py` for the machine-caller decision.
     ("POST", "/openapi/v1/collaboration/tasks/execute"):
         NoCheck("a task, not a bot; the submitter is the task owner"),
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"):
         NoCheck("a task, not a bot; read-only task graph by task_id"),
     ("GET", "/openapi/v1/collaboration/tasks/list"):
-        NoCheck("a task, not a bot; scoped to the named user's own tasks"),
+        NoCheck("a task, not a bot; filters records by the named user"),
 
     # ── Retiring addresses in ``deprecated/`` ─────────────────────────────
     ("GET", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER),
