@@ -28,7 +28,7 @@ Paths are relative to `src/backend/src/agentclaw/community/` unless noted.
 - [x] 1.5 Tests: a `caller`-configured MCP round-trips as `caller`; an MCP
       with no call-config row resolves to `owner`; a Bot whose call-config
       lookup returns empty still sends one item per projected code.
-- [ ] 1.6 Verify `tests/community/core/mcp/services/test_sync_service.py`
+- [x] 1.6 Verify `tests/community/core/mcp/services/test_sync_service.py`
       resource-scope assertions (`:158`, `:204`, `:319`, `:350`, `:393`,
       `:431`, `:554`) still pass untouched — they cover
       `MCPSyncService.refresh_mcp_scope`, which this group does not modify.
