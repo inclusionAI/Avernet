@@ -45,13 +45,37 @@ Paths are relative to `src/backend/src/agentclaw/community/` unless noted.
       `:431`, `:554`) still pass untouched — they cover
       `MCPSyncService.refresh_mcp_scope`, which this group does not modify.
 
+### Deferred out of Group 1 — two more callers with the same defect
+
+Code review found the identity-less `resource_scope` is not unique to the
+projector. Both are live today and neither is covered by any group below:
+
+- `adapters/http/skill_center/skillsets.py:2019`
+  (`remove_cli_from_default_skill_set`) — removing a CLI demotes every Caller
+  MCP on the Bot. This is a **skill-set mutation**, so spec criterion 1 is
+  not fully met until it is fixed.
+- `core/bot_management/engines/aicoding/strategy.py:657` — a restart with
+  `confirmed_template_update` does the same. Outside criterion 1's wording,
+  same defect.
+
+Patching them one at a time leaves the trap armed for the next caller. The
+structural fix is `unpack_resource_scope` (`plugin_api/passport.py:106`):
+stop it synthesising identity-less items and reject an MCP-bearing scope
+that omits `mcp_items`, which makes all three call sites correct at once and
+turns a future omission into a hard failure instead of a silent privilege
+change. That touches a shared seam and breaks two tests pinning the current
+shapes (`contracts/gateway/test_rule15_skillsets.py:206`,
+`core/bot_management/services/test_restart_authorization_refresh.py:160`),
+so it is a scope call for the author rather than something to fold in
+silently. **Raised in the final report; not actioned.**
+
 ## Group 2 — Thread `ProjectionScope`, defaulting to everything (no behaviour change)
 
 Every step is behaviour-preserving: the scope is declared and carried, but
 every caller still passes `ProjectionScope.everything()`. The suite must be
 green at the end of this group *without* any test expectation changing.
 
-- [ ] 2.1 Add `ProjectionScope` (frozen dataclass: `skills`, `mcp`,
+- [x] 2.1 Add `ProjectionScope` (frozen dataclass: `skills`, `mcp`,
       `claimed_mcp`, `released_mcp`, `reconcile`, plus `everything()`) in
       `core/skill_center/services/_mutation_flow.py`. `reconcile` is an
       explicit flag, not an equality check against `everything()` — a
