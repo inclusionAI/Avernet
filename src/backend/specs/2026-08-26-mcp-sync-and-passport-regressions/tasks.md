@@ -148,7 +148,55 @@ green at the end of this group *without* any test expectation changing.
 - [x] 3.9 Test — a `reconcile` scope pushes every projected code, so the
       device-activated reconcile path is unchanged.
 
-## Group 4 — Delivery shape decided per provider (problem 4)
+## Group 4 — Delivery shape decided per provider (problem 4) — **BLOCKED**
+
+**The plan's premise does not hold against the code.** Task 4.4 says
+`BotRuntimeProjector` should hand an intent to
+`DeviceSyncDispatcher.dispatch(ctx)` "instead of orchestrating the device
+calls itself". It does not orchestrate `DeviceSync` calls — it calls three
+different ports, and only one of them is `DeviceSync`:
+
+1. `SkillSetService.sync_runtime` / `sync_mcp_delivery` /
+   `sync_mcp_desired_state` (`bot_runtime_projector.py:410`, `:443`, `:519`,
+   `:522`) — **`SkillSetService` owns device resolution**
+   (`_resolver.resolve_for_bot` + `_device_sync_dispatcher.dispatch`), not the
+   projector. The projector holds no resolver and no dispatcher.
+2. `SkillsPoolRuntimeProtocol.probe` / `publish_mappings` /
+   `verify_mappings` (`:565`, `:574`, `:582`) — a **separate subsystem** with
+   its own contract. Pool-layout Bots publish skills through it, and it
+   cannot be represented as a `DeviceSync` call at all.
+3. `PassportPlugin.update_passport` — AgentPass, not the device, and
+   identical across providers.
+
+So `apply_runtime_projection` on `DeviceSync` can only ever cover the legacy
+symlink + MCP half. For a Bot on the pool layout, skills go through port 2
+and MCP through port 1 — two subsystems, so "one delivery for a both-halves
+mutation" is unreachable there regardless of provider.
+
+It *is* reachable for teclaw specifically, which is explicitly excluded from
+the pool path (`_apply_skill_projection`: *"Teclaw v4 consumes a complete
+Artifact projection through the existing DeviceSync dispatcher. It has no
+Skills Pool mapping endpoint"*). So the idea is sound for the provider it was
+aimed at — but the seam has to be `SkillSetService`, which owns resolution,
+rather than the projector reaching past it into `DeviceSync`.
+
+Options for the author, none of which should be chosen silently:
+
+- **(a)** Put the combined entry point on `SkillSetService` instead: it
+  already resolves the device once and dispatches. The projector calls one
+  method rather than three; each `DeviceSync` impl still decides its call
+  count. Achieves the teclaw win, leaves the pool path alone.
+- **(b)** Narrow Group 4 to the cheap half: gate the existing three calls on
+  `scope.skills` / `scope.mcp` in the projector. Wins the arca/baas saving
+  now, gives teclaw nothing, and is the `if`-in-shared-code the review
+  objected to.
+- **(c)** Drop Group 4. Problems 1–3 and 5 are the regressions; problem 4 is
+  a cost issue whose main beneficiary needs corp work anyway.
+
+**Not actioned — raised for the author.** Groups 5 and 6 do not depend on it
+and are complete.
+
+### Original tasks, unchanged for reference
 
 - [ ] 4.1 Define `RuntimeProjectionIntent` (symlinks, MCP claimed/released,
       full allow-list, the `ProjectionScope`) and add
@@ -181,10 +229,10 @@ green at the end of this group *without* any test expectation changing.
 
 ## Group 5 — Dead code (problem 5)
 
-- [ ] 5.1 Delete `SkillSetService.refresh_mcp_scope`
+- [x] 5.1 Delete `SkillSetService.refresh_mcp_scope`
       (`core/skill_center/services/skill_set_service.py:1914-1950`) and any
       now-unused imports.
-- [ ] 5.2 Confirm `MCPSyncService.refresh_mcp_scope` still has exactly one
+- [x] 5.2 Confirm `MCPSyncService.refresh_mcp_scope` still has exactly one
       production caller, `DeviceService._sync_mcps_when_device_active`
       (`core/devices/services/device_service.py:1518`), and that neither is
       modified.
