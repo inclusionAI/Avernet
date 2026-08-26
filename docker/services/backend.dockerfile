@@ -49,12 +49,27 @@ WORKDIR /app
 # skill-center repo sync (core/skill_center/services/git_sync.py), rsync for
 # skill/workspace publishing — and without the binaries those flows fail with
 # FileNotFoundError at request time instead of at boot.
-# `sudo` is deliberately absent. The sudo-prefixed rsync in bot_build_service
-# writes host-mounted publish roots, which is the host's grant to make; shipping
-# sudo in an image that otherwise runs unprivileged would only hide that.
+#
+# openssh-client rides along with git deliberately. Debian's git only
+# *Recommends* ssh-client, which --no-install-recommends drops, and
+# GitSyncService applies no scheme validation: the operator-supplied repo URL
+# goes from the secret store straight into `git clone`
+# (_resolve_repo_url_from_secret → _sync_clone_bare_repo). A skills repo
+# configured as git@host:org/repo.git or ssh://… is therefore a legitimate
+# setting that would otherwise die on a missing SSH transport.
+#
+# `sudo` is absent, and that is a real limitation rather than an oversight.
+# BotBuildService._migrate_bot_instance runs `sudo chmod` and `sudo rsync`
+# unconditionally, so the non-teclaw (arca/baas) service-bot publish path fails
+# here with BotBuildMigrationError however storage is mounted. Installing
+# passwordless sudo would hand UID 10001 unrestricted root and defeat running
+# unprivileged at all; making that path work without sudo is a backend change,
+# not an image change. Until that lands, this image serves the API and the
+# teclaw publish path (non-mount delivery via BaaS, which never shells out to
+# sudo), not the mount-based one.
 RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends curl git rsync \
+    && apt-get install -y --no-install-recommends curl git openssh-client rsync \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 admin \
     && useradd --uid 10001 --gid admin --create-home --shell /bin/bash admin
