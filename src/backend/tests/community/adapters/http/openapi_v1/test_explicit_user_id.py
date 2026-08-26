@@ -268,12 +268,6 @@ def _without_request_id(response) -> dict:
 #: between "this operation has no user dimension" and "somebody found the
 #: parameter inconvenient".
 _NO_USER_DIMENSION = {
-    # The user-identity read is how a client LEARNS the id it must thread
-    # everywhere else — requiring the parameter here would make the id a
-    # precondition of discovering it. The answer is read off the verified
-    # principal, so there is no caller-supplied user to compare against and no
-    # 403 to answer.
-    ("get", f"{PUBLIC_API_PREFIX}/org/user"),
     # Name uniqueness is checked across the tenant, not within one user's bots.
     ("get", f"{PUBLIC_API_PREFIX}/bots/check-name"),
     # The marketplace catalogue is identical for every caller in the tenant.
@@ -302,6 +296,18 @@ _NO_USER_DIMENSION = {
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/execute"),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/dashboard"),
 }
+
+#: Operations whose ``user_id`` is a directory filter, not the self-confirm
+#: seam. Same spelling, opposite contract: elsewhere ``user_id`` is *who this
+#: call acts for* and must be the caller (403 otherwise); here it is *whose
+#: identity to return*, and any authenticated human caller may name any user.
+#: So it is OPTIONAL, carries no 403, and stays out of both _NO_USER_DIMENSION
+#: (it takes the param) and the user-scoped-required rule (the param is not
+#: self-confirm). Mirrors /bots/logs/traces' carve-out (the first opposite-
+#: contract spelling). The whoami no-param branch is unchanged: the param's
+#: *absence* is still today's discover-your-id flow; only its *presence* is
+#: the directory lookup.
+_DIRECTORY_USER_ID = {("get", f"{PUBLIC_API_PREFIX}/org/user")}
 
 # Operations that are user-scoped but deliberately non-delegable. They derive
 # the actor from the verified human principal and therefore publish no
@@ -430,6 +436,7 @@ def _user_scoped(path: str, method: str) -> bool:
         not path.startswith(_LOGS_PREFIX)
         and (method, path) not in _NO_USER_DIMENSION
         and (method, path) not in _AUTHENTICATED_SELF
+        and (method, path) not in _DIRECTORY_USER_ID
     )
 
 
@@ -530,6 +537,25 @@ def test_bot_logs_keeps_its_own_meaning_of_user_id():
     assert _param(traces, USER_ID_QUERY) is not None, (
         "the filter is part of that operation's contract, not this rule's"
     )
+
+
+def test_org_user_directory_filter_is_optional_without_403():
+    """``GET /org/user`` may take an OPTIONAL ``user_id`` — opposite contract.
+
+    Same spelling, opposite meaning: elsewhere ``user_id`` is *who this call
+    acts for* and must be the caller (403 otherwise); here it is *whose
+    identity to return*, a directory filter any authenticated human caller may
+    name any user for — so it is OPTIONAL and carries no 403. The whoami
+    no-param branch is unchanged. Mirrors the /bots/logs/traces carve-out, the
+    first opposite-contract spelling.
+    """
+    schema = _schema()
+    operation = schema["paths"][f"{PUBLIC_API_PREFIX}/org/user"]["get"]
+    parameter = _param(operation, USER_ID_QUERY)
+    assert parameter is not None, "GET /org/user carries the optional user_id"
+    assert parameter["in"] == "query"
+    assert parameter["required"] is False
+    assert "403" not in operation["responses"]
 
 
 def test_user_id_is_never_a_body_field_or_a_path_segment():
