@@ -135,9 +135,10 @@ reasons remain, and both are about staging rather than doubt:
    once — while `baas` could be flipped alone.
 
 Defaulting off buys a staged rollout for one config line in a pre environment,
-and pooling — the larger, certain win — lands immediately either way. **This
-default is the decision most worth confirming at review**; shipping it on is a
-one-word change to this spec.
+and pooling — the larger, certain win — lands immediately either way.
+**Confirmed at review (2026-08-26): ship `http2: false`, flip per environment.**
+Probing `agentclawproxy-prod` (task F1b) is a prerequisite for that flip, not for
+this change.
 
 **Out of scope**
 
