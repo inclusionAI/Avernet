@@ -51,11 +51,64 @@ def test_community_binds_database(community_injector):
     assert not isinstance(resolved, MockSeam)
 
 
-def test_database_url_env_overrides_yaml(monkeypatch):
-    # DATABASE_URL takes precedence over the yaml ``database.url`` block.
-    monkeypatch.setenv("DATABASE_URL", "sqlite:///tmp/override-b3.db")
+def test_database_config_reads_the_yaml_block_verbatim(monkeypatch):
+    # DATABASE_URL no longer reaches the provider directly: the shipped overlay
+    # spells the url as ``${DATABASE_URL:-...}`` and the YAML loader expands it
+    # during config loading (AGENTS.md puts raw env access there). The provider
+    # is therefore a pure reader of the resolved block.
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///tmp/ignored-by-the-provider.db")
+    monkeypatch.setattr(
+        "agentclaw.community.di.modules.config_module._block",
+        lambda name: {"backend": "sqlite", "url": "sqlite:///tmp/from-yaml.db"},
+    )
     config = CommunityDatabaseModule().database_config()
-    assert config.url == "sqlite:///tmp/override-b3.db"
+    assert config.url == "sqlite:///tmp/from-yaml.db"
+
+
+def test_database_config_defaults_are_sqlite_with_schema_creation():
+    config = CommunityDatabaseModule().database_config()
+    assert config.backend == "sqlite"
+    assert config.url.startswith("sqlite")
+    # A container deployment has nobody to run DDL before the first request.
+    assert config.create_schema is True
+
+
+def test_database_config_rejects_backend_url_mismatch(monkeypatch):
+    # Flipping backend to mysql but leaving the sqlite url behind must fail loudly
+    # rather than quietly writing production traffic to a file in the container.
+    monkeypatch.setattr(
+        "agentclaw.community.di.modules.config_module._block",
+        lambda name: {"backend": "mysql", "url": "sqlite:///./data/agentclaw.db"},
+    )
+    with pytest.raises(ValueError, match="database.backend is 'mysql'"):
+        CommunityDatabaseModule().database_config()
+
+
+def test_database_config_rejects_unknown_backend(monkeypatch):
+    monkeypatch.setattr(
+        "agentclaw.community.di.modules.config_module._block",
+        lambda name: {"backend": "oracle", "url": "oracle://host/db"},
+    )
+    with pytest.raises(ValueError, match="Unknown database.backend"):
+        CommunityDatabaseModule().database_config()
+
+
+def test_mysql_backend_builds_a_pooled_engine(monkeypatch):
+    # mysql+pymysql is lazy — create_engine opens no socket — so this pins the
+    # engine setup (pre-ping / recycle) without needing a server.
+    monkeypatch.setattr(
+        "agentclaw.community.di.modules.config_module._block",
+        lambda name: {
+            "backend": "mysql",
+            "url": "mysql+pymysql://u:p@db.example:3306/agentclaw?charset=utf8mb4",
+            "create_schema": False,
+        },
+    )
+    config = CommunityDatabaseModule().database_config()
+    plugin = CommunityDatabaseModule().database(config)
+    assert isinstance(plugin, CommunityDatabase)
+    assert plugin._engine.pool._pre_ping is True
+    assert plugin._engine.pool._recycle == 3600
 
 
 def test_community_binds_cache(community_injector):

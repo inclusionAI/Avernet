@@ -106,11 +106,24 @@ user_config:
     operator_subjects: []
 
   # Relational store — consumed by the community CommunityDatabase.
-  # SQLAlchemy URL (SQLite file / Postgres / MySQL). The DATABASE_URL env var,
-  # if set, takes precedence (keep passwords out of this file). The schema is
-  # operator-provisioned — the app does not create tables.
+  #
+  # `backend` is the single field that switches stores: "sqlite" for a local or
+  # single-node run, "mysql" for a managed instance (Aliyun RDS and friends).
+  # `url` must name the same store — the provider rejects a mismatch rather than
+  # silently falling back to the SQLite default.
+  #
+  # Keep passwords out of this file: the URL is an env placeholder, expanded at
+  # config load. A managed-MySQL deployment sets DATABASE_URL from a Secret, e.g.
+  #   mysql+pymysql://user:pass@rds-host:3306/agentclaw?charset=utf8mb4
+  #
+  # `create_schema: true` lets the app emit its own DDL at boot — a container
+  # deployment has nobody to run CREATE TABLE between `kubectl apply` and the
+  # first request. Set it false if you provision the schema out of band or run
+  # migrations yourself.
   database:
-    url: "sqlite:///./data/agentclaw.db"
+    backend: "sqlite"
+    url: "${DATABASE_URL:-sqlite:///./data/agentclaw.db}"
+    create_schema: true
 
   # Cache + distributed lock — consumed by the community CommunityCache.
   # Set redis_url to a Redis endpoint for a multi-worker deploy (KV + SET NX

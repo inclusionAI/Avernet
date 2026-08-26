@@ -1,7 +1,7 @@
 """Community-safe YAML configuration provider (B2).
 
 Reads ``configs/application.yaml`` plus the overlay owned by a semantic deploy
-profile and deep-merges them into an
+profile, deep-merges them, expands ``${ENV_VAR}`` placeholders, and returns an
 :class:`~agentclaw.community.core.config.provider.AppConfig`. This is the default
 provider (community / test / local) and the body of the loader the local-mode
 monkeypatch used to carry inline.
@@ -13,6 +13,8 @@ with no company packages installed.
 from __future__ import annotations
 
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -28,6 +30,13 @@ _OVERLAY_BY_PROFILE = {
     "corp_test": "application-test.yaml",
     "singlebox": "application-singlebox.yaml",
 }
+
+# Placeholder syntax: ${NAME} or ${NAME:-default} (shell / k8s / envsubst style),
+# matching the loaders in baas, gateway and proxy so one deployment spells its
+# config the same way for every service. ``${NAME:-}`` yields an empty string.
+_ENV_INTERP = re.compile(
+    r"\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::-(?P<default>[^}]*))?\}"
+)
 
 
 class DeployProfileLike(Protocol):
@@ -54,10 +63,61 @@ def _overlay_for_profile(profile: DeployProfileLike) -> str:
         ) from exc
 
 
+def _expand_env_placeholders(data: Any, *, strict: bool = True) -> Any:
+    """Recursively expand ``${NAME}`` placeholders in a merged config tree.
+
+    Walks dict and list nodes; for string leaves, replaces every ``${NAME}`` (or
+    ``${NAME:-default}``) occurrence with the value of environment variable
+    ``NAME``. Non-string values are returned as-is.
+
+    Resolution order for a placeholder:
+
+    1. environment variable ``NAME`` if set (an empty string counts as set);
+    2. the default given via ``:-default`` if present;
+    3. when *strict* is True (the default, matching BaaS) it raises
+       ``KeyError`` — a referenced env var that is neither set nor defaulted is a
+       configuration error, and a deployment that forgot to wire a Secret should
+       fail at boot rather than serve a half-configured surface. When *strict* is
+       False the placeholder is left unchanged.
+
+    Anything that must still boot bare therefore needs a default in the YAML
+    (``${DATABASE_URL:-sqlite:///./data/agentclaw.db}``), not a naked
+    ``${DATABASE_URL}``.
+
+    This runs inside config loading — an approved site for raw environment access
+    per AGENTS.md — and before the typed config providers read the tree, so they
+    see resolved values and never reach for ``os.environ`` themselves.
+    """
+
+    def _env_replacer(match: re.Match[str]) -> str:
+        name = match.group("name")
+        if name in os.environ:
+            return os.environ[name]
+        default = match.group("default")
+        if default is not None:
+            return default
+        if not strict:
+            return match.group(0)
+        raise KeyError(
+            f"Environment variable {name!r} referenced by ${{{name}}} in config "
+            "is not set and has no default"
+        )
+
+    if isinstance(data, dict):
+        return {k: _expand_env_placeholders(v, strict=strict) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_expand_env_placeholders(v, strict=strict) for v in data]
+    if isinstance(data, str):
+        return _ENV_INTERP.sub(_env_replacer, data)
+    return data
+
+
 def _load_yaml_configs(
     overlay_name: str = "application-dev.yaml",
+    *,
+    strict: bool = True,
 ) -> dict[str, Any]:
-    """Merge application.yaml with the caller-selected overlay."""
+    """Merge application.yaml with the caller-selected overlay, expanding env vars."""
     # B11: configs live in the community subtree (agentclaw/community/configs). In a
     # deploy the assembled runtime `configs/` (cwd) holds them; in the monorepo they
     # resolve from the subtree. Community never searches corp/configs — the test
@@ -77,7 +137,11 @@ def _load_yaml_configs(
         with open(overlay_path, "r", encoding="utf-8") as file:
             overlay_config = yaml.safe_load(file) or {}
         logger.info("YamlConfigProvider loaded overlay: %s", overlay_path)
-        return _deep_merge(base_config, overlay_config)
+        merged = _deep_merge(base_config, overlay_config)
+        # Expand after the merge so an overlay can introduce a placeholder the
+        # base does not carry, and before AppConfig so every consumer — typed
+        # dataclass providers included — reads resolved values.
+        return _expand_env_placeholders(merged, strict=strict)
 
     candidates = ", ".join(str(config_dir) for config_dir in config_dirs)
     raise FileNotFoundError(

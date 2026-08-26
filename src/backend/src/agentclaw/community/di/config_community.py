@@ -35,14 +35,37 @@ class BcsAuthConfig:
 class CommunityDatabaseConfig:
     """Relational-store connection for the community ``CommunityDatabase``.
 
-    Community-only: sourced from the ``database`` block of ``user_config``
-    (overridable by the ``DATABASE_URL`` env var in the provider). ``url`` is a
-    SQLAlchemy URL — SQLite file / Postgres / MySQL. The default is a local
-    SQLite file so a bare community boot works; a real deploy points it at a
-    pre-provisioned store. Corp/test never resolve this type.
+    Community-only: sourced from the ``database`` block of ``user_config``.
+    Corp/test never resolve this type.
+
+    ``backend`` is the one field a deployment flips to change stores — ``sqlite``
+    for a local or single-node run, ``mysql`` for a managed instance. It selects
+    engine setup (pooling, pragmas), and the provider rejects a ``url`` whose
+    scheme disagrees with it, so the two can never drift into a confusing
+    half-configured state.
+
+    ``url`` is a SQLAlchemy URL. Point it at an env var from the YAML
+    (``${DATABASE_URL:-...}``) rather than writing a password into the file.
+
+    ``create_schema`` lets the app emit its own DDL at boot, which is what a
+    container deployment needs — nobody runs ``CREATE TABLE`` between
+    ``kubectl apply`` and the first request. Set it false when the schema is
+    provisioned out of band or managed by migrations.
     """
 
+    backend: str = "sqlite"
     url: str = "sqlite:///./data/agentclaw.db"
+    create_schema: bool = True
+
+
+#: Accepted ``database.backend`` values mapped to the SQLAlchemy URL scheme each
+#: one requires. Adding a backend means adding its engine setup to
+#: ``plugins/community/database.py`` at the same time.
+DATABASE_BACKEND_SCHEMES: dict[str, str] = {
+    "sqlite": "sqlite",
+    "mysql": "mysql",
+    "postgresql": "postgresql",
+}
 
 
 @dataclass(frozen=True)
