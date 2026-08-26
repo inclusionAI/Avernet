@@ -58,6 +58,15 @@ WORKDIR /app
 # configured as git@host:org/repo.git or ssh://… is therefore a legitimate
 # setting that would otherwise die on a missing SSH transport.
 #
+# The transport is necessary but not sufficient. `git clone` runs
+# non-interactively with no SSH options set, and this image ships no
+# known_hosts for admin, so first contact with an unknown host still fails
+# OpenSSH's default StrictHostKeyChecking=ask ("Host key verification
+# failed"). An SSH skills repo therefore also needs a known_hosts mounted for
+# admin, or GIT_SSH_COMMAND supplied. Baking StrictHostKeyChecking=accept-new
+# in here would trade that away for silent trust-on-first-use — the operator's
+# call to make, not the image's.
+#
 # `sudo` is absent, and that is a real limitation rather than an oversight.
 # BotBuildService._migrate_bot_instance runs `sudo chmod` and `sudo rsync`
 # unconditionally, so the non-teclaw (arca/baas) service-bot publish path fails
