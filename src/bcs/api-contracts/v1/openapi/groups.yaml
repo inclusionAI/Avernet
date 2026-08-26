@@ -280,7 +280,8 @@ GroupPath:
       "403":
         description: >-
           Neither the authenticated User's Human Actor nor a Bot created by
-          that Human is a Group Participant.
+          that Human is a Group Participant. Public groups are exempt from
+          this check and are readable by any authenticated caller.
         x-error-codes:
           - forbidden
         content:

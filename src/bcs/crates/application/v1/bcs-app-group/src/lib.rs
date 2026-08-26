@@ -811,7 +811,9 @@ impl GroupServiceImpl {
                 format!("Group '{group_id}' was not found"),
             ));
         }
-        if !self.can_read_group_detail(caller, &group).await? {
+        if group.visibility != visibility_name(GroupVisibility::Public)
+            && !self.can_read_group_detail(caller, &group).await?
+        {
             return Err(ApplicationError::forbidden(
                 "Neither the Human Actor nor an owned Bot is a Group Participant",
             ));
