@@ -122,6 +122,17 @@ boundary. It accepts already-resolved Team requests and does not modify
 materialize runtime content. It also preserves catalogue metadata, tag trees,
 SC publish diagnostics, non-paged versions, and exact download facts without
 turning any of them into HTTP presentation DTOs.
+It rejects response identity drift across Team, Skill, page, and exact version;
+retry, Attempt, persistence, and materialization decisions remain above it.
+Public version/download reads use an explicit scope and verify public visibility
+before crossing the exact-version boundary.
+
+This change is the staged outbound seam only. A follow-up OCB change provides
+the Corp HTTP adapter, authentication/configuration binding, and wire mapping.
+A separate Avernet change migrates the `openapi_v1` public catalogue and
+publication consumers onto domain services backed by this seam. Until both are
+present, existing routers keep using the legacy client; this module is not a
+claim that production traffic has migrated.
 
 ### One writer, one flush, one reader, one rule book
 

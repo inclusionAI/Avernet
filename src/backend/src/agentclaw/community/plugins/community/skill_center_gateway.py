@@ -22,6 +22,8 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterTeamLookupRequest,
     SkillCenterTeamSkillDetailRequest,
     SkillCenterTeamSkillListRequest,
+    SkillCenterTeamSkill,
+    SkillCenterTeamSkillPage,
     SkillCenterVersionListRequest,
     SkillCenterVersion,
 )
@@ -60,12 +62,12 @@ class CommunitySkillCenterGateway(SkillCenterGateway):
 
     def list_team_skills(
         self, request: SkillCenterTeamSkillListRequest
-    ) -> SkillCenterSkillPage:
+    ) -> SkillCenterTeamSkillPage:
         self._unavailable()
 
     def get_team_skill(
         self, request: SkillCenterTeamSkillDetailRequest
-    ) -> SkillCenterSkill | None:
+    ) -> SkillCenterTeamSkill | None:
         self._unavailable()
 
     def submit_publish(
