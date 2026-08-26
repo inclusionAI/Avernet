@@ -9,7 +9,7 @@
 # Run smoke check:
 #   docker run --rm -p 8765:8765 -e BCSFUSE_PROVIDER_MODE=dev_smoke bcsfuse:local
 
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 # Public-safe global defaults. Concrete configuration must be supplied at
 # runtime via Kubernetes Secret / ConfigMap (never baked into the image).
@@ -24,7 +24,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Runtime dependencies we need before pip install can compile extensions.
 RUN apt-get update \
-    && apt-get install -y --no-recommends \
+    && apt-get install -y --no-install-recommends \
         build-essential \
         libssl-dev \
         libmysqlclient-dev \
