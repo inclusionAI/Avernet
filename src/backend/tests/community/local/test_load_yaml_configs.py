@@ -109,6 +109,20 @@ class TestLoadYamlConfigsOverlaySelection:
         assert str(fallback_configs) in str(error.value)
 
 
+@pytest.fixture(autouse=True)
+def _community_database_url(monkeypatch):
+    """The community overlay requires a deployment-supplied ``DATABASE_URL``.
+
+    It is the Aliyun/OceanBase profile, so its ``database.url`` placeholder has
+    no inline default and strict expansion raises without one. These tests are
+    about overlay *merging*, not the DSN, so they supply what a deployment would.
+    The tests that assert the requirement itself set or clear it explicitly.
+    """
+    monkeypatch.setenv(
+        "DATABASE_URL", "mysql+pymysql://t:t@127.0.0.1:3306/agentclaw"
+    )
+
+
 class TestCommunityOverlaySelection:
     """DEPLOY_PROFILE=community 加载中性基座 application.yaml + community overlay
     （application.yaml 已中性化，可安全合并 —— B6/OSS-0 #3）。"""
@@ -213,7 +227,8 @@ class TestCommunityOverlaySelection:
     def test_community_overlay_exposes_data_infra_blocks(self):
         # B3：database/cache/object_storage/secret 四块只在 community overlay。
         user_config = _load_yaml_configs("application-community.yaml").get("user_config", {})
-        assert user_config.get("database", {}).get("url", "").startswith("sqlite:///")
+        assert user_config.get("database", {}).get("backend") == "mysql"
+        assert user_config.get("database", {}).get("url", "").startswith("mysql+")
         assert user_config.get("cache", {}).get("redis_url") == ""
         storage = user_config.get("object_storage", {})
         assert storage.get("backend") == "fs"
@@ -225,3 +240,85 @@ class TestCommunityOverlaySelection:
         user_config = _load_yaml_configs("application-test.yaml").get("user_config", {})
         for block in ("database", "cache", "object_storage", "secret"):
             assert block not in user_config
+
+
+class TestEnvPlaceholderExpansion:
+    """``${NAME}`` / ``${NAME:-default}`` expansion, matching baas/gateway/proxy.
+
+    Config loading is the approved site for raw environment access, so a
+    deployment injects its DSNs and secrets here rather than through bespoke
+    ``os.environ`` reads scattered across DI providers.
+    """
+
+    def test_expands_a_set_variable(self, monkeypatch):
+        monkeypatch.setenv("AC_TEST_HOST", "db.internal")
+        result = yaml_provider._expand_env_placeholders({"url": "${AC_TEST_HOST}"})
+        assert result == {"url": "db.internal"}
+
+    def test_falls_back_to_the_inline_default(self, monkeypatch):
+        monkeypatch.delenv("AC_TEST_MISSING", raising=False)
+        result = yaml_provider._expand_env_placeholders(
+            {"url": "${AC_TEST_MISSING:-sqlite:///./data/agentclaw.db}"}
+        )
+        assert result == {"url": "sqlite:///./data/agentclaw.db"}
+
+    def test_set_but_empty_beats_the_default(self, monkeypatch):
+        # An operator who exports NAME= means empty, not "use the default".
+        monkeypatch.setenv("AC_TEST_EMPTY", "")
+        result = yaml_provider._expand_env_placeholders({"k": "${AC_TEST_EMPTY:-fallback}"})
+        assert result == {"k": ""}
+
+    def test_strict_rejects_an_unset_variable_with_no_default(self, monkeypatch):
+        # Strict is the default: a deployment that forgot to wire a Secret fails
+        # at boot instead of serving a half-configured surface.
+        monkeypatch.delenv("AC_TEST_MISSING", raising=False)
+        with pytest.raises(KeyError, match="AC_TEST_MISSING"):
+            yaml_provider._expand_env_placeholders({"k": "${AC_TEST_MISSING}"})
+
+    def test_lenient_leaves_an_unresolvable_placeholder_intact(self, monkeypatch):
+        monkeypatch.delenv("AC_TEST_MISSING", raising=False)
+        result = yaml_provider._expand_env_placeholders(
+            {"k": "${AC_TEST_MISSING}"}, strict=False
+        )
+        assert result == {"k": "${AC_TEST_MISSING}"}
+
+    def test_walks_nested_dicts_lists_and_leaves_non_strings_alone(self, monkeypatch):
+        monkeypatch.setenv("AC_TEST_V", "x")
+        tree = {"a": [{"b": "${AC_TEST_V}"}], "n": 7, "t": True, "none": None}
+        assert yaml_provider._expand_env_placeholders(tree) == {
+            "a": [{"b": "x"}],
+            "n": 7,
+            "t": True,
+            "none": None,
+        }
+
+    def test_expands_several_placeholders_in_one_string(self, monkeypatch):
+        monkeypatch.setenv("AC_TEST_H", "host")
+        monkeypatch.setenv("AC_TEST_P", "3306")
+        result = yaml_provider._expand_env_placeholders({"u": "mysql://${AC_TEST_H}:${AC_TEST_P}/db"})
+        assert result == {"u": "mysql://host:3306/db"}
+
+    def test_community_overlay_database_url_honours_the_env(self, monkeypatch):
+        # End-to-end through the real overlay: the shipped `${DATABASE_URL:-...}`
+        # placeholder is what a deployment overrides.
+        monkeypatch.setenv("DATABASE_URL", "mysql+pymysql://u:p@rds:3306/agentclaw")
+        user_config = _load_yaml_configs("application-community.yaml")["user_config"]
+        assert user_config["database"]["url"] == "mysql+pymysql://u:p@rds:3306/agentclaw"
+
+    def test_community_overlay_requires_database_url(self, monkeypatch):
+        # No inline default: community is the deployed Aliyun/OceanBase profile,
+        # so a missing Secret must fail the boot rather than silently pointing
+        # production traffic at a local file.
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        with pytest.raises(KeyError, match="DATABASE_URL"):
+            _load_yaml_configs("application-community.yaml")
+
+    def test_local_overlays_load_bare_under_strict_expansion(self, monkeypatch):
+        # Guard: the local-facing overlays must boot with nothing exported, so
+        # every placeholder they ship carries a default. Strict expansion
+        # enforces it. `application-community.yaml` is deliberately NOT in this
+        # list — it is the deployed profile and requires DATABASE_URL (see
+        # test_community_overlay_requires_database_url).
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        for overlay in ("application-singlebox.yaml", "application-test.yaml"):
+            assert _load_yaml_configs(overlay)

@@ -59,6 +59,16 @@ def verify_boot() -> tuple[bool, str]:
     env.pop("REAL_SERVER_ENV", None)
     env.pop("ALIPAY_APP_ENV", None)
     env["PYTHONPATH"] = str(_SRC)
+    # The community overlay's database.url is `${DATABASE_URL}` with no inline
+    # default — the deployed profile requires a real DSN and fails the boot
+    # without one. This gate proves "corp is absent and the app still wires up",
+    # not "a database is reachable", so it supplies the DSN a deployment would.
+    # Nothing here connects: the proof below builds the injector, and
+    # create_engine does not open a socket. Schema DDL only runs under the
+    # lifespan, which the proof never enters.
+    env.setdefault(
+        "DATABASE_URL", "mysql+pymysql://selftest:selftest@127.0.0.1:3306/agentclaw"
+    )
     rc, out = _run([sys.executable, "-c", _BOOT_PROOF], env, timeout=120)
     return rc == 0 and "COMMUNITY_BOOT_OK" in out, out
 

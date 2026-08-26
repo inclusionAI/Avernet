@@ -2,12 +2,15 @@
 
 Capability: relational store connection. B3 binds the configured-URL
 ``CommunityDatabase``. The ``CommunityDatabaseConfig`` provider lives here
-(community-only) and reads the ``database`` block of ``user_config``, with the
-``DATABASE_URL`` env var taking precedence — corp/test never resolve it.
+(community-only) and reads the ``database`` block of ``user_config`` —
+corp/test never resolve it.
+
+The block's ``url`` is expected to carry an env placeholder
+(``${DATABASE_URL:-sqlite:///./data/agentclaw.db}``); the YAML provider expands
+it during config loading, which is where AGENTS.md puts raw environment access.
+This module therefore reads no environment variable of its own.
 """
 from __future__ import annotations
-
-import os
 
 from injector import Module, inject, provider, singleton
 
@@ -25,14 +28,41 @@ class CommunityDatabaseModule(Module):
     @singleton
     @provider
     def database_config(self) -> cfg.CommunityDatabaseConfig:
-        """Resolve the database URL: ``DATABASE_URL`` env wins, else the
-        ``database`` block, else the dataclass default (a local SQLite file)."""
+        """Read the ``database`` block, falling back to the dataclass defaults.
+
+        Validates ``backend`` against the URL scheme rather than inferring one
+        from the other: a deployment that flips ``backend`` to ``mysql`` and
+        forgets to point ``url`` at the instance would otherwise boot happily on
+        the default SQLite file and quietly write real traffic to a scratch file
+        inside the container.
+        """
         from agentclaw.community.di.modules.config_module import _block
 
         block = _block("database")
         defaults = cfg.CommunityDatabaseConfig()
-        url = os.environ.get("DATABASE_URL") or block.get("url") or defaults.url
-        return cfg.CommunityDatabaseConfig(url=url)
+
+        backend = str(block.get("backend") or defaults.backend).strip().lower()
+        url = block.get("url") or defaults.url
+        create_schema = block.get("create_schema")
+        if create_schema is None:
+            create_schema = defaults.create_schema
+
+        expected_scheme = cfg.DATABASE_BACKEND_SCHEMES.get(backend)
+        if expected_scheme is None:
+            supported = ", ".join(sorted(cfg.DATABASE_BACKEND_SCHEMES))
+            raise ValueError(
+                f"Unknown database.backend {backend!r}; supported: {supported}"
+            )
+        if not url.startswith(expected_scheme):
+            raise ValueError(
+                f"database.backend is {backend!r} but database.url is not a "
+                f"{expected_scheme} URL (got scheme {url.split(':', 1)[0]!r}); "
+                "set both to the same store"
+            )
+
+        return cfg.CommunityDatabaseConfig(
+            backend=backend, url=url, create_schema=bool(create_schema)
+        )
 
     @singleton
     @provider
@@ -42,11 +72,16 @@ class CommunityDatabaseModule(Module):
 
         from agentclaw.community.plugins.community.database import CommunityDatabase
 
-        # Mask any inline credentials — a Postgres/MySQL URL embeds the password
-        # (postgresql://user:pass@host/db); never log it in the clear.
+        # Mask any inline credentials — a MySQL/Postgres URL embeds the password
+        # (mysql+pymysql://user:pass@host/db); never log it in the clear.
         try:
             safe_url = make_url(config.url).render_as_string(hide_password=True)
         except Exception:  # pragma: no cover — malformed URL surfaces on connect
             safe_url = "<unparseable>"
-        logger.info("DatabasePlugin: CommunityDatabase (url=%s)", safe_url)
-        return CommunityDatabase(config.url)
+        logger.info(
+            "DatabasePlugin: CommunityDatabase (backend=%s, url=%s, create_schema=%s)",
+            config.backend,
+            safe_url,
+            config.create_schema,
+        )
+        return CommunityDatabase(config.url, create_schema=config.create_schema)

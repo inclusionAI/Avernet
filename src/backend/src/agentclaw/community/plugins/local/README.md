@@ -20,6 +20,7 @@ internal_dependencies:
   - agentclaw.community.core.access
   - agentclaw.community.core.auth
   - agentclaw.community.core.base
+  - agentclaw.community.core.schema   # shared schema bootstrap (model registration + create_all)
   - agentclaw.community.core.bot_chat
   - agentclaw.community.core.bot_app_grant.models  # SQLite ORM side-effect import for bot→app authorization tables
   - agentclaw.community.core.bot_dormant   # SQLite ORM side-effect import for local table creation
