@@ -1187,6 +1187,63 @@ async fn bot_final_event_relays_through_bot_delivery_port() {
 }
 
 #[tokio::test]
+async fn failed_provider_bot_event_send_uses_unified_system_message() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    support
+        .registry
+        .set_delivery_target(
+            "bot-driver",
+            support::FakeRegistryService::provider_target("bot-driver"),
+        )
+        .await;
+    support.bot_delivery.fail_for("bot-driver").await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.routing_policy = Some(RoutingPolicy {
+        mode: RoutingMode::Structured,
+        default_bot_final_delivery: DefaultDelivery::SendToDriver,
+        ..RoutingPolicy::default()
+    });
+    support.group.upsert(group).await.unwrap();
+    let system_message = Arc::new(RecordingSystemMessage::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_system_message(system_message.clone());
+
+    let outcome = flow
+        .handle_bot_event(BotEventCommand {
+            bot_id: "bot-observer".to_string(),
+            run_id: "run-provider-failure".to_string(),
+            group_id: "group-1".to_string(),
+            event_type: "chat".to_string(),
+            event_payload: json!({
+                "state": "final",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "done"}],
+                },
+            }),
+            state: ChatEventState::Final,
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.bot_deliveries.len(), 1);
+    assert!(!outcome.bot_deliveries[0].delivered);
+    let notifications = system_message.notifications.lock().await;
+    assert_eq!(notifications.len(), 1);
+    let SystemMessageEvent::GenericNotification { message, .. } = &notifications[0].event else {
+        panic!("expected generic notification");
+    };
+    assert_eq!(message, "消息投递失败，请稍后重试。");
+}
+
+#[tokio::test]
 async fn bot_final_event_relay_uses_each_provider_targets_session_tags() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     support

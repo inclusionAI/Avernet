@@ -1105,7 +1105,7 @@ async fn dispatch_failed_send_system_message_does_not_record_run_context() {
 }
 
 #[tokio::test]
-async fn dispatch_errored_send_system_message_does_not_record_run_context() {
+async fn dispatch_failed_provider_send_notifies_frontend_without_run_context() {
     let group = Group {
         id: "group-provider".into(),
         label: None,
@@ -1149,13 +1149,13 @@ async fn dispatch_errored_send_system_message_does_not_record_run_context() {
         delivered: true,
         fail: true,
     });
-    let frontend_delivery = Arc::new(NoopFrontendDeliveryPort);
+    let frontend_delivery = Arc::new(RecordingFrontendDeliveryPort::default());
     let run_context = Arc::new(RecordingRunContext::default());
 
     let dispatcher = SystemMessageDispatcherImpl::builder()
         .with_registry(registry)
         .with_delivery(delivery.clone())
-        .with_frontend_delivery(frontend_delivery)
+        .with_frontend_delivery(frontend_delivery.clone())
         .with_bot_run_context(run_context.clone())
         .register(FixedSendProducer)
         .build()
@@ -1178,6 +1178,13 @@ async fn dispatch_errored_send_system_message_does_not_record_run_context() {
     assert_eq!(params["bcs_group_id"], "group-provider");
     assert_eq!(params["bcs_session_id"], "session-provider");
     assert_eq!(run_context.len(), 0);
+    let published = frontend_delivery.published.lock().unwrap();
+    assert_eq!(published.len(), 1);
+    let frame: serde_json::Value = serde_json::from_str(&published[0].event_json).unwrap();
+    assert_eq!(
+        frame["payload"]["message"]["content"][0]["text"],
+        "消息投递失败，请稍后重试。"
+    );
 }
 
 #[tokio::test]

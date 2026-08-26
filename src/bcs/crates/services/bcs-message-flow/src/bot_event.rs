@@ -588,6 +588,7 @@ async fn relay_final_chat_event(
     }
     let mut bot_deliveries = Vec::new();
     let mut delivery_results = Vec::new();
+    let mut provider_send_failed = false;
 
     // Finalize the run's open chat segment: flush the buffered streaming text
     // as ONE row, using the final frame's complete text. (Final-only runs with
@@ -696,6 +697,8 @@ async fn relay_final_chat_event(
             flow.registry.get_protocol_version(&target.bot_uuid).await,
             &delivery_target,
         );
+        let is_provider_send = delivery_target.is_http_provider()
+            && target.delivery_type == DeliveryType::Send;
         let provider_tags = if delivery_target.is_http_provider() {
             group
                 .participants
@@ -755,6 +758,9 @@ async fn relay_final_chat_event(
             .await;
         match delivery {
             Ok(result) => {
+                if is_provider_send && !result.delivered {
+                    provider_send_failed = true;
+                }
                 log_relay_deliver_result(
                     cmd,
                     &run_id,
@@ -783,6 +789,9 @@ async fn relay_final_chat_event(
                 bot_deliveries.push(result);
             }
             Err(error) => {
+                if is_provider_send {
+                    provider_send_failed = true;
+                }
                 let error_text = error.to_string();
                 log_relay_deliver_result(
                     cmd,
@@ -811,6 +820,26 @@ async fn relay_final_chat_event(
 
     if bot_deliveries.iter().any(|delivery| delivery.delivered) {
         flow.group.increment_message_count(&cmd.group_id).await?;
+    }
+
+    if provider_send_failed {
+        if let Some(ref system_message) = flow.system_message {
+            let session_id = cmd.bcs_session_id.as_deref().unwrap_or(&cmd.group_id);
+            let receivers = group
+                .participants
+                .iter()
+                .filter(|participant| participant.is_bot() && participant.bot_uuid != cmd.bot_id)
+                .cloned()
+                .collect();
+            let event = SystemMessageEvent::GenericNotification {
+                group_id: cmd.group_id.clone(),
+                message: "消息投递失败，请稍后重试。".to_string(),
+                receivers,
+            };
+            let _ = system_message
+                .notify(&cmd.group_id, event, session_id, &group.participants)
+                .await;
+        }
     }
 
     if !decision.hidden_mentions.is_empty() {
