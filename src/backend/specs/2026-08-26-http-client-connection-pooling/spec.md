@@ -63,11 +63,20 @@ should not be repeated: its TLS is terminated by an egress gateway whose
 certificate issuer is `O = Anthropic, CN = Egress Gateway SDS Issuing CA`, so it
 reports the gateway's ALPN, not the origin's.)
 
-**Still unprobed: `agentclawproxy-prod.alipay.com`** — which matters *more* than
-secbaas, since it fronts the parallel container calls this whole change is for.
-Same one-liner against that host settles it. Not a blocker either way: httpx
-falls back to HTTP/1.1 silently where `h2` is not offered, so an unprobed host
-costs correctness nothing, only benefit.
+`agentclawproxy-prod.alipay.com` reports the same, and matters more than
+secbaas since it fronts the parallel container calls this whole change is for:
+
+```
+$ openssl s_client -connect agentclawproxy-prod.alipay.com:443 -alpn h2,http/1.1 </dev/null 2>/dev/null | grep ALPN
+ALPN protocol: h2
+```
+
+Note the scope of that result: agentclawproxy is a proxy, so this establishes the
+**backend→proxy** hop only — the connection this pool actually holds — and says
+nothing about proxy→container beyond it. That is the right scope for this change.
+
+So both target upstreams negotiate HTTP/2 today. Enabling the flag is a staging
+decision with a known payoff, not a bet on unknown server support.
 
 ## What each half buys
 

@@ -133,10 +133,10 @@ config path including the HTTP/2 flag; Group 3 validates.
       protocol: h2`**, probed from inside the corp network. (A sandbox probe is
       worthless here — its TLS is terminated by an egress gateway that reports
       its own ALPN.)
-- [ ] F1b Same probe against `agentclawproxy-prod.alipay.com`, which matters
-      more than secbaas since it fronts the parallel container calls:
-      `openssl s_client -connect agentclawproxy-prod.alipay.com:443 -alpn h2,http/1.1 </dev/null 2>/dev/null | grep ALPN`
-      Not a blocker — httpx falls back to HTTP/1.1 where `h2` is not offered.
+- [x] F1b Same probe against `agentclawproxy-prod.alipay.com` — **`ALPN
+      protocol: h2`**. Both target upstreams negotiate HTTP/2, so F3's flip has a
+      known payoff. Scope note: agentclawproxy is a proxy, so this covers the
+      backend→proxy hop (the one this pool holds), not proxy→container.
 - [ ] F2 Mirror the `pyproject.toml` httpx-extra change into the corp manifest,
       which the community manifest documents itself as tracking by hand.
 - [ ] F3 Roll `http_client.http2: true` out per environment (pre first), watching
