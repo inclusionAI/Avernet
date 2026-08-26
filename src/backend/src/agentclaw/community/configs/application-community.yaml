@@ -115,6 +115,11 @@ user_config:
   # Keep passwords out of this file: the URL is an env placeholder, expanded at
   # config load. A managed-MySQL deployment sets DATABASE_URL from a Secret, e.g.
   #   mysql+pymysql://user:pass@rds-host:3306/agentclaw?charset=utf8mb4
+  # ...and must ALSO set `backend: "mysql"` below. Changing only one of the two
+  # is rejected at boot with a ValueError naming the mismatch — that guard is
+  # deliberate (a silent fall back to the SQLite default would write production
+  # traffic to a file inside the container), but it is easier to read here than
+  # to discover from the error.
   #
   # `create_schema: true` lets the app emit its own DDL at boot — a container
   # deployment has nobody to run CREATE TABLE between `kubectl apply` and the
