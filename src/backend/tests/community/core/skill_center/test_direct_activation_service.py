@@ -170,8 +170,14 @@ class _PlatformDefaultMcpPolicy:
         self.codes = frozenset(codes)
         self.bots: list[dict] = []
 
-    def server_codes_for(self, bot: dict) -> frozenset[str]:
+    def require_direct_control_allowed(
+        self, *, bot: dict, server_code: str
+    ) -> frozenset[str]:
         self.bots.append(bot)
+        if server_code in self.codes:
+            raise SkillSetControlPlaneConflictError(
+                "RESOURCE_MANAGED_BY_PLATFORM_POLICY"
+            )
         return self.codes
 
 

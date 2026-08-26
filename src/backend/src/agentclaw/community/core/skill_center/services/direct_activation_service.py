@@ -39,9 +39,6 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
 )
-from agentclaw.community.core.skill_center.policies.capability_ownership import (
-    require_direct_mcp_control_allowed,
-)
 from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
     PlatformDefaultMcpPolicy,
 )
@@ -250,11 +247,10 @@ class DirectActivationService:
     def _platform_default_codes(
         self, bot: dict, server_code: str
     ) -> frozenset[str]:
-        codes = self._platform_default_mcp_policy.server_codes_for(bot)
-        require_direct_mcp_control_allowed(
-            is_platform_default=server_code in codes
+        return self._platform_default_mcp_policy.require_direct_control_allowed(
+            bot=bot,
+            server_code=server_code,
         )
-        return codes
 
     def _bot(self, *, bot_id: str, owner_id: str, actor_id: str) -> dict:
         """Resolve the exact addressed Bot; the MCP wire's error vocabulary."""

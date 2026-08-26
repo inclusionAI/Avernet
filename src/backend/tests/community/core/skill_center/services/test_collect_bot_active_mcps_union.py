@@ -242,3 +242,17 @@ def test_strict_runtime_policy_context_propagates_template_lookup_failure(tmp_pa
             user_id="owner",
             strict_policy_context=True,
         )
+
+
+def test_display_read_still_degrades_when_template_lookup_fails(tmp_path):
+    db = _Database()
+    service = _service(db, tmp_path, ext_info_provider=lambda _bot_id: None)
+    service._bot_repo.get_by_id_and_owner.side_effect = RuntimeError(
+        "bot repository unavailable"
+    )
+
+    assert service.collect_bot_active_mcps(
+        entity_id="owner",
+        bot_id="bot",
+        user_id="owner",
+    ) == []

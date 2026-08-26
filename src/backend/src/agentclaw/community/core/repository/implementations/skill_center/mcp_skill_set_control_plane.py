@@ -239,7 +239,8 @@ class McpSkillSetControlPlaneCommands:
     ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
             require_direct_mcp_control_allowed(
-                is_platform_default=server_code in platform_default_codes
+                server_code=server_code,
+                platform_default_codes=platform_default_codes,
             )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             self._require_not_set_managed(
@@ -269,7 +270,8 @@ class McpSkillSetControlPlaneCommands:
     ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
             require_direct_mcp_control_allowed(
-                is_platform_default=server_code in platform_default_codes
+                server_code=server_code,
+                platform_default_codes=platform_default_codes,
             )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             self._require_not_set_managed(
