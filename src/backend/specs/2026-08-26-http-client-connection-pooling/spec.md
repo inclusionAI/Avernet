@@ -130,6 +130,9 @@ that is discarded after one request.
   contract.
 - `timeout` moves from the (now shared) client constructor to the per-request
   call, preserving the existing per-call timeout budget.
+- The `transport` constructor parameter is **removed**. It is never wired by the
+  composition root — a production argument that only tests supply — and the one
+  test file that injected an `httpx.MockTransport` through it is deleted with it.
 
 **Why `http2` defaults to off.** With secbaas's ALPN support now confirmed, the
 original first reason for holding back is gone — multiplexing *will* engage. Two
@@ -227,9 +230,11 @@ this change.
 9. **Thread-safe.** Lazy construction is safe under concurrent first calls from
    `asyncio.to_thread` worker threads — exactly one client is ever built per
    instance.
-10. The existing backend unit suite passes, including the `HttpClient` contract
-    test, the DI module tests that assert `HttpxClient` bindings, and the real
-    `HttpxClient` streaming test driven through `httpx.MockTransport`.
+10. **No test-only production surface.** `HttpxClient.__init__` takes `base_url`
+    plus the four transport-policy arguments the composition root supplies, and
+    nothing else. No parameter exists solely so a test can reach in.
+11. The existing backend unit suite passes, including the `HttpClient` contract
+    test and the DI module tests that assert `HttpxClient` bindings.
 
 ## Risks
 
@@ -259,6 +264,18 @@ not touch — but it has only ever observed clients that live for one request an
 HTTP/1.1 connections. Community and singlebox CI cannot exercise it. This is the
 primary reason `http2` ships defaulted off: pooling and multiplexing can then be
 validated against it one at a time rather than together.
+
+**`stream()` loses its automated coverage.** Removing the `transport` seam
+deletes the only tests that exercised `HttpxClient.stream()`, including the F1
+regression pinning `LLM.chat()` against a real stream. This is an accepted
+trade: a production constructor argument that exists solely for tests is design
+damage, and the judgement is that carrying it is worse than the gap. What bounds
+the risk — `stream()` after the rewrite is three lines with no branching, and
+`test_session_resources.py` still drives the pooled non-stream path over a real
+socket — does not eliminate it: a pooling mistake specific to streaming would now
+reach production rather than CI. If that gap is ever worth closing, `respx` is
+already a dev dependency and intercepts httpx at the transport layer without any
+production seam, so coverage can return without the parameter.
 
 **A new runtime dependency.** `httpx[http2]` pulls `h2`, `hpack`, and
 `hyperframe` — three small, pure-Python packages maintained alongside httpx
