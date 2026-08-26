@@ -511,6 +511,15 @@ class MCPSyncService:
                 active_mcps,
                 identity_modes=identity_modes,
             )
+            # 当前 Passport MCP 参数不含 token；保留完整条目以定位 TCAuth 前置校验失败值。
+            logger.info(
+                "[MCPSyncService] Passport update request: "
+                "operation=caller_mcp_identity_sync, bot_id=%s, user_id=%s, "
+                "mcp_items=%s",
+                bot_id,
+                user_id,
+                mcp_items,
+            )
             self.passport_update.update_mcp_identity_to_agent_principal(
                 bot_id=bot_id,
                 user_id=user_id,
@@ -969,14 +978,27 @@ class MCPSyncService:
 
         try:
             # resource_scope 是完整快照：MCP 身份与 CLI 都必须回传，避免覆盖丢失授权。
+            resource_scope = {
+                "mcp_codes": synced_server_codes,
+                "mcp_items": mcp_items,
+                "cli_items": cli_items,
+            }
+            # 当前 Passport MCP 参数不含 token；保留完整请求以定位 TCAuth 前置校验失败值。
+            logger.info(
+                "[MCPSyncService] Passport update request: "
+                "operation=mcp_scope_refresh, bot_id=%s, user_id=%s, "
+                "resource_scope=%s, bot_name=%s, bot_desc=%s, engine_type=%s",
+                bot_id,
+                user_id,
+                resource_scope,
+                bot_name,
+                bot_desc,
+                engine_type,
+            )
             self.passport_update.update_passport(
                 bot_id=bot_id,
                 user_id=user_id,
-                resource_scope={
-                    "mcp_codes": synced_server_codes,
-                    "mcp_items": mcp_items,
-                    "cli_items": cli_items,
-                },
+                resource_scope=resource_scope,
                 bot_name=bot_name,
                 bot_desc=bot_desc,
                 engine_type=engine_type,
