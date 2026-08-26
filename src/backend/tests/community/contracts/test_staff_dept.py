@@ -330,3 +330,108 @@ def test_community_directory_lookup_reports_null(community_world) -> None:
     assert info.dept_no is None
     assert info.dept_name is None
     assert info.dept_path is None
+
+
+def test_local_directory_lookup_is_present_with_null_identity(
+    app_with_testing_modules,
+) -> None:
+    """Local impl: ``?user_id=X`` → 200, identity null, plugin hit recorded."""
+    init_principal_verifier_config(
+        _SecretResolver(), "gateway_principal_signing_key", strict=False
+    )
+    try:
+        client = _http_client(app_with_testing_modules)
+        resp = client.get(
+            "/openapi/v1/org/user",
+            headers={PRINCIPAL_HEADER: _token()},
+            params={"user_id": "u-lookup-1"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert data["user_id"] == "u-lookup-1"
+        assert data["username"] is None
+        assert data["display_name"] is None
+        assert data["full_name"] is None
+        assert data["dept_no"] is None
+        assert data["dept_name"] is None
+        assert data["dept_path"] is None
+
+        injector = getattr(app_with_testing_modules.state, "injector", None)
+        assert injector is not None
+        local = injector.get(StaffDeptPlugin)
+        assert any(
+            getattr(c, "kwargs", {}).get("work_no") == "u-lookup-1"
+            for c in local.calls_to("get_user_by_work_no")
+        )
+    finally:
+        reset_principal_verifier_config_cache()
+
+
+def test_wired_directory_lookup_propagates_identity() -> None:
+    """A wired impl returns identity+dept values → they reach the ?user_id response."""
+
+    class _Real:
+        def get_dept_by_work_no(self, *, work_no: str) -> StaffDeptInfo:
+            return StaffDeptInfo()
+
+        def get_user_by_work_no(self, *, work_no: str):
+            from agentclaw.community.plugin_api.staff_dept import UserIdentityInfo
+            return UserIdentityInfo(
+                work_no=work_no,
+                username="cara@example.com",
+                display_name="Cara",
+                full_name="Cara Lin",
+                dept_no="D-9",
+                dept_name="Platform Reliability",
+                dept_path="Ant Group/Platform/Reliability",
+            )
+
+    init_principal_verifier_config(
+        _SecretResolver(), "gateway_principal_signing_key", strict=False
+    )
+    try:
+        client = _http_client(_app_bound_to(_Real()))
+        resp = client.get(
+            "/openapi/v1/org/user",
+            headers={PRINCIPAL_HEADER: _token()},
+            params={"user_id": "u-lookup-1"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert data["user_id"] == "u-lookup-1"
+        assert data["username"] == "cara@example.com"
+        assert data["display_name"] == "Cara"
+        assert data["full_name"] == "Cara Lin"
+        assert data["dept_no"] == "D-9"
+        assert data["dept_name"] == "Platform Reliability"
+        assert data["dept_path"] == "Ant Group/Platform/Reliability"
+    finally:
+        reset_principal_verifier_config_cache()
+
+
+def test_directory_lookup_directory_down_surfaces_5xx() -> None:
+    """Infra failure during ``get_user_by_work_no`` → 5xx, no identity leaked."""
+
+    class _Down:
+        def get_dept_by_work_no(self, *, work_no: str) -> StaffDeptInfo:
+            return StaffDeptInfo()
+
+        def get_user_by_work_no(self, *, work_no: str):
+            raise DeptLookupError("master-data service unreachable")
+
+    init_principal_verifier_config(
+        _SecretResolver(), "gateway_principal_signing_key", strict=False
+    )
+    try:
+        client = _http_client(_app_bound_to(_Down()))
+        resp = client.get(
+            "/openapi/v1/org/user",
+            headers={PRINCIPAL_HEADER: _token()},
+            params={"user_id": "u-lookup-1"},
+        )
+        assert resp.status_code == 502, resp.text
+        body = resp.json()
+        assert body.get("data") is None
+        assert "unavailable" in body.get("message", "").lower()
+    finally:
+        reset_principal_verifier_config_cache()

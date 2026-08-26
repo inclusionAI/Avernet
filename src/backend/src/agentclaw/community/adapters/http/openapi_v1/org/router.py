@@ -50,6 +50,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
 from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     refuse_app_only_caller,
+    USER_ID_QUERY,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
@@ -108,59 +109,113 @@ def _staff_dept_reader(request: Request) -> StaffDeptPlugin | None:
 async def get_user_identity(
     request: Request,
     principal: PrincipalDep,
+    user_id: Annotated[
+        str | None,
+        Query(
+            alias=USER_ID_QUERY,
+            # min_length only (mirrors require_user_id): a blank value must not
+            # read as whoami — it names nobody and is a 422. No upper bound: the
+            # identity boundary has none (GatewayUser.id is unconstrained).
+            min_length=1,
+            description=(
+                "Optional directory filter — whose identity+department to "
+                "return. ABSENT means whoami: return the verified caller's own "
+                "identity, as before. PRESENT switches to a directory lookup of "
+                "that user; any authenticated human caller may name any user — "
+                "this is the OPPOSITE contract to the `user_id` on every other "
+                "operation (which is who the call acts for and must equal the "
+                "caller, 403 otherwise). There is no self-only 403 here. An "
+                "app-only caller is still refused."
+            ),
+        ),
+    ] = None,
 ) -> Envelope[OrgUserIdentity]:
-    """Return the end user the caller's credential names.
+    """Return the end user the caller's credential names, or — when
+    ``user_id`` is present — the identity+dept of the user it names.
 
-    The identity the gateway resolved and signed: the id to use as `user_id`
-    on delegable user-scoped operations, and the identity non-delegable
-    self-service operations derive directly. Call it once per session and
-    cache the result — the values only change when the session's credential
-    does.
+    Without the parameter this is the whoami: the identity the gateway resolved
+    and signed (the id to use as `user_id` elsewhere), with dept looked up
+    through the staff-dept service by the caller's work number. With the
+    parameter it is a directory lookup: that user's identity **and** dept come
+    from the staff directory (the gateway signs only the caller, so another
+    user's identity is read off HR, not the principal). The two branches read
+    different sources by design and are not asserted equal even for ``self``.
 
-    Department attributes are not in that identity; they are looked up by the
-    caller's work number through the staff-dept service. A reader that is not
-    wired leaves them null; a real reader returns them, or an all-null info
-    when the person has no dept. A reader that fails (directory down) raises
-    an error which propagates to a 5xx — so "no dept" and "directory down"
-    stay distinguishable.
+    A reader that is not wired leaves the looked-up fields null (200); a real
+    reader returns them, or an all-null info when the person has no record/no
+    dept. A reader that fails (directory down) raises and surfaces as 5xx — so
+    "no record" and "directory down" stay distinguishable, the same split the
+    whoami dept read makes.
     """
-    # ``getattr`` for the same reason ``principal.py``'s helpers read
-    # tolerantly: production always supplies a ``VerifiedCaller``, and a test
-    # stand-in that models no user must land in the fail-closed branch below
-    # rather than on an AttributeError.
-    user = getattr(principal, "user", None)
-    if user is None:
-        # Unreachable behind ``refuse_app_only_caller`` for a verified caller;
-        # kept as the fail-closed answer for a hand-constructed principal.
-        raise MissingPrincipalError("principal names no end user")
+    if user_id is None:
+        # ``getattr`` for the same reason ``principal.py``'s helpers read
+        # tolerantly: production always supplies a ``VerifiedCaller``, and a
+        # test stand-in that models no user must land in the fail-closed
+        # branch below rather than on an AttributeError.
+        user = getattr(principal, "user", None)
+        if user is None:
+            # Unreachable behind ``refuse_app_only_caller`` for a verified
+            # caller; kept as the fail-closed answer for a hand-constructed
+            # principal.
+            raise MissingPrincipalError("principal names no end user")
 
-    dept_no = None
-    dept_name = None
-    dept_path = None
+        dept_no = None
+        dept_name = None
+        dept_path = None
+        reader = _staff_dept_reader(request)
+        if reader is not None:
+            # ``get_dept_by_work_no`` is a sync Plugin method (mirrors
+            # antprocess's sync surface); bridge to the async handler via
+            # ``asyncio.to_thread``. ``DeptLookupError`` is deliberately not
+            # caught — infra failure surfaces as a 5xx distinct from the
+            # all-``None`` "no dept" return.
+            info = await asyncio.to_thread(
+                reader.get_dept_by_work_no, work_no=user.id
+            )
+            dept_no = info.dept_no
+            dept_name = info.dept_name
+            dept_path = info.dept_path
+
+        return envelope(
+            OrgUserIdentity(
+                user_id=user.id,
+                username=user.username,
+                display_name=user.display_name,
+                full_name=user.full_name,
+                tenant=principal.tenant,
+                # Optional profile data off the staff directory, null when the
+                # reader is unwired or the person has no dept (200); a directory
+                # failure raised above rather than landing null here.
+                dept_no=dept_no,
+                dept_name=dept_name,
+                dept_path=dept_path,
+            ),
+            request,
+        )
+
+    # directory lookup — relaxed: a human caller may name any user. Identity
+    # AND dept come from the staff directory (the gateway signs only the
+    # caller). No self-only 403: this is the opposite-contract user_id, carved
+    # out of the explicit-user-id rule (see _DIRECTORY_USER_ID in
+    # test_explicit_user_id.py).
+    info = None
     reader = _staff_dept_reader(request)
     if reader is not None:
-        # ``get_dept_by_work_no`` is a sync Plugin method (mirrors antprocess's
-        # sync surface); bridge to the async handler via ``asyncio.to_thread``.
-        # ``DeptLookupError`` is deliberately not caught — infra failure
-        # surfaces as a 5xx distinct from the all-``None`` "no dept" return.
-        info = await asyncio.to_thread(reader.get_dept_by_work_no, work_no=user.id)
-        dept_no = info.dept_no
-        dept_name = info.dept_name
-        dept_path = info.dept_path
-
+        # DeptLookupError deliberately not caught — infra failure surfaces as
+        # 5xx, distinct from the all-None "no record" 200, like the whoami read.
+        info = await asyncio.to_thread(
+            reader.get_user_by_work_no, work_no=user_id
+        )
     return envelope(
         OrgUserIdentity(
-            user_id=user.id,
-            username=user.username,
-            display_name=user.display_name,
-            full_name=user.full_name,
+            user_id=user_id,
+            username=info.username if info else None,
+            display_name=info.display_name if info else None,
+            full_name=info.full_name if info else None,
             tenant=principal.tenant,
-            # Optional profile data off the staff directory, null when the
-            # reader is unwired or the person has no dept (200); a directory
-            # failure raised above rather than landing null here.
-            dept_no=dept_no,
-            dept_name=dept_name,
-            dept_path=dept_path,
+            dept_no=info.dept_no if info else None,
+            dept_name=info.dept_name if info else None,
+            dept_path=info.dept_path if info else None,
         ),
         request,
     )

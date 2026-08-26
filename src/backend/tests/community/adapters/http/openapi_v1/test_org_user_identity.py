@@ -189,11 +189,12 @@ def test_an_app_alone_is_refused_like_an_unauthenticated_caller(client):
     assert refused.json()["code"] == unauthenticated.json()["code"]
 
 
-def test_the_answer_ignores_a_user_id_smuggled_into_the_query(client):
-    """The operation takes no ``user_id`` — one supplied anyway changes nothing.
+def test_a_user_id_param_triggers_a_directory_lookup_of_that_user(client):
+    """``?user_id=X`` is a directory lookup, not ignored — and it is NOT a 403.
 
-    Not a 422: an undeclared query parameter is ignored on this surface, and
-    the identity comes off the signed principal either way.
+    The relaxation: a human caller may name any user. Unwired (no injector),
+    the reader resolves to None, so the looked-up user's identity+dept answer
+    null — but ``user_id`` echoes the requested id, and the call is 200, never 403.
     """
     token = _token(user={"id": USER, "username": "alice@example.com"})
 
@@ -201,6 +202,26 @@ def test_the_answer_ignores_a_user_id_smuggled_into_the_query(client):
         "/openapi/v1/org/user",
         headers={PRINCIPAL_HEADER: token},
         params={"user_id": "someone-else"},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["user_id"] == "someone-else"
+    assert data["username"] is None
+    assert data["dept_no"] is None
+    assert data["dept_name"] is None
+    assert data["dept_path"] is None
+
+
+def test_with_user_id_equal_self_still_returns_200_not_403(client):
+    """Naming yourself is accepted — the param is a directory filter, not a
+    self-confirm seam, so there is no mismatch-403 path on this operation."""
+    token = _token(user={"id": USER, "username": "alice@example.com"})
+
+    response = client.get(
+        "/openapi/v1/org/user",
+        headers={PRINCIPAL_HEADER: token},
+        params={"user_id": USER},
     )
 
     assert response.status_code == 200, response.text
