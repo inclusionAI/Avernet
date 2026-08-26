@@ -74,7 +74,11 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
 
         Reads ttl_expiration_timestamp (ms epoch) from provider_device_props — the exact
         creation_result.model_dump() payload the community device service
-        persists (D-06). A missing/zero value logs a warning and defers
+        persists (D-06). WR-02 dual-key fallback: devices created before
+        the field-pair release persist only the legacy integer-ms
+        ttl_expiration_time key, so that key is read as a fallback and
+        pre-release creations register with their real expiry. A
+        missing/zero/non-numeric value logs a warning and defers
         registration to the discovery scan; any repository failure only
         emits CRITICAL + [arca_ttl_metrics] register_error=1. Never raises
         (INTG-01 defensive posture: cold-table problems must never affect
@@ -84,9 +88,26 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
             props = response.provider_device_props or {}
             ttl_ms = props.get("ttl_expiration_timestamp")
             if not ttl_ms:
+                # WR-02: pre-release rows persisted only the legacy
+                # integer-ms ttl_expiration_time key.
+                ttl_ms = props.get("ttl_expiration_time")
+            if not ttl_ms:
                 log.warning(
                     "[arca_ttl] provider_device_props missing ttl_expiration_timestamp "
                     "for device %s — registration deferred to discovery scan",
+                    device_uuid,
+                )
+                return
+            # Numeric contract: the persisted value is an int ms epoch, but
+            # numeric strings are possible — coerce with the same
+            # int(float()) contract the scheduler consumers use; an
+            # unparseable value defers to the discovery scan.
+            try:
+                ttl_ms = int(float(ttl_ms))
+            except (TypeError, ValueError, OverflowError):
+                log.warning(
+                    "[arca_ttl] provider_device_props non-numeric TTL for "
+                    "device %s — registration deferred to discovery scan",
                     device_uuid,
                 )
                 return
