@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.bot_chat.models import AwLangfuseTrace
+from agentclaw.community.core.bot_chat.models import AwLangfuseTrace, AcOtelLogTrace, BcsGroupSession
 from agentclaw.community.core.repository.implementations.chat.db import BotChatDbRepository
 from agentclaw.community.core.bot_chat.service import _extract_user_input
 from agentclaw.community.core.bot_chat.schemas import ConversationObservation, ConversationSession, SessionMetadata
@@ -180,6 +180,35 @@ def _insert_bot(db: SqliteTestDb, **kwargs):
     defaults.update(kwargs)
     with db.orm_session() as session:
         session.add(BotModel(**defaults))
+
+
+def _insert_group_session(db: SqliteTestDb, **kwargs):
+    defaults = {
+        "session_id": "session-key-1",
+        "group_id": "group-1",
+        "env": "dev",
+        "status": "running",
+        "session_kind": "chat",
+    }
+    defaults["id"] = db.next_id()
+    defaults.update(kwargs)
+    with db.orm_session() as session:
+        session.add(BcsGroupSession(**defaults))
+
+
+def _insert_ocb_trace(db: SqliteTestDb, **kwargs):
+    defaults = {
+        "id": db.next_id(),
+        "trace_id": "ocb-trace-1",
+        "session_key": "agent:main:bcs:group:session-key-1",
+        "session_id": "runtime-session-1",
+        "user_id": "owner-b",
+        "bot_id": "bot-b",
+        "start_time_ms": 1780288428373,
+    }
+    defaults.update(kwargs)
+    with db.orm_session() as session:
+        session.add(AcOtelLogTrace(**defaults))
 
 
 def _insert_bot_collaborator(db: SqliteTestDb, **kwargs):
@@ -391,6 +420,41 @@ class TestBotOwnershipRules:
         repo = BotChatDbRepository(db)
 
         assert repo.has_bot_access("user2", "bot-a") is False
+
+    def test_group_trace_access_allows_participant_to_read_other_bot_trace(self):
+        db = SqliteTestDb()
+        _insert_bot(db, entity_id="owner-a", bot_id="bot-a")
+        _insert_bot(db, entity_id="owner-b", bot_id="bot-b")
+        _insert_group_session(db)
+        _insert_ocb_trace(db)
+        _insert_ocb_trace(
+            db,
+            id=db.next_id(),
+            trace_id="ocb-trace-participant",
+            bot_id="bot-a",
+            user_id="owner-a",
+        )
+        repo = BotChatDbRepository(db)
+
+        assert repo.has_group_trace_access(
+            "owner-a",
+            "runtime-session-1",
+            "agent:main:bcs:group:session-key-1",
+        ) is True
+
+    def test_group_trace_access_denies_user_outside_group(self):
+        db = SqliteTestDb()
+        _insert_bot(db, entity_id="owner-a", bot_id="bot-a")
+        _insert_bot(db, entity_id="owner-b", bot_id="bot-b")
+        _insert_group_session(db)
+        _insert_ocb_trace(db)
+        repo = BotChatDbRepository(db)
+
+        assert repo.has_group_trace_access(
+            "unrelated-user",
+            "runtime-session-1",
+            "agent:main:bcs:group:session-key-1",
+        ) is False
 
 
 class TestBotIdQueryRules:

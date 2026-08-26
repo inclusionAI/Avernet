@@ -16,6 +16,7 @@ from agentclaw.community.core.bot_chat.models import (
     AcOtelLogBizRef,
     AcOtelLogObservation,
     AcOtelLogTrace,
+    BcsGroupSession,
 )
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
 from agentclaw.community.core.bot_chat.query_support import (
@@ -24,6 +25,8 @@ from agentclaw.community.core.bot_chat.query_support import (
     enrich_group_labels,
     enrich_task_labels,
     enrich_trace_labels,
+    bcs_session_candidates,
+    trace_keys_for_bcs_session,
     list_group_sessions,
     load_task_refs,
     match_column,
@@ -462,6 +465,97 @@ class BotChatDbRepository(
     def has_bot_access(self, user_id: str, bot_id: str) -> bool:
         """Check if user_id is either owner or collaborator of bot_id."""
         return self.is_bot_owner(user_id, bot_id) or self.is_bot_collaborator(user_id, bot_id)
+
+    def has_group_trace_access(
+        self, user_id: str, session_id: str | None, session_key: str | None
+    ) -> bool:
+        """Allow a group participant to read traces from every bot in that group.
+
+        A trace detail request has historically carried only ``trace_id`` and
+        user identity. Resolve the trace's BCS group from its session key, then
+        grant access when the user owns or collaborates on any bot that has a
+        trace in that group. This keeps ordinary bot-scoped access unchanged
+        while making the group aggregation/detail contract consistent.
+        """
+        values = {value.strip() for value in (session_id, session_key) if value and value.strip()}
+        if not values:
+            return False
+
+        with self._db.orm_session() as session:
+            group_rows = (
+                session.query(BcsGroupSession)
+                .filter(
+                    BcsGroupSession.env == get_current_env(),
+                    BcsGroupSession.session_id.in_(
+                        candidate
+                        for value in values
+                        for candidate in bcs_session_candidates(value)
+                    ),
+                )
+                .all()
+            )
+            if not group_rows:
+                return False
+
+            group_ids = {row.group_id for row in group_rows}
+            group_session_ids = [
+                row.session_id
+                for row in session.query(BcsGroupSession).filter(
+                    BcsGroupSession.env == get_current_env(),
+                    BcsGroupSession.group_id.in_(group_ids),
+                ).all()
+            ]
+            log_keys = {
+                key
+                for value in group_session_ids
+                for key in (trace_keys_for_bcs_session(value) | {value})
+            }
+            if not log_keys:
+                return False
+
+            bot_ids = {
+                bot_id
+                for (bot_id,) in session.query(AcOtelLogTrace.bot_id)
+                .filter(
+                    AcOtelLogTrace.session_key.in_(log_keys),
+                    AcOtelLogTrace.bot_id.isnot(None),
+                )
+                .distinct()
+                .all()
+            }
+            bot_ids.update(
+                bot_id
+                for (bot_id,) in session.query(AwLangfuseTrace.bot_id)
+                .filter(
+                    AwLangfuseTrace.session_id.in_(log_keys),
+                    AwLangfuseTrace.bot_id.isnot(None),
+                )
+                .distinct()
+                .all()
+            )
+            owner_match = (
+                session.query(BotModel.id)
+                .filter(
+                    BotModel.entity_id == user_id,
+                    BotModel.bot_id.in_(bot_ids),
+                    BotModel.is_delete == 0,
+                    BotModel.env == get_current_env(),
+                )
+                .first()
+            )
+            if owner_match is not None:
+                return True
+
+            collaborator_match = (
+                session.query(BotCollaboratorModel.id)
+                .filter(
+                    BotCollaboratorModel.user_id == user_id,
+                    BotCollaboratorModel.bot_id.in_(bot_ids),
+                    BotCollaboratorModel.env == get_current_env(),
+                )
+                .first()
+            )
+            return collaborator_match is not None
 
     def enrich_labels(
         self,
