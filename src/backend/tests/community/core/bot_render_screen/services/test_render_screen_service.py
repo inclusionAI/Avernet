@@ -137,14 +137,19 @@ class TestListRenderScreens:
         mock_repo.list_by_bot_id.assert_called_once_with(bot_id="bot_001", owner_id=None)
 
 
-    def test_missing_bot_fails_closed(self, service, mock_bot_repo):
+    def test_external_bcn_bot_without_management_record_returns_empty_list(
+        self, service, mock_repo, mock_bot_repo
+    ):
         mock_bot_repo.get_by_id.return_value = None
-        with pytest.raises(PermissionError, match="无权查看此 Bot 的 CDN 配置"):
-            service.list_render_screens(
-                bot_id="bot_missing",
-                owner_id="owner_001",
-                current_user_id="user_001",
-            )
+
+        result = service.list_render_screens(
+            bot_id="bot_1eff6708",
+            owner_id=None,
+            current_user_id="user_001",
+        )
+
+        assert result == []
+        mock_repo.list_by_bot_id.assert_not_called()
 
 
 class TestCreateRenderScreen:

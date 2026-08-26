@@ -102,10 +102,13 @@ class RenderScreenService:
         current_user_id: str | None = None,
     ) -> list[RenderScreenRecord]:
         """查询某 Bot 下所有 CDN 配置（未删除）。"""
-        try:
-            bot = self._require_bot(bot_id)
-        except PermissionError as exc:
-            raise PermissionError(f"无权查看此 Bot 的 CDN 配置: {bot_id}") from exc
+        # BCN can contain externally onboarded bots that do not have a matching
+        # ac_bot management record. They can still participate in group chat, but
+        # they have no Avernet-managed CDN configuration. Treat that as an empty
+        # list rather than an authorization failure.
+        bot = self._bot_repo.get_by_id(bot_id)
+        if not bot:
+            return []
 
         scope = resolve_render_screen_scope(bot)
         if scope == "bot":
