@@ -1710,6 +1710,82 @@ impl BotRepoPort for PersistentBotRepo {
             .collect()
     }
 
+    async fn list_all_bots(&self) -> Vec<RegisteredBot> {
+        let env = resolve_env();
+        let sql = "SELECT bot_uuid, name, bot_info, visibility, status, actor_kind, env, created_by FROM bcs_bots WHERE env = ? AND COALESCE(is_deleted, 0) = 0 AND COALESCE(actor_kind, 'bot') = 'bot' ORDER BY gmt_create DESC, bot_uuid ASC";
+        let rows = match self
+            .db_query(sql, vec![Value::from(env.as_str())])
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) => {
+                warn!(env = %env, error = %error, "list_all_bots: failed to load bot rows from DB; returning empty result");
+                return Vec::new();
+            }
+        };
+
+        rows
+            .iter()
+            .filter_map(|row| {
+                let bot_uuid: String = db_get_column_opt(row, "bot_uuid").ok().flatten()?;
+                let name: Option<String> = db_get_column_opt(row, "name").ok().flatten();
+                let env: Option<String> = db_get_column_opt(row, "env").ok().flatten();
+                let visibility: String = db_get_column_opt(row, "visibility")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| "protected".to_string());
+                let created_by: Option<String> = db_get_column_opt(row, "created_by").ok().flatten();
+                let bot_info: BotInfo = db_get_column_opt::<String>(row, "bot_info")
+                    .ok()
+                    .flatten()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or_default();
+
+                let status_str: String = db_get_column_opt(row, "status")
+                    .ok()
+                    .flatten()
+                    .filter(|v: &String| !v.is_empty())
+                    .unwrap_or_else(|| "online".to_string());
+                let actor_kind_str: String = db_get_column_opt(row, "actor_kind")
+                    .ok()
+                    .flatten()
+                    .filter(|v: &String| !v.is_empty())
+                    .unwrap_or_else(|| "bot".to_string());
+
+                let actor_kind = match actor_kind_str.as_str() {
+                    "human" => bcs_service_api::ActorKind::Human,
+                    _ => bcs_service_api::ActorKind::Bot,
+                };
+                let status = match status_str.as_str() {
+                    "hidden" => bcs_service_api::ActorStatus::Hidden,
+                    _ => bcs_service_api::ActorStatus::Online,
+                };
+                let hidden = status_str == "hidden";
+
+                Some(RegisteredBot {
+                    bot_uuid,
+                    capabilities: BotCapabilities {
+                        name,
+                        summary: bot_info.summary,
+                        domains: bot_info.domains,
+                        skills: bot_info.skills,
+                        scopes: bot_info.scopes,
+                        binding_channels: bot_info.binding_channels,
+                        hidden,
+                        visibility,
+                        agent_code: None,
+                        agent_token: None,
+                    },
+                    dynamic_status: BotDynamicStatus::default(),
+                    env,
+                    created_by,
+                    actor_kind,
+                    status,
+                })
+            })
+            .collect()
+    }
+
     async fn list_bots_by_creator(&self, created_by: &str) -> Vec<RegisteredBot> {
         let current_env = resolve_env();
         // D-F: unified DB query — always query the database to include offline bots.
