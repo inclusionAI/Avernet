@@ -13,44 +13,64 @@ Delivering is not: pushing an MCP's `api_key` to the device, or deleting it,
 is a per-MCP act that should happen only when that MCP's claim actually
 changed.
 
-So the fix is to split them:
+So the fix separates them, and it separates *who knows what*:
 
 - **Declaration stays total.** `sync_all_mcp_servers` and `update_passport`
   keep receiving the full projected set. Nothing about that is wrong today,
   except that the Passport payload is incomplete (problem 1).
-- **Delivery becomes a delta.** The projector computes
-  `claimed = post − pre` and `released = pre − post` over the projected MCP
-  code set, pushes configuration for `claimed`, removes it for `released`,
-  and touches nothing else.
+- **Delivery is scoped, and the mutation says to what.** `add_mcp` knows it
+  claimed `{server_code}`; `remove_mcp` knows it released one. That fact
+  travels with the mutation instead of being re-derived downstream.
+- **The projector performs the delivery, the provider decides its shape.**
+  The projector stays the only component doing device I/O, so compensation
+  keeps working and the control-plane service needs no device dependency.
+  How many device calls a delivery costs is answered by the `DeviceSync`
+  implementation behind `DeviceSyncDispatcher`, not by a branch in shared
+  code.
 
-This single change resolves problems 2 and 3 together, and it does so more
-cleanly than porting REL's per-operation pushes back:
+### Why declared, not derived
 
-| REL mechanism | replaced by |
-| --- | --- |
-| push at `add_mcp_to_skill_set` | `claimed` delta |
-| `should_remove` cross-Set usage scan | structural — an MCP another Set still claims never leaves the post set |
-| `default_server_codes` skip | structural — platform defaults are in `system_default_mcp_server_codes`, always in the post set |
-| `remove_mcp_detail` at two sites | `released` delta |
+An earlier draft had the projector snapshot the MCP set before the mutation
+and diff it afterwards (`claimed = post − pre`). That is strictly more
+machinery for information the caller already holds, plus a second copy of the
+set-union logic that could drift from `_resolve_plan`. Dropped.
 
-One point in favour of the rejected alternative, checked and found not to
-apply: since `2befbc2e2` the add site already calls
-`self._mcp_center.get_mcp_detail(server_code)` via `_mcp_catalog_entry`
-(`skill_set_management_service.py:719`), so a mutation-site push looks like
-it could reuse that fetch. It cannot — the helper narrows the result to
-`{name, description, icon}` for the membership row, and a device push needs
-the full entry. A mutation-site push would still add its own catalogue call.
+The one thing the diff gave for free was REL's removal guards — an MCP that
+another active Set still claims, or that the platform default policy
+supplies, must not be deleted from the device just because *this* Set
+dropped it. That is recovered with one filter against the post-mutation
+projected set, which `_resolve_plan` already computes:
 
-It also removes the need for the "push unconditionally at add time"
-constraint the spec flagged. Adding an MCP to an *inactive* Set installs no
-claim, so the delta is empty and nothing is pushed — and activating that Set
-later adds the claims, so the delta is exactly those codes and they get
-pushed then. dev's `runtime_required=bool(target.get("is_active"))` gate stays
-as-is, and unlike REL there is no orphan registration for an inactive Set.
+```python
+claimed  = declared_claimed  & post_codes   # only push what is actually claimed
+released = declared_released - post_codes   # only remove what nothing else claims
+```
 
-Problem 4 (facets) is the same idea one level up: `project` currently
-delivers both halves unconditionally; it should deliver only the facet the
-mutation touched.
+An MCP another Set still holds is still in `post_codes`, so it survives the
+filter and is not deleted. A platform default is always in `post_codes`, same
+result. No pre-snapshot, no diff, both guards preserved.
+
+### Why the provider decides the call shape
+
+The engines disagree about what a delivery is:
+
+| provider | skills | MCP config | allow-list |
+| --- | --- | --- | --- |
+| arca / baas | `sync_symlinks` | per-MCP `POST`/`PUT`/`DELETE` | `filter-servers` |
+| singlebox | `sync_symlinks` | per-MCP | no-op (engine lacks `mcporter`) |
+| teclaw | one composed artifact carrying all three | | |
+
+For arca/baas, skipping a half a mutation did not touch is a real saving. For
+teclaw it is meaningless — worse, splitting a both-halves mutation into two
+calls makes it recompose and redeliver the same artifact twice. A
+`ProjectionFacet` enum branched on inside the projector would encode the
+arca/baas answer as if it were universal.
+
+`DeviceSyncDispatcher` is already the per-provider registry
+(`plugins/community/device_sync_dispatcher.py:41`, keyed on `ctx.provider`),
+and `DeviceSync` is already the per-provider behaviour seam. So the scope
+becomes a *payload field* delivered through that seam, and each impl decides
+what it costs.
 
 ---
 
@@ -229,6 +249,33 @@ delivery = await self._mcp_sync_service.sync_mcp_details_for_bot(
 
 ### Fix
 
+**The mutation declares what it touched.** A small value object travels with
+the mutation from the control-plane command to the projector:
+
+```python
+@dataclass(frozen=True)
+class ProjectionScope:
+    """What one mutation changed, as the mutation itself knows it.
+
+    Declared, never inferred: ``add_mcp`` holds the code it claimed and
+    ``remove_mcp`` the one it released, so re-deriving them downstream would
+    be a second source of truth for a fact the caller already has.
+    """
+    skills: bool = False
+    mcp: bool = False
+    claimed_mcp: frozenset[str] = frozenset()
+    released_mcp: frozenset[str] = frozenset()
+
+    @classmethod
+    def everything(cls) -> "ProjectionScope":
+        """Reconcile: no mutation to declare, so every projected code is
+        treated as newly claimed (device-activated restart, skill upload)."""
+        return cls(skills=True, mcp=True)
+```
+
+`ProjectionScope.everything()` is the default, so any caller not updated
+keeps today's behaviour.
+
 **`SkillSetService.sync_mcp_desired_state` becomes declaration-only.** The
 detail loop and `sync_mcp_details_for_bot` call are deleted; `get_mcp_detail`
 is no longer called here at all, which also removes the fail-closed hazard.
@@ -240,7 +287,7 @@ is no longer called here at all, which also removes the fail-closed hazard.
         Declaration is total on purpose: ``sync_all_mcp_servers`` is the
         device-level reconciliation command and clears stale entries, so it
         runs even for an empty set.  Per-MCP *configuration* delivery is not
-        total — it is driven by the claim delta in ``sync_mcp_delivery``.
+        total — the mutation declares that scope, see ``sync_mcp_delivery``.
         """
         try:
             ctx = await asyncio.to_thread(
@@ -266,17 +313,16 @@ Note the argument shape: `filter_servers` reads `server_code`/`serverCode`
 off each dict (`mcp_device_transport.py:76`), so bare strings cannot be
 passed — wrap them.
 
-**A new delivery method carries the delta.** It fetches details only for the
-codes being pushed:
+**Delivery takes the declared codes**, fetching details only for what it
+pushes:
 
 ```python
     async def sync_mcp_delivery(
-        self, *, claimed: set[str], released: set[str]
+        self, *, claimed: frozenset[str], released: frozenset[str]
     ) -> bool:
         """Deliver configuration for newly claimed MCPs and withdraw it for
-        released ones.  Unlike the allow-list declaration this is a delta:
-        an MCP whose claim did not change is not re-pushed, so one mutation
-        never rewrites another MCP's device-side configuration."""
+        released ones.  Both sets are declared by the mutation and already
+        filtered against the projected set by the caller."""
         try:
             entries: list[dict[str, Any]] = []
             for server_code in sorted(claimed):
@@ -315,30 +361,22 @@ codes being pushed:
 ```
 
 `if not detail: return False` still fails, but now only for a code we are
-actually installing — which is the same contract REL had.
+actually installing — the same contract REL had.
 
-**The projector computes the delta.** `_resolve_plan` already produces the
-post-mutation projected set; the pre-mutation set is one DB read, taken
-before the mutation by the same flow that already snapshots skill mappings.
-
-`core/skill_center/runtime_projection_contract.py` and
-`api/bot_runtime_projector.py` gain:
-
-```python
-    async def snapshot_mcp_codes(
-        self, *, bot_id: str, owner_id: str
-    ) -> frozenset[str]: ...
-```
-
-implemented as the MCP half of `_resolve_plan`'s projection, and
-`_apply_non_skill_projection` gains a `previous_mcp_codes` parameter:
+**The projector filters the declared scope against the projected set**, which
+is where REL's two removal guards come back:
 
 ```python
         codes = set(projection.mcp_server_codes)
-        if not await service.sync_mcp_delivery(
-            claimed=codes - previous_mcp_codes,
-            released=previous_mcp_codes - codes,
-        ):
+        if scope is ProjectionScope.everything():
+            claimed, released = frozenset(codes), frozenset()
+        else:
+            # An MCP another active Set still claims — or one the platform
+            # default policy supplies — is still in ``codes``, so it survives
+            # here and is never deleted just because this Set dropped it.
+            claimed = scope.claimed_mcp & codes
+            released = scope.released_mcp - codes
+        if not await service.sync_mcp_delivery(claimed=claimed, released=released):
             raise SkillSetRuntimeReconcileError()
         if not await service.sync_mcp_desired_state(server_codes=codes):
             raise SkillSetRuntimeReconcileError()
@@ -348,41 +386,51 @@ Order matters and matches the old invariant: configuration lands before the
 allow-list references it, and withdrawal happens before the allow-list stops
 covering it.
 
-`MutationProjectionFlow.apply` takes the pre-snapshot alongside the existing
-mapping snapshot:
+**Compensation inverts the scope.** `MutationProjectionFlow` already swaps
+its skill-mapping arguments on the compensating call; the MCP scope inverts
+the same way:
 
 ```python
-        previous_mappings = await self._runtime.snapshot_skill_mappings(
-            bot_id=bot_id, owner_id=owner_id,
-        )
-        previous_mcp_codes = await self._runtime.snapshot_mcp_codes(
-            bot_id=bot_id, owner_id=owner_id,
-        )
-        result = mutation()
-        await self._project_or_compensate(
-            ..., previous_mcp_codes=previous_mcp_codes,
+    def _inverted(scope: ProjectionScope) -> ProjectionScope:
+        return replace(
+            scope,
+            claimed_mcp=scope.released_mcp,
+            released_mcp=scope.claimed_mcp,
         )
 ```
 
-and the compensating call passes the *current* set as the baseline so the
-delta inverts, exactly as `retired_logical_skill_mappings` already inverts
-for skills.
+No pre-snapshot is needed for this: the compensating projection re-resolves
+the plan against the restored desired state, so `codes` is already the
+pre-mutation set, and the filter above does the rest.
 
-**Entry points with no mutation** — `SkillSymlinkListener` (device activated)
-and `LocalSkillUploadService` — call `project`/`project_mcp_and_cli` without a
-flow. They pass `previous_mcp_codes=frozenset()`, which makes every projected
-code "claimed" and reproduces today's full push. That is correct for a
-freshly activated device and preserves the reconcile behaviour the spec
-declared out of scope.
+**Where each command's scope comes from.** `add_mcp` and `remove_mcp` hold
+the single `server_code` outright.
 
-This also settles the skill-carried `mcp_dependencies` question: a dependency
-entering the projected set is `claimed` like any other code and gets its
-configuration; one leaving is `released`. Allow-list and configuration cannot
-diverge, and no separate push site is needed.
+`activate`/`deactivate` need the Set's MCP codes, and
+`set_skill_set_active` already computes them under the same row lock it takes
+for the mutation (`capability_desired_state.py:493`):
+
+```python
+mcp_codes = {str(member.server_code) for member in mcp_members}
+```
+
+So they ride back on `DesiredStateMutation.details` — the dict field that
+already exists for exactly this
+(`capability_desired_state_types.py:34`) — rather than the service issuing a
+second, unlocked query that could disagree with what the mutation actually
+installed. The scope is therefore finalised *after* `mutation()` returns, not
+before it, for these two commands.
+
+`add_skill`/`remove_skill` carry the skill's `mcp_dependencies` when it has
+any.
+
+This also settles the skill-carried dependency question: a dependency the
+skill brings is declared like any other claim, and one it takes away is
+declared released. Allow-list and configuration cannot diverge.
 
 ---
 
-## Problem 4 — projection facets
+## Problem 4 — scoped projection, decided per provider
 
 ### Current
 
@@ -401,83 +449,101 @@ and both the forward and compensating paths in
 An MCP mutation resyncs all symlinks; a skill mutation declares the MCP
 allow-list and updates the Passport. A failed mutation does all of it twice.
 
+### Rejected fix
+
+A `ProjectionFacet` enum (`SKILLS` / `MCP_AND_CLI` / `ALL`) branched on inside
+`project`. It encodes the arca/baas call shape as universal: for a
+whole-artifact provider, `ALL` should be one compose-and-deliver, and two
+facet calls would recompose and redeliver the same artifact twice. It is also
+the `if provider ==` in shared code that the registry exists to avoid.
+
 ### Fix
 
-Declare the facet at the mutation, do not inject a callback — the
-compensating projection has to apply the *same* facet in reverse, which an
-opaque callable cannot express.
+`ProjectionScope` (above) already carries `skills` and `mcp` booleans
+alongside the MCP code sets. Rather than the projector branching on them, the
+whole scope goes through the `DeviceSync` seam, and each provider impl
+decides what it costs.
 
-`core/skill_center/services/_mutation_flow.py`:
-
-```python
-class ProjectionFacet(Enum):
-    SKILLS = "skills"
-    MCP_AND_CLI = "mcp_and_cli"
-    ALL = "all"
-```
-
-`project` takes it and dispatches:
+Widen the `DeviceSync` protocol (`core/devices/services/device_sync.py`) with
+one intent-shaped method:
 
 ```python
-    async def project(
-        self, *, bot_id, owner_id, retired_mappings=(),
-        previous_mcp_codes: frozenset[str] = frozenset(),
-        facet: ProjectionFacet = ProjectionFacet.ALL,
-    ) -> None:
-        service, bot, engine, projection, effective_cli_items = self._resolve_plan(...)
-        if facet in (ProjectionFacet.SKILLS, ProjectionFacet.ALL):
-            await self._apply_skill_projection(...)
-        if facet in (ProjectionFacet.MCP_AND_CLI, ProjectionFacet.ALL):
-            await self._apply_non_skill_projection(..., previous_mcp_codes=previous_mcp_codes)
+    def apply_runtime_projection(
+        self,
+        intent: RuntimeProjectionIntent,
+    ) -> dict[str, Any]:
+        """Apply one scoped runtime projection.
+
+        The intent carries everything a delivery could need — symlinks, the
+        MCP configuration delta, the full allow-list — plus which parts this
+        mutation actually touched. How many device calls that costs is the
+        implementation's decision: a per-call engine skips the untouched
+        halves, a whole-artifact engine composes once and delivers once
+        regardless of scope.
+        """
+        ...
 ```
 
-`_mutate` passes it through, and each command declares its own:
+Implementations:
 
-The service has exactly seven commands routing through `_mutate`
-(`skill_set_management_service.py:286`–`:584`); each declares one facet.
+- `BaasDeviceSyncService` — today's behaviour, gated on the scope: symlinks
+  only when `intent.scope.skills`, MCP config + `filter-servers` only when
+  `intent.scope.mcp`.
+- `SingleboxDeviceSyncService` — delegates, keeping its `sync_all_mcp_servers`
+  no-op (`singlebox_device_sync.py:47`).
+- teclaw (corp) — composes the artifact once from the whole intent and
+  delivers it once, whatever the scope says. **This impl lives outside this
+  repository and must land alongside.** Until it does, teclaw keeps the
+  default.
+- A default implementation on the protocol reproduces the per-call sequence,
+  so a provider that does not override is unchanged.
+
+Selection needs no new registry: `DeviceSyncDispatcher.dispatch(ctx)` already
+returns the per-provider `DeviceSync`, keyed on `ctx.provider`.
+
+The projector then stops orchestrating device calls and hands over the
+intent, keeping only what is genuinely shared — resolving the plan, building
+the Passport payload, raising `SkillSetRuntimeReconcileError`. Passport is
+not part of the intent: AgentPass is not the device, and every provider
+updates it the same way.
+
+`project_mcp_and_cli` becomes `project(scope=ProjectionScope(mcp=True))` with
+the named method kept as a thin alias, so `skill_center_module.py:918` and
+`SkillSymlinkListener` need no edit.
+
+### Scope declaration per command
+
+The service has seven commands routing through `_mutate`
+(`skill_set_management_service.py:286`–`:584`); each declares one scope.
 `add_mcp` and `remove_mcp` cover the Default-Set exclusion branches too, so
 the mapping is per command, not per repository call:
 
-| command | facet |
+| command | scope |
 | --- | --- |
-| `add_mcp` (incl. `default_set_unexclude_mcp` branch) | `MCP_AND_CLI` |
-| `remove_mcp` (incl. `default_set_exclude_mcp` branch) | `MCP_AND_CLI` |
-| `add_skill` | `SKILLS`, or `ALL` when the skill carries `mcp_dependencies` |
-| `remove_skill` | `SKILLS`, or `ALL` when the skill carries `mcp_dependencies` |
-| `activate` | `ALL` |
-| `deactivate` | `ALL` |
-| `legacy_activate` | `ALL` |
+| `add_mcp` (incl. `default_set_unexclude_mcp`) | `mcp=True, claimed={server_code}` |
+| `remove_mcp` (incl. `default_set_exclude_mcp`) | `mcp=True, released={server_code}` |
+| `add_skill` | `skills=True`, plus `mcp=True, claimed=<deps>` when the skill has `mcp_dependencies` |
+| `remove_skill` | `skills=True`, plus `mcp=True, released=<deps>` when the skill has `mcp_dependencies` |
+| `activate` | `skills=True, mcp=True, claimed=<set's codes>` |
+| `deactivate` | `skills=True, mcp=True, released=<set's codes>` |
+| `legacy_activate` | `skills=True, mcp=True, claimed=<set's codes>` |
 
-`project_mcp_and_cli` becomes `project(facet=MCP_AND_CLI)`; keep the named
-method as a thin alias so `skill_center_module.py:918` and the listener stay
-untouched.
-
-The default is `ALL`, so any caller not enumerated above keeps today's
-behaviour.
-
-**Caveat to hold.** A skill carrying `mcp_dependencies` changes the MCP set,
-so `add_skill`/`remove_skill` cannot be `SKILLS` when the skill has
-dependencies. Resolve it in the command:
-
-```python
-facet = (
-    ProjectionFacet.ALL
-    if self._skill_has_mcp_dependencies(...)
-    else ProjectionFacet.SKILLS
-)
-```
-
-Cheaper and safer than the alternative, and it keeps the delta honest.
+Non-flow entry points — `SkillSymlinkListener` (`skill_center_module.py:914`)
+and `LocalSkillUploadService._sync_runtime` (`:533`) — pass
+`ProjectionScope.everything()`, reproducing today's full push. That is
+correct for a freshly activated device and preserves the reconcile behaviour
+the spec declared out of scope.
 
 ---
 
 ## Problem 5 — dead code
 
 Delete `SkillSetService.refresh_mcp_scope`
-(`core/skill_center/services/skill_set_service.py:1914-1950`). Leave
-`MCPSyncService.refresh_mcp_scope` and its caller
-`DeviceService._sync_mcps_when_device_active` alone — different method, still
-live.
+(`core/skill_center/services/skill_set_service.py:1914-1950`).
+
+Leave `MCPSyncService.refresh_mcp_scope` alone — a different method with a
+live caller, `DeviceService._sync_mcps_when_device_active`
+(`device_service.py:1518`), the device-ACTIVE reconcile path.
 
 ---
 
@@ -485,11 +551,14 @@ live.
 
 | file | change |
 | --- | --- |
-| `core/skill_center/services/bot_runtime_projector.py` | identity-bearing `mcp_items`; `previous_mcp_codes`; `snapshot_mcp_codes`; facet dispatch; thread `bot` into `_apply_non_skill_projection` |
+| `core/skill_center/services/bot_runtime_projector.py` | identity-bearing `mcp_items`; accept `ProjectionScope`; filter declared codes against the projected set; hand an intent to `DeviceSync`; thread `bot` into `_apply_non_skill_projection` |
 | `core/skill_center/services/skill_set_service.py` | `sync_mcp_desired_state` → declaration-only; new `sync_mcp_delivery`; delete `refresh_mcp_scope` |
-| `core/skill_center/services/_mutation_flow.py` | `ProjectionFacet`; MCP pre-snapshot; pass facet + baseline through forward and compensating projections |
-| `core/skill_center/services/skill_set_management_service.py` | per-command facet declaration |
-| `core/skill_center/runtime_projection_contract.py`, `api/bot_runtime_projector.py` | protocol: `snapshot_mcp_codes`, `facet`, `previous_mcp_codes` |
+| `core/skill_center/services/_mutation_flow.py` | `ProjectionScope`; forward and invert it across the compensating projection |
+| `core/skill_center/services/skill_set_management_service.py` | per-command scope declaration |
+| `core/repository/implementations/skill_center/capability_desired_state.py` | return the Set's MCP codes on the activate/deactivate mutation result |
+| `core/devices/services/device_sync.py` | `apply_runtime_projection` + `RuntimeProjectionIntent`, with a per-call default |
+| `core/devices/services/baas_device_sync.py`, `singlebox_device_sync.py` | scope-aware delivery |
+| `core/skill_center/runtime_projection_contract.py`, `api/bot_runtime_projector.py` | protocol: `scope` parameter |
 | `di/modules/skill_center_module.py` | inject `CallerIdentityRepositoryProtocol` into the projector |
 
 ## Tests
@@ -497,49 +566,59 @@ live.
 New:
 
 - `mcp_items` carries `caller` for an MCP whose call-config says so, and
-  `owner` for one with no row — asserted on the projector's
-  `update_passport` kwargs.
+  `owner` for one with no row.
 - Adding one MCP to a Bot with three pushes exactly one detail and declares
-  three allow-list codes.
+  four allow-list codes.
 - Removing an MCP calls `remove_mcp_detail` once; an MCP still claimed by
   another active Set is not removed; a platform-default MCP is not removed.
 - A Bot holding a catalogue-missing MCP can still add an unrelated one.
-- An MCP-only mutation performs no `sync_symlinks`; a skill-only mutation
-  (no `mcp_dependencies`) performs no `sync_all_mcp_servers` and no
-  `update_passport`.
-- Compensation on projection failure inverts the MCP delta.
-- `project` with `previous_mcp_codes=frozenset()` pushes every projected code
-  (device-activated reconcile path unchanged).
+- Compensation inverts the scope: a projection failure after a successful add
+  removes what it pushed.
+- `ProjectionScope.everything()` pushes every projected code (device-activated
+  reconcile unchanged).
+- On the baas impl, an MCP-only scope performs no `sync_symlinks`; a
+  skills-only scope performs no `sync_all_mcp_servers` and no per-MCP write.
+- A fake whole-artifact `DeviceSync` receives one `apply_runtime_projection`
+  call for a both-halves scope.
 
 Must keep passing unchanged: `tests/community/core/mcp/services/test_sync_service.py`
-resource-scope contract tests (`:158`, `:204`, `:319`, `:350`, `:393`, `:431`,
-`:554`) — they cover `MCPSyncService.refresh_mcp_scope`, which this plan does
-not touch.
+resource-scope contract tests (`:158`, `:204`, `:319`, `:350`, `:393`,
+`:431`, `:554`) — they cover `MCPSyncService.refresh_mcp_scope`, which this
+plan does not touch.
 
 ## Sequencing
 
 1. Problem 1 alone — smallest diff, highest severity, independently shippable.
-2. `snapshot_mcp_codes` + delta plumbing, delivery still total (no behaviour
-   change) — isolates the plumbing from the behaviour flip.
-3. Flip delivery to the delta: problems 2 and 3 land together.
-4. Facets (problem 4).
+2. `ProjectionScope` threaded end to end, defaulting to `everything()` — no
+   behaviour change, isolates the plumbing.
+3. Commands declare real scopes; delivery honours `claimed`/`released`:
+   problems 2 and 3 land together.
+4. `apply_runtime_projection` on `DeviceSync`, with the per-call default
+   preserving behaviour, then baas/singlebox overrides.
 5. Delete dead code (problem 5).
+
+Group 4 needs the corp teclaw implementation to land alongside to realise its
+benefit; the default keeps teclaw correct but not yet cheaper.
 
 ## Risks
 
-- **Identity source.** `list_draft_call_types` reads
-  `BotMcpCallConfigModel` on `(bot_pk, engine_type, env)`. "draft" is naming,
-  not a staging state — it is the same source `_update_passport` uses. If a
-  Bot's `engine_type` at projection time differs from the one the config rows
-  were written under, modes resolve empty and fall back to `owner`. The
-  projector uses `bot["active_engine"]`, the same value `_update_passport`
-  resolves, so this matches existing behaviour rather than introducing drift.
-- **Delta correctness depends on the pre-snapshot.** If `snapshot_mcp_codes`
-  and `_resolve_plan` disagree about how the set is built, the delta is
-  wrong in both directions. They must share one helper, not two copies of
-  the union logic.
-- **Removal is now automatic.** Any code that leaves the projected set gets
-  `DELETE /api/mcp/{code}`. The platform-default and other-Set cases are
-  structurally excluded, but a bug in `_resolve_plan` would now delete device
-  configuration rather than merely mis-declare an allow-list. Group 2 landing
-  the plumbing with delivery still total exists to de-risk exactly this.
+- **Identity source.** `list_draft_call_types` reads `BotMcpCallConfigModel`
+  on `(bot_pk, engine_type, env)`. "draft" is naming, not a staging state —
+  it is the same source `_update_passport` uses. If a Bot's `engine_type` at
+  projection time differs from the one the config rows were written under,
+  modes resolve empty and fall back to `owner`. The projector uses
+  `bot["active_engine"]`, the same value `_update_passport` resolves, so this
+  matches existing behaviour rather than introducing drift.
+- **A wrong declaration is now a wrong device call.** With the scope declared
+  rather than derived, a command that declares the wrong codes pushes or
+  deletes the wrong configuration. The `& codes` / `- codes` filter bounds
+  the damage — nothing outside the projected set is ever pushed, and nothing
+  inside it is ever deleted — so the worst case is a missed push, not a
+  deletion of something still in use.
+- **Widening `DeviceSync` is a cross-repo change.** The protocol gains a
+  method every impl must satisfy; the corp teclaw impl is not visible from
+  here. The per-call default on the protocol is what keeps that from being a
+  breaking change.
+- **Removal is now automatic.** Any declared-released code that has left the
+  projected set gets `DELETE /api/mcp/{code}`. Step 2 landing the plumbing
+  with `everything()` still in force exists to de-risk exactly this.

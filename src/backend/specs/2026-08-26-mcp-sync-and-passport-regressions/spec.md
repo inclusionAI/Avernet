@@ -485,19 +485,41 @@ The projector already has partial separation — `project`,
 counterpart, and `_mutate` has no way to declare which facet a mutation
 touches.
 
-### Constraint on any fix
+### Constraints on any fix
 
-The compensation must apply the *same* facet in reverse. A caller-supplied
-callback cannot express that, because the flow cannot derive the
-counter-projection from an opaque callable. The facet must be declared, not
-injected.
+**The compensation must apply the same scope in reverse.** A caller-supplied
+callback cannot express that — the flow cannot derive a counter-projection
+from an opaque callable — so what changed must be *declared*, not injected as
+behaviour.
+
+**"How many device calls" is a provider decision, not a caller decision.**
+The engines do not agree on the shape of a delivery. arca/baas write per-MCP
+config, declare `filter-servers`, and sync symlinks as separate calls, so
+skipping a half is a real saving. Singlebox is the same minus `filter-servers`
+(`SingleboxDeviceSyncService.sync_all_mcp_servers` is a documented no-op —
+the engine needs `mcporter`). Teclaw composes and delivers one whole
+artifact that already contains skills, MCP and CLI, so a mutation touching
+both halves needs **one** delivery, not two — and splitting it into two
+would make teclaw recompose and redeliver the same artifact twice.
+
+A projector that branches on which halves to run therefore encodes the wrong
+thing in the wrong place. The scope of a change belongs to the caller; the
+number of device calls it costs belongs to the provider implementation,
+reached through the existing `DeviceSyncDispatcher` registry
+(`plugins/community/device_sync_dispatcher.py:41`, keyed on `ctx.provider`)
+rather than a conditional in shared code.
 
 ### Acceptance criteria
 
-- An MCP-only mutation performs no skill/symlink projection.
-- A skill-only mutation performs no MCP or Passport projection.
-- Activation, deactivation and Set deletion continue to project both.
-- The compensating projection covers exactly the facet the forward
+- A mutation declares the scope it touched; nothing infers it.
+- On arca/baas, an MCP-only mutation performs no symlink sync, and a
+  skill-only mutation performs no MCP allow-list declaration and no Passport
+  update.
+- On a whole-artifact provider, a mutation touching both halves costs one
+  delivery, not two.
+- Selecting that behaviour goes through the provider registry; no shared
+  code branches on provider or engine type to decide it.
+- The compensating projection covers exactly the scope the forward
   projection did.
 
 ---
@@ -507,15 +529,36 @@ injected.
 `core/skill_center/services/skill_set_service.py:1914` has no callers. On REL
 it was the mutation-path scope refresh; dev's projector inlines both of its
 halves (`sync_all_mcp_servers` for the device, `update_passport` for the
-Passport). `MCPSyncService.refresh_mcp_scope` — a different method — is still
-live and is called by `DeviceService._sync_mcps_when_device_active`; only the
-`SkillSetService` wrapper is dead.
+Passport).
+
+**Two different methods share this name, and only one is dead.** The
+`SkillSetService` method is a thin wrapper that delegates to
+`MCPSyncService.refresh_mcp_scope`; deleting the wrapper does not orphan the
+callee, because the callee has its own live caller on a different path:
+
+```python
+# core/devices/services/device_service.py:1518
+# inside DeviceService._sync_mcps_when_device_active
+scope_result = await self._mcp_sync.refresh_mcp_scope(
+    user_id=record.entity_id,
+    entity_id=record.entity_id,
+    bot_id=bot_id,
+    entity_type=record.entity_type,
+    engine_type=engine_type,
+)
+```
+
+That is the device-ACTIVE reconcile — the path that re-declares scope and
+re-pushes every MCP detail after a container restart, and the reason
+restart/reprovision is out of scope for this work. So the asymmetry is not a
+half-measure: the wrapper is unreachable, the callee is load-bearing.
 
 ### Acceptance criteria
 
 - `SkillSetService.refresh_mcp_scope` is removed.
-- `MCPSyncService.refresh_mcp_scope` and its device-active caller are
-  untouched.
+- `MCPSyncService.refresh_mcp_scope` still has exactly one production
+  caller, `DeviceService._sync_mcps_when_device_active`, and neither is
+  modified.
 
 ---
 
@@ -555,8 +598,13 @@ authorization service, so merging static engine defaults would undo it.
 2. Removing or excluding an MCP removes its configuration — `api_key`
    included — from the device, unless another active claim holds it.
 3. Adding one MCP costs one device configuration write.
-4. An MCP-only mutation touches no symlinks; a skill-only mutation touches
-   neither the device MCP allow-list nor the Passport.
-5. No production path calls `SkillSetService.refresh_mcp_scope`.
+4. On a per-call provider (arca/baas), an MCP-only mutation touches no
+   symlinks and a skill-only mutation touches neither the device MCP
+   allow-list nor the Passport; on a whole-artifact provider, a mutation
+   touching both halves costs one delivery. Which of these happens is
+   decided by the provider implementation behind `DeviceSyncDispatcher`, not
+   by a conditional in shared code.
+5. No production path calls `SkillSetService.refresh_mcp_scope`;
+   `MCPSyncService.refresh_mcp_scope` keeps its device-active caller.
 6. The existing `test_sync_service.py` resource-scope contract tests still
    pass unchanged.

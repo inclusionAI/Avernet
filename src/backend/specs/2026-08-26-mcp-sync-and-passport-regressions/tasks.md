@@ -1,9 +1,9 @@
 # Tasks — MCP Device-Sync and Passport Regressions
 
 Groups are ordered so the suite stays green after each one, and so the
-highest-severity fix (Group 1) is independently shippable. Group 3 is the
-only group that changes device delivery behaviour; Group 2 exists to land its
-plumbing separately and de-risk it.
+highest-severity fix (Group 1) is independently shippable. Group 2 threads
+the scope with no behaviour change; Group 3 is the one group that changes
+device delivery.
 
 Paths are relative to `src/backend/src/agentclaw/community/` unless noted.
 
@@ -33,89 +33,111 @@ Paths are relative to `src/backend/src/agentclaw/community/` unless noted.
       `:431`, `:554`) still pass untouched — they cover
       `MCPSyncService.refresh_mcp_scope`, which this group does not modify.
 
-## Group 2 — Delta plumbing, delivery still total (no behaviour change)
+## Group 2 — Thread `ProjectionScope`, defaulting to everything (no behaviour change)
 
-Every step here is behaviour-preserving: the delta is computed and threaded,
-but delivery still pushes the full set. The suite must be green at the end of
-this group *without* any test expectation changing.
+Every step is behaviour-preserving: the scope is declared and carried, but
+every caller still passes `ProjectionScope.everything()`. The suite must be
+green at the end of this group *without* any test expectation changing.
 
-- [ ] 2.1 Extract the MCP-set union out of
-      `BotRuntimeProjector._resolve_plan` into one helper so the snapshot and
-      the projection cannot drift (plan risk 2). Both callers use it.
-- [ ] 2.2 Add `BotRuntimeProjector.snapshot_mcp_codes(*, bot_id, owner_id)
-      -> frozenset[str]` using that helper; declare it on
+- [ ] 2.1 Add `ProjectionScope` (frozen dataclass: `skills`, `mcp`,
+      `claimed_mcp`, `released_mcp`, plus `everything()`) in
+      `core/skill_center/services/_mutation_flow.py`.
+- [ ] 2.2 Add `scope: ProjectionScope = ProjectionScope.everything()` to
+      `project`, `project_mcp_and_cli`, `project_for_cleanup` and
+      `_apply_non_skill_projection`; declare it on
       `core/skill_center/runtime_projection_contract.py` and
-      `api/bot_runtime_projector.py`.
-- [ ] 2.3 Add `previous_mcp_codes: frozenset[str] = frozenset()` to `project`,
-      `project_mcp_and_cli`, `project_for_cleanup` and
-      `_apply_non_skill_projection`; thread it through. Nothing reads it yet.
-- [ ] 2.4 `MutationProjectionFlow.apply`: take the pre-mutation snapshot
-      beside the existing `snapshot_skill_mappings` call and pass it to
-      `_project_or_compensate`; the compensating projection passes the
-      post-mutation set as its baseline so the delta inverts, mirroring
-      `retired_logical_skill_mappings`.
-- [ ] 2.5 Confirm the non-flow entry points — `SkillSymlinkListener`
+      `api/bot_runtime_projector.py`. Nothing reads it yet.
+- [ ] 2.3 `MutationProjectionFlow.apply` / `_mutate` accept and forward the
+      scope on the forward projection, and the inverted scope
+      (`claimed_mcp` ↔ `released_mcp`) on the compensating one, mirroring how
+      `retired_logical_skill_mappings` already swaps its arguments at
+      `_mutation_flow.py:119`.
+- [ ] 2.4 Confirm the non-flow entry points — `SkillSymlinkListener`
       (`di/modules/skill_center_module.py:914`) and
-      `LocalSkillUploadService._sync_runtime` (`:533`) — reach the default
-      `frozenset()`, which will mean "everything is newly claimed" in Group 3.
+      `LocalSkillUploadService._sync_runtime` (`:533`) — reach the
+      `everything()` default.
 
-## Group 3 — Delta delivery: removal and fan-out (problems 2 and 3)
+## Group 3 — Scoped delivery: removal and fan-out (problems 2 and 3)
 
-- [ ] 3.1 Add `SkillSetService.sync_mcp_delivery(*, claimed, released)`:
+- [ ] 3.1 Return the Set's MCP codes on the activate/deactivate mutation:
+      `set_skill_set_active` already computes `mcp_codes` under the row lock
+      (`core/repository/implementations/skill_center/capability_desired_state.py:493`),
+      so put them on `DesiredStateMutation.details` rather than re-querying
+      unlocked in the service.
+- [ ] 3.2 Declare the real scope on each of the seven commands per the plan's
+      table (`skill_set_management_service.py:286`–`:584`). `add_mcp` /
+      `remove_mcp` know their `server_code` directly; `activate` /
+      `deactivate` read theirs from `details` after `mutation()` returns;
+      `add_skill` / `remove_skill` add the skill's `mcp_dependencies` when it
+      has any.
+- [ ] 3.3 Add `SkillSetService.sync_mcp_delivery(*, claimed, released)`:
       fetch catalogue details for `claimed` only, push via
       `sync_mcp_details_for_bot`, then `remove_mcp_detail` each `released`
       code. Skip the push entirely when `claimed` is empty.
-- [ ] 3.2 Reduce `SkillSetService.sync_mcp_desired_state` to declaration
+- [ ] 3.4 Reduce `SkillSetService.sync_mcp_desired_state` to declaration
       only — delete the detail loop and the `sync_mcp_details_for_bot` call.
       `sync_all_mcp_servers` takes dicts and reads `server_code`/`serverCode`
       off each (`core/devices/services/mcp_device_transport.py:76`), so pass
       `[{"server_code": c} for c in sorted(server_codes)]`, not bare strings.
-- [ ] 3.3 `_apply_non_skill_projection`: call `sync_mcp_delivery` with
-      `claimed = codes - previous_mcp_codes` and
-      `released = previous_mcp_codes - codes` **before**
-      `sync_mcp_desired_state`, so configuration lands before the allow-list
-      cites it and withdrawal precedes the allow-list dropping it.
-- [ ] 3.4 Tests — fan-out: adding one MCP to a Bot with three others pushes
+- [ ] 3.5 `_apply_non_skill_projection`: filter the declared scope against the
+      projected set — `claimed = scope.claimed_mcp & codes`,
+      `released = scope.released_mcp - codes` — then call `sync_mcp_delivery`
+      **before** `sync_mcp_desired_state`, so configuration lands before the
+      allow-list cites it and withdrawal precedes the allow-list dropping it.
+      An `everything()` scope means `claimed = codes`, `released = ∅`.
+- [ ] 3.6 Tests — fan-out: adding one MCP to a Bot with three others pushes
       exactly one detail and declares four allow-list codes; a Bot holding a
-      catalogue-missing MCP can still add an unrelated one (the old
-      `if not detail: return False` no longer sees unrelated codes).
-- [ ] 3.5 Tests — removal: removing an MCP calls `remove_mcp_detail` once; an
-      MCP still claimed by another active Set is **not** removed; a
-      platform/template-default MCP is **not** removed. These two guards are
-      structural (such codes never leave the post set) — assert them so a
-      future `_resolve_plan` change cannot silently start deleting device
-      config.
-- [ ] 3.6 Test — compensation inverts the delta: a projection failure after a
+      catalogue-missing MCP can still add an unrelated one.
+- [ ] 3.7 Tests — removal guards: removing an MCP calls `remove_mcp_detail`
+      once; an MCP still claimed by another active Set is **not** removed; a
+      platform/template-default MCP is **not** removed. Both guards come from
+      the `- codes` filter, so assert them directly — a future `_resolve_plan`
+      change must not silently start deleting device config.
+- [ ] 3.8 Test — compensation inverts the scope: a projection failure after a
       successful add removes what it pushed.
-- [ ] 3.7 Test — `project` with `previous_mcp_codes=frozenset()` pushes every
-      projected code, so the device-activated reconcile path is unchanged.
+- [ ] 3.9 Test — `ProjectionScope.everything()` pushes every projected code,
+      so the device-activated reconcile path is unchanged.
 
-## Group 4 — Projection facets (problem 4)
+## Group 4 — Delivery shape decided per provider (problem 4)
 
-- [ ] 4.1 Add `ProjectionFacet` (`SKILLS` / `MCP_AND_CLI` / `ALL`) in
-      `core/skill_center/services/_mutation_flow.py`; default `ALL`
-      everywhere so unenumerated callers keep today's behaviour.
-- [ ] 4.2 `BotRuntimeProjector.project` dispatches on the facet; keep
-      `project_mcp_and_cli` as a thin alias for `project(facet=MCP_AND_CLI)`
-      so `skill_center_module.py:918` and `SkillSymlinkListener` need no edit.
-- [ ] 4.3 `MutationProjectionFlow.apply` / `_mutate` accept and forward the
-      facet, on both the forward and the compensating projection.
-- [ ] 4.4 Declare the facet on each of the seven commands per the plan's
-      table. `add_skill` / `remove_skill` resolve to `ALL` when the skill
-      carries `mcp_dependencies`, `SKILLS` otherwise.
-- [ ] 4.5 Tests: an MCP-only mutation performs no `sync_symlinks`; a
-      skill-only mutation with no `mcp_dependencies` performs no
-      `sync_all_mcp_servers` and no `update_passport`; a skill *with*
-      dependencies still projects both.
+- [ ] 4.1 Define `RuntimeProjectionIntent` (symlinks, MCP claimed/released,
+      full allow-list, the `ProjectionScope`) and add
+      `DeviceSync.apply_runtime_projection(intent)` to
+      `core/devices/services/device_sync.py`, with a **default implementation
+      reproducing today's per-call sequence** so no impl breaks and teclaw
+      stays correct until its own override lands.
+- [ ] 4.2 `BaasDeviceSyncService.apply_runtime_projection`: symlinks only when
+      `intent.scope.skills`; MCP config + `filter-servers` only when
+      `intent.scope.mcp`.
+- [ ] 4.3 `SingleboxDeviceSyncService`: delegate, preserving its
+      `sync_all_mcp_servers` no-op (`singlebox_device_sync.py:47`).
+- [ ] 4.4 `BotRuntimeProjector` hands the intent to
+      `DeviceSyncDispatcher.dispatch(ctx)` instead of orchestrating the device
+      calls itself. It keeps plan resolution, the Passport payload (AgentPass
+      is not the device, and every provider updates it identically), and
+      `SkillSetRuntimeReconcileError`. No branch on provider or engine type in
+      shared code.
+- [ ] 4.5 Keep `project_mcp_and_cli` as a thin alias for
+      `project(scope=ProjectionScope(mcp=True))` so `skill_center_module.py:918`
+      and `SkillSymlinkListener` need no edit.
+- [ ] 4.6 Tests: on the baas impl an MCP-only scope performs no
+      `sync_symlinks`, and a skills-only scope performs no
+      `sync_all_mcp_servers` and no per-MCP write; a fake whole-artifact
+      `DeviceSync` receives exactly one `apply_runtime_projection` call for a
+      both-halves scope.
+- [ ] 4.7 Flag for the corp side: teclaw needs its own
+      `apply_runtime_projection` composing and delivering once, or it keeps
+      the default (correct, not yet cheaper). Out of this repository.
 
 ## Group 5 — Dead code (problem 5)
 
 - [ ] 5.1 Delete `SkillSetService.refresh_mcp_scope`
       (`core/skill_center/services/skill_set_service.py:1914-1950`) and any
       now-unused imports.
-- [ ] 5.2 Confirm `MCPSyncService.refresh_mcp_scope` and its caller
-      `DeviceService._sync_mcps_when_device_active`
-      (`core/devices/services/device_service.py:1494`) are untouched.
+- [ ] 5.2 Confirm `MCPSyncService.refresh_mcp_scope` still has exactly one
+      production caller, `DeviceService._sync_mcps_when_device_active`
+      (`core/devices/services/device_service.py:1518`), and that neither is
+      modified.
 
 ## Verification
 
