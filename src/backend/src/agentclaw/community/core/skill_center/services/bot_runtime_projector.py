@@ -16,6 +16,9 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.identity import (
+    CallerIdentityRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
 )
@@ -64,6 +67,7 @@ class BotRuntimeProjector:
         pool_runtime: SkillsPoolRuntimeProtocol,
         pool_layouts: SkillsPoolLayoutRepositoryProtocol,
         passport: PassportPlugin,
+        caller_identity_repo: CallerIdentityRepositoryProtocol,
     ) -> None:
         self._factory = factory
         self._bot_repo = bot_repo
@@ -72,6 +76,10 @@ class BotRuntimeProjector:
         self._pool_runtime = pool_runtime
         self._pool_layouts = pool_layouts
         self._passport = passport
+        # The Passport manifest is overwrite-style per resource list, so the
+        # projector cannot send MCP scope without also sending each MCP's
+        # execution identity — see ``_passport_mcp_items``.
+        self._caller_identity_repo = caller_identity_repo
 
     async def snapshot_skill_mappings(
         self,

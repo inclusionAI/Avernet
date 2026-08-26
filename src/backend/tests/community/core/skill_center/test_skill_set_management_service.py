@@ -18,6 +18,7 @@ from agentclaw.community.core.repository.implementations.skill_center.capability
 from agentclaw.community.core.repository.capability_desired_state_types import (
     InstallationFlushPlan,
 )
+from agentclaw.community.core.caller_identity.models import McpCallType
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     SkillSetControlPlaneConflictError,
@@ -675,6 +676,23 @@ class _RuntimePassport:
         # static default. A reconcile must preserve it exactly, not revive the
         # engine's static list.
         return [{"cli_code": "kept-cli", "cli_name": "Kept"}]
+
+
+class _RuntimeCallerIdentity:
+    """Caller-identity source for the Passport MCP scope.
+
+    ``call_types`` is sparse exactly like the real table: a missing entry
+    means Owner, so the default stub asserts nothing and every projected MCP
+    resolves to ``owner``.
+    """
+
+    def __init__(self, call_types: dict[str, McpCallType] | None = None) -> None:
+        self.call_types = call_types or {}
+        self.calls: list[tuple[int, str]] = []
+
+    def list_draft_call_types(self, bot_pk: int, engine_type: str):
+        self.calls.append((bot_pk, engine_type))
+        return dict(self.call_types)
 
 
 class _FailingRuntimePassport(_RuntimePassport):
@@ -1689,6 +1707,7 @@ async def test_runtime_mapping_snapshot_has_no_runtime_side_effects():
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     snapshot = await runtime.snapshot_skill_mappings(
@@ -1719,6 +1738,7 @@ async def test_runtime_projection_flushes_installations_first():
         pool_runtime=_RuntimePool(),
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     await runtime.project(bot_id="bot-1", owner_id="true-owner")
@@ -1748,6 +1768,7 @@ async def test_projection_flush_prefers_the_layout_engine_for_default_sets():
         pool_runtime=_RuntimePool(),
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     await runtime.project(bot_id="bot-1", owner_id="true-owner")
@@ -1774,6 +1795,7 @@ async def test_runtime_projection_fails_before_engine_writes_when_flush_fails():
         pool_runtime=_RuntimePool(),
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     with pytest.raises(RuntimeError, match="installation persistence unavailable"):
@@ -1792,6 +1814,7 @@ async def test_runtime_projection_fails_closed_when_default_mcp_policy_is_unavai
         pool_runtime=_RuntimePool(),
         pool_layouts=_RuntimeLayouts(),
         passport=passport,
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     with pytest.raises(SkillSetRuntimeReconcileError):
@@ -1816,6 +1839,7 @@ async def test_runtime_projection_mcp_inputs_agree_when_the_union_overlaps():
         pool_runtime=_RuntimePool(),
         pool_layouts=_RuntimeLayouts(),
         passport=passport,
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     await runtime.project(bot_id="bot-1", owner_id="true-owner")
@@ -1839,6 +1863,7 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
         pool_runtime=_RuntimePool(),
         pool_layouts=_RuntimeLayouts(),
         passport=passport,
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     await runtime.project(bot_id="bot-1", owner_id="true-owner")
@@ -1890,6 +1915,7 @@ async def test_runtime_reconcile_fails_closed_when_effective_cli_scope_cannot_be
         pool_runtime=_RuntimePool(),
         pool_layouts=_RuntimeLayouts(),
         passport=passport,
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     with pytest.raises(SkillSetRuntimeReconcileError):
@@ -1910,6 +1936,7 @@ async def test_runtime_reconcile_requires_and_uses_mapping_v3_for_center():
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     await runtime.project(bot_id="bot-1", owner_id="true-owner")
@@ -1939,6 +1966,7 @@ async def test_coding_template_uses_aicoding_for_center_probe_but_keeps_logical_
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     await runtime.project(bot_id="bot-1", owner_id="true-owner")
@@ -1970,6 +1998,7 @@ async def test_existing_coding_runtime_uses_its_resolved_layout(
         pool_runtime=_RuntimePool(),
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     await runtime.project(bot_id="bot-1", owner_id="true-owner")
@@ -1990,6 +2019,7 @@ async def test_historical_aicoding_cleanup_uses_legacy_runtime_not_pool_mapping(
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     await runtime.project_for_cleanup(bot_id="bot-1", owner_id="true-owner")
@@ -2013,6 +2043,7 @@ async def test_historical_cleanup_rejects_center_before_runtime_or_mcp_delivery(
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     with pytest.raises(SkillSetRuntimeReconcileError):
@@ -2036,6 +2067,7 @@ async def test_teclaw_v4_rejects_center_without_any_center_runtime_request():
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     with pytest.raises(SkillSetRuntimeReconcileError):
@@ -2058,6 +2090,7 @@ async def test_teclaw_v4_repo_projection_uses_artifact_runtime_not_pool_mapping(
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     await runtime.project(bot_id="bot-1", owner_id="true-owner")
@@ -2087,6 +2120,7 @@ async def test_non_skill_projection_never_writes_skill_mappings():
         pool_runtime=pool,
         pool_layouts=_RuntimeLayouts(),
         passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
     await runtime.project_mcp_and_cli(bot_id="bot-1", owner_id="true-owner")

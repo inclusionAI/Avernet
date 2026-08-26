@@ -9,7 +9,7 @@ Paths are relative to `src/backend/src/agentclaw/community/` unless noted.
 
 ## Group 1 — Passport identity mode (problem 1)
 
-- [ ] 1.1 Inject `CallerIdentityRepositoryProtocol`
+- [x] 1.1 Inject `CallerIdentityRepositoryProtocol`
       (`core/repository/protocols/identity.py:58`) into `BotRuntimeProjector.__init__`
       (`core/skill_center/services/bot_runtime_projector.py:58`); bind it in
       `di/modules/skill_center_module.py`.
