@@ -158,6 +158,36 @@ def _record(*, provider_type: str = "ARCA", identity: int = 7) -> SimpleNamespac
 # ── start_device (INTG-01 register) ────────────────────────────────────
 
 
+class TestPersistedTtlPairContract:
+    def test_creation_result_dump_locks_persisted_ttl_pair_shape(self):
+        """WR-01: contract lock for the provider_device_props payload the
+        creation chain persists verbatim (creation_result.model_dump()).
+
+        The persisted shape is the formatted '%Y-%m-%d %H:%M:%S' string in
+        ttl_expiration_time plus the ms-epoch integer in
+        ttl_expiration_timestamp. Both the legacy readers (string compare /
+        log-only) and the dormant deadline dual-key reader depend on this
+        exact pair; a regression back to the pre-Phase-5 int-only shape (or
+        dropping either key from the dump) must fail here."""
+        result = ArcaCreationResult(
+            platform="arca",
+            status="ACTIVE",
+            template_id="tpl-test-001",
+            sandbox_id="sandbox-abc123",
+            ttl_expiration_time="2025-06-15 23:06:40",
+            ttl_expiration_timestamp=_TTL_MS,
+        )
+
+        props = result.model_dump()
+
+        assert "ttl_expiration_time" in props
+        assert "ttl_expiration_timestamp" in props
+        assert isinstance(props["ttl_expiration_time"], str)
+        assert isinstance(props["ttl_expiration_timestamp"], int)
+        assert props["ttl_expiration_time"] == "2025-06-15 23:06:40"
+        assert props["ttl_expiration_timestamp"] == _TTL_MS
+
+
 class TestStartDeviceHook:
     @pytest.mark.asyncio
     async def test_arca_create_registers_and_returns_same_response(self):
