@@ -73,7 +73,14 @@ ENV_FILE=""
 # main.py defaults to 8888. Every rendered manifest therefore published a port
 # with no listener behind it. Each entry below is the service's real default.
 declare -A DEFAULT_PORT=(
-    [baas]=8888
+    # baas is the exception: it has NO port env override (nothing in src/baas/
+    # reads BAAS_PORT), so its listener is whatever the mounted config says.
+    # Every k8s deployment here sets SERVER_ENV=prod (scripts/k8s-tests/*/baas.env),
+    # which merges application-prod.yaml and pins web.port to 8080 — the base
+    # application.yaml's 8888 never applies there. Publishing 8888 would point
+    # the Service at a dead port. NB: BAAS_PORT=8888 in those env files is inert;
+    # it is read by nothing.
+    [baas]=8080
     [gateway]=8888
     [proxy]=8888
     [bcs]=21000
@@ -233,6 +240,11 @@ if [[ ${#ENV_VARS[@]} -gt 0 ]]; then
     for entry in "${ENV_VARS[@]}"; do
         key="${entry%%=*}"
         val="${entry#*=}"
+        # The value goes into a YAML double-quoted scalar, where \ and " are
+        # escapes. A DSN password may legally contain either. Backslash first,
+        # so the quote escape we add is not itself doubled.
+        val="${val//\\/\\\\}"
+        val="${val//\"/\\\"}"
         ENV_YAML="${ENV_YAML}
         - name: ${key}
           value: \"${val}\""
@@ -245,14 +257,22 @@ fi
 export SERVICE NAMESPACE IMAGE PORT PROBE_PATH REPLICAS CPU_REQUEST CPU_LIMIT MEMORY_REQUEST MEMORY_LIMIT
 RENDERED="$(cat "$TEMPLATE" | envsubst)"
 
-# Then replace __ENV_VARS__ with the env block (or remove if empty)
+# Then replace __ENV_VARS__ with the env block (or remove if empty).
+# This MUST come after the last envsubst pass. There used to be a second pass
+# here, which re-expanded the values just inserted: a DATABASE_URL whose
+# password contained a legal '$' had everything from the '$' onward eaten
+# (mysql://u:pa$FOO@h → mysql://u:pa@h), so the pod booted with silently
+# corrupted credentials. The template's own ${...} placeholders are all
+# resolved by the first pass, so nothing is lost by dropping the second.
+# Splice by splitting on the marker rather than ${RENDERED//marker/$ENV_YAML}:
+# bash processes backslashes in a substitution's REPLACEMENT text, so a value
+# containing a backslash lost one level on the way in — undoing the escaping
+# just applied above. Concatenation copies the payload verbatim.
 if [[ -n "$ENV_YAML" ]]; then
-    RENDERED="${RENDERED//__ENV_VARS__/$ENV_YAML}"
+    RENDERED="${RENDERED%%__ENV_VARS__*}${ENV_YAML}${RENDERED#*__ENV_VARS__}"
 else
-    RENDERED="${RENDERED//        __ENV_VARS__/}"
+    RENDERED="${RENDERED%%        __ENV_VARS__*}${RENDERED#*        __ENV_VARS__}"
 fi
-export SERVICE NAMESPACE IMAGE PORT PROBE_PATH REPLICAS CPU_REQUEST CPU_LIMIT MEMORY_REQUEST MEMORY_LIMIT
-RENDERED="$(echo "$RENDERED" | envsubst)"
 
 # --- Output or apply ---
 

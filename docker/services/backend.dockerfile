@@ -99,6 +99,22 @@ COPY src/backend/src/agentclaw/community/configs /app/configs
 # runs unprivileged and cannot mkdir under a root-owned /app at request time.
 # Mount a volume over /app/data for anything that must outlive the pod.
 # tmp/ and ~/logs/ follow the same convention as the sibling service images.
+#
+# RUN ONE REPLICA unless you have configured BOTH of the following. Two things
+# in the shipped community profile are per-process, and neither fails loudly
+# when a second pod appears:
+#   * /app/data is pod-local. workspace/*, oss, nas and the default
+#     object_storage.backend "fs" all live here, so replicas diverge and a pod
+#     replacement drops whatever it held. Set object_storage.backend: "s3"
+#     (or mount shared storage) first.
+#   * cache.redis_url defaults to empty, which CommunityCache serves with an
+#     in-process lock — the overlay itself calls this "single-process only".
+#     Lifecycle work that takes those locks (GitSyncService.startup,
+#     SkillCenterSyncService, the task-discovery scheduler) then runs
+#     concurrently in every pod, each believing it holds the lock. Set
+#     REDIS_URL first.
+# The deployment template defaults to 2 replicas, so a default backend rollout
+# is affected today; scale out only once both are set.
 RUN mkdir -p /app/data/workspace/openclaw \
              /app/data/workspace/claude_code \
              /app/data/workspace/aicoding \
