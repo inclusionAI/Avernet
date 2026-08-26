@@ -204,3 +204,19 @@ def test_zero_keepalive_connections_is_allowed(resolve):
     """0 is legitimate here — it disables keep-alive without disabling the
     pool, so it must not be swept up by the range guard."""
     assert resolve({"max_keepalive_connections": 0}).defaults.max_keepalive_connections == 0
+
+
+@pytest.mark.parametrize(
+    "raw", [1.7, 2.5, "1.7", True, False, 100.5]
+)
+def test_fractional_or_boolean_connection_counts_are_rejected(resolve, raw):
+    """`int(1.7)` is 1 — a legal-looking ceiling that serialises every burst,
+    and one the range guard would wave through. `int(True)` is 1 for the same
+    reason. Neither is a plausible intent, so both fall back."""
+    conf = resolve({"max_connections": raw})
+    assert conf.defaults.max_connections == 100
+
+
+def test_whole_float_connection_count_is_accepted(resolve):
+    """`max_connections: 64.0` is unambiguous — only fractions are rejected."""
+    assert resolve({"max_connections": 64.0}).defaults.max_connections == 64
