@@ -265,6 +265,8 @@ class CronAutoSetupService:
             "enabled": True,
             "timeout_secs": DEFAULT_CRON_TIMEOUT_SECS,  # 写入 payload.timeout_secs，默认 1 小时，不再 86400
             "kind": "autoInitiate",  # 显式传递 kind，供引擎设置 payload.kind
+            "owner_id": owner_id,
+            "bot_id": bot_id,
         }
         if model:
             adapter_body["model"] = model  # 指定AI模型（取自 template_config，否则兜底 DEFAULT_CRON_MODEL）
