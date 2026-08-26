@@ -7,7 +7,7 @@ config path including the HTTP/2 flag; Group 3 validates.
 
 ## Group 0 — Dependency: `httpx[http2]`
 
-- [ ] 0.1 `pyproject.toml`: `"httpx>=0.27.0"` → `"httpx[http2]>=0.27.0"`, keeping
+- [x] 0.1 `pyproject.toml`: `"httpx>=0.27.0"` → `"httpx[http2]>=0.27.0"`, keeping
       its position in the alphabetised shared-base list. Note in the commit
       message that the block is documented as mirroring the corp manifest, so
       corp needs the same edit when this lands there.
