@@ -155,7 +155,7 @@ class CapabilityDesiredStateRepository(
                 user_id=owner_id,
                 is_default=False,
                 is_builtin=False,
-                is_active=False,
+                is_active=True,
                 env=get_current_env(),
                 avernet_tenant=get_current_avernet_tenant(),
                 engine_type=engine_type,

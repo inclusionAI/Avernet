@@ -431,6 +431,7 @@ def test_create_rejects_a_duplicate_name_without_a_durable_replay_record():
         description="description",
     )
     assert first["name"] == "set"
+    assert first["is_active"] is True
     with pytest.raises(SkillSetControlPlaneConflictError, match="SKILL_SET_NAME_CONFLICT"):
         repository.create_set(
             bot_id="bot", owner_id="owner", name="set", description="description"

@@ -86,7 +86,7 @@ class _CreateRepository(_Repository):
             "name": kwargs["name"],
             "bolt_id": kwargs["bot_id"],
             "is_default": False,
-            "is_active": False,
+            "is_active": True,
         }
 
 
@@ -949,7 +949,7 @@ def test_addressed_create_persists_metadata_without_runtime_reconcile() -> None:
     ]
 
 
-def test_create_inactive_set_does_not_require_runtime_readiness() -> None:
+def test_create_active_empty_set_does_not_require_runtime_readiness() -> None:
     repository = _CreateRepository()
     service = SkillSetManagementService(
         repository=repository,
@@ -972,7 +972,7 @@ def test_create_inactive_set_does_not_require_runtime_readiness() -> None:
         description=None,
     )
 
-    assert result["is_active"] is False
+    assert result["is_active"] is True
     assert repository.create_calls[0]["engine_type"] == "claude_code"
 
 
