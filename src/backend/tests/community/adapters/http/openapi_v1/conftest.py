@@ -156,6 +156,9 @@ class SeamBots:
             "env": "dev",
         }
 
+    def get_bot(self, bot_id: str, owner_id: str):
+        return self.get_by_id_and_owner(bot_id, owner_id)
+
 
 class SeamCollaborators:
     """The level every non-owner caller holds. Owners never reach this.
@@ -219,7 +222,7 @@ def bind_edit_lock_seam(binder, *, locks=None):
 def bind_bot_access_seam(
     binder, *, bots=None, collaborators=None, audit=None, locks=None
 ):
-    """Wire the three services ``bot_access`` needs, on a bare-``FastAPI`` app.
+    """Wire the services ``bot_access`` needs, on a bare-``FastAPI`` app.
 
     Once a group's rows are ``Check``, ``PublicAPIRoute`` attaches the gate to
     every one of its routes, and the gate fails **closed** when the repository
@@ -233,6 +236,7 @@ def bind_bot_access_seam(
     """
     from injector import InstanceProvider  # noqa: PLC0415
 
+    from agentclaw.community.api.bot_service import BotServiceProtocol  # noqa: PLC0415
     from agentclaw.community.core.repository.protocols.bot import (  # noqa: PLC0415
         BotCollabLogRepositoryProtocol,
         BotRepository,
@@ -244,7 +248,9 @@ def bind_bot_access_seam(
         CollaboratorLockServiceProtocol,
     )
 
-    binder.bind(BotRepository, to=InstanceProvider(bots or SeamBots()))
+    bot_seam = bots or SeamBots()
+    binder.bind(BotRepository, to=InstanceProvider(bot_seam))
+    binder.bind(BotServiceProtocol, to=InstanceProvider(bot_seam))
     binder.bind(
         CollaboratorServiceProtocol,
         to=InstanceProvider(collaborators or SeamCollaborators()),

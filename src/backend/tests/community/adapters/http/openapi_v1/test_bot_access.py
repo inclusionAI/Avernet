@@ -36,6 +36,7 @@ from agentclaw.community.adapters.http.openapi_v1.authorization import (
 from agentclaw.community.api.collaborator_lock_service import (
     CollaboratorLockServiceProtocol,
 )
+from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.member_management_capability import (
     MemberManagementCapabilityProtocol,
 )
@@ -92,6 +93,9 @@ class _Bots:
         if not self.exists or bot_id != BOT:
             return None
         return {"id": 7, "bot_id": BOT, "owner_id": self.owner, "env": "test"}
+
+    def get_bot(self, bot_id, owner_id):
+        return self.get_by_id_and_owner(bot_id, owner_id)
 
 
 class _Collaborators:
@@ -255,9 +259,9 @@ def _post(client, *, caller=CALLER, owner=OWNER):
     return client.post(URL, params={"user_id": caller, "owner_id": owner})
 
 
-def _scaffold_surface(rule, *, locks, dependencies=None):
+def _scaffold_surface(rule, *, locks, dependencies=None, bots=None):
     """A mutation retaining its existing auth mode while adding the lock."""
-    bots = _Bots()
+    bots = bots or _Bots()
     authz.AUTHORIZATION[("POST", PATH)] = rule
     try:
         router = APIRouter(route_class=PublicAPIRoute)
@@ -269,6 +273,7 @@ def _scaffold_surface(rule, *, locks, dependencies=None):
         class _M(Module):
             def configure(self, binder):
                 binder.bind(BotRepository, to=InstanceProvider(bots))
+                binder.bind(BotServiceProtocol, to=InstanceProvider(bots))
                 binder.bind(
                     CollaboratorLockServiceProtocol,
                     to=InstanceProvider(locks),
@@ -718,7 +723,11 @@ def test_unadjudicable_log_bounds_the_addressed_bot(caplog):
 
 def test_owner_scoped_route_adds_lock_without_changing_owner_scope():
     locks = _Locks(has_collaborators=True)
-    client = _scaffold_surface(OWNER_SCOPED_EDIT_LOCK, locks=locks)
+    client = _scaffold_surface(
+        OWNER_SCOPED_EDIT_LOCK,
+        bots=_Bots(owner=CALLER),
+        locks=locks,
+    )
 
     response = client.post(URL, params={"user_id": CALLER})
 
@@ -726,6 +735,16 @@ def test_owner_scoped_route_adds_lock_without_changing_owner_scope():
     assert locks.calls == [
         {"bot_id": BOT, "owner_id": CALLER, "user_id": CALLER}
     ]
+
+
+def test_owner_scoped_refusal_happens_before_the_edit_lock_check():
+    locks = _Locks(raises=True)
+    client = _scaffold_surface(OWNER_SCOPED_EDIT_LOCK, locks=locks)
+
+    response = client.post(URL, params={"user_id": CALLER})
+
+    assert response.status_code == 404
+    assert locks.calls == []
 
 
 def test_service_checked_route_resolves_the_bot_owner_for_the_lock():

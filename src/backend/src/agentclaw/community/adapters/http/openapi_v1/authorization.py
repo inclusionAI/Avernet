@@ -286,7 +286,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/nodes"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/passport"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/collaboration/bots/{bot_uuid}/public"): OWNER_SCOPED_EDIT_LOCK,
+    ("POST", "/openapi/v1/collaboration/bots/{bot_uuid}/public"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/render-screens"):
         NoCheck("share and group viewers must render panels without an Editor relation"),
     ("POST", "/openapi/v1/bots/{bot_id}/render-screens"): Check(PermissionLevel.MEMBER),

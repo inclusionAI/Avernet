@@ -532,7 +532,6 @@ def test_edit_lock_operations_exactly_match_the_legacy_locked_surface():
         ("POST", "/openapi/v1/bots/{bot_id}/skills/upload-folder"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
         ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"),
-        ("POST", "/openapi/v1/collaboration/bots/{bot_uuid}/public"),
     }
     actual = {
         key
