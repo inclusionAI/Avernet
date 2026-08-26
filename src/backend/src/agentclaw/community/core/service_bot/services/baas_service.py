@@ -3430,6 +3430,7 @@ class BaasService:  # pragma: no cover
         device_uuid: Optional[str] = None,
         auth_header: str = "openclawToken",
         timeout: float | None = None,
+        http_info: Optional[HttpConnectionInfo] = None,
     ) -> httpx.Response:
         """容器内 API 统一出口：封装 get_http_info + 直传完整 http_url。
 
@@ -3459,6 +3460,13 @@ class BaasService:  # pragma: no cover
                 需传 ``"x-proxypass-token"`` —— 该网关用此 header 鉴权，传 openclawToken
                 会 401。``info.token`` 是网关对应的 token，header 名不同而已。
             timeout: 获取连接信息并调用容器 API 的总超时秒数；不传时沿用各请求默认值。
+            http_info: 已解析好的连接信息。传入时跳过 get_http_info（省掉一次
+                binding 查库 + 一次 BaaS 往返），直接用它的 ``http_url``/``token``
+                发请求。调用方须保证它是用**同一** bind_id / port / **path** /
+                tenant / device_uuid 解析出来的 —— ``http_url`` 里含 path，换个
+                path 复用会打到错误的容器路由。批量同 path 请求（如逐文件
+                ``/api/file/upload``）由 ``BaasInvokeTransport`` 按 path 缓存后
+                在此复用。
 
         Returns:
             httpx.Response — 来自 self._general_http 的原始响应，供调用方自行处理
@@ -3470,18 +3478,24 @@ class BaasService:  # pragma: no cover
             raise ValueError("timeout must be positive")
 
         started_at = time.monotonic() if timeout is not None else None
-        http_info_timeout_kwargs = (
-            {"timeout": min(timeout, 5.0)} if timeout is not None else {}
-        )
-        info = self.get_http_info(
-            bind_id=bind_id,
-            port=port,
-            path=path,
-            tenant=tenant,
-            device_affinity=device_affinity,
-            device_uuid=device_uuid,
-            **http_info_timeout_kwargs,
-        )
+        if http_info is not None:
+            # Caller already resolved this (same bind_id/port/path/tenant/device_uuid)
+            # and is reusing it across a batch — the whole ``timeout`` budget is the
+            # container request's, since no resolution round trip is spent here.
+            info = http_info
+        else:
+            http_info_timeout_kwargs = (
+                {"timeout": min(timeout, 5.0)} if timeout is not None else {}
+            )
+            info = self.get_http_info(
+                bind_id=bind_id,
+                port=port,
+                path=path,
+                tenant=tenant,
+                device_affinity=device_affinity,
+                device_uuid=device_uuid,
+                **http_info_timeout_kwargs,
+            )
 
         request_timeout_kwargs: dict[str, float] = {}
         if timeout is not None and started_at is not None:
