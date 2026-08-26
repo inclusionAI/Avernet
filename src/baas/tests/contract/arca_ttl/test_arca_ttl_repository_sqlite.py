@@ -661,6 +661,30 @@ class TestFindUnregistered:
         # Four-key contract (Pitfall 4).
         assert sorted(rows[0].keys()) == ["id", "sandbox_id", "source_table", "ttl"]
 
+    def test_legacy_ttl_expiration_time_key_falls_back_in_discovery(self, repo):
+        """WR-02: pre-release rows persisted only the legacy integer-ms
+        ttl_expiration_time key (no ttl_expiration_timestamp) — the
+        dual-key COALESCE must project that legacy value instead of NULL,
+        so pre-existing ACTIVE containers keep their real expiry instead
+        of degrading to the discovery now+window fallback."""
+        _seed_hot_device(
+            id_val=30,
+            env=ENV,
+            provider_device_id="sb-30",
+            provider_device_props='{"ttl_expiration_time": 1788192000000}',
+        )
+        _seed_hot_binding(
+            id_val=31,
+            env=ENV,
+            device_props='{"sandbox_id": "sb-b-31", "ttl_expiration_time": 1788969600000}',
+        )
+
+        device_rows = repo.find_unregistered(ENV, "baas_device", 500)
+        binding_rows = repo.find_unregistered(ENV, "ac_entity_device_binding", 500)
+
+        assert [(r["id"], r["ttl"]) for r in device_rows] == [(30, 1788192000000)]
+        assert [(r["id"], r["ttl"]) for r in binding_rows] == [(31, 1788969600000)]
+
     def test_unsupported_side_raises(self, repo):
         with pytest.raises(ValueError, match="Unsupported side"):
             repo.find_unregistered(ENV, "bogus", 500)

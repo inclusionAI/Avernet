@@ -354,6 +354,38 @@ class TestStartDeviceHook:
         ]
         assert len(warnings) == 1
 
+    @pytest.mark.asyncio
+    async def test_arca_create_legacy_ttl_time_fallback_registers(self):
+        """WR-02: pre-release props persisted only the legacy integer-ms
+        ttl_expiration_time key — the dual-key fallback reads it and
+        registers with the real expiry instead of deferring to the
+        discovery scan."""
+        svc, mock_schedule_repo, _ = _make_service()
+        response = _response(
+            props_override={
+                "platform": "arca",
+                "status": "ACTIVE",
+                "ttl_expiration_time": _TTL_MS,
+            }
+        )
+
+        with patch.object(
+            DefaultDeviceService, "start_device", new=AsyncMock(return_value=response)
+        ):
+            result = await svc.start_device(
+                tenant="test-tenant", device_uuid="DEVICE-test-001"
+            )
+
+        assert result is response
+        expected_next = _expiration_dt() - timedelta(hours=12)
+        mock_schedule_repo.register.assert_called_once_with(
+            "test",
+            sandbox_id="sandbox-abc123",
+            source_table="baas_device",
+            source_id=response.id,
+            next_renew_at=expected_next,
+        )
+
 
 # ── stop_device_by_uuid (INTG-02 set_status) ───────────────────────────
 
