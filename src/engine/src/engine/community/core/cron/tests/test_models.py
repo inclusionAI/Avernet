@@ -65,6 +65,8 @@ class TestCronJob:
         assert job.id == "job-001"
         assert job.name == "daily-report"
         assert job.enabled is True  # default
+        assert job.owner_id is None
+        assert job.bot_id is None
         assert job.session_target == "isolated"  # default
         assert job.state == {}  # default_factory
         assert job.notify is None  # optional
@@ -73,11 +75,15 @@ class TestCronJob:
         notify = CronNotifyConfig(enabled=True, user_ids=["abc"])
         job = self._make_job(
             enabled=False,
+            owner_id="u1",
+            bot_id="b1",
             session_target="persistent",
             state={"run_count": 5},
             notify=notify,
         )
         assert job.enabled is False
+        assert job.owner_id == "u1"
+        assert job.bot_id == "b1"
         assert job.session_target == "persistent"
         assert job.state == {"run_count": 5}
         assert job.notify.user_ids == ["abc"]
@@ -173,7 +179,20 @@ class TestCreateJobRequest:
         )
         assert req.session_target == "isolated"
         assert req.enabled is True
+        assert req.owner_id is None
+        assert req.bot_id is None
         assert req.notify is None
+
+    def test_context_fields(self):
+        req = CreateJobRequest(
+            name="job",
+            schedule={},
+            payload={},
+            owner_id="u1",
+            bot_id="b1",
+        )
+        assert req.owner_id == "u1"
+        assert req.bot_id == "b1"
 
     def test_with_notify(self):
         req = CreateJobRequest(

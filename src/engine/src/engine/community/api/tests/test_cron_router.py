@@ -176,13 +176,19 @@ class TestCreateTask:
             "enabled": False,
             "timeout_secs": 120,
             "model": "gpt-4o",
+            "owner_id": "u1",
+            "bot_id": "b1",
             "notify": {"enabled": True, "user_ids": ["u1", "u2"]},
         }
         resp = client.post("/api/cron", json=payload)
         assert resp.status_code == 200
         # Verify the CreateJobRequest passed to add_job
         call_args = mock_cron_api.add_job.call_args[0][0]
+        assert call_args.owner_id == "u1"
+        assert call_args.bot_id == "b1"
         assert call_args.payload["model"] == "gpt-4o"
+        assert call_args.payload["owner_id"] == "u1"
+        assert call_args.payload["bot_id"] == "b1"
         assert call_args.payload["timeout_secs"] == 120
         assert call_args.notify is not None
         assert call_args.notify.user_ids == ["u1", "u2"]
@@ -227,6 +233,16 @@ class TestCreateTask:
         assert resp.status_code == 200
         call_args = mock_cron_api.add_job.call_args[0][0]
         assert "append_message" not in call_args.payload
+
+    def test_owner_and_bot_ids_passed_to_payload(self, client, mock_cron_api):
+        payload = {**self._PAYLOAD, "owner_id": "u1", "bot_id": "b1"}
+        resp = client.post("/api/cron", json=payload)
+        assert resp.status_code == 200
+        call_args = mock_cron_api.add_job.call_args[0][0]
+        assert call_args.owner_id == "u1"
+        assert call_args.bot_id == "b1"
+        assert call_args.payload["owner_id"] == "u1"
+        assert call_args.payload["bot_id"] == "b1"
 
 
 # ── PUT /api/cron/{task_id} ───────────────────────────────────────────────────
