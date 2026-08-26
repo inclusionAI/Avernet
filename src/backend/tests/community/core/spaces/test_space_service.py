@@ -13,7 +13,7 @@ from agentclaw.community.core.repository.implementations.spaces.space import (
     SpaceRepository,
 )
 from agentclaw.community.core.spaces.errors import SpaceAlreadyExistsError
-from agentclaw.community.core.spaces.models import SpaceRecord, SpaceType
+from agentclaw.community.core.spaces.models import SpaceListScope, SpaceRecord, SpaceType
 from agentclaw.community.core.spaces.services.space_service import SpaceService
 from agentclaw.community.plugin_api.staff_dept import (
     StaffProfileInfo,
@@ -389,7 +389,25 @@ def test_list_spaces_normalizes_filters_and_pagination() -> None:
         space_type="TEAM",
         offset=25,
         limit=25,
+        scope=SpaceListScope.ALL,
     )
+
+
+def test_list_spaces_forwards_accessible_scope() -> None:
+    repository = MagicMock()
+    repository.list_spaces.return_value = (0, [])
+    service = _make_service(repository, MagicMock())
+
+    service.list_spaces(
+        user_id="owner-1",
+        keyword=None,
+        space_type=None,
+        page_no=1,
+        page_size=20,
+        scope=SpaceListScope.ACCESSIBLE,
+    )
+
+    assert repository.list_spaces.call_args.kwargs["scope"] is SpaceListScope.ACCESSIBLE
 
 
 def test_list_spaces_turns_blank_optional_filters_into_none() -> None:

@@ -62,6 +62,7 @@ from agentclaw.community.core.market_favorites.models import (
     MarketFavoriteRecord,
 )
 from agentclaw.community.core.spaces.models import (
+    SpaceListScope,
     SpaceMemberSummaryRecord,
     SpaceRole as DomainSpaceRole,
     SpaceSummaryRecord,
@@ -178,6 +179,10 @@ async def list_spaces(
     ] = None,
     page_no: PageNoQuery = 1,
     page_size: PageSizeQuery = 20,
+    scope: Annotated[
+        SpaceListScope,
+        Query(description="Space visibility scope: all or accessible."),
+    ] = SpaceListScope.ALL,
     service: SpaceServiceProtocol = Injected(SpaceServiceProtocol),
 ) -> Envelope[Page[SpaceItem]]:
     actor_id = _require_user_delegation(caller)
@@ -187,6 +192,7 @@ async def list_spaces(
         space_type=DomainSpaceType(space_type) if space_type is not None else None,
         page_no=page_no,
         page_size=page_size,
+        scope=scope,
     )
     return page(total, [_space_item(record) for record in records], request)
 
