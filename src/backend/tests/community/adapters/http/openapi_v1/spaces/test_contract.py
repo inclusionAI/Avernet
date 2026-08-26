@@ -33,6 +33,7 @@ from agentclaw.community.core.market_favorites.models import (
 )
 from agentclaw.community.core.spaces.models import (
     SpaceJoinStatus,
+    SpaceListScope as DomainSpaceListScope,
     SpaceMemberRecord,
     SpaceMemberSummaryRecord,
     SpaceRecord,
@@ -433,7 +434,25 @@ def test_list_spaces_forwards_filters_and_maps_page(client, space_service):
         space_type=SpaceType.TEAM,
         page_no=2,
         page_size=5,
+        scope=DomainSpaceListScope.ALL,
     )
+
+
+def test_list_spaces_forwards_accessible_scope(client, space_service):
+    space_service.list_spaces.return_value = (0, [])
+
+    response = client.get(
+        "/openapi/v1/bots/spaces", params={"scope": "accessible"}
+    )
+
+    assert response.status_code == 200
+    assert space_service.list_spaces.call_args.kwargs["scope"] is DomainSpaceListScope.ACCESSIBLE
+
+
+def test_list_spaces_rejects_unknown_scope(client):
+    response = client.get("/openapi/v1/bots/spaces", params={"scope": "joined"})
+
+    assert response.status_code == 422
 
 
 @pytest.mark.parametrize("was_created", [True, False])
