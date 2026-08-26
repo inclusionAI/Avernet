@@ -50,7 +50,6 @@ from agentclaw.community.adapters.http.openapi_v1.access_log import (
 )
 from agentclaw.community.adapters.http.openapi_v1.authorization import (
     Check,
-    ServiceChecked,
 )
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
@@ -64,7 +63,6 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 from agentclaw.community.api.collaborator_lock_service import (
     CollaboratorLockServiceProtocol,
 )
-from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.member_management_capability import (
     MemberManagementCapabilityProtocol,
 )
@@ -167,87 +165,6 @@ def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
             )
 
     return gate
-
-
-def require_scaffold_edit_lock(rule: object) -> Callable[..., AsyncIterator[None]]:
-    """Add the lock after the retained owner/service authorization mode.
-
-    A locked ``ServiceChecked`` route keeps its service authorization as a
-    route dependency so FastAPI resolves it before this appended dependency.
-    """
-
-    async def gate(
-        request: Request,
-        caller_id: UserIdDep,
-    ) -> AsyncIterator[None]:
-        raw_bot_id = request.path_params.get("bot_id")
-        if not isinstance(raw_bot_id, str) or not raw_bot_id:
-            raise BotEditLockCheckError("edit-lock target is unavailable")
-
-        bot_id = raw_bot_id
-        owner_id = caller_id
-        if isinstance(rule, ServiceChecked):
-            owner_id = await _owner_of(request, bot_id=bot_id)
-        else:
-            await _require_owner_scoped_bot(
-                request,
-                bot_id=bot_id,
-                owner_id=owner_id,
-            )
-
-        await _require_edit_lock(
-            request,
-            bot_id=bot_id,
-            owner_id=owner_id,
-            caller_id=caller_id,
-        )
-        yield
-
-    return gate
-
-
-async def _require_owner_scoped_bot(
-    request: Request, *, bot_id: str, owner_id: str
-) -> None:
-    """Preserve owner-scoped admission before consulting the edit lock."""
-    bot_service = _service(request, BotServiceProtocol)
-    if bot_service is None:
-        raise BotAccessRefusedError(f"bot {for_log(bot_id)} not found")
-    try:
-        bot = await asyncio.to_thread(bot_service.get_bot, bot_id, owner_id)
-    except Exception as exc:
-        logger.exception(
-            "[bot_access] owner-scoped lookup failed for bot=%s; refusing",
-            for_log(bot_id),
-        )
-        raise BotAccessRefusedError(
-            f"bot {for_log(bot_id)} not found"
-        ) from exc
-    if not bot:
-        raise BotAccessRefusedError(f"bot {for_log(bot_id)} not found")
-
-
-async def _owner_of(request: Request, *, bot_id: str) -> str:
-    """Resolve the owner for a service-checked route's authorized Bot."""
-    bots = _service(request, BotRepository)
-    if bots is None:
-        raise BotEditLockCheckError("edit-lock target is unavailable")
-    try:
-        bot = await asyncio.to_thread(bots.get_by_id, bot_id)
-    except Exception as exc:
-        logger.exception(
-            "[bot_access] edit-lock owner lookup failed for bot=%s; refusing",
-            for_log(bot_id),
-        )
-        raise BotEditLockCheckError("edit-lock target is unavailable") from exc
-    owner_id = (
-        bot.get("owner_id")
-        if isinstance(bot, dict)
-        else getattr(bot, "owner_id", None)
-    )
-    if not isinstance(owner_id, str) or not owner_id:
-        raise BotEditLockCheckError("edit-lock target is unavailable")
-    return owner_id
 
 
 async def _require_edit_lock(
@@ -528,4 +445,4 @@ def _service(request: Request, protocol: type) -> Any | None:
         return None
 
 
-__all__ = ["require_check", "require_scaffold_edit_lock"]
+__all__ = ["require_check"]

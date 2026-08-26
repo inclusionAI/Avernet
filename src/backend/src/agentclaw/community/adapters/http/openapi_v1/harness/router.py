@@ -128,7 +128,6 @@ HarnessBotAccessDep = Annotated[str, Depends(require_harness_bot_access)]
     "/diagnose",
     response_model=Envelope[DiagnoseStartResponse],
     responses=ERROR_RESPONSES,
-    dependencies=[Depends(require_harness_bot_access)],
 )
 @envelope_errors
 async def harness_diagnose(
@@ -136,6 +135,7 @@ async def harness_diagnose(
     bot_id: Annotated[str, Path(..., description="Bot ID")],
     body: HarnessDiagnoseRequest,
     user_id: UserIdDep,
+    _: HarnessBotAccessDep,
     scanner: ContentScannerProtocol = Injected(ContentScannerProtocol),
     scan_repo: HarnessScanRecordRepository = Injected(HarnessScanRecordRepository),
     patch_planner: PatchPlannerProtocol = Injected(PatchPlannerProtocol),
@@ -304,7 +304,6 @@ async def harness_preview(
     "/apply",
     response_model=Envelope[ApplyResponse],
     responses=ERROR_RESPONSES,
-    dependencies=[Depends(require_harness_bot_access)],
 )
 @envelope_errors
 async def harness_apply(
@@ -312,6 +311,7 @@ async def harness_apply(
     bot_id: Annotated[str, Path(..., description="Bot ID")],
     body: HarnessApplyRequest,
     user_id: UserIdDep,
+    _: HarnessBotAccessDep,
     engine: PatchEngineProtocol = Injected(PatchEngineProtocol),
     patch_repo: HarnessPatchRepository = Injected(HarnessPatchRepository),
     patch_record_repo: HarnessPatchRecordRepository = Injected(HarnessPatchRecordRepository),

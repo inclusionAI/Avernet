@@ -9,9 +9,6 @@ import zipfile
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.api.collaborator_lock_service import (
-    CollaboratorLockServiceProtocol,
-)
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
@@ -161,10 +158,6 @@ _HEADERS = {"content-type": "application/zip", PRINCIPAL_HEADER: _principal()}
 def _seed_uploadable_bot(world) -> None:
     """Seed the same non-default tenant that the verified request selects."""
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
-    # Resolve the real lock service before replacing SkillServiceFactory below.
-    # Its wider BotService graph also consumes that factory, while this focused
-    # storage double intentionally implements only the upload method.
-    world.get(CollaboratorLockServiceProtocol)
     storage_factory = _StorageFactory()
     world.injector.binder.bind(SkillServiceFactory, to=storage_factory, scope=None)
     with avernet_tenant_scope(_TENANT):

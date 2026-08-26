@@ -319,7 +319,7 @@ def test_scaffolding_burn_down_is_reported():
 
 
 #: The exact operations that may still be ``ServiceChecked`` once this feature
-#: lands — twenty-five of them, deferred for six reasons recorded in
+#: lands — twenty-seven of them, deferred for seven reasons recorded in
 #: ``spec.md``'s *Out of Scope*. It was ten when the plan was written; the
 #: engine-runtime and bot-chat traces added the rest, each for a reason the
 #: table could not have shown. That is what this set is for.
@@ -347,11 +347,14 @@ _DEFERRED_OPERATIONS = frozenset(
         ("POST", "/openapi/v1/bots/{bot_id}/harness/preview"),
         ("POST", "/openapi/v1/bots/{bot_id}/harness/rollback"),
         # The read remains checked in skill_query_service, which also keeps the
-        # retiring skills addresses checked. The two canonical upload writes
-        # additionally use Check(MEMBER, EDIT_LOCK): their service check stays
-        # in place, while the seam establishes permission before checking the
-        # legacy edit lock.
+        # retiring skills addresses checked.
         ("GET", "/openapi/v1/bots/{bot_id}/skills"),
+        # Upload authorization remains owned by local_skill_upload_service.
+        # This change only adds lock declarations to settled ``Check`` rows;
+        # migrating ``ServiceChecked`` handlers is a separate authorization
+        # change and stays out of scope here.
+        ("POST", "/openapi/v1/bots/{bot_id}/skills"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skills/upload-folder"),
         # Its check guards what may be *composed* — a credential granting
         # operator.admin over every session on the device — rather than how the
         # route is served. Whether a route-level gate replaces that is not a
@@ -489,20 +492,13 @@ def test_existing_service_level_edit_lock_defences_are_preserved():
     )
 
 
-def test_edit_lock_operations_exactly_match_the_legacy_locked_surface():
+def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
     expected = {
-        ("DELETE", "/openapi/v1/bots/{bot_id}"),
-        ("PUT", "/openapi/v1/bots/{bot_id}"),
         ("POST", "/openapi/v1/bots/{bot_id}/channels"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
         ("PATCH", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
         ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"),
-        ("POST", "/openapi/v1/bots/{bot_id}/data-init"),
         ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"),
-        ("PUT", "/openapi/v1/bots/{bot_id}/engine/config"),
-        ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"),
-        ("POST", "/openapi/v1/bots/{bot_id}/harness/diagnose"),
-        ("PUT", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"),
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"),
         ("PUT", "/openapi/v1/bots/{bot_id}/lifecycle/approval"),
@@ -512,14 +508,6 @@ def test_edit_lock_operations_exactly_match_the_legacy_locked_surface():
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/retry"),
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"),
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade"),
-        ("DELETE", "/openapi/v1/bots/{bot_id}/resources"),
-        ("POST", "/openapi/v1/bots/{bot_id}/resources/mkdir"),
-        ("POST", "/openapi/v1/bots/{bot_id}/resources/upload"),
-        ("POST", "/openapi/v1/bots/{bot_id}/restart"),
-        ("POST", "/openapi/v1/bots/{bot_id}/routines"),
-        ("DELETE", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"),
-        ("PATCH", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"),
-        ("POST", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"),
         ("POST", "/openapi/v1/bots/{bot_id}/skill-sets"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"),
         ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/activate"),
@@ -528,15 +516,13 @@ def test_edit_lock_operations_exactly_match_the_legacy_locked_surface():
         ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"),
         ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"),
-        ("POST", "/openapi/v1/bots/{bot_id}/skills"),
-        ("POST", "/openapi/v1/bots/{bot_id}/skills/upload-folder"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
         ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"),
     }
     actual = {
         key
         for key, rule in AUTHORIZATION.items()
-        if getattr(rule, "edit_lock", None) is EDIT_LOCK
+        if isinstance(rule, Check) and rule.edit_lock is EDIT_LOCK
     }
 
     assert actual == expected
@@ -550,7 +536,7 @@ def test_every_edit_lock_operation_declares_423_in_openapi():
     edit_locked = {
         key
         for key, rule in AUTHORIZATION.items()
-        if getattr(rule, "edit_lock", None) is EDIT_LOCK
+        if isinstance(rule, Check) and rule.edit_lock is EDIT_LOCK
     }
 
     missing = sorted(key for key in edit_locked if 423 not in routes[key].responses)
@@ -793,10 +779,6 @@ def test_bot_id_anywhere_on_the_path_is_accepted():
 #: rows that share it is precisely what keeps it in place.
 _TWINS_CHECKED_INDEPENDENTLY = frozenset(
     {
-        # The retiring upload carries bot_id in the query string, which the
-        # path-only seam cannot adjudicate. Its collection shim keeps the
-        # grant/service check used before the canonical route migrated.
-        ("POST", "/openapi/v1/bots/skills/upload"),
         ("GET", "/openapi/v1/bots/skills/{skill_id}"),
         ("DELETE", "/openapi/v1/bots/skills/{skill_id}"),
         ("POST", "/openapi/v1/bots/skills/{skill_id}/activate"),
@@ -950,11 +932,6 @@ def test_the_check_the_exempted_twins_rely_on_still_exists():
         "the exempted twins resolve their bot through _bot_behind; without it "
         "they no longer reach the check they are exempted on account of"
     )
-    collection_source = inspect.getsource(legacy_skills._collection_shim)
-    assert "_grant_checked" in collection_source, (
-        "the retiring upload no longer carries its independent grant check"
-    )
-
     get_source = inspect.getsource(query_service.SkillQueryService.get_local_skill)
     assert "_require_view_access" in get_source, (
         "get_local_skill no longer calls _require_view_access, so _bot_behind "
@@ -965,7 +942,7 @@ def test_the_check_the_exempted_twins_rely_on_still_exists():
     source = inspect.getsource(query_service.SkillQueryService._require_view_access)
     assert "check_collaborator_permission" in source, (
         "_require_view_access no longer performs a collaborator check, so the "
-        "the skill-id twins exempted in _TWINS_CHECKED_INDEPENDENTLY are "
+        "four legacy skills twins exempted in _TWINS_CHECKED_INDEPENDENTLY are "
         "now unguarded — either restore it or migrate them"
     )
     assert "PermissionLevel.MEMBER" in source, (

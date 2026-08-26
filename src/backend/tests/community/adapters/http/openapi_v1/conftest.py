@@ -142,22 +142,8 @@ class SeamBots:
     which would pass whatever the seam did.
     """
 
-    def __init__(self, owner_id: str = "actor") -> None:
-        self.owner_id = owner_id
-
     def get_by_id_and_owner(self, bot_id: str, owner_id: str):
         return {"id": 1, "bot_id": bot_id, "owner_id": owner_id, "env": "dev"}
-
-    def get_by_id(self, bot_id: str):
-        return {
-            "id": 1,
-            "bot_id": bot_id,
-            "owner_id": self.owner_id,
-            "env": "dev",
-        }
-
-    def get_bot(self, bot_id: str, owner_id: str):
-        return self.get_by_id_and_owner(bot_id, owner_id)
 
 
 class SeamCollaborators:
@@ -205,20 +191,6 @@ class SeamLocks:
         )
 
 
-def bind_edit_lock_seam(binder, *, locks=None):
-    """Wire the no-collaborator lock used by focused handler test apps."""
-    from injector import InstanceProvider  # noqa: PLC0415
-
-    from agentclaw.community.api.collaborator_lock_service import (  # noqa: PLC0415
-        CollaboratorLockServiceProtocol,
-    )
-
-    binder.bind(
-        CollaboratorLockServiceProtocol,
-        to=InstanceProvider(locks or SeamLocks()),
-    )
-
-
 def bind_bot_access_seam(
     binder, *, bots=None, collaborators=None, audit=None, locks=None
 ):
@@ -236,7 +208,9 @@ def bind_bot_access_seam(
     """
     from injector import InstanceProvider  # noqa: PLC0415
 
-    from agentclaw.community.api.bot_service import BotServiceProtocol  # noqa: PLC0415
+    from agentclaw.community.api.collaborator_lock_service import (  # noqa: PLC0415
+        CollaboratorLockServiceProtocol,
+    )
     from agentclaw.community.core.repository.protocols.bot import (  # noqa: PLC0415
         BotCollabLogRepositoryProtocol,
         BotRepository,
@@ -244,13 +218,7 @@ def bind_bot_access_seam(
     from agentclaw.community.core.bot_collaborator.protocols import (  # noqa: PLC0415
         CollaboratorServiceProtocol,
     )
-    from agentclaw.community.api.collaborator_lock_service import (  # noqa: PLC0415
-        CollaboratorLockServiceProtocol,
-    )
-
-    bot_seam = bots or SeamBots()
-    binder.bind(BotRepository, to=InstanceProvider(bot_seam))
-    binder.bind(BotServiceProtocol, to=InstanceProvider(bot_seam))
+    binder.bind(BotRepository, to=InstanceProvider(bots or SeamBots()))
     binder.bind(
         CollaboratorServiceProtocol,
         to=InstanceProvider(collaborators or SeamCollaborators()),

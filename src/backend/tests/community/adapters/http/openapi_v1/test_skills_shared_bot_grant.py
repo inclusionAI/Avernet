@@ -50,7 +50,6 @@ from agentclaw.community.core.gateway_principal import (
 )
 
 from .conftest import (
-    SeamBots,
     SeamCollaborators,
     bind_bot_access_seam,
     mount_public_error_handlers,
@@ -197,7 +196,6 @@ def client():
             # the addressed owner, and a wrong lookup still answers 404.
             bind_bot_access_seam(
                 binder,
-                bots=SeamBots(owner_id=OWNER),
                 collaborators=SeamCollaborators(PermissionLevel.MEMBER),
             )
 
