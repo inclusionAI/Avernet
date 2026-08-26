@@ -114,8 +114,26 @@ declare -A PORT_ENV_VAR=(
     [backend]=BACKEND_PORT
 )
 
-# All services default to 4 CPU / 8Gi spec, 2 replicas.
-DEFAULT_REPLICAS=2
+# All services default to a 4 CPU / 8Gi spec.
+#
+# Replicas are per-service because the backend cannot safely run more than one
+# pod on the shipped community defaults, and nothing fails loudly when it does:
+#   * /app/data is pod-local — workspace/*, oss, nas and the default
+#     object_storage.backend "fs" all live there, so replicas diverge and a pod
+#     replacement drops what it held.
+#   * cache.redis_url defaults to empty, which CommunityCache serves with an
+#     in-process lock; the overlay itself calls that "single-process only".
+#     Startup work that takes those locks (GitSyncService, SkillCenterSyncService,
+#     the task-discovery scheduler) would then run concurrently in every pod,
+#     each believing it holds the lock.
+# Configure S3 object storage and REDIS_URL, then raise it with REPLICAS=N.
+declare -A DEFAULT_REPLICAS=(
+    [baas]=2
+    [gateway]=2
+    [proxy]=2
+    [bcs]=2
+    [backend]=1
+)
 DEFAULT_CPU_REQUEST="4"
 DEFAULT_CPU_LIMIT="4"
 DEFAULT_MEM_REQUEST="8Gi"
@@ -176,7 +194,7 @@ fi
 
 PORT="${PORT:-${DEFAULT_PORT[$SERVICE]}}"
 PROBE_PATH="${PROBE_PATH:-${DEFAULT_PROBE_PATH[$SERVICE]}}"
-REPLICAS="${REPLICAS:-$DEFAULT_REPLICAS}"
+REPLICAS="${REPLICAS:-${DEFAULT_REPLICAS[$SERVICE]}}"
 CPU_REQUEST="${CPU_REQUEST:-$DEFAULT_CPU_REQUEST}"
 CPU_LIMIT="${CPU_LIMIT:-$DEFAULT_CPU_LIMIT}"
 MEMORY_REQUEST="${MEMORY_REQUEST:-$DEFAULT_MEM_REQUEST}"
