@@ -487,9 +487,11 @@ unit file.
 - `test_profile_and_modules_for.py` resolves the real `HttpxClient` bindings
   across profiles — confirms the new required provider argument is satisfied by
   the container, not just by direct calls.
-- `test_session_resources.py` binds `HttpxClient(_session_file_api_base())`
-  against a live local HTTP server; it exercises the pooled path end-to-end over
-  a real socket, which no mock-transport test does.
+- The session-resource endpoint cases bind `HttpxClient(_session_file_api_base())`
+  against a live `ThreadingHTTPServer`, exercising the pooled path end-to-end
+  over a real socket. Run them with `pytest tests/community/endpoints/` — the
+  file registers cases via `@endpoint_test` and defines no `test_*` functions,
+  so naming it directly collects nothing and passes vacuously.
 - `test_lifecycle_discovery.py` — confirms nothing about discovery regressed.
 - `test_local_no_external_deps.py` — confirms the new `h2` dependency does not
   breach whatever the local-plugin import rules allow.
