@@ -18,12 +18,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, USER_SCOPED_403
+from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
 from agentclaw.community.adapters.http.task.schemas import (
     TaskExecutionGraphDTO,
@@ -94,21 +93,22 @@ async def get_task_dashboard(
     return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
 
 
-@router.get("/list", response_model=Envelope[list[TaskInfoRecordDTO]], responses=USER_SCOPED_403)
+@router.get("/list", response_model=Envelope[list[TaskInfoRecordDTO]])
 @envelope_errors
 async def list_tasks(
     request: Request,
-    user_id: UserIdDep,
+    principal: PrincipalDep,
+    user_id: str = Query(..., description="按归属 user_id 过滤任务记录"),
     status: Annotated[
         str | None, Query(description="可选 status 过滤记录状态;非法值 → 400")
     ] = None,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> Envelope[list[TaskInfoRecordDTO]]:
-    """列持久化 task_info 记录,按更新时间降序。可选 status 过滤记录状态。
+    """列持久化 task_info 记录,按更新时间降序,并按查询参数 user_id 过滤。
 
-    返回完整 TaskInfoRecord 字段(含 task_spec/execution_config/owner)。非法 status → 400
-    (Status(invalid) 会抛 ValueError,router 层先校验;经 HTTPException → 中央 handler
-    → ErrorEnvelope,非 500)。"""
+    user_id 是直接的筛选条件,不要求与认证主体一致,也不执行 owner 作用域校验。
+    返回完整任务记录字段。非法 status 返回 400，而不是服务器内部错误。"""
+    del principal  # Authentication remains mandatory; user_id is only a query filter.
     if status is not None and status not in {s.value for s in Status}:
         raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
     items = service.list_tasks(status, owner_user_id=user_id)

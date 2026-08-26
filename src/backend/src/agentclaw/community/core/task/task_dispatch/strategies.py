@@ -86,7 +86,7 @@ class DirectDispatchStrategy:
 
 
 class SearchBasedDispatchStrategy:
-    """默认兜底:搜推匹配(决策非查找)。两步:① 框架语义预查候选集(分字段 title/objective/background)
+    """默认兜底:搜推匹配(决策非查找)。两步:① 框架关键字预查候选集(分字段 title/objective/background)
     → ② 投 owner bot search skill 在候选里决出 who+how → 4 态 SearchResult。端口(bot/discover)由 DI 注入;
     省略端口 = stub 路径(纯内核单测)恒 MISS。搜推 skill 不自取 BCSFuse,候选集由框架预查喂入 prompt。
 
@@ -156,7 +156,8 @@ def _tokenize(text: str) -> list[str]:
 
 
 async def _prefetch_candidates(discover, node: TaskNode, graph: TaskExecutionGraph) -> list[dict]:
-    """框架候选预查:对 node 的 title/objective/background 各 jieba 分词,每 token 调 search_by_keyword
+    """框架候选预查:对 node 的 title/objective/background 各 jieba 分词,每 token 调 name/owner LIKE
+    ``search_by_keyword``
     (命中 0→空,不 fallback 全量),合并去重按 recommend.score 降序。discover.search_by_keyword 是同步
     requests,经 asyncio.to_thread 包;多 token 用 asyncio.gather 并发。user_id 取 graph 派生
     owner_bot_id;filters={"runtime_state":["online"]},top_k=10,min_score=0.01。"""
