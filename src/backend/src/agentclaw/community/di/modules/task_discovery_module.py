@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 from injector import Binder, Module, inject, provider, singleton
 
@@ -52,23 +51,11 @@ from agentclaw.community.core.task.task_discovery.session_initiator import (
     SessionInitiator,
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
-    SqliteTaskReader,
+    OrmTaskReader,
     TaskReader,
 )
+from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
-
-#: 默认 db 文件路径(8 级上溯到项目根)
-_PROJECT_ROOT = Path(__file__).resolve()
-for _ in range(8):
-    _PROJECT_ROOT = _PROJECT_ROOT.parent
-_DEFAULT_DB = str(
-    _PROJECT_ROOT / "scripts" / ".dependencies" / "data" / "discovered_tasks.db"
-)
-
-
-def _resolve_db_path() -> str:
-    """从环境变量或默认路径解析 db 文件路径。"""
-    return os.environ.get("TASK_DISCOVERY_DATA_FILE", _DEFAULT_DB)
 
 
 _DEFAULT_BACKEND_URL = "http://localhost:8888"
@@ -142,9 +129,14 @@ class TaskDiscoveryModule(Module):
 
     @singleton
     @provider
-    def _provide_task_reader(self) -> TaskReader:
-        """构建 SqliteTaskReader（注入 db path）。"""
-        return SqliteTaskReader(_resolve_db_path())
+    @inject
+    def _provide_task_reader(self, db: DatabasePlugin) -> TaskReader:
+        """构建 OrmTaskReader（注入 DatabasePlugin）。
+
+        corp 走 ZDAS/OceanBase，local 走 SQLite 内存库。
+        替代原 SqliteTaskReader 的直接 sqlite3 文件访问。
+        """
+        return OrmTaskReader(db)
 
     @singleton
     @provider
