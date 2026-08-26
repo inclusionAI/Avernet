@@ -195,7 +195,8 @@ def client():
             # the grant is still the thing that has to be looked up against
             # the addressed owner, and a wrong lookup still answers 404.
             bind_bot_access_seam(
-                binder, collaborators=SeamCollaborators(PermissionLevel.MEMBER)
+                binder,
+                collaborators=SeamCollaborators(PermissionLevel.MEMBER),
             )
 
     app = FastAPI()

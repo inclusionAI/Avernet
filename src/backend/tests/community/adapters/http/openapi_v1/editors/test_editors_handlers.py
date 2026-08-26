@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -93,6 +95,10 @@ async def test_mutations_delegate_to_bot_first_service_methods():
     service = Mock()
     service.add_editor.return_value = _record()
     service.update_editor.return_value = _record("admin")
+    service.list_editors.return_value = [_record()]
+    locks = Mock()
+    locks.get_lock_info.return_value = SimpleNamespace(lock=None)
+    locks.acquire_lock.return_value = SimpleNamespace(holder_user_id="owner-1")
 
     created = await add_editor(
         bot_id="bot-1",
@@ -101,6 +107,7 @@ async def test_mutations_delegate_to_bot_first_service_methods():
         actor_id="owner-1",
         owner_id="owner-1",
         service=service,
+        locks=locks,
     )
     updated = await update_editor(
         bot_id="bot-1",
@@ -118,6 +125,7 @@ async def test_mutations_delegate_to_bot_first_service_methods():
         actor_id="owner-1",
         owner_id="owner-1",
         service=service,
+        locks=locks,
     )
     left = await leave_editors(
         bot_id="bot-1",
@@ -125,6 +133,7 @@ async def test_mutations_delegate_to_bot_first_service_methods():
         actor_id="member-1",
         owner_id="owner-1",
         service=service,
+        locks=locks,
     )
 
     assert created.code == 201000
@@ -146,6 +155,121 @@ async def test_mutations_delegate_to_bot_first_service_methods():
         operator_id="owner-1",
         role="admin",
     )
+    locks.acquire_lock.assert_called_once_with("bot-1", "owner-1", "owner-1")
+
+
+@pytest.mark.asyncio
+async def test_add_editor_auto_acquires_and_keeps_the_actor_lock():
+    service = Mock()
+    service.add_editor.return_value = _record()
+    locks = Mock()
+    locks.get_lock_info.return_value = SimpleNamespace(lock=None)
+    locks.acquire_lock.return_value = SimpleNamespace(holder_user_id="owner-1")
+
+    response = await add_editor(
+        bot_id="bot-1",
+        body=EditorCreate(editor_user_id="member-1", role="member"),
+        request=_request("POST"),
+        actor_id="owner-1",
+        owner_id="owner-1",
+        service=service,
+        locks=locks,
+    )
+
+    assert response.code == 201000
+    locks.acquire_lock.assert_called_once_with("bot-1", "owner-1", "owner-1")
+    locks.release_lock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_add_editor_refuses_when_another_user_holds_the_lock():
+    service = Mock()
+    held = SimpleNamespace(holder_user_id="other")
+    locks = Mock()
+    locks.get_lock_info.return_value = SimpleNamespace(lock=held)
+    locks.acquire_lock.return_value = None
+
+    response = await add_editor(
+        bot_id="bot-1",
+        body=EditorCreate(editor_user_id="member-1", role="member"),
+        request=_request("POST"),
+        actor_id="owner-1",
+        owner_id="owner-1",
+        service=service,
+        locks=locks,
+    )
+
+    assert response.status_code == 423
+    assert json.loads(response.body)["message"] == "Edit lock required"
+    service.add_editor.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_add_editor_failure_releases_only_the_newly_acquired_lock():
+    service = Mock()
+    service.add_editor.side_effect = RuntimeError("write failed")
+    locks = Mock()
+    locks.get_lock_info.return_value = SimpleNamespace(lock=None)
+    locks.acquire_lock.return_value = SimpleNamespace(holder_user_id="owner-1")
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        await add_editor(
+            bot_id="bot-1",
+            body=EditorCreate(editor_user_id="member-1", role="member"),
+            request=_request("POST"),
+            actor_id="owner-1",
+            owner_id="owner-1",
+            service=service,
+            locks=locks,
+        )
+
+    locks.release_lock.assert_called_once_with("bot-1", "owner-1", "owner-1", False)
+
+
+@pytest.mark.asyncio
+async def test_add_editor_failure_keeps_a_preexisting_actor_lock():
+    service = Mock()
+    service.add_editor.side_effect = RuntimeError("write failed")
+    held = SimpleNamespace(holder_user_id="owner-1")
+    locks = Mock()
+    locks.get_lock_info.return_value = SimpleNamespace(lock=held)
+    locks.acquire_lock.return_value = held
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        await add_editor(
+            bot_id="bot-1",
+            body=EditorCreate(editor_user_id="member-1", role="member"),
+            request=_request("POST"),
+            actor_id="owner-1",
+            owner_id="owner-1",
+            service=service,
+            locks=locks,
+        )
+
+    locks.release_lock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_removing_the_lock_holder_cleans_the_stale_lock():
+    service = Mock()
+    service.list_editors.return_value = [_record()]
+    locks = Mock()
+    locks.get_lock_info.return_value = SimpleNamespace(
+        lock=SimpleNamespace(holder_user_id="member-1")
+    )
+
+    response = await remove_editor(
+        bot_id="bot-1",
+        editor_id=7,
+        request=_request("DELETE"),
+        actor_id="owner-1",
+        owner_id="owner-1",
+        service=service,
+        locks=locks,
+    )
+
+    assert response.data.deleted is True
+    locks.release_lock.assert_called_once_with("bot-1", "owner-1", "owner-1", True)
 
 
 def test_editor_requests_reject_unknown_fields_and_roles():
