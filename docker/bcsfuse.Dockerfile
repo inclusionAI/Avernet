@@ -27,7 +27,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         libssl-dev \
-        libmysqlclient-dev \
+        libmariadb-dev-compat \
         pkg-config \
         gcc \
     && rm -rf /var/lib/apt/lists/*
