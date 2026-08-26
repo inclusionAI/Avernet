@@ -23,6 +23,8 @@ from gateway.community.logger import get_logger
 from gateway.community.spi.auth import AuthenticatedUser, AuthError
 from gateway.community.spi.authn import (
     CredentialBundle,
+    CredentialLocation,
+    CredentialSpec,
     Principal,
     PrincipalType,
     UserPrincipal,
@@ -54,6 +56,15 @@ class GoogleUserStrategy:
         self._token_header = token_header
         self._userinfo_url = userinfo_url
         self._transport = transport
+        self.credential = CredentialSpec(
+            scheme_name="userToken",
+            location=CredentialLocation.HEADER,
+            name=token_header,
+            description=(
+                "End-user identity token, verified by the gateway against the "
+                "identity provider."
+            ),
+        )
 
     async def build(self, creds: CredentialBundle) -> Principal | None:
         token = creds.headers.get(self._token_header, "")

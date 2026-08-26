@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 from gateway.community.core.authn import RouteSecurity
@@ -19,6 +20,7 @@ from gateway.community.core.forwarding import (
     build_combined_openapi,
     build_served_openapi,
 )
+from gateway.community.spi.authn import CredentialSpec, PrincipalType
 from gateway.community.spi.forwarder import Forwarder
 from gateway.community.spi.schema_catalog import SchemaCatalog
 from gateway.community.spi.ws_forwarder import WebSocketForwarder
@@ -63,6 +65,7 @@ class Forwarding:
     def served_openapi(
         self,
         route_security: RouteSecurity,
+        credentials: Mapping[PrincipalType, CredentialSpec] = MappingProxyType({}),
         *,
         title: str,
         version: str,
@@ -88,6 +91,7 @@ class Forwarding:
             description=description,
             rewrites=rewrites,
             mount_prefixes=mount_prefixes,
+            credentials=credentials,
         )
 
     def served_internal_openapi(

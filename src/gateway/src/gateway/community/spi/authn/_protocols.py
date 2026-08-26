@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from ._models import CredentialBundle, Principal, PrincipalType
+from ._models import CredentialBundle, CredentialSpec, Principal, PrincipalType
 
 
 class AuthStrategy(Protocol):
@@ -20,6 +20,7 @@ class AuthStrategy(Protocol):
 
     name: str  # stable id (the PrincipalType value)
     principal_type: PrincipalType  # the identity type this strategy produces
+    credential: CredentialSpec  # the wire form a client must present
 
     async def build(self, creds: CredentialBundle) -> Principal | None:
         """Try to build a Principal from the request.

@@ -166,3 +166,37 @@ class CredentialBundle:
     headers: Mapping[str, str]
     cookies: Mapping[str, str]
     query: Mapping[str, str]
+
+
+class CredentialLocation(StrEnum):
+    """Where on the wire a credential travels."""
+
+    HEADER = "header"
+    COOKIE = "cookie"
+    BEARER = "bearer"  # ``Authorization: Bearer <token>``
+
+
+@dataclass(frozen=True)
+class CredentialSpec:
+    """The wire form of one identity's credential, as clients must present it.
+
+    A strategy declares this next to the code that reads the credential, so the
+    served OpenAPI document can name what a caller must send without any
+    generator holding a second copy of the header name. That matters across
+    flavors: the community user strategy reads its own configured header, while
+    an enterprise overlay registered through
+    :func:`~gateway.community.plugin_registry.register_extra_authn_strategy`
+    reads a different one, and each deployment's document is right because the
+    object that reads the credential is the object that describes it.
+
+    Only the **documented** form goes here. A strategy that also accepts a
+    fallback (an app token in either ``Authorization`` or a dedicated header)
+    names the fallback in ``description`` rather than declaring a second scheme,
+    so the document keeps one security scheme per identity and generated clients
+    stay usable.
+    """
+
+    scheme_name: str  # key published under ``components.securitySchemes``
+    location: CredentialLocation
+    name: str  # header/cookie name; ``Authorization`` for BEARER
+    description: str = ""

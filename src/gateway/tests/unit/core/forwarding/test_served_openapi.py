@@ -18,6 +18,11 @@ from gateway.community.core.forwarding import (
     build_combined_openapi,
     build_served_openapi,
 )
+from gateway.community.spi.authn import (
+    CredentialLocation,
+    CredentialSpec,
+    PrincipalType,
+)
 
 _FIXTURE = Path(__file__).resolve().parents[3] / "fixtures" / "bots.openapi.json"
 _BAAS_ARTIFACT = (
@@ -312,3 +317,164 @@ def test_bcsfuse_paths_served_with_user_security() -> None:
                 assert operation["x-avernet-security"] == {"user": "required"}, (
                     f"{method} {path}"
                 )
+
+
+# ── standard OpenAPI security ────────────────────────────────────────────────
+#
+# `x-avernet-security` says which identities the gateway resolves; it does not
+# name a credential, so no client or code generator can act on it. These cover
+# the `security` + `securitySchemes` pair that does, and the stripping that
+# keeps the gateway the only writer of auth on the served document.
+
+_CREDENTIALS = {
+    PrincipalType.USER: CredentialSpec(
+        scheme_name="userToken",
+        location=CredentialLocation.HEADER,
+        name="x-one-id",
+        description="End-user identity token.",
+    ),
+    PrincipalType.APP: CredentialSpec(
+        scheme_name="appToken",
+        location=CredentialLocation.BEARER,
+        name="Authorization",
+    ),
+}
+
+
+def _served_with(table: dict[str, Any]) -> dict[str, Any]:
+    description = json.loads(_FIXTURE.read_text())
+    return build_served_openapi(
+        ["bots"],
+        lambda _domain: description,
+        RouteSecurity.from_table(table),
+        title="gateway",
+        version="0.1.0",
+        credentials=_CREDENTIALS,
+    )
+
+
+def _security_for(table: dict[str, Any]) -> Any:
+    return _served_with(table)["paths"]["/openapi/v1/bots"]["get"]["security"]
+
+
+def test_security_schemes_name_the_credential_a_client_sends() -> None:
+    schemes = _served_with({"/**": {"user": "required"}})["components"][
+        "securitySchemes"
+    ]
+    assert schemes["userToken"] == {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-one-id",
+        "description": "End-user identity token.",
+    }
+    assert schemes["appToken"] == {"type": "http", "scheme": "bearer"}
+
+
+def test_required_identities_become_one_and_group() -> None:
+    assert _security_for({"/**": {"user": "required", "app": "required"}}) == [
+        {"appToken": [], "userToken": []}
+    ]
+
+
+def test_optional_identity_adds_an_alternative_without_it() -> None:
+    # app is always needed; the user may or may not be on the wire.
+    assert _security_for({"/**": {"app": "required", "user": "optional"}}) == [
+        {"appToken": []},
+        {"appToken": [], "userToken": []},
+    ]
+
+
+def test_all_optional_renders_at_least_one_of() -> None:
+    # The requirement table cannot express "user or app" and leans on an
+    # upstream guard to refuse a caller presenting neither; OpenAPI can, so the
+    # empty alternative is deliberately absent.
+    alternatives = _security_for({"/**": {"user": "optional", "app": "optional"}})
+    assert {} not in alternatives
+    assert sorted(map(sorted, alternatives)) == sorted(
+        map(
+            sorted,
+            [{"appToken": []}, {"userToken": []}, {"appToken": [], "userToken": []}],
+        )
+    )
+
+
+def test_empty_requirement_is_a_public_operation() -> None:
+    # `[]` is a positive claim that no credential is needed — not the same as
+    # omitting `security`, which says the gateway cannot describe the route.
+    assert _security_for({"/**": {}}) == []
+
+
+def test_identity_without_a_registered_strategy_omits_security() -> None:
+    # No bot credential is registered, so no client could satisfy a bot scheme.
+    # Publishing one would describe a door with no key.
+    operation = _served_with({"/**": {"bot": "required"}})["paths"]["/openapi/v1/bots"][
+        "get"
+    ]
+    assert "security" not in operation
+    assert operation["x-avernet-security"] == {"bot": "required"}
+
+
+def test_upstream_authored_security_is_stripped() -> None:
+    # bcs authors `x-avernet-security` in its own contracts. The gateway is what
+    # reads credentials and refuses requests, so its table wins and the
+    # upstream's block must not survive into the served document.
+    description = json.loads(_FIXTURE.read_text())
+    description["paths"]["/openapi/v1/bots"]["get"]["x-avernet-security"] = {
+        "access_key": "required"
+    }
+    served = build_served_openapi(
+        ["bots"],
+        lambda _domain: description,
+        RouteSecurity.from_table({"/**": {"user": "required"}}),
+        title="gateway",
+        version="0.1.0",
+        credentials=_CREDENTIALS,
+    )
+    assert served["paths"]["/openapi/v1/bots"]["get"]["x-avernet-security"] == {
+        "user": "required"
+    }
+
+
+def test_upstream_security_does_not_survive_an_unmatched_route() -> None:
+    # The dangerous half of the same fact: with no rule matching, the gateway
+    # stamps nothing, and an upstream block left in place would be the only
+    # auth claim on the operation — authored by a component that never sees the
+    # credential.
+    description = json.loads(_FIXTURE.read_text())
+    description["paths"]["/openapi/v1/bots"]["get"]["x-avernet-security"] = {
+        "access_key": "required"
+    }
+    served = build_served_openapi(
+        ["bots"],
+        lambda _domain: description,
+        RouteSecurity.from_table({"/openapi/v1/nothing/**": {"user": "required"}}),
+        title="gateway",
+        version="0.1.0",
+        credentials=_CREDENTIALS,
+    )
+    operation = served["paths"]["/openapi/v1/bots"]["get"]
+    assert "x-avernet-security" not in operation
+    assert "security" not in operation
+
+
+def test_shipped_bots_routes_render_against_the_real_table() -> None:
+    # The bots surface as actually configured: every operation gets a security
+    # block naming a credential, and none is left undescribable.
+    description = json.loads(_FIXTURE.read_text())
+    served = build_served_openapi(
+        ["bots"],
+        lambda _domain: description,
+        _SHIPPED_RULES,
+        title="gateway",
+        version="0.1.0",
+        credentials=_CREDENTIALS,
+    )
+    operations = [
+        operation
+        for item in served["paths"].values()
+        for method, operation in item.items()
+        if method in _METHODS
+    ]
+    assert operations
+    for operation in operations:
+        assert operation["security"], operation

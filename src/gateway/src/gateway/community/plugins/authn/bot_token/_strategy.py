@@ -24,6 +24,8 @@ from gateway.community.spi.authn import (
     Bot,
     BotPrincipal,
     CredentialBundle,
+    CredentialLocation,
+    CredentialSpec,
     Principal,
     PrincipalType,
 )
@@ -74,6 +76,15 @@ class BotTokenStrategy:
     ) -> None:
         self._registry = registry
         self._token_header = token_header
+        self.credential = CredentialSpec(
+            scheme_name="botToken",
+            location=CredentialLocation.BEARER,
+            name="Authorization",
+            description=(
+                "Bot session token. May also be presented in the "
+                f"{token_header} header."
+            ),
+        )
 
     async def build(self, creds: CredentialBundle) -> Principal | None:
         token = extract_bot_token(creds, self._token_header)

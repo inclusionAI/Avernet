@@ -25,11 +25,14 @@ registers one ``IdentityChain`` per ``PrincipalType``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from gateway.community.logger import get_logger
 from gateway.community.spi.auth import AuthError
 from gateway.community.spi.authn import (
     AuthStrategy,
     CredentialBundle,
+    CredentialSpec,
     Principal,
     PrincipalType,
 )
@@ -59,6 +62,22 @@ class IdentityChain:
         # config/observability. Inner strategy names stay on the inner plugins.
         return self.principal_type.value  # type: ignore[no-any-return]
 
+    @property
+    def has_strategies(self) -> bool:
+        """Whether any strategy is registered for this identity."""
+        return bool(self._strategies)
+
+    @property
+    def credential(self) -> CredentialSpec:
+        """The wire form a client should present for this identity.
+
+        The chain tries its strategies in priority order, so the first one holds
+        the form to document; anything after it is a fallback the gateway still
+        accepts but does not advertise. Raises ``IndexError`` on a chain built
+        with no strategies — a composition-root bug, not a request-time state.
+        """
+        return self._strategies[0].credential
+
     async def build(self, creds: CredentialBundle) -> Principal | None:
         """Try each inner strategy in order; return the first successful Principal."""
         for strategy in self._strategies:
@@ -87,3 +106,21 @@ class IdentityChain:
             )
             return principal
         return None  # every inner strategy was inapplicable
+
+
+def credential_specs(
+    chains: Mapping[PrincipalType, IdentityChain],
+) -> dict[PrincipalType, CredentialSpec]:
+    """The documented credential for each identity that has a strategy.
+
+    Built from the chains the composition root actually registered, so the
+    served document describes the credentials *this* deployment reads rather
+    than a list of names compiled into the generator. A chain with no strategies
+    contributes nothing: there is no way to present that identity, so there is
+    nothing truthful to publish for it.
+    """
+    return {
+        identity: chain.credential
+        for identity, chain in chains.items()
+        if chain.has_strategies
+    }
