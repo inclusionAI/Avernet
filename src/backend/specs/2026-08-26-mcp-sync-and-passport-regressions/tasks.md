@@ -147,6 +147,30 @@ green at the end of this group *without* any test expectation changing.
       (`core/devices/services/device_service.py:1518`), and that neither is
       modified.
 
+## Group 6 — Documentation and logging
+
+Interleave with the groups above rather than deferring — a docstring written
+after the fact records what the code does, not why it had to. Landing them
+per group is the intent; this group is the checklist that nothing was missed.
+
+- [ ] 6.1 Docstrings per the plan's Documentation section: `ProjectionScope`
+      (declared not derived; the guard only shrinks), the
+      `sync_mcp_desired_state` / `sync_mcp_delivery` declare-vs-deliver split
+      at both sites, the `- codes` guard's real justification, and
+      `apply_runtime_projection` (call count is the impl's decision).
+- [ ] 6.2 Comment at the `mcp_items` call site naming the overwrite-style
+      contract and the `"owner"` default that made the omission destructive,
+      so it is not "simplified" back out.
+- [ ] 6.3 Logging per the plan's table: identity-mode counts, guard trims
+      (only when something was trimmed), pushes at INFO, **removals at
+      WARNING**, per-provider device-call counts.
+- [ ] 6.4 **Audit every new log line for secrets.** MCP entries from MCP
+      Center and `build_mcp_sync_payload` carry `api_key` and custom headers;
+      log `server_code` and counts only, never the entry or payload. Grep the
+      diff for logged variables that could hold one before pushing.
+- [ ] 6.5 Failure paths keep `exc_info=True` and name `bot_id` +
+      `server_code`, so a partial delivery is diagnosable from one line.
+
 ## Verification
 
 - [ ] V1 Backend test suite green.

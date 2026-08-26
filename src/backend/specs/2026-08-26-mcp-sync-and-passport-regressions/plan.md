@@ -580,6 +580,53 @@ live caller, `DeviceService._sync_mcps_when_device_active`
 
 ---
 
+## Logging
+
+Every change here is device- or authorization-facing and most of it is
+invisible in the response body, so the log is the only record that the right
+thing happened. Three of the five problems went unnoticed precisely because
+nothing said what was pushed.
+
+**Never log a credential.** `sync_mcp_delivery` handles entries straight from
+MCP Center and `build_mcp_sync_payload` — they carry `api_key` and custom
+headers. Log `server_code` and counts, never the entry, never the payload.
+The repo's existing convention is explicit about this
+(`plugins/.../passport.py`: *"Passport 日志只记录 token 存在性，禁止输出值或前缀"*)
+and it applies with equal force to MCP configuration.
+
+What each new or changed path logs:
+
+| site | level | content |
+| --- | --- | --- |
+| `_passport_mcp_items` | INFO | `bot_id`, total count, how many resolved `caller` — the fact problem 1 silently destroyed. Codes only, no payload. |
+| `_apply_non_skill_projection` scope guard | INFO | declared vs effective `claimed`/`released` **when the guard trimmed something**, with the codes it dropped and why (not in projected set / still supplied). Silent when nothing was trimmed. |
+| `sync_mcp_delivery` push | INFO | `bot_id`, the `server_code`s pushed, count. |
+| `sync_mcp_delivery` removal | **WARNING** | `bot_id`, `server_code`. Deleting device configuration is destructive and irreversible from our side — it deserves to be findable without DEBUG. |
+| `sync_mcp_desired_state` | INFO | `bot_id`, declared code count (already partly present). |
+| `apply_runtime_projection` impls | INFO | provider, scope, and how many device calls it made — the number that proves the teclaw single-delivery claim. |
+
+Failure paths keep `exc_info=True` and name the `bot_id` and `server_code`
+that failed, so a partial delivery is diagnosable from one line.
+
+## Documentation
+
+The existing code in this area carries dense "why" docstrings, and the
+regressions this plan fixes were all invisible-by-omission. New code matches
+that bar:
+
+- `ProjectionScope` — why declared rather than derived, and that the
+  projector's intersection is a guard that can only shrink it.
+- `sync_mcp_desired_state` vs `sync_mcp_delivery` — the declare/deliver split
+  stated at both sites, since the whole regression came from conflating them.
+- The `- codes` removal guard — what it protects (non-membership supply:
+  defaults and Skill dependencies) and what it no longer needs to
+  (cross-Set, unreachable under R3).
+- `apply_runtime_projection` — that call count is the implementation's
+  decision, with the per-call and whole-artifact cases named.
+- The `mcp_items` addition — a comment at the call site naming the
+  overwrite-style contract and the `"owner"` default that made omission
+  destructive, so nobody "simplifies" it back out.
+
 ## Files touched
 
 | file | change |
