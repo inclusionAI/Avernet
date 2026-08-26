@@ -36,7 +36,9 @@ from secbaas.community.core.repository.bot_run import BotRunRecord
 def _make_eval_session_log():
     """创建 mock EvalSessionLogProtocol，extract_eval_headers 原样返回 metadata。"""
     mock = MagicMock()
-    mock.extract_eval_headers.side_effect = lambda *, metadata, x_eval_id, x_default_tag: metadata
+    mock.extract_eval_headers.side_effect = (
+        lambda *, metadata, x_eval_id, x_default_tag: metadata
+    )
     return mock
 
 
