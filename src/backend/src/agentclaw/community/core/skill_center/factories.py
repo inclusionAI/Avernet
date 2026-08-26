@@ -91,6 +91,17 @@ async def _gather_package_io(coroutines: list) -> list:
     still in flight at that moment could land a file behind the cleanup and leave an
     orphan the next upload would trip over. Re-raising in input order keeps the
     surfaced error the same one the sequential loop would have raised.
+
+    Cancellation is drained the same way, and needs its own handling because it does
+    not travel the exception path: device filesystems block inside
+    ``asyncio.to_thread``, which cannot interrupt a call already executing on a
+    worker thread — cancelling only abandons the await while the HTTP write keeps
+    going. Worse, ``CancelledError`` is a ``BaseException``, so
+    ``LocalSkillUploadService``'s ``except Exception`` compensation is skipped while
+    its ``finally`` still releases the edit lease. A retry could then acquire the
+    lease, ``delete_tree`` the directory and start a fresh package that the
+    abandoned writes land into. So the batch is shielded and drained before the
+    cancellation is allowed to continue.
     """
     semaphore = asyncio.Semaphore(_PACKAGE_IO_CONCURRENCY)
 
@@ -99,15 +110,22 @@ async def _gather_package_io(coroutines: list) -> list:
             async with semaphore:
                 return await coro
         finally:
-            # Cancelling this batch while a coroutine is still queued on the
-            # semaphore would leave it never awaited, which Python surfaces as a
-            # RuntimeWarning. Closing an already-finished coroutine is a no-op, so
-            # this is safe on the normal path too.
+            # A coroutine still queued on the semaphore when this batch is cancelled
+            # would never be awaited, which Python surfaces as a RuntimeWarning.
+            # Closing an already-finished coroutine is a no-op, so this is safe on
+            # the normal path too.
             coro.close()
 
-    results = await asyncio.gather(
-        *(_bounded(coro) for coro in coroutines), return_exceptions=True
+    batch = asyncio.ensure_future(
+        asyncio.gather(*(_bounded(coro) for coro in coroutines), return_exceptions=True)
     )
+    try:
+        results = await asyncio.shield(batch)
+    except BaseException:
+        # Shielding keeps ``batch`` running when the caller is cancelled; awaiting it
+        # here is what guarantees no write is still in flight once this raises.
+        await asyncio.gather(batch, return_exceptions=True)
+        raise
     for result in results:
         if isinstance(result, BaseException):
             raise result

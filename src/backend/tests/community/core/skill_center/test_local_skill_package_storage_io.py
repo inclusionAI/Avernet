@@ -195,3 +195,28 @@ async def test_a_package_upload_resolves_http_info_once_for_the_whole_batch():
         call.kwargs["data"]["target_path"] for call in baas_service.invoke_http.call_args_list
     }
     assert uploaded == {f"{DIRECTORY}/{name}" for name, _ in files}
+
+
+@pytest.mark.asyncio
+async def test_cancelling_a_write_drains_in_flight_writes_before_propagating():
+    """取消也必须先排空 —— to_thread 停不掉已经在工作线程里跑的写。
+
+    ``CancelledError`` 是 ``BaseException``，所以 ``LocalSkillUploadService`` 的
+    ``except Exception`` 补偿会被整个跳过，而它的 ``finally`` 仍然放掉 edit lease。
+    此时若还有写在飞，重试拿到 lease、``delete_tree`` 后重建的新包就会被这些迟到的
+    写污染成混合包。
+    """
+    filesystem = _RecordingFilesystem(delay=0.05)
+    storage = LocalSkillPackageStorage(filesystem, DIRECTORY)
+
+    task = asyncio.create_task(storage.write(_package(4)))
+    await asyncio.sleep(0.01)
+    assert filesystem.in_flight > 0, "batch should be in flight before cancelling"
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # the cancellation waited for the whole batch, so nothing can land afterwards
+    assert filesystem.in_flight == 0
+    assert len(filesystem.files) == 4
