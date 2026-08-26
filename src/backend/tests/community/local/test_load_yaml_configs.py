@@ -109,6 +109,20 @@ class TestLoadYamlConfigsOverlaySelection:
         assert str(fallback_configs) in str(error.value)
 
 
+@pytest.fixture(autouse=True)
+def _community_database_url(monkeypatch):
+    """The community overlay requires a deployment-supplied ``DATABASE_URL``.
+
+    It is the Aliyun/OceanBase profile, so its ``database.url`` placeholder has
+    no inline default and strict expansion raises without one. These tests are
+    about overlay *merging*, not the DSN, so they supply what a deployment would.
+    The tests that assert the requirement itself set or clear it explicitly.
+    """
+    monkeypatch.setenv(
+        "DATABASE_URL", "mysql+pymysql://t:t@127.0.0.1:3306/agentclaw"
+    )
+
+
 class TestCommunityOverlaySelection:
     """DEPLOY_PROFILE=community 加载中性基座 application.yaml + community overlay
     （application.yaml 已中性化，可安全合并 —— B6/OSS-0 #3）。"""
@@ -213,7 +227,8 @@ class TestCommunityOverlaySelection:
     def test_community_overlay_exposes_data_infra_blocks(self):
         # B3：database/cache/object_storage/secret 四块只在 community overlay。
         user_config = _load_yaml_configs("application-community.yaml").get("user_config", {})
-        assert user_config.get("database", {}).get("url", "").startswith("sqlite:///")
+        assert user_config.get("database", {}).get("backend") == "mysql"
+        assert user_config.get("database", {}).get("url", "").startswith("mysql+")
         assert user_config.get("cache", {}).get("redis_url") == ""
         storage = user_config.get("object_storage", {})
         assert storage.get("backend") == "fs"
@@ -290,17 +305,20 @@ class TestEnvPlaceholderExpansion:
         user_config = _load_yaml_configs("application-community.yaml")["user_config"]
         assert user_config["database"]["url"] == "mysql+pymysql://u:p@rds:3306/agentclaw"
 
-    def test_community_overlay_database_url_defaults_to_sqlite(self, monkeypatch):
+    def test_community_overlay_requires_database_url(self, monkeypatch):
+        # No inline default: community is the deployed Aliyun/OceanBase profile,
+        # so a missing Secret must fail the boot rather than silently pointing
+        # production traffic at a local file.
         monkeypatch.delenv("DATABASE_URL", raising=False)
-        user_config = _load_yaml_configs("application-community.yaml")["user_config"]
-        assert user_config["database"]["url"] == "sqlite:///./data/agentclaw.db"
+        with pytest.raises(KeyError, match="DATABASE_URL"):
+            _load_yaml_configs("application-community.yaml")
 
-    def test_shipped_overlays_all_load_under_strict_expansion(self):
-        # Guard: every placeholder shipped in a community overlay must carry a
-        # default, or a bare boot breaks. Strict expansion is what enforces it.
-        for overlay in (
-            "application-community.yaml",
-            "application-singlebox.yaml",
-            "application-test.yaml",
-        ):
+    def test_local_overlays_load_bare_under_strict_expansion(self, monkeypatch):
+        # Guard: the local-facing overlays must boot with nothing exported, so
+        # every placeholder they ship carries a default. Strict expansion
+        # enforces it. `application-community.yaml` is deliberately NOT in this
+        # list — it is the deployed profile and requires DATABASE_URL (see
+        # test_community_overlay_requires_database_url).
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        for overlay in ("application-singlebox.yaml", "application-test.yaml"):
             assert _load_yaml_configs(overlay)

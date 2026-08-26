@@ -107,27 +107,31 @@ user_config:
 
   # Relational store — consumed by the community CommunityDatabase.
   #
-  # `backend` is the single field that switches stores: "sqlite" for a local or
-  # single-node run, "mysql" for a managed instance (Aliyun RDS and friends).
-  # `url` must name the same store — the provider rejects a mismatch rather than
-  # silently falling back to the SQLite default.
+  # The community profile IS the deployed configuration, and that deployment runs
+  # on Aliyun against OceanBase — so this block names a real managed store rather
+  # than a local convenience default.
   #
-  # Keep passwords out of this file: the URL is an env placeholder, expanded at
-  # config load. A managed-MySQL deployment sets DATABASE_URL from a Secret, e.g.
-  #   mysql+pymysql://user:pass@rds-host:3306/agentclaw?charset=utf8mb4
-  # ...and must ALSO set `backend: "mysql"` below. Changing only one of the two
-  # is rejected at boot with a ValueError naming the mismatch — that guard is
-  # deliberate (a silent fall back to the SQLite default would write production
-  # traffic to a file inside the container), but it is easier to read here than
-  # to discover from the error.
+  # `backend` selects the store and drives engine setup (pooling, pragmas):
+  # "mysql" covers OceanBase, which speaks the MySQL wire protocol in MySQL mode
+  # — the same target `src/gateway/migrations/mysql/` is written against. "sqlite"
+  # and "postgresql" are also accepted. `url` must name the same store; the
+  # provider rejects a mismatch at boot rather than falling back silently.
+  #
+  # `url` has NO inline default on purpose. DATABASE_URL is deployment-supplied
+  # (a k8s Secret), and strict expansion makes a missing one fail the boot
+  # loudly instead of quietly writing production traffic somewhere else:
+  #   DATABASE_URL=mysql+pymysql://user:pass@ob-host:3306/agentclaw?charset=utf8mb4
+  # Anything that merely loads this overlay without deploying — the OSS boot
+  # self-test, the OpenAPI dump — must therefore supply a DSN too; no connection
+  # is opened by config resolution alone.
   #
   # `create_schema: true` lets the app emit its own DDL at boot — a container
   # deployment has nobody to run CREATE TABLE between `kubectl apply` and the
   # first request. Set it false if you provision the schema out of band or run
   # migrations yourself.
   database:
-    backend: "sqlite"
-    url: "${DATABASE_URL:-sqlite:///./data/agentclaw.db}"
+    backend: "mysql"
+    url: "${DATABASE_URL}"
     create_schema: true
 
   # Cache + distributed lock — consumed by the community CommunityCache.

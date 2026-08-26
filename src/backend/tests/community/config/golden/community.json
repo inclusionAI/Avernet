@@ -45,9 +45,9 @@
       "adapter_service_port": 20003
     },
     "database": {
-      "backend": "sqlite",
+      "backend": "mysql",
       "create_schema": true,
-      "url": "${DATABASE_URL:-sqlite:///./data/agentclaw.db}"
+      "url": "${DATABASE_URL}"
     },
     "desktop_bot_periodic_scan": {
       "apply_owner_whitelist": [],

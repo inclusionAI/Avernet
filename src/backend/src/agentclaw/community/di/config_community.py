@@ -39,13 +39,20 @@ class CommunityDatabaseConfig:
     Corp/test never resolve this type.
 
     ``backend`` is the one field a deployment flips to change stores — ``sqlite``
-    for a local or single-node run, ``mysql`` for a managed instance. It selects
-    engine setup (pooling, pragmas), and the provider rejects a ``url`` whose
-    scheme disagrees with it, so the two can never drift into a confusing
-    half-configured state.
+    for a local or single-node run, ``mysql`` for a managed instance (including
+    OceanBase, which speaks the MySQL protocol). It selects engine setup
+    (pooling, pragmas), and the provider rejects a ``url`` whose scheme disagrees
+    with it, so the two can never drift into a confusing half-configured state.
 
-    ``url`` is a SQLAlchemy URL. Point it at an env var from the YAML
-    (``${DATABASE_URL:-...}``) rather than writing a password into the file.
+    ``url`` is a SQLAlchemy URL, sourced from the YAML's env placeholder rather
+    than written into the file, so no password is ever committed.
+
+    **These field defaults are the no-block fallback, not what community
+    deploys.** The shipped ``application-community.yaml`` sets ``mysql`` with a
+    required ``${DATABASE_URL}``, because the community profile is the deployed
+    Aliyun/OceanBase configuration. The SQLite values below apply only if the
+    ``database`` block is absent entirely — a DSN cannot be a literal default,
+    since host and credentials are per-deployment.
 
     ``create_schema`` lets the app emit its own DDL at boot, which is what a
     container deployment needs — nobody runs ``CREATE TABLE`` between
