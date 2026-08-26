@@ -92,7 +92,10 @@ def _coerce(block: dict[str, Any], key: str, cast, fallback, where: str, valid=N
     except Exception as exc:  # noqa: BLE001 — see docstring: never fatal
         logger.warning(
             "ConfigModule: %s.%s=%r is not a valid %s (%s); using %r.",
-            where, key, raw, cast.__name__, type(exc).__name__, fallback,
+            # `_as_bool` / `_as_int` are internal names; an operator reading a
+            # boot log wants the type, not our helper.
+            where, key, raw, cast.__name__.removeprefix("_as_"),
+            type(exc).__name__, fallback,
         )
         return fallback
     if valid is not None and not valid(value):
@@ -139,7 +142,15 @@ def _as_bool(raw: Any) -> bool:
             return False
         raise ValueError(f"not a boolean: {raw!r}")
     if isinstance(raw, (int, float)):
-        return bool(raw)
+        # Exactly 0 or 1. `bool()` reads 2, -1, 0.5 and .nan as True alike, and
+        # none of those is a plausible way to write a boolean — so accepting
+        # them means a typo silently enables a wire change documented as
+        # opt-in. 0/1 stay accepted because YAML users do write them.
+        if raw == 0:
+            return False
+        if raw == 1:
+            return True
+        raise ValueError(f"not a boolean: {raw!r}")
     raise TypeError(f"not a boolean: {type(raw).__name__}")
 
 
