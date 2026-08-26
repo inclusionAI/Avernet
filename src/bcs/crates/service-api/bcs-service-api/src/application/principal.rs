@@ -36,4 +36,9 @@ pub struct AdminActor {
 pub struct RequestAuthHeaders {
     pub authorization: Option<String>,
     pub cookie: Option<String>,
+    /// Auth-related headers forwarded from the ingress request for downstream
+    /// user-scoped lookups. Values may contain credentials; implementations
+    /// must not log or persist them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forwarded_headers: Vec<(String, String)>,
 }

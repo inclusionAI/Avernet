@@ -47,7 +47,7 @@ use bcs_service_api::port::repo::{
     PermissionRequestRepoPort,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
-use bcs_user_directory_api::UserDirectoryPlugin;
+use bcs_user_directory_api::{UserDirectoryLookupContext, UserDirectoryPlugin};
 
 /// Generate a fresh external request id (a bare UUID v4, simple form — no
 /// prefix). The internal bigint PK (`permission_requests.id`) is assigned by
@@ -144,6 +144,25 @@ fn bot_friend_ext_no_check_scope_friend_deps(
         .unwrap_or_default()
 }
 
+fn user_directory_lookup_context(request_auth: Option<&RequestAuthHeaders>) -> UserDirectoryLookupContext {
+    let Some(request_auth) = request_auth else {
+        return UserDirectoryLookupContext::default();
+    };
+    if !request_auth.forwarded_headers.is_empty() {
+        return UserDirectoryLookupContext {
+            forwarded_headers: request_auth.forwarded_headers.clone(),
+        };
+    }
+    let mut forwarded_headers = Vec::new();
+    if let Some(value) = &request_auth.authorization {
+        forwarded_headers.push(("authorization".to_string(), value.clone()));
+    }
+    if let Some(value) = &request_auth.cookie {
+        forwarded_headers.push(("cookie".to_string(), value.clone()));
+    }
+    UserDirectoryLookupContext { forwarded_headers }
+}
+
 #[async_trait]
 impl ConnectService for DbConnectService {
     async fn create_connect(
@@ -222,7 +241,7 @@ impl ConnectService for DbConnectService {
         let friend_strategy = normalize_policy_value(&cfg.friend_check_in_strategy);
         let dept_free_auto_approved = friend_strategy == "dept_free"
             && self
-                .caller_department_matches_friend_allowlist(caller, &cfg)
+                .caller_department_matches_friend_allowlist(caller, &cfg, request_auth.as_ref())
                 .await;
         let needs_approval = !(friend_strategy == "open" || dept_free_auto_approved);
         match normalize_policy_value(&cfg.visibility).as_str() {
@@ -641,7 +660,11 @@ impl DbConnectService {
         }
     }
 
-    async fn resolve_user_department_code(&self, actor_id: &str) -> Option<String> {
+    async fn resolve_user_department_code(
+        &self,
+        actor_id: &str,
+        request_auth: Option<&RequestAuthHeaders>,
+    ) -> Option<String> {
         let user_directory = self.user_directory.as_ref()?;
         let staff_no = match actor_kind_of(actor_id) {
             ActorKind::Human => actor_id.strip_prefix("human_")?.to_string(),
@@ -650,8 +673,9 @@ impl DbConnectService {
                 cfg.created_by?
             }
         };
+        let lookup_context = user_directory_lookup_context(request_auth);
         user_directory
-            .lookup_department_by_staff_no(&staff_no)
+            .lookup_department_by_staff_no_with_context(&staff_no, &lookup_context)
             .await
             .ok()
             .flatten()
@@ -661,12 +685,13 @@ impl DbConnectService {
         &self,
         caller: &str,
         cfg: &bcs_domain::edge_permission::BotActorConfig,
+        request_auth: Option<&RequestAuthHeaders>,
     ) -> bool {
         let allowlist = bot_friend_ext_no_check_scope_friend_deps(&cfg.friend_ext);
         if allowlist.is_empty() {
             return false;
         }
-        let Some(caller_department) = self.resolve_user_department_code(caller).await else {
+        let Some(caller_department) = self.resolve_user_department_code(caller, request_auth).await else {
             return false;
         };
         allowlist
@@ -1387,6 +1412,41 @@ mod tests {
     }
 
     #[derive(Clone, Default)]
+    struct RecordingContextUserDirectoryPlugin {
+        department: String,
+        contexts: Arc<tokio::sync::Mutex<Vec<UserDirectoryLookupContext>>>,
+    }
+
+    #[async_trait]
+    impl UserDirectoryPlugin for RecordingContextUserDirectoryPlugin {
+        async fn lookup_by_staff_no(
+            &self,
+            staff_no: &str,
+        ) -> Result<Option<bcs_user_directory_api::UserDirectoryProfile>, bcs_user_directory_api::UserDirectoryError> {
+            Ok(Some(bcs_user_directory_api::UserDirectoryProfile {
+                staff_no: staff_no.to_string(),
+                nick_name: None,
+            }))
+        }
+
+        async fn lookup_department_by_staff_no(
+            &self,
+            _staff_no: &str,
+        ) -> Result<Option<String>, bcs_user_directory_api::UserDirectoryError> {
+            Ok(Some(self.department.clone()))
+        }
+
+        async fn lookup_department_by_staff_no_with_context(
+            &self,
+            _staff_no: &str,
+            context: &UserDirectoryLookupContext,
+        ) -> Result<Option<String>, bcs_user_directory_api::UserDirectoryError> {
+            self.contexts.lock().await.push(context.clone());
+            Ok(Some(self.department.clone()))
+        }
+    }
+
+    #[derive(Clone, Default)]
     struct RecordingFriendConnectNotificationPort {
         events: Arc<tokio::sync::Mutex<Vec<FriendConnectNotificationCommand>>>,
     }
@@ -1692,6 +1752,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dept_free_lookup_receives_forwarded_auth_context() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(
+            &db,
+            "human_1",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("85020"),
+        )
+        .await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "no_check_scope_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::Value::String("F4858".to_string())]),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "x:dept_context",
+            "protected",
+            "protected",
+            "DEPT_FREE",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let contexts = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let departments = Arc::new(RecordingContextUserDirectoryPlugin {
+            department: "F4858".to_string(),
+            contexts: contexts.clone(),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+        let res = svc
+            .create_connect(
+                "human_1",
+                "x:dept_context",
+                None,
+                Some(RequestAuthHeaders {
+                    authorization: Some("Bearer caller-token".to_string()),
+                    cookie: None,
+                    forwarded_headers: vec![(
+                        "authorization".to_string(),
+                        "Bearer caller-token".to_string(),
+                    )],
+                }),
+            )
+            .await
+            .expect("dept_free exact match from department port → Approved");
+
+        assert_eq!(res.status, ConnectStatus::Approved);
+        assert_eq!(
+            contexts.lock().await[0].forwarded_headers,
+            vec![("authorization".to_string(), "Bearer caller-token".to_string())]
+        );
+    }
+
+    #[tokio::test]
     async fn dept_free_allowlist_auto_approves_when_department_port_matches() {
         let (eg, pp, rq, bc, db) = assemble().await;
         seed_bot(
@@ -1844,7 +1963,7 @@ mod tests {
         let recorder = RecordingFriendConnectNotificationPort::default();
         let events = recorder.events.clone();
         let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
-        let request_auth = RequestAuthHeaders { authorization: Some("Bearer user-token".to_string()), cookie: Some("session=abc".to_string()) };
+        let request_auth = RequestAuthHeaders { authorization: Some("Bearer user-token".to_string()), cookie: Some("session=abc".to_string()), forwarded_headers: Vec::new() };
         let res = svc
             .create_connect("human_1", "x:pending_notify", Some("hi".into()), Some(request_auth.clone()))
             .await
