@@ -32,7 +32,6 @@ import json
 import os
 
 import httpx
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
@@ -74,12 +73,15 @@ from agentclaw.community.core.task.task_discovery.scheduler import (
     TaskDiscoveryScheduler,
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
-    SqliteTaskReader,
+    TaskReader,
+    clear_discovered_tasks,
+    upsert_discovered_tasks,
 )
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -234,17 +236,6 @@ async def bbs_result(
 
 # ===== 任务发现阶段(任务模块的一个阶段,非独立模块)=====
 
-#: 默认 db 文件路径(9 级上溯到仓库根 → scripts/.dependencies/data/discovered_tasks.db)
-_PROJECT_ROOT = Path(__file__).resolve()
-for _ in range(9):
-    _PROJECT_ROOT = _PROJECT_ROOT.parent
-_DEFAULT_DB = str(_PROJECT_ROOT / "scripts" / ".dependencies" / "data" / "discovered_tasks.db")
-
-
-def _resolve_db_path() -> str:
-    """从环境变量或默认路径解析 db 文件路径。"""
-    return os.environ.get("TASK_DISCOVERY_DATA_FILE", _DEFAULT_DB)
-
 
 @router.post("/discovery/discover", response_model=Envelope[dict[str, Any]])
 @envelope_errors
@@ -296,6 +287,7 @@ async def discover_tasks(
 @envelope_errors
 async def get_discovery_status(
     request: Request,
+    reader: TaskReader = Injected(TaskReader),  # noqa: B008
     service: DiscoveryService = Injected(DiscoveryService),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
     """查看任务发现状态。
@@ -304,9 +296,7 @@ async def get_discovery_status(
     有 session_id 的 task 会标注 discover 已执行；没有的说明 discover 还没跑过。
     db 读失败 → ``InternalError`` → 500。
     """
-    db_path = _resolve_db_path()
     try:
-        reader = SqliteTaskReader(db_path)
         tasks = reader.read_discovered_tasks()
     except Exception as exc:
         raise InternalError("status read failed") from exc
@@ -346,6 +336,46 @@ async def get_discovery_status(
         },
         request,
     )
+
+
+@router.post("/discovery/tasks", response_model=Envelope[dict[str, Any]])
+@envelope_errors
+async def write_discovered_tasks(
+    request: Request,
+    tasks: list[dict[str, Any]] = Body(..., embed=True),
+    db: DatabasePlugin = Injected(DatabasePlugin),  # noqa: B008
+) -> Envelope[dict[str, Any]]:
+    """写入已发现任务（upsert 语义）。
+
+    按 ``task_id`` 自然键判断：已存在则更新，不存在则插入。
+    跨 SQLite / OceanBase 兼容。供外部系统或 e2e 测试写入已发现任务数据。
+
+    Body::
+
+        {"tasks": [{"task_id": "...", "bot_id": "...", ...}, ...]}
+    """
+    try:
+        count = upsert_discovered_tasks(db, tasks)
+    except Exception as exc:
+        raise InternalError("write discovered tasks failed") from exc
+    return envelope({"written": count}, request)
+
+
+@router.delete("/discovery/tasks", response_model=Envelope[dict[str, Any]])
+@envelope_errors
+async def clear_discovered_tasks_endpoint(
+    request: Request,
+    db: DatabasePlugin = Injected(DatabasePlugin),  # noqa: B008
+) -> Envelope[dict[str, Any]]:
+    """清空所有已发现任务数据。
+
+    供测试清理或运维重置使用。
+    """
+    try:
+        count = clear_discovered_tasks(db)
+    except Exception as exc:
+        raise InternalError("clear discovered tasks failed") from exc
+    return envelope({"cleared": count}, request)
 
 
 # ===== task-discovery 调度端点（discovery 阶段；外部 cron / 运维触发）=====

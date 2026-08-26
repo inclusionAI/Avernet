@@ -40,13 +40,8 @@ import time
 import unittest
 import warnings
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import httpx
-
-from agentclaw.community.core.task.task_discovery.task_reader import (
-    init_discovered_tasks_db,
-)
 
 # ---------------------------------------------------------------------------
 # 钉钉 SDK 依赖自检安装
@@ -73,7 +68,6 @@ def _ensure_dingtalk_sdk() -> None:
         pass
 
     venv_python = sys.executable
-    venv_dir = str(Path(venv_python).parent.parent)
 
     # 检测可用的安装方式
     if shutil.which("uv"):
@@ -149,12 +143,6 @@ _MOCK_TASKS: list[dict] = [
     },
 ]
 
-_DATA_FILE = Path(__file__).resolve()
-for _ in range(8):
-    _DATA_FILE = _DATA_FILE.parent
-_DATA_FILE = _DATA_FILE / "scripts" / ".dependencies" / "data" / "discovered_tasks.db"
-
-
 def _write_mock_data(bot_id: str, owner_id: str) -> None:
     tasks = []
     for t in _MOCK_TASKS:
@@ -163,8 +151,13 @@ def _write_mock_data(bot_id: str, owner_id: str) -> None:
         task["owner_id"] = owner_id
         task["task_id"] = f"timed_fire_{bot_id}_{owner_id}_{_TODAY}"
         tasks.append(task)
-    init_discovered_tasks_db(_DATA_FILE, tasks)
-    print(f"[setup] mock 数据已写入 {_DATA_FILE} ({len(tasks)} tasks, bot={bot_id})")
+    r = httpx.post(
+        f"{_BACKEND}/api/v1/collaboration/tasks/discovery/tasks",
+        json={"tasks": tasks},
+        timeout=15.0, headers=_HDRS,
+    )
+    r.raise_for_status()
+    print(f"[setup] written {len(tasks)} tasks via HTTP /discovery/tasks (bot={bot_id})")
 
 
 # ---------------------------------------------------------------------------
@@ -445,7 +438,7 @@ class TestCronTimedFireE2E(unittest.TestCase):
 
         print("\n[SUCCESS] cron 定时触发 e2e 验证通过！")
         print(f"  - cron='{cron_expr}' 在 {next_run} 自动 fire")
-        print(f"  - 任务发现执行，session 创建成功")
+        print("  - 任务发现执行，session 创建成功")
         print("  - 钉钉交互卡片 / 工单通知由 DiscoveryService 在发现时投递"
               "（钉钉需后端启动时配置凭证 env）")
 

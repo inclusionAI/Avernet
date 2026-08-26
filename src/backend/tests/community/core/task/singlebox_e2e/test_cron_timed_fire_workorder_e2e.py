@@ -47,13 +47,8 @@ import time
 import unittest
 import warnings
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import httpx
-
-from agentclaw.community.core.task.task_discovery.task_reader import (
-    init_discovered_tasks_db,
-)
 
 # ---------------------------------------------------------------------------
 # 配置
@@ -117,12 +112,6 @@ _MOCK_TASKS: list[dict] = [
     },
 ]
 
-_DATA_FILE = Path(__file__).resolve()
-for _ in range(8):
-    _DATA_FILE = _DATA_FILE.parent
-_DATA_FILE = _DATA_FILE / "scripts" / ".dependencies" / "data" / "discovered_tasks.db"
-
-
 def _write_mock_data(bot_id: str, owner_id: str) -> None:
     tasks = []
     for t in _MOCK_TASKS:
@@ -131,8 +120,13 @@ def _write_mock_data(bot_id: str, owner_id: str) -> None:
         task["owner_id"] = owner_id
         task["task_id"] = f"timed_fire_{bot_id}_{owner_id}_{_TODAY}"
         tasks.append(task)
-    init_discovered_tasks_db(_DATA_FILE, tasks)
-    print(f"[setup] mock 数据已写入 {_DATA_FILE} ({len(tasks)} tasks, bot={bot_id})")
+    r = httpx.post(
+        f"{_BACKEND}/api/v1/collaboration/tasks/discovery/tasks",
+        json={"tasks": tasks},
+        timeout=15.0, headers=_HDRS,
+    )
+    r.raise_for_status()
+    print(f"[setup] written {len(tasks)} tasks via HTTP /discovery/tasks (bot={bot_id})")
 
 
 # ---------------------------------------------------------------------------
@@ -474,7 +468,7 @@ class TestCronTimedFireWorkOrderE2E(unittest.TestCase):
 
         print("\n[SUCCESS] cron 定时触发 e2e 验证通过！")
         print(f"  - cron='{cron_expr}' 在 {next_run} 自动 fire")
-        print(f"  - 任务发现执行，session 创建成功")
+        print("  - 任务发现执行，session 创建成功")
 
         # ================================================================
         # Phase 6: 工单事件通知（可选 — 需 SINGLEBOX_WORKORDER_E2E=1 + 签名 key）
@@ -533,7 +527,7 @@ class TestCronTimedFireWorkOrderE2E(unittest.TestCase):
 
         print("\n[SUCCESS] 完整 e2e 验证通过！")
         print(f"  - cron='{cron_expr}' 在 {next_run} 自动 fire")
-        print(f"  - 任务发现执行，session 创建成功")
+        print("  - 任务发现执行，session 创建成功")
         print("  - 工单事件 NOTICE 投递成功 "
               f"(notification_ids={notification_ids})")
 

@@ -51,6 +51,7 @@ internal_dependencies:
   - agentclaw.community.core.skills_pool  # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.task_queue   # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.task.repository.models  # SQLite ORM side-effect import for task_* table creation
+  - agentclaw.community.core.task.task_discovery.discovered_task_models  # SQLite ORM side-effect import for ac_discovered_tasks table creation
   - agentclaw.community.core.workspace
   - agentclaw.community.kernel
   - agentclaw.community.log
