@@ -202,6 +202,59 @@ def test_form_coop_group_does_not_attach_event_subscriptions():
     assert not bcs.created_req.event_subscriptions
 
 
+def test_form_coop_group_manager_worker_attaches_event_subscriptions():
+    """manager_worker 群内联挂 §4 event_subscriptions(BCS 主动推回 /callback/report,激活既有
+    apply_manager_worker_event → execution_graph audit 快照 + converge_by_session)。鉴权用既有
+    caller_bot_token(Bearer)+ HMAC,无 cookie(见 spec §4.3)。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver(),
+                       api_base_url="https://api.example.com")
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["mgr", "worker"],
+        collab_mode="manager_worker",
+        members_info=[{"bot_id": "mgr", "role": "manager"}, {"bot_id": "worker", "role": "worker"}],
+    )))
+    subs = bcs.created_req.event_subscriptions
+    assert subs and len(subs) == 1
+    s = subs[0]
+    assert s["name"] == "avernet-manager-worker"
+    assert s["payload"] == {"mode": "full"}
+    assert set(s["event_filters"]) == {
+        "group.created", "session.created",
+        "task.assigned", "task.completed", "session.completed",   # §4
+    }
+    assert s["sink"]["type"] == "webhook"
+    assert s["sink"]["url"] == "https://api.example.com/api/v1/collaboration/tasks/callback/report"
+    assert s["sink"]["request_timeout_ms"] == 10000
+    # manager/worker 参与者照常
+    assert sorted(p["role"] for p in bcs.created_req.participants) == ["manager", "worker"]
+
+
+def test_form_coop_group_manager_worker_without_api_base_url_skips_subscriptions():
+    """_api_base_url 未配(sink.url 不能空/相对)→ 跳过 event_subscriptions + warn;manager_worker 群照常建,poller 兜底。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())  # api_base_url 缺省 ""
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["mgr", "worker"], collab_mode="manager_worker",
+        members_info=[{"bot_id": "mgr", "role": "manager"}, {"bot_id": "worker", "role": "worker"}],
+    )))
+    assert not bcs.created_req.event_subscriptions
+
+
+def test_form_coop_group_chat_does_not_attach_event_subscriptions():
+    """chat 群不挂订阅(本次不给 chat 事件流);既有 state_machine 否定测试 + chat 不挂,确保只有 manager_worker 挂。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver(),
+                       api_base_url="https://api.example.com")
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["b1", "b2"], collab_mode="chat", members_info=[],
+    )))
+    assert not bcs.created_req.event_subscriptions
+
+
 def test_form_coop_group_passes_caller_bot_token_from_provider():
     """注入 BcsBotTokenProvider 时,form_coop_group 取 driver_bot(BCS uuid)的 token 填 caller_bot_token(参考 ocb Bearer)。"""
     captured = {}

@@ -240,6 +240,23 @@ class TaskExecutor:
             req_kwargs["participants"] = [
                 {"bot_uuid": bcs_uuid(mgr), "role": "manager"}] + [
                 {"bot_uuid": bcs_uuid(b), "role": "worker"} for b in bot_ids if b != mgr]
+            # §4 任务协作群事件:内联挂 event_subscriptions,BCS 主动推 §4 事件回 Avernet 回调路由,
+            # 激活既有 apply_manager_worker_event → task_callback.execution_graph(audit 快照)+ converge_by_session。
+            # 鉴权 = HMAC + 既有 caller_bot_token(Bearer driver-bot);require_human 由 Bearer(+HMAC) 兜,无 cookie
+            # (见 specs/2026-08-26-task-execute-group-kind-and-manager-worker-event-push/spec.md §4.3)。
+            if self._api_base_url:
+                req_kwargs["event_subscriptions"] = [{
+                    "name": "avernet-manager-worker",
+                    "event_filters": ["group.created", "session.created",
+                                      "task.assigned", "task.completed", "session.completed"],
+                    "payload": {"mode": "full"},
+                    "sink": {"type": "webhook",
+                             "url": f"{self._api_base_url}/api/v1/collaboration/tasks/callback/report",
+                             "request_timeout_ms": 10000},
+                }]
+            else:
+                logger.warning(
+                    "[task][manager_worker] _api_base_url 未配,跳过 event_subscriptions(sink.url 需绝对地址);poller 兜底收敛")
         elif mode == "state_machine":
             req_kwargs["group_strategy"] = "state_machine"
             # GroupFormation.extend_props["definition_yaml"] → BCS collaboration_definition_yaml
@@ -283,10 +300,10 @@ class TaskExecutor:
         service_spec = gf.extend_props.get("service_spec")
         if service_spec:
             req_kwargs["service_spec"] = service_spec
-        # 不再内联挂 event_subscriptions:带订阅会让 BCS 建 groups 走 create_group_with_inline_subscriptions
-        # → require_human,对 HMAC-only / HTTP bot token(Bearer→Bot)分别 401 / 403。改为参考 ocb:以 driver-bot
-        # session_token 作 caller 身份(``Authorization: Bearer``),BCS 走 no-sub 分支建群;BCN 终态收敛由
-        # result poller 轮询 get_state_machine_run / get_group 承担(task_executor_result_poller)。
+        # event_subscriptions:仅 manager_worker 分支(上方)内联挂 §4 订阅推回;state_machine/chat 不挂。
+        # 鉴权:driver-bot session_token 作 caller 身份(``Authorization: Bearer``);manager_worker 挂订阅时 BCS 走
+        # require_human,由 Bearer(+HMAC) 兜过(无 cookie,见 spec §4.3);state_machine/chat 走 no-sub 分支建群。
+        # 终态收敛:result poller 轮询 get_state_machine_run / get_group 兜底(与 §4 推送双兜底,同进 on_report 幂等)。
         if self._bot_token_provider is not None:
             req_kwargs["caller_bot_token"] = self._bot_token_provider.get_token(
                 req_kwargs.get("driver_bot") or "")
