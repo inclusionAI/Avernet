@@ -358,3 +358,89 @@ async def test_ingest_otlp_traces_does_not_promote_child_span_to_trace(monkeypat
     assert calls["logs"][0]["trace_count"] == 0
     assert calls["logs"][0]["observation_count"] == 1
     assert calls["logs"][0]["trace_ids"] == ["trace-child-only"]
+
+
+def test_span_to_observation_falls_back_to_gen_ai_session_id():
+    observation = _span_to_observation(
+        {
+            "traceId": "trace-fallback",
+            "spanId": "span-fallback",
+            "name": "LLM",
+            "startTimeUnixNano": "1782736696842000000",
+            "endTimeUnixNano": "1782736706842000000",
+            "attributes": [
+                _attr("gen_ai.span.kind", "LLM"),
+                _attr("gen_ai.session.id", "session-fallback"),
+            ],
+        },
+        {},
+    )
+
+    assert observation["session_id"] == "session-fallback"
+    assert observation["session_key"] == "session-fallback"
+
+
+def test_trace_from_root_falls_back_to_gen_ai_session_id():
+    trace = _trace_from_root(
+        {
+            "traceId": "trace-fallback",
+            "spanId": "chat-fallback",
+            "name": "Turn 1",
+            "startTimeUnixNano": "1782736696842000000",
+            "endTimeUnixNano": "1782736706842000000",
+            "attributes": [
+                _attr("gen_ai.span.kind", "CHAT"),
+                _attr("gen_ai.session.id", "session-fallback"),
+                _attr("identity.owner_id", "197444"),
+                _attr("identity.bot_id", "default"),
+            ],
+        },
+        {},
+    )
+
+    assert trace["session_id"] == "session-fallback"
+    assert trace["session_key"] == "session-fallback"
+
+
+def test_span_to_observation_prefers_conversation_id_when_both_present():
+    observation = _span_to_observation(
+        {
+            "traceId": "trace-priority",
+            "spanId": "span-priority",
+            "name": "LLM",
+            "startTimeUnixNano": "1782736696842000000",
+            "endTimeUnixNano": "1782736706842000000",
+            "attributes": [
+                _attr("gen_ai.span.kind", "LLM"),
+                _attr("gen_ai.session.id", "session-id"),
+                _attr("gen_ai.conversation.id", "conversation-id"),
+            ],
+        },
+        {},
+    )
+
+    assert observation["session_id"] == "session-id"
+    assert observation["session_key"] == "conversation-id"
+
+
+def test_trace_from_root_prefers_conversation_id_when_both_present():
+    trace = _trace_from_root(
+        {
+            "traceId": "trace-priority",
+            "spanId": "chat-priority",
+            "name": "Turn 1",
+            "startTimeUnixNano": "1782736696842000000",
+            "endTimeUnixNano": "1782736706842000000",
+            "attributes": [
+                _attr("gen_ai.span.kind", "CHAT"),
+                _attr("gen_ai.session.id", "session-id"),
+                _attr("gen_ai.conversation.id", "conversation-id"),
+                _attr("identity.owner_id", "197444"),
+                _attr("identity.bot_id", "default"),
+            ],
+        },
+        {},
+    )
+
+    assert trace["session_id"] == "session-id"
+    assert trace["session_key"] == "conversation-id"
