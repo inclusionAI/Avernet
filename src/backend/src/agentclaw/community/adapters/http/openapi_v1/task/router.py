@@ -106,10 +106,8 @@ async def list_tasks(
 ) -> Envelope[list[TaskInfoRecordDTO]]:
     """列持久化 task_info 记录,按更新时间降序,并按查询参数 user_id 过滤。
 
-    ``user_id`` 是直接的筛选条件,不要求与认证主体一致,也不执行 owner 作用域校验。
-    返回完整 TaskInfoRecord 字段(含 task_spec/execution_config/owner)。非法 status → 400
-    (Status(invalid) 会抛 ValueError,router 层先校验;经 HTTPException → 中央 handler
-    → ErrorEnvelope,非 500)。"""
+    user_id 是直接的筛选条件,不要求与认证主体一致,也不执行 owner 作用域校验。
+    返回完整任务记录字段。非法 status 返回 400，而不是服务器内部错误。"""
     del principal  # Authentication remains mandatory; user_id is only a query filter.
     if status is not None and status not in {s.value for s in Status}:
         raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
