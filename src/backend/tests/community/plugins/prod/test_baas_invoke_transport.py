@@ -380,15 +380,14 @@ def test_http_info_resolution_carries_the_instance_identity():
     )
 
 
-@pytest.mark.parametrize("status", [401, 403])
-def test_rejected_token_refreshes_http_info_and_retries_once(status):
-    """缓存的 token 过期时刷新重试，调用方不该看到假 401/403。"""
+def test_rejected_token_refreshes_http_info_and_retries_once():
+    """缓存的 token 过期时刷新重试，调用方不该看到假 401。"""
     from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
 
     svc = MagicMock()
     stale, fresh = MagicMock(name="stale"), MagicMock(name="fresh")
     svc.get_http_info.side_effect = [stale, fresh]
-    svc.invoke_http.side_effect = [_response(status), _ok_response()]
+    svc.invoke_http.side_effect = [_response(401), _ok_response()]
 
     transport = BaasInvokeTransport(
         bind_id=42, engine_port=20003, tenant="team_claw", baas_service=svc
@@ -412,6 +411,30 @@ def test_rejected_token_refreshes_http_info_and_retries_once(status):
     assert svc.invoke_http.call_args.kwargs["http_info"] is fresh
 
 
+def test_a_403_is_the_device_answer_and_is_never_replayed():
+    """403 不是网关拒 token —— engine 把 PermissionError 映射成 403，proxy 原样透传。
+
+    重放会把一次 mutating 的 upload/delete 再跑一遍（无 device_uuid 时还可能打到
+    另一台设备），并且掩盖 engine 真正的鉴权结论。
+    """
+    from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
+
+    svc = MagicMock()
+    svc.invoke_http.return_value = _response(403)
+    transport = BaasInvokeTransport(
+        bind_id=42, engine_port=20003, tenant="team_claw", baas_service=svc
+    )
+
+    resp = transport.post_multipart(
+        "/api/file/upload", files={"file": ("a", b"x")}, data={"target_path": "a"}
+    )
+
+    assert resp.status_code == 403
+    # sent exactly once, and the http_info was never re-resolved
+    assert svc.invoke_http.call_count == 1
+    assert svc.get_http_info.call_count == 1
+
+
 def test_a_persistently_rejected_token_stops_after_one_retry():
     """真配置错时不无限重试 —— 刷新一次后如实返回 401。"""
     from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
@@ -426,6 +449,43 @@ def test_a_persistently_rejected_token_stops_after_one_retry():
 
     assert resp.status_code == 401
     assert svc.invoke_http.call_count == 2
+    assert svc.get_http_info.call_count == 2
+
+
+def test_concurrent_rejections_share_one_refresh():
+    """一批并发写同时被拒时只刷新一次，而不是每个请求各刷一次。
+
+    无条件 refresh 会在失败路径上把本 cache 消除掉的「每文件一次解析」原样带回来。
+    """
+    import threading
+
+    from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
+
+    svc = MagicMock()
+    # Distinct objects per call, like the real get_http_info, which builds a fresh
+    # HttpConnectionInfo every time. A shared MagicMock return_value would hand back
+    # one identical object and make the compare-and-swap unobservable.
+    svc.get_http_info.side_effect = [MagicMock(name=f"info-{i}") for i in range(20)]
+    transport = BaasInvokeTransport(
+        bind_id=42, engine_port=20003, tenant="team_claw", baas_service=svc
+    )
+    # prime the cache so every worker starts from the same (about to be rejected) entry
+    primed = transport._http_info("/api/file/upload")
+    assert svc.get_http_info.call_count == 1
+
+    barrier = threading.Barrier(8)
+
+    def refresh_once():
+        barrier.wait()
+        transport._http_info("/api/file/upload", stale=primed)
+
+    workers = [threading.Thread(target=refresh_once) for _ in range(8)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+
+    # one thread re-resolved; the other seven took the entry it installed
     assert svc.get_http_info.call_count == 2
 
 

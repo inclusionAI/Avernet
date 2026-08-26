@@ -41,9 +41,17 @@ if TYPE_CHECKING:
 # by the refresh-and-retry in :meth:`BaasInvokeTransport._invoke`.
 _HTTP_INFO_TTL_SECONDS = 30.0
 
-# Gateway verdicts that mean "this token is no longer good" — the one case where a
-# cached ``http_info`` must be dropped and the call replayed against a fresh one.
-_STALE_TOKEN_STATUSES = frozenset({401, 403})
+# The proxypass gateway answers 401 when it rejects the token it was handed — the one
+# verdict that means "this cached http_info is no longer usable".
+#
+# 403 is deliberately excluded. It does not identify a token problem: the engine's file
+# router maps ``PermissionError`` to 403 (``engine/community/api/file/router.py``) and
+# the proxy forwards upstream responses through unchanged
+# (``sandboxproxy/community/adapters/web/routes.py``), so a 403 is the device's own
+# authorization answer. Replaying it would re-run a mutating upload/delete and, with no
+# ``device_uuid`` pinning the instance, possibly run it against a *different* device —
+# while hiding the engine's actual verdict from the caller.
+_STALE_TOKEN_STATUS = 401
 
 
 def build_desktop_client() -> httpx.Client:
@@ -124,7 +132,9 @@ class BaasInvokeTransport:
         self._http_info_lock = threading.Lock()
         self._http_info_cache: dict[str, tuple[float, "HttpConnectionInfo"]] = {}
 
-    def _http_info(self, path: str, *, refresh: bool = False) -> "HttpConnectionInfo":
+    def _http_info(
+        self, path: str, *, stale: "HttpConnectionInfo | None" = None
+    ) -> "HttpConnectionInfo":
         """Resolve ``http_info`` for ``path``, reusing a fresh cached one.
 
         Keyed by ``path`` alone because every other input BaaS resolves against
@@ -132,14 +142,21 @@ class BaasInvokeTransport:
         this instance. Path must stay in the key: the returned ``http_url`` embeds
         it, so reusing one path's entry for another would POST to the wrong route.
 
-        ``refresh=True`` forces a new resolution and replaces the entry — used by
-        :meth:`_invoke` when the gateway rejects a cached token.
+        ``stale`` names the entry the caller was just rejected on, which makes a
+        refresh a compare-and-swap: it re-resolves only while the cache still holds
+        that exact entry, and otherwise hands back whatever replaced it. An
+        unconditional refresh would resolve once per in-flight request when a
+        concurrent batch is rejected together — reinstating, on the failure path,
+        the very per-file fan-out this cache exists to remove.
         """
         with self._http_info_lock:
-            if not refresh:
-                cached = self._http_info_cache.get(path)
-                if cached is not None and cached[0] > time.monotonic():
-                    return cached[1]
+            cached = self._http_info_cache.get(path)
+            if (
+                cached is not None
+                and cached[0] > time.monotonic()
+                and cached[1] is not stale
+            ):
+                return cached[1]
             info = self._baas_service.get_http_info(
                 bind_id=self._bind_id,
                 port=self._engine_port,
@@ -156,12 +173,15 @@ class BaasInvokeTransport:
     def _invoke(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         """Issue one container call against this transport's cached ``http_info``.
 
-        Retries once against a freshly resolved ``http_info`` when the gateway
-        answers 401/403: a cached token can expire (or its device be reallocated)
-        mid-batch, and a caller must never see a spurious auth failure caused by
-        this cache choosing to reuse a token. Replay is safe because every payload
-        we send is already materialised (``json`` dicts, ``files`` bytes) rather
-        than a consumed stream. A genuine misconfiguration simply fails twice.
+        Retries once against a re-resolved ``http_info`` when the gateway answers
+        401: a cached token can expire (or its device be reallocated) mid-batch, and
+        a caller must never see a spurious auth failure caused by this cache
+        choosing to reuse a token. Replay is safe because every payload we send is
+        already materialised (``json`` dicts, ``files`` bytes) rather than a consumed
+        stream. A genuine misconfiguration simply fails twice.
+
+        Every other status — 403 included, see :data:`_STALE_TOKEN_STATUS` — is the
+        device's own answer and is returned untouched.
         """
         call = dict(
             bind_id=self._bind_id,
@@ -177,12 +197,11 @@ class BaasInvokeTransport:
             device_uuid=self._device_uuid,
             **kwargs,
         )
-        response = self._baas_service.invoke_http(
-            **call, http_info=self._http_info(path)
-        )
-        if response.status_code in _STALE_TOKEN_STATUSES:
+        info = self._http_info(path)
+        response = self._baas_service.invoke_http(**call, http_info=info)
+        if response.status_code == _STALE_TOKEN_STATUS:
             return self._baas_service.invoke_http(
-                **call, http_info=self._http_info(path, refresh=True)
+                **call, http_info=self._http_info(path, stale=info)
             )
         return response
 
