@@ -60,7 +60,7 @@ class _CallbackTaskService:
         self.callback = _CallbackSink()
 
 
-def _seed_task_service(world) -> None:
+def _seed_task_service(world, *, expected_owner=None) -> None:
     async def execute(_self, _task_info):
         return TaskOpResult(
             task_id="task-endpoint-1",
@@ -73,7 +73,7 @@ def _seed_task_service(world) -> None:
         return TaskExecutionGraph(run_id=1, loop_round=0, status=Status.PENDING)
 
     def list_tasks(_self, _status=None, owner_user_id=None):
-        assert owner_user_id is None
+        assert owner_user_id == expected_owner
         return [
             TaskInfoRecord(
                 id=1,
@@ -218,6 +218,21 @@ def list_happy():
     expect=ExpectError(status=400),
 )
 def list_error():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/list",
+    scenario="scoped_by_user_id",
+    seed=lambda w: _seed_task_service(w, expected_owner="user-endpoint-1"),
+    input=CaseInput(query_params={"user_id": "user-endpoint-1"}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": [{"task_id": "task-endpoint-1"}]},
+    ),
+)
+def list_scoped_by_user_id():
     pass
 
 

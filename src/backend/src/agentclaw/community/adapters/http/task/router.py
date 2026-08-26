@@ -131,14 +131,21 @@ async def get_task_dashboard_internal(
 async def list_tasks_internal(
     request: Request,
     status: str | None = None,
+    user_id: str | None = Query(
+        None,
+        description="可选:按 owner_user_id 过滤;为空返回全量。与公开面 "
+        "``/openapi/v1/.../list`` 的 owner 作用域语义对齐(内部镜像用查询参数身份,非签名 principal)",
+    ),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> Envelope[list[TaskInfoRecordDTO]]:
-    """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选状态过滤)。
+    """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选状态/owner 过滤)。
 
-    非法 ``status`` 过滤值 → 400(经 ``HTTPException`` → 中央 handler → ``ErrorEnvelope``)。"""
+    非法 ``status`` 过滤值 → 400(经 ``HTTPException`` → 中央 handler → ``ErrorEnvelope``)。
+    ``user_id`` 为空时不按 owner 过滤(返回全量,供内部可信调用方);传入则按 ``owner_user_id``
+    过滤,与公开面 ``/openapi/v1/.../list`` 的 owner 作用域一致。"""
     if status is not None and status not in {s.value for s in Status}:
         raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
-    items = service.list_tasks(status)
+    items = service.list_tasks(status, owner_user_id=user_id)
     return envelope([task_info_record_to_dto(item) for item in items], request)
 
 
