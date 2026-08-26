@@ -117,7 +117,7 @@ class _DiscardingCookieJar(http.cookiejar.CookieJar):
     as-is rather than copying it into a fresh one.
     """
 
-    def set_cookie(self, cookie: http.cookiejar.Cookie) -> None:  # noqa: D102
+    def set_cookie(self, cookie: http.cookiejar.Cookie) -> None:
         return None
 
 

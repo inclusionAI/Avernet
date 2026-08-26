@@ -136,22 +136,25 @@ config path including the HTTP/2 flag; Group 3 validates.
 
 ## Group 3 — Validate the blast radius
 
-- [ ] 3.1 Run the consumer tests that exercise this seam:
+- [x] 3.1 Run the consumer tests that exercise this seam:
       `tests/community/contracts/test_http_client.py`,
       `tests/community/core/service_bot/services/` (BaasService),
       `tests/community/core/harness/services/` (LLM + streaming),
       `tests/community/core/bot_management/services/` (BCN),
       `tests/community/core/quality/test_task_processor.py`,
       `tests/community/core/bot_dormant/`.
-- [ ] 3.2 Run `tests/community/endpoints/test_session_resources.py` — now the
-      **only** test that drives a real `HttpxClient` over a real socket, and
-      therefore the sole end-to-end proof the pooled path works at all. Treat a
-      failure here as blocking, not incidental.
-- [ ] 3.3 Run `tests/community/architecture/` — module boundaries (the new
+- [x] 3.2 Run the session-resource endpoint cases — a real `HttpxClient` bound
+      against a live `ThreadingHTTPServer`, and the end-to-end proof the pooled
+      path works over a real socket. **Invoke via `pytest
+      tests/community/endpoints/`, not the file directly**: it registers cases
+      through `@endpoint_test` into `ENDPOINT_CASES` and defines no `test_*`
+      functions, so running the file collects zero tests and passes vacuously.
+      Treat a failure here as blocking, not incidental.
+- [x] 3.3 Run `tests/community/architecture/` — module boundaries (the new
       `kernel.lifecycle` import from `plugins/`), lifecycle discovery, the
       Rule 20/21 plugin-pairing test, and `test_local_no_external_deps.py`
       (the new `h2` dependency).
-- [ ] 3.4 Run the full backend unit suite (`scripts/ci_test.sh` or
+- [x] 3.4 Run the full backend unit suite (`scripts/ci_test.sh` or
       `pytest tests/community`) and `ruff check` on the touched files. Record
       the counts; state explicitly anything that could not be run and why.
 
