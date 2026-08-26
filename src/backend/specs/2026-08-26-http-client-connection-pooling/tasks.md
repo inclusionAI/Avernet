@@ -11,7 +11,7 @@ config path including the HTTP/2 flag; Group 3 validates.
       its position in the alphabetised shared-base list. Note in the commit
       message that the block is documented as mirroring the corp manifest, so
       corp needs the same edit when this lands there.
-- [ ] 0.2 `uv.lock` — hand-edit, four changes (do NOT run `uv lock`; the pinned
+- [x] 0.2 `uv.lock` — hand-edit, four changes (do NOT run `uv lock`; the pinned
       aliyun registry is unreachable from the sandbox and regenerating would
       rewrite every URL in the file):
       (a) root `dependencies`: `{ name = "httpx" }` → `{ name = "httpx", extra = ["http2"] }`;
