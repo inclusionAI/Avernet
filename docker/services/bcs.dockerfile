@@ -22,8 +22,9 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
 # workspace is self-contained under src/bcs (no path deps outside it).
 COPY src/bcs /build/src/bcs
 
-# Fetch dependencies into the registry cache first, so source-only changes
-# reuse the downloaded crates.
+# Prefetch dependencies into the registry cache mount. BuildKit retains the
+# cache across builds, so repeated builds reuse already-downloaded crates even
+# though the `COPY src/bcs` layer above busts on any source change.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo fetch --locked --manifest-path /build/src/bcs/Cargo.toml
 

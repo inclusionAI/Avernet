@@ -1445,7 +1445,21 @@ impl BcsConfig {
         let mut config = match ext.to_lowercase().as_str() {
             "json" => parse_and_expand("json")?,
             "toml" => parse_and_expand("toml")?,
-            _ => parse_and_expand("json").or_else(|_| parse_and_expand("toml"))?,
+            // Unknown extension: try JSON first, then TOML. Only fall through to
+            // TOML when the content fails to *parse* as JSON — a valid JSON
+            // document must surface its own expansion/deserialize errors instead
+            // of being retried (and mis-reported) as a TOML parse error.
+            _ => match crate::config_loader::parse_config_content(
+                "json",
+                &content,
+                &path_display,
+            ) {
+                Ok(mut value) => {
+                    crate::config_loader::expand_env_vars(&mut value)?;
+                    serde_json::from_value(value)?
+                }
+                Err(_) => parse_and_expand("toml")?,
+            },
         };
 
         let local_path_base_dir = local_path_base_dir_for_config_file(path);
@@ -1638,6 +1652,31 @@ botchat_url = "${BCS_TEST_FROM_FILE_MISSING}"
         assert!(
             err.contains("BCS_TEST_FROM_FILE_MISSING"),
             "error should name the missing var: {err}"
+        );
+    }
+
+    #[test]
+    fn from_file_unknown_ext_json_with_unset_env_reports_env_error_not_toml() {
+        // A valid JSON document with an unset `${VAR}` must surface the env
+        // error directly, not be retried as TOML and mis-reported. Guards the
+        // `_` (unknown extension) branch swallowing expansion errors.
+        safe_remove_var("BCS_TEST_UNKNOWN_EXT_VAR");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bcs-config"); // no extension -> unknown-ext branch
+        std::fs::write(
+            &path,
+            r#"{"bots_base_dir":"/bots","botchat_url":"${BCS_TEST_UNKNOWN_EXT_VAR}"}"#,
+        )
+        .unwrap();
+
+        let err = BcsConfig::from_file(&path).unwrap_err().to_string();
+        assert!(
+            err.contains("BCS_TEST_UNKNOWN_EXT_VAR"),
+            "should surface the unset env-var error, got: {err}"
+        );
+        assert!(
+            !err.to_lowercase().contains("toml"),
+            "should not misreport as a TOML parse error, got: {err}"
         );
     }
 
