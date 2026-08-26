@@ -1,8 +1,8 @@
-# Plan — Outbound HTTP Connection Pooling for `HttpClient`
+# Plan — Outbound HTTP Connection Pooling and HTTP/2 for `HttpClient`
 
-Implements `spec.md`. Five source files, four test files. No protocol change:
-`plugin_api/http_client.py` is untouched, so no consumer and no conformance
-contract moves.
+Implements `spec.md`. Six source files (one of them the dependency manifest
+pair), four test files. No protocol change: `plugin_api/http_client.py` is
+untouched, so no consumer and no conformance contract moves.
 
 ## Verified assumptions
 
@@ -17,6 +17,47 @@ writing this plan, because each one would otherwise be a rewrite risk:
 | An absolute URL still bypasses `base_url` (the `general` contract) | Yes — `base_url="http://svc.test"` + `"http://other.test:20010/x"` requests the absolute URL |
 | `httpx.PoolTimeout` classifies as an existing boundary error | `issubclass(httpx.PoolTimeout, httpx.TimeoutException)` is `True`, so `HttpClientTimeoutError` already covers it |
 | A custom `transport=` makes `limits=` inert rather than an error | Yes — `Client._init_transport` returns the given transport before building `HTTPTransport`, so the `MockTransport` tests are unaffected |
+| `http2=True` composes with a `MockTransport` | Yes — verified constructing and issuing a request through both `http2=True`+`MockTransport` and `http2=True`+ real `HTTPTransport` |
+| `http2=True` needs `h2` **even with a custom transport** | Yes — `Client.__init__` does `if http2: import h2` *before* `_init_transport` short-circuits. So the dependency is required by any test that passes `http2=True`, not only by real network paths. |
+| httpx negotiates h2 by ALPN only | `httpcore/_sync/connection.py`: `http2_negotiated or (self._http2 and not self._http1)` — no cleartext upgrade path |
+
+## Component 0 — dependency: `httpx[http2]`
+
+`pyproject.toml`: `"httpx>=0.27.0"` → `"httpx[http2]>=0.27.0"`, keeping its
+position in the alphabetised shared-base list and its existing comment context
+(the block is documented as mirroring the corp manifest, so the corp side needs
+the same edit when this lands there).
+
+`uv.lock` is hand-edited rather than regenerated. Regenerating is not an option
+here: the lock pins `https://mirrors.aliyun.com/pypi/simple` as its registry and
+that mirror is unreachable from the dev sandbox, so `uv lock` would rewrite
+every URL in the file to a different index — a diff of thousands of lines
+unrelated to this change. The aliyun mirror mirrors PyPI's path layout exactly
+(`/pypi/packages/<a>/<b>/<hash>/<file>` ↔
+`files.pythonhosted.org/packages/<a>/<b>/<hash>/<file>`), so the entries are
+constructed by host-swapping the URLs PyPI's JSON API reports. Resolved versions
+and hashes, already fetched and verified:
+
+- `h2` 4.4.1 — depends on `hpack>=4.2,<5` and `hyperframe>=6.1,<7`
+- `hpack` 4.2.0 — no dependencies
+- `hyperframe` 6.1.0 — no dependencies
+
+Four edits to `uv.lock`:
+
+1. Root package `dependencies`: `{ name = "httpx" }` → `{ name = "httpx", extra = ["http2"] }`.
+2. Root `[package.metadata] requires-dist`: `{ name = "httpx", specifier = ">=0.27.0" }`
+   → `{ name = "httpx", extras = ["http2"], specifier = ">=0.27.0" }`.
+3. The existing `httpx` package entry gains a
+   `[package.optional-dependencies]` section with `http2 = [{ name = "h2" }]`,
+   following the shape the `uvicorn` entry already uses for its `standard` extra.
+4. Three new `[[package]]` blocks for `h2`, `hpack`, `hyperframe`, inserted in
+   the file's alphabetical ordering, each with
+   `source = { registry = "https://mirrors.aliyun.com/pypi/simple" }`, its
+   `sdist`, its wheel, and (for `h2`) its `dependencies` list.
+
+Verification that the edit is well-formed is `uv lock --check` (or `uv sync
+--frozen` where the mirror is reachable) — the task list runs whichever is
+available and records which.
 
 ## Component 1 — `plugins/http_client.py`: the pooled client
 
@@ -35,6 +76,7 @@ class HttpxClient(LifecycleBase, HttpClient):
         max_connections: int = DEFAULT_MAX_CONNECTIONS,
         max_keepalive_connections: int = DEFAULT_MAX_KEEPALIVE_CONNECTIONS,
         keepalive_expiry: float = DEFAULT_KEEPALIVE_EXPIRY,
+        http2: bool = DEFAULT_HTTP2,
     ):
         self._base_url = base_url
         self._transport = transport
@@ -43,14 +85,16 @@ class HttpxClient(LifecycleBase, HttpClient):
             max_keepalive_connections=max_keepalive_connections,
             keepalive_expiry=keepalive_expiry,
         )
+        self._http2 = http2
         self._lock = threading.Lock()
         self._client: httpx.Client | None = None
 ```
 
 The module-level `DEFAULT_*` constants mirror `HttpClientPoolConfig`'s field
-defaults. They exist for direct constructions only (the singlebox endpoint
-fixture, the streaming test); the composition root always passes explicit
-values, so the two default sets can never silently diverge in production.
+defaults, `DEFAULT_HTTP2 = False` included. They exist for direct constructions
+only (the singlebox endpoint fixture, the streaming test); the composition root
+always passes explicit values, so the two default sets can never silently
+diverge in production.
 
 **Lazy, thread-safe pool.** `_pooled_client()` double-checks under a
 `threading.Lock`. The lock guards *construction only* and is never held across a
@@ -67,6 +111,7 @@ def _pooled_client(self) -> httpx.Client:
             kwargs: dict[str, Any] = {
                 "base_url": self._base_url,
                 "limits": self._limits,
+                "http2": self._http2,
             }
             if self._transport is not None:
                 kwargs["transport"] = self._transport
@@ -79,7 +124,7 @@ binding at boot; eager construction would open pools for upstreams a given
 deployment never calls.
 
 **Request path.** `_request` keeps its `None`-omitting `kwargs` assembly
-verbatim — that is what acceptance criterion 3 pins — and changes only its last
+verbatim — that is what acceptance criterion 4 pins — and changes only its last
 two lines. The `with httpx.Client(...) as client:` block goes away; `timeout`
 moves from the constructor to the call:
 
@@ -88,7 +133,7 @@ return self._pooled_client().request(method, path, timeout=timeout, **kwargs)
 ```
 
 A bare float expands to the same connect/read/write/pool budget httpx applied
-when it was a constructor argument, so criterion 4 holds without a translation
+when it was a constructor argument, so criterion 5 holds without a translation
 step.
 
 **Streaming.** Same substitution, and critically *no* client close:
@@ -120,8 +165,9 @@ which is not a `Lifecycle`.
 design as the contract ("every call opens a short-lived `httpx.Client`"). It is
 rewritten to state the pooled design, the two operational consequences from the
 spec's risk section (`keepalive_expiry` vs upstream idle timeout; streams
-occupying pool slots), and why HTTP/2 is absent — so the next reader does not
-re-litigate the multiplexing question from scratch.
+occupying pool slots), and the HTTP/2 semantics — ALPN-only negotiation, inert
+against the plaintext singlebox upstreams, off by default — so the next reader
+does not re-derive the multiplexing question from scratch.
 
 ## Component 2 — `di/config.py`: `HttpClientPoolConfig`
 
@@ -135,16 +181,16 @@ class HttpClientPoolConfig:
     max_connections: int = 100
     max_keepalive_connections: int = 20
     keepalive_expiry: float = 5.0
+    http2: bool = False
 ```
 
-Defaults are httpx's own. The docstring carries the operational meaning the
+Pool defaults are httpx's own. The docstring carries the operational meaning the
 numbers do not: that the ceilings are **per upstream client**, not process-wide;
 that exceeding `max_connections` yields `HttpClientTimeoutError`
-(`httpx.PoolTimeout`) once the per-call timeout elapses; and that
-`keepalive_expiry` must stay below the upstream's idle timeout to avoid the
-stale-connection `RemoteProtocolError`.
-
-No `http2` field — per spec, the knob is not added.
+(`httpx.PoolTimeout`) once the per-call timeout elapses; that `keepalive_expiry`
+must stay below the upstream's idle timeout to avoid the stale-connection
+`RemoteProtocolError`; and that `http2` engages only against TLS upstreams that
+offer `h2` via ALPN, defaulting off pending per-environment validation.
 
 ## Component 3 — `di/modules/config_module.py`: the provider
 
@@ -163,11 +209,13 @@ def http_client_pool(self) -> cfg.HttpClientPoolConfig:
             block.get("max_keepalive_connections", defaults.max_keepalive_connections)
         ),
         keepalive_expiry=float(block.get("keepalive_expiry", defaults.keepalive_expiry)),
+        http2=bool(block.get("http2", defaults.http2)),
     )
 ```
 
 Placed next to `masa_agent_eval`. Missing block ⇒ dataclass defaults, so no
-deployment needs a config change to adopt this.
+deployment needs a config change to adopt pooling, and enabling HTTP/2 later is
+purely additive to one YAML block.
 
 ## Component 4 — `di/modules/http_client_module.py`: wiring
 
@@ -181,12 +229,15 @@ return HttpxClient(
     max_connections=pool.max_connections,
     max_keepalive_connections=pool.max_keepalive_connections,
     keepalive_expiry=pool.keepalive_expiry,
+    http2=pool.http2,
 )
 ```
 
 The existing `logger.info` line per provider is extended to record the pool
-ceiling alongside the base_url, so a deployment's effective limits are visible
-in boot logs rather than having to be inferred from config.
+ceiling and the HTTP/2 flag alongside the base_url, so a deployment's effective
+transport settings are visible in boot logs rather than having to be inferred
+from config. This is what will confirm, in a pre environment, that flipping
+`http2` actually took effect.
 
 **Breaking-call-site note:** `test_http_client_module_bcn.py` and
 `test_infrastructure_module.py` invoke these providers *directly*
@@ -201,6 +252,8 @@ hide a missing binding at boot, which is worse than two test edits.
 A commented `http_client` block under `user_config`, matching how the file
 documents other optional blocks (e.g. the commented LLM `base_url`). Commented,
 not active, so the dataclass defaults remain the single source of the values.
+The `http2` key carries a one-line note that it engages only against TLS
+upstreams offering `h2`.
 
 ## Test plan
 
@@ -216,27 +269,31 @@ construction arguments are the thing under test:
   instance; `httpx.Client` constructed exactly once (criterion 1).
 - `test_client_is_built_with_configured_limits` — `limits` carries the three
   configured values (criterion 2).
-- `test_none_args_are_omitted_from_the_request` — preserved (criterion 3).
-- `test_post_with_files_and_data_passes_multipart_kwargs` — preserved
+- `test_http2_defaults_off_and_is_forwarded_when_enabled` — `http2=False` is
+  passed by default; `HttpxClient(..., http2=True)` forwards `http2=True` and
+  constructs for real against a `MockTransport`, proving `h2` is importable
   (criterion 3).
+- `test_none_args_are_omitted_from_the_request` — preserved (criterion 4).
+- `test_post_with_files_and_data_passes_multipart_kwargs` — preserved
+  (criterion 4).
 - `test_get_and_put_dispatch_correct_methods` — preserved.
 - `test_timeout_is_passed_per_request_not_per_client` — `request` receives
-  `timeout=T`; the client is not constructed with one (criterion 4).
+  `timeout=T`; the client is not constructed with one (criterion 5).
 - `test_absolute_url_bypasses_base_url` — the `general` client's contract, newly
-  pinned because pooling is the change most likely to disturb it (criterion 3).
-- `test_response_and_transport_errors_propagate` — preserved (criterion 5).
+  pinned because pooling is the change most likely to disturb it (criterion 4).
+- `test_response_and_transport_errors_propagate` — preserved (criterion 6).
 - `test_stream_shares_the_pool_and_leaves_it_open` — after a `stream` block
-  exits, a following `get` succeeds on the same client (criterion 6).
+  exits, a following `get` succeeds on the same client (criterion 7).
 - `test_close_is_idempotent_and_rebuilds_on_next_use` — `close()` twice does not
-  raise; a later call works (criterion 7).
+  raise; a later call works (criterion 8).
 - `test_teardown_closes_the_pool` — `await client.teardown()` closes the
-  underlying client (criterion 7).
+  underlying client (criterion 8).
 - `test_concurrent_first_calls_build_exactly_one_client` — N threads racing
-  through `_pooled_client()` produce one instance (criterion 8).
+  through `_pooled_client()` produce one instance (criterion 9).
 
 **`tests/community/di/modules/test_http_client_module_bcn.py`** — pass
-`cfg.HttpClientPoolConfig()`; add an assertion that a non-default config reaches
-the constructed client's `_limits`.
+`cfg.HttpClientPoolConfig()`; add an assertion that a non-default config
+(limits *and* `http2=True`) reaches the constructed client.
 
 **`tests/community/di/modules/test_infrastructure_module.py`** — pass
 `cfg.HttpClientPoolConfig()` to `general_http_client()`.
@@ -254,6 +311,9 @@ unit file.
 
 ## Risk-driven checks before the suite
 
+- `uv lock --check` (or `uv sync --frozen`) — the hand-edited lock is
+  internally consistent. This is the check most likely to catch a mistake in
+  Component 0, and it must run before anything else is trusted.
 - `test_profile_and_modules_for.py` resolves the real `HttpxClient` bindings
   across profiles — confirms the new required provider argument is satisfied by
   the container, not just by direct calls.
@@ -261,3 +321,5 @@ unit file.
   against a live local HTTP server; it exercises the pooled path end-to-end over
   a real socket, which no mock-transport test does.
 - `test_lifecycle_discovery.py` — confirms nothing about discovery regressed.
+- `test_local_no_external_deps.py` — confirms the new `h2` dependency does not
+  breach whatever the local-plugin import rules allow.
