@@ -74,13 +74,13 @@ config path including the HTTP/2 flag; Group 3 validates.
       per call." becomes a pooled-client description. Docstring only; the
       Protocol, its signatures and the conformance contract are untouched, so
       this is not a contract change.
-- [ ] 1.8c Delete `tests/community/core/harness/services/test_http_client_stream.py`.
+- [x] 1.8c Delete `tests/community/core/harness/services/test_http_client_stream.py`.
       Its two `HttpxClient` cases depend on the removed `transport` seam. First
       move its third case, `test_local_http_client_stream_raises` (which never
       used `transport`), into `tests/community/contracts/test_http_client.py`
       alongside the rest of the local-impl contract, so it is not lost with the
       file. Confirm nothing else imports from the deleted module.
-- [ ] 1.9 Run `tests/community/plugins/test_http_client.py` and
+- [x] 1.9 Run `tests/community/plugins/test_http_client.py` and
       `tests/community/contracts/test_http_client.py`. Both green. Note in the
       PR that `HttpxClient.stream()` now has no automated coverage — a
       deliberate trade recorded in `spec.md`, not an oversight.
