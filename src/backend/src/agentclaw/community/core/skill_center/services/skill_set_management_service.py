@@ -469,6 +469,7 @@ class SkillSetManagementService:
                     default_engine_types=self._default_engine_types(bot),
                 ),
             )
+        catalog = self._mcp_catalog_entry(server_code)
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
@@ -480,6 +481,9 @@ class SkillSetManagementService:
                 owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 server_code=server_code,
+                name=catalog["name"],
+                description=catalog["description"],
+                icon=catalog["icon"],
                 engine_type=self._engine(bot),
                 default_engine_types=self._default_engine_types(bot),
             ),
@@ -711,6 +715,28 @@ class SkillSetManagementService:
     def _is_public_mcp(self, server_code: str) -> bool:
         detail = self._mcp_center.get_mcp_detail(server_code)
         return bool(detail and detail.get("accessLevel") == "PUBLIC")
+
+    def _mcp_catalog_entry(self, server_code: str) -> dict[str, Any]:
+        """The catalogue metadata a new membership row carries.
+
+        The row is what every read-side answer renders, so it holds the
+        catalogue's own name/description/icon rather than the server code
+        standing in for all three. Resolved before the mutation opens: a code
+        the catalogue does not know is a 404 at the boundary, not a membership
+        row persisted under a placeholder name.
+
+        A known entry that simply carries no display name still installs — the
+        server code is a usable label, and refusing there would reject an
+        install over a cosmetic gap in someone else's catalogue.
+        """
+        detail = self._mcp_center.get_mcp_detail(server_code)
+        if not detail:
+            raise SkillSetControlPlaneNotFoundError("MCP server not found")
+        return {
+            "name": str(detail.get("name") or server_code),
+            "description": detail.get("description"),
+            "icon": detail.get("icon"),
+        }
 
     def _require_set_mcp_permissions(
         self, *, bot_id: str, actor_id: str, set_id: str, bot: dict

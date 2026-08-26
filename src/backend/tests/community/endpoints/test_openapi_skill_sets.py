@@ -534,6 +534,50 @@ def _seed_mcp_member(world) -> None:
         )
 
 
+def _seed_mcp_catalog(world) -> None:
+    world.get(MCPCenterPlugin).set_override(
+        "get_mcp_detail",
+        lambda server_code: {
+            "serverCode": server_code,
+            "name": "Dima MCP",
+            "description": "Dima workflow tools",
+            "icon": "https://example.test/dima.png",
+        },
+    )
+    _seed(world)
+
+
+def _assert_mcp_catalog_metadata_persisted(_response, world) -> None:
+    # Read through the control-plane service, whose list_mcps hands back the
+    # membership rows verbatim — so this asserts what was persisted, not what
+    # the request echoed back.
+    with avernet_tenant_scope(_TENANT):
+        assert world.get(SkillSetManagementServiceProtocol).list_mcps(
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            user_id=_OWNER,
+            set_id="1",
+        ) == [
+            {
+                "id": "1",
+                "server_code": "mcp.test",
+                "name": "Dima MCP",
+                "description": "Dima workflow tools",
+                "icon": "https://example.test/dima.png",
+            }
+        ]
+
+
+def _assert_no_mcp_membership(_response, world) -> None:
+    with avernet_tenant_scope(_TENANT):
+        assert world.get(SkillSetManagementServiceProtocol).list_mcps(
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            user_id=_OWNER,
+            set_id="1",
+        ) == []
+
+
 @_case("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps", "lists_mcps", ExpectSuccess(status=200, json_contains={"data": []}))
 def list_mcps_happy():
     pass
@@ -544,17 +588,32 @@ def list_mcps_error():
     pass
 
 
-# The ordinary-Set half of PUT …/mcps/{server_code} has no case: the repository
-# command requires the catalogue ``name``/``description``/``icon``
-# (CapabilityDesiredStateRepositoryProtocol.add_mcp) and
-# SkillSetManagementService.add_mcp does not pass them, so every ordinary-Set
-# add raises TypeError before reaching storage. The two cases that asserted the
-# metadata contract — a 200 persisting the catalogue entry, and a 404 for a
-# server_code the catalogue does not know — were removed rather than rewritten
-# to pin that crash; restoring them is the test half of fixing the service call.
-# The route itself stays covered (``unexcludes_default_mcp`` /
-# ``default_mcp_membership_stays_immutable`` below), so the gap is this Set
-# shape, not the endpoint.
+@_case(
+    "PUT",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}",
+    "adds_mcp_with_catalog_metadata",
+    ExpectSuccess(status=200, json_contains={"data": {"changed": True}}),
+    seed=_seed_mcp_catalog,
+    extra=(_assert_mcp_catalog_metadata_persisted,),
+)
+def add_mcp_happy():
+    pass
+
+
+@_case(
+    "PUT",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}",
+    "rejects_missing_mcp_catalog_entry",
+    ExpectError(status=404),
+    path_params={
+        "bot_id": _BOT_ID,
+        "set_id": "1",
+        "server_code": "mcp.unknown",
+    },
+    extra=(_assert_no_mcp_membership,),
+)
+def add_missing_mcp_error():
+    pass
 
 
 @_case("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}", "missing_set", ExpectError(status=404), path_params={"bot_id": _BOT_ID, "set_id": "999", "server_code": "mcp.test"})
