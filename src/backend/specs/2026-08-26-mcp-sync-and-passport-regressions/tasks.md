@@ -11,7 +11,7 @@ Paths are relative to `src/backend/src/agentclaw/community/` unless noted.
 
 - [ ] 1.1 Inject `CallerIdentityRepositoryProtocol`
       (`core/repository/protocols/identity.py:58`) into `BotRuntimeProjector.__init__`
-      (`core/skill_center/services/bot_runtime_projector.py:57`); bind it in
+      (`core/skill_center/services/bot_runtime_projector.py:58`); bind it in
       `di/modules/skill_center_module.py`.
 - [ ] 1.2 Add `BotRuntimeProjector._passport_mcp_items(*, bot, engine, codes)`:
       read `list_draft_call_types(int(bot["id"]), engine)`, emit
@@ -23,7 +23,7 @@ Paths are relative to `src/backend/src/agentclaw/community/` unless noted.
       already returns it, and all three entry points (`project`,
       `project_mcp_and_cli`, `project_for_cleanup`) hold it.
 - [ ] 1.4 Add `"mcp_items"` to the `resource_scope` at
-      `bot_runtime_projector.py:369`, built from the same
+      `bot_runtime_projector.py:374`, built from the same
       `filter_passport_mcp_codes(...)` list already passed as `mcp_codes`.
 - [ ] 1.5 Tests: a `caller`-configured MCP round-trips as `caller`; an MCP
       with no call-config row resolves to `owner`; a Bot whose call-config
@@ -111,7 +111,7 @@ this group *without* any test expectation changing.
 ## Group 5 — Dead code (problem 5)
 
 - [ ] 5.1 Delete `SkillSetService.refresh_mcp_scope`
-      (`core/skill_center/services/skill_set_service.py:1914-1951`) and any
+      (`core/skill_center/services/skill_set_service.py:1914-1950`) and any
       now-unused imports.
 - [ ] 5.2 Confirm `MCPSyncService.refresh_mcp_scope` and its caller
       `DeviceService._sync_mcps_when_device_active`

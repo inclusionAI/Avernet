@@ -33,6 +33,14 @@ cleanly than porting REL's per-operation pushes back:
 | `default_server_codes` skip | structural — platform defaults are in `system_default_mcp_server_codes`, always in the post set |
 | `remove_mcp_detail` at two sites | `released` delta |
 
+One point in favour of the rejected alternative, checked and found not to
+apply: since `2befbc2e2` the add site already calls
+`self._mcp_center.get_mcp_detail(server_code)` via `_mcp_catalog_entry`
+(`skill_set_management_service.py:719`), so a mutation-site push looks like
+it could reuse that fetch. It cannot — the helper narrows the result to
+`{name, description, icon}` for the membership row, and a device push needs
+the full entry. A mutation-site push would still add its own catalogue call.
+
 It also removes the need for the "push unconditionally at add time"
 constraint the spec flagged. Adding an MCP to an *inactive* Set installs no
 claim, so the delta is empty and nothing is pushed — and activating that Set
@@ -73,7 +81,7 @@ self.passport_update.update_passport(
 
 ### Current (dev)
 
-`bot_runtime_projector.py:369` sends two of the three:
+`bot_runtime_projector.py:374` sends two of the three:
 
 ```python
 resource_scope={
@@ -426,7 +434,7 @@ class ProjectionFacet(Enum):
 `_mutate` passes it through, and each command declares its own:
 
 The service has exactly seven commands routing through `_mutate`
-(`skill_set_management_service.py:285`–`:579`); each declares one facet.
+(`skill_set_management_service.py:286`–`:584`); each declares one facet.
 `add_mcp` and `remove_mcp` cover the Default-Set exclusion branches too, so
 the mapping is per command, not per repository call:
 
@@ -466,7 +474,7 @@ Cheaper and safer than the alternative, and it keeps the delta honest.
 ## Problem 5 — dead code
 
 Delete `SkillSetService.refresh_mcp_scope`
-(`core/skill_center/services/skill_set_service.py:1914-1951`). Leave
+(`core/skill_center/services/skill_set_service.py:1914-1950`). Leave
 `MCPSyncService.refresh_mcp_scope` and its caller
 `DeviceService._sync_mcps_when_device_active` alone — different method, still
 live.

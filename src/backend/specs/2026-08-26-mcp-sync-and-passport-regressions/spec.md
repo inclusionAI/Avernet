@@ -69,7 +69,7 @@ caller of that Bot.
 
 ### What the projector sends
 
-`core/skill_center/services/bot_runtime_projector.py:369`:
+`core/skill_center/services/bot_runtime_projector.py:374`:
 
 ```python
 self._passport.update_passport(
@@ -398,7 +398,7 @@ reproducible from the DB is rewritten on every unrelated mutation.
 ### Where the push belongs
 
 The single changed `server_code` is known at the control-plane mutation site,
-`skill_set_management_service.py:436`, which dispatches on Set kind:
+`skill_set_management_service.py:437`, which dispatches on Set kind:
 
 ```python
 if target["is_default"]:
@@ -431,6 +431,15 @@ activation would whitelist MCPs that were never configured.
 
 `config_flow.py:158` is the existing precedent for the shape: write the DB
 row, push the single MCP, roll the row back on failure.
+
+Since `2befbc2e2` the ordinary-Set branch also resolves the catalogue entry
+before opening the mutation (`_mcp_catalog_entry`,
+`skill_set_management_service.py:719`), so an unknown `server_code` is now a
+404 at the boundary rather than a crash. That narrows the *add's own*
+exposure but does not touch this problem: the entry is projected down to
+`{name, description, icon}` for the membership row, so it is not a device
+payload, and the projection still fails closed on catalogue-missing codes
+belonging to *other* MCPs.
 
 ### Acceptance criteria
 
@@ -534,7 +543,7 @@ deliberately.
 
 **Default-CLI merge.** dev omits REL's `get_default_cli_items` merge in the
 passport payload, by documented intent
-(`bot_runtime_projector.py:266`): CLI removal is persisted by the
+(`bot_runtime_projector.py:265`): CLI removal is persisted by the
 authorization service, so merging static engine defaults would undo it.
 
 ---
