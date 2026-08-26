@@ -220,3 +220,24 @@ def test_fractional_or_boolean_connection_counts_are_rejected(resolve, raw):
 def test_whole_float_connection_count_is_accepted(resolve):
     """`max_connections: 64.0` is unambiguous — only fractions are rejected."""
     assert resolve({"max_connections": 64.0}).defaults.max_connections == 64
+
+
+@pytest.mark.parametrize("raw", [2, -1, 99, 0.5, float("nan"), float("inf")])
+def test_non_binary_numeric_http2_is_rejected(resolve, raw):
+    """`bool()` reads every non-zero numeric as True, including .nan — so a
+    typo like `http2: 2` would silently enable a wire change documented as
+    opt-in, while every other malformed value falls back safely."""
+    assert resolve({"http2": raw}).defaults.http2 is False
+
+
+@pytest.mark.parametrize("raw,expected", [(0, False), (1, True), (0.0, False), (1.0, True)])
+def test_binary_numeric_http2_is_honoured(resolve, raw, expected):
+    """0/1 stay accepted — YAML users do write them."""
+    assert resolve({"http2": raw}).defaults.http2 is expected
+
+
+def test_non_binary_numeric_http2_does_not_override_a_configured_true(resolve):
+    """The fallback is the *base* value, not the dataclass default: a bad
+    override must not silently turn http2 off where it was deliberately on."""
+    conf = resolve({"http2": True, "overrides": {"baas": {"http2": 7}}})
+    assert conf.for_qualifier("baas").http2 is True
