@@ -14,8 +14,8 @@ use bcs_eventing::{
 };
 use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity, CreateEventSubscription,
-    CreateEventSubscriptionRequest, EventPayload, EventSinkInput,
+    ApplicationError, AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity,
+    CreateEventSubscription, CreateEventSubscriptionRequest, EventPayload, EventSinkInput,
 };
 use bcs_service_api::port::{
     EventDeliveryAttemptMetric, EventDeliveryDisposition, EventDeliveryError, EventDeliveryPort,
@@ -197,6 +197,21 @@ pub fn caller() -> AuthenticatedCaller {
             full_name: None,
         }),
         bot: None,
+        app: None,
+        access_key: None,
+    }
+}
+
+pub fn bot_caller() -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: Some("tenant-1".to_string()),
+        user: None,
+        bot: Some(AuthenticatedBotIdentity {
+            bot_uuid: "bot-owner".to_string(),
+            owner_id: "owner".to_string(),
+            app_id: 7,
+            agent_code: "agent-bot-owner".to_string(),
+        }),
         app: None,
         access_key: None,
     }

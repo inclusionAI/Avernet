@@ -130,8 +130,11 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
 
     security = RouteSecurity.from_table(raw["user_config"]["route_security"])
     requirement = security.resolve("GET", "/openapi/v1/collaboration/groups/group-1")
-    assert requirement is not None
-    assert requirement[PrincipalType.USER] is Presence.REQUIRED
+    assert requirement == {
+        PrincipalType.USER: Presence.OPTIONAL,
+        PrincipalType.APP: Presence.REQUIRED,
+        PrincipalType.BOT: Presence.OPTIONAL,
+    }
 
     friend_requirement = security.resolve(
         "POST", "/openapi/v1/collaboration/friend-connections/requests"

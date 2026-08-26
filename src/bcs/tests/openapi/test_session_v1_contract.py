@@ -142,11 +142,20 @@ def test_view_actor_failures_are_forbidden_without_a_bot_not_found_response() ->
         }
 
 
-def test_session_detail_uses_implicit_human_or_owned_bot_participant_access() -> None:
+def test_session_resource_operations_use_human_or_owned_bot() -> None:
     contract = load_contract(CONTRACT_ROOT)
-    operation = contract["paths"][
-        "/openapi/v1/collaboration/sessions/{session_id}"
-    ]["get"]
+    path = contract["paths"]["/openapi/v1/collaboration/sessions/{session_id}"]
+
+    for method in ("get", "patch", "delete"):
+        operation = path[method]
+        assert operation["x-avernet-security"] == {
+            "user": "optional",
+            "app": "required",
+            "bot": "optional",
+        }
+        assert operation["x-bcn-identity-policy"] == "human_or_owned_bot"
+
+    operation = path["get"]
 
     assert "view_bot_id" not in {
         parameter["name"]
@@ -156,8 +165,7 @@ def test_session_detail_uses_implicit_human_or_owned_bot_participant_access() ->
     forbidden = operation["responses"]["403"]
     assert forbidden["x-error-codes"] == ["forbidden"]
     description = forbidden["description"]
-    assert "Human Actor" in description
-    assert "created by that Human" in description
+    assert "HumanOrOwnedBot Principal" in description
     assert "Session Participant" in description
 
 
@@ -321,10 +329,24 @@ def test_delete_session_accepts_optional_acting_bot_id_query() -> None:
             "name": "acting_bot_id",
             "in": "query",
             "required": False,
-            "description": "Optional Bot identity perspective for the delete decision. Omit to evaluate the authenticated Human perspective.",
+            "description": "Optional Bot identity perspective for the delete decision. A Human caller may select an owned Bot; a Bot caller may select only itself. Omit to use the selected HumanOrOwnedBot Principal.",
             "schema": {"type": "string", "minLength": 1},
         }
     }
+
+
+def test_create_session_uses_human_or_owned_bot() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/groups/{group_id}/sessions"
+    ]["post"]
+
+    assert operation["x-avernet-security"] == {
+        "user": "optional",
+        "app": "required",
+        "bot": "optional",
+    }
+    assert operation["x-bcn-identity-policy"] == "human_or_owned_bot"
 
 
 def test_create_group_session_does_not_accept_driver_or_participants() -> None:

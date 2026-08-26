@@ -23,8 +23,9 @@ use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_relation::RelationCore;
 use bcs_service_api::application::system_message::SystemMessageService;
 use bcs_service_api::application::v1::{
-    AddSessionParticipant, AuthenticatedAppIdentity, AuthenticatedBotIdentity, AuthenticatedCaller,
-    AuthenticatedUserIdentity, CollectSession, CompleteSession, CreateSession, DeleteSession,
+    AddSessionParticipant, ApplicationError as V1ApplicationError, AuthenticatedAppIdentity,
+    AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity, CollectSession,
+    CompleteSession, CreateSession, DeleteSession,
     DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, SessionMessageService,
     SessionParticipantInput, SessionService,
     SessionStatus as V1SessionStatus, UncollectSession, UpdateSession, UpdateSessionParticipant,
@@ -996,7 +997,7 @@ async fn session_detail_propagates_owned_bot_lookup_database_failure() {
 }
 
 #[tokio::test]
-async fn session_v1_rejects_a_caller_without_user_identity() {
+async fn session_list_still_rejects_a_caller_without_user_identity() {
     let fixture = Fixture::new().await;
     fixture.add_bot("driver").await;
     fixture.store_group("g1", "driver", None).await;
@@ -1012,7 +1013,7 @@ async fn session_v1_rejects_a_caller_without_user_identity() {
         },
     )
     .await
-    .expect_err("current V1 operations require an authenticated User");
+    .expect_err("the actor-relative list still requires an authenticated User");
     assert!(matches!(
         error,
         bcs_service_api::application::v1::ApplicationError::Forbidden(_)
@@ -1160,6 +1161,108 @@ async fn delete_is_idempotent() {
         .expect("second delete");
     // Idempotent: a missing session yields deleted=false, not a 404.
     assert!(!second.deleted);
+}
+
+#[tokio::test]
+async fn bot_caller_creates_reads_updates_and_deletes_session() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+    let caller = bot_only_caller("driver");
+    let outcome = create_session(
+        &fixture,
+        caller.clone(),
+        "g1",
+        "driver",
+        vec![participant_input("expert", None)],
+        None,
+        Some("Bot session"),
+    )
+    .await;
+    let session_id = outcome.session.session_id;
+
+    let detail = fixture
+        .service
+        .get(GetSession {
+            caller: caller.clone(),
+            session_id: session_id.clone(),
+        })
+        .await
+        .expect("Bot Principal reads its Session");
+    assert_eq!(detail.session_id, session_id);
+
+    let updated = fixture
+        .service
+        .update(UpdateSession {
+            caller: caller.clone(),
+            session_id: session_id.clone(),
+            title: Some("Bot updated".into()),
+        })
+        .await
+        .expect("Bot Principal updates its Session");
+    assert_eq!(updated.title.as_deref(), Some("Bot updated"));
+
+    let deleted = fixture
+        .service
+        .delete(DeleteSession {
+            caller,
+            session_id,
+            acting_bot_id: Some("driver".into()),
+        })
+        .await
+        .expect("Bot Principal deletes its Session");
+    assert!(deleted.deleted);
+}
+
+#[tokio::test]
+async fn unrelated_bot_cannot_read_update_or_delete_session() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+    let outcome = create_session(
+        &fixture,
+        bot_only_caller("driver"),
+        "g1",
+        "driver",
+        vec![participant_input("expert", None)],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id;
+
+    let read = fixture
+        .service
+        .get(GetSession {
+            caller: bot_only_caller("outsider"),
+            session_id: session_id.clone(),
+        })
+        .await;
+    assert!(matches!(read, Err(V1ApplicationError::Forbidden(_))));
+
+    let update = fixture
+        .service
+        .update(UpdateSession {
+            caller: bot_only_caller("outsider"),
+            session_id: session_id.clone(),
+            title: Some("forged".into()),
+        })
+        .await;
+    assert!(matches!(update, Err(V1ApplicationError::Forbidden(_))));
+
+    let delete = fixture
+        .service
+        .delete(DeleteSession {
+            caller: bot_only_caller("outsider"),
+            session_id,
+            acting_bot_id: None,
+        })
+        .await;
+    assert!(matches!(delete, Err(V1ApplicationError::Forbidden(_))));
 }
 
 #[tokio::test]
