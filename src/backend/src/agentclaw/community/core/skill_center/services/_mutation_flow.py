@@ -58,7 +58,10 @@ class MutationProjectionFlow:
         engine_type: str | None,
         mutation: Callable[[], DesiredStateMutation],
         runtime_required: bool = True,
-        scope: ProjectionScope = ProjectionScope.everything(),
+        scope: ProjectionScope | None = None,
+        scope_from_result: (
+            Callable[[DesiredStateMutation], ProjectionScope] | None
+        ) = None,
     ) -> dict:
         """Run the command; return ``{**item, "changed": ..., **details}``.
 
@@ -68,8 +71,15 @@ class MutationProjectionFlow:
         a compensation's restore to the Sets the mutation could have touched.
 
         ``scope`` is what this mutation changed, declared by the command that
-        knows it. It defaults to a full reconcile so an undeclared caller is
-        unchanged.
+        knows it. Omitting both scope arguments means a full reconcile, so an
+        undeclared caller is unchanged.
+
+        ``scope_from_result`` covers the commands that cannot name their scope
+        up front: activate and deactivate learn which MCPs they claimed or
+        released only from the mutation result, which the repository fills in
+        under the row lock it already holds. Building the scope from a second,
+        unlocked query instead could disagree with what was actually
+        installed.
         """
         if not runtime_required:
             result = mutation()
@@ -82,13 +92,16 @@ class MutationProjectionFlow:
             owner_id=owner_id,
         )
         result = mutation()
+        if scope_from_result is not None:
+            scope = scope_from_result(result)
+        effective_scope = scope if scope is not None else ProjectionScope.everything()
         await self._project_or_compensate(
             bot_id=bot_id,
             owner_id=owner_id,
             engine_type=engine_type,
             mutation=result,
             previous_mappings=previous_mappings,
-            scope=scope,
+            scope=effective_scope,
         )
         return {**result.item, "changed": result.changed, **result.details}
 

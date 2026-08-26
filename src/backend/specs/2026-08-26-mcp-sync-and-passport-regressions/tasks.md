@@ -103,12 +103,18 @@ green at the end of this group *without* any test expectation changing.
       (`core/repository/implementations/skill_center/capability_desired_state.py:493`),
       so put them on a dedicated `DesiredStateMutation.mcp_codes` field (NOT `details`, which is spread into the HTTP response body) rather than re-querying
       unlocked in the service.
-- [ ] 3.2 Declare the real scope on each of the seven commands per the plan's
+- [x] 3.2 Declare the real scope on each of the seven commands per the plan's
       table (`skill_set_management_service.py:286`–`:584`). `add_mcp` /
       `remove_mcp` know their `server_code` directly; `activate` /
       `deactivate` read theirs from `details` after `mutation()` returns;
-      `add_skill` / `remove_skill` add the skill's `mcp_dependencies` when it
-      has any.
+      `add_skill` / `remove_skill` declare **no scope**, so they reconcile —
+      a deliberate deviation from the plan. Those commands hold only
+      `skill_id`, and a Skill's `mcp_dependencies` need a lookup that does
+      not exist yet; declaring `mcp=True` with an empty code set would leave
+      a dependency whitelisted by `filter-servers` but never configured on
+      the device, which is the divergence the spec forbids. Reconciling is
+      today's behaviour and is correct, just not narrowed. Narrowing needs
+      the dependency lookup first — Group 4, where the flags gate anything.
 - [ ] 3.3 Add `SkillSetService.sync_mcp_delivery(*, claimed, released)`:
       fetch catalogue details for `claimed` only, push via
       `sync_mcp_details_for_bot`, then `remove_mcp_detail` each `released`

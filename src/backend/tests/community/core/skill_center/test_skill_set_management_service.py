@@ -751,12 +751,19 @@ async def test_collaborator_command_restores_desired_state_and_uses_true_owner()
         {"bot_id": "bot-1", "owner_id": "true-owner"},
         {"bot_id": "bot-1", "owner_id": "true-owner"},
     ]
+    # Two projections: the forward one, then the compensating one after the
+    # runtime failed. deactivate declares its scope rather than reconciling,
+    # and the compensating call carries scope.inverted() — released and
+    # claimed swap, exactly as retired_mappings swap alongside them.
+    _deactivate_scope = ProjectionScope(
+        skills=True, mcp=True, released_mcp=frozenset()
+    )
     assert runtime.reconcile_calls == [
         {
             "bot_id": "bot-1",
             "owner_id": "true-owner",
             "retired_mappings": (),
-            "scope": ProjectionScope.everything(),
+            "scope": _deactivate_scope,
         },
         {
             "bot_id": "bot-1",
@@ -767,7 +774,7 @@ async def test_collaborator_command_restores_desired_state_and_uses_true_owner()
                     corpus="repo", relative_path="business/eva", link_name="eva"
                 ),
             ),
-            "scope": ProjectionScope.everything(),
+            "scope": _deactivate_scope.inverted(),
         },
     ]
     assert len(repository.restore_calls) == 1
@@ -802,7 +809,12 @@ async def test_deactivate_retires_mappings_removed_from_the_runtime_projection()
             "bot_id": "bot-1",
             "owner_id": "true-owner",
             "retired_mappings": _Runtime._skill_mappings(),
-            "scope": ProjectionScope.everything(),
+            # deactivate declares what it released rather than reconciling:
+            # the Set's MCP codes come back on the mutation result, resolved
+            # under the row lock that uninstalled them.
+            "scope": ProjectionScope(
+                skills=True, mcp=True, released_mcp=frozenset()
+            ),
         }
     ]
 
@@ -1598,7 +1610,12 @@ async def test_existing_claude_code_skill_set_deactivate_uses_full_projection():
             "bot_id": "bot-1",
             "owner_id": "true-owner",
             "retired_mappings": _Runtime._skill_mappings(),
-            "scope": ProjectionScope.everything(),
+            # deactivate declares what it released rather than reconciling:
+            # the Set's MCP codes come back on the mutation result, resolved
+            # under the row lock that uninstalled them.
+            "scope": ProjectionScope(
+                skills=True, mcp=True, released_mcp=frozenset()
+            ),
         }
     ]
 
