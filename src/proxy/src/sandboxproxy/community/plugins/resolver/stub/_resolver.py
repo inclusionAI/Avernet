@@ -14,5 +14,5 @@ class StubTargetResolver:
 
     prefix = "stub"
 
-    def resolve(self, target_host: str) -> dict[str, str]:
+    async def resolve(self, target_host: str) -> dict[str, str]:
         return dict(STUB_DESTINATION)

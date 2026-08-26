@@ -21,11 +21,12 @@ class TargetResolver(Protocol):
 
     prefix: str
 
-    def resolve(self, target_host: str) -> dict[str, str]:
+    async def resolve(self, target_host: str) -> dict[str, str]:
         """Return a dict describing the resolved upstream.
 
         Expected keys vary by resolver:
-        - ``ARCA_``  → ``arca_host`` (upstream host)
+        - ``ARCA_``  → ``pod_ip`` + ``pod_port`` + ``provider_device_id``
+          (direct pod-IP upstream)
         - ``TECLAW_`` → ``teclaw_host`` + ``x-target-bot-id`` + extra headers
         - ``LOCAL_`` → ``baas_host`` + ``local_path_prefix``
 

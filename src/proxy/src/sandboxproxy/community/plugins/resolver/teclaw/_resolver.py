@@ -20,7 +20,7 @@ class TeclawTargetResolver:
             else UserConfig.model_validate(config)
         )
 
-    def resolve(self, target_host: str) -> dict[str, str]:
+    async def resolve(self, target_host: str) -> dict[str, str]:
         if not target_host.startswith("TECLAW_"):
             raise ValueError(f"Not a TECLAW_ target: {target_host!r}")
         rest = target_host[len("TECLAW_") :]

@@ -53,7 +53,7 @@ def build_router(container: ApplicationContainer, loaded: Config) -> APIRouter:
         target_path = "/" + path if sep else "/"
 
         try:
-            resolved = resolver.resolve(target_hostport)
+            resolved = await resolver.resolve(target_hostport)
         except ValueError as exc:
             return JSONResponse({"detail": str(exc)}, status_code=400)
         except RuntimeError as exc:
@@ -77,7 +77,7 @@ def build_router(container: ApplicationContainer, loaded: Config) -> APIRouter:
         target_hostport, sep, path = target.partition("/")
         target_path = "/" + path if sep else "/"
         try:
-            resolved = resolver.resolve(target_hostport)
+            resolved = await resolver.resolve(target_hostport)
         except (ValueError, RuntimeError):
             await websocket.close(code=1008)
             return
@@ -157,6 +157,14 @@ def build_router(container: ApplicationContainer, loaded: Config) -> APIRouter:
 
 
 def _upstream_url(resolved: dict[str, str]) -> str:
+    pod_ip = resolved.get("pod_ip")
+    if pod_ip:
+        port = resolved.get("pod_port", "")
+        host = f"{pod_ip}:{port}" if port else pod_ip
+        scheme = resolved.get("pod_scheme", "http")
+        if host.startswith(("http://", "https://")):
+            return host
+        return f"{scheme}://{host}"
     host = (
         resolved.get("arca_host")
         or resolved.get("teclaw_host")

@@ -571,6 +571,34 @@ class TestDefaultDeviceService:
 
         assert result is None
 
+    # ---- get_provider_device_props ----
+
+    def test_get_provider_device_props_found(self, service, mock_repo, mock_env):
+        record = MagicMock(spec=DeviceRecord)
+        record.provider_device_id = "ALIYUN_ACK_DEFAULT-abc@0"
+        record.status = "ACTIVE"
+        record.provider_device_props = {
+            "sandbox_id": "ALIYUN_ACK_DEFAULT-abc@0",
+            "metadata": {"ip_addr": "10.0.0.7"},
+        }
+        mock_repo.get_by_provider_device_id.return_value = record
+
+        result = service.get_provider_device_props(
+            provider_device_id="ALIYUN_ACK_DEFAULT-abc@0"
+        )
+
+        assert result is not None
+        assert result.provider_device_id == "ALIYUN_ACK_DEFAULT-abc@0"
+        assert result.status == "ACTIVE"
+        assert result.provider_device_props["metadata"]["ip_addr"] == "10.0.0.7"
+
+    def test_get_provider_device_props_not_found(self, service, mock_repo, mock_env):
+        mock_repo.get_by_provider_device_id.return_value = None
+
+        result = service.get_provider_device_props(provider_device_id="nonexistent")
+
+        assert result is None
+
     # ---- destroy_device_by_uuid ----
 
     @pytest.mark.asyncio

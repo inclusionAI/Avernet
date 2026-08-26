@@ -14,6 +14,7 @@ user_config:
 
   baas:
     host: ${SANDBOXPROXY_BAAS_HOST:-http://baas.avernet-inc.com}
+    device_props_path: ${SANDBOXPROXY_BAAS_DEVICE_PROPS_PATH:-/api/v1/devices/provider-device/{provider_device_id}/props}
 
   teclaw:
     host: ${SANDBOXPROXY_TECLAW_HOST:-http://teclaw.avernet-inc.com}

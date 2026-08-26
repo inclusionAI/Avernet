@@ -25,6 +25,7 @@ user_config:
 
   baas:
     host: http://baas.internal.example
+    device_props_path: /api/v1/devices/provider-device/{provider_device_id}/props
 
   teclaw:
     host: http://teclaw.internal.example

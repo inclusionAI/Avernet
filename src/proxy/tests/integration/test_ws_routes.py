@@ -93,3 +93,6 @@ class TestHelpers:
 
         assert _upstream_url({"arca_host": "h1"}) == "https://h1"
         assert _upstream_url({"arca_host": "http://h1"}) == "http://h1"
+        assert _upstream_url({"pod_ip": "10.0.0.7", "pod_port": "20003"}) == (
+            "http://10.0.0.7:20003"
+        )

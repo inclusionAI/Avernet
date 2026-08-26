@@ -91,6 +91,14 @@ class DeviceRepository(Protocol):
         """
         ...
 
+    def get_by_provider_device_id(self, provider_device_id: str) -> DeviceRecord | None:
+        """Get device by exact provider_device_id (any status except deleted).
+
+        Uses the indexed provider_device_id column. Returns the most recent
+        match (ORDER BY id DESC LIMIT 1) or None.
+        """
+        ...
+
     def get_by_provider_device_id_like(
         self, provider_device_id_prefix: str
     ) -> DeviceRecord | None:

@@ -445,6 +445,27 @@ class TestGetByProviderDeviceIdLike:
         assert result is None
 
 
+# ==================== get_by_provider_device_id (exact) ====================
+
+
+class TestGetByProviderDeviceId:
+    def test_found(self, repository, mock_session):
+        model = _make_mock_device_model(id_val=8, provider_device_id="sandbox-abc-123")
+        mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = model
+
+        result = repository.get_by_provider_device_id("sandbox-abc-123")
+
+        assert result is not None
+        assert result.provider_device_id == "sandbox-abc-123"
+        model.to_record.assert_called_once()
+
+    def test_not_found(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
+
+        result = repository.get_by_provider_device_id("nonexistent")
+        assert result is None
+
+
 # ==================== get_by_provider_device_id_prefix ====================
 
 

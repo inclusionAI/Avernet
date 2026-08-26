@@ -6,7 +6,6 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import time
 
 import pytest
@@ -25,13 +24,7 @@ def _sign(secret: str, payload: dict) -> str:
 
 
 @pytest.fixture
-def secret() -> str:
-    return "integration-secret"
-
-
-@pytest.fixture
-def app(secret: str):
-    os.environ["SANDBOXPROXY_JWT_SECRET"] = secret
+def app(jwt_secret: str):
     from sandboxproxy.community.adapters.web import build_app
     from sandboxproxy.community.api.identity import resolve_instance_id
     from sandboxproxy.community.bootstrap import (
@@ -88,8 +81,8 @@ class TestProxypassAuth:
         )
         assert resp.status_code == 401
 
-    def test_valid_token(self, client, secret: str) -> None:
-        token = _sign(secret, {"sub": "u1", "exp": time.time() + 3600})
+    def test_valid_token(self, client, jwt_secret: str) -> None:
+        token = _sign(jwt_secret, {"sub": "u1", "exp": time.time() + 3600})
         # stub resolver returns a fixed local destination; forward will fail
         # to reach it, but the request must NOT be rejected as unauthorized.
         resp = client.get(

@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
     from ._command_result import CommandResult
     from ._credentials import PaasCredentials
-    from ._device import DeviceInfo
+    from ._device import DeviceInfo, ProviderDevicePropsResponse
     from ._device_config import DeviceCreateConfig
     from ._device_creation_result import DeviceCreationResult
     from ._device_facade_config import (
@@ -107,6 +107,13 @@ class DeviceService(Protocol):
         device_uuid: str,
     ) -> DeviceResponse | None:
         """Get device information by UUID."""
+        ...
+
+    def get_provider_device_props(
+        self,
+        provider_device_id: str,
+    ) -> ProviderDevicePropsResponse | None:
+        """Get provider_device_props by exact provider_device_id."""
         ...
 
 

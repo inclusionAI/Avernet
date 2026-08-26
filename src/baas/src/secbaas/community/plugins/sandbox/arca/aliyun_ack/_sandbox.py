@@ -94,16 +94,25 @@ class AliyunAckSandbox(ArcaSandbox):
             ttl_in_minutes = self._ttl_in_minutes
             ttl_timestamp = self._derive_ttl_timestamp(pod, ttl_in_minutes)
 
+            pod_ip = getattr(status, "pod_ip", None)
+            if not pod_ip:
+                raise RuntimeError(
+                    f"get_info failed for sandbox {self._sandbox_id}: pod has no status.pod_ip"
+                )
+
+            metadata: dict[str, Any] = {
+                "pod_name": self._pod_name,
+                "namespace": self._namespace,
+                "ip_addr": pod_ip,
+            }
+
             return ArcaSandboxInfo(
                 sandbox_id=self._sandbox_id,
                 status=getattr(status, "phase", None) or "UNKNOWN",
                 template_id=self._template_id,
                 ttl_in_minutes=ttl_in_minutes,
                 ttl_timestamp=ttl_timestamp,
-                metadata={
-                    "pod_name": self._pod_name,
-                    "namespace": self._namespace,
-                },
+                metadata=metadata,
             )
         except ApiException as e:
             raise RuntimeError(

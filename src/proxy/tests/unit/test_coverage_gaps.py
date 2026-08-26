@@ -21,16 +21,20 @@ class TestResolverErrorBranches:
         return PrefixTargetResolver(UserConfig.model_validate(base))
 
     def test_teclaw_empty_id(self) -> None:
+        import asyncio
+
         r = self._resolver()
         try:
-            r.resolve("TECLAW_@tmpl:8080")
+            asyncio.run(r.resolve("TECLAW_@tmpl:8080"))
         except ValueError:
             pass
 
     def test_local_no_port(self) -> None:
+        import asyncio
+
         r = self._resolver()
         try:
-            r.resolve("LOCAL_dev1@42")
+            asyncio.run(r.resolve("LOCAL_dev1@42"))
         except ValueError:
             pass
 
