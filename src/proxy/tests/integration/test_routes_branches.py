@@ -76,7 +76,7 @@ def client(app):
 
 
 def _auth(token: str) -> dict:
-    return {"Authorization": f"Bearer {token}"}
+    return {"X-PROXYPASS-TOKEN": token}
 
 
 @pytest.mark.integration

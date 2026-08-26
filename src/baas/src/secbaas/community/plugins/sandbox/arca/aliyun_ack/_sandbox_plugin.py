@@ -402,7 +402,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         token = self._arca_utils._get_proxypass_token(
             paas_device_id, port=port, template_id=template_id
         )
-        url = self._arca_utils.build_proxypass_url(target, norm_path, scheme="https")
+        url = self._arca_utils.build_proxypass_url(target, norm_path, scheme="http")
         return HttpConnectionInfo(http_url=url, token=token, target=target)
 
     def close(self) -> None:

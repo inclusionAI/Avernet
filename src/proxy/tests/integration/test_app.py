@@ -77,7 +77,7 @@ class TestProxypassAuth:
 
     def test_invalid_token(self, client) -> None:
         resp = client.get(
-            "/proxypass/ARCA_123", headers={"Authorization": "Bearer bad"}
+            "/proxypass/ARCA_123", headers={"X-PROXYPASS-TOKEN": "bad"}
         )
         assert resp.status_code == 401
 
@@ -87,6 +87,19 @@ class TestProxypassAuth:
         # to reach it, but the request must NOT be rejected as unauthorized.
         resp = client.get(
             "/proxypass/ARCA_123",
-            headers={"Authorization": f"Bearer {token}"},
+            headers={"X-PROXYPASS-TOKEN": token},
+        )
+        assert resp.status_code != 401
+
+    def test_valid_token_via_query_param(self, client, jwt_secret: str) -> None:
+        token = _sign(jwt_secret, {"sub": "u1", "exp": time.time() + 3600})
+        resp = client.get(f"/proxypass/ARCA_123?x-proxypass-token={token}")
+        assert resp.status_code != 401
+
+    def test_valid_token_header_case_insensitive(self, client, jwt_secret: str) -> None:
+        token = _sign(jwt_secret, {"sub": "u1", "exp": time.time() + 3600})
+        resp = client.get(
+            "/proxypass/ARCA_123",
+            headers={"x-proxypass-token": token},
         )
         assert resp.status_code != 401
