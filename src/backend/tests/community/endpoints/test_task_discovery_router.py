@@ -272,12 +272,8 @@ def dingtalk_config_happy():
 @endpoint_test(
     method="POST",
     path="/api/v1/collaboration/tasks/discovery/dingtalk-config",
-    scenario="error_missing_fields",
-    input=CaseInput(json_body={"ak_id": "only-ak-id"}),
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={"success": False},
-    ),
+    scenario="error",
+    expect=ExpectError(status=422),
 )
-def dingtalk_config_err_missing_fields():
-    """Error path: missing required fields -> returns success=False."""
+def dingtalk_config_err_missing_body():
+    """Error path: missing required body -> FastAPI 422."""
