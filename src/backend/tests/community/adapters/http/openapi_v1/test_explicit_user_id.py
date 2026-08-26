@@ -297,6 +297,13 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/dashboard"),
 }
 
+# Read-only operations that accept a user_id as a caller-selected filter rather
+# than as the authenticated user's acting scope. They still require the query
+# parameter, but must not advertise the owner-mismatch 403.
+_USER_ID_FILTER_ONLY = {
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/list"),
+}
+
 #: Operations whose ``user_id`` is a directory filter, not the self-confirm
 #: seam. Same spelling, opposite contract: elsewhere ``user_id`` is *who this
 #: call acts for* and must be the caller (403 otherwise); here it is *whose
@@ -435,6 +442,7 @@ def _user_scoped(path: str, method: str) -> bool:
         not path.startswith(_LOGS_PREFIX)
         and (method, path) not in _NO_USER_DIMENSION
         and (method, path) not in _AUTHENTICATED_SELF
+        and (method, path) not in _USER_ID_FILTER_ONLY
         and (method, path) not in _DIRECTORY_USER_ID
     )
 
@@ -449,6 +457,18 @@ def test_every_user_scoped_operation_requires_user_id_in_the_query():
         if parameter is None or parameter["in"] != "query" or not parameter["required"]:
             offenders.append(f"{method.upper()} {path} -> {parameter}")
     assert not offenders, f"operations not naming their user in the query: {offenders}"
+
+
+def test_filter_only_operations_require_user_id_without_owner_scope_403():
+    """Caller-selected filters remain required query parameters, not owner scopes."""
+    schema = _schema()
+    for method, path in _USER_ID_FILTER_ONLY:
+        operation = schema["paths"][path][method]
+        parameter = _param(operation, USER_ID_QUERY)
+        assert parameter is not None, f"{method.upper()} {path}"
+        assert parameter["in"] == "query", f"{method.upper()} {path}"
+        assert parameter["required"] is True, f"{method.upper()} {path}"
+        assert "403" not in operation["responses"], f"{method.upper()} {path}"
 
 
 def test_the_pinned_number_of_operations_take_it():
