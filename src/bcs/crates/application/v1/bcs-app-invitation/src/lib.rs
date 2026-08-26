@@ -831,7 +831,7 @@ impl FriendConnectionService for InvitationFriendshipServiceImpl {
             ));
         }
         let result = connect
-            .create_connect(&from, &command.to_actor.id, command.message)
+            .create_connect(&from, &command.to_actor.id, command.message, None)
             .await
             .map_err(map_service_error)?;
         let status = match result.status {

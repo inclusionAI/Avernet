@@ -48,7 +48,7 @@ impl PermissionRequestRepoPort for NoopPermissionRequestRepo {
 pub struct NoopConnectService;
 #[async_trait]
 impl ConnectService for NoopConnectService {
-    async fn create_connect(&self, _: &str, _: &str, _: Option<String>) -> ServiceResult<ConnectResult> {
+    async fn create_connect(&self, _: &str, _: &str, _: Option<String>, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<ConnectResult> {
         Ok(ConnectResult { request_ids: vec![], edge_ids: vec![], status: ConnectStatus::Pending, auto_accepted: false })
     }
     async fn approve(&self, _: &str, _: &str) -> ServiceResult<Vec<u64>> { Ok(vec![]) }

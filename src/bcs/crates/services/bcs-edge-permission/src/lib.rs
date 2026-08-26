@@ -41,6 +41,7 @@ use bcs_service_api::port::{
     FriendConnectNotificationCommand, FriendConnectNotificationKind,
     FriendConnectNotificationPort,
 };
+use bcs_service_api::RequestAuthHeaders;
 use bcs_service_api::port::repo::{
     BotActorConfigRepoPort, EdgeGrantRepoPort, PermissionProfileRepoPort,
     PermissionRequestRepoPort,
@@ -150,6 +151,7 @@ impl ConnectService for DbConnectService {
         caller: &str,
         to_bot: &str,
         message: Option<String>,
+        request_auth: Option<RequestAuthHeaders>,
     ) -> ServiceResult<ConnectResult> {
         // 1. Self-add guard.
         if caller == to_bot {
@@ -236,6 +238,7 @@ impl ConnectService for DbConnectService {
                         to_bot,
                         self.target_notification_recipients(&cfg),
                         message.as_deref(),
+                        request_auth.clone(),
                     )
                     .await?;
                     Ok(ConnectResult {
@@ -686,6 +689,7 @@ impl DbConnectService {
         target_bot_id: &str,
         recipient_user_ids: Vec<String>,
         message: Option<&str>,
+        request_auth: Option<RequestAuthHeaders>,
     ) -> ServiceResult<()> {
         if recipient_user_ids.is_empty() {
             return Ok(());
@@ -699,6 +703,7 @@ impl DbConnectService {
                 target_bot_id: target_bot_id.to_string(),
                 recipient_user_ids,
                 message: message.map(ToOwned::to_owned),
+                request_auth,
             })
             .await
     }
@@ -1483,7 +1488,7 @@ mod tests {
         let (eg, pp, rq, bc, _db) = assemble().await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("bot_a:1", "bot_a:1", None)
+            .create_connect("bot_a:1", "bot_a:1", None, None)
             .await
             .expect_err("self-add rejected");
         assert!(matches!(err, ServiceError::CannotAddSelf), "got {err:?}");
@@ -1494,7 +1499,7 @@ mod tests {
         let (eg, pp, rq, bc, _db) = assemble().await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("human_1", "human_2", None)
+            .create_connect("human_1", "human_2", None, None)
             .await
             .expect_err("human→human rejected");
         assert!(
@@ -1508,7 +1513,7 @@ mod tests {
         let (eg, pp, rq, bc, _db) = assemble().await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("x:1", "human_2", None)
+            .create_connect("x:1", "human_2", None, None)
             .await
             .expect_err("bot→human rejected");
         assert!(
@@ -1522,7 +1527,7 @@ mod tests {
         let (eg, pp, rq, bc, _db) = assemble().await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("human_1", "x:missing", None)
+            .create_connect("human_1", "x:missing", None, None)
             .await
             .expect_err("missing bot → BotNotFound");
         assert!(
@@ -1537,7 +1542,7 @@ mod tests {
         seed_bot(&db, "x:hidden", "public", "protected", "OPEN", "hidden", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("human_1", "x:hidden", None)
+            .create_connect("human_1", "x:hidden", None, None)
             .await
             .expect_err("hidden → BotHidden");
         assert!(matches!(err, ServiceError::BotHidden(_)), "got {err:?}");
@@ -1549,7 +1554,7 @@ mod tests {
         seed_bot(&db, "x:priv", "private", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("human_1", "x:priv", None)
+            .create_connect("human_1", "x:priv", None, None)
             .await
             .expect_err("private → PrivateBotCannotCollaborate");
         assert!(
@@ -1564,7 +1569,7 @@ mod tests {
         seed_bot(&db, "x:nha", "protected", "private", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("human_1", "x:nha", None)
+            .create_connect("human_1", "x:nha", None, None)
             .await
             .expect_err("user_visibility=private → Forbidden for human caller");
         assert!(matches!(err, ServiceError::Forbidden(_)), "got {err:?}");
@@ -1576,7 +1581,7 @@ mod tests {
         seed_bot(&db, "x:pub", "public", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let res = svc
-            .create_connect("human_1", "x:pub", None)
+            .create_connect("human_1", "x:pub", None, None)
             .await
             .expect("public+auto → Approved");
         assert_eq!(res.status, ConnectStatus::Approved);
@@ -1625,7 +1630,7 @@ mod tests {
         .await;
         let svc = service(&eg, &pp, &rq, &bc);
         let res = svc
-            .create_connect("human_1", "x:dept_noop", None)
+            .create_connect("human_1", "x:dept_noop", None, None)
             .await
             .expect("noop department port should not auto-approve");
         assert_eq!(res.status, ConnectStatus::Pending);
@@ -1675,7 +1680,7 @@ mod tests {
         });
         let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
         let res = svc
-            .create_connect("human_1", "x:dept", None)
+            .create_connect("human_1", "x:dept", None, None)
             .await
             .expect("dept_free ancestor hit → Approved");
         assert_eq!(res.status, ConnectStatus::Approved);
@@ -1726,7 +1731,7 @@ mod tests {
         let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
 
         let res = svc
-            .create_connect("human_1", "x:dept_from_port", None)
+            .create_connect("human_1", "x:dept_from_port", None, None)
             .await
             .expect("dept_free exact match from department port → Approved");
 
@@ -1774,7 +1779,7 @@ mod tests {
         let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
 
         let res = svc
-            .create_connect("x:applicant", "x:target", None)
+            .create_connect("x:applicant", "x:target", None, None)
             .await
             .expect("bot applicant owner ancestor dept from department port → Approved");
 
@@ -1821,7 +1826,7 @@ mod tests {
         });
         let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
         let res = svc
-            .create_connect("human_1", "x:dept_miss", None)
+            .create_connect("human_1", "x:dept_miss", None, None)
             .await
             .expect("dept_free miss → Pending");
         assert_eq!(res.status, ConnectStatus::Pending);
@@ -1839,8 +1844,9 @@ mod tests {
         let recorder = RecordingFriendConnectNotificationPort::default();
         let events = recorder.events.clone();
         let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        let request_auth = RequestAuthHeaders { authorization: Some("Bearer user-token".to_string()), cookie: Some("session=abc".to_string()) };
         let res = svc
-            .create_connect("human_1", "x:pending_notify", Some("hi".into()))
+            .create_connect("human_1", "x:pending_notify", Some("hi".into()), Some(request_auth.clone()))
             .await
             .expect("manual pending");
         assert_eq!(res.status, ConnectStatus::Pending);
@@ -1854,6 +1860,7 @@ mod tests {
         assert_eq!(event.target_bot_id, "x:pending_notify");
         assert_eq!(event.recipient_user_ids, vec!["85020".to_string()]);
         assert_eq!(event.message.as_deref(), Some("hi"));
+        assert_eq!(event.request_auth, Some(request_auth));
     }
 
     #[tokio::test]
@@ -1864,11 +1871,11 @@ mod tests {
         let events = recorder.events.clone();
         let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
         let first = svc
-            .create_connect("human_1", "x:pending_idem", None)
+            .create_connect("human_1", "x:pending_idem", None, None)
             .await
             .expect("first pending");
         let second = svc
-            .create_connect("human_1", "x:pending_idem", None)
+            .create_connect("human_1", "x:pending_idem", None, None)
             .await
             .expect("idempotent pending");
         assert_eq!(first.request_ids, second.request_ids);
@@ -1881,7 +1888,7 @@ mod tests {
         seed_bot(&db, "x:man", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let res = svc
-            .create_connect("human_1", "x:man", Some("hi".into()))
+            .create_connect("human_1", "x:man", Some("hi".into()), None)
             .await
             .expect("manual → Pending");
         assert_eq!(res.status, ConnectStatus::Pending);
@@ -1903,7 +1910,7 @@ mod tests {
         seed_bot(&db, "x:auto1", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let res = svc
-            .create_connect("human_1", "x:auto1", None)
+            .create_connect("human_1", "x:auto1", None, None)
             .await
             .expect("auto → Approved");
         assert_eq!(res.status, ConnectStatus::Approved);
@@ -1932,7 +1939,7 @@ mod tests {
         seed_bot(&db, "x:botB", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let res = svc
-            .create_connect("x:botA", "x:botB", None)
+            .create_connect("x:botA", "x:botB", None, None)
             .await
             .expect("Bot↔Bot auto → Approved");
         assert_eq!(res.status, ConnectStatus::Approved);
@@ -1960,12 +1967,12 @@ mod tests {
         seed_bot(&db, "x:idem", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let first = svc
-            .create_connect("human_1", "x:idem", None)
+            .create_connect("human_1", "x:idem", None, None)
             .await
             .expect("first connect");
         assert_eq!(first.status, ConnectStatus::Approved);
         let second = svc
-            .create_connect("human_1", "x:idem", None)
+            .create_connect("human_1", "x:idem", None, None)
             .await
             .expect("second connect idempotent");
         assert_eq!(second.status, ConnectStatus::Approved);
@@ -1982,12 +1989,12 @@ mod tests {
         seed_bot(&db, "x:pend", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let first = svc
-            .create_connect("human_1", "x:pend", None)
+            .create_connect("human_1", "x:pend", None, None)
             .await
             .expect("first manual");
         assert_eq!(first.status, ConnectStatus::Pending);
         let second = svc
-            .create_connect("human_1", "x:pend", None)
+            .create_connect("human_1", "x:pend", None, None)
             .await
             .expect("second idempotent");
         assert_eq!(second.status, ConnectStatus::Pending);
@@ -2001,7 +2008,7 @@ mod tests {
         seed_bot(&db, "x:appr", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("human_1", "x:appr", None)
+            .create_connect("human_1", "x:appr", None, None)
             .await
             .expect("manual pending");
         assert_eq!(pending.status, ConnectStatus::Pending);
@@ -2026,7 +2033,7 @@ mod tests {
         seed_bot(&db, "x:nodupe", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("human_1", "x:nodupe", None)
+            .create_connect("human_1", "x:nodupe", None, None)
             .await
             .expect("manual pending");
         let rid = pending.request_ids[0].clone();
@@ -2051,7 +2058,7 @@ mod tests {
         seed_bot(&db, "x:bbB", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("x:bbA", "x:bbB", None)
+            .create_connect("x:bbA", "x:bbB", None, None)
             .await
             .expect("manual pending Bot↔Bot");
         assert_eq!(pending.request_ids.len(), 2);
@@ -2077,7 +2084,7 @@ mod tests {
         seed_bot(&db, "x:rej", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("human_1", "x:rej", None)
+            .create_connect("human_1", "x:rej", None, None)
             .await
             .expect("manual pending");
         let rid = pending.request_ids[0].clone();
@@ -2098,7 +2105,7 @@ mod tests {
         seed_bot(&db, "x:rbB", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("x:rbA", "x:rbB", None)
+            .create_connect("x:rbA", "x:rbB", None, None)
             .await
             .expect("pending");
         svc.reject(&pending.request_ids[0], "owner", None)
@@ -2116,7 +2123,7 @@ mod tests {
         seed_bot(&db, "x:canc", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("human_1", "x:canc", None)
+            .create_connect("human_1", "x:canc", None, None)
             .await
             .expect("pending");
         let rid = pending.request_ids[0].clone();
@@ -2136,7 +2143,7 @@ mod tests {
         seed_bot(&db, "x:unf", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let created = svc
-            .create_connect("human_1", "x:unf", None)
+            .create_connect("human_1", "x:unf", None, None)
             .await
             .expect("auto connect");
         assert_eq!(created.edge_ids.len(), 1);
@@ -2153,7 +2160,7 @@ mod tests {
         seed_bot(&db, "x:uA", "protected", "protected", "OPEN", "online", Some("85020")).await;
         seed_bot(&db, "x:uB", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
-        svc.create_connect("x:uA", "x:uB", None).await.expect("connect");
+        svc.create_connect("x:uA", "x:uB", None, None).await.expect("connect");
         assert!(eg.has_friend_edge("x:uA", "x:uB", "dev").await);
 
         let n = svc.revoke_friend("x:uA", "x:uB").await.expect("revoke ok");
@@ -2168,7 +2175,7 @@ mod tests {
         let (eg, pp, rq, bc, db) = assemble().await;
         seed_bot(&db, "x:keep", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
-        svc.create_connect("human_1", "x:keep", None).await.expect("connect");
+        svc.create_connect("human_1", "x:keep", None, None).await.expect("connect");
         // Manually insert a writer-profile edge with a different ref id.
         eg.insert_grant(EdgeGrant {
             edge_id: 4001,
@@ -2198,8 +2205,8 @@ mod tests {
         seed_bot(&db, "x:lf1", "protected", "protected", "OPEN", "online", Some("85020")).await;
         seed_bot(&db, "x:lf2", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
-        svc.create_connect("human_1", "x:lf1", None).await.expect("c1");
-        svc.create_connect("human_1", "x:lf2", None).await.expect("c2");
+        svc.create_connect("human_1", "x:lf1", None, None).await.expect("c1");
+        svc.create_connect("human_1", "x:lf2", None, None).await.expect("c2");
 
         let friends = svc.list_friends("human_1").await.expect("list ok");
         let ids: Vec<String> = friends.iter().map(|f| f.actor_id.clone()).collect();
@@ -2219,7 +2226,7 @@ mod tests {
         seed_bot(&db, "x:lr", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("human_1", "x:lr", None)
+            .create_connect("human_1", "x:lr", None, None)
             .await
             .expect("pending");
         // The bot's inbox should list the pending request received.
@@ -2261,7 +2268,7 @@ mod tests {
         let svc = service(&eg, &pp, &rq, &bc);
         // Create 3 separate human callers connecting to the same bot.
         for h in ["human_a", "human_b", "human_c"] {
-            svc.create_connect(h, "x:pg", None).await.expect("pending");
+            svc.create_connect(h, "x:pg", None, None).await.expect("pending");
         }
         let page1 = svc
             .list_requests("x:pg", RequestDirection::Received, None, 1, 2)
@@ -2323,7 +2330,7 @@ mod tests {
         // Seed a friend edge by going through ConnectService (auto path),
         // which also ensures the target default profile and builds the edge.
         let conn = service(&eg, &pp, &rq, &bc);
-        conn.create_connect("human_1", "x:fr", None)
+        conn.create_connect("human_1", "x:fr", None, None)
             .await
             .expect("connect");
         assert!(eg.has_friend_edge("human_1", "x:fr", "dev").await);
@@ -2386,7 +2393,7 @@ mod tests {
         seed_bot(&db, "x:az", "protected", "protected", "OPEN", "online", Some("85020")).await;
         // Seed an approved friend edge.
         let conn = service(&eg, &pp, &rq, &bc);
-        conn.create_connect("human_1", "x:az", None)
+        conn.create_connect("human_1", "x:az", None, None)
             .await
             .expect("connect");
 
@@ -2523,7 +2530,7 @@ mod tests {
         seed_bot(&db, "x:sa", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("human_1", "x:sa", Some("hi".into()))
+            .create_connect("human_1", "x:sa", Some("hi".into()), None)
             .await
             .expect("pending");
         let rid = pending.request_ids[0].clone();
@@ -2580,7 +2587,7 @@ mod tests {
         seed_bot(&db, "x:btB", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
-            .create_connect("x:btA", "x:btB", None)
+            .create_connect("x:btA", "x:btB", None, None)
             .await
             .expect("pending bot↔bot");
         assert_eq!(pending.request_ids.len(), 2);

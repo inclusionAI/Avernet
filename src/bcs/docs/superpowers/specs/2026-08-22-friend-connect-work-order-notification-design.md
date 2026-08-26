@@ -669,6 +669,14 @@ Recommended first version:
 - Synchronous call with idempotent Backend create.
 - Return failure if pending approval WorkOrder cannot be created.
 
+Implementation note:
+
+- In the BCS open-source / no-backend-credential deployment, the work-order
+  adapter may intentionally degrade to a no-op when the backend rejects the
+  call with 401/403, because the friend-connect flow has no user delegation
+  credential to forward. That keeps the friend request itself runnable while
+  leaving the backend inbox empty.
+
 ### 12.4 Applicant department source for H→A
 
 Resolved:
