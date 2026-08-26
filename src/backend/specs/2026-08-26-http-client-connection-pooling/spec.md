@@ -225,8 +225,15 @@ a prerequisite for flipping the bindings that reach it, not for this change.
 6. **Nothing is swallowed.** `raise_for_status` errors and transport errors
    propagate unchanged. Pool exhaustion surfaces as `httpx.PoolTimeout`, which
    is an `httpx.TimeoutException` and therefore already classifies as
-   `HttpClientTimeoutError` at the boundary — no new exception type escapes the
-   seam.
+   `HttpClientTimeoutError` at the boundary — so the *steady-state* failure
+   modes introduce no new exception type.
+
+   One exception type is new, and it is confined to shutdown: after `teardown()`
+   releases the pool the client is terminal, and a call racing that raises a
+   plain `RuntimeError`. This was chosen over the alternative — letting a
+   caller's retry rebuild a pool after shutdown released it, leaking a live pool
+   past teardown. It is documented on the Protocol so consumers are not
+   surprised, and it cannot occur while the process is serving.
 7. **Streaming shares the pool and does not close it.** `stream()` yields a
    streaming response from the shared client; when the `with` block exits the
    connection returns to the pool and the client stays usable for later calls.

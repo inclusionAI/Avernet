@@ -34,6 +34,13 @@ Impls (Rule 20/21):
   ``httpx.Client`` per binding, with bounded ``httpx.Limits`` and optional
   HTTP/2. Pool exhaustion surfaces as ``HttpClientTimeoutError``
   (``httpx.PoolTimeout``) once the per-call ``timeout`` elapses.
+
+  One caveat outside the exception aliases below: the prod impl releases its
+  pool at shutdown and is **terminal** afterwards, so a call that races
+  teardown raises a plain ``RuntimeError`` rather than any ``httpx`` error.
+  That is deliberate — the alternative is reopening connections after shutdown
+  released them — and it is confined to the shutdown window; steady-state
+  failures classify through the aliases as before.
 * ``local`` → ``LocalHttpClient(base_url)`` (``MockSeam``, flavor ``MOCK``) — an
   unstubbed call **raises** so a test can never silently hit the network.
 """
