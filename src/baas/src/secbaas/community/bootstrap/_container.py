@@ -210,7 +210,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
             DeviceCallbackHandler,
             publish_service_factory=_lazy_publish_service,
         ),
-eval_binding_resolver=plugins.eval_binding_resolver,
+        eval_binding_resolver=plugins.eval_binding_resolver,
         eval_consistency_check=plugins.eval_consistency_check,
         eval_session_log=plugins.eval_session_log,
     )

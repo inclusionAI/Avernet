@@ -128,9 +128,9 @@ async def list_tasks(
     user_id 是直接的筛选条件,不要求与认证主体一致,也不执行 owner 作用域校验。
     返回完整任务记录字段。非法 status 返回 400,而不是服务器内部错误。
 
-    分页为可选入参(向后兼容):``page``/``page_size`` 均不传时 ``data`` 为列表,
-    等同历史契约(供接力 skill 全量枚举等场景);两者同时传入时 ``data`` 为
-    ``Page{total, items}``(1-based,``page_size`` 最大 100)。仅传其一视为入参错误(400)。"""
+    分页为可选入参(向后兼容):page/page_size 均不传时 data 为列表,
+    等同历史契约(供接力 skill 全量枚举等场景);两者同时传入时 data 为
+    Page(total, items)(1-based,page_size 最大 100)。仅传其一视为入参错误(400)。"""
     del principal  # Authentication remains mandatory; user_id is only a query filter.
     if status is not None and status not in {s.value for s in Status}:
         raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")

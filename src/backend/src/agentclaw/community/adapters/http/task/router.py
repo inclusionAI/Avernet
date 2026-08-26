@@ -157,8 +157,8 @@ async def list_tasks_internal(
     ``user_id`` 为空时不按 owner 过滤(返回全量,供内部可信调用方);传入则按 ``owner_user_id``
     过滤,与公开面 ``/openapi/v1/.../list`` 的 owner 作用域一致。
 
-    分页为可选入参(与公开面同步):``page``/``page_size`` 均不传时 ``data`` 为列表(历史契约);
-    两者同时传入时返回 ``Page{total, items}``;仅传其一 → 400。"""
+    分页为可选入参(与公开面同步):page/page_size 均不传时 data 为列表(历史契约);
+    两者同时传入时返回 Page(total, items);仅传其一 → 400。"""
     if status is not None and status not in {s.value for s in Status}:
         raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
     if (page is None) != (page_size is None):

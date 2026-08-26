@@ -1,4 +1,4 @@
-"""ORM-based repository for baas_arca_ttl_renewal_schedule table.
+"""ORM-based repository for baas_bot_ttl_renewal_schedule table.
 
 Implements the full 11-method TtlRenewalScheduleRepository contract:
 the registration slice (register / register_if_missing) via a shared
@@ -177,11 +177,11 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
     ) -> list[dict]:
         """Query ACTIVE rows where next_renew_at < :now (caller-supplied).
 
-        ``now`` must be a naive-UTC datetime computed by the caller
-        (CR-01 clock domain): both sides of the comparison then share
-        the UTC wall clock and the due gate is time-zone independent of
-        the DB server clock (SQLite CURRENT_TIMESTAMP is UTC; MySQL
-        NOW() follows the server time zone).
+        ``now`` must be a naive fixed-Asia/Shanghai (+08:00) datetime computed
+        by the caller via ``naive_cst_now`` (CR-01 clock domain): both sides of
+        the comparison then share the +08:00 wall clock and the due gate is
+        time-zone independent of the DB server clock (SQLite CURRENT_TIMESTAMP
+        is UTC; MySQL NOW() follows the server time zone).
 
         LEFT JOINs the corresponding hot table to verify the container
         still exists and provide device_props for TTL extraction.
@@ -420,6 +420,13 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
         ac_entity_device_binding has no such column (D-16'). The device
         side keeps baas_device.is_deleted = 0.
 
+        TTL projection is dual-key (WR-02): rows written before the
+        field-pair release persisted only the legacy integer-ms
+        ttl_expiration_time key (no ttl_expiration_timestamp), so the
+        projection COALESCEs the new key first and falls back to the
+        legacy key — pre-release ACTIVE containers keep their real expiry
+        in discovery instead of degrading to the now+window fallback.
+
         Returns:
             List of dicts, each with keys: id, sandbox_id,
             source_table, ttl.
@@ -430,8 +437,16 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                     DeviceModel.id,
                     DeviceModel.provider_device_id.label("sandbox_id"),
                     literal("baas_device").label("source_table"),
-                    self._json_unquote(
-                        DeviceModel.provider_device_props, "$.ttl_expiration_time"
+                    # WR-02 dual-key TTL projection (see docstring).
+                    func.coalesce(
+                        self._json_unquote(
+                            DeviceModel.provider_device_props,
+                            "$.ttl_expiration_timestamp",
+                        ),
+                        self._json_unquote(
+                            DeviceModel.provider_device_props,
+                            "$.ttl_expiration_time",
+                        ),
                     ).label("ttl"),
                 )
                 .select_from(DeviceModel)
@@ -466,8 +481,16 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                     DeviceBindingModel.id,
                     binding_sandbox.label("sandbox_id"),
                     literal("ac_entity_device_binding").label("source_table"),
-                    self._json_unquote(
-                        DeviceBindingModel.device_props, "$.ttl_expiration_time"
+                    # WR-02 dual-key TTL projection (see docstring).
+                    func.coalesce(
+                        self._json_unquote(
+                            DeviceBindingModel.device_props,
+                            "$.ttl_expiration_timestamp",
+                        ),
+                        self._json_unquote(
+                            DeviceBindingModel.device_props,
+                            "$.ttl_expiration_time",
+                        ),
                     ).label("ttl"),
                 )
                 .select_from(DeviceBindingModel)

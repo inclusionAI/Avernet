@@ -13,7 +13,7 @@ delivery failure is NOT best-effort).
 The plugin's MCP methods are **synchronous** (the service wraps them in
 ``asyncio.to_thread``), so the doubles use plain ``MagicMock``.
 """
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -171,6 +171,59 @@ class TestRefreshMcpScope:
                 "identity_mode": "owner",
             },
         ]
+
+    @pytest.mark.asyncio
+    async def test_logs_scope_payload_before_passport_update(self):
+        passport_update = MagicMock()
+        passport_update.query_passport_clis.return_value = []
+        expected_resource_scope = {
+            "mcp_codes": ["mcp.deepinsight"],
+            "mcp_items": [
+                {
+                    "mcp_code": "mcp.deepinsight",
+                    "mcp_name": "DeepInsight",
+                    "mcp_desc": None,
+                    "identity_mode": "owner",
+                }
+            ],
+            "cli_items": [],
+        }
+        bot_repository = MagicMock()
+        bot_repository.get_by_id_and_owner.return_value = None
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[
+                {"server_code": "mcp.deepinsight", "name": "DeepInsight"},
+            ]),
+            passport_update=passport_update,
+            bot_repository=bot_repository,
+        )
+
+        with patch(
+            "agentclaw.community.core.mcp.services.sync_service.logger.info"
+        ) as log_info:
+            def verify_log_before_passport_call(**_: object) -> None:
+                log_info.assert_any_call(
+                    "[MCPSyncService] Passport update request: "
+                    "operation=mcp_scope_refresh, bot_id=%s, user_id=%s, "
+                    "resource_scope=%s, bot_name=%s, bot_desc=%s, engine_type=%s",
+                    "bot-1",
+                    "user-1",
+                    expected_resource_scope,
+                    None,
+                    None,
+                    "openclaw",
+                )
+
+            passport_update.update_passport.side_effect = verify_log_before_passport_call
+            result = await service.refresh_mcp_scope(
+                user_id="user-1",
+                entity_id="owner-1",
+                bot_id="bot-1",
+                entity_type="staff",
+                engine_type="openclaw",
+            )
+
+        assert result == {"success": True}
 
     @pytest.mark.asyncio
     async def test_updates_virtual_default_bot_without_caller_identity_lookup(self):
