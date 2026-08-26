@@ -130,3 +130,20 @@ def test_consumer_shares_the_singleton_a_test_can_configure(world) -> None:
     bcn_client = world.get(Annotated[HttpClient, QUALIFIER_BCN])
     service = world.get(BcnService)
     assert service._http is bcn_client
+
+
+# ── stream: the local impl raises when unstubbed, like every other verb ──────
+
+
+def test_local_http_client_stream_raises() -> None:
+    """``stream`` obeys the same no-silent-network rule as the other verbs.
+
+    Moved here when ``test_http_client_stream.py`` was deleted along with the
+    injectable-transport seam its ``HttpxClient`` cases depended on; this case
+    never used that seam and pins the local impl's half of the ``stream``
+    contract.
+    """
+    client = LocalHttpClient("http://local.invalid")
+    with pytest.raises(HttpNotConfiguredError):
+        with client.stream("POST", "/v1/chat/completions", json={}, timeout=5.0):
+            pass
