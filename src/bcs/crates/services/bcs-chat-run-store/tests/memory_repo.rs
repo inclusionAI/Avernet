@@ -31,12 +31,12 @@ async fn create_duplicate_is_rejected() {
 }
 
 #[tokio::test]
-async fn capacity_is_enforced_as_backend_error() {
+async fn capacity_is_enforced_as_capacity_error() {
     let repo = MemoryChatRunRepo::with_capacity(1);
     repo.create(record("a", 1)).await.unwrap();
     match repo.create(record("b", 1)).await {
-        Err(ChatRunRepoError::Backend(_)) => {}
-        other => panic!("expected Backend capacity error, got {other:?}"),
+        Err(ChatRunRepoError::Capacity { max_entries: 1 }) => {}
+        other => panic!("expected Capacity, got {other:?}"),
     }
 }
 
@@ -140,7 +140,8 @@ async fn delete_expired_terminal_only_removes_past_retention() {
     repo.create(old).await.unwrap();
     repo.create(fresh).await.unwrap();
     let removed = repo.delete_expired_terminal(100, 50).await.unwrap();
-    assert_eq!(removed, 1);
+    assert_eq!(removed.len(), 1);
+    assert_eq!(removed[0], "old");
     assert!(repo.get("old").await.unwrap().is_none());
     assert!(repo.get("fresh").await.unwrap().is_some());
 }

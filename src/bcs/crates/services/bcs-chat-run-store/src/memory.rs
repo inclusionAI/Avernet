@@ -78,10 +78,9 @@ impl ChatRunRepoPort for MemoryChatRunRepo {
     async fn create(&self, record: ChatRunRecord) -> Result<(), ChatRunRepoError> {
         let mut guard = self.inner.write().await;
         if guard.cap > 0 && guard.runs.len() >= guard.cap {
-            return Err(ChatRunRepoError::Backend(format!(
-                "chat run store at capacity ({})",
-                guard.cap
-            )));
+            return Err(ChatRunRepoError::Capacity {
+                max_entries: guard.cap,
+            });
         }
         if guard.runs.contains_key(&record.run_id) {
             return Err(ChatRunRepoError::DuplicateRunId(record.run_id.clone()));
@@ -155,6 +154,9 @@ impl ChatRunRepoPort for MemoryChatRunRepo {
         if current.state.is_terminal() || current.version != expected_version {
             return Ok(false);
         }
+        if current.state == ChatRunState::Pending {
+            current.state = ChatRunState::Running;
+        }
         current.accumulated_content = accumulated;
         current.content_truncated = truncated;
         current.version += 1;
@@ -178,7 +180,7 @@ impl ChatRunRepoPort for MemoryChatRunRepo {
         &self,
         now_ms: u64,
         retention_ms: u64,
-    ) -> Result<usize, ChatRunRepoError> {
+    ) -> Result<Vec<String>, ChatRunRepoError> {
         let mut guard = self.inner.write().await;
         let drop_ids: Vec<String> = guard
             .runs
@@ -192,11 +194,10 @@ impl ChatRunRepoPort for MemoryChatRunRepo {
             })
             .map(|(key, _)| key.clone())
             .collect();
-        let removed = drop_ids.len();
-        for key in drop_ids {
-            guard.runs.remove(&key);
+        for key in &drop_ids {
+            guard.runs.remove(key);
         }
-        Ok(removed)
+        Ok(drop_ids)
     }
 
     async fn metric_counts(&self) -> Result<Vec<ChatRunMetricCount>, ChatRunRepoError> {
@@ -218,5 +219,15 @@ impl ChatRunRepoPort for MemoryChatRunRepo {
             }
         }
         Ok(counts)
+    }
+
+    async fn list_client_kinds(
+        &self,
+    ) -> Result<HashMap<String, DirectChatClientKind>, ChatRunRepoError> {
+        let mut map = HashMap::new();
+        for record in self.inner.read().await.runs.values() {
+            map.insert(record.run_id.clone(), client_kind(record.client.as_deref()));
+        }
+        Ok(map)
     }
 }

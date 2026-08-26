@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{ChatResponseMode, ChatRunMetricCount};
+use crate::{ChatResponseMode, ChatRunMetricCount, DirectChatClientKind};
 
 /// Maximum accumulated content kept for a single run (1 MiB). Slicing past
 /// this uses char-boundary-safe truncation; see `ChatRunStore::append_delta`.
@@ -141,10 +141,10 @@ pub enum CasOutcome {
 pub enum ChatRunRepoError {
     #[error("chat run {0} already exists")]
     DuplicateRunId(String),
-    #[error("chat run {0} not found")]
-    NotFound(String),
-    #[error("chat run {0} compare-and-set conflict")]
-    Conflict(String),
+    #[error("chat run not found")]
+    NotFound,
+    #[error("chat run store at capacity ({max_entries})")]
+    Capacity { max_entries: usize },
     #[error("chat run store backend error: {0}")]
     Backend(String),
 }
@@ -198,13 +198,21 @@ pub trait ChatRunRepoPort: Send + Sync + 'static {
     /// timeout sweep that marks overdue runs failed.
     async fn list_active(&self, now_ms: u64) -> Result<Vec<ChatRunRecord>, ChatRunRepoError>;
 
-    /// Delete terminal runs past their retention window. Returns rows removed.
+    /// Delete terminal runs past their retention window. Returns the run IDs that
+    /// were actually removed, so the engine can emit per-run lifecycle events.
     async fn delete_expired_terminal(
         &self,
         now_ms: u64,
         retention_ms: u64,
-    ) -> Result<usize, ChatRunRepoError>;
+    ) -> Result<Vec<String>, ChatRunRepoError>;
 
     /// Aggregate counts by state × client kind for metrics.
     async fn metric_counts(&self) -> Result<Vec<ChatRunMetricCount>, ChatRunRepoError>;
+
+    /// Scan every run's `run_id → client kind` mapping. Used by the cleanup
+    /// loop to attribute lifecycle events to the right client after a run may
+    /// already have been deleted. Sub-identity (not aggregated) on purpose.
+    async fn list_client_kinds(
+        &self,
+    ) -> Result<std::collections::HashMap<String, DirectChatClientKind>, ChatRunRepoError>;
 }
