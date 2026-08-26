@@ -37,14 +37,15 @@ config path including the HTTP/2 flag; Group 3 validates.
       `DEFAULT_MAX_KEEPALIVE_CONNECTIONS = 20`, `DEFAULT_KEEPALIVE_EXPIRY = 5.0`,
       `DEFAULT_HTTP2 = False` constants (mirroring `HttpClientPoolConfig`).
 - [ ] 1.2 `HttpxClient` declares `LifecycleBase` as a base
-      (`class HttpxClient(LifecycleBase, HttpClient)`); `__init__` gains the four
-      keyword-only transport arguments, builds `self._limits =
-      httpx.Limits(...)`, stores `self._http2`, and initialises
-      `self._lock = threading.Lock()` / `self._client: httpx.Client | None = None`.
-      `base_url` and `transport` keep their current meaning.
+      (`class HttpxClient(LifecycleBase, HttpClient)`); `__init__` **drops the
+      `transport` parameter**, gains the four keyword-only policy arguments,
+      builds `self._limits = httpx.Limits(...)`, stores `self._http2`, and
+      initialises `self._lock = threading.Lock()` /
+      `self._client: httpx.Client | None = None`. `base_url` is unchanged.
 - [ ] 1.3 Add `_pooled_client()` — double-checked lazy construction under the
-      lock, passing `base_url` + `limits` + `http2` (+ `transport` only when
-      set). The lock guards construction only and is never held across a request.
+      lock, passing `base_url` + `limits` + `http2`. No `client_kwargs` dict and
+      no conditional guard remain. The lock guards construction only and is never
+      held across a request.
 - [ ] 1.4 Add `close()` (swap `self._client` to `None` under the lock, close the
       old client *outside* the lock, idempotent) and `async def teardown()`
       delegating to it.
@@ -73,9 +74,16 @@ config path including the HTTP/2 flag; Group 3 validates.
       per call." becomes a pooled-client description. Docstring only; the
       Protocol, its signatures and the conformance contract are untouched, so
       this is not a contract change.
+- [ ] 1.8c Delete `tests/community/core/harness/services/test_http_client_stream.py`.
+      Its two `HttpxClient` cases depend on the removed `transport` seam. First
+      move its third case, `test_local_http_client_stream_raises` (which never
+      used `transport`), into `tests/community/contracts/test_http_client.py`
+      alongside the rest of the local-impl contract, so it is not lost with the
+      file. Confirm nothing else imports from the deleted module.
 - [ ] 1.9 Run `tests/community/plugins/test_http_client.py` and
-      `tests/community/core/harness/services/test_http_client_stream.py`
-      (the latter unedited — it is the regression guard). Both green.
+      `tests/community/contracts/test_http_client.py`. Both green. Note in the
+      PR that `HttpxClient.stream()` now has no automated coverage — a
+      deliberate trade recorded in `spec.md`, not an oversight.
 
 ## Group 2 — Make the ceilings and the protocol configurable
 
@@ -120,10 +128,10 @@ config path including the HTTP/2 flag; Group 3 validates.
       `tests/community/core/bot_management/services/` (BCN),
       `tests/community/core/quality/test_task_processor.py`,
       `tests/community/core/bot_dormant/`.
-- [ ] 3.2 Run `tests/community/endpoints/test_session_resources.py` — the one
-      test that drives a real `HttpxClient` over a real socket, so it is the
-      only local end-to-end proof the pooled path works outside a mock
-      transport.
+- [ ] 3.2 Run `tests/community/endpoints/test_session_resources.py` — now the
+      **only** test that drives a real `HttpxClient` over a real socket, and
+      therefore the sole end-to-end proof the pooled path works at all. Treat a
+      failure here as blocking, not incidental.
 - [ ] 3.3 Run `tests/community/architecture/` — module boundaries (the new
       `kernel.lifecycle` import from `plugins/`), lifecycle discovery, the
       Rule 20/21 plugin-pairing test, and `test_local_no_external_deps.py`

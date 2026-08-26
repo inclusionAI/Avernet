@@ -1,8 +1,9 @@
 # Plan — Outbound HTTP Connection Pooling and HTTP/2 for `HttpClient`
 
 Implements `spec.md`. Six source files (one of them the dependency manifest
-pair), four test files. No protocol change: `plugin_api/http_client.py` is
-untouched, so no consumer and no conformance contract moves.
+pair), five test files (one of them deleted). No Protocol change:
+`plugin_api/http_client.py` keeps its signatures — only a stale impl note in its
+docstring is corrected — so no consumer and no conformance contract moves.
 
 ## Verified assumptions
 
@@ -16,9 +17,7 @@ writing this plan, because each one would otherwise be a rewrite risk:
 | `Client.stream(..., timeout=float)` works per-request | Yes |
 | An absolute URL still bypasses `base_url` (the `general` contract) | Yes — `base_url="http://svc.test"` + `"http://other.test:20010/x"` requests the absolute URL |
 | `httpx.PoolTimeout` classifies as an existing boundary error | `issubclass(httpx.PoolTimeout, httpx.TimeoutException)` is `True`, so `HttpClientTimeoutError` already covers it |
-| A custom `transport=` makes `limits=` inert rather than an error | Yes — `Client._init_transport` returns the given transport before building `HTTPTransport`, so the `MockTransport` tests are unaffected |
-| `http2=True` composes with a `MockTransport` | Yes — verified constructing and issuing a request through both `http2=True`+`MockTransport` and `http2=True`+ real `HTTPTransport` |
-| `http2=True` needs `h2` **even with a custom transport** | Yes — `Client.__init__` does `if http2: import h2` *before* `_init_transport` short-circuits. So the dependency is required by any test that passes `http2=True`, not only by real network paths. |
+| `http2=True` requires `h2` importable at construction | Yes — `Client.__init__` does `if http2: import h2`. Verified constructing a real `HTTPTransport` client with `http2=True`. |
 | httpx negotiates h2 by ALPN only | `httpcore/_sync/connection.py`: `http2_negotiated or (self._http2 and not self._http1)` — no cleartext upgrade path |
 
 ## Component 0 — dependency: `httpx[http2]`
@@ -72,14 +71,12 @@ class HttpxClient(LifecycleBase, HttpClient):
         self,
         base_url: str,
         *,
-        transport: Any | None = None,
         max_connections: int = DEFAULT_MAX_CONNECTIONS,
         max_keepalive_connections: int = DEFAULT_MAX_KEEPALIVE_CONNECTIONS,
         keepalive_expiry: float = DEFAULT_KEEPALIVE_EXPIRY,
         http2: bool = DEFAULT_HTTP2,
     ):
         self._base_url = base_url
-        self._transport = transport
         self._limits = httpx.Limits(
             max_connections=max_connections,
             max_keepalive_connections=max_keepalive_connections,
@@ -112,7 +109,6 @@ def _pooled_client(self) -> httpx.Client:
                 base_url=self._base_url,
                 limits=self._limits,
                 http2=self._http2,
-                transport=self._transport,
             )
         return self._client
 ```
@@ -121,20 +117,24 @@ Lazy rather than eager because `discover_lifecycle_participants` resolves every
 binding at boot; eager construction would open pools for upstreams a given
 deployment never calls.
 
-`transport` stays `Any | None = None`. It is **never** wired by DI — all four
-providers construct `HttpxClient(base_url=…)` bare — and is passed only by
-`test_http_client_stream.py`, which injects an `httpx.MockTransport`. So `None`
-is the production value on every path; the parameter is an optional test-injection
-seam, and dropping the `| None` would break all four bindings.
+**The `transport` parameter is deleted** (review decision, 2026-08-26). It exists
+on the current class but is never wired by DI — all four providers construct
+`HttpxClient(base_url=…)` bare — and was passed only by
+`test_http_client_stream.py`, which injected an `httpx.MockTransport`. A
+production constructor argument that only tests supply is design damage, so it
+goes, and the test file that depended on it goes with it (see Test plan). This
+also removes the `client_kwargs` dict and its `if self._transport is not None`
+guard: with `timeout` moving to the call site and `transport` gone, there is
+nothing left to assemble conditionally.
 
-Note this drops the existing `client_kwargs` dict and its
-`if self._transport is not None` guard in favour of passing `transport=` straight
-through. Verified equivalent: `Client._init_transport` is
-`if transport is not None: return transport` before it builds an `HTTPTransport`,
-so an explicit `transport=None` and an omitted one take the same branch. The
-current code conditionally assembles the kwarg only because it also had to
-conditionally add `timeout`; with `timeout` moving to the call site there is
-nothing left for the dict to do.
+Consequence, accepted deliberately: **`HttpxClient.stream()` ends up with no
+automated coverage.** It is the one method this change rewrites whose behavior no
+test will exercise. Two things bound the risk — `stream()`'s body after the
+rewrite is three lines with no branching, and `test_session_resources.py` still
+drives the pooled non-stream path over a real socket — but it is a real gap and
+`spec.md` records it as such. If it is ever worth closing, `respx` is already a
+dev dependency and intercepts httpx at the transport layer with no production
+seam, so coverage can return without the parameter coming back.
 
 **Pool topology — one client per binding, not per base_url.** Worth stating
 precisely, because the two are only the same for three of the four qualifiers:
@@ -296,33 +296,49 @@ upstreams offering `h2`.
 
 ## Test plan
 
+**`tests/community/core/harness/services/test_http_client_stream.py` (deleted).**
+Its two `HttpxClient` cases exist only because the class accepts an injectable
+`transport`; with that parameter gone they cannot be written as they stand. Its
+third case, `test_local_http_client_stream_raises`, never used `transport` — it
+pins `LocalHttpClient.stream` raising when unstubbed — so it moves into
+`tests/community/contracts/test_http_client.py`, where the rest of the local-impl
+contract already lives, rather than being lost with the file.
+
 **`tests/community/plugins/test_http_client.py` (rewritten).** The existing
 tests patch `httpx.Client` and assert `ctor.assert_called_once_with(base_url=…,
 timeout=…)` plus a `request(...)` call with no `timeout` — both encode the
-per-call-client design and must move. The file is restructured around a
-`MockTransport`-driven real client (which exercises the actual pooling code
-rather than a mock of it) plus a narrow `httpx.Client`-patching helper where
-construction arguments are the thing under test:
+per-call-client design and must move. With no injectable transport, every case
+below drives a patched `httpx.Client` and asserts on construction arguments and
+delegation. That is a weaker instrument than a real client — it verifies what
+`HttpxClient` *asks httpx to do*, not what httpx then does — which is acceptable
+here because httpx's own behavior (per-request `timeout`, absolute-URL handling,
+pool reuse) was verified directly against the pinned version and is recorded in
+the assumptions table above:
 
 - `test_pool_is_reused_across_calls` — two calls, one underlying client
   instance; `httpx.Client` constructed exactly once (criterion 1).
 - `test_client_is_built_with_configured_limits` — `limits` carries the three
   configured values (criterion 2).
 - `test_http2_defaults_off_and_is_forwarded_when_enabled` — `http2=False` is
-  passed by default; `HttpxClient(..., http2=True)` forwards `http2=True` and
-  constructs for real against a `MockTransport`, proving `h2` is importable
-  (criterion 3).
+  passed to `httpx.Client` by default and `http2=True` when configured. Paired
+  with an unpatched case that constructs `HttpxClient(..., http2=True)` and
+  triggers the pool, proving `h2` is importable in the installed environment
+  (criterion 3) — no request is issued, so no network is touched.
 - `test_none_args_are_omitted_from_the_request` — preserved (criterion 4).
 - `test_post_with_files_and_data_passes_multipart_kwargs` — preserved
   (criterion 4).
 - `test_get_and_put_dispatch_correct_methods` — preserved.
 - `test_timeout_is_passed_per_request_not_per_client` — `request` receives
   `timeout=T`; the client is not constructed with one (criterion 5).
-- `test_absolute_url_bypasses_base_url` — the `general` client's contract, newly
-  pinned because pooling is the change most likely to disturb it (criterion 4).
+- `test_absolute_url_bypasses_base_url` — asserts the absolute URL reaches
+  `Client.request` unaltered, which is the part `HttpxClient` owns; that httpx
+  then ignores `base_url` for it is verified in the assumptions table
+  (criterion 4).
 - `test_response_and_transport_errors_propagate` — preserved (criterion 6).
-- `test_stream_shares_the_pool_and_leaves_it_open` — after a `stream` block
-  exits, a following `get` succeeds on the same client (criterion 7).
+- `test_stream_shares_the_pool_and_leaves_it_open` — `stream` is issued on the
+  pooled client and `close()` is never called on it; a following `get` reuses the
+  same instance (criterion 7). This is the only remaining check on `stream`, and
+  it covers plumbing rather than streaming behavior.
 - `test_close_is_idempotent_and_rebuilds_on_next_use` — `close()` twice does not
   raise; a later call works (criterion 8).
 - `test_teardown_closes_the_pool` — `await client.teardown()` closes the
@@ -336,12 +352,6 @@ construction arguments are the thing under test:
 
 **`tests/community/di/modules/test_infrastructure_module.py`** — pass
 `cfg.HttpClientPoolConfig()` to `general_http_client()`.
-
-**`tests/community/core/harness/services/test_http_client_stream.py`** — expected
-to pass unchanged; it constructs `HttpxClient("http://llm.local",
-transport=transport)` and drives a real `stream`. Treated as the regression
-guard that the streaming rewrite did not change observable behavior. Run, not
-edited.
 
 **Not added:** pooling assertions in `tests/community/contracts/test_http_client.py`.
 That file is the Rule 25 conformance test for the *protocol* and its local impl;
