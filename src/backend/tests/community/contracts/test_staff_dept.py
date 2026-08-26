@@ -314,3 +314,20 @@ def test_local_profile_lookup_is_recorded_and_returns_null_name(
         getattr(call, "kwargs", {}).get("work_no") == "work-42"
         for call in local.calls_to("get_profile_by_work_no")
     )
+
+
+def test_community_directory_lookup_reports_null(community_world) -> None:
+    """The community column wires ``NoStaffDept`` ⇒ all-``None`` identity+dept."""
+    from agentclaw.community.plugin_api.staff_dept import UserIdentityInfo
+
+    info = community_world.get(StaffDeptPlugin).get_user_by_work_no(
+        work_no="anyone"
+    )
+    assert isinstance(info, UserIdentityInfo)
+    assert info.work_no == "anyone"
+    assert info.username is None
+    assert info.display_name is None
+    assert info.full_name is None
+    assert info.dept_no is None
+    assert info.dept_name is None
+    assert info.dept_path is None
