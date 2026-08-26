@@ -91,7 +91,7 @@ green at the end of this group *without* any test expectation changing.
       (`claimed_mcp` ↔ `released_mcp`) on the compensating one, mirroring how
       `retired_logical_skill_mappings` already swaps its arguments at
       `_mutation_flow.py:119`.
-- [ ] 2.4 Confirm the non-flow entry points — `SkillSymlinkListener`
+- [x] 2.4 Confirm the non-flow entry points — `SkillSymlinkListener`
       (`di/modules/skill_center_module.py:914`) and
       `LocalSkillUploadService._sync_runtime` (`:533`) — reach the
       `everything()` default.
