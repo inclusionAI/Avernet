@@ -35,6 +35,7 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     FavoriteTargetRequest,
     MarketFavoriteItem,
     PersonalSpaceInitialized,
+    SpaceListScope,
     SearchFavoritesRequest,
     SpaceCreated,
     SpaceRole,
@@ -62,7 +63,7 @@ from agentclaw.community.core.market_favorites.models import (
     MarketFavoriteRecord,
 )
 from agentclaw.community.core.spaces.models import (
-    SpaceListScope,
+    SpaceListScope as DomainSpaceListScope,
     SpaceMemberSummaryRecord,
     SpaceRole as DomainSpaceRole,
     SpaceSummaryRecord,
@@ -192,7 +193,7 @@ async def list_spaces(
         space_type=DomainSpaceType(space_type) if space_type is not None else None,
         page_no=page_no,
         page_size=page_size,
-        scope=scope,
+        scope=DomainSpaceListScope(scope.value),
     )
     return page(total, [_space_item(record) for record in records], request)
 

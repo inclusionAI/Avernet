@@ -5,10 +5,9 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import ContextManager, Protocol, TYPE_CHECKING, runtime_checkable
 
-from agentclaw.community.core.spaces.models import SpaceListScope
-
 if TYPE_CHECKING:
     from agentclaw.community.core.spaces.models import (
+        SpaceListScope,
         PersonalSpaceLookupRecord,
         SpaceMemberRecord,
         SpaceMemberSummaryRecord,
@@ -78,7 +77,7 @@ class SpaceRepositoryProtocol(Protocol):
         space_type: str | None,
         offset: int,
         limit: int,
-        scope: SpaceListScope = SpaceListScope.ALL,
+        scope: SpaceListScope = "all",
     ) -> tuple[int, list[SpaceSummaryRecord]]: ...
 
     @abstractmethod

@@ -33,7 +33,7 @@ from agentclaw.community.core.market_favorites.models import (
 )
 from agentclaw.community.core.spaces.models import (
     SpaceJoinStatus,
-    SpaceListScope,
+    SpaceListScope as DomainSpaceListScope,
     SpaceMemberRecord,
     SpaceMemberSummaryRecord,
     SpaceRecord,
@@ -434,7 +434,7 @@ def test_list_spaces_forwards_filters_and_maps_page(client, space_service):
         space_type=SpaceType.TEAM,
         page_no=2,
         page_size=5,
-        scope=SpaceListScope.ALL,
+        scope=DomainSpaceListScope.ALL,
     )
 
 
@@ -446,7 +446,7 @@ def test_list_spaces_forwards_accessible_scope(client, space_service):
     )
 
     assert response.status_code == 200
-    assert space_service.list_spaces.call_args.kwargs["scope"] is SpaceListScope.ACCESSIBLE
+    assert space_service.list_spaces.call_args.kwargs["scope"] is DomainSpaceListScope.ACCESSIBLE
 
 
 def test_list_spaces_rejects_unknown_scope(client):
