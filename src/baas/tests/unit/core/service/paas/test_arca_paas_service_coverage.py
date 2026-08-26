@@ -525,6 +525,56 @@ class TestCreateDevice:
         assert result.ttl_expiration_time is None
         assert result.ttl_expiration_timestamp is None
 
+    def test_create_device_sync_zero_ttl_timestamp_yields_none(
+        self, service, mock_sandbox, mock_plugin
+    ):
+        """WR-02: ttl_timestamp == 0 is not a valid deadline — both fields None.
+
+        Zero must never become an epoch-0 (1970) renewal anchor: the wrapper
+        and the scheduler both treat 0 as missing, so the creation chain must
+        too (both-or-None field-pair contract).
+        """
+        info = _make_sandbox_info()
+        info.ttl_timestamp = 0
+        mock_sandbox.get_info.return_value = info
+
+        config = ArcaCreateConfig(template_id="tpl-001", ttl_in_minutes=60)
+
+        result = service._create_device_sync(config)
+
+        assert result.ttl_expiration_time is None
+        assert result.ttl_expiration_timestamp is None
+
+    def test_create_device_sync_numeric_string_ttl_timestamp_coerced(
+        self, service, mock_sandbox, mock_plugin
+    ):
+        """WR-03: numeric-string ttl_timestamp is coerced like the scheduler consumers."""
+        info = _make_sandbox_info()
+        info.ttl_timestamp = "1750000000000"
+        mock_sandbox.get_info.return_value = info
+
+        config = ArcaCreateConfig(template_id="tpl-001", ttl_in_minutes=60)
+
+        result = service._create_device_sync(config)
+
+        assert result.ttl_expiration_timestamp == 1750000000000
+        assert result.ttl_expiration_time == "2025-06-15 23:06:40"
+
+    def test_create_device_sync_non_numeric_string_ttl_timestamp_yields_none(
+        self, service, mock_sandbox, mock_plugin
+    ):
+        """WR-03: non-numeric-string ttl_timestamp falls back to both None."""
+        info = _make_sandbox_info()
+        info.ttl_timestamp = "soon"
+        mock_sandbox.get_info.return_value = info
+
+        config = ArcaCreateConfig(template_id="tpl-001", ttl_in_minutes=60)
+
+        result = service._create_device_sync(config)
+
+        assert result.ttl_expiration_time is None
+        assert result.ttl_expiration_timestamp is None
+
     def test_create_device_sync_uses_creds_template_id(
         self, service, mock_sandbox, mock_plugin
     ):
