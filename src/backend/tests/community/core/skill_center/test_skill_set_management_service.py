@@ -52,6 +52,7 @@ class _Repository:
         self.restore_calls = []
         self.set_active_calls = []
         self.update_calls = []
+        self.add_mcp_calls = []
 
     def update_set(self, **kwargs):
         self.update_calls.append(kwargs)
@@ -68,11 +69,19 @@ class _Repository:
     def restore_desired_state(self, **kwargs) -> None:
         self.restore_calls.append(kwargs)
 
+    def add_mcp(self, **kwargs) -> DesiredStateMutation:
+        self.add_mcp_calls.append(kwargs)
+        return DesiredStateMutation(
+            item={"server_code": kwargs["server_code"]},
+            changed=True,
+            previous_state=CapabilityDesiredState(set(), {}, {}),
+        )
+
     def list_mcps(self, **_kwargs):
         return []
 
     def get_set(self, **_kwargs):
-        return {"is_default": False}
+        return {"id": "set-1", "is_default": False, "is_active": True}
 
     def delete_set(self, **_kwargs) -> None:
         return None
@@ -2096,6 +2105,48 @@ async def test_projection_fails_closed_without_a_bot_primary_key():
     assert factory.service.desired_skills is None
     assert passport.calls == []
     assert identity.calls == []
+
+
+@pytest.mark.asyncio
+async def test_compensation_inverts_the_declared_mcp_delta():
+    """A failed projection must withdraw what the forward one delivered.
+
+    The forward projection pushed configuration for the claimed MCP; the
+    mutation is then rolled back, so the compensating projection has to
+    release exactly that code — otherwise the DB says the MCP is gone while
+    its endpoint and api_key stay on the device. This is why the scope is a
+    value the flow can invert rather than behaviour it cannot see into.
+    """
+    repository = _Repository()
+    runtime = _Runtime()
+    service = SkillSetManagementService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=runtime,
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
+    )
+
+    with pytest.raises(SkillSetRuntimeReconcileError):
+        await service.add_mcp(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            user_id="true-owner",
+            set_id="set-1",
+            server_code="mcp.new",
+        )
+
+    forward, compensating = runtime.reconcile_calls
+    assert forward["scope"].claimed_mcp == frozenset({"mcp.new"})
+    assert forward["scope"].released_mcp == frozenset()
+    # Inverted: what was claimed going forward is released coming back.
+    assert compensating["scope"].claimed_mcp == frozenset()
+    assert compensating["scope"].released_mcp == frozenset({"mcp.new"})
 
 
 @pytest.mark.asyncio

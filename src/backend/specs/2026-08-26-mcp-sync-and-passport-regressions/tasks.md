@@ -143,7 +143,7 @@ green at the end of this group *without* any test expectation changing.
       needs no test: R3 makes it unreachable,
       `policies/capability_ownership.py:9`.) Assert directly — a future
       `_resolve_plan` change must not silently start deleting device config.
-- [ ] 3.8 Test — compensation inverts the scope: a projection failure after a
+- [x] 3.8 Test — compensation inverts the scope: a projection failure after a
       successful add removes what it pushed.
 - [x] 3.9 Test — a `reconcile` scope pushes every projected code, so the
       device-activated reconcile path is unchanged.
