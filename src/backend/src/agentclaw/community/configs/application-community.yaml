@@ -75,9 +75,10 @@ user_config:
   #   # Optional per-binding overrides. Valid keys are exactly the four
   #   # HttpClient qualifiers: baas, bcn, general, masa_agent_eval. An override
   #   # names only the keys it changes and inherits the rest from the defaults
-  #   # above. An unrecognised key is silently inert — check the per-binding
-  #   # "HttpClient[<qualifier>]: ..." line in the boot log to confirm what
-  #   # actually resolved.
+  #   # above. An unrecognised key FAILS STARTUP, naming the typo and the
+  #   # valid set: it cannot be honoured by any binding, so accepting it would
+  #   # mean the ceiling you set silently never applied. The per-binding
+  #   # "HttpClient[<qualifier>]: ..." boot log line shows what resolved.
   #   overrides:
   #     baas:
   #       http2: true                 # single origin, plain request/response —

@@ -26,6 +26,12 @@ from injector import Module, inject, provider, singleton
 
 from agentclaw.community.di import config as cfg
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
+from agentclaw.community.plugin_api.http_client import (
+    QUALIFIER_BAAS,
+    QUALIFIER_BCN,
+    QUALIFIER_GENERAL,
+    QUALIFIER_MASA_AGENT_EVAL,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -55,6 +61,13 @@ def _block(name: str) -> dict[str, Any]:
     raw = _user_config().get(name) or {}
     return dict(raw) if isinstance(raw, dict) else {}
 
+
+# The closed set of HttpClient bindings an ``overrides`` entry may name. Taken
+# from the qualifier constants themselves so the config surface cannot drift
+# from the injector keys.
+_HTTP_CLIENT_QUALIFIERS = frozenset(
+    {QUALIFIER_BAAS, QUALIFIER_BCN, QUALIFIER_GENERAL, QUALIFIER_MASA_AGENT_EVAL}
+)
 
 _TRUE_SCALARS = frozenset({"true", "yes", "on", "1"})
 _FALSE_SCALARS = frozenset({"false", "no", "off", "0"})
@@ -643,16 +656,34 @@ class ConfigModule(Module):
         it changes; the rest come from the resolved shared defaults, so a value
         left unset keeps tracking those defaults if they later change.
 
-        An unrecognised qualifier key is inert rather than fatal — this provider
-        does no I/O and has no binding list to validate against, and failing boot
-        over a typo in a pool ceiling is the worse trade. ``HttpClientModule``
-        logs each binding's resolved policy, which is where a typo shows up.
+        An unrecognised qualifier key **raises**. The valid set is closed and
+        known (the four ``QUALIFIER_*`` constants), so a name outside it cannot
+        be honoured by any binding — unlike a malformed *value*, where falling
+        back to a working default is a sane reading of operator intent. Silently
+        ignoring it would leave the operator believing a ceiling had been raised
+        while the binding ran on the shared defaults, which is the failure this
+        block exists to prevent. ``ci.enforce.md`` §E requires startup to fail
+        early on invalid config, and ``baas.deploy_runtime`` already rejects an
+        unknown value the same way.
+
+        ``HttpClientPoolConfig`` is in ``container.py``'s eager-check allowlist
+        so that raise lands at boot on pre/prod rather than at the first
+        outbound call.
         """
         block = _block("http_client")
         defaults = _pool_policy(block, cfg.HttpClientPoolPolicy())
         raw_overrides = block.get("overrides") or {}
         overrides: dict[str, cfg.HttpClientPoolPolicy] = {}
         if isinstance(raw_overrides, dict):
+            unknown = sorted(
+                str(name) for name in raw_overrides if str(name) not in _HTTP_CLIENT_QUALIFIERS
+            )
+            if unknown:
+                valid = ", ".join(repr(q) for q in sorted(_HTTP_CLIENT_QUALIFIERS))
+                raise ValueError(
+                    f"unknown http_client.overrides qualifier(s) "
+                    f"{', '.join(repr(u) for u in unknown)}; expected one of {valid}"
+                )
             for name, body in raw_overrides.items():
                 if isinstance(body, dict):
                     overrides[str(name)] = _pool_policy(
