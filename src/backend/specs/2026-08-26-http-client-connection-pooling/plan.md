@@ -108,14 +108,12 @@ def _pooled_client(self) -> httpx.Client:
         return client
     with self._lock:
         if self._client is None:
-            kwargs: dict[str, Any] = {
-                "base_url": self._base_url,
-                "limits": self._limits,
-                "http2": self._http2,
-            }
-            if self._transport is not None:
-                kwargs["transport"] = self._transport
-            self._client = httpx.Client(**kwargs)
+            self._client = httpx.Client(
+                base_url=self._base_url,
+                limits=self._limits,
+                http2=self._http2,
+                transport=self._transport,
+            )
         return self._client
 ```
 
@@ -126,11 +124,17 @@ deployment never calls.
 `transport` stays `Any | None = None`. It is **never** wired by DI — all four
 providers construct `HttpxClient(base_url=…)` bare — and is passed only by
 `test_http_client_stream.py`, which injects an `httpx.MockTransport`. So `None`
-is the production value on every path, and the `if self._transport is not None`
-guard is what keeps httpx building its own pooled `HTTPTransport` (a `transport=None`
-kwarg passed explicitly would *not* be equivalent — `_init_transport` branches on
-the argument being absent vs. `None`-valued only by identity, so passing it
-unconditionally is a needless risk for no gain).
+is the production value on every path; the parameter is an optional test-injection
+seam, and dropping the `| None` would break all four bindings.
+
+Note this drops the existing `client_kwargs` dict and its
+`if self._transport is not None` guard in favour of passing `transport=` straight
+through. Verified equivalent: `Client._init_transport` is
+`if transport is not None: return transport` before it builds an `HTTPTransport`,
+so an explicit `transport=None` and an omitted one take the same branch. The
+current code conditionally assembles the kwarg only because it also had to
+conditionally add `timeout`; with `timeout` moving to the call site there is
+nothing left for the dict to do.
 
 **Pool topology — one client per binding, not per base_url.** Worth stating
 precisely, because the two are only the same for three of the four qualifiers:
