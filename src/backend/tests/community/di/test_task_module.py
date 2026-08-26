@@ -10,6 +10,9 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.di.modules.task_module import TaskModule
+from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
+    SingleboxKeywordBotDiscover,
+)
 
 
 class _StubDiscoverModule(Module):
@@ -79,3 +82,14 @@ def test_resolve_api_base_url_reuses_iframe_callback_origin(monkeypatch):
         TaskModule._resolve_api_base_url("https://be.local:8888/path?x=1")
         == "https://be.local:8888"
     )
+
+
+def test_task_module_uses_keyword_discovery_in_every_profile(monkeypatch):
+    class _BotPublic:
+        def search_public_bots_by_keyword(self, **_kwargs):
+            return {"total": 0, "items": []}
+
+    for profile in ("singlebox", "corp", "community"):
+        monkeypatch.setenv("DEPLOY_PROFILE", profile)
+        discover = TaskModule._resolve_discover(bot_public=_BotPublic())
+        assert isinstance(discover, SingleboxKeywordBotDiscover)

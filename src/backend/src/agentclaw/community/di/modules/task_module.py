@@ -68,7 +68,6 @@ class TaskModule(Module):
     def task_service(
         self,
         graph: TaskGraphService,
-        discover: BotDiscoverServiceProtocol,
         bot_public: BotPublicServiceProtocol,
         injector: Injector,
     ) -> TaskService:
@@ -80,8 +79,9 @@ class TaskModule(Module):
         - 其它(corp/prod)→ 不内联 BaaS/BCS 密钥;``_resolve_ports`` 返 ``(None,None)`` 后由
           ``injector.get(OpenApiBotPort)``/``injector.get(BcsClientPort)`` 取 corp overlay 经 DI 绑定的
           真实端口实现(community 未绑 → None,纯内核/HTTP-contract 路径退化为 stub)。
-        - discover(``BotDiscoverServiceProtocol``,来自 BotPublicModule)始终传入:
-          singlebox profile 换 ``SingleboxKeywordBotDiscover``(本地关键字搜索),其余用注入的 BCSFuse。
+        - discover: every profile reuses ``SingleboxKeywordBotDiscover`` over the local
+          public-Bot catalogue (name/owner-name LIKE). Task dispatch intentionally does
+          not invoke BCSFuse recommendation, whose availability must not decide routing.
         """
         try:
             graph.bind_repository(injector.get(TaskGraphRepositoryProtocol))
@@ -120,7 +120,7 @@ class TaskModule(Module):
             type(bcs).__name__ if bcs is not None else "None",
             "" if (bot is not None and bcs is not None) else "不(全退 Avernet 桩)",
         )
-        discover_port = self._resolve_discover(default=discover, bot_public=bot_public)
+        discover_port = self._resolve_discover(bot_public=bot_public)
         # BBS 候选查询复用 BcnService 的统一 provider 身份(BcnConfig prod/pre,与 register/switch
         # provider-bot 同源)。任务模块作为普通消费方经 DI 注入 BcnService;纯内核/未装 BotManagement 的
         # DI 测试路径取不到 → None(BBS 按可恢复态跳过;singlebox 无凭据亦走 not-configured 静默)。
@@ -298,18 +298,14 @@ class TaskModule(Module):
 
     @staticmethod
     def _resolve_discover(
-        *,
-        default: BotDiscoverServiceProtocol,
-        bot_public: BotPublicServiceProtocol,
+        *, bot_public: BotPublicServiceProtocol
     ) -> BotDiscoverServiceProtocol:
-        """选 bot 搜推端口(组合根按 ``DEPLOY_PROFILE`` 选实现)。
+        """Reuse the existing public-Bot LIKE candidate adapter for every profile.
 
-        - ``DEPLOY_PROFILE=singlebox`` → ``SingleboxKeywordBotDiscover``:本地关键字搜索(DB LIKE bot_name/
-          owner_name,``/api/v1/bot-public/search``);singlebox 无 BCSFuse 索引服务,本地新建 bot 上不了 recommend。
-        - 其它(corp/prod)→ 注入的 BCSFuse ``BotDiscoverService``(语义 recommend)。
+        ``SearchBasedDispatchStrategy`` performs jieba tokenization and calls this
+        port once per token. BCSFuse remains available to the separate public
+        Bot-discovery API, but is not a task dispatch dependency.
         """
-        if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
-            return default
         from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
             SingleboxKeywordBotDiscover,
         )

@@ -16,6 +16,7 @@ dependencies = [
     { name = "fastapi-injector" },
     { name = "httpx" },
     { name = "injector" },
+    { name = "jieba" },
     { name = "pycryptodome" },
     { name = "pyjwt" },
     { name = "python-multipart" },
@@ -31,7 +32,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "fakeredis" },
-    { name = "jieba" },
     { name = "jsonschema" },
     { name = "moto", extra = ["s3"] },
     { name = "pytest" },
@@ -55,6 +55,7 @@ requires-dist = [
     { name = "fastapi-injector", specifier = ">=0.7,<1.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "injector", specifier = ">=0.21,<1.0" },
+    { name = "jieba", specifier = ">=0.42" },
     { name = "pycryptodome", specifier = ">=3.23.0" },
     { name = "pyjwt", specifier = ">=2.8.0" },
     { name = "python-multipart", specifier = ">=0.0.18" },
@@ -70,7 +71,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "fakeredis", specifier = ">=2.20" },
-    { name = "jieba", specifier = ">=0.42" },
     { name = "jsonschema", specifier = ">=4.20" },
     { name = "moto", extras = ["s3"], specifier = ">=5.0" },
     { name = "pytest", specifier = ">=8.0.0" },
