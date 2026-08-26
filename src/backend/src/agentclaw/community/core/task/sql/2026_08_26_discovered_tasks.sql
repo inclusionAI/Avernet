@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS `ac_discovered_tasks` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `task_id` varchar(256) COLLATE utf8mb4_bin NOT NULL COMMENT '唯一标识',
+  `bot_id` varchar(256) COLLATE utf8mb4_bin NOT NULL COMMENT 'Bot ID',
+  `owner_id` varchar(256) COLLATE utf8mb4_bin NOT NULL COMMENT 'Bot 所有者 ID',
+  `dt` varchar(10) COLLATE utf8mb4_bin NOT NULL COMMENT '日期 YYYY-MM-DD',
+  `title` varchar(512) COLLATE utf8mb4_bin NOT NULL COMMENT '任务标题',
+  `instruction` text COLLATE utf8mb4_bin DEFAULT NULL COMMENT '核心执行指令',
+  `background` text COLLATE utf8mb4_bin DEFAULT NULL COMMENT '背景信息',
+  `discovery_basis` text COLLATE utf8mb4_bin DEFAULT NULL COMMENT '挖掘依据',
+  `priority` varchar(20) COLLATE utf8mb4_bin NOT NULL DEFAULT 'medium' COMMENT '优先级 high/medium/low',
+  `discovered_at` varchar(64) COLLATE utf8mb4_bin DEFAULT NULL COMMENT '发现时间戳',
+  `status` varchar(32) COLLATE utf8mb4_bin NOT NULL DEFAULT 'pending_confirmation' COMMENT '当前状态',
+  `objective` text COLLATE utf8mb4_bin DEFAULT NULL COMMENT '任务目标',
+  `acceptances` text COLLATE utf8mb4_bin DEFAULT NULL COMMENT '验收标准 JSON array',
+  `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  PRIMARY KEY(`id`),
+  UNIQUE KEY `uk_ac_discovered_tasks_task_id`(`task_id`) LOCAL,
+  KEY `idx_ac_discovered_tasks_bot_owner_dt`(`bot_id`, `owner_id`, `dt`)
+) DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '任务发现-已发现任务数据';
