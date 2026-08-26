@@ -420,6 +420,13 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
         ac_entity_device_binding has no such column (D-16'). The device
         side keeps baas_device.is_deleted = 0.
 
+        TTL projection is dual-key (WR-02): rows written before the
+        field-pair release persisted only the legacy integer-ms
+        ttl_expiration_time key (no ttl_expiration_timestamp), so the
+        projection COALESCEs the new key first and falls back to the
+        legacy key — pre-release ACTIVE containers keep their real expiry
+        in discovery instead of degrading to the now+window fallback.
+
         Returns:
             List of dicts, each with keys: id, sandbox_id,
             source_table, ttl.
@@ -430,9 +437,16 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                     DeviceModel.id,
                     DeviceModel.provider_device_id.label("sandbox_id"),
                     literal("baas_device").label("source_table"),
-                    self._json_unquote(
-                        DeviceModel.provider_device_props,
-                        "$.ttl_expiration_timestamp",
+                    # WR-02 dual-key TTL projection (see docstring).
+                    func.coalesce(
+                        self._json_unquote(
+                            DeviceModel.provider_device_props,
+                            "$.ttl_expiration_timestamp",
+                        ),
+                        self._json_unquote(
+                            DeviceModel.provider_device_props,
+                            "$.ttl_expiration_time",
+                        ),
                     ).label("ttl"),
                 )
                 .select_from(DeviceModel)
@@ -467,9 +481,16 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                     DeviceBindingModel.id,
                     binding_sandbox.label("sandbox_id"),
                     literal("ac_entity_device_binding").label("source_table"),
-                    self._json_unquote(
-                        DeviceBindingModel.device_props,
-                        "$.ttl_expiration_timestamp",
+                    # WR-02 dual-key TTL projection (see docstring).
+                    func.coalesce(
+                        self._json_unquote(
+                            DeviceBindingModel.device_props,
+                            "$.ttl_expiration_timestamp",
+                        ),
+                        self._json_unquote(
+                            DeviceBindingModel.device_props,
+                            "$.ttl_expiration_time",
+                        ),
                     ).label("ttl"),
                 )
                 .select_from(DeviceBindingModel)
