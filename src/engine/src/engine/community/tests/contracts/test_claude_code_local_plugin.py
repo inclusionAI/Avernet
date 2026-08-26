@@ -9,8 +9,8 @@ local plugin, no ``world`` fixture.
 from __future__ import annotations
 
 from engine.community.kernel.frames import EventFrame
-from engine.community.plugin_api.claude_code.plugin import ClaudeCodePlugin
 from engine.community.local.claude_code import LocalClaudeCodePluginImpl
+from engine.community.plugin_api.claude_code.plugin import ClaudeCodePlugin
 
 
 def test_local_claude_code_plugin_satisfies_runtime_protocol_shape():
@@ -196,6 +196,11 @@ async def test_local_claude_code_plugin_stateful_ports_and_error_branches():
     assert (await plugin.skills_sync_bindpaths())["ok"] is True
     assert (await plugin.skills_clean_symlinks())["ok"] is True
     assert (await plugin.skills_ensure_center())["ok"] is True
+    center_items = [{"skill_uuid": "u1", "version": "1.0.0"}]
+    assert (await plugin.skills_ensure_center(items=center_items)) == {
+        "ok": center_items,
+        "failed": [],
+    }
     assert await plugin.skills_uninstall("sk1") is True
     assert await plugin.skills_uninstall("sk1") is False
     assert await plugin.skills_get("sk1") is None

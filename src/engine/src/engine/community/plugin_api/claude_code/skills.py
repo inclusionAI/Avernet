@@ -216,11 +216,14 @@ class ClaudeCodeSkillsPort(Protocol):
     async def skills_ensure_center(
         self,
         token: str | None = None,
+        items: list[dict[str, str]] | None = None,
     ) -> dict:
-        """Call ``skills.ensure_center`` to ensure center skills are present.
+        """Call ``skills.ensure_center`` for exact Center skill versions.
 
         Args:
             token: MCP token for per-token pool routing; None -> default client.
+            items: Exact ``skill_uuid`` / ``version`` dependencies to ensure.
+                ``None`` preserves the historical no-op request shape.
         """
         ...
 

@@ -8,8 +8,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from pathlib import Path
+import shutil
+from pathlib import Path, PurePosixPath
 from typing import Any
+from uuid import UUID, uuid4
 
 from engine.community.core.skills.layout_planner import (
     MAPPING_CONTRACT_VERSION,
@@ -282,22 +284,6 @@ class _SkillsPortMixin:
                 f"rsync exit {result.returncode}: {result.stderr.strip()[:200]}"
             )
 
-    @staticmethod
-    def _skills_ensure_current_symlink(uuid_dir: Path, version_dir_name: str) -> None:
-        """Atomically update the ``current`` symlink under ``uuid_dir``.
-
-        Relocated intact from
-        ``engines/openclaw/skills.py:OpenClawSkillsService._ensure_current_symlink``.
-        """
-        current = uuid_dir / "current"
-        if current.is_symlink() and os.readlink(current) == version_dir_name:
-            return
-        tmp = uuid_dir / f".current.tmp.{os.getpid()}"
-        if tmp.is_symlink() or tmp.exists():
-            tmp.unlink()
-        tmp.symlink_to(version_dir_name)
-        os.replace(tmp, current)
-
     async def _skills_ensure_one(
         self,
         item: dict[str, Any],
@@ -313,28 +299,67 @@ class _SkillsPortMixin:
         """
         import asyncio as _asyncio
 
-        skill_uuid = item["skill_uuid"]
-        version_dir_name = str(item["version"])
+        skill_uuid = item.get("skill_uuid")
+        version_dir_name = item.get("version")
+        if not isinstance(skill_uuid, str):
+            raise _SkillsEnsureError("skill_uuid must be a UUIDv4")
+        try:
+            parsed_uuid = UUID(skill_uuid)
+        except ValueError as error:
+            raise _SkillsEnsureError("skill_uuid must be a UUIDv4") from error
+        if parsed_uuid.version != 4:
+            raise _SkillsEnsureError("skill_uuid must be a UUIDv4")
+        if (
+            not isinstance(version_dir_name, str)
+            or not version_dir_name
+            or version_dir_name.strip() != version_dir_name
+            or len(PurePosixPath(version_dir_name).parts) != 1
+            or PurePosixPath(version_dir_name).parts[0] in {".", ".."}
+        ):
+            raise _SkillsEnsureError("version must be one normalized path segment")
         local_uuid_dir = local_root / skill_uuid
         local_version_dir = local_uuid_dir / version_dir_name
 
-        if local_version_dir.exists() and any(local_version_dir.iterdir()):
+        if (local_version_dir / "SKILL.md").is_file():
             return
+        if local_version_dir.exists() or local_version_dir.is_symlink():
+            raise _SkillsEnsureError("existing center version incomplete")
 
         lock_key = f"{skill_uuid}/{version_dir_name}"
         lock = self._get_ensure_lock(lock_key)
         async with lock:
-            if local_version_dir.exists() and any(local_version_dir.iterdir()):
+            if (local_version_dir / "SKILL.md").is_file():
                 return
+            if local_version_dir.exists() or local_version_dir.is_symlink():
+                raise _SkillsEnsureError("existing center version incomplete")
 
             nas_version_dir = nas_root / skill_uuid / version_dir_name
-            if not nas_version_dir.exists():
-                raise _SkillsEnsureError(f"NAS source missing: {nas_version_dir}")
+            if (
+                nas_version_dir.is_symlink()
+                or not (nas_version_dir / "SKILL.md").is_file()
+                or (nas_version_dir / "SKILL.md").is_symlink()
+            ):
+                raise _SkillsEnsureError(
+                    f"NAS source missing SKILL.md: {nas_version_dir}"
+                )
 
             local_version_dir.parent.mkdir(parents=True, exist_ok=True)
-            await _asyncio.to_thread(
-                self._skills_rsync_dir, nas_version_dir, local_version_dir
-            )
+            temporary = local_uuid_dir / f".{version_dir_name}.tmp.{uuid4().hex}"
+            temporary.mkdir()
+            try:
+                await _asyncio.to_thread(
+                    self._skills_rsync_dir, nas_version_dir, temporary
+                )
+                if not (temporary / "SKILL.md").is_file():
+                    raise _SkillsEnsureError(
+                        f"center skill missing SKILL.md: {nas_version_dir}"
+                    )
+                if local_version_dir.exists() or local_version_dir.is_symlink():
+                    raise _SkillsEnsureError("existing center version incomplete")
+                os.replace(temporary, local_version_dir)
+            except Exception:
+                shutil.rmtree(temporary, ignore_errors=True)
+                raise
 
     async def ensure_center_skills(self, params: dict[str, Any]) -> dict[str, Any]:
         """Ensure each (skill_uuid, version) from ``params["items"]`` is present locally.

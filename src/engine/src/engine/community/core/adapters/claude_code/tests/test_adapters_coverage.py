@@ -1585,7 +1585,7 @@ class TestSkillsAdapterCoverage:
     async def test_ensure_center_filters_non_dict(self):
         port = _SkillsPort()
 
-        async def ensure(token=None):
+        async def ensure(items=None, token=None):
             return {"ok": [{"skill_uuid": "ok1"}, "bad", None],
                     "failed": [{"skill_uuid": "f1", "reason": "x"}, 5, None]}
         port.skills_ensure_center = ensure  # type: ignore[assignment]

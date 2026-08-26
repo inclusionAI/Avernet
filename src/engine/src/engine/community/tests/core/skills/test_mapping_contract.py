@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+
 from engine.community.core.skills.exceptions import (
     InvalidPoolMappingRequestError,
 )

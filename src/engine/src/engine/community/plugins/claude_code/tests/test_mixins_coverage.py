@@ -928,7 +928,22 @@ class TestSkillsMixin:
         c = _FakeRelayClient()
         c.set_response("skills.ensure_center", _ok({"ensured": True}))
         impl, _ = _impl(c)
+        assert await impl.skills_ensure_center(
+            items=[{"skill_uuid": "u1", "version": "1.0"}]
+        ) == {"ensured": True}
+        _, args, kw = _last_call(c)
+        assert args[0] == "skills.ensure_center"
+        assert kw["params"] == {"items": [{"skill_uuid": "u1", "version": "1.0"}]}
+
+    async def test_ensure_center_without_items_preserves_legacy_payload(self):
+        c = _FakeRelayClient()
+        c.set_response("skills.ensure_center", _ok({"ensured": True}))
+        impl, _ = _impl(c)
+
         assert await impl.skills_ensure_center() == {"ensured": True}
+        _, args, kw = _last_call(c)
+        assert args[0] == "skills.ensure_center"
+        assert kw["params"] == {}
 
 
 # ── _session.py ──────────────────────────────────────────────────────────────

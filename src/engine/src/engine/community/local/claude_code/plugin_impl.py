@@ -481,8 +481,11 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
     async def skills_ensure_center(
         self,
         token: str | None = None,
+        items: list[dict[str, str]] | None = None,
     ) -> dict:
-        return {"ok": True, "ensured": []}
+        if items is None:
+            return {"ok": True, "ensured": []}
+        return {"ok": items, "failed": []}
 
     # ----------------------------------------------------------------- cron
 
