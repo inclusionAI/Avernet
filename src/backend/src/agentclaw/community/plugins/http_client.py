@@ -52,23 +52,22 @@ Lifecycle
 ``LifecycleBase.teardown`` closes the pool at process shutdown (phase 2, after
 every participant's ``shutdown()`` has returned); discovery finds this instance
 through its ``@singleton`` binding, so nothing has to be registered by hand.
-``close()`` is idempotent and merely drops the pool, so a call that *starts*
-afterwards lazily builds a fresh one. A call already in flight is not protected:
-if ``close()`` lands between ``_pooled_client()`` returning and the request being
-sent, httpx raises ``RuntimeError("Cannot send a request, as the client has been
-closed.")`` — which is not an ``httpx.HTTPError``, so a caller catching transport
-errors will not catch it.
+``close()`` is idempotent and **terminal**: it drops the pool and latches the
+instance closed, so a later call raises rather than quietly opening fresh
+sockets. That matters because shutdown phase 2 drains *coroutines*, not the
+``asyncio.to_thread`` workers this seam is usually called from —
+``LLM._stream_read`` can still be reading an SSE body on such a worker when the
+pool closes underneath it. Without the latch, the ``RuntimeError`` httpx raises
+on the closed client reaches ``LLM``'s retry layer, which classifies it as
+connection-level (no ``.response``) and retries, and the retry would build a
+*new* pool after teardown that nothing will ever close.
 
-That window is accepted rather than guarded, but it is not empty: ``teardown``
-runs in shutdown phase 2, after every participant's ``shutdown()`` has returned,
-which drains *coroutines* — not the ``asyncio.to_thread`` workers this seam is
-usually called from. ``LLM._stream_read`` in particular can still be reading an
-SSE body on such a worker when the pool closes underneath it, and nothing
-cancels it. Closing the hole properly would mean either tracking in-flight
-requests or retrying on a closed client; the first is bookkeeping this seam does
-not otherwise need, and the second is retry semantics it deliberately does not
-have. The consequence is bounded — a ``RuntimeError`` in a worker thread during
-shutdown, on a request whose response nobody is waiting for any more.
+So a request racing teardown fails, and it fails loudly: the caller is still
+awaiting it (``LLM._do_request`` awaits the ``to_thread`` future and re-raises),
+and ``RuntimeError`` is not an ``httpx.HTTPError``, so a handler catching
+transport errors will not catch it. That is the accepted cost of not reopening
+connections after teardown said we were done. Guarding it properly would mean
+tracking in-flight requests, which this seam does not otherwise need.
 """
 from __future__ import annotations
 
@@ -142,6 +141,8 @@ class HttpxClient(LifecycleBase, HttpClient):
         # requests itself, so the lock is never held across a request.
         self._lock = threading.Lock()
         self._client: httpx.Client | None = None
+        # Latched by close(); a closed instance never builds another pool.
+        self._closed = False
 
     # ── Pool ────────────────────────────────────────────────────────────
 
@@ -156,6 +157,13 @@ class HttpxClient(LifecycleBase, HttpClient):
         if client is not None:
             return client
         with self._lock:
+            if self._closed:
+                raise RuntimeError(
+                    "HttpxClient for "
+                    f"{self._base_url or '<absolute-url caller>'} is closed; "
+                    "the connection pool was released at shutdown and will not "
+                    "be reopened."
+                )
             if self._client is None:
                 self._client = httpx.Client(
                     base_url=self._base_url,
@@ -166,8 +174,13 @@ class HttpxClient(LifecycleBase, HttpClient):
             return self._client
 
     def close(self) -> None:
-        """Close the pooled client and release its connections. Idempotent."""
+        """Release the pool and latch the instance closed. Idempotent.
+
+        Terminal by design: a later call raises rather than opening a fresh
+        pool, so nothing reconnects to an upstream after teardown released it.
+        """
         with self._lock:
+            self._closed = True
             client, self._client = self._client, None
         # Closing outside the lock: ``close()`` walks the pool and can block, and
         # holding the construction lock across it would stall an unrelated caller

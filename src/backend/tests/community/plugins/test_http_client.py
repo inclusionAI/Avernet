@@ -268,15 +268,33 @@ def test_stream_shares_the_pool_and_leaves_it_open():
 # ── lifecycle ────────────────────────────────────────────────────────────────
 
 
-def test_close_is_idempotent_and_rebuilds_on_next_use():
+def test_close_is_idempotent_and_terminal():
+    """``close()`` must not double-close, and must not let a later call open a
+    fresh pool — a post-teardown rebuild would reconnect to an upstream that
+    shutdown had already released, and nothing would ever close it."""
     client = HttpxClient(base_url="http://svc.test")
     with _patched_httpx() as (ctor, inner):
         client.get("/a")
         client.close()
         client.close()  # idempotent — must not raise or double-close
-        client.get("/b")
+        with pytest.raises(RuntimeError, match="closed"):
+            client.get("/b")
     inner.close.assert_called_once()
-    assert ctor.call_count == 2, "a call after close should build a fresh pool"
+    assert ctor.call_count == 1, "a call after close must not build a new pool"
+
+
+def test_teardown_latches_against_a_retrying_caller():
+    """Regression for the concrete leak path: teardown closes the pool, the
+    in-flight worker sees a failure, its retry layer calls again — and that
+    retry must not resurrect the pool after shutdown."""
+    client = HttpxClient(base_url="http://svc.test")
+    with _patched_httpx() as (ctor, _inner):
+        client.get("/a")
+        asyncio.run(client.teardown())
+        for _ in range(3):  # a retry loop hammering a closed client
+            with pytest.raises(RuntimeError):
+                client.get("/retry")
+    assert ctor.call_count == 1, "retries after teardown must not reopen a pool"
 
 
 def test_teardown_closes_the_pool():
@@ -302,10 +320,12 @@ def test_teardown_without_a_pool_is_a_noop():
 #
 # The tests above patch ``httpx.Client`` and so pin only what ``HttpxClient``
 # asks httpx to do. These drive a REAL ``httpx.Client`` over an
-# ``httpx.MockTransport`` by seeding the pool directly, which needs no
-# constructor seam — the production class keeps exactly the arguments the
-# composition root passes. That matters most for ``stream()``, which the pooling
-# rewrite changed and which nothing else exercises end to end.
+# ``httpx.MockTransport``, built through the production ``_pooled_client()``
+# path with only ``transport=`` added — so production's own constructor
+# arguments are the ones under test, and no constructor seam is needed. Do not
+# hand-assemble a client and assign it to ``_client``: that silently drops
+# whatever production passes (``cookies=_DiscardingCookieJar()`` among it) and
+# the tests stop covering the real thing.
 
 
 def _seeded(handler, base_url: str = "http://svc.test", **kwargs) -> HttpxClient:
