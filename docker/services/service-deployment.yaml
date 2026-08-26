@@ -5,12 +5,16 @@
 # manifest. Uses envsubst-compatible ${...} placeholders.
 #
 # Placeholders:
-#   SERVICE     — service name (baas | gateway | bcs | backend)
-#   SERVICE     — service name (baas | gateway | bcs | backend)
+#   SERVICE     — service name (baas | gateway | proxy | bcs | backend)
 #   NAMESPACE   — K8s namespace
 #   IMAGE       — container image with tag
 #   PORT        — container + service port
-#   REPLICAS    — number of pod replicas (default 2)
+#   PROBE_PATH  — HTTP path both probes GET. Per-service, because the backend
+#                 serves /api/health while the others serve /health.
+#   REPLICAS    — number of pod replicas. Per-service: 2 for most, but 1 for
+#                 backend, whose shipped defaults are per-process (pod-local
+#                 /app/data, in-process cache lock). See DEFAULT_REPLICAS in
+#                 docker/kube-deploy.sh.
 #   CPU_REQUEST, CPU_LIMIT, MEMORY_REQUEST, MEMORY_LIMIT — resource spec
 #   ENV_VARS    — rendered env var entries (one "- name: ..." block per line)
 # ============================================================
@@ -46,13 +50,30 @@ spec:
             memory: "${MEMORY_LIMIT}"
         livenessProbe:
           httpGet:
-            path: /health
+            path: ${PROBE_PATH}
             port: ${PORT}
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
           httpGet:
-            path: /health
+            path: ${PROBE_PATH}
             port: ${PORT}
           initialDelaySeconds: 10
           periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${SERVICE}
+  namespace: ${NAMESPACE}
+  labels:
+    app: ${SERVICE}
+spec:
+  type: ClusterIP
+  selector:
+    app: ${SERVICE}
+  ports:
+  - name: http
+    port: ${PORT}
+    targetPort: ${PORT}
+    protocol: TCP
