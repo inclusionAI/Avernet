@@ -15,3 +15,8 @@ user_config:
 
   teclaw:
     host: ${SANDBOXPROXY_TECLAW_HOST:-http://teclaw.avernet-inc.com}
+
+# 中间件配置总览
+module_config:
+  web:
+    port: 8080
