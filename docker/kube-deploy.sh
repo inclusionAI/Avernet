@@ -16,6 +16,7 @@
 #   gateway    — API gateway (port 8080)
 #   bcs        — BCS coordination service (port 21000)
 #   backend    — Backend service (port 8090)
+#   bcsfuse    — BCS Fuse open-source service (port 8765)
 #
 # The script renders docker/services/service-deployment.yaml via
 # envsubst, then optionally applies it with kubectl.
@@ -66,6 +67,7 @@ declare -A DEFAULT_PORT=(
     [gateway]=8080
     [proxy]=8080
     [bcs]=8080
+    [bcsfuse]=8765
     [backend]=8080
 )
 
@@ -112,7 +114,7 @@ done
 # --- Validate ---
 
 if [[ -z "$SERVICE" ]]; then
-    echo "error: --service is required (baas|gateway|proxy|bcs|backend)" >&2
+    echo "error: --service is required (baas|gateway|proxy|bcs|bcsfuse|backend)" >&2
     exit 2
 fi
 if [[ -z "$IMAGE" ]]; then
@@ -121,7 +123,7 @@ if [[ -z "$IMAGE" ]]; then
 fi
 if [[ -z "${DEFAULT_PORT[$SERVICE]:-}" ]]; then
     echo "error: unknown service '$SERVICE'" >&2
-    echo "  supported: baas, gateway, proxy, bcs, backend" >&2
+    echo "  supported: baas, gateway, proxy, bcs, bcsfuse, backend" >&2
     exit 2
 fi
 
