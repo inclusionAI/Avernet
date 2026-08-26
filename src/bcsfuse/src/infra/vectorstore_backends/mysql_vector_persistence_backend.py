@@ -45,7 +45,7 @@ CREATE_TABLE_SQL = f"""
 CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
     `id` VARCHAR(255) PRIMARY KEY,
     `vector` LONGBLOB NOT NULL,
-    payload JSON NOT NULL DEFAULT '{{}}',
+    payload JSON DEFAULT NULL,
     `version` INT NOT NULL DEFAULT 1,
     `is_deleted` TINYINT DEFAULT 0,
     `gmt_create` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -141,7 +141,7 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
         try:
             for point in points:
                 vector_blob = self._serialize_vector(point.vector)
-                payload_json = json.dumps(point.payload)
+                payload_json = json.dumps(point.payload if point.payload is not None else {})
 
                 # Determine if row exists first (avoids ON DUPLICATE KEY UPDATE dialect differences)
                 cursor.execute(f"SELECT 1 FROM {TABLE_NAME} WHERE `id` = %s", (point.id,))
