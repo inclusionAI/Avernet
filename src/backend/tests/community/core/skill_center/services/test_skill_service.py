@@ -800,13 +800,15 @@ class TestSkillServiceGetActiveSkills:
             ]
         )
         device_fs.exists = AsyncMock(
-            side_effect=lambda path: path.endswith("direct-skill/SKILL.md")
+            side_effect=AssertionError("the read answers existence; do not probe")
         )
 
         async def _read_file(path, **_kwargs):
             if path.endswith("direct-skill/SKILL.md"):
                 return b"---\nname: direct-skill\n---\n"
-            raise AssertionError(f"must not read missing metadata: {path}")
+            # What the DeviceFileSystem contract returns for a file the device
+            # does not have — an entry with no SKILL.md is skipped on that alone.
+            return None
 
         device_fs.read_file = AsyncMock(side_effect=_read_file)
         svc = SkillService(
@@ -826,9 +828,13 @@ class TestSkillServiceGetActiveSkills:
         )
 
         assert [skill.id for skill in skills] == ["direct-skill"]
-        device_fs.read_file.assert_awaited_once_with(
-            f"{active_root}/direct-skill/SKILL.md"
-        )
+        # One read per entry — no ``exists`` probe ahead of it, which on the baas
+        # backend is itself a full ``read_file`` and doubled the cost of the list.
+        assert [c.args[0] for c in device_fs.read_file.await_args_list] == [
+            f"{active_root}/mcporter/SKILL.md",
+            f"{active_root}/direct-skill/SKILL.md",
+        ]
+        device_fs.exists.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_missing_device_active_root_is_empty(

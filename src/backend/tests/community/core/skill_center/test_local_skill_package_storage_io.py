@@ -19,10 +19,10 @@ import asyncio
 
 import pytest
 
-from agentclaw.community.core.skill_center.factories import (
-    _PACKAGE_IO_CONCURRENCY,
-    LocalSkillPackageStorage,
+from agentclaw.community.core.devices.device_io_batch import (
+    DEVICE_IO_CONCURRENCY,
 )
+from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
 
 DIRECTORY = "/private/skills-local/pkg"
 
@@ -88,9 +88,9 @@ async def test_write_fan_out_stays_bounded():
     filesystem = _RecordingFilesystem()
     storage = LocalSkillPackageStorage(filesystem, DIRECTORY)
 
-    await storage.write(_package(_PACKAGE_IO_CONCURRENCY * 3))
+    await storage.write(_package(DEVICE_IO_CONCURRENCY * 3))
 
-    assert filesystem.peak_in_flight <= _PACKAGE_IO_CONCURRENCY
+    assert filesystem.peak_in_flight <= DEVICE_IO_CONCURRENCY
 
 
 @pytest.mark.asyncio

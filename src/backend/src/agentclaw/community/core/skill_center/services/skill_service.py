@@ -26,6 +26,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.skill_center.services.git_sync import GitSyncService
 
 from agentclaw.community.core.access.admin_scopes import skill_admin
+from agentclaw.community.core.devices.device_io_batch import (
+    gather_device_io,
+)
 from agentclaw.community.core.skill_center.errors import (
     SkillDeleteConsistencyError,
     SkillReferencedBySkillSetError,
@@ -505,26 +508,32 @@ class SkillService:
         if entries is None:
             return []
 
-        skills: list[SkillInfo] = []
-        for entry in entries:
-            name = entry.get("name")
-            if (
-                not isinstance(name, str)
-                or not name
-                or name in {".", ".."}
-                or Path(name).name != name
-                or name in self.RESERVED_SKILL_NAMES
-            ):
-                continue
+        names = [
+            name
+            for entry in entries
+            if isinstance(name := entry.get("name"), str)
+            and name
+            and name not in {".", ".."}
+            and Path(name).name == name
+            and name not in self.RESERVED_SKILL_NAMES
+        ]
+        # One read per entry, all in flight at once. Two things were paid per entry
+        # before: an ``exists`` probe *and* a read — and on the baas backend
+        # ``exists`` is itself a ``read_file``, so a bot's active Skills cost two
+        # full downloads each, issued one after another. A single read answers both
+        # questions: a missing entry and a directory in an entry's place both read
+        # back as ``None``, which is exactly what the probe used to filter out.
+        contents = await gather_device_io([
+            device_fs.read_file(str(active_root / name / "SKILL.md"))
+            for name in names
+        ])
 
-            active_path = active_root / name
-            content = None
-            skill_file = active_path / "SKILL.md"
-            if not await device_fs.exists(str(skill_file)):
-                continue
-            content = await device_fs.read_file(str(skill_file))
+        skills: list[SkillInfo] = []
+        for name, content in zip(names, contents):
             if content is None:
                 continue
+            active_path = active_root / name
+            skill_file = active_path / "SKILL.md"
 
             try:
                 text = SkillParser.decode_content(content)
@@ -2016,13 +2025,22 @@ class SkillService:
             # 先清理已存在的目录
             await device_fs.delete_tree(engine_skill_dir_str)
 
-            # 逐文件写入（DeviceFileSystem 自动创建父目录）
-            for file_info in processed_files:
-                relative_path = file_info["relative_path"]
-                content = file_info["content"]
-                file_path = f"{engine_skill_dir_str}/{relative_path}"
-                await device_fs.write_file(file_path, content)
-                logger.debug(f"[SkillService.upload_skill] Saved file: {file_path}")
+            # 并发写入（DeviceFileSystem 自动创建父目录）。每个文件都是一次设备
+            # 往返，逐个 await 让一个包的耗时变成 ``文件数 × 单次往返`` —— 而本地
+            # 技能包正是由许多小文件组成的。``gather_device_io`` 有界扇出并在放行
+            # 前排空：下面的 ``except`` 会 ``delete_tree`` 整个目录，若此刻还有写
+            # 在途，它会落在清理之后，给下一次上传留下孤儿文件。
+            await gather_device_io([
+                device_fs.write_file(
+                    f"{engine_skill_dir_str}/{file_info['relative_path']}",
+                    file_info["content"],
+                )
+                for file_info in processed_files
+            ])
+            logger.debug(
+                "[SkillService.upload_skill] Saved %d files under %s",
+                len(processed_files), engine_skill_dir_str,
+            )
 
             logger.info(f"[SkillService.upload_skill] Using skill name from SKILL.md: '{skill_name}'")
 
