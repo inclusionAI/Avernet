@@ -104,6 +104,27 @@ def _coerce(block: dict[str, Any], key: str, cast, fallback, where: str, valid=N
     return value
 
 
+def _as_int(raw: Any) -> int:
+    """Strict integer: no silent truncation, no ``True`` meaning 1.
+
+    ``int(1.7)`` is ``1``. For a pool ceiling that is a legal-looking but
+    pathological value — a one-connection pool serialises every burst — and it
+    would pass the range guard, so it has to be rejected at the cast instead.
+    ``int("1.7")`` already raises, so string scalars need no special case.
+    """
+    if isinstance(raw, bool):
+        raise TypeError(f"not an integer: {raw!r}")
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        if not math.isfinite(raw) or raw != int(raw):
+            raise ValueError(f"not a whole number: {raw!r}")
+        return int(raw)
+    if isinstance(raw, str):
+        return int(raw.strip())
+    raise TypeError(f"not an integer: {type(raw).__name__}")
+
+
 def _as_bool(raw: Any) -> bool:
     """Strict-ish boolean: YAML may hand back a string, and ``bool("false")``
     is ``True`` — which would silently enable a wire-protocol change that the
@@ -136,12 +157,12 @@ def _pool_policy(
         # A ceiling below 1 would make every request on the binding wait for a
         # connection that can never exist, then fail as a timeout — forever.
         max_connections=_coerce(
-            block, "max_connections", int, base.max_connections, where,
+            block, "max_connections", _as_int, base.max_connections, where,
             valid=lambda v: v >= 1,
         ),
         # 0 is legitimate here: it disables keep-alive without disabling the pool.
         max_keepalive_connections=_coerce(
-            block, "max_keepalive_connections", int,
+            block, "max_keepalive_connections", _as_int,
             base.max_keepalive_connections, where,
             valid=lambda v: v >= 0,
         ),
