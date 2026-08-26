@@ -363,6 +363,7 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerMcpSyncError,
 )
 from agentclaw.community.core.skill_center.errors import (  # noqa: E402
+    McpPermissionDeniedError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
@@ -400,6 +401,7 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     # decides the wire, exactly as every other domain error already works.
     SkillSetControlPlaneNotFoundError: 404,
     SkillSetAccessDeniedError: 403,
+    McpPermissionDeniedError: 403,
     # 400, not 409: the published wire echoes the reason code as a rejected
     # request and clients already parse it that way. Kept as-is deliberately.
     SkillSetControlPlaneConflictError: 400,
