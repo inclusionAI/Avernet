@@ -98,7 +98,7 @@ green at the end of this group *without* any test expectation changing.
 
 ## Group 3 — Scoped delivery: removal and fan-out (problems 2 and 3)
 
-- [ ] 3.1 Return the Set's MCP codes on the activate/deactivate mutation:
+- [x] 3.1 Return the Set's MCP codes on the activate/deactivate mutation:
       `set_skill_set_active` already computes `mcp_codes` under the row lock
       (`core/repository/implementations/skill_center/capability_desired_state.py:493`),
       so put them on `DesiredStateMutation.details` rather than re-querying

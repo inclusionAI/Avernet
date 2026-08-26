@@ -529,7 +529,17 @@ class CapabilityDesiredStateRepository(
                     server_codes=mcp_codes,
                 )
             session.flush()
-            return DesiredStateMutation(_item(row), changed, old)
+            # The projection needs to know which MCPs this Set just claimed
+            # or released, and they are only knowable under the row lock this
+            # transaction already holds. Returning them here keeps the
+            # command from issuing a second, unlocked query that could
+            # disagree with what was actually installed.
+            return DesiredStateMutation(
+                _item(row),
+                changed,
+                old,
+                mcp_codes=frozenset(mcp_codes),
+            )
 
     def restore_desired_state(
         self,

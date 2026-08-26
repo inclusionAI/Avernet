@@ -32,6 +32,15 @@ class DesiredStateMutation:
     changed: bool
     previous_state: CapabilityDesiredState
     details: dict = field(default_factory=dict)
+    mcp_codes: frozenset[str] = frozenset()
+    """MCP codes this mutation claimed or released, if it touched any.
+
+    Deliberately not part of ``details``: the flow spreads ``details`` into
+    the command's return value and thence the HTTP response body, so putting
+    runtime-projection facts there would leak them into the public API. This
+    field is read by the command to build its ``ProjectionScope`` and goes no
+    further.
+    """
 
 
 @dataclass(frozen=True)
