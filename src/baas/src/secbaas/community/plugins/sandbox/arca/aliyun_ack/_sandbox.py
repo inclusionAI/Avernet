@@ -145,31 +145,46 @@ class AliyunAckSandbox(ArcaSandbox):
         return int((created_epoch_s + ttl * 60) * 1000)
 
     def destroy(self) -> bool:
-        """Delete the backing Deployment. Idempotent on 404.
+        """Delete the backing Deployment and associated resources. Idempotent on 404.
 
-        The PVC is NOT deleted here — it is an independent resource so data
-        survives Deployment deletion.
+        Removes the Deployment, ConfigMap, and NetworkPolicy created from
+        the template. The PVC is NOT deleted — it is an independent resource
+        so data survives Deployment deletion.
         """
         logger.info(
             "[aliyun_ack] destroy sandbox_id=%s deployment=%s",
             self._sandbox_id,
             self._deployment_name,
         )
-        try:
-            apps_api = AppsV1Api(self._client)
-            apps_api.delete_namespaced_deployment(
-                name=self._deployment_name,
-                namespace=self._namespace,
-            )
-            return True
-        except ApiException as e:
-            if e.status == 404:
-                logger.info(
-                    "[aliyun_ack] destroy: deployment %s already gone (404), idempotent",
-                    self._deployment_name,
-                )
-                return True
-            raise RuntimeError(f"destroy failed ({e.status})") from e
+        uid = self._deployment_name.removeprefix("avernet-agent-")
+        core_api = CoreV1Api(self._client)
+        for name, delete_fn in (
+            (
+                self._deployment_name,
+                lambda: AppsV1Api(self._client).delete_namespaced_deployment(
+                    name=self._deployment_name, namespace=self._namespace
+                ),
+            ),
+            (
+                f"envoy-header-rules-{uid}",
+                lambda: core_api.delete_namespaced_config_map(
+                    name=f"envoy-header-rules-{uid}", namespace=self._namespace
+                ),
+            ),
+            (
+                f"avernet-agent-netpol-{uid}",
+                lambda: core_api.delete_namespaced_network_policy(
+                    name=f"avernet-agent-netpol-{uid}", namespace=self._namespace
+                ),
+            ),
+        ):
+            try:
+                delete_fn()
+            except ApiException as e:
+                if e.status != 404:
+                    raise RuntimeError(f"destroy failed ({e.status})") from e
+                logger.info("[aliyun_ack] destroy: %s already gone (404)", name)
+        return True
 
     def exec_command(
         self,
