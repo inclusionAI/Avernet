@@ -251,6 +251,18 @@ def _assert_default_mcp_excluded(_response, world) -> None:
             )
 
 
+def _seed_inactive(world) -> None:
+    _seed(world)
+    with avernet_tenant_scope(_TENANT):
+        world.get(SkillSetControlPlaneRepositoryProtocol).set_active(
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            set_id="1",
+            active=False,
+            engine_type="openclaw",
+        )
+
+
 def _assert_reconciled(_response, world) -> None:
     assert world.get(SkillSetControlPlaneServiceProtocol)._runtime.calls == [
         (_BOT_ID, _OWNER)
@@ -312,8 +324,8 @@ def list_sets_error():
 @_case(
     "POST",
     "/openapi/v1/bots/{bot_id}/skill-sets",
-    "creates_inactive_set",
-    ExpectSuccess(status=201, json_contains={"data": {"is_active": False}}),
+    "creates_active_set",
+    ExpectSuccess(status=201, json_contains={"data": {"is_active": True}}),
     json_body={"name": "Created"},
     headers={**_HEADERS, "Idempotency-Key": "create-set"},
 )
@@ -410,6 +422,7 @@ def update_set_error():
     "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}",
     "deletes_inactive_set",
     ExpectSuccess(status=200, json_contains={"data": {"deleted": True}}),
+    seed=_seed_inactive,
 )
 def delete_set_happy():
     pass
