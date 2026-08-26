@@ -3894,10 +3894,10 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
         let cache_key_prefix = config.cache.redis.effective_key_prefix();
         info!(db_plugin = %db_kind, "Initializing DB-backed bot registry");
         let bot_repo = Arc::new(PersistentBotRepo::with_plugins_flavor_and_cache_key_prefix(
-            cache_plugin,
+            cache_plugin.clone(),
             db_plugin.clone(),
             db_flavor,
-            cache_key_prefix,
+            cache_key_prefix.clone(),
         ));
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
@@ -4251,9 +4251,21 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             session_file_service.clone(),
             config.session_files.share.history_attachment_ttl_seconds,
         );
-        let a2a_run_store = Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_capacity(
-            config.async_chat_run_max_entries,
-        ));
+        let a2a_run_store: Arc<bcs_message_flow::a2a_chat::ChatRunStore> =
+            if config.async_chat_run_store == "persistent" {
+                let chat_run_repo: Arc<dyn bcs_service_api::port::repo::ChatRunRepoPort> =
+                    Arc::new(bcs_chat_run_store::SqlChatRunRepo::new(
+                        db_plugin.clone(),
+                        db_flavor,
+                        cache_plugin.clone(),
+                        cache_key_prefix.clone(),
+                    ));
+                Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_repo(chat_run_repo))
+            } else {
+                Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_capacity(
+                    config.async_chat_run_max_entries,
+                ))
+            };
         let a2a_run_port = Arc::new(crate::http_adapter::BootstrapRunChannelPort {
             run_channels: run_channels.clone(),
         });

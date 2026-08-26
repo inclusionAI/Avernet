@@ -753,6 +753,19 @@ pub struct BcsConfig {
     #[serde(default = "default_async_chat_run_max_entries")]
     pub async_chat_run_max_entries: usize,
 
+    /// Direct Chat async run store backend: `"memory"` (in-process,
+    /// pre-#1546 behavior; not restart/replica-safe) or `"persistent"`
+    /// (MySQL-authoritative + Redis hot cache). Default `"memory"` — opt-in
+    /// for the governed store. See #1546.
+    #[serde(default = "default_async_chat_run_store")]
+    pub async_chat_run_store: String,
+
+    /// Provider downlink run context backend: `"memory"` or `"redis"`.
+    /// Default `"memory"`. The `"redis"` option requires a configured
+    /// `[cache.redis]` and a Redis-backed `BotRunContextPort` implementation.
+    #[serde(default = "default_bot_run_context_store")]
+    pub bot_run_context_store: String,
+
     /// AI安全网关配置。
     /// 用于Bot间消息的安全检查和拦截。
     #[serde(default)]
@@ -872,6 +885,14 @@ fn default_async_chat_poll_wait_max_ms() -> u64 {
 
 fn default_async_chat_run_max_entries() -> usize {
     100_000
+}
+
+fn default_async_chat_run_store() -> String {
+    "memory".to_string()
+}
+
+fn default_bot_run_context_store() -> String {
+    "memory".to_string()
 }
 
 fn default_metrics_endpoint_path() -> String {
@@ -1103,6 +1124,8 @@ impl Default for BcsConfig {
             async_chat_run_retention_ms: default_async_chat_run_retention_ms(),
             async_chat_poll_wait_max_ms: default_async_chat_poll_wait_max_ms(),
             async_chat_run_max_entries: default_async_chat_run_max_entries(),
+            async_chat_run_store: default_async_chat_run_store(),
+            bot_run_context_store: default_bot_run_context_store(),
             security_gateway: SecurityGatewayConfig::default(),
             security: SecurityConfig::default(),
             eventing: EventingConfig::default(),
