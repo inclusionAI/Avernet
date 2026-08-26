@@ -600,34 +600,19 @@ class SkillSetService:
             return False
 
     async def sync_mcp_desired_state(self, *, server_codes: set[str]) -> bool:
-        """Project the complete MCP desired state to the Bot runtime.
+        """Declare the complete MCP allow-list to the Bot runtime.
 
-        ``sync_all_mcp_servers`` is deliberately called even for an empty
-        set: it is the device-level reconciliation command that clears stale
-        allow-list entries.  Per-server detail delivery precedes that full
-        declaration so all newly allowed MCPs have their configured payload.
+        Declaration is total on purpose: ``sync_all_mcp_servers`` is the
+        device-level reconciliation command and clears stale entries, so it
+        runs even for an empty set.
 
-        Detail delivery is handed to ``sync_mcp_details_for_bot`` rather than
-        looped one ``sync_mcp_detail`` at a time: every entry here targets the
-        same bot, and that entrypoint resolves the device once for the whole
-        batch instead of paying a blocking ws-info round trip per MCP.
+        It is *only* declaration. Per-MCP configuration delivery is scoped to
+        what a mutation actually changed and lives in ``sync_mcp_delivery``,
+        which the caller runs first so configuration lands before the
+        allow-list cites it. Folding the two together is what made every
+        mutation re-push every MCP the Bot had.
         """
         try:
-            entries: list[dict[str, Any]] = []
-            for server_code in sorted(server_codes):
-                detail = self.mcp_center.get_mcp_detail(server_code)
-                if not detail:
-                    return False
-                entries.append(detail)
-            delivery = await self._mcp_sync_service.sync_mcp_details_for_bot(
-                user_id=self.user_id or self.entity_id or "",
-                mcp_entries=entries,
-                bot_id=self.bot_id,
-                entity_id=self.entity_id,
-                engine_type=self.engine_type,
-            )
-            if not delivery.get("success"):
-                return False
             # resolve_for_bot 与 sync_all_mcp_servers 都是同步阻塞调用(前者含
             # ws-info HTTP,后者是设备侧 HTTP),留在协程里会占住 event loop。
             ctx = await asyncio.to_thread(
@@ -635,15 +620,21 @@ class SkillSetService:
                 self.bot_id,
                 self.entity_id or self.user_id or "",
             )
+            logger.info(
+                "[sync_mcp_desired_state] declaring MCP allow-list: bot_id=%s, mcps=%s",
+                self.bot_id, len(server_codes),
+            )
             return bool(
                 await asyncio.to_thread(
                     self._device_sync_dispatcher.dispatch(ctx).sync_all_mcp_servers,
-                    entries,
+                    # ``filter_servers`` reads server_code/serverCode off each
+                    # entry, so bare strings would silently declare nothing.
+                    [{"server_code": code} for code in sorted(server_codes)],
                 )
             )
         except Exception:
             logger.warning(
-                "[sync_mcp_desired_state] MCP projection failed for bot_id=%s",
+                "[sync_mcp_desired_state] MCP allow-list declaration failed for bot_id=%s",
                 self.bot_id,
                 exc_info=True,
             )

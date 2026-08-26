@@ -119,7 +119,7 @@ green at the end of this group *without* any test expectation changing.
       fetch catalogue details for `claimed` only, push via
       `sync_mcp_details_for_bot`, then `remove_mcp_detail` each `released`
       code. Skip the push entirely when `claimed` is empty.
-- [ ] 3.4 Reduce `SkillSetService.sync_mcp_desired_state` to declaration
+- [x] 3.4 Reduce `SkillSetService.sync_mcp_desired_state` to declaration
       only — delete the detail loop and the `sync_mcp_details_for_bot` call.
       `sync_all_mcp_servers` takes dicts and reads `server_code`/`serverCode`
       off each (`core/devices/services/mcp_device_transport.py:76`), so pass
@@ -132,7 +132,7 @@ green at the end of this group *without* any test expectation changing.
       A `reconcile` scope means `claimed = codes`, `released = ∅`. The
       intersection is a guard, never a source: it cannot enlarge what the
       mutation declared, so `add_mcp`'s one code stays one code.
-- [ ] 3.6 Tests — fan-out: adding one MCP to a Bot with three others pushes
+- [x] 3.6 Tests — fan-out: adding one MCP to a Bot with three others pushes
       exactly one detail (assert the `sync_single_mcp` call count is 1, not
       just that the right code appears) and declares four allow-list codes; a
       Bot holding a catalogue-missing MCP can still add an unrelated one.
