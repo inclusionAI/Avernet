@@ -1207,6 +1207,39 @@ async fn group_detail_accepts_human_or_exact_owned_bot_participation_only() {
 }
 
 #[tokio::test]
+async fn get_public_group_readable_without_participation() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+    let mut group = normal_group(
+        "public-plaza-detail",
+        "driver",
+        vec![Participant::bot("driver", ParticipantRole::Driver)],
+        GroupStrategy::Chat,
+        1,
+    );
+    group.visibility = "public".to_string();
+    fixture
+        .groups
+        .upsert(group)
+        .await
+        .expect("store public Group");
+
+    let detail = fixture
+        .service
+        .get(GetGroup {
+            caller: bot_principal("alice"),
+            group_id: "public-plaza-detail".into(),
+        })
+        .await
+        .expect("public Group is readable without participation or owned Bot");
+    let GroupDetail::Collaboration(detail) = detail else {
+        panic!("expected collaboration detail");
+    };
+    assert_eq!(detail.group_id, "public-plaza-detail");
+    assert!(matches!(detail.visibility, GroupVisibility::Public));
+}
+
+#[tokio::test]
 async fn group_detail_propagates_owned_bot_lookup_database_failure() {
     let bots = Arc::new(BotCore::with_repo(Arc::new(
         PersistentBotRepo::with_plugins(Arc::new(InMemoryCachePlugin::new()), Arc::new(FailingDb)),
