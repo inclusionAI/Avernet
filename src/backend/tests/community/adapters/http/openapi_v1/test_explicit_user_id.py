@@ -268,12 +268,6 @@ def _without_request_id(response) -> dict:
 #: between "this operation has no user dimension" and "somebody found the
 #: parameter inconvenient".
 _NO_USER_DIMENSION = {
-    # The user-identity read is how a client LEARNS the id it must thread
-    # everywhere else — requiring the parameter here would make the id a
-    # precondition of discovering it. The answer is read off the verified
-    # principal, so there is no caller-supplied user to compare against and no
-    # 403 to answer.
-    ("get", f"{PUBLIC_API_PREFIX}/org/user"),
     # Name uniqueness is checked across the tenant, not within one user's bots.
     ("get", f"{PUBLIC_API_PREFIX}/bots/check-name"),
     # The marketplace catalogue is identical for every caller in the tenant.
@@ -309,6 +303,17 @@ _NO_USER_DIMENSION = {
 _USER_ID_FILTER_ONLY = {
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/list"),
 }
+
+#: Operations whose ``user_id`` is a directory filter, not the self-confirm
+#: seam. Same spelling, opposite contract: elsewhere ``user_id`` is *who this
+#: call acts for* and must be the caller (403 otherwise); here it is *whose
+#: identity to return*, and any authenticated human caller may name any user.
+#: So it is REQUIRED, carries no 403, and stays out of both _NO_USER_DIMENSION
+#: (it takes the param) and the user-scoped-required rule (the param is not
+#: self-confirm). Mirrors /bots/logs/traces' carve-out (the first opposite-
+#: contract spelling). There is no whoami fall-back: the param names whose
+#: identity to return, and its absence is a 422.
+_DIRECTORY_USER_ID = {("get", f"{PUBLIC_API_PREFIX}/org/user")}
 
 # Operations that are user-scoped but deliberately non-delegable. They derive
 # the actor from the verified human principal and therefore publish no
@@ -393,7 +398,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: publish-to-users route moved from /bots/{bot_id}/public-bcs to the external
 #: /collaboration/bots/{bot_uuid}/public, so one path-addressed {bot_id}
 #: operation became a {bot_uuid}-named one: path -1, none +1.
-_BOT_ID_PLACEMENT = {"path": 140, "query": 1, "none": 62}
+_BOT_ID_PLACEMENT = {"path": 141, "query": 1, "none": 62}
 
 
 def _schema() -> dict:
@@ -438,6 +443,7 @@ def _user_scoped(path: str, method: str) -> bool:
         and (method, path) not in _NO_USER_DIMENSION
         and (method, path) not in _AUTHENTICATED_SELF
         and (method, path) not in _USER_ID_FILTER_ONLY
+        and (method, path) not in _DIRECTORY_USER_ID
     )
 
 
@@ -507,9 +513,13 @@ def test_the_pinned_number_of_operations_take_it():
     # Bot editor requests add one. The BCS publish-to-users route moved from the
     # internal /bots/{bot_id}/public-bcs path to the external contract path
     # /collaboration/bots/{bot_uuid}/public (same op count, {bot_uuid} not {bot_id}).
-    # Task listing has a user_id filter, but is not owner-scoped; it is covered
-    # by _USER_ID_FILTER_ONLY and therefore excluded from this owner-scope count.
-    assert len(taking) == 180
+    # Service publication version upgrade adds one Bot-addressed operation.
+    # GET .../collaboration/tasks/list briefly counted here; it now takes
+    # ``user_id`` as a caller-selected filter with no owner-mismatch 403, so it
+    # moved to _USER_ID_FILTER_ONLY (asserted by its own test) and left this
+    # count: 182 → 181. execute/dashboard take no user_id at all — see
+    # _NO_USER_DIMENSION.
+    assert len(taking) == 181
 
 
 def test_the_exempt_operations_take_none():
@@ -549,6 +559,25 @@ def test_bot_logs_keeps_its_own_meaning_of_user_id():
     assert _param(traces, USER_ID_QUERY) is not None, (
         "the filter is part of that operation's contract, not this rule's"
     )
+
+
+def test_org_user_directory_filter_is_required_without_403():
+    """``GET /org/user`` takes a REQUIRED ``user_id`` — opposite contract.
+
+    Same spelling, opposite meaning: elsewhere ``user_id`` is *who this call
+    acts for* and must be the caller (403 otherwise); here it is *whose
+    identity to return*, a directory filter any authenticated human caller may
+    name any user for — so it is REQUIRED (no whoami fall-back; absence is a
+    422) and carries no 403. Mirrors the /bots/logs/traces carve-out, the
+    first opposite-contract spelling.
+    """
+    schema = _schema()
+    operation = schema["paths"][f"{PUBLIC_API_PREFIX}/org/user"]["get"]
+    parameter = _param(operation, USER_ID_QUERY)
+    assert parameter is not None, "GET /org/user carries the required user_id"
+    assert parameter["in"] == "query"
+    assert parameter["required"] is True
+    assert "403" not in operation["responses"]
 
 
 def test_user_id_is_never_a_body_field_or_a_path_segment():
