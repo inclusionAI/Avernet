@@ -52,12 +52,19 @@ Lifecycle
 ``LifecycleBase.teardown`` closes the pool at process shutdown (phase 2, after
 every participant's ``shutdown()`` has returned); discovery finds this instance
 through its ``@singleton`` binding, so nothing has to be registered by hand.
-``close()`` is idempotent and merely drops the pool — a call arriving afterwards
-lazily builds a fresh one rather than raising, so a straggler cannot turn
-shutdown into a ``RuntimeError``.
+``close()`` is idempotent and merely drops the pool, so a call that *starts*
+afterwards lazily builds a fresh one. A call already in flight is not protected:
+if ``close()`` lands between ``_pooled_client()`` returning and the request being
+sent, httpx raises ``RuntimeError("Cannot send a request, as the client has been
+closed.")`` — which is not an ``httpx.HTTPError``, so a caller catching transport
+errors will not catch it. That window is accepted rather than guarded: teardown
+runs in shutdown phase 2, after every participant's ``shutdown()`` has returned,
+so service-tier traffic is already finished by then, and closing the hole would
+mean retry semantics this seam deliberately does not have.
 """
 from __future__ import annotations
 
+import http.cookiejar
 import threading
 from contextlib import contextmanager
 from typing import Any, Iterator, Mapping
@@ -67,13 +74,37 @@ import httpx
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.plugin_api.http_client import HttpClient
 
-# Transport-policy defaults, mirroring ``di.config.HttpClientPoolPolicy``. The
-# composition root always passes the configured values, so these apply only to a
-# direct construction (the singlebox endpoint fixture, unit tests).
+# Transport-policy defaults. Once the composition root is wired to config it
+# passes explicit values for all four, so these govern only a direct
+# construction (the singlebox endpoint fixture, unit tests); they are kept in
+# step with the config dataclass defaults by hand.
 DEFAULT_MAX_CONNECTIONS = 100
 DEFAULT_MAX_KEEPALIVE_CONNECTIONS = 20
 DEFAULT_KEEPALIVE_EXPIRY = 5.0
 DEFAULT_HTTP2 = False
+
+
+class _DiscardingCookieJar(http.cookiejar.CookieJar):
+    """A cookie jar that stores nothing.
+
+    ``httpx.Client`` keeps a cookie jar for its own lifetime: it extracts
+    ``Set-Cookie`` from every response and replays the result on every later
+    request to the same host. That is harmless for a client that lives one call
+    and actively wrong for a pooled one — this seam is a stateless RPC transport
+    shared by every caller, and the ``general`` binding in particular carries
+    per-user credentials to a single upstream (see the yuque router). A session
+    cookie set by one caller's response must never ride along on the next
+    caller's request.
+
+    Overriding ``set_cookie`` is the whole fix: ``CookieJar.extract_cookies``
+    funnels every accepted cookie through it, so discarding there leaves the jar
+    permanently empty and nothing is ever sent back. Passing this as ``cookies=``
+    is public API — ``httpx.Cookies.__init__`` adopts a ``CookieJar`` instance
+    as-is rather than copying it into a fresh one.
+    """
+
+    def set_cookie(self, cookie: http.cookiejar.Cookie) -> None:  # noqa: D102
+        return None
 
 
 class HttpxClient(LifecycleBase, HttpClient):
@@ -122,6 +153,7 @@ class HttpxClient(LifecycleBase, HttpClient):
                     base_url=self._base_url,
                     limits=self._limits,
                     http2=self._http2,
+                    cookies=_DiscardingCookieJar(),
                 )
             return self._client
 
