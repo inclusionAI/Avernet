@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from injector import inject
 
+from agentclaw.community.core.caller_identity.models import McpCallType
 from agentclaw.community.core.mcp.services.passport_scope import (
     filter_passport_mcp_codes,
 )
@@ -46,7 +47,11 @@ from agentclaw.community.core.skills_pool.types import (
     runtime_uses_pool_paths,
 )
 from agentclaw.community.core.workspace.skill_layout import runtime_layout_engine_for_bot
-from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.passport import McpScopeItem, PassportPlugin
+
+
+logger = get_logger()
 
 
 class BotRuntimeProjector:
@@ -358,6 +363,53 @@ class BotRuntimeProjector:
             )
         elif not service.sync_runtime(desired_skills=desired_skills):
             raise SkillSetRuntimeReconcileError()
+
+    def _passport_mcp_items(
+        self, *, bot: dict, engine: str, codes: list[str]
+    ) -> list[McpScopeItem]:
+        """Build the MCP scope with an explicit execution identity per entry.
+
+        ``updatePassport`` replaces each resource list wholesale, and the
+        Passport port fills a missing ``identity_mode`` with ``"owner"``
+        rather than leaving the field off the wire. Sending codes without
+        identity therefore does not "leave identity alone" — it asserts Owner
+        for every MCP and silently discards Caller configuration that
+        ``update_mcp_identity_to_agent_principal`` wrote through the same
+        field. So the modes are resolved here, on every projection.
+
+        The source is the sparse per-Bot call-config table: a Bot with no row
+        for a code runs it as Owner, which is also the fallback when the Bot
+        has no primary key to look up by.
+        """
+        modes: Mapping[str, McpCallType] = {}
+        bot_pk = bot.get("id")
+        if bot_pk is not None:
+            modes = self._caller_identity_repo.list_draft_call_types(
+                int(bot_pk), engine
+            )
+        items: list[McpScopeItem] = [
+            {
+                "mcp_code": code,
+                # ``McpCallType`` is a ``StrEnum``; ``parse`` normalises both a
+                # missing entry and a raw string to a valid member, so the
+                # Passport port never has to guess.
+                "identity_mode": str(McpCallType.parse(modes.get(code))),
+            }
+            for code in codes
+        ]
+        caller_count = sum(
+            1 for item in items if item["identity_mode"] == McpCallType.CALLER
+        )
+        logger.info(
+            "[BotRuntimeProjector] Passport MCP scope resolved: bot_id=%s, "
+            "engine=%s, mcps=%s, caller=%s, owner=%s",
+            bot.get("bot_id"),
+            engine,
+            len(items),
+            caller_count,
+            len(items) - caller_count,
+        )
+        return items
 
     async def _apply_non_skill_projection(
         self,

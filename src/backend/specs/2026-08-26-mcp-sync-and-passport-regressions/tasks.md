@@ -13,7 +13,7 @@ Paths are relative to `src/backend/src/agentclaw/community/` unless noted.
       (`core/repository/protocols/identity.py:58`) into `BotRuntimeProjector.__init__`
       (`core/skill_center/services/bot_runtime_projector.py:58`); bind it in
       `di/modules/skill_center_module.py`.
-- [ ] 1.2 Add `BotRuntimeProjector._passport_mcp_items(*, bot, engine, codes)`:
+- [x] 1.2 Add `BotRuntimeProjector._passport_mcp_items(*, bot, engine, codes)`:
       read `list_draft_call_types(int(bot["id"]), engine)`, emit
       `{"mcp_code": code, "identity_mode": mode}` per code, defaulting to
       `"owner"` when the Bot has no row for that code. `McpCallType` is a
