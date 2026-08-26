@@ -159,6 +159,39 @@ this change.
 - Per-qualifier pool or protocol tuning. One policy applies to all four
   bindings; if `general` later needs its own ceiling or its own `http2` answer,
   that is an additive follow-up.
+- **Making the seam async.** Considered and deferred; the reasoning is recorded
+  here because it is the obvious next question. Four things argue against
+  bundling it:
+
+  1. The seam is synchronous *on purpose*. `llm.py`, `bot_dormant/baas_client.py`
+     and `harness_module.py` independently record the same reason: corp
+     `sofa_tracer` patches `httpx.AsyncClient.send` but not `Client.send`, and
+     that patch has a known SpawnProcess hook problem. The sync client routes
+     around it. An async seam walks back into it, and the tracer is out-of-repo
+     so no CI here can exercise the failure.
+  2. Async pooling is strictly harder than sync pooling, and this repo has
+     already paid for the lesson. `task_runner/integration/bcs_http_adapter.py`
+     notes that "an httpx AsyncClient/connection pool is not safe to share
+     across asyncio event loops" — the task module runs a FastAPI loop plus
+     poller and harness loops — and carries loop-affinity tracking with a
+     per-call fallback client to cope. The singleton pool this spec builds is
+     simple *because* `httpx.Client` is thread-safe and loop-agnostic. Pooling
+     is the easy half; it should land first either way.
+  3. The blast radius is a cascade. 55 seam call sites across 9 files, and the
+     two services in front of it are entirely synchronous (`BaasService`: 57
+     sync methods, 0 async; `BcnService`: 9 and 0), so an async seam forces both
+     services async and then every one of their callers.
+  4. The payoff is the *next* ceiling, not this one. Async would remove the
+     `asyncio.to_thread` hop and its `min(32, cpu+4)` executor bound — real
+     under heavy fan-out, but a per-call cost measured in microseconds against
+     the milliseconds of TLS handshake this change eliminates. It would also not
+     provide the `max_connections` backpressure, which is the ceiling this
+     change is actually for.
+
+  Note that `httpx.AsyncClient` is *not* banned repo-wide — roughly ten call
+  sites outside this seam use it directly. The constraint is specific to the
+  traced seam. If async is revisited, the first step is settling the
+  `sofa_tracer` question with its owner, not writing code.
 
 ## Acceptance criteria
 
