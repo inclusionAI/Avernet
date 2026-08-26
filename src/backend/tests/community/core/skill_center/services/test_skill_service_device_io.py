@@ -289,3 +289,30 @@ async def test_deactivate_all_removes_entries_concurrently(tmp_path):
     assert results["success"] == ["skill-0", "skill-1", "skill-3", "skill-4"]
     assert results["failed"] == ["skill-2"]
     assert state["peak"] > 1
+
+
+@pytest.mark.asyncio
+async def test_duplicate_upload_paths_collapse_to_one_deterministic_write(tmp_path):
+    """两个 part 指向同一路径时只写一次，且内容是最后那个——与逐个写入一致。
+
+    The request is a flat multipart list, so nothing upstream stops two parts
+    from naming one path. Writing them concurrently would let whichever call
+    finished last win, making the installed Skill differ run to run.
+    """
+    device_fs = _RecordingDeviceFilesystem(delay=0)
+    service = _service(tmp_path, device_fs)
+
+    files = [
+        {"filename": "SKILL.md", "content": _MANIFEST, "relative_path": "SKILL.md"},
+        {"filename": "a.txt", "content": b"first", "relative_path": "assets/a.txt"},
+        {"filename": "b.txt", "content": b"other", "relative_path": "assets/b.txt"},
+        {"filename": "a.txt", "content": b"last", "relative_path": "assets/a.txt"},
+    ]
+    await service.upload_skill(files, user_id="user1", bolt_id="bot1")
+
+    written = [e for e in device_fs.events if e.startswith("write:")]
+    collided = [e for e in written if e.endswith("assets/a.txt")]
+    assert len(collided) == 1, f"one write per destination, got {written}"
+    assert len(written) == 3
+    # last part wins, exactly as the sequential overwrite left it
+    assert device_fs.files[collided[0][len("write:"):]] == b"last"

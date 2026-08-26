@@ -1862,7 +1862,21 @@ class SkillService:
         skill_md_file = skill_md_files[0]
         skill_md_path = skill_md_file["relative_path"]
         skill_root = os.path.dirname(skill_md_path)
-        processed_files: list[dict[str, Any]] = []
+        # Keyed by destination path, so a request naming the same path twice
+        # yields one write rather than two. Nothing upstream rejects that: the
+        # request is a flat multipart list and two parts can carry one path.
+        # The sequential writer used to let the later entry overwrite the
+        # earlier, so the last one deterministically won; writing them
+        # concurrently would instead let whichever call finished last win, and
+        # the installed Skill would differ run to run. Assigning into a dict
+        # keeps that last-one-wins outcome and makes it a single write.
+        #
+        # Deduplicating rather than rejecting keeps this legacy address
+        # accepting exactly the requests it accepted before. The OpenAPI upload
+        # is stricter — ``LocalSkillUploadService._unpack`` answers
+        # ``duplicate_file_path`` — but tightening a retiring address is a
+        # product call, not a fix for this.
+        by_path: dict[str, dict[str, Any]] = {}
 
         for file_info in candidates:
             relative_path = file_info["relative_path"]
@@ -1876,10 +1890,11 @@ class SkillService:
 
             if not relative_path_without_root:
                 continue
-            processed_files.append({
+            by_path[relative_path_without_root] = {
                 "relative_path": relative_path_without_root,
                 "content": file_info["content"],
-            })
+            }
+        processed_files: list[dict[str, Any]] = list(by_path.values())
 
         raw_bytes = skill_md_file.get("content", b"")
         try:
