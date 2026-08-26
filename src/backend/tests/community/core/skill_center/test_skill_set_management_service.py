@@ -524,6 +524,13 @@ class _RuntimeBots:
         }
 
 
+class _RuntimeBotsWithPk(_RuntimeBots):
+    """A persisted Bot: identity lookups are keyed on the primary key."""
+
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
+        return {**super().get_by_id_and_owner(bot_id, owner_id), "id": 42}
+
+
 class _AicodingImageRuntimeBots(_RuntimeBots):
     def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
         return {
@@ -1910,6 +1917,117 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
             },
         }
     ]
+
+
+def _passport_mcp_items(passport: _RuntimePassport) -> list[dict]:
+    """The MCP identity scope from the single updatePassport call."""
+    assert len(passport.calls) == 1
+    return passport.calls[0]["resource_scope"]["mcp_items"]
+
+
+@pytest.mark.asyncio
+async def test_projection_preserves_caller_identity_for_configured_mcp():
+    """A Caller MCP keeps Caller across a projection that never mentions it.
+
+    This is the regression: updatePassport replaces the MCP list wholesale
+    and the Passport port writes identity_mode="owner" for any item that
+    arrives without one, so a projection that omitted identity moved every
+    Caller MCP onto the bot owner's credential.
+    """
+    passport = _RuntimePassport()
+    identity = _RuntimeCallerIdentity({"mcp.weather": McpCallType.CALLER})
+    runtime = BotRuntimeProjector(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBotsWithPk(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=passport,
+        caller_identity_repo=identity,
+    )
+
+    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+
+    assert _passport_mcp_items(passport) == [
+        {"mcp_code": "mcp.template-preset", "identity_mode": "owner"},
+        {"mcp_code": "mcp.weather", "identity_mode": "caller"},
+    ]
+    # Looked up by the Bot's primary key and the engine it actually runs.
+    assert identity.calls == [(42, "openclaw")]
+
+
+@pytest.mark.asyncio
+async def test_projection_defaults_to_owner_without_a_call_config_row():
+    """The call-config table is sparse: a missing row means Owner."""
+    passport = _RuntimePassport()
+    runtime = BotRuntimeProjector(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBotsWithPk(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=passport,
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+
+    assert _passport_mcp_items(passport) == [
+        {"mcp_code": "mcp.template-preset", "identity_mode": "owner"},
+        {"mcp_code": "mcp.weather", "identity_mode": "owner"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_projection_sends_one_identity_item_per_declared_code():
+    """Every declared code carries an identity, even for an empty lookup.
+
+    A code in ``mcp_codes`` without a matching ``mcp_items`` entry is exactly
+    what the Passport port fills in with Owner, so the two lists must stay
+    the same length however the lookup answers.
+    """
+    passport = _RuntimePassport()
+    runtime = BotRuntimeProjector(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBotsWithPk(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=passport,
+        caller_identity_repo=_RuntimeCallerIdentity({}),
+    )
+
+    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+
+    scope = passport.calls[0]["resource_scope"]
+    assert [item["mcp_code"] for item in scope["mcp_items"]] == scope["mcp_codes"]
+
+
+@pytest.mark.asyncio
+async def test_projection_falls_back_to_owner_without_a_bot_primary_key():
+    """No primary key to look up by is the same answer as no row: Owner."""
+    passport = _RuntimePassport()
+    identity = _RuntimeCallerIdentity({"mcp.weather": McpCallType.CALLER})
+    runtime = BotRuntimeProjector(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBots(),  # no "id" key
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=passport,
+        caller_identity_repo=identity,
+    )
+
+    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+
+    assert all(
+        item["identity_mode"] == "owner" for item in _passport_mcp_items(passport)
+    )
+    assert identity.calls == []
 
 
 @pytest.mark.asyncio
