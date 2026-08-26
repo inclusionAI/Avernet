@@ -64,6 +64,7 @@ class BcsCreateGroupRequest:
     visibility: str | None = None
     opening_message: dict[str, Any] | None = None
     event_subscriptions: list[dict[str, Any]] | None = None    # 内联事件订阅(回调 webhook);BCS 把 CloudEvent 推到 sink.url
+    caller_bot_token: str | None = None                        # driver-bot 的 session token(直读 bcs_bots.session_token);参考 ocb:作为 Authorization: Bearer 做 caller 身份
 
 
 @dataclass
@@ -186,7 +187,13 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
             v = getattr(req, opt)
             if v is not None:
                 body[opt] = v
-        r = await self._req("POST", "/groups", json=body, idempotency_key=uuid.uuid4().hex)
+        # 参考 ocb(http_client.py:254-257):driver-bot 的 session token 经 Authorization: Bearer 做 caller 身份,
+        # BCS resolve_group_create_caller 据此把 caller 解析成 driver/originator bot(仅 HMAC X-ECB-* 无 caller)。
+        extra_headers: dict[str, str] | None = None
+        if req.caller_bot_token:
+            extra_headers = {"Authorization": f"Bearer {req.caller_bot_token}"}
+        r = await self._req("POST", "/groups", json=body, idempotency_key=uuid.uuid4().hex,
+                           extra_headers=extra_headers)
         data = r.json()
         return BcsCreateGroupResult(
             group_id=data["group_id"], session_id=data.get("session_id"),

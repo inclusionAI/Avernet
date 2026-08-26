@@ -28,18 +28,12 @@ logger = logging.getLogger(__name__)
 _DISPATCH_CONCURRENCY = 8
 _BCS_PARTICIPANT_ROLES = {"driver", "consultant", "manager", "worker", "observer"}
 
-# BCN 协作群事件回调投递路径:投到 task 模块的 `/api/v1/collaboration/tasks/callback/report`
-# (主 router 的 report 回投路由),该路由 ``callback.report_result`` → ``on_report`` 驱动图态(收口 DONE)。
-# 注:该路由按 ``TaskCallbackDataDTO``(loop_task_id + result{success,...})校验 body;BCS event_subscriptions
-# 推的是 CloudEvent(event_type/scope/data,无 loop_task_id)。要让 CloudEvent 真能走通,需在 /callback/report
-# 侧把 CloudEvent 适配成 TaskCallbackDataDTO(或让该路由兼容 CloudEvent),否则会 422。
-_BCN_EVENT_CALLBACK_PATH = "/api/v1/collaboration/tasks/callback/report"
-
 
 class TaskExecutor:
     def __init__(self, *, bot, bcs, formatter, context, sink, poller,
                  identity_resolver=None, graph=None,
-                 api_base_url: str = "", bcn: BcnService | None = None) -> None:
+                 api_base_url: str = "", bcn: BcnService | None = None,
+                 bot_token_provider=None) -> None:
         """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None;
         context: TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。
         graph: TaskGraphService|None,动态派发后把 group_id/session_id/run_id 落节点 run_info.extend_props
@@ -54,6 +48,7 @@ class TaskExecutor:
         self._sink = sink
         self._poller = poller
         self._identity_resolver = identity_resolver
+        self._bot_token_provider = bot_token_provider  # driver-bot session_token 取数(直读 bcs_bots);None→不发 Bearer
         self._graph = graph
         self._api_base_url = api_base_url
         self._group_meta: dict[str, dict[str, Any]] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
@@ -288,25 +283,13 @@ class TaskExecutor:
         service_spec = gf.extend_props.get("service_spec")
         if service_spec:
             req_kwargs["service_spec"] = service_spec
-        # BCN 事件回调订阅(创建协作群入参 event_subscriptions):BCS 把协作事件 CloudEvent 推到本后端
-        # task 模块回调路径。sink.url = api_base_url + 回调路径(api_base_url 去尾斜杠)。
-        # event_filters 按 collab_mode 分流:state_machine 订阅 state_machine.*;manager_worker/chat
-        # 无状态机 run,去 state_machine.*、保留 group/session/task/message(§4 生命周期事件)。
-        _api_base = gf.extend_props.get("api_base_url")
-        if _api_base:
-            _event_filters = (["group.*", "session.*", "task.*", "state_machine.*", "message.created"]
-                              if mode == "state_machine"
-                              else ["group.*", "session.*", "task.*", "message.created"])
-            req_kwargs["event_subscriptions"] = [{
-                "name": "group-webhook",
-                "event_filters": _event_filters,
-                "payload": {"mode": "metadata_only"},
-                "sink": {
-                    "type": "webhook",
-                    "url": str(_api_base).rstrip("/") + _BCN_EVENT_CALLBACK_PATH,
-                    "request_timeout_ms": 2000,
-                },
-            }]
+        # 不再内联挂 event_subscriptions:带订阅会让 BCS 建 groups 走 create_group_with_inline_subscriptions
+        # → require_human,对 HMAC-only / HTTP bot token(Bearer→Bot)分别 401 / 403。改为参考 ocb:以 driver-bot
+        # session_token 作 caller 身份(``Authorization: Bearer``),BCS 走 no-sub 分支建群;BCN 终态收敛由
+        # result poller 轮询 get_state_machine_run / get_group 承担(task_executor_result_poller)。
+        if self._bot_token_provider is not None:
+            req_kwargs["caller_bot_token"] = self._bot_token_provider.get_token(
+                req_kwargs.get("driver_bot") or "")
         # 任务描述(目标)→ BCS 创建群的 context 字段。BCS ``resolve_session_topic`` 把 group.context
         # 兜底注入 <GroupContext> 的 `目标` 行(session input 为空时,如建群 BotJoined)。
         _task_context = gf.extend_props.get("task_context")

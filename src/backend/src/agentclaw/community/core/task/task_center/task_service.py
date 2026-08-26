@@ -55,7 +55,8 @@ class TaskService:
                  task_node_repo: TaskNodeRepositoryProtocol | None = None,
                  task_node_run_info_repo: TaskNodeRunInfoRepositoryProtocol | None = None,
                  bot_service=None,
-                 api_base_url: str | None = None) -> None:
+                 api_base_url: str | None = None,
+                 bot_token_provider=None) -> None:
         """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
         bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。
         BBS 候选通过注入的 BcnService.list_bots_by_task_modes(复用统一 provider 身份)查询。
@@ -77,6 +78,7 @@ class TaskService:
         self._callback_repo = callback_repo
         self._bot_service = bot_service
         self._api_base_url = api_base_url
+        self._bot_token_provider = bot_token_provider  # driver-bot session_token 取数(直读 bcs_bots);经 _build_engine 透传给 TaskExecutor
         self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
         # fire-and-forget 后台推进任务跟踪(防 GC + 异常可见 + drain seam)
         self._bg_tasks: set[asyncio.Task] = set()
@@ -96,6 +98,7 @@ class TaskService:
             self._graph, bot=bot, bcs=bcs, discover=discover, bcn=self._bcn,
             bcs_identity=self._bcs_identity,
             api_base_url=self._api_base_url,
+            bot_token_provider=self._bot_token_provider,
         )
 
     @property

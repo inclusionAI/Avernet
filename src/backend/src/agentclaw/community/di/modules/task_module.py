@@ -178,6 +178,18 @@ class TaskModule(Module):
             gov = injector.get(EconomyGovernanceConfig)
         except Exception:  # noqa: BLE101 EconomyGovernanceModule 未装(纯内核/轻量测试列) → 取不到
             gov = None
+        # driver-bot session_token 取数(参考 ocb 直读 bcs_bots.session_token):corp overlay 经 DI 绑定
+        # BcsBotTokenProvider(ZDAS 真实实现);community 未绑 → NullBcsBotTokenProvider(去 event_subscriptions
+        # 后 HMAC 匿名建群亦成,不依赖 token;有则作 caller 身份 Bearer,带归属)。
+        from agentclaw.community.core.task.task_runner.integration.bcs_bot_token_provider import (
+            BcsBotTokenProvider, NullBcsBotTokenProvider,
+        )
+        try:
+            bot_token_provider = injector.get(BcsBotTokenProvider)
+            if bot_token_provider is None:
+                bot_token_provider = NullBcsBotTokenProvider()
+        except Exception:  # noqa: BLE101 未绑定 → Null(本地/singlebox/纯内核测试)
+            bot_token_provider = NullBcsBotTokenProvider()
         return TaskService(
             graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
             bcn=bcn, bcs_identity=bcs_identity, task_info_repo=task_info_repo,
@@ -185,6 +197,7 @@ class TaskModule(Module):
             task_node_run_info_repo=task_node_run_info_repo,
             bot_service=bot_service,
             api_base_url=self._resolve_api_base_url(gov.iframe_callback_url if gov else ""),
+            bot_token_provider=bot_token_provider,
         )
 
     @singleton
