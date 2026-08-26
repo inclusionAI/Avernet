@@ -3,7 +3,7 @@
 Proves the ORM pipeline end-to-end on a real in-memory SQLite database
 without booting the container (RESEARCH study 7 / D-06'):
 
-1. plugin ``create_all()`` builds ``baas_arca_ttl_renewal_schedule``
+1. plugin ``create_all()`` builds ``baas_bot_ttl_renewal_schedule``
 2. first ``register()`` inserts an ACTIVE row
 3. re-registering the same uk_source performs the dialect upsert
    (sandbox_id/next_renew_at overwrite, STOPPED resurrect, fail-count
@@ -32,7 +32,7 @@ from secbaas.community.core.repository.device_binding._orm_model import (
 )
 from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 
-TABLE = "baas_arca_ttl_renewal_schedule"
+TABLE = "baas_bot_ttl_renewal_schedule"
 HOT_DEVICE_TABLE = "baas_device"
 HOT_BINDING_TABLE = "ac_entity_device_binding"
 ENV = "pre"
@@ -229,6 +229,7 @@ def _seed_hot_device(
     provider_type: str = "ARCA",
     status: str = "ACTIVE",
     is_deleted: int = 0,
+    provider_device_props: str | None = None,
 ) -> None:
     with db_manager.orm_session() as session:
         session.add(
@@ -243,9 +244,13 @@ def _seed_hot_device(
                 provider_type=provider_type,
                 provider_device_id=provider_device_id,
                 provider_device_props=(
-                    '{"ttl_expiration_time":"2026-09-01T00:00:00"}'
-                    if provider_device_id
-                    else None
+                    provider_device_props
+                    if provider_device_props is not None
+                    else (
+                        '{"ttl_expiration_time":"2026-09-01T00:00:00"}'
+                        if provider_device_id
+                        else None
+                    )
                 ),
                 is_deleted=is_deleted,
             )
@@ -540,14 +545,29 @@ class TestRowUpdates:
 # ==================== find_unregistered anti-join ====================
 
 
-PROPS_TTL = '"ttl_expiration_time": "2026-09-10T00:00:00"'
+PROPS_TTL = (
+    '"ttl_expiration_time": "2026-09-10T00:00:00", '
+    '"ttl_expiration_timestamp": 1788969600000'
+)
 
 
 class TestFindUnregistered:
     def test_device_side_anti_join_and_filters(self, repo):
         # Found: 10 (unregistered), 12 (stale cold sandbox).
-        _seed_hot_device(id_val=10, env=ENV, provider_device_id="sb-10")
-        _seed_hot_device(id_val=12, env=ENV, provider_device_id="sb-12")
+        # Dual-key pair-write props mirror the health_check scanner idiom (CR-GAP-01):
+        # the retargeted reader labels ttl from $.ttl_expiration_timestamp.
+        _seed_hot_device(
+            id_val=10,
+            env=ENV,
+            provider_device_id="sb-10",
+            provider_device_props='{"ttl_expiration_time":"2026-09-01T00:00:00","ttl_expiration_timestamp":1788192000000}',
+        )
+        _seed_hot_device(
+            id_val=12,
+            env=ENV,
+            provider_device_id="sb-12",
+            provider_device_props='{"ttl_expiration_time":"2026-09-01T00:00:00","ttl_expiration_timestamp":1788192000000}',
+        )
         # Suppressed: 11 (matching ACTIVE cold row).
         _seed_hot_device(id_val=11, env=ENV, provider_device_id="sb-11")
         _seed_cold(
@@ -581,8 +601,8 @@ class TestFindUnregistered:
         assert [
             (r["id"], r["sandbox_id"], r["source_table"], r["ttl"]) for r in rows
         ] == [
-            (10, "sb-10", "baas_device", "2026-09-01T00:00:00"),
-            (12, "sb-12", "baas_device", "2026-09-01T00:00:00"),
+            (10, "sb-10", "baas_device", 1788192000000),
+            (12, "sb-12", "baas_device", 1788192000000),
         ]
 
     def test_binding_side_anti_join_json_equality(self, repo):
@@ -635,11 +655,35 @@ class TestFindUnregistered:
         assert [
             (r["id"], r["sandbox_id"], r["source_table"], r["ttl"]) for r in rows
         ] == [
-            (20, "sb-b-20", "ac_entity_device_binding", "2026-09-10T00:00:00"),
-            (22, "sb-b-22", "ac_entity_device_binding", "2026-09-10T00:00:00"),
+            (20, "sb-b-20", "ac_entity_device_binding", 1788969600000),
+            (22, "sb-b-22", "ac_entity_device_binding", 1788969600000),
         ]
         # Four-key contract (Pitfall 4).
         assert sorted(rows[0].keys()) == ["id", "sandbox_id", "source_table", "ttl"]
+
+    def test_legacy_ttl_expiration_time_key_falls_back_in_discovery(self, repo):
+        """WR-02: pre-release rows persisted only the legacy integer-ms
+        ttl_expiration_time key (no ttl_expiration_timestamp) — the
+        dual-key COALESCE must project that legacy value instead of NULL,
+        so pre-existing ACTIVE containers keep their real expiry instead
+        of degrading to the discovery now+window fallback."""
+        _seed_hot_device(
+            id_val=30,
+            env=ENV,
+            provider_device_id="sb-30",
+            provider_device_props='{"ttl_expiration_time": 1788192000000}',
+        )
+        _seed_hot_binding(
+            id_val=31,
+            env=ENV,
+            device_props='{"sandbox_id": "sb-b-31", "ttl_expiration_time": 1788969600000}',
+        )
+
+        device_rows = repo.find_unregistered(ENV, "baas_device", 500)
+        binding_rows = repo.find_unregistered(ENV, "ac_entity_device_binding", 500)
+
+        assert [(r["id"], r["ttl"]) for r in device_rows] == [(30, 1788192000000)]
+        assert [(r["id"], r["ttl"]) for r in binding_rows] == [(31, 1788969600000)]
 
     def test_unsupported_side_raises(self, repo):
         with pytest.raises(ValueError, match="Unsupported side"):

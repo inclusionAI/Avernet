@@ -50,10 +50,16 @@ async def list_render_screens(
     service: RenderScreenServiceProtocol = Depends(get_render_screen_service),
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> RenderScreenApiResponse:
-    """查询 Bot 的 CDN 链接列表。"""
+    """查询 Bot 的 CDN 链接列表。
+
+    副屏 CDN 配置（库名 → CDN URL 映射）是非敏感资源。协作群/分享页的查看者
+    并非 Bot 归属者，若强制 owner/协作者校验会导致群聊等场景查不到副屏配置，
+    副屏渲染报「组件库不存在」。故读接口不做身份校验：coding bot 按 bot 维度
+    返回全部配置，普通 bot 按 owner_id（或当前用户兜底）过滤。
+    写操作（POST/PUT/DELETE）仍走 authorize_* 校验，读放开不影响写权限。
+    """
     user_id = user.staffId
     try:
-        service.authorize_render_screen_bot(bot_id=bot_id, user_id=user_id)
         records = service.list_render_screens(
             bot_id=bot_id,
             owner_id=owner_id,

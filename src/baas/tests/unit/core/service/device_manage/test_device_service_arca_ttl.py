@@ -23,9 +23,10 @@ Pins the exact INTG-01/INTG-02 semantics replicated by the wrapper:
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -61,9 +62,12 @@ def _mock_env(monkeypatch):
 
 
 def _expiration_dt() -> datetime:
-    # CR-01: the wrapper computes the register margin in naive UTC — the
-    # test expectation must share the UTC wall clock, not the local one.
-    return datetime.fromtimestamp(_TTL_MS / 1000, tz=UTC).replace(tzinfo=None)
+    # CR-01: the wrapper computes the register margin in fixed
+    # Asia/Shanghai (+08:00) — the test expectation must share the +08:00
+    # wall clock, not the host-local one.
+    return datetime.fromtimestamp(_TTL_MS / 1000, tz=ZoneInfo("Asia/Shanghai")).replace(
+        tzinfo=None
+    )
 
 
 def _make_service(
@@ -103,8 +107,10 @@ def _response(
     provider_device_props is built from a real ArcaCreationResult.model_dump()
     — the exact payload shape the production chain persists (D-06: the
     community device service stores creation_result.model_dump() verbatim,
-    with props.sandbox_id mirroring provider_device_id). Use props_override
-    to simulate a props dict that lacks the ttl_expiration_time key
+    with props.sandbox_id mirroring provider_device_id, and the restored
+    field pair: the fixed +08:00 formatted string plus the ms-epoch
+    integer). Use props_override
+    to simulate a props dict that lacks the ttl_expiration_timestamp key
     entirely. status defaults to ACTIVE; pass "FAILED"/"PENDING" to
     simulate the destroy+create update outcomes.
     """
@@ -114,7 +120,8 @@ def _response(
             status="ACTIVE",
             template_id="tpl-test-001",
             sandbox_id=provider_device_id,
-            ttl_expiration_time=ttl,
+            ttl_expiration_time="2025-06-15 23:06:40",
+            ttl_expiration_timestamp=ttl,
         ).model_dump()
     else:
         props = props_override
@@ -149,6 +156,36 @@ def _record(*, provider_type: str = "ARCA", identity: int = 7) -> SimpleNamespac
 
 
 # ── start_device (INTG-01 register) ────────────────────────────────────
+
+
+class TestPersistedTtlPairContract:
+    def test_creation_result_dump_locks_persisted_ttl_pair_shape(self):
+        """WR-01: contract lock for the provider_device_props payload the
+        creation chain persists verbatim (creation_result.model_dump()).
+
+        The persisted shape is the formatted '%Y-%m-%d %H:%M:%S' string in
+        ttl_expiration_time plus the ms-epoch integer in
+        ttl_expiration_timestamp. Both the legacy readers (string compare /
+        log-only) and the dormant deadline dual-key reader depend on this
+        exact pair; a regression back to the pre-Phase-5 int-only shape (or
+        dropping either key from the dump) must fail here."""
+        result = ArcaCreationResult(
+            platform="arca",
+            status="ACTIVE",
+            template_id="tpl-test-001",
+            sandbox_id="sandbox-abc123",
+            ttl_expiration_time="2025-06-15 23:06:40",
+            ttl_expiration_timestamp=_TTL_MS,
+        )
+
+        props = result.model_dump()
+
+        assert "ttl_expiration_time" in props
+        assert "ttl_expiration_timestamp" in props
+        assert isinstance(props["ttl_expiration_time"], str)
+        assert isinstance(props["ttl_expiration_timestamp"], int)
+        assert props["ttl_expiration_time"] == "2025-06-15 23:06:40"
+        assert props["ttl_expiration_timestamp"] == _TTL_MS
 
 
 class TestStartDeviceHook:
@@ -263,7 +300,7 @@ class TestStartDeviceHook:
     async def test_arca_create_ttl_key_missing_skips_register_and_logs_warning(
         self, caplog
     ):
-        """WR-03: a props dict missing the ttl_expiration_time KEY (not just a
+        """WR-03: a props dict missing the ttl_expiration_timestamp KEY (not just a
         None value) must skip register and log a warning — never silently."""
         svc, mock_schedule_repo, _ = _make_service()
         response = _response(props_override={"platform": "arca", "status": "ACTIVE"})
@@ -282,9 +319,72 @@ class TestStartDeviceHook:
             r
             for r in caplog.records
             if r.levelno == logging.WARNING
-            and "missing ttl_expiration_time" in r.message
+            and "missing ttl_expiration_timestamp" in r.message
         ]
         assert len(warnings) == 1
+
+    @pytest.mark.asyncio
+    async def test_arca_create_ttl_zero_skips_register_and_logs_warning(self, caplog):
+        """WR-02: ttl_expiration_timestamp == 0 is treated as missing — skip
+        register and warn, never anchor the schedule at epoch 0 (1970 loop)."""
+        svc, mock_schedule_repo, _ = _make_service()
+        response = _response(
+            props_override={
+                "platform": "arca",
+                "status": "ACTIVE",
+                "ttl_expiration_timestamp": 0,
+            }
+        )
+
+        with patch.object(
+            DefaultDeviceService, "start_device", new=AsyncMock(return_value=response)
+        ):
+            with caplog.at_level(logging.WARNING, logger="core-scheduler"):
+                result = await svc.start_device(
+                    tenant="test-tenant", device_uuid="DEVICE-test-001"
+                )
+
+        assert result is response
+        mock_schedule_repo.register.assert_not_called()
+        warnings = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING
+            and "missing ttl_expiration_timestamp" in r.message
+        ]
+        assert len(warnings) == 1
+
+    @pytest.mark.asyncio
+    async def test_arca_create_legacy_ttl_time_fallback_registers(self):
+        """WR-02: pre-release props persisted only the legacy integer-ms
+        ttl_expiration_time key — the dual-key fallback reads it and
+        registers with the real expiry instead of deferring to the
+        discovery scan."""
+        svc, mock_schedule_repo, _ = _make_service()
+        response = _response(
+            props_override={
+                "platform": "arca",
+                "status": "ACTIVE",
+                "ttl_expiration_time": _TTL_MS,
+            }
+        )
+
+        with patch.object(
+            DefaultDeviceService, "start_device", new=AsyncMock(return_value=response)
+        ):
+            result = await svc.start_device(
+                tenant="test-tenant", device_uuid="DEVICE-test-001"
+            )
+
+        assert result is response
+        expected_next = _expiration_dt() - timedelta(hours=12)
+        mock_schedule_repo.register.assert_called_once_with(
+            "test",
+            sandbox_id="sandbox-abc123",
+            source_table="baas_device",
+            source_id=response.id,
+            next_renew_at=expected_next,
+        )
 
 
 # ── stop_device_by_uuid (INTG-02 set_status) ───────────────────────────

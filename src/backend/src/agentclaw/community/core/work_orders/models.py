@@ -72,6 +72,7 @@ class WorkOrderEventType(StrEnum):
     HUMAN2BOT_PUBLIC_ORDER_COMPLETED = "HUMAN2BOT_PUBLIC_ORDER_COMPLETED"
     BOT2BOT_PUBLIC_ORDER_CREATED = "BOT2BOT_PUBLIC_ORDER_CREATED"
     BOT2BOT_PUBLIC_ORDER_COMPLETED = "BOT2BOT_PUBLIC_ORDER_COMPLETED"
+    TASK_DISCOVERED = "TASK_DISCOVERED"
 
 
 EVENT_CATEGORIES: dict[WorkOrderEventType, NotificationCategory] = {
@@ -93,6 +94,7 @@ EVENT_CATEGORIES: dict[WorkOrderEventType, NotificationCategory] = {
     WorkOrderEventType.HUMAN2BOT_PUBLIC_ORDER_COMPLETED: NotificationCategory.NOTICE,
     WorkOrderEventType.BOT2BOT_PUBLIC_ORDER_CREATED: NotificationCategory.NOTICE,
     WorkOrderEventType.BOT2BOT_PUBLIC_ORDER_COMPLETED: NotificationCategory.NOTICE,
+    WorkOrderEventType.TASK_DISCOVERED: NotificationCategory.NOTICE,
 }
 
 # Approval events are extracted from the single classification table so new

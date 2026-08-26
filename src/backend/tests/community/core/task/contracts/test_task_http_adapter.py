@@ -157,7 +157,10 @@ class TestTaskList:
         c, _ = client
         task_id = _execute_and_get_id(c)
 
-        r = c.get("/openapi/v1/collaboration/tasks/list")
+        r = c.get(
+            "/openapi/v1/collaboration/tasks/list",
+            params={"user_id": "owner_user"},
+        )
 
         assert r.status_code == 200, r.text
         records = r.json()["data"]
@@ -171,7 +174,7 @@ class TestTaskList:
         assert record["status"] == "DEFINED"
         assert record["gmt_create"] is not None
 
-    def test_public_list_is_scoped_to_authenticated_user(self, client):
+    def test_public_list_filters_by_explicit_user_id(self, client):
         c, inj = client
         repo = inj.get(TaskInfoRepositoryProtocol)
         repo.insert(TaskInfoRecord(
@@ -185,13 +188,15 @@ class TestTaskList:
             status=Status.PENDING,
         ))
 
-        r = c.get("/openapi/v1/collaboration/tasks/list")
+        r = c.get(
+            "/openapi/v1/collaboration/tasks/list",
+            params={"user_id": "other-user"},
+        )
 
         assert r.status_code == 200, r.text
-        assert all(
-            record["owner_user_id"] == "owner_user"
-            for record in r.json()["data"]
-        )
+        records = r.json()["data"]
+        assert [record["task_id"] for record in records] == ["other-user-task"]
+        assert records[0]["owner_user_id"] == "other-user"
 
     def test_list_filters_persisted_status(self, client):
         c, _ = client
@@ -199,11 +204,11 @@ class TestTaskList:
 
         pending = c.get(
             "/openapi/v1/collaboration/tasks/list",
-            params={"status": Status.PENDING.value},
+            params={"status": Status.PENDING.value, "user_id": "owner_user"},
         )
         done = c.get(
             "/openapi/v1/collaboration/tasks/list",
-            params={"status": Status.DONE.value},
+            params={"status": Status.DONE.value, "user_id": "owner_user"},
         )
 
         assert any(item["task_id"] == task_id for item in pending.json()["data"])

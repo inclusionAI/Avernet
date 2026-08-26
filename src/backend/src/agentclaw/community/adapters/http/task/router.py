@@ -35,7 +35,7 @@ import httpx
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
@@ -131,14 +131,21 @@ async def get_task_dashboard_internal(
 async def list_tasks_internal(
     request: Request,
     status: str | None = None,
+    user_id: str | None = Query(
+        None,
+        description="可选:按 owner_user_id 过滤;为空返回全量。与公开面 "
+        "``/openapi/v1/.../list`` 的 owner 作用域语义对齐(内部镜像用查询参数身份,非签名 principal)",
+    ),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> Envelope[list[TaskInfoRecordDTO]]:
-    """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选状态过滤)。
+    """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选状态/owner 过滤)。
 
-    非法 ``status`` 过滤值 → 400(经 ``HTTPException`` → 中央 handler → ``ErrorEnvelope``)。"""
+    非法 ``status`` 过滤值 → 400(经 ``HTTPException`` → 中央 handler → ``ErrorEnvelope``)。
+    ``user_id`` 为空时不按 owner 过滤(返回全量,供内部可信调用方);传入则按 ``owner_user_id``
+    过滤,与公开面 ``/openapi/v1/.../list`` 的 owner 作用域一致。"""
     if status is not None and status not in {s.value for s in Status}:
         raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
-    items = service.list_tasks(status)
+    items = service.list_tasks(status, owner_user_id=user_id)
     return envelope([task_info_record_to_dto(item) for item in items], request)
 
 
@@ -272,7 +279,7 @@ async def discover_tasks(
             "tasks": [
                 {
                     "task_id": r.task.task_id,
-                    "project_name": r.task.project_name,
+                    "project_name": r.task.title,
                     "success": r.success,
                     "session_id": r.session.session_id if r.session else None,
                     "notification_sent": r.notification_sent,
@@ -311,7 +318,7 @@ async def get_discovery_status(
             "bot_id": t.bot_id,
             "owner_id": t.owner_id,
             "dt": t.dt,
-            "project_name": t.project_name,
+            "project_name": t.title,
             "status": t.status,
             "priority": t.priority,
         }
@@ -408,6 +415,83 @@ async def run_scheduled_trigger(
         "total_discovered": len(payload),
         "results": payload,
     }
+
+
+@router.post("/discovery/reschedule")
+async def reschedule_cron(
+    cron: str = Query(..., description="新的 5 字段 cron 表达式, e.g. '30 14 * * *'"),
+    timezone: str | None = Query(None, description="时区, 默认沿用当前时区"),
+    scheduler: TaskDiscoveryScheduler = Injected(TaskDiscoveryScheduler),  # noqa: B008
+) -> dict[str, Any]:
+    """运行时修改 cron 触发时间 — 无需重启 backend。
+
+    使用 APScheduler ``reschedule_job()`` 原地替换 job 的 trigger，
+    新 cron 立即生效，旧的下一次执行计划被丢弃。
+
+    扁平 JSON 响应（与 scheduler-status / scheduled-trigger 一致）。
+    """
+    logger.info("[task_discovery] reschedule received: cron='%s' tz='%s'", cron, timezone)
+    try:
+        ok = scheduler.reschedule(cron, timezone=timezone)
+    except Exception as exc:
+        logger.error(
+            "[task_discovery] reschedule failed: %s", exc, exc_info=True,
+        )
+        return {"success": False, "message": str(exc)}
+    if not ok:
+        return {"success": False, "message": "scheduler not running"}
+
+    status = scheduler.get_status()
+    jobs = status.get("jobs") or []
+    next_run = jobs[0].get("next_run_time") if jobs else None
+    return {
+        "success": True,
+        "cron": cron,
+        "timezone": status.get("timezone"),
+        "next_run_time": next_run,
+    }
+
+
+@router.post("/discovery/dingtalk-config")
+async def set_dingtalk_config(
+    body: dict = Body(...),
+) -> dict[str, Any]:
+    """运行时注入钉钉凭证 + 前端 URL — 无需重启 backend。
+
+    测试/e2e 可通过本端点注入 AK/Robot/Template 和可选的 frontend_url，
+    随后的 cron fire 即用这些凭证投递卡片，card_data 内的 session_url 也用注入的 frontend_url。
+    凭证仅存于进程内存，重启后失效。
+    """
+    from agentclaw.community.plugins.community.notify_sender import (
+        DingTalkCredentialHolder,
+    )
+
+    ak_id = (body.get("ak_id") or "").strip()
+    ak_secret = (body.get("ak_secret") or "").strip()
+    robot_code = (body.get("robot_code") or "").strip()
+    card_template_id = (body.get("card_template_id") or "").strip()
+    frontend_url = (body.get("frontend_url") or "").strip()
+
+    if not all([ak_id, ak_secret, robot_code, card_template_id]):
+        return {"success": False, "message": "钉钉字段必填: ak_id, ak_secret, robot_code, card_template_id"}
+
+    DingTalkCredentialHolder.set(ak_id, ak_secret, robot_code, card_template_id)
+    injected = ["dingtalk credentials"]
+
+    if frontend_url:
+        from agentclaw.community.core.task.task_discovery.session_initiator import (
+            FrontendUrlHolder,
+        )
+        FrontendUrlHolder.set(frontend_url)
+        injected.append(f"frontend_url={frontend_url}")
+
+    logger.info(
+        "[task_discovery] injected via API: %s (robot=%s, template=%s)",
+        ", ".join(injected),
+        robot_code,
+        card_template_id,
+    )
+    return {"success": True, "message": "; ".join(injected) + " injected"}
 
 
 # ===== task_loop inbound PUSH callback router(单 bot workflow / bcn 协作群)=====

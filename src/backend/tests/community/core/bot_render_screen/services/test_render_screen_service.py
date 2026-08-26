@@ -121,14 +121,20 @@ class TestListRenderScreens:
         assert len(result) == 1
         mock_repo.list_by_bot_id.assert_called_once_with(bot_id="bot_001", owner_id=None)
 
-    def test_shared_coding_bot_denies_non_collaborator(self, service, mock_repo, mock_bot_repo):
+    def test_shared_coding_bot_list_open_to_group_viewers(self, service, mock_repo, mock_bot_repo):
+        # 读放开：群聊/分享场景的非协作查看者也能读到共享 bot 的副屏配置，
+        # 否则前端渲染副屏会报「组件库不存在」。写权限不受影响。
         mock_bot_repo.get_by_id.return_value = _bot(template_type="applicationCoding", active_engine="claude_code")
-        with pytest.raises(PermissionError):
-            service.list_render_screens(
-                bot_id="bot_001",
-                owner_id="owner_001",
-                current_user_id="stranger",
-            )
+        mock_repo.list_by_bot_id.return_value = [_record(id=1, owner_id="owner_001")]
+
+        result = service.list_render_screens(
+            bot_id="bot_001",
+            owner_id="owner_001",
+            current_user_id="stranger",
+        )
+
+        assert len(result) == 1
+        mock_repo.list_by_bot_id.assert_called_once_with(bot_id="bot_001", owner_id=None)
 
 
     def test_missing_bot_fails_closed(self, service, mock_bot_repo):

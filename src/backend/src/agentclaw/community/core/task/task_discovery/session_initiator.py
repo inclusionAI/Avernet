@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from typing import Any, Protocol
 
 import httpx
@@ -28,11 +27,23 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-#: 默认 backend 地址（用于查 bot connection 解析 engine target）
-_DEFAULT_BACKEND_URL = "http://localhost:8888"
 
-#: 默认前端 workbench 端口
-_DEFAULT_FRONTEND_PORT = "8000"
+class FrontendUrlHolder:
+    """运行时前端 URL holder — 允许通过 API 动态注入，无需重启 backend。
+
+    优先级：holder > 构造注入值 > 默认值。
+    这是一个纯类变量 holder，不读取环境变量 — env 解析在 DI factory 完成。
+    """
+    _url: str = ""
+
+    @classmethod
+    def set(cls, url: str) -> None:
+        cls._url = url.rstrip("/")
+        logger.info("[FrontendUrlHolder] frontend url injected at runtime: %s", cls._url)
+
+    @classmethod
+    def get(cls) -> str:
+        return cls._url
 
 #: WebSocket 协议常量
 _WS_PROTOCOL = 3
@@ -75,17 +86,13 @@ class CronRelaySessionInitiator:
     def __init__(
         self,
         cron_relay: Any,
-        frontend_url: str | None = None,
+        frontend_url: str = "http://localhost:8000",
+        backend_url: str = "http://localhost:8888",
         wait_for_reply: bool = False,
     ):
         self._cron_relay = cron_relay
-        self._frontend_url = frontend_url or os.environ.get(
-            "FRONTEND_URL",
-            f"http://localhost:{_DEFAULT_FRONTEND_PORT}",
-        )
-        self._backend_url = os.environ.get(
-            "BACKEND_URL", _DEFAULT_BACKEND_URL,
-        )
+        self._frontend_url = frontend_url
+        self._backend_url = backend_url
         self._wait_for_reply = wait_for_reply
 
     async def initiate_session(
@@ -108,9 +115,9 @@ class CronRelaySessionInitiator:
         first_task = tasks[0]
         task_count = len(tasks)
         title = (
-            f"[DreamMode] 发现 {task_count} 件可能有意义的事情"
+            f"[DreamMode-任务发现] 发现 {task_count} 件可能有意义的事情"
             if task_count > 1
-            else f"[DreamMode] {first_task.project_name}"
+            else f"[DreamMode-任务发现] {first_task.title}"
         )
 
         # ── Step 1: 创建 session ──────────────────────────────
@@ -347,14 +354,28 @@ class CronRelaySessionInitiator:
     # ── 辅助方法 ──────────────────────────────────────────────
 
     def _build_discovery_prompt(self, tasks: list[DiscoveredTask]) -> str:
-        """构造发现提示消息 — 作为 chat.send 的 message 发送给 bot。"""
+        """构造发现提示消息 — 作为 chat.send 的 message 发送给 bot。
+
+        直接按 4 个维度组织（对齐执行层 TaskSpec 语义）：
+          目标       ← task.objective（缺省回退 title）
+          预期交付物 ← task.instruction
+          验收标准   ← task.acceptances（为空则提示确认时补充）
+          约束       ← task.background
+        """
         lines = ["/task 我为您发现了以下可能有意义的事情，请确认是否执行：\n"]
         for i, task in enumerate(tasks, 1):
-            lines.append(f"{i}. 【{task.project_name}】")
-            lines.append(f"   简介：{task.description}")
-            lines.append(f"   业务场景：{task.business_scenario}")
-            if task.work_item_url:
-                lines.append(f"   关联需求：{task.work_item_url}")
+            lines.append(f"{i}. 【{task.title}】")
+            lines.append(f"   目标：{task.objective or task.title}")
+            lines.append(f"   预期交付物：{task.instruction}")
+            if task.acceptances:
+                lines.append("   验收标准：")
+                for a in task.acceptances:
+                    lines.append(
+                        f"     - [{a.get('id', '')}] {a.get('description', '')}"
+                    )
+            else:
+                lines.append("   验收标准：（确认时可由你补充）")
+            lines.append(f"   约束：{task.background}")
             lines.append("")
         lines.append("请向用户展示以上任务，并询问是否确认执行。")
         return "\n".join(lines)
@@ -363,12 +384,20 @@ class CronRelaySessionInitiator:
         """构建前端 workbench session URL。
 
         前端路由格式: ``/assistant?botId={bot_id}&sessionId={session_id}``
-        sessionId 需 URL encode（如 ``agent:main:main`` 含冒号）。
+        sessionId 需 URL encode（如 ``agent:main:xxx`` 含冒号）。
+
+        engine 返回的 raw session_id 需要加 ``agent:main:`` 前缀构成
+        前端所需的完整 session key，这样 session_url 可直接被钉钉卡片 /
+        通知 / 测试脚本消费，无需外部拼装。
+
+        动态解析 frontend URL — 支持运行时 API 注入（FrontendUrlHolder）。
         """
         from urllib.parse import quote
 
-        base = self._frontend_url.rstrip("/")
-        encoded_sid = quote(session_id, safe="")
+        base = FrontendUrlHolder.get() or self._frontend_url
+        base = base.rstrip("/")
+        full_session_key = f"agent:main:{session_id}"
+        encoded_sid = quote(full_session_key, safe="")
         return f"{base}/assistant?botId={agent_id}&sessionId={encoded_sid}"
 
 

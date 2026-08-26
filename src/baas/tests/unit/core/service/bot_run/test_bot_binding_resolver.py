@@ -12,11 +12,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from secbaas.community.api.eval_env import DYNAMIC_ENV_TAG_KEY
 from secbaas.community.core.repository.ac_bot import AcBotRecord
 from secbaas.community.core.repository.device_binding import (
     DeviceBindingRecord,
 )
-from secbaas.community.api.eval_env import DYNAMIC_ENV_TAG_KEY
 from secbaas.community.core.service.bot_run import BotBindingResolver
 
 # ==================== Fixtures ====================
@@ -821,7 +821,9 @@ class TestServiceBotEvalStage:
         assert result.binding_id == self.BINDING_ID_EVAL
         # 验证委托调用
         eval_plugin.resolve_eval_binding.assert_called_once_with(
-            bot_id=BOT_ID, entity_id=ENTITY_ID, env=ENV,
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
         )
         # 走 eval 路径，不应查 publish 表
         mock_publish_repo.get_binding_id.assert_not_called()
@@ -831,7 +833,9 @@ class TestServiceBotEvalStage:
     ):
         """Plugin 返回 None → resolve 返回 None。"""
         resolver, _ = self._make_eval_resolver(
-            mock_ac_bot_repo, mock_publish_repo, mock_binding_repo,
+            mock_ac_bot_repo,
+            mock_publish_repo,
+            mock_binding_repo,
             resolved_id=None,
         )
         mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
@@ -956,7 +960,8 @@ class TestEvalSwitchControl:
     ):
         """Plugin enabled → lifecycle_stage='eval' 走 eval binding。"""
         eval_plugin = _make_eval_binding_resolver_plugin(
-            enabled=True, resolved_id=self.BINDING_ID_EVAL,
+            enabled=True,
+            resolved_id=self.BINDING_ID_EVAL,
         )
         resolver = self._make_resolver_with_plugin(
             mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, eval_plugin

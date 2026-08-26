@@ -638,6 +638,9 @@ def test_mcp_membership_is_independent_for_two_owners_sharing_default_bot_id():
         owner_id="owner-a",
         set_id=str(owner_a.id),
         server_code="mcp.weather",
+        name="Weather",
+        description=None,
+        icon=None,
     )
 
     assert result.changed is True
@@ -725,6 +728,7 @@ def test_create_rejects_a_duplicate_name_without_a_durable_replay_record():
         description="description",
     )
     assert first["name"] == "set"
+    assert first["is_active"] is True
     with pytest.raises(SkillSetControlPlaneConflictError, match="SKILL_SET_NAME_CONFLICT"):
         repository.create_set(
             bot_id="bot", owner_id="owner", name="set", description="description"
@@ -816,11 +820,16 @@ def test_active_skill_set_mutates_mcp_membership_and_installation_atomically():
         session.flush()
 
     added = repository.add_mcp(
-        bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather"
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather",
+        name="Weather MCP", description="Weather tools",
+        icon="https://example.test/weather.png",
     )
     assert added.changed is True
     with db.orm_session() as session:
-        assert session.query(SkillSetMCPServer).count() == 1
+        membership = session.query(SkillSetMCPServer).one()
+        assert (membership.name, membership.description, membership.icon) == (
+            "Weather MCP", "Weather tools", "https://example.test/weather.png",
+        )
         assert {
             row.server_code for row in session.query(BotMCPInstallation).all()
         } == {"mcp.weather"}
@@ -849,13 +858,15 @@ def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
         SkillSetControlPlaneConflictError, match="RESOURCE_DIRECT_ACTIVE"
     ):
         repository.add_mcp(
-            bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather"
+            bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather",
+            name="Weather", description=None, icon=None,
         )
     assert repository.deactivate_mcp_direct(
         bot_id="bot", owner_id="owner", server_code="mcp.weather"
     ).changed
     assert repository.add_mcp(
-        bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather"
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather",
+        name="Weather", description=None, icon=None,
     ).changed
     with pytest.raises(
         SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_SKILL_SET"

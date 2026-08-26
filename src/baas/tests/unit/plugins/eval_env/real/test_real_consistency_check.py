@@ -22,9 +22,7 @@ def _make_binding_info(device_props=None):
 class TestRealEvalConsistencyCheck:
     def test_consistent_tags_returns_true(self):
         checker = RealEvalConsistencyCheck()
-        binding_info = _make_binding_info(
-            device_props={DYNAMIC_ENV_TAG_KEY: "staging"}
-        )
+        binding_info = _make_binding_info(device_props={DYNAMIC_ENV_TAG_KEY: "staging"})
         result = checker.check_default_tag_consistency(
             binding_info=binding_info,
             chat_metadata={"default_tag": "staging"},
@@ -44,9 +42,7 @@ class TestRealEvalConsistencyCheck:
 
     def test_no_metadata_tag_returns_true(self):
         checker = RealEvalConsistencyCheck()
-        binding_info = _make_binding_info(
-            device_props={DYNAMIC_ENV_TAG_KEY: "staging"}
-        )
+        binding_info = _make_binding_info(device_props={DYNAMIC_ENV_TAG_KEY: "staging"})
         result = checker.check_default_tag_consistency(
             binding_info=binding_info,
             chat_metadata={},
