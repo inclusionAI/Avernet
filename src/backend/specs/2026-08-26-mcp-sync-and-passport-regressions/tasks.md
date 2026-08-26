@@ -115,7 +115,7 @@ green at the end of this group *without* any test expectation changing.
       the device, which is the divergence the spec forbids. Reconciling is
       today's behaviour and is correct, just not narrowed. Narrowing needs
       the dependency lookup first — Group 4, where the flags gate anything.
-- [ ] 3.3 Add `SkillSetService.sync_mcp_delivery(*, claimed, released)`:
+- [x] 3.3 Add `SkillSetService.sync_mcp_delivery(*, claimed, released)`:
       fetch catalogue details for `claimed` only, push via
       `sync_mcp_details_for_bot`, then `remove_mcp_detail` each `released`
       code. Skip the push entirely when `claimed` is empty.

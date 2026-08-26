@@ -515,6 +515,90 @@ class SkillSetService:
             self.user_id or self.entity_id, desired_skills
         )
 
+    async def sync_mcp_delivery(
+        self, *, claimed: frozenset[str], released: frozenset[str]
+    ) -> bool:
+        """Deliver configuration for newly claimed MCPs, withdraw it for released ones.
+
+        The counterpart to ``sync_mcp_desired_state``: that one *declares* the
+        complete allow-list, which is overwrite-style and must always carry
+        the whole set. This one *delivers*, which is per-MCP and must only
+        touch what actually changed — re-pushing an unchanged MCP rewrites its
+        device-side configuration from the DB for no reason, and deleting one
+        that is still supplied would break it.
+
+        Both sets are declared by the mutation and already guarded against the
+        projected set by the caller, so they are as small as the change was:
+        one code for an MCP add or remove, the Set's members for an
+        activation. ``sync_mcp_details_for_bot`` resolves the device once for
+        the batch, so at one entry that is one device write, not a fan-out.
+        """
+        if not claimed and not released:
+            return True
+        try:
+            entries: list[dict[str, Any]] = []
+            for server_code in sorted(claimed):
+                detail = self.mcp_center.get_mcp_detail(server_code)
+                if not detail:
+                    # Only ever a code we are actually installing — an
+                    # unrelated catalogue gap cannot reach here and block the
+                    # whole projection.
+                    logger.error(
+                        "[sync_mcp_delivery] no catalogue detail for %s, bot_id=%s",
+                        server_code, self.bot_id,
+                    )
+                    return False
+                entries.append(detail)
+            if entries:
+                logger.info(
+                    "[sync_mcp_delivery] pushing MCP configuration: bot_id=%s, "
+                    "mcps=%s, codes=%s",
+                    self.bot_id, len(entries), sorted(claimed),
+                )
+                delivery = await self._mcp_sync_service.sync_mcp_details_for_bot(
+                    user_id=self.user_id or self.entity_id or "",
+                    mcp_entries=entries,
+                    bot_id=self.bot_id,
+                    entity_id=self.entity_id,
+                    engine_type=self.engine_type,
+                )
+                if not delivery.get("success"):
+                    logger.error(
+                        "[sync_mcp_delivery] MCP configuration push failed: "
+                        "bot_id=%s, error=%s",
+                        self.bot_id, delivery.get("error"),
+                    )
+                    return False
+            for server_code in sorted(released):
+                # WARNING, not INFO: this deletes the MCP's stored endpoint,
+                # api_key and headers from the device, and nothing here can
+                # put them back.
+                logger.warning(
+                    "[sync_mcp_delivery] removing MCP configuration from device: "
+                    "bot_id=%s, server_code=%s",
+                    self.bot_id, server_code,
+                )
+                removal = await self._mcp_sync_service.remove_mcp_detail(
+                    server_code=server_code,
+                    bot_id=self.bot_id,
+                    user_id=self.entity_id or self.user_id or "",
+                )
+                if not removal.get("success"):
+                    logger.error(
+                        "[sync_mcp_delivery] MCP removal failed: bot_id=%s, "
+                        "server_code=%s, error=%s",
+                        self.bot_id, server_code, removal.get("error"),
+                    )
+                    return False
+            return True
+        except Exception:
+            logger.warning(
+                "[sync_mcp_delivery] MCP delivery failed for bot_id=%s",
+                self.bot_id,
+                exc_info=True,
+            )
+            return False
+
     async def sync_mcp_desired_state(self, *, server_codes: set[str]) -> bool:
         """Project the complete MCP desired state to the Bot runtime.
 
