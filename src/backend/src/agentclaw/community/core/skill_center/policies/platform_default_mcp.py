@@ -13,6 +13,9 @@ from typing import Any
 from agentclaw.community.core.mcp.services._defaults import (
     get_default_mcp_server_codes,
 )
+from agentclaw.community.core.skill_center.policies.capability_ownership import (
+    require_direct_mcp_control_allowed,
+)
 
 
 class PlatformDefaultMcpPolicy:
@@ -38,6 +41,25 @@ class PlatformDefaultMcpPolicy:
                 ext_info=self._ext_info_provider(bot_id),
             )
         )
+
+    def require_direct_control_allowed(
+        self,
+        *,
+        bot: Mapping[str, Any],
+        server_code: str,
+    ) -> frozenset[str]:
+        """Validate ownership and return the immutable per-Bot snapshot.
+
+        The snapshot is passed into the persistence UoW so the transactional
+        boundary rechecks the same decision without resolving mutable template
+        context again inside the database transaction.
+        """
+        platform_default_codes = self.server_codes_for(bot)
+        require_direct_mcp_control_allowed(
+            server_code=server_code,
+            platform_default_codes=platform_default_codes,
+        )
+        return platform_default_codes
 
 
 __all__ = ["PlatformDefaultMcpPolicy"]

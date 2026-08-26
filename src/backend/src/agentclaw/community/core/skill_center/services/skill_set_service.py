@@ -405,6 +405,9 @@ class SkillSetService:
         """
         provider = self._ext_info_provider
         if provider is None:
+            # Runtime DI always supplies this provider. In strict mode a
+            # missing provider means the service was constructed incorrectly;
+            # it is not evidence that this Bot has no template defaults.
             if strict:
                 raise RuntimeError("Default MCP policy provider is unavailable")
             return None
@@ -443,30 +446,26 @@ class SkillSetService:
             if strict:
                 raise RuntimeError("Default MCP template context is unavailable")
             return None
-        if strict:
+        try:
             bot = self._bot_repo.get_by_id_and_owner(
                 str(target_bot_id), str(self.entity_id)
             )
-            if not isinstance(bot, dict):
+        except Exception as exc:
+            if strict:
+                raise
+            logger.warning(
+                "[SkillSetService] default capabilities template_type lookup failed for "
+                "bot_id=%s: %s",
+                target_bot_id,
+                exc,
+            )
+            return None
+        if not isinstance(bot, dict):
+            if strict:
                 raise RuntimeError("Default MCP template context is unavailable")
-        else:
-            try:
-                bot = self._bot_repo.get_by_id_and_owner(
-                    str(target_bot_id), str(self.entity_id)
-                )
-            except Exception as exc:
-                logger.warning(
-                    "[SkillSetService] default capabilities template_type lookup failed for "
-                    "bot_id=%s: %s",
-                    target_bot_id,
-                    exc,
-                )
-                return None
-        if isinstance(bot, dict):
-            template_type = bot.get("template_type")
-            if isinstance(template_type, str):
-                return template_type
-        return None
+            return None
+        template_type = bot.get("template_type")
+        return template_type if isinstance(template_type, str) else None
 
     def _sync_symlinks_to_device_if_needed(
         self, user_id: str | None = None, desired_skills: list[dict] | None = None
