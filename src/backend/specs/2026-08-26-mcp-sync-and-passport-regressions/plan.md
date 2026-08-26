@@ -447,11 +447,16 @@ for the mutation (`capability_desired_state.py:493`):
 mcp_codes = {str(member.server_code) for member in mcp_members}
 ```
 
-So they ride back on `DesiredStateMutation.details` — the dict field that
-already exists for exactly this
-(`capability_desired_state_types.py:34`) — rather than the service issuing a
-second, unlocked query that could disagree with what the mutation actually
-installed. The scope is therefore finalised *after* `mutation()` returns, not
+So they ride back on a dedicated `DesiredStateMutation.mcp_codes` field,
+rather than the service issuing a second, unlocked query that could disagree
+with what the mutation actually installed.
+
+**Not on `details`**, which an earlier draft of this plan specified:
+`MutationProjectionFlow.apply` returns
+`{**result.item, "changed": result.changed, **result.details}`, so `details`
+is spread into the command's return value and thence the HTTP response body.
+Runtime-projection facts placed there would leak into the public API of
+every activate and deactivate call. The scope is therefore finalised *after* `mutation()` returns, not
 before it, for these two commands.
 
 `add_skill`/`remove_skill` carry the skill's `mcp_dependencies` when it has
@@ -636,6 +641,7 @@ that bar:
 | `core/skill_center/services/_mutation_flow.py` | `ProjectionScope`; forward and invert it across the compensating projection |
 | `core/skill_center/services/skill_set_management_service.py` | per-command scope declaration |
 | `core/repository/implementations/skill_center/capability_desired_state.py` | return the Set's MCP codes on the activate/deactivate mutation result |
+| `core/repository/capability_desired_state_types.py` | `DesiredStateMutation.mcp_codes` — a dedicated field, since `details` reaches the HTTP response |
 | `core/devices/services/device_sync.py` | `apply_runtime_projection` + `RuntimeProjectionIntent`, with a per-call default |
 | `core/devices/services/baas_device_sync.py`, `singlebox_device_sync.py` | scope-aware delivery |
 | `core/skill_center/runtime_projection_contract.py`, `api/bot_runtime_projector.py` | protocol: `scope` parameter |

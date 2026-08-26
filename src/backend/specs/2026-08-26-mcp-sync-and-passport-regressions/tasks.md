@@ -101,7 +101,7 @@ green at the end of this group *without* any test expectation changing.
 - [x] 3.1 Return the Set's MCP codes on the activate/deactivate mutation:
       `set_skill_set_active` already computes `mcp_codes` under the row lock
       (`core/repository/implementations/skill_center/capability_desired_state.py:493`),
-      so put them on `DesiredStateMutation.details` rather than re-querying
+      so put them on a dedicated `DesiredStateMutation.mcp_codes` field (NOT `details`, which is spread into the HTTP response body) rather than re-querying
       unlocked in the service.
 - [ ] 3.2 Declare the real scope on each of the seven commands per the plan's
       table (`skill_set_management_service.py:286`–`:584`). `add_mcp` /
