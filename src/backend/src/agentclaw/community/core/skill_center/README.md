@@ -29,6 +29,12 @@ provides:
   - "SkillActivationSyncScope"
   - "SkillActivationSyncTaskHandler"
   - "SkillActivationSyncWork"
+  - "SkillParser"
+  - "SkillMetadata"
+  - "SkillManifestError"
+  - "SkillManifestErrorCode"
+  - "SkillManifestValidationIssue"
+  - "SkillManifestValidationResult"
   - "enqueue_skill_activation_sync"
   - "build_skill_activation_sync_payload"
   - "parse_skill_activation_sync_payload"
@@ -104,7 +110,7 @@ internal_dependencies:
 
 ### Change impact
 
-Capability activation is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols.
+Capability activation is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols. Changes to `SkillMetadataParserProtocol`, `SkillMetadata`, or stable manifest error codes affect Local folder upload immediately and the shared fixtures consumed by Git import, Draft validation and publication validation; coordinate those consumers before changing fields, limits or codes. List/detail/market readers must continue consuming parser-derived projections rather than inventing a second name or description source.
 
 ### One writer, one flush, one reader, one rule book
 

@@ -8,24 +8,42 @@ text when parsing ``name`` and ``description``.
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.skill_center.skill_metadata import (
+    SkillManifestError,
+    SkillManifestErrorCode,
+    SkillManifestValidationIssue,
+    SkillManifestValidationResult,
+    SkillMetadata,
+)
 
 
 logger = get_logger()
 
+_MAX_SKILL_NAME_LENGTH = 100
+_MAX_SKILL_DESCRIPTION_UTF8_BYTES = 65_535
 
-class SkillManifestError(ValueError):
-    """Raised when a ``SKILL.md`` manifest violates the parser contract."""
 
-    def __init__(self, code: str, message: str, field: str | None = None) -> None:
-        self.code = code
-        self.field = field
-        super().__init__(message)
+def _validate_manifest_path(path: str) -> None:
+    """Accept a relative package path whose canonical leaf is ``SKILL.md``."""
+    parsed = PurePosixPath(path)
+    if (
+        not path
+        or "\\" in path
+        or parsed.is_absolute()
+        or ".." in parsed.parts
+        or parsed.name != "SKILL.md"
+    ):
+        raise SkillManifestError(
+            SkillManifestErrorCode.INVALID_PATH,
+            "Manifest path must be a safe relative path ending in SKILL.md.",
+            "path",
+        )
 
 
 @dataclass
@@ -154,7 +172,32 @@ def _validate_manifest(data: dict[str, Any]) -> dict[str, Any]:
             )
         result[field_name] = value
 
+    if len(result["name"]) > _MAX_SKILL_NAME_LENGTH:
+        raise SkillManifestError(
+            SkillManifestErrorCode.NAME_TOO_LONG,
+            f"SKILL.md field 'name' cannot exceed {_MAX_SKILL_NAME_LENGTH} characters.",
+            "name",
+        )
+    if len(result["description"].encode("utf-8")) > _MAX_SKILL_DESCRIPTION_UTF8_BYTES:
+        raise SkillManifestError(
+            SkillManifestErrorCode.DESCRIPTION_TOO_LONG,
+            "SKILL.md field 'description' cannot exceed "
+            f"{_MAX_SKILL_DESCRIPTION_UTF8_BYTES} UTF-8 bytes.",
+            "description",
+        )
+
     return result
+
+
+def _parse_manifest(
+    content: str | bytes, *, path: str = "SKILL.md"
+) -> tuple[dict[str, Any], str]:
+    """Decode, parse and validate one manifest exactly once."""
+    _validate_manifest_path(path)
+    if isinstance(content, bytes):
+        content = SkillParser.decode_content(content)
+    frontmatter, body = _extract_frontmatter(content)
+    return _validate_manifest(frontmatter), body
 
 
 def _to_skill_info(data: dict[str, Any]) -> dict[str, Any]:
@@ -187,6 +230,30 @@ def _to_skill_info(data: dict[str, Any]) -> dict[str, Any]:
 
 class SkillParser:
     """Strict parser for ``SKILL.md`` metadata with UTF-8/GBK compatibility."""
+
+    @staticmethod
+    def parse_skill_markdown(
+        content: str | bytes, *, path: str = "SKILL.md"
+    ) -> SkillMetadata:
+        """Return authoritative metadata through the reusable parser seam."""
+        validated, _body = _parse_manifest(content, path=path)
+        return SkillMetadata(
+            name=validated["name"], description=validated["description"]
+        )
+
+    @staticmethod
+    def validate_skill_markdown(
+        content: str | bytes, *, path: str = "SKILL.md"
+    ) -> SkillManifestValidationResult:
+        """Validate without making callers depend on exception messages."""
+        try:
+            metadata = SkillParser.parse_skill_markdown(content, path=path)
+        except SkillManifestError as exc:
+            return SkillManifestValidationResult(
+                metadata=None,
+                error=SkillManifestValidationIssue(code=exc.code, field=exc.field),
+            )
+        return SkillManifestValidationResult(metadata=metadata)
 
     @staticmethod
     def decode_content(content: bytes) -> str:
@@ -294,8 +361,9 @@ class SkillParser:
         """Parse strict UTF-8-decoded ``SKILL.md`` content."""
         if not content:
             return None
-        frontmatter, _body = _extract_frontmatter(content)
-        return _to_skill_info(_validate_manifest(frontmatter))
+        validated, _body = _parse_manifest(content)
+        projection = dict(validated)
+        return _to_skill_info(projection)
 
     @staticmethod
     def parse_config(content: str) -> list[dict[str, Any]]:

@@ -24,6 +24,7 @@ from agentclaw.community.core.skill_center.services import (
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
 )
+from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditBusyError,
     SkillsPoolEditGuard,
@@ -547,6 +548,7 @@ def _replacement_service(
         guard or _Guard(),
         lambda: _DeviceResolver(provider),
         runtime,
+        SkillParser(),
     )
 
 
@@ -571,6 +573,7 @@ def _service(
         guard or _Guard(),
         lambda: _DeviceResolver(provider),
         _RuntimeFactory(),
+        SkillParser(),
     )
 
 

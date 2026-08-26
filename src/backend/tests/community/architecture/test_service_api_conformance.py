@@ -76,6 +76,9 @@ from agentclaw.community.api.local_bot_workflow_service import (
 from agentclaw.community.api.skill_query_service import (
     SkillQueryServiceProtocol,
 )
+from agentclaw.community.api.skill_metadata_parser import (
+    SkillMetadataParserProtocol,
+)
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
@@ -135,6 +138,7 @@ from agentclaw.community.core.services.engine_config import EngineConfigService
 from agentclaw.community.core.skill_center.services.skill_query_service import (
     SkillQueryService,
 )
+from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
 )
@@ -182,6 +186,7 @@ _PAIRS = [
     (HealthDiagnosisServiceProtocol, HealthDiagnosisService),
     (BotRuntimeProjectorProtocol, BotRuntimeProjector),
     (SkillQueryServiceProtocol, SkillQueryService),
+    (SkillMetadataParserProtocol, SkillParser),
     (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
     (DirectActivationServiceProtocol, DirectActivationService),
     (LocalSkillDeleteServiceProtocol, LocalSkillDeleteService),
