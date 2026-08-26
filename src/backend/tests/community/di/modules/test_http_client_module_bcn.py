@@ -70,12 +70,22 @@ def test_shared_defaults_reach_the_constructed_client() -> None:
 
 
 def test_override_for_this_qualifier_wins() -> None:
+    """``for_qualifier`` returns the override *whole* — every field of it, not
+    a merge with ``defaults``. Values here are chosen to differ from BOTH the
+    shared defaults and the dataclass defaults, so a regression cannot hide
+    behind a coincidence."""
     pool = cfg.HttpClientPoolConfig(
-        defaults=cfg.HttpClientPoolPolicy(max_connections=10),
-        overrides={QUALIFIER_BCN: cfg.HttpClientPoolPolicy(max_connections=99)},
+        defaults=cfg.HttpClientPoolPolicy(max_connections=10, keepalive_expiry=9.0),
+        overrides={
+            QUALIFIER_BCN: cfg.HttpClientPoolPolicy(
+                max_connections=99, keepalive_expiry=3.5, http2=True
+            )
+        },
     )
     client = HttpClientModule().bcn_http_client(_bcn(), pool)
     assert client._limits.max_connections == 99
+    assert client._limits.keepalive_expiry == 3.5
+    assert client._http2 is True
 
 
 def test_override_for_a_different_qualifier_is_ignored() -> None:

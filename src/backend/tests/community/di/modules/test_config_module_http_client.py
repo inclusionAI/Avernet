@@ -136,3 +136,44 @@ def test_values_are_coerced_from_yaml_scalars(resolve):
     assert conf.defaults.max_connections == 64
     assert conf.defaults.keepalive_expiry == 2.0
     assert isinstance(conf.defaults.keepalive_expiry, float)
+
+
+# ── malformed values must stay inert, never fatal ────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        {"max_connections": None},          # `max_connections:` with no value
+        {"keepalive_expiry": None},         # `keepalive_expiry: ~`
+        {"max_connections": "lots"},
+        {"keepalive_expiry": "soon"},
+        {"max_keepalive_connections": []},
+        {"http2": "maybe"},
+        {"http2": None},
+    ],
+)
+def test_malformed_values_fall_back_instead_of_raising(resolve, block):
+    """A provider exception here is not a loud failure: lifecycle discovery
+    swallows it, so all four HttpClient bindings would vanish at boot with no
+    log line and the first outbound call would die somewhere unrelated. A bad
+    pool ceiling must stay inert, as the block's docs promise."""
+    conf = resolve(block)
+    assert conf.defaults == cfg.HttpClientPoolPolicy()
+
+
+def test_malformed_override_value_falls_back_to_the_shared_default(resolve):
+    conf = resolve({"max_connections": 55, "overrides": {"baas": {"max_connections": None}}})
+    assert conf.for_qualifier("baas").max_connections == 55
+
+
+@pytest.mark.parametrize("raw", ["false", "False", "no", "off", "0", False, 0])
+def test_falsey_http2_scalars_do_not_enable_http2(resolve, raw):
+    """``bool("false")`` is ``True``. Getting this wrong silently turns on a
+    wire-protocol change the design requires to be opt-in."""
+    assert resolve({"http2": raw}).defaults.http2 is False
+
+
+@pytest.mark.parametrize("raw", ["true", "True", "yes", "on", "1", True, 1])
+def test_truthy_http2_scalars_enable_http2(resolve, raw):
+    assert resolve({"http2": raw}).defaults.http2 is True

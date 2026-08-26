@@ -199,6 +199,15 @@
       "base_url": "",
       "base_url_pre": ""
     },
+    "http_client_pool": {
+      "defaults": {
+        "http2": false,
+        "keepalive_expiry": 5.0,
+        "max_connections": 100,
+        "max_keepalive_connections": 20
+      },
+      "overrides": {}
+    },
     "kb": {
       "base_url": "",
       "function_name": "",

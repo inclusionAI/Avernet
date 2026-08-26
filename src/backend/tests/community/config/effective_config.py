@@ -78,6 +78,7 @@ _PROVIDER_METHODS = (
     "workspace_hosting",
     "skill_scan",
     "masa_agent_eval",
+    "http_client_pool",
     "desktop_bot_periodic_scan",
     "dormant_config",
     "dormant_notify",
