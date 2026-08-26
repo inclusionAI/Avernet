@@ -370,14 +370,20 @@ class ArcaPaasService(PaasService):
             # info.ttl_timestamp). Numeric guard required: mock sandbox info
             # objects are MagicMock, so a missing ttl_timestamp yields a
             # MagicMock child via getattr — passing it through would pollute
-            # pydantic validation. Non-numeric values fall back to None
-            # (discovery scan then uses its now+12h fallback).
+            # pydantic validation. Only positive numbers are accepted: 0 and
+            # negatives are not valid deadlines (WR-02), and numeric strings
+            # are coerced with the same int(float()) contract the scheduler
+            # consumers use (WR-03, _renew_one). Anything else falls back to
+            # None (discovery scan then uses its now+12h fallback).
             raw_ttl_timestamp = getattr(info, "ttl_timestamp", None)
-            ttl_expiration_timestamp = (
-                int(raw_ttl_timestamp)
-                if isinstance(raw_ttl_timestamp, (int, float))
-                else None
-            )
+            ttl_expiration_timestamp: int | None = None
+            if isinstance(raw_ttl_timestamp, (int, float)) and raw_ttl_timestamp > 0:
+                ttl_expiration_timestamp = int(raw_ttl_timestamp)
+            elif isinstance(raw_ttl_timestamp, str):
+                try:
+                    ttl_expiration_timestamp = int(float(raw_ttl_timestamp))
+                except (TypeError, ValueError, OverflowError):
+                    ttl_expiration_timestamp = None
             ttl_expiration_time = (
                 format_ttl_expiration_time(ttl_expiration_timestamp)
                 if ttl_expiration_timestamp is not None

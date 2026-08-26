@@ -293,6 +293,37 @@ class TestStartDeviceHook:
         ]
         assert len(warnings) == 1
 
+    @pytest.mark.asyncio
+    async def test_arca_create_ttl_zero_skips_register_and_logs_warning(self, caplog):
+        """WR-02: ttl_expiration_timestamp == 0 is treated as missing — skip
+        register and warn, never anchor the schedule at epoch 0 (1970 loop)."""
+        svc, mock_schedule_repo, _ = _make_service()
+        response = _response(
+            props_override={
+                "platform": "arca",
+                "status": "ACTIVE",
+                "ttl_expiration_timestamp": 0,
+            }
+        )
+
+        with patch.object(
+            DefaultDeviceService, "start_device", new=AsyncMock(return_value=response)
+        ):
+            with caplog.at_level(logging.WARNING, logger="core-scheduler"):
+                result = await svc.start_device(
+                    tenant="test-tenant", device_uuid="DEVICE-test-001"
+                )
+
+        assert result is response
+        mock_schedule_repo.register.assert_not_called()
+        warnings = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING
+            and "missing ttl_expiration_timestamp" in r.message
+        ]
+        assert len(warnings) == 1
+
 
 # ── stop_device_by_uuid (INTG-02 set_status) ───────────────────────────
 
