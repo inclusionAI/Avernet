@@ -9,9 +9,10 @@ from typing import Any, Protocol, runtime_checkable
 class DirectActivationServiceProtocol(Protocol):
     """Activate/deactivate ONE capability (skill or MCP) for a Bot, directly.
 
-    Legal only when no Set governs the capability (ownership rule R1 — decided
-    inside the write transaction). Same authorization, same UoW write, same
-    compensation as the Set service: one pattern, two scopes.
+    Legal only when no Set or platform Default policy governs the capability.
+    Platform Default MCPs are controlled only by Default exclusion/un-exclusion.
+    Same authorization, same UoW write, same compensation as the Set service:
+    one pattern, two scopes.
     """
 
     async def activate_skill(

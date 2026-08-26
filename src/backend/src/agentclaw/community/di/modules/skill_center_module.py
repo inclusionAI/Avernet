@@ -113,6 +113,9 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
 )
+from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
+    PlatformDefaultMcpPolicy,
+)
 from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
     BotCapabilityStateReader,
 )
@@ -367,6 +370,15 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
     ) -> ApiBotRuntimeProjectorProtocol:
         """Expose that same singleton through the public Service API."""
         return service
+
+    @singleton
+    @provider
+    @inject
+    def platform_default_mcp_policy(
+        self, injector: Injector
+    ) -> PlatformDefaultMcpPolicy:
+        """Strict engine/template Default MCP policy shared by Direct writes."""
+        return PlatformDefaultMcpPolicy(_build__ext_info_provider(injector))
 
     @singleton
     @provider

@@ -766,6 +766,10 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
 _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {
     "RESOURCE_DIRECT_ACTIVE": (409201, "Resource is directly active"),
     "RESOURCE_MANAGED_BY_SKILL_SET": (409202, "Resource is managed by a SkillSet"),
+    "RESOURCE_MANAGED_BY_PLATFORM_POLICY": (
+        409210,
+        "Resource is managed by the platform Default policy",
+    ),
     "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET": (409203, "Resource belongs to another SkillSet"),
     "SYSTEM_DEFAULT_IMMUTABLE": (409204, "System Default SkillSet is immutable"),
     "SKILL_SET_ACTIVE": (409205, "Active SkillSet cannot be deleted"),

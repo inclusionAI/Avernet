@@ -67,6 +67,9 @@ from agentclaw.community.core.skill_center.services.skill_query_service import (
 from agentclaw.community.core.skill_center.services.direct_activation_service import (
     DirectActivationService,
 )
+from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
+    PlatformDefaultMcpPolicy,
+)
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
@@ -999,6 +1002,7 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
         object(),
         object(),
         object(),
+        PlatformDefaultMcpPolicy(lambda _bot_id: None),
     )
     with avernet_tenant_scope("tenant-b"):
         with pytest.raises(LocalSkillNotFoundError):

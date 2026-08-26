@@ -68,7 +68,7 @@ class _Bots:
         }
 
 
-def _service(db: _Database, tmp_path) -> SkillSetService:
+def _service(db: _Database, tmp_path, *, ext_info_provider=None) -> SkillSetService:
     skills = SkillRepository(db)
     return SkillSetService(
         skill_repo=skills,
@@ -80,7 +80,10 @@ def _service(db: _Database, tmp_path) -> SkillSetService:
         skills_dir=tmp_path / "skills",
         repo_dir=tmp_path / "skills-repo",
         local_dir=tmp_path / "skills-local",
+        entity_id="owner",
+        bot_id="bot",
         engine_type=_ENGINE,
+        ext_info_provider=ext_info_provider,
         path_factory=MagicMock(),
         reader=BotCapabilityStateReader(
             repository=CapabilityDesiredStateRepository(db),
@@ -206,3 +209,36 @@ def test_a_direct_installation_appears_with_minimal_metadata(tmp_path):
             "is_default": False,
         }
     ]
+
+
+def test_strict_runtime_policy_context_propagates_provider_failure(tmp_path):
+    db = _Database()
+
+    def broken_provider(_bot_id: str):
+        raise RuntimeError("template policy unavailable")
+
+    service = _service(db, tmp_path, ext_info_provider=broken_provider)
+
+    with pytest.raises(RuntimeError, match="template policy unavailable"):
+        service.collect_bot_active_mcps(
+            entity_id="owner",
+            bot_id="bot",
+            user_id="owner",
+            strict_policy_context=True,
+        )
+
+
+def test_strict_runtime_policy_context_propagates_template_lookup_failure(tmp_path):
+    db = _Database()
+    service = _service(db, tmp_path, ext_info_provider=lambda _bot_id: None)
+    service._bot_repo.get_by_id_and_owner.side_effect = RuntimeError(
+        "bot repository unavailable"
+    )
+
+    with pytest.raises(RuntimeError, match="bot repository unavailable"):
+        service.collect_bot_active_mcps(
+            entity_id="owner",
+            bot_id="bot",
+            user_id="owner",
+            strict_policy_context=True,
+        )
