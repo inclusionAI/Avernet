@@ -14,6 +14,7 @@ needs the dispatcher *types* under ``TYPE_CHECKING``.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, TYPE_CHECKING
 
@@ -70,6 +71,79 @@ class LocalSkillQuarantineRepairError(OSError):
     """A partial authoritative-package delete could not be verified repaired."""
 
 
+# Every package file is one device round trip. Issuing them sequentially made a
+# package cost ``file_count × round_trip``, which dominates upload time for the many
+# small files a skill package is made of. Fan them out instead — but bounded: device
+# filesystems run their blocking transport through ``asyncio.to_thread``, whose
+# default executor (``min(32, cpu_count + 4)`` threads) is shared with every other
+# caller in the process, so an unbounded ``gather`` over a large package would starve
+# unrelated work.
+_PACKAGE_IO_CONCURRENCY = 8
+
+
+async def _gather_package_io(coroutines: list) -> list:
+    """Run package-file I/O concurrently, bounded, and drain before returning.
+
+    Every coroutine is awaited to completion even after one fails, then the first
+    failure *in input order* is re-raised. Draining is what makes the fan-out safe
+    to substitute for the sequential loop: a caller that sees ``write`` fail treats
+    the package as failed and immediately ``delete_tree``s its directory, so a write
+    still in flight at that moment could land a file behind the cleanup and leave an
+    orphan the next upload would trip over. Re-raising in input order keeps the
+    surfaced error the same one the sequential loop would have raised.
+
+    Cancellation is drained the same way, and needs its own handling because it does
+    not travel the exception path: device filesystems block inside
+    ``asyncio.to_thread``, which cannot interrupt a call already executing on a
+    worker thread — cancelling only abandons the await while the HTTP write keeps
+    going. Worse, ``CancelledError`` is a ``BaseException``, so
+    ``LocalSkillUploadService``'s ``except Exception`` compensation is skipped while
+    its ``finally`` still releases the edit lease. A retry could then acquire the
+    lease, ``delete_tree`` the directory and start a fresh package that the
+    abandoned writes land into. So the batch is shielded and drained before the
+    cancellation is allowed to continue.
+    """
+    semaphore = asyncio.Semaphore(_PACKAGE_IO_CONCURRENCY)
+
+    async def _bounded(coro):
+        try:
+            async with semaphore:
+                return await coro
+        finally:
+            # A coroutine still queued on the semaphore when this batch is cancelled
+            # would never be awaited, which Python surfaces as a RuntimeWarning.
+            # Closing an already-finished coroutine is a no-op, so this is safe on
+            # the normal path too.
+            coro.close()
+
+    batch = asyncio.ensure_future(
+        asyncio.gather(*(_bounded(coro) for coro in coroutines), return_exceptions=True)
+    )
+    try:
+        results = await asyncio.shield(batch)
+    except BaseException:
+        # Shielding keeps ``batch`` running when the caller is cancelled; awaiting it
+        # here is what guarantees no write is still in flight once this raises.
+        #
+        # The drain is itself shielded, and loops, because cancellation can arrive
+        # more than once — an aborted request overlapping with shutdown, say. A
+        # plain ``await`` here would let that second cancel tear down ``batch``
+        # itself and re-raise with the worker-thread writes still running, which is
+        # exactly the failure the shield above prevents on the first cancel. Only
+        # ``CancelledError`` is absorbed, and only until ``batch`` finishes, so this
+        # delays cancellation by at most the batch's own remaining work.
+        while not batch.done():
+            try:
+                await asyncio.shield(batch)
+            except asyncio.CancelledError:
+                continue
+        raise
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+    return results
+
+
 class LocalSkillPackageStorage:
     """Explicit package-I/O port owned by the SkillService factory."""
 
@@ -83,10 +157,14 @@ class LocalSkillPackageStorage:
         return self._device_directory
 
     async def write(self, files: list[tuple[str, bytes]]) -> None:
-        for relative_path, content in files:
-            await self._filesystem.write_file(
-                f"{self._device_directory}/{relative_path}", content
-            )
+        await _gather_package_io(
+            [
+                self._filesystem.write_file(
+                    f"{self._device_directory}/{relative_path}", content
+                )
+                for relative_path, content in files
+            ]
+        )
 
     async def prepare(self) -> None:
         """Remove an orphaned failed upload before writing a first package."""
@@ -149,16 +227,27 @@ class LocalSkillPackageStorage:
         files = await self._read_package_files()
         if await quarantine._filesystem.exists(quarantine.directory):
             raise OSError("Local Skill quarantine already exists")
-        for relative_path, content in files:
-            await quarantine._filesystem.write_file(
-                f"{quarantine.directory}/{relative_path}", content
-            )
-        for relative_path, content in files:
-            copied = await quarantine._filesystem.read_file(
-                f"{quarantine.directory}/{relative_path}"
-            )
-            if copied != content:
-                raise OSError("Local Skill quarantine verification failed")
+        await _gather_package_io(
+            [
+                quarantine._filesystem.write_file(
+                    f"{quarantine.directory}/{relative_path}", content
+                )
+                for relative_path, content in files
+            ]
+        )
+        copied = await _gather_package_io(
+            [
+                quarantine._filesystem.read_file(
+                    f"{quarantine.directory}/{relative_path}"
+                )
+                for relative_path, _ in files
+            ]
+        )
+        if any(
+            actual != expected
+            for actual, (_, expected) in zip(copied, files)
+        ):
+            raise OSError("Local Skill quarantine verification failed")
         try:
             source_cleaned = await self.cleanup()
         except Exception:
@@ -198,17 +287,24 @@ class LocalSkillPackageStorage:
         return True, await quarantine.cleanup()
 
     async def _restore_contents(self, files: list[tuple[str, bytes]]) -> bool:
-        for relative_path, content in files:
-            await self._filesystem.write_file(
-                f"{self.directory}/{relative_path}", content
-            )
-        for relative_path, content in files:
-            restored = await self._filesystem.read_file(
-                f"{self.directory}/{relative_path}"
-            )
-            if restored != content:
-                return False
-        return True
+        await _gather_package_io(
+            [
+                self._filesystem.write_file(
+                    f"{self.directory}/{relative_path}", content
+                )
+                for relative_path, content in files
+            ]
+        )
+        restored = await _gather_package_io(
+            [
+                self._filesystem.read_file(f"{self.directory}/{relative_path}")
+                for relative_path, _ in files
+            ]
+        )
+        return all(
+            actual == expected
+            for actual, (_, expected) in zip(restored, files)
+        )
 
     async def _read_package_files(self) -> list[tuple[str, bytes]]:
         entries = await self._filesystem.list_dir(
@@ -216,7 +312,7 @@ class LocalSkillPackageStorage:
         )
         if entries is None:
             raise OSError("Local Skill package is missing")
-        files: list[tuple[str, bytes]] = []
+        relative_paths: list[str] = []
         for entry in entries:
             if entry.get("is_dir"):
                 continue
@@ -227,9 +323,20 @@ class LocalSkillPackageStorage:
                 or ".." in relative_path.split("/")
             ):
                 raise OSError("Local Skill package has an invalid file path")
-            content = await self._filesystem.read_file(
-                f"{self._device_directory}/{relative_path}"
-            )
+            relative_paths.append(relative_path)
+        # Every listed path is validated before a single read is issued, so a
+        # package containing an invalid path is still rejected outright rather
+        # than partially read.
+        contents = await _gather_package_io(
+            [
+                self._filesystem.read_file(
+                    f"{self._device_directory}/{relative_path}"
+                )
+                for relative_path in relative_paths
+            ]
+        )
+        files: list[tuple[str, bytes]] = []
+        for relative_path, content in zip(relative_paths, contents):
             if content is None:
                 raise OSError("Local Skill package file disappeared")
             files.append((relative_path, content))
