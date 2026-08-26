@@ -2,11 +2,14 @@
 # docker/build-image.sh - generic local image build script
 #
 # Usage:
-#   docker/build-image.sh <dockerfile> [options]
+#   docker/build-image.sh <dockerfile|service> [options]
 #
 # Examples:
 #   # Build only the baas image (default ref baas:local, no push)
 #   docker/build-image.sh baas.dockerfile
+#
+#   # Build via service shortcut (env: DOCKER_REGISTRY, DOCKER_TAG)
+#   DOCKER_REGISTRY=reg.example.com/ns DOCKER_TAG=v1.0 docker/build-image.sh bcsfuse
 #
 #   # Set the image name (may include a registry); still no push
 #   # (you just want a registry-prefixed tag locally)
@@ -96,8 +99,43 @@ done
 
 if [ -z "$DOCKERFILE" ]; then
     echo "error: missing <dockerfile> argument" >&2
-    echo "usage: docker/build-image.sh <dockerfile> [--image NAME] [--tag T] [--push] [--build-arg K=V] [--no-cache]" >&2
+    echo "usage: docker/build-image.sh <dockerfile|service> [--image NAME] [--tag T] [--push] [--build-arg K=V] [--no-cache]
+    services: bcs, bcn, backend, baas, api-gateway, node-fe, bcsfuse" >&2
     exit 2
+fi
+
+# --- Service/env-style shortcut (backward compatibility with build_image.sh)
+# Allows: DOCKER_REGISTRY=... DOCKER_TAG=... ./docker/build-image.sh bcsfuse
+# Supported services: bcs/bcn, backend, baas, api-gateway, node-fe, bcsfuse
+_resolve_service() {
+    case "$1" in
+        bcs|bcn)
+            echo "docker/bcn.Dockerfile bcn" ;;
+        backend)
+            echo "docker/backend.Dockerfile backend" ;;
+        baas)
+            echo "docker/baas.Dockerfile baas" ;;
+        api-gateway)
+            echo "docker/api-gateway.Dockerfile api-gateway" ;;
+        node-fe)
+            echo "docker/node-fe.Dockerfile node-fe" ;;
+        bcsfuse)
+            echo "docker/bcsfuse.Dockerfile bcsfuse" ;;
+        *)
+            echo "" ;;
+    esac
+}
+
+if [ -n "$DOCKERFILE" ]; then
+    SERVICE_RESOLVE="$(_resolve_service "$DOCKERFILE")"
+    if [ -n "$SERVICE_RESOLVE" ] && [ ! -f "${SCRIPT_DIR}/${DOCKERFILE}" ] && [ ! -f "${REPO_ROOT}/${DOCKERFILE}" ] && [ -z "$(find "${SCRIPT_DIR}" -name "${DOCKERFILE}" -type f 2>/dev/null | head -1)" ]; then
+        SERVICE="$DOCKERFILE"
+        DOCKERFILE="${SERVICE_RESOLVE%% *}"
+        DEFAULT_IMAGE="${SERVICE_RESOLVE#* }"
+        [ -n "${DOCKER_REGISTRY:-}" ] && DEFAULT_IMAGE="${DOCKER_REGISTRY%/}/${DEFAULT_IMAGE}"
+        [ -z "$IMAGE" ] && IMAGE="$DEFAULT_IMAGE"
+        [ "${#TAGS[@]}" -eq 0 ] && TAGS=("${DOCKER_TAG:-local}")
+    fi
 fi
 
 # --- Validate --image / --tag up front (before the docker check,
