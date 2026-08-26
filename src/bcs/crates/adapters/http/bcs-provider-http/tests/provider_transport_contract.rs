@@ -135,6 +135,56 @@ async fn interaction_resolve_forwards_ask_user_metadata_and_custom_values() {
     );
     server.abort();
 }
+
+#[tokio::test]
+async fn interaction_resolve_preserves_empty_ask_user_values_without_custom_values() {
+    let captured: CapturedState = Arc::new(Mutex::new(None));
+    let app = Router::new()
+        .route("/webhook", post(capture_ack))
+        .with_state(captured.clone());
+    let (webhook_url, server) = spawn_server(app).await;
+    let target = provider_target_v2(webhook_url);
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+
+    let ack = transport
+        .resolve_interaction(InteractionProviderCommand {
+            target,
+            provider_bypass_headers: Vec::new(),
+            bcs_run_id: "bcs-run-1".to_string(),
+            provider_run_id: "provider-run-1".to_string(),
+            bcs_session_id: "session-1".to_string(),
+            group_id: "group-1".to_string(),
+            bot_id: "bot-1".to_string(),
+            interaction_id: "interaction-ask-skip".to_string(),
+            kind: InteractionKind::AskUser,
+            idempotency_key: "idem-ask-skip".to_string(),
+            resolution: json!({
+                "action": "submit",
+                "answers": {
+                    "question_1": {
+                        "header": "Delete scope",
+                        "question": "Which records should be deleted?",
+                        "values": []
+                    }
+                }
+            }),
+        })
+        .await
+        .unwrap();
+
+    assert!(ack.ok);
+    let request = captured.lock().await.clone().unwrap();
+    assert_eq!(
+        request.body["params"]["answers"]["question_1"],
+        json!({
+            "header": "Delete scope",
+            "question": "Which records should be deleted?",
+            "values": []
+        })
+    );
+    server.abort();
+}
+
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock};
 use tracing::Instrument;
