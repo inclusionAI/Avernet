@@ -142,6 +142,26 @@ class TaskDiscoveryScheduler(LifecycleBase):
                 bot_id, owner_id,
             )
 
+    def reschedule(self, cron_expr: str, *, timezone: str | None = None) -> bool:
+        """运行时修改 cron 触发时间 — 无需重启 backend。
+
+        使用 APScheduler ``reschedule_job()`` 原地替换 job 的 trigger，
+        新 cron 立即生效，旧的下一次执行计划被丢弃。
+
+        Returns:
+            True 如果 reschedule 成功；False 如果调度器未运行。
+        """
+        if self._scheduler is None or not self._scheduler.running:
+            logger.warning("[task_discovery] reschedule called but scheduler not running")
+            return False
+
+        tz = timezone or os.environ.get("TASK_DISCOVERY_TIMEZONE", _DEFAULT_TIMEZONE)
+        trigger = CronTrigger.from_crontab(cron_expr, timezone=tz)
+        self._scheduler.reschedule_job("task_discovery_daily", trigger=trigger)
+        os.environ["TASK_DISCOVERY_CRON"] = cron_expr
+        logger.info("[task_discovery] reschedule done — cron='%s' tz='%s'", cron_expr, tz)
+        return True
+
     def get_status(self) -> dict:
         """返回 APScheduler 当前调度状态 — 供 HTTP 端点查询。
 

@@ -61,21 +61,25 @@ _MOCK_TASKS: list[dict] = [
         "bot_id": "e2e-bot",  # discover 时用 bot_id 参数匹配
         "owner_id": _USER_ID,
         "dt": _TODAY,
-        "project_name": "存储行业尽调报告",
-        "description": "AI 基础设施驱动下,企业级与数据中心存储行业的最新变化、竞争格局与进入机会分析。",
-        "business_scenario": "投资尽调 — 通过行业信息抓取、竞品分析、客户访谈等手段,产出系统性的投资判断报告。",
+        "title": "存储行业尽调报告",
+        "instruction": "AI 基础设施驱动下,企业级与数据中心存储行业的最新变化、竞争格局与进入机会分析。",
+        "background": "投资尽调 — 通过行业信息抓取、竞品分析、客户访谈等手段,产出系统性的投资判断报告。",
         "discovery_basis": "用户近一周频繁搜索存储行业相关信息,行为节点链路表明用户已在自发调研但尚未系统化。",
-        "work_item_url": "https://project.alipay.com/workitem/123456",
         "priority": "high",
         "discovered_at": f"{_TODAY}T10:00:00Z",
         "status": "pending_confirmation",
+        "objective": "产出系统性的存储行业投资判断报告。",
+        "acceptances": [
+            {"id": "a1", "description": "覆盖存储行业 6 条核心结论"},
+            {"id": "a2", "description": "报告包含数据与逻辑链路"},
+        ],
     },
 ]
 
 # 从内联数据派生断言常量
 _EXPECTED_TASK_COUNT = len(_MOCK_TASKS)
 _EXPECTED_TASK_IDS = {t["task_id"] for t in _MOCK_TASKS}
-_EXPECTED_PROJECT_NAMES = {t["project_name"] for t in _MOCK_TASKS}
+_EXPECTED_PROJECT_NAMES = {t["title"] for t in _MOCK_TASKS}
 
 # 默认 db 文件路径:上溯到项目根 → scripts/.dependencies/data/discovered_tasks.db
 _DATA_FILE = Path(__file__).resolve()
