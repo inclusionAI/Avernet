@@ -513,10 +513,13 @@ def test_the_pinned_number_of_operations_take_it():
     # Bot editor requests add one. The BCS publish-to-users route moved from the
     # internal /bots/{bot_id}/public-bcs path to the external contract path
     # /collaboration/bots/{bot_uuid}/public (same op count, {bot_uuid} not {bot_id}).
-    # The task public surface adds one more: GET .../collaboration/tasks/list
-    # (execute/dashboard have no user dimension — see _NO_USER_DIMENSION).
     # Service publication version upgrade adds one Bot-addressed operation.
-    assert len(taking) == 182
+    # GET .../collaboration/tasks/list briefly counted here; it now takes
+    # ``user_id`` as a caller-selected filter with no owner-mismatch 403, so it
+    # moved to _USER_ID_FILTER_ONLY (asserted by its own test) and left this
+    # count: 182 → 181. execute/dashboard take no user_id at all — see
+    # _NO_USER_DIMENSION.
+    assert len(taking) == 181
 
 
 def test_the_exempt_operations_take_none():
