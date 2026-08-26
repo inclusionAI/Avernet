@@ -569,8 +569,52 @@ def _seed_mcp_member(world) -> None:
             owner_id=_OWNER,
             set_id="1",
             server_code="mcp.test",
+            name="Test MCP",
+            description=None,
+            icon=None,
             engine_type="openclaw",
         )
+
+
+def _seed_mcp_catalog(world) -> None:
+    world.get(MCPCenterPlugin).set_override(
+        "get_mcp_detail",
+        lambda server_code: {
+            "serverCode": server_code,
+            "name": "Dima MCP",
+            "description": "Dima workflow tools",
+            "icon": "https://example.test/dima.png",
+        },
+    )
+    _seed(world)
+
+
+def _assert_mcp_catalog_metadata_persisted(_response, world) -> None:
+    with avernet_tenant_scope(_TENANT):
+        assert world.get(SkillSetControlPlaneServiceProtocol).list_mcps(
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            user_id=_OWNER,
+            set_id="1",
+        ) == [
+            {
+                "id": "1",
+                "server_code": "mcp.test",
+                "name": "Dima MCP",
+                "description": "Dima workflow tools",
+                "icon": "https://example.test/dima.png",
+            }
+        ]
+
+
+def _assert_no_mcp_membership(_response, world) -> None:
+    with avernet_tenant_scope(_TENANT):
+        assert world.get(SkillSetControlPlaneServiceProtocol).list_mcps(
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            user_id=_OWNER,
+            set_id="1",
+        ) == []
 
 
 @_case("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps", "lists_mcps", ExpectSuccess(status=200, json_contains={"data": []}))
@@ -583,8 +627,31 @@ def list_mcps_error():
     pass
 
 
-@_case("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}", "adds_mcp", ExpectSuccess(status=200, json_contains={"data": {"changed": True}}))
+@_case(
+    "PUT",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}",
+    "adds_mcp_with_catalog_metadata",
+    ExpectSuccess(status=200, json_contains={"data": {"changed": True}}),
+    seed=_seed_mcp_catalog,
+    extra=(_assert_mcp_catalog_metadata_persisted,),
+)
 def add_mcp_happy():
+    pass
+
+
+@_case(
+    "PUT",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}",
+    "rejects_missing_mcp_catalog_entry",
+    ExpectError(status=404),
+    path_params={
+        "bot_id": _BOT_ID,
+        "set_id": "1",
+        "server_code": "mcp.unknown",
+    },
+    extra=(_assert_no_mcp_membership,),
+)
+def add_missing_mcp_error():
     pass
 
 
