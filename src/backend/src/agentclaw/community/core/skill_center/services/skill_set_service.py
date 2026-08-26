@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, List, Mapping, Optional
 
+from agentclaw.community.core.devices.device_io_batch import gather_device_io
 from agentclaw.community.core.devices.models import SynlinkMappingInfo
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 
@@ -2752,20 +2753,36 @@ class SkillSetSwitcher(_DeviceSyncMixin):
                     f"[SkillSetSwitcher] skills_dir does not exist (plugin returned None): {skills_dir}"
                 )
                 return []
-            local_cleaned: list[str] = []
+            targets: list[tuple[str, str]] = []
             for entry in entries:
                 name = entry.get("name", "")
                 if name in reserved_names:
                     logger.debug(f"[SkillSetSwitcher] Skipping reserved item: {name}")
                     continue
-                entry_path = entry.get("path") or f"{skills_dir}/{name}"
+                targets.append((name, entry.get("path") or f"{skills_dir}/{name}"))
+
+            # Each removal is one device round trip, and a switch sweeps every
+            # non-reserved entry under skills_dir — so a bot with many Skills paid
+            # ``entry_count × round_trip`` before the new set could be laid down.
+            # Fan them out instead. Every entry is still attempted and reported
+            # exactly as before: the per-entry failure is caught *inside* the
+            # coroutine, so one device rejecting a directory neither hides the
+            # others' results nor stops them.
+            async def _remove(name: str, entry_path: str) -> bool:
                 try:
-                    ok = await device_fs.delete_tree(entry_path)
-                    if ok:
-                        local_cleaned.append(name)
-                        logger.info(f"[SkillSetSwitcher] Removed: {name}")
+                    return bool(await device_fs.delete_tree(entry_path))
                 except Exception as e:
                     logger.warning(f"[SkillSetSwitcher] Failed to remove {name}: {e}")
+                    return False
+
+            removed = await gather_device_io(
+                [_remove(name, entry_path) for name, entry_path in targets]
+            )
+            local_cleaned: list[str] = []
+            for (name, _), ok in zip(targets, removed):
+                if ok:
+                    local_cleaned.append(name)
+                    logger.info(f"[SkillSetSwitcher] Removed: {name}")
             return local_cleaned
 
         try:

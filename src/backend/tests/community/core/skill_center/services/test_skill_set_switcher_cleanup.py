@@ -209,3 +209,95 @@ def test_cleanup_delete_failure_continues_and_logs(tmp_path, caplog):
     cleaned = switcher._cleanup_all_non_reserved_items()
     assert cleaned == ["good"]  # bad 未被记入 cleaned（失败）
     assert len(delete_calls) == 2  # 两条都尝试调
+
+
+def _switcher_over(tmp_path, plugin, reserved=frozenset()):
+    """A SkillSetSwitcher whose cleanup runs against ``plugin``."""
+    from agentclaw.community.core.skill_center.services.skill_set_service import (
+        SkillSetSwitcher,
+    )
+
+    dispatcher = MagicMock()
+    dispatcher.dispatch.return_value = plugin
+    skill_set_factory = MagicMock()
+    skill_set_service_mock = MagicMock()
+    skill_set_service_mock.skill_service.RESERVED_SKILL_NAMES = set(reserved)
+    skill_set_factory.create.return_value = skill_set_service_mock
+    path_factory = MagicMock()
+    skills_root = tmp_path / "skills"
+    path_factory.get_bot_skills_dir.return_value = skills_root
+    path_factory.get_bot_skills_repo_dir.return_value = skills_root / "skills-repo"
+    path_factory.get_bot_skills_local_dir.return_value = skills_root / "skills-local"
+    return SkillSetSwitcher(
+        skill_set_factory=skill_set_factory,
+        resolver=MagicMock(),
+        device_sync_dispatcher=MagicMock(),
+        device_plugin=MagicMock(),
+        path_factory=path_factory,
+        device_fs_dispatcher=dispatcher,
+        edit_guard=_edit_guard(),
+        skills_dir=skills_root,
+        bot_id="bot-1",
+        user_id="staff_u001",
+    )
+
+
+def _entries(names, root):
+    return [
+        {"name": name, "path": f"{root}/{name}", "is_dir": True, "relative_path": name}
+        for name in names
+    ]
+
+
+def test_cleanup_removes_entries_concurrently(tmp_path):
+    """每次删除都是一次设备往返；逐个 await 让一次切换 = ``entry_count × 往返``。"""
+    import asyncio
+
+    state = {"in_flight": 0, "peak": 0}
+    names = [f"stale-{index}" for index in range(6)]
+
+    async def _delete_tree(path):
+        state["in_flight"] += 1
+        state["peak"] = max(state["peak"], state["in_flight"])
+        try:
+            await asyncio.sleep(0.01)
+            return True
+        finally:
+            state["in_flight"] -= 1
+
+    plugin = MagicMock()
+
+    async def _list_dir(path, *, recursive=False):
+        return _entries(names, path)
+
+    plugin.list_dir = _list_dir
+    plugin.delete_tree = _delete_tree
+
+    switcher = _switcher_over(tmp_path, plugin)
+    cleaned = switcher._cleanup_all_non_reserved_items()
+
+    assert sorted(cleaned) == sorted(names)
+    assert state["peak"] > 1
+
+
+def test_cleanup_reports_every_entry_even_when_one_device_call_fails(tmp_path):
+    """一个条目删除失败既不隐藏其他条目的结果，也不中止它们 —— 与逐条循环一致。"""
+
+    async def _delete_tree(path):
+        if path.endswith("/boom"):
+            raise OSError("device rejected boom")
+        return not path.endswith("/refused")
+
+    plugin = MagicMock()
+
+    async def _list_dir(path, *, recursive=False):
+        return _entries(["ok-1", "boom", "refused", "ok-2"], path)
+
+    plugin.list_dir = _list_dir
+    plugin.delete_tree = _delete_tree
+
+    switcher = _switcher_over(tmp_path, plugin)
+    cleaned = switcher._cleanup_all_non_reserved_items()
+
+    # order follows the listing, and only the genuinely removed entries are named
+    assert cleaned == ["ok-1", "ok-2"]

@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from agentclaw.community.core.devices.device_io_batch import gather_device_io
 from agentclaw.community.log import get_logger
 
 
@@ -105,7 +106,14 @@ class SkillSymlinkVerifyService:
         else:
             logger.warning("[verify] list_arca_directory returned None: bot_id=%s sandbox=%s", bot_id, sandbox_id)
 
-        # 3. 逐条验证
+        # 3. 逐条验证。NAS 探测是每条一次设备往返，串起来就是
+        #    ``skill_count × round_trip``，装了几十个 Skill 的 bot 验证一次要等上
+        #    好几秒。先按原顺序判掉不需要探测的（软链缺失 / git:// 目标在容器内），
+        #    把要探 NAS 的记成一个占位，再一次性并发探完回填 —— failures 的顺序和
+        #    内容与逐条循环完全一致。
+        pending: list[tuple[str, str, str, str, str]] = []
+        # Either a decided failure, or the index of the probe that decides it.
+        slots: list[VerifyFailure | int] = []
         for skill in skills:
             skill_id = str(skill.get("id", ""))
             skill_name = skill.get("name", "")
@@ -113,7 +121,7 @@ class SkillSymlinkVerifyService:
             link_name = skill.get("link_name", skill_name)
 
             if link_name not in symlink_names:
-                failures.append(VerifyFailure(
+                slots.append(VerifyFailure(
                     skill_id=skill_id, skill_name=skill_name, git_path=git_path,
                     link_name=link_name, reason="symlink_not_found", expected=link_name,
                 ))
@@ -124,14 +132,26 @@ class SkillSymlinkVerifyService:
                 # 软链 source 真实路径：<SKILLS_CENTER_IN_NAS>/<uuid>/current/<skill_name>
                 uuid = git_path[9:]
                 nas_target = f"{self.SKILLS_CENTER_IN_NAS}/{uuid}/current/{skill_name}"
-                exists = await device_fs.exists(nas_target)
-                if not exists:
-                    failures.append(VerifyFailure(
-                        skill_id=skill_id, skill_name=skill_name, git_path=git_path,
-                        link_name=link_name, reason="nas_target_missing", expected=nas_target,
-                    ))
+                slots.append(len(pending))
+                pending.append(
+                    (skill_id, skill_name, git_path, link_name, nas_target)
+                )
             elif git_path.startswith("git://"):
                 pass  # git:// 目标在容器内，不单独验证 NAS
+
+        found = await gather_device_io(
+            [device_fs.exists(nas_target) for *_, nas_target in pending]
+        )
+        for slot in slots:
+            if isinstance(slot, VerifyFailure):
+                failures.append(slot)
+                continue
+            skill_id, skill_name, git_path, link_name, nas_target = pending[slot]
+            if not found[slot]:
+                failures.append(VerifyFailure(
+                    skill_id=skill_id, skill_name=skill_name, git_path=git_path,
+                    link_name=link_name, reason="nas_target_missing", expected=nas_target,
+                ))
 
         passed = len(skills) - len(failures)
         return VerifyReport(
