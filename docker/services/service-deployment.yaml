@@ -11,7 +11,10 @@
 #   PORT        — container + service port
 #   PROBE_PATH  — HTTP path both probes GET. Per-service, because the backend
 #                 serves /api/health while the others serve /health.
-#   REPLICAS    — number of pod replicas (default 2)
+#   REPLICAS    — number of pod replicas. Per-service: 2 for most, but 1 for
+#                 backend, whose shipped defaults are per-process (pod-local
+#                 /app/data, in-process cache lock). See DEFAULT_REPLICAS in
+#                 docker/kube-deploy.sh.
 #   CPU_REQUEST, CPU_LIMIT, MEMORY_REQUEST, MEMORY_LIMIT — resource spec
 #   ENV_VARS    — rendered env var entries (one "- name: ..." block per line)
 # ============================================================
