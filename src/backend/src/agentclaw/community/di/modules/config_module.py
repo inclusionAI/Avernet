@@ -20,6 +20,7 @@ and client construction happen in downstream module providers.
 from __future__ import annotations
 
 import math
+from dataclasses import fields
 from typing import Any
 
 from injector import Module, inject, provider, singleton
@@ -68,6 +69,11 @@ def _block(name: str) -> dict[str, Any]:
 _HTTP_CLIENT_QUALIFIERS = frozenset(
     {QUALIFIER_BAAS, QUALIFIER_BCN, QUALIFIER_GENERAL, QUALIFIER_MASA_AGENT_EVAL}
 )
+
+# The policy fields an ``http_client`` block (or an override body) may name,
+# derived from the dataclass so the accepted config surface cannot drift from
+# the type it populates.
+_POOL_POLICY_FIELDS = frozenset(f.name for f in fields(cfg.HttpClientPoolPolicy))
 
 _TRUE_SCALARS = frozenset({"true", "yes", "on", "1"})
 _FALSE_SCALARS = frozenset({"false", "no", "off", "0"})
@@ -165,6 +171,28 @@ def _as_bool(raw: Any) -> bool:
             return True
         raise ValueError(f"not a boolean: {raw!r}")
     raise TypeError(f"not a boolean: {type(raw).__name__}")
+
+
+def _reject_unknown_keys(
+    block: dict[str, Any], where: str, *, allow_overrides: bool
+) -> None:
+    """Fail on any key the policy does not define.
+
+    ``_pool_policy`` probes only the names it knows, so a misspelled field
+    (``max_conections``, ``htttp2``) would otherwise be discarded in silence and
+    the process would boot on inherited defaults while looking configured —
+    the same failure as an unknown qualifier, one level down. ``overrides`` is
+    accepted in the top-level block only; nesting it inside an override body is
+    a misunderstanding of the shape, not a policy field.
+    """
+    allowed = _POOL_POLICY_FIELDS | ({"overrides"} if allow_overrides else frozenset())
+    unknown = sorted(str(k) for k in block if str(k) not in allowed)
+    if unknown:
+        valid = ", ".join(repr(k) for k in sorted(allowed))
+        raise ValueError(
+            f"unknown {where} key(s) "
+            f"{', '.join(repr(u) for u in unknown)}; expected one of {valid}"
+        )
 
 
 def _pool_policy(
@@ -671,6 +699,7 @@ class ConfigModule(Module):
         outbound call.
         """
         block = _block("http_client")
+        _reject_unknown_keys(block, "http_client", allow_overrides=True)
         defaults = _pool_policy(block, cfg.HttpClientPoolPolicy())
         raw_overrides = block.get("overrides") or {}
         overrides: dict[str, cfg.HttpClientPoolPolicy] = {}
@@ -686,9 +715,9 @@ class ConfigModule(Module):
                 )
             for name, body in raw_overrides.items():
                 if isinstance(body, dict):
-                    overrides[str(name)] = _pool_policy(
-                        dict(body), defaults, f"http_client.overrides.{name}"
-                    )
+                    scope = f"http_client.overrides.{name}"
+                    _reject_unknown_keys(dict(body), scope, allow_overrides=False)
+                    overrides[str(name)] = _pool_policy(dict(body), defaults, scope)
                 else:
                     logger.warning(
                         "ConfigModule: http_client.overrides.%s is not a mapping "
