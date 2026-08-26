@@ -1,7 +1,7 @@
 # Plan — Outbound HTTP Connection Pooling and HTTP/2 for `HttpClient`
 
 Implements `spec.md`. Six source files (one of them the dependency manifest
-pair), five test files (one of them deleted). No Protocol change:
+pair), six test files (one deleted, one new). No Protocol change:
 `plugin_api/http_client.py` keeps its signatures — only a stale impl note in its
 docstring is corrected — so no consumer and no conformance contract moves.
 
@@ -216,12 +216,39 @@ A new frozen dataclass in the existing style, placed under a new
 
 ```python
 @dataclass(frozen=True)
-class HttpClientPoolConfig:
+class HttpClientPoolPolicy:
+    """The effective transport policy for ONE binding."""
+
     max_connections: int = 100
     max_keepalive_connections: int = 20
     keepalive_expiry: float = 5.0
     http2: bool = False
+
+
+@dataclass(frozen=True)
+class HttpClientPoolConfig:
+    """Shared defaults plus sparse per-qualifier overrides."""
+
+    defaults: HttpClientPoolPolicy = field(default_factory=HttpClientPoolPolicy)
+    overrides: Mapping[str, HttpClientPoolPolicy] = field(default_factory=dict)
+
+    def for_qualifier(self, qualifier: str) -> HttpClientPoolPolicy:
+        """Effective policy for one binding: its override, else the defaults."""
+        return self.overrides.get(qualifier, self.defaults)
 ```
+
+Two types rather than one because the values a binding *uses* and the structure
+that *selects* them are different things: `HttpxClient` takes four scalars, and
+nothing below the composition root should know overrides exist.
+
+`for_qualifier` resolves whole-policy, not field-by-field: an override that sets
+only `http2` inherits nothing else from `defaults`. Field-level merging is the
+alternative and is rejected — a half-specified override would silently drift as
+the shared defaults change, which is exactly the failure mode a reader of the
+YAML would not predict. The provider (Component 3) is what materialises a
+complete `HttpClientPoolPolicy` per override by starting from `defaults` and
+applying only the keys present, so the YAML *is* sparse while the resolved object
+is total.
 
 Pool defaults are httpx's own. The docstring carries the operational meaning the
 numbers do not: that the ceilings are **per upstream client**, not process-wide;
@@ -237,20 +264,45 @@ One `@singleton @provider` reading the `http_client` block, following the
 file's established `_block(...)` + dataclass-defaults idiom exactly:
 
 ```python
+def _pool_policy(block: dict[str, Any], base: cfg.HttpClientPoolPolicy):
+    """One policy from a YAML mapping, falling back to ``base`` per field."""
+    return cfg.HttpClientPoolPolicy(
+        max_connections=int(block.get("max_connections", base.max_connections)),
+        max_keepalive_connections=int(
+            block.get("max_keepalive_connections", base.max_keepalive_connections)
+        ),
+        keepalive_expiry=float(block.get("keepalive_expiry", base.keepalive_expiry)),
+        http2=bool(block.get("http2", base.http2)),
+    )
+
+
 @singleton
 @provider
 def http_client_pool(self) -> cfg.HttpClientPoolConfig:
     block = _block("http_client")
-    defaults = cfg.HttpClientPoolConfig()
-    return cfg.HttpClientPoolConfig(
-        max_connections=int(block.get("max_connections", defaults.max_connections)),
-        max_keepalive_connections=int(
-            block.get("max_keepalive_connections", defaults.max_keepalive_connections)
-        ),
-        keepalive_expiry=float(block.get("keepalive_expiry", defaults.keepalive_expiry)),
-        http2=bool(block.get("http2", defaults.http2)),
-    )
+    defaults = _pool_policy(block, cfg.HttpClientPoolPolicy())
+    raw = block.get("overrides") or {}
+    overrides = {
+        str(name): _pool_policy(dict(body), defaults)
+        for name, body in raw.items()
+        if isinstance(body, dict)
+    }
+    return cfg.HttpClientPoolConfig(defaults=defaults, overrides=overrides)
 ```
+
+`_pool_policy` runs twice per override — once to build `defaults` from the
+dataclass field defaults, then again per override starting from `defaults`. That
+is what makes a sparse override total: `overrides.baas: {http2: true}` resolves to
+the shared ceilings with `http2` flipped, so `for_qualifier` can return a whole
+policy without any merging at the call site.
+
+Unknown qualifier keys are not rejected. A typo (`overrides.bass`) silently does
+nothing rather than failing boot, which is the wrong trade in general — but the
+provider does no I/O and has no qualifier list to validate against, and boot-time
+failure on a config typo in a *pool ceiling* is worse than the default applying.
+The per-provider `logger.info` (Component 4) is the mitigation: the effective
+policy for every binding appears in boot logs, so a typo shows up as "the value I
+set isn't there.
 
 Placed next to `masa_agent_eval`. Missing block ⇒ dataclass defaults, so no
 deployment needs a config change to adopt pooling, and enabling HTTP/2 later is
@@ -263,14 +315,18 @@ and forwards it. `general_http_client` picks up `@inject` (it currently has no
 dependencies). The forwarding is identical in all four:
 
 ```python
+policy = pool.for_qualifier(QUALIFIER_BAAS)      # …_BCN / _GENERAL / _MASA_AGENT_EVAL
 return HttpxClient(
     base_url=base_url,
-    max_connections=pool.max_connections,
-    max_keepalive_connections=pool.max_keepalive_connections,
-    keepalive_expiry=pool.keepalive_expiry,
-    http2=pool.http2,
+    max_connections=policy.max_connections,
+    max_keepalive_connections=policy.max_keepalive_connections,
+    keepalive_expiry=policy.keepalive_expiry,
+    http2=policy.http2,
 )
 ```
+
+Each provider names its own qualifier constant — the same one its return type is
+annotated with — so the override key and the injector key cannot drift apart.
 
 The existing `logger.info` line per provider is extended to record the pool
 ceiling and the HTTP/2 flag alongside the base_url, so a deployment's effective
@@ -347,8 +403,17 @@ the assumptions table above:
   through `_pooled_client()` produce one instance (criterion 9).
 
 **`tests/community/di/modules/test_http_client_module_bcn.py`** — pass
-`cfg.HttpClientPoolConfig()`; add an assertion that a non-default config
-(limits *and* `http2=True`) reaches the constructed client.
+`cfg.HttpClientPoolConfig()`; add assertions that a non-default `defaults` policy
+(limits *and* `http2=True`) reaches the constructed client, and that an override
+keyed to a *different* qualifier does not.
+
+**`tests/community/di/modules/test_config_module_http_client.py` (new).** The
+override resolution is the part with real logic, so it gets its own tests:
+missing block ⇒ dataclass defaults for every qualifier; a top-level block sets
+the shared defaults; a sparse override inherits the unset fields from those
+defaults rather than from the dataclass; `for_qualifier` on an unlisted qualifier
+returns the defaults object; a non-dict override body is ignored rather than
+raising.
 
 **`tests/community/di/modules/test_infrastructure_module.py`** — pass
 `cfg.HttpClientPoolConfig()` to `general_http_client()`.
