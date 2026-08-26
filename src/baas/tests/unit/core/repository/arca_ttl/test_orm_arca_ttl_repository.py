@@ -442,6 +442,14 @@ class TestFindUnregistered:
             "json_unquote(json_extract(baas_device.provider_device_props, "
             "'$.ttl_expiration_timestamp'))" in sql_text
         )
+        # WR-02: dual-key projection — COALESCE prefers the new
+        # ttl_expiration_timestamp key and falls back to the legacy
+        # integer-ms ttl_expiration_time key for pre-release rows.
+        assert "coalesce(" in sql_text
+        assert (
+            "json_unquote(json_extract(baas_device.provider_device_props, "
+            "'$.ttl_expiration_time'))" in sql_text
+        )
         assert "baas_device.provider_type = %s" in sql_text
         assert "baas_device.is_deleted = %s" in sql_text
         assert "baas_device.env = %s" in sql_text
@@ -486,6 +494,13 @@ class TestFindUnregistered:
         assert (
             "json_unquote(json_extract(ac_entity_device_binding.device_props, "
             "'$.ttl_expiration_timestamp'))" in sql_text
+        )
+        # WR-02: dual-key projection — COALESCE falls back to the legacy
+        # integer-ms ttl_expiration_time key for pre-release rows.
+        assert "coalesce(" in sql_text
+        assert (
+            "json_unquote(json_extract(ac_entity_device_binding.device_props, "
+            "'$.ttl_expiration_time'))" in sql_text
         )
         assert "ac_entity_device_binding.env = %s" in sql_text
         assert "baas_bot_ttl_renewal_schedule.id IS NULL" in sql_text
