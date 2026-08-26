@@ -242,13 +242,20 @@ class BotRuntimeProjector:
         # System Defaults during Phase 1.  It resolves template presets and
         # applies ac_default_skillset_mcp_exclusion; rebuilding defaults from
         # static constants here would silently resurrect user exclusions.
-        effective_mcp_entries = service.collect_bot_active_mcps(
-            entity_id=str(bot.get("entity_id") or owner_id),
-            bot_id=bot_id,
-            user_id=owner_id,
-            entity_type=bot.get("entity_type") or "staff",
-            engine_type=engine,
-        )
+        try:
+            effective_mcp_entries = service.collect_bot_active_mcps(
+                entity_id=str(bot.get("entity_id") or owner_id),
+                bot_id=bot_id,
+                user_id=owner_id,
+                entity_type=bot.get("entity_type") or "staff",
+                engine_type=engine,
+                strict_policy_context=True,
+            )
+        except Exception as exc:
+            # A failed policy-context lookup is not an empty Default policy.
+            # Fail before any overwrite-style MCP or Passport projection so a
+            # transient dependency outage cannot remove template-only MCPs.
+            raise SkillSetRuntimeReconcileError() from exc
         effective_default_mcp_codes = frozenset(
             str(item.get("server_code") or item.get("serverCode") or "").strip()
             for item in effective_mcp_entries

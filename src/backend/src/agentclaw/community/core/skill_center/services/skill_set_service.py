@@ -394,50 +394,78 @@ class SkillSetService:
         self,
         engine_type: Optional[str],
         bot_id: Optional[str] = None,
+        *,
+        strict: bool = False,
     ) -> Mapping[str, Any] | None:
-        """Best-effort extra context lookup for engine-specific default capabilities."""
+        """Resolve extra context for engine-specific default capabilities.
+
+        Display/read callers keep their historical best-effort behavior.
+        Runtime projection passes ``strict=True`` because a dependency failure
+        must not be interpreted as removal of template-only Default MCPs.
+        """
         provider = self._ext_info_provider
         if provider is None:
+            if strict:
+                raise RuntimeError("Default MCP policy provider is unavailable")
             return None
         target_bot_id = bot_id or self.bot_id
         if not target_bot_id:
             return None
-        try:
+        if strict:
             ext_info = provider(str(target_bot_id))
-        except Exception as exc:
-            logger.warning(
-                "[SkillSetService] default capabilities ext_info lookup failed for "
-                "engine_type=%s bot_id=%s: %s",
-                engine_type,
-                target_bot_id,
-                exc,
-            )
-            return None
+        else:
+            try:
+                ext_info = provider(str(target_bot_id))
+            except Exception as exc:
+                logger.warning(
+                    "[SkillSetService] default capabilities ext_info lookup failed for "
+                    "engine_type=%s bot_id=%s: %s",
+                    engine_type,
+                    target_bot_id,
+                    exc,
+                )
+                return None
         return ext_info if isinstance(ext_info, Mapping) else None
 
     def _get_default_capabilities_template_type(
         self,
         bot_id: Optional[str] = None,
+        *,
+        strict: bool = False,
     ) -> str | None:
-        """Best-effort template_type lookup for default-capability bucket routing."""
+        """Resolve template routing context for Default capabilities.
+
+        Runtime projection uses strict mode for the same reason as ext info:
+        a repository failure is not evidence that the Bot has no template.
+        """
         target_bot_id = bot_id or self.bot_id
         if not target_bot_id or not self.entity_id:
+            if strict:
+                raise RuntimeError("Default MCP template context is unavailable")
             return None
-        try:
+        if strict:
             bot = self._bot_repo.get_by_id_and_owner(
                 str(target_bot_id), str(self.entity_id)
             )
-            if isinstance(bot, dict):
-                template_type = bot.get("template_type")
-                if isinstance(template_type, str):
-                    return template_type
-        except Exception as exc:
-            logger.warning(
-                "[SkillSetService] default capabilities template_type lookup failed for "
-                "bot_id=%s: %s",
-                target_bot_id,
-                exc,
-            )
+            if not isinstance(bot, dict):
+                raise RuntimeError("Default MCP template context is unavailable")
+        else:
+            try:
+                bot = self._bot_repo.get_by_id_and_owner(
+                    str(target_bot_id), str(self.entity_id)
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[SkillSetService] default capabilities template_type lookup failed for "
+                    "bot_id=%s: %s",
+                    target_bot_id,
+                    exc,
+                )
+                return None
+        if isinstance(bot, dict):
+            template_type = bot.get("template_type")
+            if isinstance(template_type, str):
+                return template_type
         return None
 
     def _sync_symlinks_to_device_if_needed(
@@ -1455,6 +1483,8 @@ class SkillSetService:
         user_id: str,
         entity_type: str = "staff",
         engine_type: Optional[str] = None,
+        *,
+        strict_policy_context: bool = False,
     ) -> List[dict]:
         """Effective MCPs = default policy ∪ installed.
 
@@ -1479,8 +1509,12 @@ class SkillSetService:
         effective_ext_info = self._get_default_capabilities_ext_info(
             effective_engine,
             bot_id,
+            strict=strict_policy_context,
         )
-        effective_template_type = self._get_default_capabilities_template_type(bot_id)
+        effective_template_type = self._get_default_capabilities_template_type(
+            bot_id,
+            strict=strict_policy_context,
+        )
         active_skill_sets = self._get_all_active_skill_sets_with_default_fallback(
             user_id=entity_id,
             bolt_id=bot_id,

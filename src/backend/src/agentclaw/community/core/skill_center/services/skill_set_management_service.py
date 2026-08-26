@@ -724,7 +724,7 @@ class SkillSetManagementService:
             )
 
     def _platform_default_mcp_codes(self, bot: dict, bot_id: str) -> frozenset[str]:
-        """The unmaterialized half of Default-Set MCP membership (spec A.2).
+        """The unmaterialized platform Default MCP policy (spec A.2).
 
         Resolved at write time with the same context the read-side union
         uses — engine, template, ext info. A provider failure propagates

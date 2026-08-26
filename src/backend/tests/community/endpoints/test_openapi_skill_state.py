@@ -29,6 +29,9 @@ from agentclaw.community.core.skill_center.authorization_hook import (
 from agentclaw.community.core.skill_center.services.direct_activation_service import (
     DirectActivationService,
 )
+from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
+    PlatformDefaultMcpPolicy,
+)
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillSetRepository,
@@ -185,6 +188,7 @@ def _seed_state(world, *, runtime_success: bool) -> None:
                 bot_repo=world.get(BotRepository),
                 pool_skills=world.get(SkillRepository),
             ),
+            PlatformDefaultMcpPolicy(lambda _bot_id: None),
         ),
         scope=None,
     )

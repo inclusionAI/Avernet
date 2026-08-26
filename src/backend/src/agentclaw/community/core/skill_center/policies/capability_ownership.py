@@ -69,6 +69,19 @@ def require_can_join_set(
         )
 
 
+def require_direct_mcp_control_allowed(*, is_platform_default: bool) -> None:
+    """Refuse Direct control of an engine/template Default MCP.
+
+    Platform Default MCPs are code policy rather than Set membership, so R1's
+    membership walk cannot see them. They remain policy-managed even after a
+    Bot excludes them; exclusion/un-exclusion is their only control surface.
+    """
+    if is_platform_default:
+        raise SkillSetControlPlaneConflictError(
+            "RESOURCE_MANAGED_BY_PLATFORM_POLICY"
+        )
+
+
 def _set_belongs_to_bot(
     skill_set: Mapping[str, Any],
     *,
@@ -108,4 +121,8 @@ def _set_belongs_to_bot(
     return engine_type is None or str(skill_set.get("engine_type") or "") == engine_type
 
 
-__all__ = ["is_set_managed", "require_can_join_set"]
+__all__ = [
+    "is_set_managed",
+    "require_can_join_set",
+    "require_direct_mcp_control_allowed",
+]

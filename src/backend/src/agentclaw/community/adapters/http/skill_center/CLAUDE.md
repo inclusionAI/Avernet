@@ -219,7 +219,7 @@ device 层正处于 agentbox/arca 双链路拆分迁移中（背景见 `docs/sup
 | `adapters/http/skill_center/skills.py` | 遗留 `/api/skills` 路由（读走 `SkillQueryService`，激活/去激活走 `DirectActivationService`） |
 | `adapters/http/skill_center/skillsets.py` | 遗留 `/api/skillsets` 路由（写走 `SkillSetManagementService` 控制面） |
 | `core/skill_center/services/skill_set_management_service.py` | `SkillSetManagementService` — Set 范围的期望态命令服务（Default-Set 编辑落为 per-Bot 排除行） |
-| `core/skill_center/services/direct_activation_service.py` | `DirectActivationService` — 单能力（skill/MCP）直接激活命令服务 |
+| `core/skill_center/services/direct_activation_service.py` | `DirectActivationService` — 单能力（skill/MCP）直接激活命令服务；Platform Default MCP 拒绝 Direct，只能走 Default exclusion |
 | `core/skill_center/services/skill_query_service.py` | `SkillQueryService` — Bot skill 的唯一查询缝（列表/详情/内容/参数，读前先 flush） |
 | `core/skill_center/services/bot_capability_state_reader.py` | `BotCapabilityStateReader` — flush-then-read 的唯一激活态读模型 |
 | `core/skill_center/policies/capability_ownership.py` | `CapabilityOwnershipPolicy` — R1/R2/R3 所有权规则的唯一裁决点 |

@@ -14,6 +14,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillRuntimeSyncError,
     McpPermissionDeniedError,
     SkillSetAccessDeniedError,
+    SkillSetControlPlaneConflictError,
 )
 from agentclaw.community.core.skill_center.services.direct_activation_service import (
     DirectActivationService,
@@ -164,6 +165,16 @@ class _Reader:
         return frozenset({"mcp.weather"})
 
 
+class _PlatformDefaultMcpPolicy:
+    def __init__(self, *codes: str) -> None:
+        self.codes = frozenset(codes)
+        self.bots: list[dict] = []
+
+    def server_codes_for(self, bot: dict) -> frozenset[str]:
+        self.bots.append(bot)
+        return self.codes
+
+
 def _service(
     *,
     repository=None,
@@ -172,6 +183,7 @@ def _service(
     mcp_center=None,
     reader=None,
     audit=None,
+    platform_default_mcp_policy=None,
 ) -> DirectActivationService:
     return DirectActivationService(
         repository if repository is not None else _Repository(),
@@ -182,6 +194,9 @@ def _service(
         audit if audit is not None else _Audit(),
         mcp_center if mcp_center is not None else _McpCenter(allowed=True),
         reader if reader is not None else _Reader(),
+        platform_default_mcp_policy
+        if platform_default_mcp_policy is not None
+        else _PlatformDefaultMcpPolicy(),
     )
 
 
@@ -202,6 +217,7 @@ async def test_mcp_direct_activation_checks_permission_before_writing():
             "bot_id": "bot-1",
             "owner_id": "true-owner",
             "server_code": "mcp.weather",
+            "platform_default_codes": frozenset(),
             **_SCOPE,
         }
     ]
@@ -237,9 +253,39 @@ async def test_mcp_direct_deactivation_needs_no_marketplace_permission():
             "bot_id": "bot-1",
             "owner_id": "true-owner",
             "server_code": "mcp.weather",
+            "platform_default_codes": frozenset(),
             **_SCOPE,
         }
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method_name", ["activate_mcp", "deactivate_mcp"])
+async def test_platform_default_mcp_refuses_direct_control(method_name: str):
+    repository = _Repository()
+    mcp_center = _McpCenter(allowed=True)
+    policy = _PlatformDefaultMcpPolicy("mcp.policy")
+    service = _service(
+        repository=repository,
+        mcp_center=mcp_center,
+        platform_default_mcp_policy=policy,
+    )
+
+    with pytest.raises(
+        SkillSetControlPlaneConflictError,
+        match="RESOURCE_MANAGED_BY_PLATFORM_POLICY",
+    ):
+        await getattr(service, method_name)(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            actor_id="true-owner",
+            server_code="mcp.policy",
+        )
+
+    assert policy.bots[0]["bot_id"] == "bot-1"
+    assert repository.install_mcp_calls == []
+    assert repository.uninstall_mcp_calls == []
+    assert mcp_center.calls == []
 
 
 @pytest.mark.asyncio
@@ -347,6 +393,7 @@ async def test_a_not_ready_bot_refuses_before_any_write():
     service = DirectActivationService(
         repository, _PendingBots(), _Skills(), _SuccessfulRuntime(),
         _Authorization(), _Audit(), _McpCenter(allowed=True), _Reader(),
+        _PlatformDefaultMcpPolicy(),
     )
 
     with pytest.raises(LocalSkillNotReadyError):
@@ -375,6 +422,7 @@ async def test_a_space_asset_and_a_mismatched_local_row_are_masked_as_not_found(
     service = DirectActivationService(
         repository, _Bots(), _MoreSkills(), _SuccessfulRuntime(),
         _Authorization(), _Audit(), _McpCenter(allowed=True), _Reader(),
+        _PlatformDefaultMcpPolicy(),
     )
 
     # A Space (center://) asset has no direct-activation wire.

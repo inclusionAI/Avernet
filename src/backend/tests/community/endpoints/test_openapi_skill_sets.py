@@ -24,6 +24,9 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
 from agentclaw.community.core.skill_center.services.direct_activation_service import (
     DirectActivationService,
 )
+from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
+    PlatformDefaultMcpPolicy,
+)
 from agentclaw.community.core.skill_center.authorization_hook import (
     BotCapabilityAuthorizationHookProtocol,
 )
@@ -188,6 +191,7 @@ def _seed(world, *, member: bool = False) -> None:
         world.get(BotCollabLogRepositoryProtocol),
         world.get(MCPCenterPlugin),
         world.get(BotCapabilityStateReaderProtocol),
+        PlatformDefaultMcpPolicy(lambda _bot_id: None),
     )
     world.injector.binder.bind(
         DirectActivationServiceProtocol, to=direct, scope=None

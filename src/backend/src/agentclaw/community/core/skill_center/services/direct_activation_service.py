@@ -39,6 +39,12 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
 )
+from agentclaw.community.core.skill_center.policies.capability_ownership import (
+    require_direct_mcp_control_allowed,
+)
+from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
+    PlatformDefaultMcpPolicy,
+)
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
 )
@@ -68,6 +74,7 @@ class DirectActivationService:
         audit_log_repo: BotCollabLogRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
         reader: BotCapabilityStateReaderProtocol,
+        platform_default_mcp_policy: PlatformDefaultMcpPolicy,
     ) -> None:
         self._repository = repository
         self._bot_repo = bot_repo
@@ -76,6 +83,7 @@ class DirectActivationService:
         self._audit_log_repo = audit_log_repo
         self._mcp_center = mcp_center
         self._reader = reader
+        self._platform_default_mcp_policy = platform_default_mcp_policy
         self._flow = MutationProjectionFlow(repository=repository, runtime=runtime)
 
     # ── Skills ──────────────────────────────────────────────────────
@@ -182,6 +190,7 @@ class DirectActivationService:
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str
     ) -> dict[str, Any]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
+        platform_default_codes = self._platform_default_codes(bot, server_code)
         self._require_mcp_permission(actor_id=actor_id, server_code=server_code)
         result = await self._flow.apply(
             bot=bot,
@@ -191,6 +200,7 @@ class DirectActivationService:
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
                 server_code=server_code,
+                platform_default_codes=platform_default_codes,
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
             ),
@@ -205,6 +215,7 @@ class DirectActivationService:
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str
     ) -> dict[str, Any]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
+        platform_default_codes = self._platform_default_codes(bot, server_code)
         result = await self._flow.apply(
             bot=bot,
             bot_id=bot_id,
@@ -213,6 +224,7 @@ class DirectActivationService:
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
                 server_code=server_code,
+                platform_default_codes=platform_default_codes,
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
             ),
@@ -234,6 +246,15 @@ class DirectActivationService:
         )
 
     # ── Shared ──────────────────────────────────────────────────────
+
+    def _platform_default_codes(
+        self, bot: dict, server_code: str
+    ) -> frozenset[str]:
+        codes = self._platform_default_mcp_policy.server_codes_for(bot)
+        require_direct_mcp_control_allowed(
+            is_platform_default=server_code in codes
+        )
+        return codes
 
     def _bot(self, *, bot_id: str, owner_id: str, actor_id: str) -> dict:
         """Resolve the exact addressed Bot; the MCP wire's error vocabulary."""

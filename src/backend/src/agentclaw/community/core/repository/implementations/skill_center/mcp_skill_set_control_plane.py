@@ -17,6 +17,7 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
     DesiredStateMutation,
 )
 from agentclaw.community.core.skill_center.policies.capability_ownership import (
+    require_direct_mcp_control_allowed,
     require_can_join_set,
 )
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
@@ -152,11 +153,11 @@ class McpSkillSetControlPlaneCommands:
         """The MCP twin of ``exclude_default_skill``: exclusion row +
         Installation delta in one transaction.
 
-        A Default Set's effective MCP membership has two halves: the
+        A Default Set's effective MCP projection has two inputs: the
         association rows this transaction can read, and the platform's
-        engine/template default codes — a read-time policy input the caller
-        resolves and passes in as ``platform_default_codes`` (spec A.2 keeps
-        that config unmaterialized). A code in neither half is the MCP twin
+        engine/template default policy — a read-time input the caller resolves
+        and passes in as ``platform_default_codes`` (spec A.2 keeps that config
+        unmaterialized). A code in neither input is the MCP twin
         of the skill command's never-member gate: refused without writing,
         because a stray code must not leave a dangling row that would
         pre-exclude the server if the platform ever adds it.
@@ -180,13 +181,16 @@ class McpSkillSetControlPlaneCommands:
                 session, bot_id=bot_id, owner_id=owner_id,
                 set_id=int(row.id), server_code=server_code,
             )
-            if not created:
+            # Neither a Set member nor a platform-policy code can be
+            # Direct-controlled. Retire any legacy Installation row even when
+            # the exclusion already existed; otherwise the installed half of
+            # the runtime union would bypass policy indefinitely.
+            removed_installation = mcp_installations.uninstall(
+                session, bot_id=bot_id, owner_id=owner_id,
+                env=get_current_env(), server_codes={server_code},
+            )
+            if not created and removed_installation == 0:
                 return DesiredStateMutation(self._as_item(row), False, old)
-            if server_code in member_codes:
-                mcp_installations.uninstall(
-                    session, bot_id=bot_id, owner_id=owner_id,
-                    env=get_current_env(), server_codes={server_code},
-                )
             session.flush()
             return DesiredStateMutation(self._as_item(row), True, old)
 
@@ -229,10 +233,14 @@ class McpSkillSetControlPlaneCommands:
 
     def install_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str,
+        platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
+            require_direct_mcp_control_allowed(
+                is_platform_default=server_code in platform_default_codes
+            )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             self._require_not_set_managed(
                 session,
@@ -255,10 +263,14 @@ class McpSkillSetControlPlaneCommands:
 
     def uninstall_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str,
+        platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
+            require_direct_mcp_control_allowed(
+                is_platform_default=server_code in platform_default_codes
+            )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             self._require_not_set_managed(
                 session,

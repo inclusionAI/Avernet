@@ -134,8 +134,11 @@ that way:
 - **One rule book.** `policies/capability_ownership.py` owns the ownership
   rules: R1 a Set-held capability (Default included, excluded or not) refuses
   direct control; R2 a directly-active capability refuses joining a Set; R3 a
-  capability lives in at most one Set. Command services consult the policy
-  inside the write transaction; nothing else re-derives those decisions.
+  capability lives in at most one Set. Engine/template Default MCPs are a
+  separate platform policy input rather than Set membership; they likewise
+  refuse Direct control and change only through Default exclusion/un-exclusion.
+  Command services consult these policies before and inside the write
+  transaction; nothing else re-derives those decisions.
 
 Writes go through two command services, one per scope, with identical shape —
 authorize, mutate desired state in one UoW transaction, project the complete
@@ -163,6 +166,13 @@ active-only desired-state and compensation boundary as Skills.  The MCP
 catalogue, user configuration, and permission grant remain separate facts;
 the control plane consults the MCP authorization Service API before any MCP
 membership or Direct-installation write.
+
+Engine/template Default MCPs never become Installation provenance: Direct
+commands reject them, while exclusion removes any legacy Direct row left by an
+older process so the installed union cannot bypass policy. Runtime projection
+resolves template Default MCP context strictly; a provider failure aborts the
+projection and enters command compensation rather than becoming an empty
+Default policy.
 
 `RuntimeProjectionResolver` is the only source of a mutation/restart runtime
 snapshot. It receives Installation, active ordinary SkillSet membership,

@@ -498,6 +498,19 @@ class _OverlappingCollectFactory(_RuntimeFactory):
         self.service = _OverlappingCollectService()
 
 
+class _FailingPolicyCollectService(_RuntimeFactoryService):
+    def collect_bot_active_mcps(self, **kwargs) -> list[dict]:
+        self.collect_calls.append(kwargs)
+        assert kwargs["strict_policy_context"] is True
+        raise RuntimeError("template policy unavailable")
+
+
+class _FailingPolicyCollectFactory(_RuntimeFactory):
+    def __init__(self) -> None:
+        super().__init__()
+        self.service = _FailingPolicyCollectService()
+
+
 class _RuntimeBots:
     def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
         assert (bot_id, owner_id) == ("bot-1", "true-owner")
@@ -1768,6 +1781,27 @@ async def test_runtime_projection_fails_before_engine_writes_when_flush_fails():
 
 
 @pytest.mark.asyncio
+async def test_runtime_projection_fails_closed_when_default_mcp_policy_is_unavailable():
+    factory = _FailingPolicyCollectFactory()
+    passport = _RuntimePassport()
+    runtime = BotRuntimeProjector(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=passport,
+    )
+
+    with pytest.raises(SkillSetRuntimeReconcileError):
+        await runtime.project(bot_id="bot-1", owner_id="true-owner")
+
+    assert factory.service.mcp_codes is None
+    assert passport.calls == []
+
+
+@pytest.mark.asyncio
 async def test_runtime_projection_mcp_inputs_agree_when_the_union_overlaps():
     """installed ∪ effective_default: a code arriving through both inputs —
     the repo's installed listing and the collect union that now contains
@@ -1828,6 +1862,7 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
             "user_id": "true-owner",
             "entity_type": "staff",
             "engine_type": "openclaw",
+            "strict_policy_context": True,
         }
     ]
     assert passport.calls == [
@@ -2302,5 +2337,4 @@ async def test_unexcluding_a_default_mcp_still_requires_marketplace_permission()
             set_id="9", server_code="mcp.back",
         )
     assert repository.exclusion_calls == []
-
 

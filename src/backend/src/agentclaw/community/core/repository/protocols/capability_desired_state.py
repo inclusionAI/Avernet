@@ -205,14 +205,21 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     @abstractmethod
     def install_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str,
+        platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        """The MCP twin of :meth:`install_skill`, same R1 rule."""
+        """The MCP twin of :meth:`install_skill`, plus platform-policy ownership.
+
+        ``platform_default_codes`` is resolved strictly from the Bot's
+        engine/template context. A matching code refuses Direct control; only
+        Default exclusion/un-exclusion may change its effective state.
+        """
         ...
     @abstractmethod
     def uninstall_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str,
+        platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation: ...

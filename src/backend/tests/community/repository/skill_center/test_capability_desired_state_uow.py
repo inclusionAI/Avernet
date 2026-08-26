@@ -549,7 +549,8 @@ def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
         session.flush()
 
     assert repository.install_mcp(
-        bot_id="bot", owner_id="owner", server_code="mcp.weather"
+        bot_id="bot", owner_id="owner", server_code="mcp.weather",
+        platform_default_codes=frozenset(),
     ).changed
     with pytest.raises(
         SkillSetControlPlaneConflictError, match="RESOURCE_DIRECT_ACTIVE"
@@ -558,7 +559,8 @@ def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
             bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather"
         )
     assert repository.uninstall_mcp(
-        bot_id="bot", owner_id="owner", server_code="mcp.weather"
+        bot_id="bot", owner_id="owner", server_code="mcp.weather",
+        platform_default_codes=frozenset(),
     ).changed
     assert repository.add_mcp(
         bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather"
@@ -567,8 +569,25 @@ def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
         SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_SKILL_SET"
     ):
         repository.install_mcp(
-            bot_id="bot", owner_id="owner", server_code="mcp.weather"
+            bot_id="bot", owner_id="owner", server_code="mcp.weather",
+            platform_default_codes=frozenset(),
         )
+
+
+def test_platform_default_mcp_refuses_direct_install_and_uninstall():
+    repository = CapabilityDesiredStateRepository(_Database())
+
+    for command in (repository.install_mcp, repository.uninstall_mcp):
+        with pytest.raises(
+            SkillSetControlPlaneConflictError,
+            match="RESOURCE_MANAGED_BY_PLATFORM_POLICY",
+        ):
+            command(
+                bot_id="bot",
+                owner_id="owner",
+                server_code="mcp.policy",
+                platform_default_codes=frozenset({"mcp.policy"}),
+            )
 
 
 def test_direct_mcp_installation_isolated_by_owner_for_shared_bot_id():
@@ -576,13 +595,16 @@ def test_direct_mcp_installation_isolated_by_owner_for_shared_bot_id():
     repository = CapabilityDesiredStateRepository(db)
 
     assert repository.install_mcp(
-        bot_id="default", owner_id="owner-a", server_code="mcp.weather"
+        bot_id="default", owner_id="owner-a", server_code="mcp.weather",
+        platform_default_codes=frozenset(),
     ).changed
     assert repository.install_mcp(
-        bot_id="default", owner_id="owner-b", server_code="mcp.weather"
+        bot_id="default", owner_id="owner-b", server_code="mcp.weather",
+        platform_default_codes=frozenset(),
     ).changed
     assert repository.uninstall_mcp(
-        bot_id="default", owner_id="owner-a", server_code="mcp.weather"
+        bot_id="default", owner_id="owner-a", server_code="mcp.weather",
+        platform_default_codes=frozenset(),
     ).changed
 
     with db.orm_session() as session:
@@ -2135,8 +2157,14 @@ def test_an_excluded_default_member_refuses_direct_control_for_skills_and_mcps()
     for command, address in [
         (repository.install_skill, dict(skill_id=str(skill.id))),
         (repository.uninstall_skill, dict(skill_id=str(skill.id))),
-        (repository.install_mcp, dict(server_code="mcp.member")),
-        (repository.uninstall_mcp, dict(server_code="mcp.member")),
+        (
+            repository.install_mcp,
+            dict(server_code="mcp.member", platform_default_codes=frozenset()),
+        ),
+        (
+            repository.uninstall_mcp,
+            dict(server_code="mcp.member", platform_default_codes=frozenset()),
+        ),
     ]:
         with pytest.raises(
             SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_SKILL_SET"
@@ -2469,17 +2497,25 @@ def test_excluding_a_stray_mcp_code_owns_neither_half():
         assert session.query(BotMCPInstallation).count() == 1
 
 
-def test_excluding_a_platform_default_mcp_without_membership_writes_the_row():
-    """The half a membership-only guard would break (spec A.2).
+def test_excluding_a_platform_default_mcp_retires_a_legacy_direct_row():
+    """Policy exclusion converges rows written before Direct control was banned.
 
     Engine/template default MCPs are policy, not association rows, so the
     caller names them; excluding one writes the exclusion row — that row is
-    exactly how a Bot opts out of a platform default — with no Installation
-    delta, because policy defaults were never installed rows.
+    exactly how a Bot opts out of a platform default. Any Installation row for
+    the same code is a legacy Direct-control artifact and must be removed or it
+    would immediately bypass the exclusion through the installed union half.
     """
     db = _Database()
     repository = CapabilityDesiredStateRepository(db)
     default, _skill = _seed_default_with_member(db)
+    with db.transactional_orm_session() as session:
+        session.add(
+            BotMCPInstallation(
+                bot_id="bot", owner_id="owner",
+                server_code="mcp.platform", env="dev",
+            )
+        )
 
     excluded = repository.exclude_default_mcp(
         set_id=str(default.id), server_code="mcp.platform",
@@ -2489,10 +2525,31 @@ def test_excluding_a_platform_default_mcp_without_membership_writes_the_row():
     assert excluded.changed is True
     with db.orm_session() as session:
         assert session.query(DefaultSkillsetMcpExclusion).count() == 1
-        assert session.query(BotMCPInstallation).count() == 1
+        assert {
+            row.server_code for row in session.query(BotMCPInstallation).all()
+        } == {"mcp.member"}
     assert repository.excluded_default_mcp_codes(
         bot_id="bot", owner_id="owner", set_id=str(default.id)
     ) == {"mcp.platform"}
+
+    # Idempotent exclusion is also a repair point for a row written by an old
+    # process racing this deployment.
+    with db.transactional_orm_session() as session:
+        session.add(
+            BotMCPInstallation(
+                bot_id="bot", owner_id="owner",
+                server_code="mcp.platform", env="dev",
+            )
+        )
+    repaired = repository.exclude_default_mcp(
+        set_id=str(default.id), server_code="mcp.platform",
+        platform_default_codes=frozenset({"mcp.platform"}), **_DEFAULT_SCOPE
+    )
+    assert repaired.changed is True
+    with db.orm_session() as session:
+        assert {
+            row.server_code for row in session.query(BotMCPInstallation).all()
+        } == {"mcp.member"}
 
 
 def test_restore_desired_state_preserves_mcp_membership_metadata():
