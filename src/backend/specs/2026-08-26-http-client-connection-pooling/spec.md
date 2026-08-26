@@ -31,49 +31,45 @@ spec concluded the opposite and scoped HTTP/2 out on that basis.
 
 Every base URL *in this repository* is plaintext (`http://localhost:8890` in the
 community and singlebox overlays; `http://10.0.0.1:20010`-style container URLs in
-test fixtures), because the corp production overlay is not in this repo.
-Production logs show the real hosts:
+test fixtures), because the deployment overlay that carries the real hosts is not
+in this repo. Production request logs settle it: the two upstreams this change
+targets — the BaaS API, and the proxy that fronts container calls — are both
+reached over **`https://`**, not plaintext.
 
-```
-GET  https://secbaas-prod.alipay.com/api/v1/bots/BOT-…/ws-info?…      "HTTP/1.1 404"
-POST https://agentclawproxy-prod.alipay.com/proxypass/ARCA_…:20003/api/file/list  "HTTP/1.1 200"
-```
+(The deployed hostnames and their internal route shapes are deliberately not
+reproduced here; this is the public community distribution, and `AGENTS.md`
+requires it to stay free of company-only domains and private endpoints. Anyone
+who needs to re-verify the claim can read the same request logs.)
 
-Both target upstreams — the BaaS API and the agentclaw proxy that fronts
-container calls — are **HTTPS**. (The `HTTP/1.1` in those log lines is the
-version httpx negotiated with `http2` disabled, which is today's default; it is
-not evidence about what the servers support.) The earlier inference that the BaaS
-hop was plaintext-in-mesh came from `baas_client.py`'s note about MOSN providing
-security with no `Authorization` header — that note describes the
-`/internal/bot-health-checker/alive` endpoint, not the `/api/v1/…` hop these logs
-show.
+The earlier inference that the BaaS hop was plaintext-in-mesh came from
+`baas_client.py`'s note about MOSN providing security with no `Authorization`
+header — that note describes the `/internal/bot-health-checker/alive` endpoint,
+not the `/api/v1/…` hop those logs show.
 
 Because they are TLS, ALPN negotiation is possible, and HTTP/2 is worth having.
 
-**ALPN support, confirmed.** Probed from inside the corp network:
+**ALPN support, confirmed.** Both origins were probed from inside the corporate
+network and **both negotiate `h2`** — so multiplexing will genuinely engage
+rather than falling back. The proxy origin matters more of the two, since it
+fronts the parallel container calls this whole change is for.
+
+The check, against whichever host an operator needs to confirm:
 
 ```
-$ openssl s_client -connect secbaas-prod.alipay.com:443 -alpn h2,http/1.1 </dev/null 2>/dev/null | grep ALPN
+$ openssl s_client -connect <upstream-host>:443 -alpn h2,http/1.1 </dev/null \
+    2>/dev/null | grep ALPN
 ALPN protocol: h2
 ```
 
-So the BaaS origin negotiates HTTP/2 today and multiplexing will actually
-engage there. (An equivalent probe from the development sandbox is worthless and
-should not be repeated: its TLS is terminated by an egress gateway whose
-certificate issuer is `O = Anthropic, CN = Egress Gateway SDS Issuing CA`, so it
-reports the gateway's ALPN, not the origin's.)
+Two caveats on that result:
 
-`agentclawproxy-prod.alipay.com` reports the same, and matters more than
-secbaas since it fronts the parallel container calls this whole change is for:
-
-```
-$ openssl s_client -connect agentclawproxy-prod.alipay.com:443 -alpn h2,http/1.1 </dev/null 2>/dev/null | grep ALPN
-ALPN protocol: h2
-```
-
-Note the scope of that result: agentclawproxy is a proxy, so this establishes the
-**backend→proxy** hop only — the connection this pool actually holds — and says
-nothing about proxy→container beyond it. That is the right scope for this change.
+* **Do not run this from the development sandbox.** Its TLS is terminated by an
+  egress gateway (certificate issuer `O = Anthropic, CN = Egress Gateway SDS
+  Issuing CA`), so it reports the *gateway's* ALPN, not the origin's — it will
+  answer `h2` regardless of what the real upstream supports.
+* The proxy result establishes the **backend→proxy** hop only — the connection
+  this pool actually holds — and says nothing about proxy→container beyond it.
+  That is the right scope for this change.
 
 So both target upstreams negotiate HTTP/2 today. Enabling the flag is a staging
 decision with a known payoff, not a bet on unknown server support.
@@ -158,7 +154,7 @@ incremental rather than all-or-nothing, and leaves reason 1 (the untestable corp
 send-hook wrapper) as the substantive one.
 
 **Confirmed at review (2026-08-26): ship the shared default `http2: false`, flip
-per environment and per qualifier.** Probing `agentclawproxy-prod` (task F1b) is
+per environment and per qualifier.** Probing the proxy origin (task F1b) is
 a prerequisite for flipping the bindings that reach it, not for this change.
 
 **Out of scope**
