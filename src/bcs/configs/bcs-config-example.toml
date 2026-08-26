@@ -2,9 +2,21 @@
 #
 # Copy this file, replace every example.com host and replace-with-* value,
 # then run. Do not commit real credentials.
+#
+# Environment variable references in quoted string values:
+#   key = "${VAR}"            -> value of env var VAR; startup fails if VAR is unset
+#   key = "${VAR:-default}"   -> default when VAR is unset or empty
+# Only quoted strings are expanded (bare key = ${VAR} is not valid TOML).
+# There is NO generic BCS_* substitution — only the specific variables the
+# DB/Redis loaders read hardcoded override the [database.mysql.connection]
+# and [cache.redis.connection] fields (BCS_DB_HOST/PORT/USER/PASSWORD/...,
+# BCS_REDIS_HOST/PORT/PASSWORD/...); those parse the env string into the
+# right type, so they are how numeric fields such as port get env-injected.
+# There is no escape for a literal "${" — avoid real "${...}" in string
+# values unless it is an env reference.
 
 bind = "0.0.0.0"
-port = 21000
+port = 21000  # Dockerfile healthcheck targets 21000; keep in sync if you change this.
 bots_base_dir = "/var/lib/bcs/bots"
 
 max_history_per_session = 1000

@@ -169,6 +169,122 @@ fn is_sensitive_config_key(key: &str) -> bool {
         || lower.ends_with("_token")
 }
 
+/// Parse raw config file content (TOML or JSON) into a JSON `Value`.
+///
+/// TOML is converted through `toml::Value` so the result is merge-compatible
+/// with JSON configs. `path_display` is used only for error messages.
+pub(crate) fn parse_config_content(
+    ext: &str,
+    content: &str,
+    path_display: &str,
+) -> Result<Value, ConfigLoadError> {
+    match ext.to_lowercase().as_str() {
+        "json" => serde_json::from_str(content)
+            .map_err(|e| ConfigLoadError::Parse(path_display.to_string(), e.to_string())),
+        "toml" => {
+            // Convert TOML to JSON Value for merge compatibility
+            let toml_value: toml::Value = toml::from_str(content)
+                .map_err(|e| ConfigLoadError::Parse(path_display.to_string(), e.to_string()))?;
+            serde_json::to_value(toml_value)
+                .map_err(|e| ConfigLoadError::Parse(path_display.to_string(), e.to_string()))
+        }
+        _ => Err(ConfigLoadError::UnsupportedFormat(path_display.to_string())),
+    }
+}
+
+/// Recursively expand `${VAR}` / `${VAR:-default}` references in every string
+/// value of a parsed config tree.
+///
+/// This runs after the env-overlay deep-merge and before deserialization, so
+/// only final (env-overridden) string values are resolved from the process
+/// environment, and the typed config struct receives the expanded values.
+/// Non-string values (numbers, booleans, null) are left untouched, which means
+/// `${VAR}` only works for string-typed fields; numeric/boolean fields must
+/// continue to use the typed `BCS_*` env overrides (e.g. `BCS_REDIS_PORT`).
+/// No nested expansion is performed on substituted values.
+pub(crate) fn expand_env_vars(value: &mut Value) -> Result<(), ConfigLoadError> {
+    match value {
+        Value::Object(map) => {
+            for (_, child) in map.iter_mut() {
+                expand_env_vars(child)?;
+            }
+            Ok(())
+        }
+        Value::Array(items) => {
+            for item in items.iter_mut() {
+                expand_env_vars(item)?;
+            }
+            Ok(())
+        }
+        Value::String(s) => {
+            *s = expand_env_string(s)?;
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Expand `${VAR}` / `${VAR:-default}` tokens within a single string.
+///
+/// - `${VAR}` resolves to the env var's value. A missing variable is a hard
+///   error (fail fast) so a missing secret aborts startup instead of silently
+///   becoming an empty string.
+/// - `${VAR:-default}` uses `default` when the variable is unset or empty,
+///   providing the opt-out for optional values.
+/// - An empty-but-set variable with no default expands to the empty string
+///   (the variable is explicitly set).
+/// - A literal `${` that is not a well-formed reference (`${NAME}` or
+///   `${NAME:-...}`) is a hard error.
+fn expand_env_string(input: &str) -> Result<String, ConfigLoadError> {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(start) = rest.find("${") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let end = after
+            .find('}')
+            .ok_or_else(|| ConfigLoadError::EnvExpansion(format!(
+                "config value has an unterminated environment reference: {rest:?}"
+            )))?;
+        let token = &after[..end];
+        let remaining = &after[end + 1..];
+        let (name, default) = match token.split_once(":-") {
+            Some((n, d)) => (n, Some(d)),
+            None => (token, None),
+        };
+        if !is_valid_env_name(name) {
+            return Err(ConfigLoadError::EnvExpansion(format!(
+                "invalid environment variable name `{name}` in config reference"
+            )));
+        }
+        let segment = match std::env::var(name) {
+            Ok(v) if !v.is_empty() => v,
+            Ok(v) => match default {
+                Some(d) => d.to_string(),
+                None => v, // empty-but-set variable with no default
+            },
+            Err(_) => match default {
+                Some(d) => d.to_string(),
+                None => {
+                    return Err(ConfigLoadError::EnvExpansion(format!(
+                        "environment variable `{name}` referenced in config is not set"
+                    )))
+                }
+            },
+        };
+        out.push_str(&segment);
+        rest = remaining;
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+fn is_valid_env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 /// Configuration loader with multi-environment support.
 pub struct ConfigLoader {
     config_dir: PathBuf,
@@ -245,7 +361,7 @@ impl ConfigLoader {
 
         // 2. Load environment-specific config (optional)
         let env_path = self.find_env_config();
-        let (merged_value, env_config_path) = if env_path.exists() {
+        let (mut merged_value, env_config_path) = if env_path.exists() {
             let env_value = self.load_config_value(&env_path)?;
             let mut merged = base_value;
             deep_merge(&mut merged, &env_value);
@@ -253,6 +369,11 @@ impl ConfigLoader {
         } else {
             (base_value, None)
         };
+
+        // Expand `${VAR}` / `${VAR:-default}` references in string values after
+        // the env-overlay merge, so only the final resolved values are read
+        // from the process environment.
+        expand_env_vars(&mut merged_value)?;
 
         // 3. Deserialize to target type
         let config = serde_json::from_value(merged_value.clone())
@@ -307,18 +428,7 @@ impl ConfigLoader {
             .and_then(|e| e.to_str())
             .unwrap_or("toml");
 
-        match ext.to_lowercase().as_str() {
-            "json" => serde_json::from_str(&content)
-                .map_err(|e| ConfigLoadError::Parse(path.display().to_string(), e.to_string())),
-            "toml" => {
-                // Convert TOML to JSON Value for merge compatibility
-                let toml_value: toml::Value = toml::from_str(&content)
-                    .map_err(|e| ConfigLoadError::Parse(path.display().to_string(), e.to_string()))?;
-                serde_json::to_value(toml_value)
-                    .map_err(|e| ConfigLoadError::Parse(path.display().to_string(), e.to_string()))
-            }
-            _ => Err(ConfigLoadError::UnsupportedFormat(path.display().to_string())),
-        }
+        parse_config_content(ext, &content, &path.display().to_string())
     }
 }
 
@@ -344,6 +454,10 @@ pub enum ConfigLoadError {
     /// Unsupported config format
     #[error("Unsupported config format: {0}")]
     UnsupportedFormat(String),
+
+    /// Failed to expand a `${VAR}` environment reference in config values
+    #[error("Config environment reference expansion failed: {0}")]
+    EnvExpansion(String),
 }
 
 impl ConfigLoadError {
@@ -654,6 +768,149 @@ mod tests {
 
         let result: Result<serde_json::Value, _> = loader.load();
         assert!(result.is_err());
+    }
+
+    // =========================================================================
+    // ${VAR} environment-reference expansion tests
+    // =========================================================================
+
+    #[test]
+    fn expand_env_string_resolves_a_present_variable() {
+        unsafe { std::env::set_var("BCS_TEST_CFG_TOKEN", "super-secret"); }
+        assert_eq!(
+            expand_env_string("prefix-${BCS_TEST_CFG_TOKEN}-suffix").unwrap(),
+            "prefix-super-secret-suffix"
+        );
+        unsafe { std::env::remove_var("BCS_TEST_CFG_TOKEN"); }
+    }
+
+    #[test]
+    fn expand_env_string_resolves_multiple_tokens_and_keeps_literal_text() {
+        unsafe {
+            std::env::set_var("BCS_TEST_CFG_HOST", "example.com");
+            std::env::set_var("BCS_TEST_CFG_PORT", "8443");
+        }
+        assert_eq!(
+            expand_env_string("https://${BCS_TEST_CFG_HOST}:${BCS_TEST_CFG_PORT}/path").unwrap(),
+            "https://example.com:8443/path"
+        );
+        unsafe {
+            std::env::remove_var("BCS_TEST_CFG_HOST");
+            std::env::remove_var("BCS_TEST_CFG_PORT");
+        }
+    }
+
+    #[test]
+    fn expand_env_string_uses_default_when_unset() {
+        unsafe { std::env::remove_var("BCS_TEST_CFG_ABSENT"); }
+        assert_eq!(
+            expand_env_string("${BCS_TEST_CFG_ABSENT:-fallback}").unwrap(),
+            "fallback"
+        );
+    }
+
+    #[test]
+    fn expand_env_string_uses_env_over_default_when_set() {
+        unsafe { std::env::set_var("BCS_TEST_CFG_PRESENT", "real"); }
+        assert_eq!(
+            expand_env_string("${BCS_TEST_CFG_PRESENT:-fallback}").unwrap(),
+            "real"
+        );
+        unsafe { std::env::remove_var("BCS_TEST_CFG_PRESENT"); }
+    }
+
+    #[test]
+    fn expand_env_string_errors_on_unset_without_default() {
+        unsafe { std::env::remove_var("BCS_TEST_CFG_REQUIRED"); }
+        let err = expand_env_string("${BCS_TEST_CFG_REQUIRED}").unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("BCS_TEST_CFG_REQUIRED"), "error should name the missing var: {message}");
+    }
+
+    #[test]
+    fn expand_env_string_errors_on_invalid_name() {
+        // Names must start with a letter or underscore.
+        let err = expand_env_string("${1INVALID}").unwrap_err();
+        assert!(err.to_string().contains("invalid environment variable name"));
+    }
+
+    #[test]
+    fn expand_env_string_errors_on_unterminated_reference() {
+        let err = expand_env_string("prefix-${NO_CLOSE").unwrap_err();
+        assert!(err.to_string().contains("unterminated"));
+    }
+
+    #[test]
+    fn expand_env_string_leaves_text_without_references_untouched() {
+        assert_eq!(
+            expand_env_string("plain value with no reference").unwrap(),
+            "plain value with no reference"
+        );
+    }
+
+    #[test]
+    fn expand_env_vars_walks_objects_and_arrays_and_skips_non_strings() {
+        unsafe { std::env::set_var("BCS_TEST_CFG_VAL", "expanded"); }
+        let mut value = serde_json::json!({
+            "url": "https://${BCS_TEST_CFG_VAL}/api",
+            "keys": ["${BCS_TEST_CFG_VAL}", "literal"],
+            "port": 21000,
+            "nested": { "deep": "${BCS_TEST_CFG_VAL}" },
+        });
+        expand_env_vars(&mut value).unwrap();
+        assert_eq!(value["url"], "https://expanded/api");
+        assert_eq!(value["keys"][0], "expanded");
+        assert_eq!(value["keys"][1], "literal");
+        assert_eq!(value["port"], 21000); // numeric values are untouched
+        assert_eq!(value["nested"]["deep"], "expanded");
+        unsafe { std::env::remove_var("BCS_TEST_CFG_VAL"); }
+    }
+
+    #[test]
+    #[serial]
+    fn loader_expands_references_in_loaded_string_fields() {
+        unsafe { std::env::set_var("BCS_TEST_CFG_BOTCHAT", "https://botchat.example.com"); }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("bcs-config.toml"),
+            r#"
+                bind = "0.0.0.0"
+                port = 21000
+                bots_base_dir = "/bots"
+                botchat_url = "${BCS_TEST_CFG_BOTCHAT}"
+            "#,
+        )
+        .unwrap();
+
+        let loader = ConfigLoader::new(dir.path().to_path_buf())
+            .with_environment(Environment::Prod);
+        let config: serde_json::Value = loader.load().unwrap();
+
+        assert_eq!(config["botchat_url"], "https://botchat.example.com");
+        unsafe { std::env::remove_var("BCS_TEST_CFG_BOTCHAT"); }
+    }
+
+    #[test]
+    #[serial]
+    fn loader_errors_when_a_required_reference_is_unset() {
+        unsafe { std::env::remove_var("BCS_TEST_CFG_MISSING"); }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("bcs-config.toml"),
+            r#"
+                bind = "0.0.0.0"
+                port = 21000
+                bots_base_dir = "/bots"
+                botchat_url = "${BCS_TEST_CFG_MISSING}"
+            "#,
+        )
+        .unwrap();
+
+        let loader = ConfigLoader::new(dir.path().to_path_buf())
+            .with_environment(Environment::Prod);
+        let result: Result<serde_json::Value, _> = loader.load();
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("BCS_TEST_CFG_MISSING"), "error should name the missing var: {err}");
     }
 
     #[test]
