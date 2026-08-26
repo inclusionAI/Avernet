@@ -124,7 +124,7 @@ green at the end of this group *without* any test expectation changing.
       `sync_all_mcp_servers` takes dicts and reads `server_code`/`serverCode`
       off each (`core/devices/services/mcp_device_transport.py:76`), so pass
       `[{"server_code": c} for c in sorted(server_codes)]`, not bare strings.
-- [ ] 3.5 `_apply_non_skill_projection`: guard the declared scope against the
+- [x] 3.5 `_apply_non_skill_projection`: guard the declared scope against the
       projected set — `claimed = scope.claimed_mcp & codes`,
       `released = scope.released_mcp - codes` — then call `sync_mcp_delivery`
       **before** `sync_mcp_desired_state`, so configuration lands before the
@@ -136,7 +136,7 @@ green at the end of this group *without* any test expectation changing.
       exactly one detail (assert the `sync_single_mcp` call count is 1, not
       just that the right code appears) and declares four allow-list codes; a
       Bot holding a catalogue-missing MCP can still add an unrelated one.
-- [ ] 3.7 Tests — removal guard: removing an MCP calls `remove_mcp_detail`
+- [x] 3.7 Tests — removal guard: removing an MCP calls `remove_mcp_detail`
       exactly once; a platform/template-default MCP is **not** removed, nor
       is one a Skill still lists in `mcp_dependencies` — both stay in `codes`
       without Set membership, so `- codes` spares them. (The cross-Set case
@@ -145,7 +145,7 @@ green at the end of this group *without* any test expectation changing.
       `_resolve_plan` change must not silently start deleting device config.
 - [ ] 3.8 Test — compensation inverts the scope: a projection failure after a
       successful add removes what it pushed.
-- [ ] 3.9 Test — a `reconcile` scope pushes every projected code, so the
+- [x] 3.9 Test — a `reconcile` scope pushes every projected code, so the
       device-activated reconcile path is unchanged.
 
 ## Group 4 — Delivery shape decided per provider (problem 4)

@@ -467,9 +467,19 @@ class _RuntimeFactoryService:
         self.mcp_codes: set[str] | None = None
         self.collect_calls: list[dict] = []
         self.desired_skills: list[dict] | None = None
+        # Declaration and delivery are separate acts, so the double records
+        # them separately: mcp_codes is the whole allow-list, deliveries are
+        # only what a mutation actually changed.
+        self.deliveries: list[tuple[frozenset[str], frozenset[str]]] = []
 
     def sync_runtime(self, *, desired_skills: list[dict]) -> bool:
         self.desired_skills = desired_skills
+        return True
+
+    async def sync_mcp_delivery(
+        self, *, claimed: frozenset[str], released: frozenset[str]
+    ) -> bool:
+        self.deliveries.append((claimed, released))
         return True
 
     async def sync_mcp_desired_state(self, *, server_codes: set[str]) -> bool:
@@ -2086,6 +2096,125 @@ async def test_projection_fails_closed_without_a_bot_primary_key():
     assert factory.service.desired_skills is None
     assert passport.calls == []
     assert identity.calls == []
+
+
+@pytest.mark.asyncio
+async def test_reconcile_scope_claims_every_projected_code():
+    """A restart or upload has no mutation to ask, so nothing is assumed.
+
+    The device may hold no configuration at all on that path, so every
+    projected code is treated as newly claimed — the behaviour that existed
+    before delivery was scoped, preserved exactly.
+    """
+    factory = _RuntimeFactory()
+    runtime = BotRuntimeProjector(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+
+    (claimed, released), = factory.service.deliveries
+    assert claimed == frozenset(factory.service.mcp_codes)
+    assert released == frozenset()
+
+
+@pytest.mark.asyncio
+async def test_a_declared_claim_delivers_only_that_code():
+    """Problem 3 at the projector: the guard cannot enlarge a declared scope.
+
+    The Bot's projected set has three codes; declaring one claim must deliver
+    exactly that one while the allow-list still declares all three.
+    """
+    factory = _RuntimeFactory()
+    runtime = BotRuntimeProjector(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.weather"})),
+    )
+
+    assert factory.service.deliveries == [(frozenset({"mcp.weather"}), frozenset())]
+    # Declaration stays total even though delivery did not.
+    assert factory.service.mcp_codes == {
+        "mcp.weather", "mcp.template-preset", "hitl",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_release_still_supplied_by_policy_is_not_deleted():
+    """REL's removal guard, recovered structurally.
+
+    ``mcp.template-preset`` reaches the projection through the engine/template
+    default policy rather than Set membership, so a Set dropping its claim
+    must not delete it from the device. Nothing else stops that — the
+    ``- codes`` guard is the whole protection.
+    """
+    factory = _RuntimeFactory()
+    runtime = BotRuntimeProjector(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope(
+            mcp=True, released_mcp=frozenset({"mcp.template-preset"})
+        ),
+    )
+
+    assert factory.service.deliveries == [(frozenset(), frozenset())]
+
+
+@pytest.mark.asyncio
+async def test_a_release_no_longer_supplied_is_deleted():
+    """The other side of the guard: a genuinely gone code is withdrawn.
+
+    Without this, removing an MCP left its endpoint, api_key and headers on
+    the container forever — the regression with no production caller at all.
+    """
+    factory = _RuntimeFactory()
+    runtime = BotRuntimeProjector(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope(mcp=True, released_mcp=frozenset({"mcp.gone"})),
+    )
+
+    assert factory.service.deliveries == [(frozenset(), frozenset({"mcp.gone"}))]
 
 
 @pytest.mark.asyncio

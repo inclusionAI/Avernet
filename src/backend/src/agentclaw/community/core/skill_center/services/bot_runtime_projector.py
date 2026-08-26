@@ -492,9 +492,34 @@ class BotRuntimeProjector:
         projection: RuntimeProjection,
         effective_cli_items: list[dict],
     ) -> None:
-        if not await service.sync_mcp_desired_state(
-            server_codes=set(projection.mcp_server_codes)
-        ):
+        codes = set(projection.mcp_server_codes)
+        if scope.reconcile:
+            # Nothing declared anything — a device-activated restart or a
+            # Skill upload. The device may hold no configuration at all, so
+            # every projected code counts as newly claimed.
+            claimed, released = frozenset(codes), frozenset()
+        else:
+            # A guard, never a source. ``claimed`` cannot grow past what the
+            # mutation declared, so a single-MCP add stays a single device
+            # write. ``- codes`` stops a release from deleting a code the
+            # default policy or a Skill dependency still supplies without any
+            # Set claiming it.
+            claimed = scope.claimed_mcp & codes
+            released = scope.released_mcp - codes
+            if claimed != scope.claimed_mcp or released != scope.released_mcp:
+                logger.info(
+                    "[BotRuntimeProjector] MCP scope guarded against the "
+                    "projected set: bot_id=%s, claimed %s->%s, released %s->%s",
+                    bot_id,
+                    sorted(scope.claimed_mcp), sorted(claimed),
+                    sorted(scope.released_mcp), sorted(released),
+                )
+        # Configuration lands before the allow-list cites it, and is withdrawn
+        # before the allow-list stops covering it.
+        if not await service.sync_mcp_delivery(claimed=claimed, released=released):
+            raise SkillSetRuntimeReconcileError()
+
+        if not await service.sync_mcp_desired_state(server_codes=codes):
             raise SkillSetRuntimeReconcileError()
 
         try:
