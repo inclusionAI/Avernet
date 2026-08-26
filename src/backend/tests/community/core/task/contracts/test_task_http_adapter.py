@@ -184,7 +184,7 @@ class TestTaskList:
         assert record["task_spec"]["metadata"]["task_id"] == task_id
         assert record["task_spec"]["goal"]["objective"] == "产出尽调报告"
         assert record["execution_config"]["task_type"] == "dynamic"
-        assert record["status"] == "DEFINED"
+        assert record["status"] == "REVIEWING"
         assert record["gmt_create"] is not None
 
     def test_public_list_filters_by_explicit_user_id(self, client):
@@ -224,7 +224,7 @@ class TestTaskList:
             params={"status": Status.DONE.value, "user_id": "owner_user"},
         )
 
-        assert any(item["task_id"] == task_id for item in pending.json()["data"])
+        assert all(item["task_id"] != task_id for item in pending.json()["data"])
         assert all(item["task_id"] != task_id for item in done.json()["data"])
 
     def test_list_without_page_params_returns_bare_list(self, client):

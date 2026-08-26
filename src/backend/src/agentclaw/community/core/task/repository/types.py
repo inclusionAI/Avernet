@@ -36,6 +36,10 @@ class TaskInfoRecord:
     execution_config: Optional[dict[str, Any]]
     task_spec: dict[str, Any]
     status: Status
+    # Read-side owner display fields. They are enriched from authoritative
+    # Bot/staff services and are not persisted in task_info.
+    owner_bot_name: Optional[str] = None
+    owner_user_name: Optional[str] = None
     graph_run_id: Optional[str] = None
     graph_loop_round: int = 0
     graph_output: Optional[dict[str, Any]] = None

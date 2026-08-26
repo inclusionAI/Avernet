@@ -49,6 +49,9 @@ class SearchResult:
 
     outcome: SearchOutcome
     bot_id: str | None = None                       # HIT_SINGLE
+    bot_name: str | None = None                     # HIT_SINGLE Bot display name
+    owner_id: str | None = None                     # HIT_SINGLE Bot owner
+    owner_name: str | None = None                   # HIT_SINGLE Bot owner display name
     group_id: str | None = None                     # HIT_GROUP
     group_formation: GroupFormation | None = None   # HIT_MULTI_BOTS
     miss_reason: str | None = None                  # MISS
@@ -114,6 +117,9 @@ class SearchBasedDispatchStrategy:
         if not owner:
             return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_owner")
         candidates = await _prefetch_candidates(self._discover, node, graph)
+        if not candidates:
+            logger.info("[task][search] node=%s 候选为空→MISS(no_candidates)", node.node_id)
+            return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_candidates")
         prompt = _compose_search_prompt(node, candidates)
         logger.info("[task][search] owner=%s node=%s 候选=%s", owner, node.node_id,
                     [c.get("bot_id") for c in candidates])
@@ -216,6 +222,8 @@ def _compose_search_prompt(node: TaskNode, candidates: list[dict]) -> str:
     catalog = [
         {
             "bot_id": c.get("bot_id"),
+            "owner_id": c.get("owner_id"),
+            "owner_name": c.get("owner_name"),
             "bot_name": c.get("bot_name"),
             "bot_desc": c.get("bot_desc"),
             "score": (c.get("recommend") or {}).get("score"),
@@ -228,7 +236,7 @@ def _compose_search_prompt(node: TaskNode, candidates: list[dict]) -> str:
     return_fmt = (
         '## 返回数据格式约定\n'
         '返回 JSON 字符串,``outcome`` 标 4 态之一,其余字段随态而定: \n'
-        '- **HIT_SINGLE**(单 bot 足够): ``{"outcome":"HIT_SINGLE","bot_id":"<bot_id>"}``\n'
+        '- **HIT_SINGLE**(单 bot 足够): ``{"outcome":"HIT_SINGLE","bot_id":"<bot_id>","bot_name":"<bot_name>","owner_id":"<owner_id>","owner_name":"<owner_name>"}``\n'
         '- **HIT_GROUP**(已有协作群可复用): ``{"outcome":"HIT_GROUP","group_id":"<group_id>"}``\n'
         '- **HIT_MULTI_BOTS**(多 bot 协同,需动态拉协作群):\n'
         '  ``{"outcome":"HIT_MULTI_BOTS","bot_ids":["b1","b2"],"collab_mode":"chat|manager_worker|state_machine",\n'
@@ -238,7 +246,7 @@ def _compose_search_prompt(node: TaskNode, candidates: list[dict]) -> str:
         '- **MISS**(候选都不匹配): ``{"outcome":"MISS","miss_reason":"<原因>"}``\n\n'
         '### 示例数据(HIT_SINGLE)\n'
         '```json\n'
-        '{"outcome":"HIT_SINGLE","bot_id":"供应链专家Bot"}\n'
+        '{"outcome":"HIT_SINGLE","bot_id":"供应链专家Bot","bot_name":"供应链专家Bot","owner_id":"<owner_id>","owner_name":"<owner_name>"}\n'
         '```\n'
         '### 示例数据(HIT_MULTI_BOTS,主从协作群)\n'
         '```json\n'
@@ -252,7 +260,7 @@ def _compose_search_prompt(node: TaskNode, candidates: list[dict]) -> str:
         '{"outcome":"MISS","miss_reason":"候选 bot 均无法覆盖子任务需求"}\n'
         '```'
     )
-    return (f"[search] 请基于以下子任务需求与候选 bot 集决出执行者(who)与协作方式(how)。\n"
+    return (f"[task-search] 请基于以下子任务需求与候选 bot 集决出执行者(who)与协作方式(how)。\n"
             f"子任务需求+候选集\n{_json.dumps({'demand': demand, 'catalog': catalog}, ensure_ascii=False)}\n\n{return_fmt}\n\n{NO_WEB_SEARCH_CONSTRAINT}")
 
 
@@ -281,7 +289,13 @@ def _parse_search_result(run: dict) -> SearchResult:
         return SearchResult(outcome=SearchOutcome.MISS, miss_reason="not_object")
     outcome = str(data.get("outcome") or "").upper()
     if outcome == "HIT_SINGLE":
-        return SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id=data.get("bot_id"))
+        return SearchResult(
+            outcome=SearchOutcome.HIT_SINGLE,
+            bot_id=data.get("bot_id"),
+            bot_name=data.get("bot_name"),
+            owner_id=data.get("owner_id"),
+            owner_name=data.get("owner_name"),
+        )
     if outcome == "HIT_GROUP":
         return SearchResult(outcome=SearchOutcome.HIT_GROUP, group_id=data.get("group_id"))
     if outcome == "HIT_MULTI_BOTS":

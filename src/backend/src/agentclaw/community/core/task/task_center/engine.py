@@ -834,6 +834,14 @@ class ExecutionEngine:
             if gf is not None:
                 logger.info("[task][prepare] task=%s node=%s → group(HIT_MULTI_BOTS collab=%s bot_ids=%s)",
                             task_id, node.node_id, gf.collab_mode, gf.bot_ids)
+                # 群验收需要完整 goal/instruction，而不是只有一句 task_context。
+                gf.extend_props.setdefault("task_objective", node.task_spec.goal.objective)
+                gf.extend_props.setdefault("task_instruction", node.task_spec.metadata.instruction)
+                gf.extend_props.setdefault(
+                    "acceptances",
+                    [{"id": a.id, "description": a.description}
+                     for a in node.task_spec.goal.acceptances],
+                )
                 # 飞行标记:group 交付 _drain 拉群前置,防并发 cycle 双搜推双拉群
                 self._graph.update_task_node_info(
                     TaskNodePatch(task_id=task_id, node_id=node.node_id, run_mode="coop_group",

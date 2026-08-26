@@ -17,7 +17,7 @@ tags: [task, search, dispatch]
 > 搜推判定仅基于 prompt 中的子任务需求与你自身的 bot 候选清单知识进行;候选清单已在 prompt 给出,直接挑选,无需联网。
 ## 触发条件
 
-收到 prompt 头部 `[search]` 标记的指令,且 prompt 含 `子任务需求+候选集{demand, catalog}` + 返回格式约定(详见框架 `SearchBasedDispatchStrategy._compose_search_prompt`)。
+收到 prompt 头部 `[task-search]` 标记的指令,且 prompt 含 `子任务需求+候选集{demand, catalog}` + 返回格式约定(详见框架 `SearchBasedDispatchStrategy._compose_search_prompt`)。
 
 ## 输入(prompt 内嵌)
 
