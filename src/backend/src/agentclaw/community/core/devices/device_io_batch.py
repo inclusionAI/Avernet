@@ -58,14 +58,23 @@ async def gather_device_io(
     cancellation is allowed to continue.
     """
     semaphore = asyncio.Semaphore(DEVICE_IO_CONCURRENCY)
+    # Set when the caller is cancelled, to stop the batch admitting anything new.
+    # Only calls already running need draining; see the ``except`` below.
+    aborted = False
 
     async def _bounded(coro):
         try:
             async with semaphore:
+                if aborted:
+                    # Queued behind the bound when the cancellation landed, so this
+                    # call never reached the device and has nothing to leave behind.
+                    # Returning here is what keeps the unwind bounded by the slowest
+                    # call in flight rather than by every remaining wave.
+                    return None
                 return await coro
         finally:
-            # A coroutine still queued on the semaphore when this batch is cancelled
-            # would never be awaited, which Python surfaces as a RuntimeWarning.
+            # A coroutine that never ran — this one, or one still queued when the
+            # batch was torn down — would otherwise surface as a RuntimeWarning.
             # Closing an already-finished coroutine is a no-op, so this is safe on
             # the normal path too.
             coro.close()
@@ -77,15 +86,28 @@ async def gather_device_io(
         results = await asyncio.shield(batch)
     except BaseException:
         # Shielding keeps ``batch`` running when the caller is cancelled; awaiting it
-        # here is what guarantees no write is still in flight once this raises.
+        # here is what guarantees no call is still in flight once this raises.
         #
+        # Draining is only owed to calls that have already started: ``to_thread``
+        # cannot interrupt one that is executing on a worker thread, so abandoning
+        # it would let the write land after the caller's compensation. A call still
+        # queued on the semaphore has touched nothing, so it is simply dropped —
+        # ``aborted`` makes each remaining entry take the fast path above instead of
+        # issuing its device call. Without that, cancelling a 100-file upload ran the
+        # other 92 files to completion first, which is neither needed for safety nor
+        # what a caller asking to stop expects.
+        #
+        # Assignment before the drain is what makes this ordering hold: nothing
+        # between here and the first ``await`` yields, so no queued entry can slip
+        # past the flag.
+        aborted = True
         # The drain is itself shielded, and loops, because cancellation can arrive
         # more than once — an aborted request overlapping with shutdown, say. A
         # plain ``await`` here would let that second cancel tear down ``batch``
         # itself and re-raise with the worker-thread writes still running, which is
         # exactly the failure the shield above prevents on the first cancel. Only
         # ``CancelledError`` is absorbed, and only until ``batch`` finishes, so this
-        # delays cancellation by at most the batch's own remaining work.
+        # delays cancellation by at most the work already in flight.
         while not batch.done():
             try:
                 await asyncio.shield(batch)

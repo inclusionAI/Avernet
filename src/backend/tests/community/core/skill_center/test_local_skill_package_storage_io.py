@@ -250,3 +250,32 @@ async def test_repeated_cancellation_cannot_abandon_the_drain():
 
     assert filesystem.in_flight == 0
     assert len(filesystem.files) == 4
+
+
+@pytest.mark.asyncio
+async def test_cancelling_drops_writes_still_queued_behind_the_bound():
+    """排空只欠给「已经开始」的写：还卡在信号量后面的根本没碰过设备。
+
+    Draining is owed to a write already executing on a worker thread, because
+    ``to_thread`` cannot interrupt it and abandoning it would let the write land
+    after the caller's compensation. A write still queued behind the bound has
+    touched nothing, so running it anyway buys no safety — it only makes the
+    unwind take every remaining wave instead of the one in flight.
+    """
+    total = DEVICE_IO_CONCURRENCY * 4
+    filesystem = _RecordingFilesystem(delay=0.05)
+    storage = LocalSkillPackageStorage(filesystem, DIRECTORY)
+
+    task = asyncio.create_task(storage.write(_package(total)))
+    await asyncio.sleep(0.01)
+    assert filesystem.in_flight == DEVICE_IO_CONCURRENCY, "first wave should be in flight"
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # the in-flight wave was still drained — nothing can land after this returns
+    assert filesystem.in_flight == 0
+    # ...but the three waves that had not started were dropped, not run
+    assert len(filesystem.files) <= DEVICE_IO_CONCURRENCY
+    assert len(filesystem.files) < total
