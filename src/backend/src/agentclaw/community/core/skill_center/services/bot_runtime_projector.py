@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 
 from injector import inject
 
-from agentclaw.community.core.caller_identity.models import McpCallType
 from agentclaw.community.core.mcp.services.passport_scope import (
     filter_passport_mcp_codes,
+    passport_mcp_items_from_codes,
 )
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
@@ -368,7 +368,7 @@ class BotRuntimeProjector:
             raise SkillSetRuntimeReconcileError()
 
     def _passport_mcp_items(
-        self, *, bot: dict, engine: str, codes: list[str]
+        self, *, bot: dict, bot_id: str, engine: str, codes: list[str]
     ) -> list[McpScopeItem]:
         """Build the MCP scope with an explicit execution identity per entry.
 
@@ -381,32 +381,39 @@ class BotRuntimeProjector:
         field. So the modes are resolved here, on every projection.
 
         The source is the sparse per-Bot call-config table: a Bot with no row
-        for a code runs it as Owner, which is also the fallback when the Bot
-        has no primary key to look up by.
+        for a code runs it as Owner.
+
+        Missing the Bot's primary key fails the projection rather than
+        defaulting. Every persisted Bot carries one (``BotModel.to_dict``), so
+        its absence means the record is not what this path assumes — and on a
+        privilege boundary, guessing Owner is precisely the silent demotion
+        this method exists to prevent. Every other unreadable input here fails
+        closed too.
         """
-        modes: Mapping[str, McpCallType] = {}
+        if not codes:
+            # Nothing to declare, so nothing to resolve — skip the query
+            # rather than paying it on every projection with an empty or
+            # entirely LOCAL/stdio MCP scope.
+            return []
         bot_pk = bot.get("id")
-        if bot_pk is not None:
-            modes = self._caller_identity_repo.list_draft_call_types(
-                int(bot_pk), engine
+        if bot_pk is None:
+            logger.error(
+                "[BotRuntimeProjector] Bot record has no primary key, refusing "
+                "to project MCP identity: bot_id=%s, engine=%s, mcps=%s",
+                bot_id, engine, len(codes),
             )
-        items: list[McpScopeItem] = [
-            {
-                "mcp_code": code,
-                # ``McpCallType`` is a ``StrEnum``; ``parse`` normalises both a
-                # missing entry and a raw string to a valid member, so the
-                # Passport port never has to guess.
-                "identity_mode": str(McpCallType.parse(modes.get(code))),
-            }
-            for code in codes
-        ]
+            raise SkillSetRuntimeReconcileError()
+        modes = self._caller_identity_repo.list_draft_call_types(
+            int(bot_pk), engine
+        )
+        items = passport_mcp_items_from_codes(codes, identity_modes=modes)
         caller_count = sum(
-            1 for item in items if item["identity_mode"] == McpCallType.CALLER
+            1 for item in items if item.get("identity_mode") == "caller"
         )
         logger.info(
             "[BotRuntimeProjector] Passport MCP scope resolved: bot_id=%s, "
             "engine=%s, mcps=%s, caller=%s, owner=%s",
-            bot.get("bot_id"),
+            bot_id,
             engine,
             len(items),
             caller_count,
@@ -430,8 +437,8 @@ class BotRuntimeProjector:
         ):
             raise SkillSetRuntimeReconcileError()
 
-        passport_codes = filter_passport_mcp_codes(projection.mcp_server_codes)
         try:
+            passport_codes = filter_passport_mcp_codes(projection.mcp_server_codes)
             # ``resource_scope`` is overwrite-style per list, and a code sent
             # without ``mcp_items`` does not keep its existing identity: the
             # Passport port substitutes a bare item and defaults its
@@ -445,7 +452,10 @@ class BotRuntimeProjector:
                 resource_scope={
                     "mcp_codes": passport_codes,
                     "mcp_items": self._passport_mcp_items(
-                        bot=bot, engine=engine, codes=passport_codes
+                        bot=bot,
+                        bot_id=bot_id,
+                        engine=engine,
+                        codes=passport_codes,
                     ),
                     "cli_items": effective_cli_items,
                 },

@@ -63,6 +63,46 @@ def passport_mcp_codes_from_entries(
     return codes
 
 
+def normalized_identity_mode(raw: object) -> str:
+    """Normalize one stored execution identity to the wire vocabulary.
+
+    Shared by both scope builders so the identity contract has exactly one
+    definition: an unrecognised value is rejected here rather than reaching
+    the Passport port, which would otherwise coerce it or fail further from
+    the cause.
+    """
+    mode = getattr(raw, "value", raw)
+    normalized_mode = str(mode).strip().lower()
+    if normalized_mode not in {"owner", "caller"}:
+        raise ValueError("identity mode must be owner or caller")
+    return normalized_mode
+
+
+def passport_mcp_items_from_codes(
+    mcp_codes: Iterable[str],
+    *,
+    identity_modes: Mapping[str, object],
+) -> list[McpScopeItem]:
+    """Build the MCP identity scope from codes that are already filtered.
+
+    The entries variant below is for callers holding full MCP payloads. This
+    one is for callers that already resolved their non-local codes — a
+    runtime projection, say — and would otherwise have to re-derive the
+    identity default and its validation, which is how the two copies drift.
+
+    ``mcp_name`` / ``mcp_desc`` are omitted deliberately: the Passport port
+    leaves them off the wire when absent, so identity can be declared
+    without an MCP-Center round trip per code.
+    """
+    return [
+        {
+            "mcp_code": code,
+            "identity_mode": normalized_identity_mode(identity_modes.get(code, "owner")),
+        }
+        for code in mcp_codes
+    ]
+
+
 def passport_mcp_items_from_entries(
     mcps: Iterable[Mapping[str, Any]],
     *,
@@ -76,11 +116,7 @@ def passport_mcp_items_from_entries(
         code = _server_code(mcp)
         if not code or _is_local_mcp_entry(mcp, code, local_codes):
             continue
-        raw_mode = identity_modes.get(code, "owner")
-        mode = getattr(raw_mode, "value", raw_mode)
-        normalized_mode = str(mode).strip().lower()
-        if normalized_mode not in {"owner", "caller"}:
-            raise ValueError("identity mode must be owner or caller")
+        normalized_mode = normalized_identity_mode(identity_modes.get(code, "owner"))
         items.append({
             "mcp_code": code,
             "mcp_name": _optional_text(

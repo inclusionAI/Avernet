@@ -11,8 +11,15 @@ Paths are relative to `src/backend/src/agentclaw/community/` unless noted.
 
 - [x] 1.1 Inject `CallerIdentityRepositoryProtocol`
       (`core/repository/protocols/identity.py:58`) into `BotRuntimeProjector.__init__`
-      (`core/skill_center/services/bot_runtime_projector.py:58`); bind it in
-      `di/modules/skill_center_module.py`.
+      (`core/skill_center/services/bot_runtime_projector.py:58`).
+      **No binding added to `di/modules/skill_center_module.py`**, contrary to
+      this task as first written: `CallerIdentityModule` already binds the
+      protocol in the same container (`di/container.py:134`), and
+      `SkillCenterModule` is never assembled standalone, so re-binding it
+      would only create a second binding for one key — which injector
+      resolves by last-module-wins, silently. Also declared the new import in
+      the module's Context Boundary (`core/skill_center/README.md`), without
+      which the Rule-22 architecture test fails backend CI.
 - [x] 1.2 Add `BotRuntimeProjector._passport_mcp_items(*, bot, engine, codes)`:
       read `list_draft_call_types(int(bot["id"]), engine)`, emit
       `{"mcp_code": code, "identity_mode": mode}` per code, defaulting to

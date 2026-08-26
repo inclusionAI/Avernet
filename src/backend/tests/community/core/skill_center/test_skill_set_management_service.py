@@ -516,19 +516,14 @@ class _RuntimeBots:
     def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
         assert (bot_id, owner_id) == ("bot-1", "true-owner")
         return {
+            # Every persisted Bot has a primary key; identity lookups key on it.
+            "id": 42,
             "entity_id": "entity-1",
             "active_engine": "openclaw",
             "bot_type": "personal",
             "entity_type": "staff",
             "env": "pre",
         }
-
-
-class _RuntimeBotsWithPk(_RuntimeBots):
-    """A persisted Bot: identity lookups are keyed on the primary key."""
-
-    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
-        return {**super().get_by_id_and_owner(bot_id, owner_id), "id": 42}
 
 
 class _AicodingImageRuntimeBots(_RuntimeBots):
@@ -1938,7 +1933,7 @@ async def test_projection_preserves_caller_identity_for_configured_mcp():
     identity = _RuntimeCallerIdentity({"mcp.weather": McpCallType.CALLER})
     runtime = BotRuntimeProjector(
         factory=_RuntimeFactory(),
-        bot_repo=_RuntimeBotsWithPk(),
+        bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
         pool_runtime=_RuntimePool(),
@@ -1963,7 +1958,7 @@ async def test_projection_defaults_to_owner_without_a_call_config_row():
     passport = _RuntimePassport()
     runtime = BotRuntimeProjector(
         factory=_RuntimeFactory(),
-        bot_repo=_RuntimeBotsWithPk(),
+        bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
         pool_runtime=_RuntimePool(),
@@ -1981,39 +1976,60 @@ async def test_projection_defaults_to_owner_without_a_call_config_row():
 
 
 @pytest.mark.asyncio
-async def test_projection_sends_one_identity_item_per_declared_code():
-    """Every declared code carries an identity, even for an empty lookup.
+async def test_projection_scope_is_the_projected_codes_not_the_config_rows():
+    """The projection decides the scope; the call-config table only colours it.
 
-    A code in ``mcp_codes`` without a matching ``mcp_items`` entry is exactly
-    what the Passport port fills in with Owner, so the two lists must stay
-    the same length however the lookup answers.
+    The table is per-Bot, not per-projection, so it can hold rows for MCPs
+    this Bot no longer has. Those must not reappear in the manifest —
+    ``updatePassport`` replaces the list wholesale, so an extra item would
+    re-grant a capability the Bot has lost.
     """
     passport = _RuntimePassport()
     runtime = BotRuntimeProjector(
         factory=_RuntimeFactory(),
-        bot_repo=_RuntimeBotsWithPk(),
+        bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
         pool_runtime=_RuntimePool(),
         pool_layouts=_RuntimeLayouts(),
         passport=passport,
-        caller_identity_repo=_RuntimeCallerIdentity({}),
+        caller_identity_repo=_RuntimeCallerIdentity(
+            {
+                "mcp.weather": McpCallType.CALLER,
+                "mcp.retired": McpCallType.CALLER,
+            }
+        ),
     )
 
     await runtime.project(bot_id="bot-1", owner_id="true-owner")
 
     scope = passport.calls[0]["resource_scope"]
     assert [item["mcp_code"] for item in scope["mcp_items"]] == scope["mcp_codes"]
+    assert "mcp.retired" not in scope["mcp_codes"]
+
+
+class _PkLessRuntimeBots(_RuntimeBots):
+    """A Bot record without a primary key — not what the projector assumes."""
+
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
+        record = dict(super().get_by_id_and_owner(bot_id, owner_id))
+        record.pop("id")
+        return record
 
 
 @pytest.mark.asyncio
-async def test_projection_falls_back_to_owner_without_a_bot_primary_key():
-    """No primary key to look up by is the same answer as no row: Owner."""
+async def test_projection_fails_closed_without_a_bot_primary_key():
+    """No primary key fails the projection instead of guessing Owner.
+
+    Defaulting here would be the same silent demotion the missing mcp_items
+    caused, just from a different direction, so it fails closed like every
+    other unreadable input on this path.
+    """
     passport = _RuntimePassport()
     identity = _RuntimeCallerIdentity({"mcp.weather": McpCallType.CALLER})
     runtime = BotRuntimeProjector(
         factory=_RuntimeFactory(),
-        bot_repo=_RuntimeBots(),  # no "id" key
+        bot_repo=_PkLessRuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
         pool_runtime=_RuntimePool(),
@@ -2022,11 +2038,10 @@ async def test_projection_falls_back_to_owner_without_a_bot_primary_key():
         caller_identity_repo=identity,
     )
 
-    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+    with pytest.raises(SkillSetRuntimeReconcileError):
+        await runtime.project(bot_id="bot-1", owner_id="true-owner")
 
-    assert all(
-        item["identity_mode"] == "owner" for item in _passport_mcp_items(passport)
-    )
+    assert passport.calls == []
     assert identity.calls == []
 
 
