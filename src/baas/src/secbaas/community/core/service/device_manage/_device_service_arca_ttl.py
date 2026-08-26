@@ -74,7 +74,7 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
 
         Reads ttl_expiration_timestamp (ms epoch) from provider_device_props — the exact
         creation_result.model_dump() payload the community device service
-        persists (D-06). A missing key logs a warning and defers
+        persists (D-06). A missing/zero value logs a warning and defers
         registration to the discovery scan; any repository failure only
         emits CRITICAL + [arca_ttl_metrics] register_error=1. Never raises
         (INTG-01 defensive posture: cold-table problems must never affect
@@ -83,7 +83,7 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
         try:
             props = response.provider_device_props or {}
             ttl_ms = props.get("ttl_expiration_timestamp")
-            if ttl_ms is None:
+            if not ttl_ms:
                 log.warning(
                     "[arca_ttl] provider_device_props missing ttl_expiration_timestamp "
                     "for device %s — registration deferred to discovery scan",
