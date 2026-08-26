@@ -129,11 +129,14 @@ config path including the HTTP/2 flag; Group 3 validates.
 
 ## Follow-ups for the human (not code tasks)
 
-- [ ] F1 Confirm the origins actually offer `h2` before flipping the flag —
-      from inside the corp network:
-      `openssl s_client -connect secbaas-prod.alipay.com:443 -alpn h2,http/1.1 </dev/null 2>/dev/null | grep ALPN`
-      (and the same for `agentclawproxy-prod.alipay.com`). The sandbox probe was
-      MITM'd by the dev egress gateway and proves nothing about the origins.
+- [x] F1 Confirm the origins offer `h2`. **`secbaas-prod.alipay.com` → `ALPN
+      protocol: h2`**, probed from inside the corp network. (A sandbox probe is
+      worthless here — its TLS is terminated by an egress gateway that reports
+      its own ALPN.)
+- [ ] F1b Same probe against `agentclawproxy-prod.alipay.com`, which matters
+      more than secbaas since it fronts the parallel container calls:
+      `openssl s_client -connect agentclawproxy-prod.alipay.com:443 -alpn h2,http/1.1 </dev/null 2>/dev/null | grep ALPN`
+      Not a blocker — httpx falls back to HTTP/1.1 where `h2` is not offered.
 - [ ] F2 Mirror the `pyproject.toml` httpx-extra change into the corp manifest,
       which the community manifest documents itself as tracking by hand.
 - [ ] F3 Roll `http_client.http2: true` out per environment (pre first), watching
