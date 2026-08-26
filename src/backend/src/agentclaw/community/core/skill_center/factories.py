@@ -124,7 +124,19 @@ async def _gather_package_io(coroutines: list) -> list:
     except BaseException:
         # Shielding keeps ``batch`` running when the caller is cancelled; awaiting it
         # here is what guarantees no write is still in flight once this raises.
-        await asyncio.gather(batch, return_exceptions=True)
+        #
+        # The drain is itself shielded, and loops, because cancellation can arrive
+        # more than once — an aborted request overlapping with shutdown, say. A
+        # plain ``await`` here would let that second cancel tear down ``batch``
+        # itself and re-raise with the worker-thread writes still running, which is
+        # exactly the failure the shield above prevents on the first cancel. Only
+        # ``CancelledError`` is absorbed, and only until ``batch`` finishes, so this
+        # delays cancellation by at most the batch's own remaining work.
+        while not batch.done():
+            try:
+                await asyncio.shield(batch)
+            except asyncio.CancelledError:
+                continue
         raise
     for result in results:
         if isinstance(result, BaseException):

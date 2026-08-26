@@ -220,3 +220,33 @@ async def test_cancelling_a_write_drains_in_flight_writes_before_propagating():
     # the cancellation waited for the whole batch, so nothing can land afterwards
     assert filesystem.in_flight == 0
     assert len(filesystem.files) == 4
+
+
+@pytest.mark.asyncio
+async def test_repeated_cancellation_cannot_abandon_the_drain():
+    """再次取消也不能把还在排空的 batch 丢掉（请求中止叠加进程关停等场景）。
+
+    排空本身若不加 shield，第二次取消会连 ``batch`` 一起拆掉并立刻抛出，而
+    worker 线程里的写仍在跑 —— 正是第一次取消时 shield 所防住的那个故障。
+    """
+    filesystem = _RecordingFilesystem(delay=0.05)
+    storage = LocalSkillPackageStorage(filesystem, DIRECTORY)
+
+    task = asyncio.create_task(storage.write(_package(4)))
+    await asyncio.sleep(0.01)
+    assert filesystem.in_flight > 0
+
+    # cancel repeatedly, including while the drain is already running
+    task.cancel()
+    for _ in range(3):
+        await asyncio.sleep(0)
+    task.cancel()
+    for _ in range(3):
+        await asyncio.sleep(0)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert filesystem.in_flight == 0
+    assert len(filesystem.files) == 4
