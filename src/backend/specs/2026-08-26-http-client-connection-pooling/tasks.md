@@ -89,32 +89,44 @@ config path including the HTTP/2 flag; Group 3 validates.
 
 - [ ] 2.1 `di/config.py`: add the `# ── Outbound HTTP transport ──` section
       between the CORS block and `# ── Object storage ──`, holding frozen
-      `HttpClientPoolConfig(max_connections=100, max_keepalive_connections=20,
-      keepalive_expiry=5.0, http2=False)`. Docstring states: ceilings are per
-      upstream client not process-wide; exceeding `max_connections` surfaces as
-      `HttpClientTimeoutError` (`httpx.PoolTimeout`); `keepalive_expiry` must
-      stay below the upstream idle timeout; `http2` engages only against TLS
-      upstreams offering `h2` via ALPN.
-- [ ] 2.2 `di/modules/config_module.py`: add the `http_client_pool` provider
-      next to `masa_agent_eval`, reading `_block("http_client")` with
-      dataclass-default fallbacks per the file's existing idiom, `http2`
-      included.
+      `HttpClientPoolPolicy(max_connections=100, max_keepalive_connections=20,
+      keepalive_expiry=5.0, http2=False)` and frozen `HttpClientPoolConfig`
+      (`defaults` + `overrides` mapping + `for_qualifier(name)`). Policy
+      docstring states: ceilings are per upstream client not process-wide;
+      exceeding `max_connections` surfaces as `HttpClientTimeoutError`
+      (`httpx.PoolTimeout`); `keepalive_expiry` must stay below the upstream idle
+      timeout; `http2` engages only against TLS upstreams offering `h2` via ALPN.
+      Config docstring states that `for_qualifier` resolves whole-policy, and why
+      (a half-specified override must not drift as shared defaults change).
+- [ ] 2.2 `di/modules/config_module.py`: add the module-level `_pool_policy`
+      helper and the `http_client_pool` provider next to `masa_agent_eval`.
+      Provider reads `_block("http_client")` for the shared defaults, then builds
+      each `overrides.<qualifier>` policy *starting from those defaults* so a
+      sparse override resolves total. Non-dict override bodies are skipped.
 - [ ] 2.3 `di/modules/http_client_module.py`: all four providers take
-      `pool: cfg.HttpClientPoolConfig` and forward all four values to
+      `pool: cfg.HttpClientPoolConfig`, call `pool.for_qualifier(<their own
+      QUALIFIER_* constant>)`, and forward the four policy values to
       `HttpxClient`; `general_http_client` gains `@inject`. Extend each
-      `logger.info` to record the pool ceiling and the HTTP/2 flag next to the
-      base_url — this is what confirms in a pre environment that flipping
-      `http2` took effect.
+      `logger.info` to record the resolved ceiling and HTTP/2 flag next to the
+      base_url — this is both how a pre environment confirms an `http2` flip took
+      effect and the mitigation for a mistyped override key silently doing
+      nothing.
 - [ ] 2.4 Update the two direct-call test sites broken by 2.3 —
       `tests/community/di/modules/test_http_client_module_bcn.py` and
       `tests/community/di/modules/test_infrastructure_module.py` — to pass an
-      explicit `cfg.HttpClientPoolConfig()`. In the BCN file, add a case
-      asserting a non-default config (limits *and* `http2=True`) reaches the
-      constructed client.
+      explicit `cfg.HttpClientPoolConfig()`. In the BCN file, add cases asserting
+      a non-default `defaults` policy (limits *and* `http2=True`) reaches the
+      client, and that an override keyed to a *different* qualifier does not.
+- [ ] 2.4b New `tests/community/di/modules/test_config_module_http_client.py`:
+      missing block ⇒ dataclass defaults everywhere; a top-level block sets the
+      shared defaults; a sparse override inherits unset fields from those
+      defaults rather than from the dataclass; `for_qualifier` on an unlisted
+      qualifier returns the defaults; a non-dict override body is ignored.
 - [ ] 2.5 `configs/application-community.yaml`: commented `http_client` block
-      under `user_config`, documenting the four keys and their defaults, with a
-      one-line note that `http2` engages only against TLS upstreams offering
-      `h2`.
+      under `user_config` documenting the four keys and their defaults, plus a
+      commented `overrides:` example showing a per-qualifier flip
+      (`baas: { http2: true }`) and the four valid qualifier keys. One-line note
+      that `http2` engages only against TLS upstreams offering `h2`.
 - [ ] 2.6 Run the DI module tests plus
       `tests/community/di/test_profile_and_modules_for.py` — the container, not
       just direct calls, satisfies the new provider argument.
@@ -152,15 +164,17 @@ config path including the HTTP/2 flag; Group 3 validates.
       backend→proxy hop (the one this pool holds), not proxy→container.
 - [ ] F2 Mirror the `pyproject.toml` httpx-extra change into the corp manifest,
       which the community manifest documents itself as tracking by hand.
-- [ ] F3 Roll `http_client.http2: true` out per environment (pre first), watching
-      for interactions with the out-of-repo httpx send-hook wrapper, which
-      community and singlebox CI cannot exercise.
+- [ ] F3 Roll `http2: true` out per environment AND per qualifier (pre first),
+      watching for interactions with the out-of-repo httpx send-hook wrapper,
+      which community and singlebox CI cannot exercise. Suggested order:
+      `overrides.baas` first (single origin, plain request/response), then the
+      other single-origin bindings, and `general` last since it carries the LLM
+      SSE streams alongside container calls.
 
 ## Out of scope (do not do)
 
 - Cleartext `h2c` / prior-knowledge HTTP/2 (would require disabling HTTP/1.1).
 - Retry or circuit-breaking on `RemoteProtocolError` from a stale keep-alive
   connection. The seam's "swallows nothing" invariant stands.
-- Per-qualifier pool or protocol tuning.
 - Touching `plugin_api/http_client.py`, `LocalHttpClient`, or the `test` /
   `corp_test` profile bindings.

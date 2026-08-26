@@ -126,6 +126,10 @@ that is discarded after one request.
   to `httpx.Client(http2=…)`. The `h2` package is added as a dependency via the
   `httpx[http2]` extra so the flag can be flipped by configuration alone, with
   no code change and no redeploy of a different dependency set.
+- **Per-qualifier overrides.** The four bindings front different upstreams with
+  different traffic shapes, so each resolves its own effective policy: a set of
+  shared defaults plus an optional sparse override per qualifier. Every value
+  above is overridable this way, `http2` included.
 - The pool is released at process shutdown through the existing `Lifecycle`
   contract.
 - `timeout` moves from the (now shared) client constructor to the per-request
@@ -144,13 +148,18 @@ reasons remain, and both are about staging rather than doubt:
    production.
 2. The `general` client carries LLM SSE streams alongside container calls, so
    flipping the protocol there changes two very different traffic shapes at
-   once — while `baas` could be flipped alone.
+   once.
 
-Defaulting off buys a staged rollout for one config line in a pre environment,
-and pooling — the larger, certain win — lands immediately either way.
-**Confirmed at review (2026-08-26): ship `http2: false`, flip per environment.**
-Probing `agentclawproxy-prod` (task F1b) is a prerequisite for that flip, not for
-this change.
+Reason 2 is now largely answered by the per-qualifier overrides above: `http2`
+is overridable per binding, so `baas` — a single origin with plain
+request/response traffic — can be flipped on its own while `general` stays on
+HTTP/1.1 until the SSE path has been watched. That makes the rollout
+incremental rather than all-or-nothing, and leaves reason 1 (the untestable corp
+send-hook wrapper) as the substantive one.
+
+**Confirmed at review (2026-08-26): ship the shared default `http2: false`, flip
+per environment and per qualifier.** Probing `agentclawproxy-prod` (task F1b) is
+a prerequisite for flipping the bindings that reach it, not for this change.
 
 **Out of scope**
 
@@ -159,9 +168,6 @@ this change.
   touch the network and gain nothing from a pool.
 - Retry, circuit-breaking, or any change to how failures are classified.
 - The async `aiohttp` / `requests` call sites elsewhere in the backend.
-- Per-qualifier pool or protocol tuning. One policy applies to all four
-  bindings; if `general` later needs its own ceiling or its own `http2` answer,
-  that is an additive follow-up.
 - **Making the seam async.** Considered and deferred; the reasoning is recorded
   here because it is the obvious next question. Four things argue against
   bundling it:
@@ -251,7 +257,10 @@ would change failure behavior for every caller.
 **Streams occupy pool slots.** `stream()` holds its connection for the whole
 response body. The `general` client carries LLM SSE streams, which are
 long-lived by nature; on HTTP/1.1 enough concurrent streams can saturate that
-client's pool and make ordinary calls on the same client wait. (HTTP/2 largely
+client's pool and make ordinary calls on the same client wait. This is sharpened
+by `general` being the one binding whose pool spans many origins — its ceiling is
+a budget shared across agentclawproxy, every LLM endpoint and every container IP
+— which is precisely what the per-qualifier override exists to let you size. (HTTP/2 largely
 dissolves this — concurrent streams multiplex onto one connection — which is an
 argument for turning the flag on once it is trusted.) The 100-connection default
 leaves ample headroom, and the ceiling is configurable, but the interaction is
