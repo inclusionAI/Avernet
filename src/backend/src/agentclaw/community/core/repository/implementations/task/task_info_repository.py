@@ -90,6 +90,32 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             ).all()
             return [row.to_record() for row in rows]
 
+    def list_records_page(
+        self,
+        status: Optional[Status] = None,
+        *,
+        owner_user_id: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[TaskInfoRecord], int]:
+        with self._db.orm_session() as db:
+            q = db.query(self._model)
+            if status is not None:
+                q = q.filter(self._model.status == status.value)
+            if owner_user_id is not None:
+                q = q.filter(self._model.owner_user_id == owner_user_id)
+            total = q.count()
+            rows = (
+                q.order_by(
+                    self._model.gmt_modified.desc(),
+                    self._model.id.desc(),
+                )
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
+            return [row.to_record() for row in rows], total
+
     def list_by_status(
         self,
         status: Status,

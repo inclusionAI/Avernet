@@ -404,6 +404,21 @@ class TaskService:
         st = Status(status) if status else None
         return self._task_info_repo.list_records(st, owner_user_id=owner_user_id)
 
+    def list_tasks_page(
+        self,
+        status: str | None = None,
+        owner_user_id: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[TaskInfoRecord], int]:
+        """列持久化 ``task_info`` 记录的一页(1-based),可选按状态和 owner 过滤。"""
+        if self._task_info_repo is None:
+            return [], 0
+        st = Status(status) if status else None
+        return self._task_info_repo.list_records_page(
+            st, owner_user_id=owner_user_id, page=page, page_size=page_size
+        )
+
     def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:
         """BBS 接力步②:任务根级 CAS 占有(委托 TaskGraphService.claim_bbs_owner)。
 

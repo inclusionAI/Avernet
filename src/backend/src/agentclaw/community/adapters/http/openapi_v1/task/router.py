@@ -18,12 +18,16 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
+from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
-from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    envelope,
+    envelope_errors,
+    page as page_envelope,
+)
 from agentclaw.community.adapters.http.task.schemas import (
     TaskExecutionGraphDTO,
     TaskInfoRecordDTO,
@@ -93,7 +97,10 @@ async def get_task_dashboard(
     return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
 
 
-@router.get("/list", response_model=Envelope[list[TaskInfoRecordDTO]])
+@router.get(
+    "/list",
+    response_model=Envelope[list[TaskInfoRecordDTO] | Page[TaskInfoRecordDTO]],
+)
 @envelope_errors
 async def list_tasks(
     request: Request,
@@ -102,14 +109,44 @@ async def list_tasks(
     status: Annotated[
         str | None, Query(description="可选 status 过滤记录状态;非法值 → 400")
     ] = None,
+    page: Annotated[
+        int | None,
+        Query(ge=1, description="分页页码(1-based);不传则不分页,返回全量(列表契约不变)。"),
+    ] = None,
+    page_size: Annotated[
+        int | None,
+        Query(
+            ge=1,
+            le=100,
+            description="每页条数(1-100);不传则不分页,返回全量(列表契约不变)。",
+        ),
+    ] = None,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[list[TaskInfoRecordDTO]]:
+) -> Envelope[list[TaskInfoRecordDTO] | Page[TaskInfoRecordDTO]]:
     """列持久化 task_info 记录,按更新时间降序,并按查询参数 user_id 过滤。
 
     user_id 是直接的筛选条件,不要求与认证主体一致,也不执行 owner 作用域校验。
-    返回完整任务记录字段。非法 status 返回 400，而不是服务器内部错误。"""
+    返回完整任务记录字段。非法 status 返回 400,而不是服务器内部错误。
+
+    分页为可选入参(向后兼容):``page``/``page_size`` 均不传时 ``data`` 为列表,
+    等同历史契约(供接力 skill 全量枚举等场景);两者同时传入时 ``data`` 为
+    ``Page{total, items}``(1-based,``page_size`` 最大 100)。仅传其一视为入参错误(400)。"""
     del principal  # Authentication remains mandatory; user_id is only a query filter.
     if status is not None and status not in {s.value for s in Status}:
         raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
-    items = service.list_tasks(status, owner_user_id=user_id)
-    return envelope([task_info_record_to_dto(item) for item in items], request)
+    if (page is None) != (page_size is None):
+        raise HTTPException(
+            status_code=400,
+            detail="page and page_size must be both provided or both omitted",
+        )
+    if page_size is None:
+        items = service.list_tasks(status, owner_user_id=user_id)
+        return envelope([task_info_record_to_dto(item) for item in items], request)
+    items, total = service.list_tasks_page(
+        status, owner_user_id=user_id, page=page or 1, page_size=page_size
+    )
+    return page_envelope(
+        total,
+        [task_info_record_to_dto(item) for item in items],
+        request,
+    )

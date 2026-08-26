@@ -37,8 +37,12 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
-from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
+from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    envelope,
+    envelope_errors,
+    page as page_envelope,
+)
 from agentclaw.community.adapters.http.task.auth import CallbackAuthenticator
 from agentclaw.community.adapters.http.task.schemas import (
     BbsAttachDTO,
@@ -126,7 +130,10 @@ async def get_task_dashboard_internal(
     return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
 
 
-@router.get("/list", response_model=Envelope[list[TaskInfoRecordDTO]])
+@router.get(
+    "/list",
+    response_model=Envelope[list[TaskInfoRecordDTO] | Page[TaskInfoRecordDTO]],
+)
 @envelope_errors
 async def list_tasks_internal(
     request: Request,
@@ -136,17 +143,40 @@ async def list_tasks_internal(
         description="可选:按 owner_user_id 过滤;为空返回全量。与公开面 "
         "``/openapi/v1/.../list`` 的 owner 作用域语义对齐(内部镜像用查询参数身份,非签名 principal)",
     ),
+    page: int | None = Query(
+        None, ge=1, description="分页页码(1-based);不传则不分页,返回全量。"
+    ),
+    page_size: int | None = Query(
+        None, ge=1, le=100, description="每页条数(1-100);不传则不分页,返回全量。"
+    ),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[list[TaskInfoRecordDTO]]:
+) -> Envelope[list[TaskInfoRecordDTO] | Page[TaskInfoRecordDTO]]:
     """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选状态/owner 过滤)。
 
     非法 ``status`` 过滤值 → 400(经 ``HTTPException`` → 中央 handler → ``ErrorEnvelope``)。
     ``user_id`` 为空时不按 owner 过滤(返回全量,供内部可信调用方);传入则按 ``owner_user_id``
-    过滤,与公开面 ``/openapi/v1/.../list`` 的 owner 作用域一致。"""
+    过滤,与公开面 ``/openapi/v1/.../list`` 的 owner 作用域一致。
+
+    分页为可选入参(与公开面同步):``page``/``page_size`` 均不传时 ``data`` 为列表(历史契约);
+    两者同时传入时返回 ``Page{total, items}``;仅传其一 → 400。"""
     if status is not None and status not in {s.value for s in Status}:
         raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
-    items = service.list_tasks(status, owner_user_id=user_id)
-    return envelope([task_info_record_to_dto(item) for item in items], request)
+    if (page is None) != (page_size is None):
+        raise HTTPException(
+            status_code=400,
+            detail="page and page_size must be both provided or both omitted",
+        )
+    if page_size is None:
+        items = service.list_tasks(status, owner_user_id=user_id)
+        return envelope([task_info_record_to_dto(item) for item in items], request)
+    items, total = service.list_tasks_page(
+        status, owner_user_id=user_id, page=page or 1, page_size=page_size
+    )
+    return page_envelope(
+        total,
+        [task_info_record_to_dto(item) for item in items],
+        request,
+    )
 
 
 # ===== 回投 / BBS 接力 =====

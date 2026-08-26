@@ -59,6 +59,18 @@ class TaskInfoRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def list_records_page(
+        self,
+        status: Optional["Status"] = None,
+        *,
+        owner_user_id: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list["TaskInfoRecord"], int]:
+        """Return one newest-first page (1-based, ``page_size`` items) plus total count."""
+        ...
+
+    @abstractmethod
     def list_by_status(
         self,
         status: "Status",

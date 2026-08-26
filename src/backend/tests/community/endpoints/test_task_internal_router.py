@@ -4,7 +4,6 @@ from __future__ import annotations
 from datetime import datetime
 from types import SimpleNamespace
 
-from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.models import (
     NodeOpResult,
@@ -89,6 +88,10 @@ def _seed_task_service(world, *, expected_owner=None) -> None:
             )
         ]
 
+    def list_tasks_page(_self, status=None, owner_user_id=None, page=1, page_size=20):
+        items = list_tasks(_self, status, owner_user_id=owner_user_id)
+        return items[:page_size], len(items)
+
     def claim(_self, task_id, _bot_id):
         return NodeOpResult(task_id=task_id, node_id="root", success=True)
 
@@ -105,6 +108,7 @@ def _seed_task_service(world, *, expected_owner=None) -> None:
             "execute": execute,
             "get_task_dashboard": dashboard,
             "list_tasks": list_tasks,
+            "list_tasks_page": list_tasks_page,
             "claim_bbs_task": claim,
             "attach_bbs_node": attach,
             "report_bbs_result": result,
