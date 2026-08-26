@@ -9,7 +9,7 @@ from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 
 
 @runtime_checkable
-class BotRuntimeProjectionReconcilerProtocol(Protocol):
+class BotRuntimeProjectorProtocol(Protocol):
     """Apply database desired state through the selected runtime authority."""
 
     async def snapshot_skill_mappings(
@@ -21,7 +21,7 @@ class BotRuntimeProjectionReconcilerProtocol(Protocol):
         """Return the current desired Skill mappings without publishing them."""
         ...
 
-    async def reconcile(
+    async def project(
         self,
         *,
         bot_id: str,
@@ -29,7 +29,7 @@ class BotRuntimeProjectionReconcilerProtocol(Protocol):
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None: ...
 
-    async def reconcile_non_skill_projection(
+    async def project_mcp_and_cli(
         self,
         *,
         bot_id: str,
@@ -38,7 +38,7 @@ class BotRuntimeProjectionReconcilerProtocol(Protocol):
         """Project MCP/CLI while an external authority owns Skill mappings."""
         ...
 
-    async def reconcile_cleanup(
+    async def project_for_cleanup(
         self,
         *,
         bot_id: str,
@@ -48,4 +48,4 @@ class BotRuntimeProjectionReconcilerProtocol(Protocol):
         ...
 
 
-__all__ = ["BotRuntimeProjectionReconcilerProtocol"]
+__all__ = ["BotRuntimeProjectorProtocol"]

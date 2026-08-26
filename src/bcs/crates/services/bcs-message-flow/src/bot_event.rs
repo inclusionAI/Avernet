@@ -588,6 +588,7 @@ async fn relay_final_chat_event(
     }
     let mut bot_deliveries = Vec::new();
     let mut delivery_results = Vec::new();
+    let mut provider_send_failed = false;
 
     // Finalize the run's open chat segment: flush the buffered streaming text
     // as ONE row, using the final frame's complete text. (Final-only runs with
@@ -696,6 +697,18 @@ async fn relay_final_chat_event(
             flow.registry.get_protocol_version(&target.bot_uuid).await,
             &delivery_target,
         );
+        let is_provider_send = delivery_target.is_http_provider()
+            && target.delivery_type == DeliveryType::Send;
+        let provider_tags = if delivery_target.is_http_provider() {
+            group
+                .participants
+                .iter()
+                .find(|participant| participant.bot_uuid == target.bot_uuid)
+                .map(|participant| participant.tags.as_slice())
+                .unwrap_or(&[])
+        } else {
+            &[]
+        };
         let mut frame = match target.delivery_type {
             DeliveryType::Send => build_send_frame(
                 &cmd.group_id,
@@ -704,6 +717,7 @@ async fn relay_final_chat_event(
                 &sender_display_name,
                 &outbound_message.content,
                 &group_context,
+                provider_tags,
                 protocol_version,
                 None,
             ),
@@ -714,6 +728,7 @@ async fn relay_final_chat_event(
                 &sender_display_name,
                 &outbound_message.content,
                 &group_context,
+                provider_tags,
                 protocol_version,
                 None,
             ),
@@ -743,6 +758,9 @@ async fn relay_final_chat_event(
             .await;
         match delivery {
             Ok(result) => {
+                if is_provider_send && !result.delivered {
+                    provider_send_failed = true;
+                }
                 log_relay_deliver_result(
                     cmd,
                     &run_id,
@@ -771,6 +789,9 @@ async fn relay_final_chat_event(
                 bot_deliveries.push(result);
             }
             Err(error) => {
+                if is_provider_send {
+                    provider_send_failed = true;
+                }
                 let error_text = error.to_string();
                 log_relay_deliver_result(
                     cmd,
@@ -799,6 +820,26 @@ async fn relay_final_chat_event(
 
     if bot_deliveries.iter().any(|delivery| delivery.delivered) {
         flow.group.increment_message_count(&cmd.group_id).await?;
+    }
+
+    if provider_send_failed {
+        if let Some(ref system_message) = flow.system_message {
+            let session_id = cmd.bcs_session_id.as_deref().unwrap_or(&cmd.group_id);
+            let receivers = group
+                .participants
+                .iter()
+                .filter(|participant| participant.is_bot() && participant.bot_uuid != cmd.bot_id)
+                .cloned()
+                .collect();
+            let event = SystemMessageEvent::GenericNotification {
+                group_id: cmd.group_id.clone(),
+                message: "消息投递失败，请稍后重试。".to_string(),
+                receivers,
+            };
+            let _ = system_message
+                .notify(&cmd.group_id, event, session_id, &group.participants)
+                .await;
+        }
     }
 
     if !decision.hidden_mentions.is_empty() {
@@ -841,14 +882,41 @@ async fn handle_task_bot_event(
         return Ok(Vec::new());
     }
 
-    let response_text = preview_task_response_text(&entry, cmd).await;
-    let group = flow.group.get(&entry.group_id).await;
+    let response_text = preview_task_response_text(flow, &entry, cmd).await;
+    let mut group = flow.group.get(&entry.group_id).await;
+    if let (Some(group), Some(session_id)) = (group.as_mut(), entry.session_id.as_deref()) {
+        crate::task_flow::apply_session_participants(
+            flow,
+            group,
+            &entry.group_id,
+            session_id,
+        )
+        .await?;
+    }
 
     let target_bot_name = entry
         .target_bot_name
         .as_deref()
         .unwrap_or(entry.target_bot.as_str());
     let manager_result_run_id = uuid::Uuid::new_v4().to_string();
+    let delivery_target = flow
+        .registry
+        .resolve_delivery_target(&entry.driver_bot)
+        .await?;
+    let provider_tags = if delivery_target.is_http_provider() {
+        group
+            .as_ref()
+            .and_then(|group| {
+                group
+                    .participants
+                    .iter()
+                    .find(|participant| participant.bot_uuid == entry.driver_bot)
+            })
+            .map(|participant| participant.tags.as_slice())
+            .unwrap_or(&[])
+    } else {
+        &[]
+    };
     let frame = build_task_result_frame(
         group.as_ref(),
         &entry.group_id,
@@ -859,11 +927,8 @@ async fn handle_task_bot_event(
         &response_text,
         &entry.task_id,
         &manager_result_run_id,
+        provider_tags,
     );
-    let delivery_target = flow
-        .registry
-        .resolve_delivery_target(&entry.driver_bot)
-        .await?;
     let delivery_kind = BotDeliveryKind::TaskResult;
     let result = flow
         .bot_delivery
@@ -938,10 +1003,15 @@ async fn handle_task_bot_event(
     Ok(vec![result])
 }
 
-async fn preview_task_response_text(entry: &TaskEntry, cmd: &BotEventCommand) -> String {
+async fn preview_task_response_text(
+    flow: &BcsMessageFlow,
+    entry: &TaskEntry,
+    cmd: &BotEventCommand,
+) -> String {
     let scratch = TaskStore::new();
     scratch.register(entry.clone()).await;
-    record_task_response_event_in_store(&scratch, &entry.task_id, cmd).await;
+    let is_delta_mode = flow.message_tracker.is_chat_delta_mode(&cmd.run_id).await;
+    record_task_response_event_in_store(&scratch, &entry.task_id, cmd, is_delta_mode).await;
     let attempted_entry = scratch.get(&entry.task_id).await.unwrap_or_else(|| entry.clone());
     task_response_text(&attempted_entry, cmd)
 }
@@ -962,13 +1032,21 @@ fn task_response_text(entry: &TaskEntry, cmd: &BotEventCommand) -> String {
 }
 
 async fn record_task_response_event(flow: &BcsMessageFlow, task_id: &str, cmd: &BotEventCommand) {
-    record_task_response_event_in_store(flow.task_store.as_ref(), task_id, cmd).await;
+    let is_delta_mode = flow.message_tracker.is_chat_delta_mode(&cmd.run_id).await;
+    record_task_response_event_in_store(
+        flow.task_store.as_ref(),
+        task_id,
+        cmd,
+        is_delta_mode,
+    )
+    .await;
 }
 
 async fn record_task_response_event_in_store(
     task_store: &TaskStore,
     task_id: &str,
     cmd: &BotEventCommand,
+    is_delta_mode: bool,
 ) {
     if cmd.event_type == "agent"
         && cmd.event_payload.get("stream").and_then(|value| value.as_str()) == Some("tool")
@@ -981,12 +1059,22 @@ async fn record_task_response_event_in_store(
             task_store.record_response_tool_call(task_id).await;
         }
         ChatEventState::Delta => {
-            let text = extract_message_text(&cmd.event_payload);
-            task_store.record_response_text(task_id, &text).await;
+            if let Some(delta) = extract_delta_text(&cmd.event_payload) {
+                task_store.record_response_delta(task_id, delta).await;
+            } else {
+                let text = extract_message_text(&cmd.event_payload);
+                task_store.record_response_text(task_id, &text).await;
+            }
         }
         ChatEventState::Final => {
-            let text = extract_message_text(&cmd.event_payload);
-            task_store.record_final_response_text(task_id, &text).await;
+            // In SSE delta mode every byte of visible response text was already
+            // appended from `delta_text`. The synthesized final `message` is
+            // only the current MessageTracker segment, not a task-level
+            // snapshot, so merging it here would append that segment twice.
+            if !is_delta_mode {
+                let text = extract_message_text(&cmd.event_payload);
+                task_store.record_final_response_text(task_id, &text).await;
+            }
         }
         ChatEventState::Error | ChatEventState::Aborted => {}
     }
@@ -1937,6 +2025,7 @@ fn build_send_frame(
     from_bot_name: &str,
     message: &str,
     group_context: &GroupContext,
+    tags: &[String],
     protocol_version: u32,
     message_id: Option<&str>,
 ) -> BcsFrame {
@@ -1949,6 +2038,7 @@ fn build_send_frame(
         from_bot_name,
         message,
         group_context,
+        tags,
         protocol_version,
         message_id,
     )
@@ -1961,6 +2051,7 @@ fn build_inject_frame(
     from_bot_name: &str,
     message: &str,
     group_context: &GroupContext,
+    tags: &[String],
     protocol_version: u32,
     message_id: Option<&str>,
 ) -> BcsFrame {
@@ -1973,6 +2064,7 @@ fn build_inject_frame(
         from_bot_name,
         message,
         group_context,
+        tags,
         protocol_version,
         message_id,
     )
@@ -1987,6 +2079,7 @@ fn build_bot_relay_frame(
     from_bot_name: &str,
     message: &str,
     group_context: &GroupContext,
+    tags: &[String],
     protocol_version: u32,
     message_id: Option<&str>,
 ) -> BcsFrame {
@@ -2018,6 +2111,10 @@ fn build_bot_relay_frame(
         "deliver": deliver,
     });
 
+    if !tags.is_empty() {
+        params["tags"] = serde_json::json!(tags);
+    }
+
     if supports_session_field {
         if let Some(session_id) = bcs_session_id {
             params["bcs_session_id"] = Value::String(session_id.to_string());
@@ -2047,6 +2144,7 @@ fn build_task_result_frame(
     response_text: &str,
     task_id: &str,
     run_id: &str,
+    tags: &[String],
 ) -> BcsFrame {
     let group_context = GroupContext {
         session_id: manager_session_id.to_string(),
@@ -2067,7 +2165,7 @@ fn build_task_result_frame(
         from_bot_id: None,
         from_bot_owner: None,
     };
-    let params = serde_json::json!({
+    let mut params = serde_json::json!({
         "session_key": manager_session_id,
         "bcs_group_id": manager_session_id,
         "bcs_session_id": manager_session_id,
@@ -2088,6 +2186,9 @@ fn build_task_result_frame(
         "timeout_ms": null,
         "idempotency_key": null,
     });
+    if !tags.is_empty() {
+        params["tags"] = serde_json::json!(tags);
+    }
 
     BcsFrame::Request(RequestFrame::new(
         run_id.to_string(),

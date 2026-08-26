@@ -43,6 +43,9 @@ from agentclaw.community.di.profile import DeployProfile, validate_deploy_enviro
 from agentclaw.community.di.profile_modules import modules_for
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.kernel.lifecycle import discover_lifecycle_participants
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterTransport,
+)
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_BAAS,
     QUALIFIER_BCN,
@@ -53,6 +56,9 @@ from agentclaw.community.plugin_api.http_client import (
 from agentclaw.community.plugin_api.auth import AuthRequestContext
 from agentclaw.community.core.caller_identity.contracts import CallerIdentityStage
 from agentclaw.community.plugins.http_client import HttpxClient
+from agentclaw.community.plugins.local.device_adapter_transport import (
+    InMemoryDeviceAdapterTransport,
+)
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 from agentclaw.community.plugins.local.policy_service import LocalPolicyService
 
@@ -185,6 +191,8 @@ def test_test_and_singlebox_have_explicit_access_and_http_bindings():
 
     assert "TestHttpClientModule" in test_names
     assert "TestDevicesModule" in test_names
+    assert "CommunityDeviceSyncModule" in test_names
+    assert "SingleboxDeviceSyncModule" not in test_names
     assert "SingleboxDevicesModule" not in test_names
     assert "SingleboxAccessModule" not in test_names
     assert legacy_access_module not in test_names
@@ -192,15 +200,22 @@ def test_test_and_singlebox_have_explicit_access_and_http_bindings():
     assert "SingleboxAccessModule" in singlebox_names
     assert "TestHttpClientModule" not in singlebox_names
     assert "SingleboxDevicesModule" in singlebox_names
+    assert "CommunityDeviceSyncModule" in singlebox_names
+    assert "SingleboxDeviceSyncModule" not in singlebox_names
     assert "TestDevicesModule" not in singlebox_names
     assert legacy_access_module not in singlebox_names
 
-    assert test_names - {"TestHttpClientModule", "TestDevicesModule"} == (
+    assert test_names - {
+        "CommunityDeviceSyncModule",
+        "TestHttpClientModule",
+        "TestDevicesModule",
+    } == (
         singlebox_names
         - {
             "SingleboxAccessModule",
             "SingleboxCallerIdentityModule",
             "SingleboxDevicesModule",
+            "CommunityDeviceSyncModule",
         }
     )
 
@@ -221,6 +236,15 @@ def test_singlebox_profile_resolves_local_policy_and_real_http_clients():
     assert isinstance(injector.get(PolicyServiceProtocol), LocalPolicyService)
     assert all(
         isinstance(client, HttpxClient) for client in _resolve_http_clients(injector)
+    )
+
+
+def test_singlebox_profile_keeps_local_device_adapter_transport():
+    injector = build_injector(profile=DeployProfile.SINGLEBOX)
+
+    assert isinstance(
+        injector.get(DeviceAdapterTransport),
+        InMemoryDeviceAdapterTransport,
     )
 
 

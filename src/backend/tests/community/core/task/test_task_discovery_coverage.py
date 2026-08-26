@@ -13,12 +13,15 @@ Covers lines not exercised by test_task_discovery_unit.py:
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
+    DISCOVERY_LOCK_TTL_SECONDS,
 )
 from agentclaw.community.core.task.task_discovery.lock_models import (
     TaskDiscoveryLockRecord,
@@ -31,7 +34,8 @@ from agentclaw.community.core.task.task_discovery.session_initiator import (
     CronRelaySessionInitiator,
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
-    OrmTaskReader,
+    SqliteTaskReader,
+    init_discovered_tasks_db,
 )
 from agentclaw.community.plugin_api.notify_sender import (
     NotifyMessage,
@@ -295,52 +299,26 @@ def test_build_discovery_prompt_empty_acceptances():
 
 
 # ===========================================================================
-# DiscoveredTaskModel.to_domain with invalid JSON acceptances
+# _row_to_task with invalid JSON acceptances
 # ===========================================================================
 
-def test_orm_reader_invalid_acceptances_json():
-    """to_domain falls back to [] when acceptances column has non-JSON text."""
-    from contextlib import contextmanager
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from agentclaw.community.core.base import Base
-    from agentclaw.community.core.task.task_discovery.discovered_task_models import (  # noqa: F401
-        DiscoveredTaskModel,
-    )
-
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, autoflush=False)
-
-    # Insert a row with invalid JSON in acceptances column directly
-    db_session = factory()
-    row = DiscoveredTaskModel(
-        task_id="t-bad",
-        bot_id="bot-1",
-        owner_id="owner-1",
-        dt=_DT,
-        title="BadTask",
-        instruction="desc",
-        background="bg",
-        discovery_basis="basis",
-        acceptances="not-valid-json{{",
-    )
-    db_session.add(row)
-    db_session.commit()
-    db_session.close()
-
-    class _TestDB:
-        @contextmanager
-        def orm_session(self):
-            s = factory()
-            try:
-                yield s
-                s.commit()
-            finally:
-                s.close()
-
-    reader = OrmTaskReader(_TestDB())
+def test_row_to_task_invalid_acceptances_json(tmp_path):
+    """_row_to_task falls back to [] when acceptances is not valid JSON."""
+    db_path = str(tmp_path / "test_bad_acceptances.db")
+    init_discovered_tasks_db(db_path, [
+        {
+            "task_id": "t-bad",
+            "bot_id": "bot-1",
+            "owner_id": "owner-1",
+            "dt": _DT,
+            "title": "BadTask",
+            "instruction": "desc",
+            "background": "bg",
+            "discovery_basis": "basis",
+            "acceptances": "not-valid-json{{",
+        }
+    ])
+    reader = SqliteTaskReader(db_path)
     tasks = reader.read_pending_tasks_for_bot("bot-1", "owner-1", _DT)
     assert len(tasks) == 1
     assert tasks[0].acceptances == []

@@ -176,3 +176,15 @@ class BotAccessRefusedError(Exception):
     there, or the surface becomes an enumeration oracle over other people's
     bots.
     """
+
+
+class BotEditLockError(Exception):
+    """Base for edit-lock failures raised by the authorization dependency."""
+
+
+class BotEditLockRequiredError(BotEditLockError):
+    """The Bot has collaborators and the caller does not hold its edit lock."""
+
+
+class BotEditLockCheckError(BotEditLockError):
+    """The edit-lock state could not be resolved, so the mutation is refused."""

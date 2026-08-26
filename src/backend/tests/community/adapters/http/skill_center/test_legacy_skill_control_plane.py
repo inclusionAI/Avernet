@@ -2,13 +2,11 @@
 
 import inspect
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
 
 from agentclaw.community.adapters.http.skill_center.schemas import (
-    ActivateRequest,
     AddSkillsRequest,
     DeactivateSkillSetRequest,
     SearchRequest,
@@ -19,8 +17,6 @@ from agentclaw.community.adapters.http.skill_center.skillsets import (
     get_skill_set_mcps,
 )
 from agentclaw.community.adapters.http.skill_center.skills import (
-    activate_skill,
-    deactivate_skill,
     deactivate_skill_set,
     get_market_tree,
     list_local_market_skills,
@@ -30,7 +26,6 @@ from agentclaw.community.adapters.http.skill_center.skills import (
 )
 from agentclaw.community.adapters.http.dependencies import get_request_context
 from agentclaw.community.core.skill_center.errors import (
-    LocalSkillNotFoundError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
 )
@@ -40,38 +35,6 @@ class _Bots:
     def get_by_id_and_owner(self, bot_id: str, owner_id: str):
         assert (bot_id, owner_id) == ("bot", "owner")
         return {"active_engine": "openclaw", "bot_type": "personal"}
-
-
-class _Assets:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, bool | None]] = []
-
-    def get_skill(self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str):
-        assert (skill_id, bot_id, owner_id, user_id) == ("7", "bot", "owner", "owner")
-        self.calls.append(("get", None))
-        return {"name": "local-seven"}
-
-    def resolve_legacy_skill_id(
-        self,
-        *,
-        skill_reference: str,
-        source_path: str,
-        bot_id: str,
-        owner_id: str,
-        user_id: str,
-    ):
-        assert (skill_reference, source_path, bot_id, owner_id, user_id) in {
-            ("legacy/path", "legacy", "bot", "owner", "owner"),
-            ("legacy-link", "legacy/path", "bot", "owner", "owner"),
-        }
-        return "7"
-
-    async def set_active(
-        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str, active: bool
-    ):
-        assert (skill_id, bot_id, owner_id, user_id) == ("7", "bot", "owner", "owner")
-        self.calls.append(("set", active))
-        return {"name": "local-seven"}
 
 
 class _Catalog:
@@ -219,7 +182,6 @@ async def test_legacy_deactivate_recovers_non_default_bot_from_exact_set_id() ->
         DeactivateSkillSetRequest(skill_set_id="set-1"),
         ctx=SimpleNamespace(user_id="owner", bot_id="default"),
         bot_repo=_AddressedBots(),
-        activator_factory=object(),
         control_plane=control_plane,
     )
 
@@ -236,125 +198,6 @@ async def test_legacy_deactivate_recovers_non_default_bot_from_exact_set_id() ->
             "owner_id_hint": None,
         },
     )
-
-
-@pytest.mark.asyncio
-async def test_legacy_activate_keeps_wire_but_uses_bot_skill_asset_control_plane() -> (
-    None
-):
-    assets = _Assets()
-    response = await activate_skill(
-        "7",
-        ActivateRequest(source_path="local://ignored"),
-        bot_id="bot",
-        ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
-        bot_repo=_Bots(),
-        path_factory=object(),
-        skill_service_factory=object(),
-        skill_set_service_factory=object(),
-        resolver=object(),
-        device_sync_dispatcher=object(),
-        asset_service=assets,
-    )
-
-    assert response.model_dump() == {
-        "success": True,
-        "message": "Skill activated successfully",
-        "link_name": "local-seven",
-    }
-    assert assets.calls == [("get", None), ("set", True)]
-
-
-@pytest.mark.asyncio
-async def test_legacy_activate_with_relative_path_still_uses_control_plane() -> None:
-    assets = _Assets()
-    await activate_skill(
-        "7",
-        ActivateRequest(source_path="legacy", relative_path="legacy/path"),
-        bot_id="bot",
-        ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
-        bot_repo=_Bots(),
-        path_factory=object(),
-        skill_service_factory=object(),
-        skill_set_service_factory=object(),
-        resolver=object(),
-        device_sync_dispatcher=object(),
-        asset_service=assets,
-    )
-    assert assets.calls == [("get", None), ("set", True)]
-
-
-@pytest.mark.asyncio
-async def test_legacy_activate_with_link_name_resolves_decimal_id_before_control_plane() -> (
-    None
-):
-    assets = _Assets()
-    await activate_skill(
-        "legacy-link",
-        ActivateRequest(source_path="legacy/path"),
-        bot_id="bot",
-        ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
-        bot_repo=_Bots(),
-        path_factory=object(),
-        skill_service_factory=object(),
-        skill_set_service_factory=object(),
-        resolver=object(),
-        device_sync_dispatcher=object(),
-        asset_service=assets,
-    )
-    assert assets.calls == [("get", None), ("set", True)]
-
-
-@pytest.mark.asyncio
-async def test_bound_control_plane_not_found_never_falls_back_to_legacy_mutation() -> (
-    None
-):
-    class _MissingAssets(_Assets):
-        def resolve_legacy_skill_id(self, **_kwargs):
-            raise LocalSkillNotFoundError()
-
-    legacy_service_factory = MagicMock()
-    with pytest.raises(LocalSkillNotFoundError):
-        await activate_skill(
-            "missing-link",
-            ActivateRequest(source_path="missing/path"),
-            bot_id="bot",
-            ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
-            bot_repo=_Bots(),
-            path_factory=object(),
-            skill_service_factory=legacy_service_factory,
-            skill_set_service_factory=object(),
-            resolver=object(),
-            device_sync_dispatcher=object(),
-            asset_service=_MissingAssets(),
-        )
-
-    legacy_service_factory.create.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_legacy_deactivate_keeps_wire_but_uses_bot_skill_asset_control_plane() -> (
-    None
-):
-    assets = _Assets()
-    response = await deactivate_skill(
-        "7",
-        bot_id="bot",
-        ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
-        bot_repo=_Bots(),
-        path_factory=object(),
-        skill_service_factory=object(),
-        skill_set_service_factory=object(),
-        resolver=object(),
-        device_sync_dispatcher=object(),
-        asset_service=assets,
-    )
-
-    assert response.model_dump() == {
-        "success": True,
-        "message": "Skill deactivated successfully",
-    }
-    assert assets.calls == [("get", None), ("set", False)]
 
 
 @pytest.mark.asyncio
@@ -606,3 +449,80 @@ async def test_legacy_default_detail_projects_historical_false_as_active() -> No
     )
 
     assert response.data.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_legacy_remove_reaches_the_default_set_exclusion_wire() -> None:
+    """The legacy DELETE has no default pre-refusal: the control plane's
+    restored opt-out (remove on a Default = per-Bot exclusion) flows through
+    the seam, and the historical wire shape is preserved."""
+    from agentclaw.community.adapters.http.skill_center.skillsets import (
+        remove_skill_from_set,
+    )
+
+    class _ControlPlane(_LegacySetScopeControlPlane):
+        def get_set(self, **kwargs):
+            self.calls.append(("get_set", kwargs))
+            return {"id": "set-1", "is_default": True}
+
+        async def remove_skill(self, **kwargs):
+            self.calls.append(("remove_skill", kwargs))
+            return {"id": "set-1", "is_default": True, "changed": True}
+
+    control_plane = _ControlPlane()
+    response = await remove_skill_from_set(
+        "set-1",
+        "7",
+        user_id="owner",
+        entity_id=None,
+        entity_type=None,
+        bot_id=None,
+        engine_type=None,
+        ctx=SimpleNamespace(user_id="owner", bot_id="default"),
+        bot_repo=_AddressedBots(),
+        control_plane=control_plane,
+    )
+
+    assert response.model_dump() == {
+        "success": True,
+        "message": "Skill removed from skill set",
+    }
+    assert ("remove_skill", {
+        "bot_id": "persisted-bot",
+        "owner_id": "owner",
+        "user_id": "owner",
+        "set_id": "set-1",
+        "skill_id": "7",
+    }) in control_plane.calls
+
+
+@pytest.mark.asyncio
+async def test_legacy_current_read_keeps_the_historical_id_key() -> None:
+    """The deprecated wire's readers parse ``data.skill_set_id``; the
+    re-sourced answer (first ordinary active Set) must keep the alias."""
+    from agentclaw.community.adapters.http.skill_center.skills import (
+        get_current_skill_set,
+    )
+
+    class _ControlPlane:
+        def list_sets(self, **kwargs):
+            assert kwargs["bot_id"] == "bot"
+            return [
+                {"id": "9", "name": "Default", "is_default": True, "is_active": True},
+                {"id": "3", "name": "tools", "is_default": False, "is_active": True},
+            ]
+
+    response = await get_current_skill_set(
+        entity_id="owner",
+        entity_type=None,
+        bot_id="bot",
+        engine_type=None,
+        ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
+        bot_repo=_Bots(),
+        control_plane=_ControlPlane(),
+    )
+
+    assert response.success is True
+    assert response.data["skill_set_id"] == "3"
+    assert response.data["id"] == "3"
+    assert response.data["name"] == "tools"

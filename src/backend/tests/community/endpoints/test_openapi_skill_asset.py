@@ -7,7 +7,7 @@ import time
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
+from agentclaw.community.api.skill_query_service import SkillQueryServiceProtocol
 from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
 from tests.community.factories.bot_collaborator import make_bot
@@ -89,7 +89,7 @@ def _seed_asset(world, *, missing: bool = False) -> None:
     # double and can answer without a Bot row; the gate cannot, and refuses.
     make_bot(world, bot_id=_BOT_ID, owner_id=_OWNER)
     world.injector.binder.bind(
-        BotSkillAssetServiceProtocol, to=_Asset(missing=missing), scope=None
+        SkillQueryServiceProtocol, to=_Asset(missing=missing), scope=None
     )
 
 

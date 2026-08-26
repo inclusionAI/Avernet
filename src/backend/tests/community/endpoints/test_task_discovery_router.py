@@ -2,20 +2,25 @@
 
 Covers:
 - POST /api/v1/collaboration/tasks/discovery/discover (happy + error)
-- GET  /api/v1/collaboration/tasks/discovery/status  (happy + coverage)
+- GET  /api/v1/collaboration/tasks/discovery/status  (happy + error)
 
 Happy cases assert only ``{"code": 200000}`` — the handler returns the
 unified success ``Envelope`` when the discovery flow runs end-to-end,
-regardless of whether any tasks are found in the DB (session-creation
-errors are captured per-task, not at the top level).  This makes the
-cases robust in both CI (empty DB → empty discoveries) and local dev
-(seeded DB with test data).
+regardless of whether the DB file exists or individual task sessions
+fail (session-creation errors are captured per-task, not at the top
+level).  This makes the cases robust in both CI (no DB file → empty
+discoveries) and local dev (DB file present with seed data).
 
 The POST error case is a FastAPI 422 (missing required bot_id).
-The status coverage case seeds tasks via ORM and verifies the
-aggregation of persisted tasks with process-local discovery results.
+The GET error case points the DB path at a directory, which makes
+sqlite3.connect() raise OperationalError outside the reader's inner
+try/except; the handler re-raises it as ``InternalError`` → the app's
+``DomainError`` handler answers a 500 ``ErrorEnvelope``.
 """
 from __future__ import annotations
+
+import os
+from pathlib import Path
 
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryResult,
@@ -26,9 +31,8 @@ from agentclaw.community.core.task.task_discovery.models import (
     DiscoverySession,
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
-    seed_discovered_tasks,
+    init_discovered_tasks_db,
 )
-from agentclaw.community.plugin_api.database import DatabasePlugin
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -78,8 +82,51 @@ def get_status_happy_ok():
     """Happy path: status endpoint returns success envelope."""
 
 
+# The error case for GET /status: point TASK_DISCOVERY_DATA_FILE at a
+# directory. Path.exists() returns True for a directory, so
+# SqliteTaskReader proceeds to sqlite3.connect() — which is OUTSIDE
+# the reader's inner try/except. connect() on a directory raises
+# sqlite3.OperationalError, propagating to the handler's except-Exception,
+# which re-raises it as InternalError → 500 ErrorEnvelope.
+_ERROR_DB_DIR = os.path.join(
+    os.environ.get("TMPDIR", "/tmp"),
+    "td_status_err_dir",
+)
+
+
+def _seed_status_error_dir(world) -> None:
+    """Create a directory at the error DB path and set the env var."""
+    os.makedirs(_ERROR_DB_DIR, exist_ok=True)
+    os.environ["TASK_DISCOVERY_DATA_FILE"] = _ERROR_DB_DIR
+
+
+def _cleanup_status_error_env(response, world) -> None:
+    """Restore TASK_DISCOVERY_DATA_FILE and remove the temp directory."""
+    os.environ.pop("TASK_DISCOVERY_DATA_FILE", None)
+    try:
+        os.rmdir(_ERROR_DB_DIR)
+    except OSError:
+        pass
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/v1/collaboration/tasks/discovery/status",
+    scenario="err_db_path_is_directory",
+    seed=_seed_status_error_dir,
+    extra_assertions=(_cleanup_status_error_env,),
+    expect=ExpectError(status=500),
+)
+def get_status_err_db_path_is_directory():
+    """Error path: DB path is a directory -> sqlite3.connect raises -> InternalError -> 500."""
+
+
 # Exercise the status aggregation loop with both a task that has an in-memory
 # discovery result and one that has not been discovered in this process.
+_STATUS_COVERAGE_DB = Path(
+    os.environ.get("TMPDIR", "/tmp"),
+    "task_discovery_status_coverage.db",
+)
 _STATUS_DISCOVERED_TASK_ID = "status-discovered"
 _STATUS_PENDING_TASK_ID = "status-pending"
 
@@ -102,11 +149,14 @@ def _status_task(task_id: str) -> dict:
 
 
 def _seed_status_with_discovered_and_pending_tasks(world) -> None:
-    db = world.get(DatabasePlugin)
-    seed_discovered_tasks(db, [
-        _status_task(_STATUS_DISCOVERED_TASK_ID),
-        _status_task(_STATUS_PENDING_TASK_ID),
-    ])
+    init_discovered_tasks_db(
+        _STATUS_COVERAGE_DB,
+        [
+            _status_task(_STATUS_DISCOVERED_TASK_ID),
+            _status_task(_STATUS_PENDING_TASK_ID),
+        ],
+    )
+    os.environ["TASK_DISCOVERY_DATA_FILE"] = str(_STATUS_COVERAGE_DB)
     service = world.get(DiscoveryService)
     _task_dto = _status_task(_STATUS_DISCOVERED_TASK_ID)
     task = DiscoveredTask(
@@ -135,12 +185,8 @@ def _seed_status_with_discovered_and_pending_tasks(world) -> None:
 
 
 def _cleanup_status_coverage(response, world) -> None:
-    db = world.get(DatabasePlugin)
-    with db.transactional_orm_session() as session:
-        from agentclaw.community.core.task.task_discovery.discovered_task_models import (
-            DiscoveredTaskModel,
-        )
-        session.query(DiscoveredTaskModel).delete()
+    os.environ.pop("TASK_DISCOVERY_DATA_FILE", None)
+    _STATUS_COVERAGE_DB.unlink(missing_ok=True)
 
 
 @endpoint_test(
@@ -231,126 +277,3 @@ def dingtalk_config_happy():
 )
 def dingtalk_config_err_missing_body():
     """Error path: missing required body -> FastAPI 422."""
-
-
-# ---- GET /api/v1/collaboration/tasks/discovery/status ---- (error case)
-
-def _seed_status_reader_error(world) -> None:
-    """Override DatabasePlugin.orm_session to raise — OrmTaskReader propagates
-    a RuntimeError → handler catches → InternalError → 500 ErrorEnvelope."""
-    def _fail(*_args, **_kwargs):
-        raise RuntimeError("status read failed (gate)")
-
-    world.get(DatabasePlugin).set_override("orm_session", _fail)
-
-
-@endpoint_test(
-    method="GET",
-    path="/api/v1/collaboration/tasks/discovery/status",
-    scenario="error",
-    seed=_seed_status_reader_error,
-    expect=ExpectError(status=500),
-)
-def get_status_err_reader_failure():
-    """Error path: DatabasePlugin.orm_session raises → handler InternalError → 500."""
-
-
-# ---- POST /api/v1/collaboration/tasks/discovery/tasks ----
-
-def _seed_write_tasks_ok(world) -> None:
-    """Pre-clean ac_discovered_tasks so the upsert happy path runs against an empty table."""
-    db = world.get(DatabasePlugin)
-    from agentclaw.community.core.task.task_discovery.discovered_task_models import (
-        DiscoveredTaskModel,
-    )
-    with db.transactional_orm_session() as session:
-        session.query(DiscoveredTaskModel).delete()
-
-
-def _seed_write_tasks_error(world) -> None:
-    """Override DatabasePlugin.transactional_orm_session to raise → handler InternalError → 500."""
-    def _fail(*_args, **_kwargs):
-        raise RuntimeError("upsert failed (gate)")
-
-    world.get(DatabasePlugin).set_override("transactional_orm_session", _fail)
-
-
-@endpoint_test(
-    method="POST",
-    path="/api/v1/collaboration/tasks/discovery/tasks",
-    scenario="happy",
-    input=CaseInput(json_body={
-        "tasks": [
-            {
-                "task_id": "td-write-1",
-                "bot_id": "td-bot-1",
-                "owner_id": "td-owner-1",
-                "dt": "2026-08-26",
-                "title": "Write-happy task",
-                "instruction": "instruction",
-                "background": "background",
-                "discovery_basis": "basis",
-                "priority": "medium",
-                "status": "pending_confirmation",
-                "objective": "",
-                "acceptances": [],
-            }
-        ]
-    }),
-    seed=_seed_write_tasks_ok,
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={"code": 200000},
-    ),
-)
-def write_tasks_happy():
-    """Happy path: upsert one task → returns Envelope with code=200000, written=1."""
-
-
-@endpoint_test(
-    method="POST",
-    path="/api/v1/collaboration/tasks/discovery/tasks",
-    scenario="error",
-    seed=_seed_write_tasks_error,
-    input=CaseInput(json_body={"tasks": [
-        {"task_id": "td-err-1", "bot_id": "b", "owner_id": "o", "dt": "2026-08-26",
-         "title": "x", "instruction": "y", "background": "z"}
-    ]}),
-    expect=ExpectError(status=500),
-)
-def write_tasks_err_db_unavailable():
-    """Error path: DatabasePlugin.transactional_orm_session raises → InternalError → 500."""
-
-
-# ---- DELETE /api/v1/collaboration/tasks/discovery/tasks ----
-
-def _seed_clear_tasks_error(world) -> None:
-    """Override DatabasePlugin.transactional_orm_session to raise → handler InternalError → 500."""
-    def _fail(*_args, **_kwargs):
-        raise RuntimeError("clear failed (gate)")
-
-    world.get(DatabasePlugin).set_override("transactional_orm_session", _fail)
-
-
-@endpoint_test(
-    method="DELETE",
-    path="/api/v1/collaboration/tasks/discovery/tasks",
-    scenario="happy",
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={"code": 200000},
-    ),
-)
-def clear_tasks_happy():
-    """Happy path: DELETE removes all rows (0 or more) → Envelope with code=200000."""
-
-
-@endpoint_test(
-    method="DELETE",
-    path="/api/v1/collaboration/tasks/discovery/tasks",
-    scenario="error",
-    seed=_seed_clear_tasks_error,
-    expect=ExpectError(status=500),
-)
-def clear_tasks_err_db_unavailable():
-    """Error path: DatabasePlugin.transactional_orm_session raises → InternalError → 500."""

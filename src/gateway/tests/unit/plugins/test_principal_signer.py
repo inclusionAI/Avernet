@@ -109,6 +109,20 @@ class _FakeResolver(SecretResolver):
         return _Secret(secret_user="", secret_value=self._value)
 
 
+class _StrResolver(SecretResolver):
+    """A BaaS-aligned resolver that returns a plain string secret.
+
+    Missing secrets raise ``RuntimeError`` (the ``env`` flavor contract)."""
+
+    def __init__(self, value: str | None) -> None:
+        self._value = value
+
+    def get_secret(self, secret_name: str) -> str:
+        if self._value is None:
+            raise RuntimeError(f"secret not found: {secret_name}")
+        return self._value
+
+
 def _block(
     *,
     secret_name: str = "principal_signing_key",
@@ -136,6 +150,27 @@ def test_load_signer_config_reads_key_from_resolver_and_params_from_config() -> 
 def test_load_signer_config_leaves_the_key_empty_when_the_secret_is_absent() -> None:
     """No stand-in key. The non-secret parameters still load normally."""
     cfg = load_signer_config(_block(), _FakeResolver(None), strict=False)
+
+    assert cfg.signing_key == ""
+    assert cfg.kid == "bare"
+    assert cfg.issuer == "gateway"
+    assert cfg.ttl_seconds == 60
+
+
+def test_load_signer_config_reads_plain_string_secret() -> None:
+    """The BaaS-aligned ``env`` resolver returns a plain string secret."""
+    cfg = load_signer_config(_block(), _StrResolver("envk"), strict=False)
+
+    assert cfg.signing_key == "envk"
+    assert cfg.kid == "bare"
+    assert cfg.issuer == "gateway"
+    assert cfg.ttl_seconds == 60
+
+
+def test_load_signer_config_treats_raising_string_resolver_as_absent() -> None:
+    """A missing plain-string secret (RuntimeError) leaves the key empty in
+    non-strict profiles, mirroring the duck-typed resolver's None case."""
+    cfg = load_signer_config(_block(), _StrResolver(None), strict=False)
 
     assert cfg.signing_key == ""
     assert cfg.kid == "bare"

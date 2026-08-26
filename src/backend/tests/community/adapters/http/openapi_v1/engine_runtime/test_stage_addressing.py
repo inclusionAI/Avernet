@@ -101,6 +101,10 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/chats"),
     ("get", "/openapi/v1/bots/{bot_id}/chats/{trace_id}"),
     ("post", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"),
+    (
+        "post",
+        "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade",
+    ),
     ("get", "/openapi/v1/bots/{bot_id}/lifecycle"),
     ("delete", "/openapi/v1/bots/{bot_id}/lifecycle"),
     ("get", "/openapi/v1/bots/{bot_id}/lifecycle/approval"),

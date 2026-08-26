@@ -920,7 +920,7 @@ pub async fn handle_web_send(
             .collect();
 
         let mut offline_bot_names: Vec<String> = Vec::new();
-        let mut failed_bot_names: Vec<String> = Vec::new();
+        let mut delivery_failed = false;
         for t in &failed_targets {
             let name = group
                 .get_participant(&t.bot_uuid)
@@ -931,7 +931,7 @@ pub async fn handle_web_send(
                 Err(_) => false,
             };
             if is_online {
-                failed_bot_names.push(name);
+                delivery_failed = true;
             } else {
                 offline_bot_names.push(name);
             }
@@ -959,12 +959,10 @@ pub async fn handle_web_send(
                     .await;
             }
 
-            if !failed_bot_names.is_empty() {
-                let names = failed_bot_names.join("、");
-                let message = format!("消息投递给 Bot {} 失败，请稍后重试", names);
+            if delivery_failed {
                 let event = SystemMessageEvent::GenericNotification {
                     group_id: cmd.group_id.clone(),
-                    message,
+                    message: "消息投递失败，请稍后重试。".to_string(),
                     receivers,
                 };
                 let _ = system_message
@@ -2426,6 +2424,7 @@ async fn frame_for_target(
                     &cmd.from_actor_id,
                     sender_display_name,
                     &target.bot_uuid,
+                    provider_tags,
                     &wire_attachments,
                     &cmd.thinking,
                     protocol_version,
@@ -2461,6 +2460,7 @@ async fn frame_for_target(
                     &cmd.from_actor_id,
                     sender_display_name,
                     &target.bot_uuid,
+                    provider_tags,
                     &wire_attachments,
                     protocol_version,
                     cmd.session_id.as_deref(),
@@ -2476,6 +2476,7 @@ async fn frame_for_target(
                 sender_display_name,
                 &decision.mentions,
                 &target.bot_uuid,
+                provider_tags,
                 &wire_attachments,
                 is_self,
                 protocol_version,

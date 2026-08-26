@@ -72,6 +72,20 @@ def _resolve_backend_url() -> str:
     return os.environ.get("BACKEND_URL", _DEFAULT_BACKEND_URL)
 
 
+_DEFAULT_BACKEND_URL = "http://localhost:8888"
+_DEFAULT_FRONTEND_URL = "http://localhost:8000"
+
+
+def _resolve_frontend_url() -> str:
+    """Resolve frontend workbench URL from env (DI factory — config lives here, not in core/)."""
+    return os.environ.get("FRONTEND_URL", _DEFAULT_FRONTEND_URL)
+
+
+def _resolve_backend_url() -> str:
+    """Resolve backend self URL from env (DI factory — config lives here, not in core/)."""
+    return os.environ.get("BACKEND_URL", _DEFAULT_BACKEND_URL)
+
+
 class TaskDiscoveryModule(Module):
     """DI bindings for task discovery."""
 

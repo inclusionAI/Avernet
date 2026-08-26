@@ -45,6 +45,16 @@ impl SystemMessageService for RecordingSystemMessage {
     }
 }
 
+/// Test no-auth shared-content URL projector for upload-completion notifications.
+struct CompletionShareProjector;
+impl bcs_service_api::application::v1::SessionFileInternalContentUrlProjector
+    for CompletionShareProjector
+{
+    fn shared_content_url(&self, token: &str) -> String {
+        format!("http://share.test/sessions/shared-file/content?token={token}")
+    }
+}
+
 struct Fixture {
     service: SessionFileApplicationServiceImpl,
     bots: Arc<BotCore>,
@@ -94,6 +104,7 @@ impl Fixture {
             groups.clone(),
             bots.clone(),
             notifications.clone(),
+            Arc::new(CompletionShareProjector),
         );
         Self {
             service,
@@ -259,7 +270,6 @@ async fn human_creator_can_upload_and_complete_an_owned_bots_file() {
             caller: human_caller("alice"),
             session_id: "group-1:abcd1234".into(),
             file_id,
-            notification_content_url: "https://gateway.test/openapi/v1/collaboration/content".into(),
         })
         .await
         .expect("owner Human completes");
@@ -272,7 +282,10 @@ async fn human_creator_can_upload_and_complete_an_owned_bots_file() {
             message, receivers, ..
         } => {
             assert!(message.starts_with("用户 alice 上传了一个文件 report.txt"));
-            assert!(message.contains("gateway.test"));
+            assert!(
+                message.contains("http://share.test/sessions/shared-file/content?token="),
+                "expected a share link in the notification, got: {message}",
+            );
             let mut receiver_ids = receivers
                 .iter()
                 .map(|participant| participant.bot_uuid.as_str())
@@ -333,7 +346,6 @@ async fn completion_skips_notification_when_uploader_is_the_only_bot() {
             caller,
             session_id: session_id.into(),
             file_id: prepared.file.file_id,
-            notification_content_url: "http://legacy.test/content".into(),
         })
         .await
         .expect("complete file");

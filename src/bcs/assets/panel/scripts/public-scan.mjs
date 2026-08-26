@@ -5,11 +5,13 @@ const root = process.cwd();
 const targets = [
   'src',
   'README.md',
+  'PUBLISHING.md',
   'package.json',
   'package-lock.json',
   'vite.config.ts',
   'tsconfig.json',
   'tsconfig.build.json',
+  'dist/index.umd.js',
 ];
 const deniedPatterns = [
   /alipay/i,

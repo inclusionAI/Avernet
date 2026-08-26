@@ -32,16 +32,45 @@ user_config:
     forwarder: "httpx"
     schema_catalog: "file"
     cache: "stub"
+    # To use the Redis-backed cache plugin, set ``cache: "redis"`` and provide
+    # a top-level ``cache_redis`` block (see below). Default ``stub`` is the
+    # in-memory, single-process option.
+    #
+    # cache: "redis"
     auth: "stub"
     # SecretResolver flavor. Community reads creds from env; enterprise overlays
     # this with a corp/KMS-backed selector registered via the plugin_registry.
+    # Set ``secret: "aliyun_kms"`` to resolve signing keys/credentials from
+    # Aliyun KMS, with the resolver's own access credentials provided as secret
+    # references in ``plugins.secret_aliyun_kms``.
     secret: "community"
+    # secret_aliyun_kms:
+    #   endpoint: ""
+    #   region_id: ""
+    #   access_key_id: "@kms_access_key_id"
+    #   access_key_secret: "@kms_access_key_secret"
+    #   secret_name_prefix: ""
     authn:
       app_token: "stub"
       tenant: "stub"
-    database:
-      plugin_database: "SQLITE_ORM"
-      database_url: ""
+    database: "sqlite"
+
+  # Database plugin connection params for the plugin selected by
+  # ``plugins.database`` (mirrors BaaS: a sibling top-level section).
+  database:
+    database_url: ""
+    # create_schema / seed_data default to false (matching BaaS). Set them to
+    # true only in the E2E overlays (e.g. e2e-mariadb.yaml) so a freshly
+    # provisioned test database is created and seeded.
+    create_schema: false
+    seed_data: false
+
+  # Redis cache plugin connection params for ``plugins.cache: "redis"``
+  # (mirrors BaaS: a sibling top-level section).
+  cache_redis:
+    url: "redis://localhost:6379/0"
+    socket_timeout: 5.0
+    socket_connect_timeout: 5.0
 
   # SecretResolver configuration. The community (env-backed) resolver reads
   # ``{env_prefix}{NAME}_VALUE`` / ``_USER`` from the process environment.
@@ -336,6 +365,31 @@ user_config:
       user: required
       app: required
 
+    # Group creation selects either the Human or an authenticated Bot as its
+    # effective Actor. App remains required as the integration credential;
+    # BCN rejects missing actors and mismatched User/Bot ownership claims.
+    "POST /openapi/v1/collaboration/groups":
+      user: optional
+      app: required
+      bot: optional
+
+    # Resource-level authorization stays in BCN: the selected Bot must have a
+    # readable or management relation to the target Group/Session.
+    "/openapi/v1/collaboration/groups/{group_id}":
+      user: optional
+      app: required
+      bot: optional
+
+    "POST /openapi/v1/collaboration/groups/{group_id}/sessions":
+      user: optional
+      app: required
+      bot: optional
+
+    "/openapi/v1/collaboration/sessions/{session_id}":
+      user: optional
+      app: required
+      bot: optional
+
     # New-version publish-to-users: served by the backend (the antprocess
     # approval + bcs_pub callback live there), pulled out of the
     # collaboration→bcs domain by the `collaboration-publish` match upstream. A
@@ -343,6 +397,12 @@ user_config:
     # POST /api/bots/{bot_id}/public this replaces. The method-qualified exact
     # path outranks the broad collaboration/** (app: required) rule above.
     "POST /openapi/v1/collaboration/bots/{bot_uuid}/public":
+      user: required
+
+    # Public group plaza: any authenticated end user can browse public groups
+    # without an app credential. Method-qualified exact path outranks the
+    # broad collaboration/** (user+app required) rule above.
+    "GET /openapi/v1/collaboration/public-groups":
       user: required
 
     "/api/v1/collaboration/**":

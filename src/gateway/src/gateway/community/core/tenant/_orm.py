@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, text
+from sqlalchemy import JSON, BigInteger, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.community.spi.database import Base
@@ -23,12 +23,12 @@ class TenantRow(Base):  # type: ignore[misc]
     __tablename__ = "avernet_tenant"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column()
-    description: Mapped[str] = mapped_column(default="")
-    owner: Mapped[str] = mapped_column(default="")
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    description: Mapped[str] = mapped_column(String(1024), default="")
+    owner: Mapped[str] = mapped_column(String(128), default="")
     config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    creator: Mapped[str] = mapped_column(default="")
-    modifier: Mapped[str] = mapped_column(default="")
+    creator: Mapped[str] = mapped_column(String(128), default="")
+    modifier: Mapped[str] = mapped_column(String(128), default="")
     gmt_create: Mapped[datetime] = mapped_column(
         server_default=text("CURRENT_TIMESTAMP")
     )

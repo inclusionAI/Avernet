@@ -79,7 +79,7 @@
       ],
       "endpoints": [
         {
-          "env": "PRE",
+          "env": "PROD",
           "networkType": "INTERNET",
           "transportProtocol": "STREAMABLE_HTTP",
           "url": "https://singlebox.toolsdiag.invalid/mcp"

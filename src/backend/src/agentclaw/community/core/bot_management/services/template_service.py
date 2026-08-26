@@ -229,6 +229,23 @@ class TemplateService:
             )
             return []
 
+    def get_template_config_strict(
+        self,
+        bot_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """The write-path twin of :meth:`get_template_config`.
+
+        ``None`` means exactly "this Bot has no template"; a repository
+        failure propagates. The lenient reader below folds both into
+        ``None``, which is right for list/read surfaces that must degrade —
+        and wrong for a write deciding persisted state from the answer,
+        where "no template" and "lookup failed" must not be confusable.
+        """
+        template = self._repository.get_by_bot_id(bot_id)
+        if not template:
+            return None
+        return template.get("ext")
+
     def get_template_config(
         self,
         bot_id: str,

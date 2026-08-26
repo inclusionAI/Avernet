@@ -76,6 +76,30 @@ async def _delete(uri: str):
         return await client.delete(uri)
 
 
+# ── feature-disabled (no-op backend) tests ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_upload_url_feature_disabled_501_message(mock_dispatcher):
+    """When the no-op backend raises the standardized message, upload-url returns
+    a 501 with the feature-disabled message."""
+    from secbaas.community.plugins.file_transfer._noop import _DISABLED_MESSAGE
+
+    mock_dispatcher.dispatch_get_upload_url.side_effect = NotImplementedError(
+        _DISABLED_MESSAGE
+    )
+
+    resp = await _post(
+        "/api/v1/bots/t1/bot-001/files/upload-url",
+        json_data={"device_path": "/x", "filename": "x"},
+    )
+
+    assert resp.status_code == 501
+    detail = resp.json()["detail"]
+    assert detail["error"] == "NOT_IMPLEMENTED"
+    assert detail["message"] == _DISABLED_MESSAGE
+
+
 # ── get_upload_url tests ─────────────────────────────────────────────
 
 

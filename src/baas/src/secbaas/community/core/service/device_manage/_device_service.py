@@ -22,6 +22,7 @@ from secbaas.community.api.device_manage import (
     EncryptableHeaderRule,
     EncryptableOutBoundRule,
     OutBoundOperationRule,
+    ProviderDevicePropsResponse,
     TeClawCreateConfig,  # noqa: F401 used in update_device TECLAW branch
 )
 from secbaas.community.api.template_manage import (
@@ -2280,6 +2281,7 @@ class DefaultDeviceService(DeviceService):
             tenant=tenant,
             env=env,
             status=DeviceStatus.STOPPED.value,
+            modifier=modifier,
         )
         logger.info(f"Device {device_uuid} status updated to STOPPED")
 
@@ -2332,3 +2334,38 @@ class DefaultDeviceService(DeviceService):
             f"tenant={record.tenant}, env={record.env}"
         )
         return device_record_to_response(record)
+
+    def get_provider_device_props(
+        self,
+        provider_device_id: str,
+    ) -> ProviderDevicePropsResponse | None:
+        """Get provider_device_props by exact provider_device_id.
+
+        Queries the baas_device record by the indexed provider_device_id
+        column. Returns None when no matching, non-deleted record exists.
+
+        Args:
+            provider_device_id: PaaS provider device ID (e.g. ``ALIYUN_ACK_DEFAULT-abc@0``)
+
+        Returns:
+            ProviderDevicePropsResponse, or None if not found/deleted
+        """
+        logger.info(
+            f"Getting provider device props: provider_device_id={provider_device_id}"
+        )
+
+        record = self._repository.get_by_provider_device_id(
+            provider_device_id=provider_device_id
+        )
+
+        if not record:
+            logger.info(f"Provider device not found: {provider_device_id}")
+            return None
+
+        return ProviderDevicePropsResponse(
+            provider_device_id=record.provider_device_id
+            if record.provider_device_id
+            else provider_device_id,
+            status=record.status,
+            provider_device_props=record.provider_device_props or None,
+        )

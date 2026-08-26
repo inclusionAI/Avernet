@@ -358,7 +358,7 @@ impl BotQueryService for Bot {
 
         let mut filtered: Vec<RegisteredBot> = self
             .registry
-            .list_active()
+            .list_all_bots()
             .await
             .into_iter()
             .filter(|bot| {

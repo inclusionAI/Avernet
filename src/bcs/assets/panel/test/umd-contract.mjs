@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import vm from 'node:vm';
 
@@ -35,6 +36,14 @@ try {
 
 if (typeof module.exports.StateMachineRunView !== 'function') {
   console.error('UMD contract failed: StateMachineRunView export is missing.');
+  process.exit(1);
+}
+
+const require = createRequire(import.meta.url);
+const packageExports = require('..');
+
+if (typeof packageExports.StateMachineRunView !== 'function') {
+  console.error('UMD contract failed: package main does not expose StateMachineRunView.');
   process.exit(1);
 }
 

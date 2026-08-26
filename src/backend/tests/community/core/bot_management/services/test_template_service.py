@@ -6,7 +6,6 @@ from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.bot_management.services.template_service import (
     TemplateService,
     TemplateValidationError,
-    TemplateServiceError,
 )
 
 
@@ -158,6 +157,35 @@ class TestTemplateService:
         result = template_service.get_template_config(bot_id)
 
         assert result == ext_content
+
+    def test_get_template_config_strict_distinguishes_absence_from_failure(
+        self, template_service
+    ):
+        """The strict twin: None means "no template"; a failure raises.
+
+        The lenient reader folds repository failures into None, which a
+        write-path caller (the Default-MCP exclusion gate) must never
+        mistake for "this Bot has no template presets".
+        """
+        template_service._repository.get_by_bot_id.return_value = None
+        assert template_service.get_template_config_strict("bot") is None
+
+        template_service._repository.get_by_bot_id.return_value = {
+            "bot_id": "bot",
+            "ext": {"name": "t", "template_type": "applicationCoding"},
+        }
+        assert template_service.get_template_config_strict("bot") == {
+            "name": "t",
+            "template_type": "applicationCoding",
+        }
+
+        template_service._repository.get_by_bot_id.side_effect = RuntimeError(
+            "db unavailable"
+        )
+        with pytest.raises(RuntimeError, match="db unavailable"):
+            template_service.get_template_config_strict("bot")
+        # The lenient reader keeps its degrade-to-None contract.
+        assert template_service.get_template("bot") is None
 
     def test_validate_ext_content_with_nested_dict_ok(self, template_service):
         """Test _validate_ext_content handles nested dictionaries correctly."""

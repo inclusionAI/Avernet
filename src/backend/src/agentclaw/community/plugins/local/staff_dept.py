@@ -14,6 +14,7 @@ from agentclaw.community.plugin_api.staff_dept import (
     StaffDeptInfo,
     StaffProfileInfo,
     StaffDeptPlugin,
+    UserIdentityInfo,
 )
 from agentclaw.community.plugins.local._mock_seam import MockSeam
 
@@ -45,6 +46,13 @@ class LocalStaffDeptService(MockSeam, StaffDeptPlugin):
             work_no,
         )
         return StaffDeptInfo()
+
+    def get_user_by_work_no(self, *, work_no: str) -> UserIdentityInfo:
+        logger.info(
+            "[LocalStaffDeptService.get_user_by_work_no] noop — work_no=%s",
+            work_no,
+        )
+        return UserIdentityInfo(work_no=work_no)
 
     def search_depts(self, *, keyword: str) -> list[DeptSearchItem]:
         logger.info(

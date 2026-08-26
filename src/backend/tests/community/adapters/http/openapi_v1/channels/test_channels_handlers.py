@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from agentclaw.community.adapters.http.openapi_v1.authorization import (
     AUTHORIZATION,
     Check,
+    EDIT_LOCK,
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.adapters.http.openapi_v1.channels.router import (
@@ -391,6 +392,7 @@ def test_the_four_writes_still_require_bot_admin():
         assert rule.level is PermissionLevel.ADMIN, (
             f"{key[0]} {key[1]} moved off the ADMIN bar _require_admin enforced"
         )
+        assert rule.edit_lock is EDIT_LOCK
     for key in reads:
         rule = AUTHORIZATION[key]
         assert isinstance(rule, Check) and rule.level is PermissionLevel.MEMBER, (

@@ -101,7 +101,7 @@ bcs confirm-group-help --url "http://xxx/proposals/xxx/confirm"
 跳过提案流程，直接创建一个群组。**推荐在 agent 已知参与者的场景下使用**（如 agent 自己建群自己确认）。
 
 ```bash
-bcs create-group (--driver "<driver_bot_id>" | --manager "<manager_bot_id>") --participants "<bot1,bot2>" [--topic "<群组主题>"] [--context "<协作背景>"]
+bcs create-group (--driver "<driver_bot_id>" | --manager "<manager_bot_id>") --participants "<bot1,bot2>" [--participant-tag "<bot_id>=<tag>"]... [--topic "<群组主题>"] [--context "<协作背景>"]
 ```
 
 **参数：**
@@ -109,6 +109,7 @@ bcs create-group (--driver "<driver_bot_id>" | --manager "<manager_bot_id>") --p
 - `--driver "BotID"`: 创建普通 chat 群，并指定 driver Bot（与 `--manager` 二选一）
 - `--manager "BotID"`: 创建 manager-worker 群，并指定唯一 manager Bot（与 `--driver` 二选一）
 - `--participants "Bot1,Bot2"`: 参与者列表（**必需**）
+- `--participant-tag "BotID=Tag"`: 为指定成员设置 Provider 路由 tag，可重复使用；支持 driver、manager 和普通 participant
 - `--topic "主题"`: 群组主题，设置群组 label 为 "Group: {topic}"（可选）
 - `--context "背景"`: 协作背景描述（可选）
 - `--scene-group-id "ID"`: 钉钉场景群 ID（可选，使用 BCS 默认配置）
@@ -124,7 +125,18 @@ bcs create-group --driver "bot-001" --participants "bot-dba,bot-pm" --topic "数
 
 # manager-worker 群；participants 自动作为 worker，manager 无需重复出现在列表中
 bcs create-group --manager "bot-manager" --participants "bot-worker-1,bot-worker-2" --topic "并行实现任务"
+
+# 为 manager 和 worker 分别设置 Provider 路由 tag；同一 Bot 可重复设置多个 tag
+bcs create-group --manager "bot-manager" --participants "bot-worker-1,bot-worker-2" \
+  --participant-tag "bot-manager=tenant-a" \
+  --participant-tag "bot-manager=scene-review" \
+  --participant-tag "bot-worker-1=worker-tag"
 ```
+
+`--participant-tag` 中的 Bot 必须是最终群成员。普通群的 driver 和
+manager-worker 群的 manager 即使没有写入 `--participants`，也可以直接按其
+Bot ID 设置 tag；CLI 会将其显式加入建群请求。格式错误、空 tag 或非群成员
+Bot 会在发送请求前被拒绝。
 
 **返回示例：**
 

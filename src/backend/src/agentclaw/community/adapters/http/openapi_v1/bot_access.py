@@ -23,11 +23,11 @@ admits a stranger at exactly the moment the check meant to stop them could not
 run. The direction here matches ``core/engine_runtime/gate.py``, which says the
 same thing about the same lookup.
 
-**What is not here.** No edit lock. The internal AOP refuses a mutation when
-another collaborator holds one; this seam does not, deliberately and for this
-iteration only (``spec.md`` *Decisions* 1). Locks that services enforce today —
-channels, service publications — are untouched and keep working; this module
-simply has no opinion about them, and imports nothing that could give it one.
+**Edit lock is explicit.** A row that adds ``EDIT_LOCK`` checks the Bot lock
+after its permission bar succeeds. Bots without collaborators pass without a
+lock; member-management applications keep their session-level concurrency
+model; all other collaborative Bots require the caller to hold the Bot lock.
+Rows without ``EDIT_LOCK`` never consult the lock service.
 
 **Audit is separate from permission.** They are two settings that cannot
 disable each other: the level check runs before the handler, the record is
@@ -48,12 +48,24 @@ from fastapi import Request
 from agentclaw.community.adapters.http.openapi_v1.access_log import (
     RESPONSE_STATUS_KEY,
 )
-from agentclaw.community.adapters.http.openapi_v1.authorization import Check
+from agentclaw.community.adapters.http.openapi_v1.authorization import (
+    Check,
+)
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     OwnerIdDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.errors import BotAccessRefusedError
+from agentclaw.community.adapters.http.openapi_v1.errors import (
+    BotAccessRefusedError,
+    BotEditLockCheckError,
+    BotEditLockRequiredError,
+)
+from agentclaw.community.api.collaborator_lock_service import (
+    CollaboratorLockServiceProtocol,
+)
+from agentclaw.community.api.member_management_capability import (
+    MemberManagementCapabilityProtocol,
+)
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
@@ -124,6 +136,14 @@ def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
             # its three siblings rather than making this one a special case.
             raise BotAccessRefusedError(f"bot {for_log(bot_id)} not found")
 
+        if rule.edit_lock is not None:
+            await _require_edit_lock(
+                request,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                caller_id=caller_id,
+            )
+
         # The ``yield`` is bare, and that is load-bearing rather than terse. An
         # exception escaping the handler is thrown back in here, and a bare
         # ``yield`` propagates it immediately, so everything below is skipped —
@@ -145,6 +165,63 @@ def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
             )
 
     return gate
+
+
+async def _require_edit_lock(
+    request: Request, *, bot_id: str, owner_id: str, caller_id: str
+) -> None:
+    """Require the Bot lock for collaborative service-Bot mutations."""
+    locks = _service(request, CollaboratorLockServiceProtocol)
+    if locks is None:
+        logger.error(
+            "[bot_access] edit-lock service is not wired for bot=%s; refusing",
+            for_log(bot_id),
+        )
+        raise BotEditLockCheckError("edit-lock service is unavailable")
+
+    if await _uses_member_management_semantics(
+        request, bot_id=bot_id, owner_id=owner_id
+    ):
+        return
+
+    try:
+        info = await asyncio.to_thread(
+            locks.get_lock_info,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=caller_id,
+        )
+    except Exception as exc:
+        logger.exception(
+            "[bot_access] edit-lock lookup failed for bot=%s; refusing",
+            for_log(bot_id),
+        )
+        raise BotEditLockCheckError("edit-lock state is unavailable") from exc
+
+    if not info.has_collaborators:
+        return
+    if info.lock is None or info.lock.holder_user_id != caller_id:
+        raise BotEditLockRequiredError("edit lock is not held by the caller")
+
+
+async def _uses_member_management_semantics(
+    request: Request, *, bot_id: str, owner_id: str
+) -> bool:
+    """Preserve the legacy session-lock exception for coding applications."""
+    bots = _service(request, BotRepository)
+    capabilities = _service(request, MemberManagementCapabilityProtocol)
+    if bots is None or capabilities is None:
+        return False
+    try:
+        bot = await asyncio.to_thread(bots.get_by_id_and_owner, bot_id, owner_id)
+        return bool(bot and capabilities.uses_member_management_semantics(bot, bot_id))
+    except Exception:
+        logger.exception(
+            "[bot_access] member-management capability lookup failed for bot=%s; "
+            "using the service-Bot lock policy",
+            for_log(bot_id),
+        )
+        return False
 
 
 async def _resolve_level(

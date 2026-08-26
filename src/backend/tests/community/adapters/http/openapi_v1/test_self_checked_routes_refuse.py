@@ -53,16 +53,15 @@ from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
-)
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
+from agentclaw.community.api.skill_query_service import (
+    SkillQueryServiceProtocol,
 )
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
-from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
+)
 from agentclaw.community.core.gateway_principal import (
     AppPrincipal,
     GatewayApp,
@@ -139,20 +138,27 @@ class _Services:
     async def delete_local_skill(self, **_kwargs):
         self._record("delete_local_skill")
 
-    async def set_local_skill_active(self, *, skill_id: str, actor_id: str, active):
-        self._record("set_local_skill_active")
+    def get_skill(self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str):
+        return self.get_local_skill(skill_id=skill_id, actor_id=user_id)
+
+    async def activate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+    ):
+        self._record("activate_skill")
         return {
             **self.get_local_skill(skill_id=skill_id, actor_id=actor_id),
             "changed": True,
         }
 
-    def get_skill(self, *, skill_id: str, bot_id: str, actor_id: str):
-        return self.get_local_skill(skill_id=skill_id, actor_id=actor_id)
-
-    async def set_active(self, *, skill_id: str, bot_id: str, actor_id: str, active):
-        return await self.set_local_skill_active(
-            skill_id=skill_id, actor_id=actor_id, active=active
-        )
+    async def deactivate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+    ):
+        self._record("deactivate_skill")
+        return {
+            **self.get_local_skill(skill_id=skill_id, actor_id=actor_id),
+            "active": False,
+            "changed": True,
+        }
 
     async def upload_local_skill(self, *, bot_id, owner_id, actor_id, package):
         self._record("upload_local_skill")
@@ -179,11 +185,10 @@ def client(services):
             binder.bind(BotAppGrantServiceProtocol, to=_NoGrants())
             binder.bind(CronRelayServiceProtocol, to=services)
             for protocol in (
-                LocalSkillQueryServiceProtocol,
+                SkillQueryServiceProtocol,
                 LocalSkillDeleteServiceProtocol,
-                LocalSkillStateServiceProtocol,
                 LocalSkillUploadServiceProtocol,
-                BotSkillAssetServiceProtocol,
+                DirectActivationServiceProtocol,
             ):
                 binder.bind(protocol, to=services)
 

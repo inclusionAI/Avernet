@@ -26,8 +26,8 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishStatusInvalidError,
 )
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
-from agentclaw.community.core.skill_center.services.active_skillset_installation_materializer import (
-    ActiveSkillSetInstallationMaterializer,
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.core.service_bot.services.deploy.producer import (
     DeployArtifactProducerRouter,
@@ -197,7 +197,7 @@ class PublishFlowService(
         channel_overrides_reader: "ChannelEngineOverridesReader",
         task_queue_service: TaskQueueService,
         publish_operation_repo: PublishOperationRepository,
-        active_skillset_materializer: ActiveSkillSetInstallationMaterializer,
+        capability_reader: BotCapabilityStateReaderProtocol,
     ):
         """Initialize the flow processing service.
 
@@ -286,7 +286,7 @@ class PublishFlowService(
             baas_service=baas_service,
             producer_router=producer_router,
             provider_behaviors=self._provider_behaviors,
-            active_skillset_materializer=active_skillset_materializer,
+            capability_reader=capability_reader,
         )
 
         # Durable task queue: backend-driven advances (build+verify release, online

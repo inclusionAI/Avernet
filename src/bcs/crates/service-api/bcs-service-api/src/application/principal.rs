@@ -31,3 +31,9 @@ pub struct AdminActor {
     pub actor_id: String,
     pub scopes: Vec<String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RequestAuthHeaders {
+    pub authorization: Option<String>,
+    pub cookie: Option<String>,
+}

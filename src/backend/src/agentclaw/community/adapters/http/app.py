@@ -124,10 +124,6 @@ from agentclaw.community.adapters.http.quality.router import router as quality_r
 # configuration routes and secures (tests/community/contracts/gateway/
 # test_public_namespace.py), so ``openapi_v1/task`` stays unmounted until that
 # configuration declares the collaboration domain.
-from agentclaw.community.adapters.http.task import (  # noqa: E402
-    task_callback_router,
-    task_internal_router,
-)
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_render_screen.router import router as render_screen_router  # noqa: E402
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
@@ -364,6 +360,7 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
 )
 from agentclaw.community.core.skill_center.errors import (  # noqa: E402
     McpPermissionDeniedError,
+    LocalSkillNotReadyError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
@@ -509,6 +506,32 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
     return JSONResponse(
         status_code=status,
         content={"detail": exc.detail},
+        headers=_trace_headers(request),
+    )
+
+
+@app.exception_handler(LocalSkillNotReadyError)
+async def _local_skill_not_ready_handler(
+    request: Request, exc: LocalSkillNotReadyError,
+) -> JSONResponse:
+    """The activation family's readiness refusal, mapped like a conflict.
+
+    The shared mutation flow raises this before any write when the Bot cannot
+    safely accept a mutation. ``/openapi/v1`` maps it to 409 in its own table;
+    it is a plain ``Exception`` (not a ``DomainError``), so without this
+    handler the legacy ``/api`` activation routes would answer an unhandled
+    500 for a well-understood 4xx situation.
+    """
+    logger.warning(
+        "[LocalSkillNotReadyError 409] %s %s%s",
+        request.method, request.url.path, params_suffix(request),
+    )
+    public = _public_mapped_error(request, exc)
+    if public is not None:
+        return public
+    return JSONResponse(
+        status_code=409,
+        content={"detail": "Bot is not ready"},
         headers=_trace_headers(request),
     )
 

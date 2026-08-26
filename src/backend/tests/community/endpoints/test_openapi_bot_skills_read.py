@@ -31,11 +31,8 @@ import time
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.api.bot_skill_asset_service import (
-    BotSkillAssetServiceProtocol,
-)
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
+from agentclaw.community.api.skill_query_service import (
+    SkillQueryServiceProtocol,
 )
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -94,7 +91,7 @@ _FORBIDDEN_QUERY = {"user_id": "another-user"}
 
 
 def _record() -> dict:
-    """One skill row exactly as the query/asset services return it.
+    """One skill row exactly as the query service returns it.
 
     ``bolt_id`` is the bot the skill belongs to and ``user_id`` its owner:
     ``_require_addressed_bot`` compares the first against the address and
@@ -126,16 +123,14 @@ def _seed_happy_services(world) -> None:
     def list_bot_skills(_self, **_kwargs):
         return 1, [_record()]
 
-    bind_overrides(
-        world,
-        LocalSkillQueryServiceProtocol,
-        {"list_bot_skills": list_bot_skills},
-    )
-
     def get_skill(_self, **_kwargs):
         return _record()
 
-    bind_overrides(world, BotSkillAssetServiceProtocol, {"get_skill": get_skill})
+    bind_overrides(
+        world,
+        SkillQueryServiceProtocol,
+        {"list_bot_skills": list_bot_skills, "get_skill": get_skill},
+    )
 
 
 #: The skill as the router projects the record — what both operations answer

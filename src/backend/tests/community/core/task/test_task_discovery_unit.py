@@ -2,7 +2,7 @@
 
 Covers:
   - DiscoveredTask new fields and methods (to_discovery_prompt, to_notification_body, to_card_data)
-  - OrmTaskReader.read_pending_tasks_for_bot
+  - SqliteTaskReader.read_pending_tasks_for_bot
   - DiscoveryService with SessionInitiator (mocked)
   - CronRelaySessionInitiator._build_discovery_prompt / _build_session_url
   - CronRelaySessionInitiator.initiate_session Step 2.5 title update (success/fail/exception)
@@ -12,16 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import os
-from contextlib import contextmanager
 from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.task.task_discovery.discovered_task_models import (  # noqa: F401
-    DiscoveredTaskModel,
-)
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryResult,
     DiscoveryService,
@@ -34,8 +28,8 @@ from agentclaw.community.core.task.task_discovery.session_initiator import (
     CronRelaySessionInitiator,
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
-    OrmTaskReader,
-    seed_discovered_tasks,
+    SqliteTaskReader,
+    init_discovered_tasks_db,
 )
 from agentclaw.community.plugin_api.notify_sender import (
     NotifyMessage,
@@ -109,78 +103,41 @@ class TestDiscoveredTask:
 
 
 # ---------------------------------------------------------------------------
-# OrmTaskReader.read_pending_tasks_for_bot
+# SqliteTaskReader.read_pending_tasks_for_bot
 # ---------------------------------------------------------------------------
 
-class _InMemoryDB:
-    """In-memory SQLite database for unit testing (mimics DatabasePlugin)."""
-
-    def __init__(self):
-        self._engine = create_engine(
-            "sqlite:///:memory:", connect_args={"check_same_thread": False}
-        )
-        from agentclaw.community.core.base import Base
-        Base.metadata.create_all(self._engine)
-        self._session_factory = sessionmaker(bind=self._engine, autoflush=False)
-
-    @contextmanager
-    def orm_session(self):
-        db = self._session_factory()
-        try:
-            yield db
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
-
-    @contextmanager
-    def transactional_orm_session(self):
-        db = self._session_factory()
-        try:
-            yield db
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
-
-
 class TestTaskReader:
-    _MOCK_TASKS = [
-        {
-            "task_id": "t1", "bot_id": "bot-001", "owner_id": "user-001",
-            "dt": _DT, "title": "Task1", "instruction": "d1",
-            "background": "s1", "discovery_basis": "b1",
-            "status": "pending_confirmation",
-            "objective": "Objective-1",
-            "acceptances": [{"id": "ac1", "description": "acc-1"}],
-        },
-        {
-            "task_id": "t2", "bot_id": "bot-002", "owner_id": "user-001",
-            "dt": _DT, "title": "Task2", "instruction": "d2",
-            "background": "s2", "discovery_basis": "b2",
-            "status": "pending_confirmation",
-            "objective": "",
-            "acceptances": [],
-        },
-        {
-            "task_id": "t3", "bot_id": "bot-001", "owner_id": "user-001",
-            "dt": _DT, "title": "Task3", "instruction": "d3",
-            "background": "s3", "discovery_basis": "b3",
-            "status": "confirmed",  # not pending
-        },
-    ]
+    def _setup_db(self, tmpdir):
+        db = os.path.join(str(tmpdir), "test.db")
+        init_discovered_tasks_db(db, [
+            {
+                "task_id": "t1", "bot_id": "bot-001", "owner_id": "user-001",
+                "dt": _DT, "title": "Task1", "instruction": "d1",
+                "background": "s1", "discovery_basis": "b1",
+                "status": "pending_confirmation",
+                "objective": "Objective-1",
+                "acceptances": [{"id": "ac1", "description": "acc-1"}],
+            },
+            {
+                "task_id": "t2", "bot_id": "bot-002", "owner_id": "user-001",
+                "dt": _DT, "title": "Task2", "instruction": "d2",
+                "background": "s2", "discovery_basis": "b2",
+                "status": "pending_confirmation",
+                "objective": "",
+                "acceptances": [],
+            },
+            {
+                "task_id": "t3", "bot_id": "bot-001", "owner_id": "user-001",
+                "dt": _DT, "title": "Task3", "instruction": "d3",
+                "background": "s3", "discovery_basis": "b3",
+                "status": "confirmed",  # not pending
+            },
+        ])
+        return db
 
-    def _make_reader(self):
-        db = _InMemoryDB()
-        seed_discovered_tasks(db, self._MOCK_TASKS)
-        return OrmTaskReader(db)
-
-    def test_read_pending_for_bot(self):
-        reader = self._make_reader()
+    def test_read_pending_for_bot(self, tmp_path):
+        db = self._setup_db(tmp_path)
+        reader = SqliteTaskReader(db)
         tasks = reader.read_pending_tasks_for_bot("bot-001", "user-001", _DT)
         assert len(tasks) == 1
         assert tasks[0].bot_id == "bot-001"
@@ -188,19 +145,22 @@ class TestTaskReader:
         assert tasks[0].objective == "Objective-1"
         assert tasks[0].acceptances == [{"id": "ac1", "description": "acc-1"}]
 
-    def test_read_pending_for_wrong_bot(self):
-        reader = self._make_reader()
+    def test_read_pending_for_wrong_bot(self, tmp_path):
+        db = self._setup_db(tmp_path)
+        reader = SqliteTaskReader(db)
         tasks = reader.read_pending_tasks_for_bot("wrong-bot", "user-001", _DT)
         assert tasks == []
 
-    def test_read_pending_excludes_non_pending(self):
-        reader = self._make_reader()
+    def test_read_pending_excludes_non_pending(self, tmp_path):
+        db = self._setup_db(tmp_path)
+        reader = SqliteTaskReader(db)
         tasks = reader.read_pending_tasks_for_bot("bot-001", "user-001", _DT)
         # Task3 is "confirmed", not included
         assert all(t.needs_confirmation for t in tasks)
 
-    def test_read_all_backward_compat(self):
-        reader = self._make_reader()
+    def test_read_all_backward_compat(self, tmp_path):
+        db = self._setup_db(tmp_path)
+        reader = SqliteTaskReader(db)
         all_tasks = reader.read_discovered_tasks()
         assert len(all_tasks) == 3
 

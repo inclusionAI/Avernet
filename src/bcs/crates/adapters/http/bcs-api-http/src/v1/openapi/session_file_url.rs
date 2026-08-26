@@ -3,21 +3,18 @@ use url::Url;
 
 #[derive(Clone)]
 pub struct SessionFileUrlProjector {
-    public_base: Url,
+    internal_base: Url,
 }
 
 impl SessionFileUrlProjector {
-    pub fn new(public_base: String) -> Result<Self, String> {
-        let public_base = Url::parse(&public_base)
-            .map_err(|_| "public collaboration base URL is invalid".to_string())?;
-        if !matches!(public_base.scheme(), "http" | "https") || public_base.host().is_none() {
-            return Err("public collaboration base URL must use HTTP(S)".to_string());
-        }
-        Ok(Self { public_base })
+    pub fn new(internal_base: String) -> Result<Self, String> {
+        let internal_base =
+            validate_base(&internal_base, "internal collaboration base URL")?;
+        Ok(Self { internal_base })
     }
 
     fn route_url(&self, segments: &[&str]) -> Url {
-        let mut url = self.public_base.clone();
+        let mut url = self.internal_base.clone();
         {
             let mut path = url
                 .path_segments_mut()
@@ -61,7 +58,7 @@ impl SessionFileUrlProjector {
                     if let Some(object) = part.as_object_mut() {
                         object.insert(
                             "upload_url".to_string(),
-                            Value::String(format!("{content_url}?part={part_number}")),
+                            Value::String(format!("{}?part={}", content_url, part_number)),
                         );
                     }
                 }
@@ -70,5 +67,21 @@ impl SessionFileUrlProjector {
             object.insert("upload_url".to_string(), Value::String(content_url));
         }
         target
+    }
+}
+
+fn validate_base(raw: &str, label: &str) -> Result<Url, String> {
+    let url = Url::parse(raw).map_err(|_| format!("{} is invalid", label))?;
+    if !matches!(url.scheme(), "http" | "https") || url.host().is_none() {
+        return Err(format!("{} must use HTTP(S)", label));
+    }
+    Ok(url)
+}
+
+impl bcs_service_api::application::v1::SessionFileInternalContentUrlProjector
+    for SessionFileUrlProjector
+{
+    fn shared_content_url(&self, token: &str) -> String {
+        SessionFileUrlProjector::shared_content_url(self, token)
     }
 }

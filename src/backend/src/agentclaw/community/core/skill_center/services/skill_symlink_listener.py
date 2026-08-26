@@ -26,7 +26,7 @@ if TYPE_CHECKING:
         DeviceContextResolver,
     )
     from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+    from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 logger = get_logger()
 
 _TRANSITION_AUTHORITY = "transition"

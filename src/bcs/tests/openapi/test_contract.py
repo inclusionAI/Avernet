@@ -100,6 +100,16 @@ def test_all_operations_share_the_collaboration_ownership_prefix() -> None:
 
 def test_operations_use_the_approved_gateway_security_boundary() -> None:
     contract = load_contract(CONTRACT_ROOT)
+    human_or_owned_bot = {
+        ("post", "/openapi/v1/collaboration/groups"),
+        ("get", "/openapi/v1/collaboration/groups/{group_id}"),
+        ("patch", "/openapi/v1/collaboration/groups/{group_id}"),
+        ("delete", "/openapi/v1/collaboration/groups/{group_id}"),
+        ("post", "/openapi/v1/collaboration/groups/{group_id}/sessions"),
+        ("get", "/openapi/v1/collaboration/sessions/{session_id}"),
+        ("patch", "/openapi/v1/collaboration/sessions/{session_id}"),
+        ("delete", "/openapi/v1/collaboration/sessions/{session_id}"),
+    }
 
     for path, path_item in contract["paths"].items():
         for method, operation in path_item.items():
@@ -107,11 +117,8 @@ def test_operations_use_the_approved_gateway_security_boundary() -> None:
                 continue
             if path == "/openapi/v1/collaboration/messages/ws":
                 expected = {}
-            elif (method, path) == (
-                "post",
-                "/openapi/v1/collaboration/groups/{group_id}/sessions",
-            ):
-                expected = {"user": "optional", "app": "optional", "bot": "optional"}
+            elif (method, path) in human_or_owned_bot:
+                expected = {"user": "optional", "app": "required", "bot": "optional"}
             else:
                 expected = {"user": "required", "app": "required"}
             assert operation["x-avernet-security"] == expected, (

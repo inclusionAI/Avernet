@@ -5,7 +5,7 @@ fn projector() -> SessionFileUrlProjector {
     SessionFileUrlProjector::new(
         "https://gateway.example.com/api/v1/collaboration".to_string(),
     )
-    .expect("valid public base")
+    .expect("valid base")
 }
 
 #[test]
@@ -66,5 +66,22 @@ fn projects_each_proxy_multipart_part_from_its_server_part_number() {
     assert_eq!(
         projected["parts"][1]["upload_url"],
         "https://gateway.example.com/api/v1/collaboration/sessions/s/files/f/content?part=2"
+    );
+}
+
+#[test]
+fn content_url_and_shared_content_url_use_internal_base() {
+    let projector = SessionFileUrlProjector::new(
+        "https://gateway.example.com/api/v1/collaboration".to_string(),
+    )
+    .expect("valid base");
+
+    assert_eq!(
+        projector.content_url("s", "f"),
+        "https://gateway.example.com/api/v1/collaboration/sessions/s/files/f/content"
+    );
+    assert_eq!(
+        projector.shared_content_url("tok"),
+        "https://gateway.example.com/api/v1/collaboration/sessions/shared-file/content?token=tok"
     );
 }

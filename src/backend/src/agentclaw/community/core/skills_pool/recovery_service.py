@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from injector import inject
 
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     RuntimeLayoutProbeStatus,
@@ -196,12 +199,14 @@ class SkillsPoolRollbackService:
         bot_repository: BotRepository,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         skill_repository: SkillsPoolSkillRepositoryProtocol,
+        reader: BotCapabilityStateReaderProtocol,
         runtime: SkillsPoolRuntimeProtocol,
         edit_guard: SkillsPoolEditGuard,
     ) -> None:
         self._bots = bot_repository
         self._layouts = layout_repository
         self._skills = skill_repository
+        self._reader = reader
         self._runtime = runtime
         self._edit_guard = edit_guard
 
@@ -371,11 +376,8 @@ class SkillsPoolRollbackService:
             owner_id=user_id,
             bot_id=scope.bot_id,
         )
-        active_assets = self._skills.list_bot_active_assets(
-            env=scope.env,
-            bot_id=scope.bot_id,
-            owner_id=user_id,
-            engine=engine,
+        active_assets = self._reader.active_skill_assets(
+            bot_id=scope.bot_id, owner_id=user_id, bot=bot
         )
         try:
             local_names = [local_skill_name(asset) for asset in local_assets]

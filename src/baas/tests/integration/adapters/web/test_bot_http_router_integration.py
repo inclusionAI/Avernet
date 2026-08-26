@@ -17,9 +17,7 @@ from secbaas.community.bootstrap import get_container
 get_container().config.from_dict(
     {
         "plugins": {
-            "database": {
-                "plugin_database": os.environ.get("PLUGIN_DATABASE", "ZDAS_ORM"),
-            },
+            "database": os.environ.get("PLUGIN_DATABASE", "sqlite"),
         },
     }
 )

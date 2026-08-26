@@ -108,7 +108,8 @@ pub struct CreateSession {
     pub title: Option<String>,
     pub kind: Option<SessionKind>,
     /// Optional explicit creator Actor ID supplied through V1
-    /// `acting_bot_id`; Human callers may select themselves or an owned Bot.
+    /// `acting_bot_id`; Human callers may select themselves or an owned Bot,
+    /// while Bot callers may select only themselves.
     pub acting_bot_id: Option<String>,
     pub creator_role: Option<ParticipantRole>,
     pub input: Option<Value>,
@@ -143,6 +144,8 @@ pub struct UpdateSession {
 pub struct DeleteSession {
     pub caller: AuthenticatedCaller,
     pub session_id: String,
+    /// Optional management perspective. Human callers may select an owned Bot;
+    /// Bot callers may select only themselves.
     pub acting_bot_id: Option<String>,
 }
 

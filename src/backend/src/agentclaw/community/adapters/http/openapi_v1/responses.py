@@ -47,6 +47,8 @@ from agentclaw.community.api.bot_startup_script_service import (
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     ApplicationCodingUnavailableError,
     BotAccessRefusedError,
+    BotEditLockCheckError,
+    BotEditLockRequiredError,
     BotCombinationUnsupportedError,
     BotTemplateInvalidError,
     CallerIdentityConflictError,
@@ -214,14 +216,12 @@ from agentclaw.community.core.skill_center.errors import (
     RepositoryCatalogSyncFailedError,
     RepositoryCatalogSyncInProgressError,
     SkillEngineNotSupportedError,
-    SkillManagedBySkillSetError,
     SkillParameterValidationError,
     SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
-    SkillSetManagedResourceError,
     SkillSetAccessDeniedError,
     McpPermissionDeniedError,
     LocalSkillTooLargeError,
@@ -422,6 +422,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # through to the raw ``{"detail": ...}`` shape — a *different* body from the
     # envelope a genuinely absent bot returns, which is the tell.
     BotAccessRefusedError: (404, "Not found"),
+    BotEditLockRequiredError: (423, "Edit lock required"),
+    BotEditLockCheckError: (500, "Internal error"),
     # Withdrawing an authorization that is not there. Shares the 404 shape with
     # an absent bot, and that is not a collision worth avoiding: an owner
     # reconciling their records needs "there was nothing to remove" to read
@@ -563,7 +565,6 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Another SkillSet mutation holds this Bot's fence",
     ),
     SkillSetRuntimeReconcileError: (502, "Skill runtime synchronization failed"),
-    SkillSetManagedResourceError: (409, "Skill is managed by a SkillSet"),
     LocalSkillOwnerAmbiguousError: (409, "Ambiguous Local Skill owner"),
     LocalSkillInvalidPackageError: (400, "Invalid Skill package"),
     LocalSkillNotReadyError: (409, "Bot is not ready"),
@@ -580,7 +581,6 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Skill update service is temporarily unavailable",
     ),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
-    SkillManagedBySkillSetError: (409, "Skill is managed by a SkillSet"),
     SkillRuntimeNameConflictError: (409, "Skill runtime name conflicts with an active Skill"),
     SkillEngineNotSupportedError: (409, "Skill is not supported by this bot type and engine"),
     RepositoryCatalogNotFoundError: (404, "Not found"),
@@ -758,12 +758,10 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillStorageError: 502101,
     SkillParameterValidationError: 422101,
     LocalSkillRuntimeSyncError: 502102,
-    SkillManagedBySkillSetError: 409105,
     SkillRuntimeNameConflictError: 409106,
     SkillEngineNotSupportedError: 409107,
     RepositoryCatalogSyncInProgressError: 409108,
     RepositoryCatalogSyncFailedError: 502103,
-    SkillSetManagedResourceError: 409202,
     SkillSetControlPlaneLockUnavailableError: 409209,
     SkillSetAccessDeniedError: 403201,
     McpPermissionDeniedError: 403202,
@@ -772,6 +770,10 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
 _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {
     "RESOURCE_DIRECT_ACTIVE": (409201, "Resource is directly active"),
     "RESOURCE_MANAGED_BY_SKILL_SET": (409202, "Resource is managed by a SkillSet"),
+    "RESOURCE_MANAGED_BY_PLATFORM_POLICY": (
+        409210,
+        "Resource is managed by the platform Default policy",
+    ),
     "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET": (409203, "Resource belongs to another SkillSet"),
     "SYSTEM_DEFAULT_IMMUTABLE": (409204, "System Default SkillSet is immutable"),
     "SKILL_SET_ACTIVE": (409205, "Active SkillSet cannot be deleted"),

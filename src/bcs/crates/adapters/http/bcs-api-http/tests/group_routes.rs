@@ -17,7 +17,7 @@ use bcs_service_api::application::v1::{
     CreateGroup, CreateGroupOutcome, CreateGroupSpec, DeleteGroup, DeleteGroupParticipant,
     DeleteResult, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupService, GroupStatus,
     GroupStrategy, GroupVisibility, InlineGroupEventSubscriptionRequest, ListGroups,
-    MembershipFilter, Page, Participant, UpdateGroup, UpdateGroupParticipant,
+    ListPublicGroups, MembershipFilter, Page, Participant, UpdateGroup, UpdateGroupParticipant,
 };
 use bcs_service_api::application::v1::{
     AddSessionParticipant, CompleteSession, CreateSession, CreateSessionOutcome, DeleteSession,
@@ -54,6 +54,7 @@ impl PrincipalVerifier for HeaderVerifier {
 #[derive(Default)]
 struct FakeGroupService {
     list: Mutex<Option<ListGroups>>,
+    list_public: Mutex<Option<ListPublicGroups>>,
     created: Mutex<Option<CreateGroup>>,
     inline_event_subscriptions: Mutex<Vec<InlineGroupEventSubscriptionRequest>>,
     reuse_dm: AtomicBool,
@@ -72,6 +73,14 @@ impl GroupService for FakeGroupService {
         command: ListGroups,
     ) -> Result<Page<bcs_service_api::application::v1::GroupSummary>, ApplicationError> {
         *self.list.lock().expect("list lock") = Some(command);
+        Ok(Page::empty(0, 20))
+    }
+
+    async fn list_public_groups(
+        &self,
+        command: ListPublicGroups,
+    ) -> Result<Page<bcs_service_api::application::v1::GroupSummary>, ApplicationError> {
+        *self.list_public.lock().expect("list public lock") = Some(command);
         Ok(Page::empty(0, 20))
     }
 
@@ -1120,4 +1129,72 @@ async fn create_group_threads_explicit_originator() {
         captured_originator(&service).as_deref(),
         Some("human_staff-1")
     );
+}
+
+#[tokio::test]
+async fn list_public_groups_parses_query() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/public-groups?offset=0&limit=20&strategy=state_machine&q=plan",
+            Value::Null,
+        ))
+        .await
+        .expect("list public response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["code"], 20_000);
+    let captured = service
+        .list_public
+        .lock()
+        .expect("list public lock")
+        .clone()
+        .expect("list public command");
+    assert_eq!(captured.offset, 0);
+    assert_eq!(captured.limit, 20);
+    assert_eq!(captured.strategy, Some(GroupStrategy::StateMachine));
+    assert_eq!(captured.q.as_deref(), Some("plan"));
+}
+
+#[tokio::test]
+async fn list_public_groups_applies_default_limit_and_rejects_unknown_fields() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service.clone());
+
+    let defaults = app
+        .clone()
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/public-groups",
+            Value::Null,
+        ))
+        .await
+        .expect("defaults response");
+    assert_eq!(defaults.status(), StatusCode::OK);
+    let captured = service
+        .list_public
+        .lock()
+        .expect("lock")
+        .clone()
+        .expect("command");
+    assert_eq!(captured.limit, 20);
+    assert_eq!(captured.offset, 0);
+    assert!(captured.strategy.is_none());
+    assert!(captured.q.is_none());
+
+    let unknown = app
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/public-groups?kind=normal",
+            Value::Null,
+        ))
+        .await
+        .expect("unknown response");
+    assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
+    let body = response_json(unknown).await;
+    assert_eq!(body["data"]["error_code"], "invalid_request");
 }

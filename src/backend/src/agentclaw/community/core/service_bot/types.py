@@ -2,7 +2,26 @@
 
 共享的类型定义和常量。
 """
+from collections.abc import Iterable
 from enum import Enum
+
+from agentclaw.community.core.service_bot.repository.models import (
+    BotPublishRecord,
+    PublishStatus,
+)
+
+
+def can_upgrade_publication_from_records(
+    record: BotPublishRecord,
+    all_records: Iterable[BotPublishRecord],
+) -> bool:
+    """Return the legacy Vn -> Vn+1 eligibility from an in-memory record set."""
+    if record.status != PublishStatus.SUCCESS.value:
+        return False
+    successors = [item for item in all_records if item.last_pub_id == record.id]
+    return not successors or all(
+        item.status == PublishStatus.FAILED.value for item in successors
+    )
 
 
 class PublishStage(str, Enum):

@@ -7,23 +7,36 @@ import time
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
 )
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.skill_center.services.local_skill_state_service import (
-    LocalSkillStateService,
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
 )
+from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
+    BotCapabilityStateReader,
+)
+from agentclaw.community.core.repository.protocols.bot import (
+    BotCollabLogRepositoryProtocol,
+)
+from agentclaw.community.core.skill_center.authorization_hook import (
+    BotCapabilityAuthorizationHookProtocol,
+)
+from agentclaw.community.core.skill_center.services.direct_activation_service import (
+    DirectActivationService,
+)
+from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
+    PlatformDefaultMcpPolicy,
+)
+from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillSetRepository,
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.repository.protocols.skill_installation import (
-    SkillInstallationRepositoryProtocol,
-)
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -65,9 +78,12 @@ class _Runtime:
     async def verify_mappings(self, **_kwargs) -> bool:
         return self.success
 
-    async def reconcile(self, **_kwargs) -> None:
+    async def project(self, **_kwargs) -> None:
         if not self.success:
             raise RuntimeError("runtime reconcile failed")
+
+    async def snapshot_skill_mappings(self, **_kwargs):
+        return ()
 
 
 class _RuntimeFactory:
@@ -139,7 +155,11 @@ def _seed_state(world, *, runtime_success: bool) -> None:
                 "engine_type": "openclaw",
             }
         )
-        skill = world.get(SkillRepository).create(
+        # A direct-controlled Local Skill: no Set membership. A Set-managed
+        # member — the Default included, excluded or not — refuses the
+        # Skill-level command (R1, no exclusion carve-out); the dedicated
+        # 409 case below pins that.
+        world.get(SkillRepository).create(
             {
                 "name": "state-skill",
                 "description": "State endpoint coverage",
@@ -152,24 +172,23 @@ def _seed_state(world, *, runtime_success: bool) -> None:
                 "source_type": "upload",
             }
         )
-        world.get(SkillSetRepository).add_skill_to_set(
-            skill_set["id"], skill["id"], user_id=_OWNER
-        )
-        world.get(SkillSetRepository).add_default_skill_exclusion(
-            _OWNER, _BOT_ID, int(skill_set["id"]), int(skill["id"])
-        )
     runtime_factory = _RuntimeFactory(runtime_success)
     world.injector.binder.bind(
-        LocalSkillStateServiceProtocol,
-        to=LocalSkillStateService(
-            world.get(SkillRepository),
-            world.get(SkillInstallationRepositoryProtocol),
+        DirectActivationServiceProtocol,
+        to=DirectActivationService(
+            world.get(CapabilityDesiredStateRepositoryProtocol),
             world.get(BotRepository),
-            world.get(CollaboratorServiceProtocol),
-            runtime_factory,
             world.get(SkillRepository),
-            world.get(SkillSetRepository),
             runtime_factory._runtime,
+            world.get(BotCapabilityAuthorizationHookProtocol),
+            world.get(BotCollabLogRepositoryProtocol),
+            world.get(MCPCenterPlugin),
+            BotCapabilityStateReader(
+                repository=world.get(CapabilityDesiredStateRepositoryProtocol),
+                bot_repo=world.get(BotRepository),
+                pool_skills=world.get(SkillRepository),
+            ),
+            PlatformDefaultMcpPolicy(lambda _bot_id: None),
         ),
         scope=None,
     )
@@ -181,6 +200,16 @@ def _seed_activate(world) -> None:
 
 def _seed_runtime_failure(world) -> None:
     _seed_state(world, runtime_success=False)
+
+
+def _seed_excluded_default_member(world) -> None:
+    """The Bot's Default Set holds the Skill, and the owner excluded it."""
+    _seed_state(world, runtime_success=True)
+    with avernet_tenant_scope(_TENANT):
+        sets = world.get(SkillSetRepository)
+        default_set = sets.get_default(user_id=_OWNER, bolt_id=_BOT_ID)
+        sets.add_skill_to_set(default_set["id"], "1", user_id=_OWNER)
+        sets.add_default_skill_exclusion(_OWNER, _BOT_ID, int(default_set["id"]), 1)
 
 
 def _assert_skill_remains_inactive(_response, world) -> None:
@@ -234,6 +263,26 @@ def activate_local_skill_reconciles_runtime():
 )
 def activate_local_skill_runtime_failure_is_publicly_safe():
     """The activation command maps a runtime transport failure to the fixed envelope."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate",
+    scenario="excluded_default_member_refuses_direct_control",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
+    seed=_seed_excluded_default_member,
+    expect=ExpectError(
+        status=409,
+        json_contains={"code": 409202},
+    ),
+)
+def excluded_default_member_stays_set_managed():
+    """R1 with no exclusion carve-out: re-activation removes the exclusion
+    through the Set wire, never the Skill-level command."""
 
 
 @endpoint_test(

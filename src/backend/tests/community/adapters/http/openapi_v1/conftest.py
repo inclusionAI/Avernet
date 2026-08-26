@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     BotAccessRefusedError,
+    BotEditLockError,
     GrantNotResolvableError,
     MissingPrincipalError,
     UserIdMismatchError,
@@ -86,6 +87,7 @@ def mount_public_error_handlers(app: FastAPI) -> FastAPI:
         _bot_access_refused_handler,
         _grant_not_resolvable_handler,
         _principal_error_handler,
+        _unhandled_exception_handler,
         _user_id_mismatch_handler,
         _validation_error_handler,
     )
@@ -94,6 +96,7 @@ def mount_public_error_handlers(app: FastAPI) -> FastAPI:
     app.add_exception_handler(UserIdMismatchError, _user_id_mismatch_handler)
     app.add_exception_handler(GrantNotResolvableError, _grant_not_resolvable_handler)
     app.add_exception_handler(BotAccessRefusedError, _bot_access_refused_handler)
+    app.add_exception_handler(BotEditLockError, _unhandled_exception_handler)
     app.add_exception_handler(RequestValidationError, _validation_error_handler)
     return app
 
@@ -172,8 +175,26 @@ class SeamAudit:
         return data
 
 
-def bind_bot_access_seam(binder, *, bots=None, collaborators=None, audit=None):
-    """Wire the three services ``bot_access`` needs, on a bare-``FastAPI`` app.
+class SeamLocks:
+    """A lock service for handler tests whose Bot has no collaborators."""
+
+    def get_lock_info(self, **kwargs):
+        from agentclaw.community.core.bot_collaborator.models import (  # noqa: PLC0415
+            LockInfoResult,
+        )
+
+        return LockInfoResult(
+            lock=None,
+            holder_name=None,
+            has_collaborators=False,
+            is_owner=False,
+        )
+
+
+def bind_bot_access_seam(
+    binder, *, bots=None, collaborators=None, audit=None, locks=None
+):
+    """Wire the services ``bot_access`` needs, on a bare-``FastAPI`` app.
 
     Once a group's rows are ``Check``, ``PublicAPIRoute`` attaches the gate to
     every one of its routes, and the gate fails **closed** when the repository
@@ -187,6 +208,9 @@ def bind_bot_access_seam(binder, *, bots=None, collaborators=None, audit=None):
     """
     from injector import InstanceProvider  # noqa: PLC0415
 
+    from agentclaw.community.api.collaborator_lock_service import (  # noqa: PLC0415
+        CollaboratorLockServiceProtocol,
+    )
     from agentclaw.community.core.repository.protocols.bot import (  # noqa: PLC0415
         BotCollabLogRepositoryProtocol,
         BotRepository,
@@ -194,7 +218,6 @@ def bind_bot_access_seam(binder, *, bots=None, collaborators=None, audit=None):
     from agentclaw.community.core.bot_collaborator.protocols import (  # noqa: PLC0415
         CollaboratorServiceProtocol,
     )
-
     binder.bind(BotRepository, to=InstanceProvider(bots or SeamBots()))
     binder.bind(
         CollaboratorServiceProtocol,
@@ -202,4 +225,8 @@ def bind_bot_access_seam(binder, *, bots=None, collaborators=None, audit=None):
     )
     binder.bind(
         BotCollabLogRepositoryProtocol, to=InstanceProvider(audit or SeamAudit())
+    )
+    binder.bind(
+        CollaboratorLockServiceProtocol,
+        to=InstanceProvider(locks or SeamLocks()),
     )

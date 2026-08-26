@@ -20,7 +20,7 @@ internal_dependencies:
   - agentclaw.community.di.modules
   - agentclaw.community.log
   - agentclaw.community.core.devices.services.device_filesystem
-  - agentclaw.community.plugin_api.device_sync
+  - agentclaw.community.plugin_api.device_sync_dispatcher
 ```
 
 ### Change impact

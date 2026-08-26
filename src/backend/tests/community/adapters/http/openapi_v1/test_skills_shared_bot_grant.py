@@ -32,17 +32,14 @@ from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProt
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
-)
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
+from agentclaw.community.api.skill_query_service import (
+    SkillQueryServiceProtocol,
 )
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
-from agentclaw.community.api.bot_skill_asset_service import (
-    BotSkillAssetServiceProtocol,
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
 )
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
@@ -133,24 +130,29 @@ class _Skills:
     async def delete_local_skill(self, *, skill_id: str, owner_id: str, user_id: str):
         return None
 
-    async def set_local_skill_active(self, *, skill_id: str, actor_id: str, active):
-        return {
-            **self.get_local_skill(skill_id=skill_id, actor_id=actor_id),
-            "changed": True,
-        }
-
     def get_skill(self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str):
         assert (bot_id, owner_id) == (BOT, OWNER)
         record = self.get_local_skill(skill_id=skill_id, actor_id=user_id)
         return record
 
-    async def set_active(
-        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str, active
+    async def activate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
     ):
         assert (bot_id, owner_id) == (BOT, OWNER)
-        return await self.set_local_skill_active(
-            skill_id=skill_id, actor_id=user_id, active=active
-        )
+        return {
+            **self.get_local_skill(skill_id=skill_id, actor_id=actor_id),
+            "changed": True,
+        }
+
+    async def deactivate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+    ):
+        assert (bot_id, owner_id) == (BOT, OWNER)
+        return {
+            **self.get_local_skill(skill_id=skill_id, actor_id=actor_id),
+            "active": False,
+            "changed": True,
+        }
 
     async def get_content(self, **_kwargs):
         return "---\nname: shared-skill\n---\n# Shared"
@@ -177,11 +179,10 @@ def client():
         def configure(self, binder):
             binder.bind(BotAppGrantServiceProtocol, to=_Grants())
             for protocol in (
-                LocalSkillQueryServiceProtocol,
+                SkillQueryServiceProtocol,
                 LocalSkillDeleteServiceProtocol,
-                LocalSkillStateServiceProtocol,
                 LocalSkillUploadServiceProtocol,
-                BotSkillAssetServiceProtocol,
+                DirectActivationServiceProtocol,
             ):
                 binder.bind(protocol, to=skills)
             # The four ``{skill_id}`` operations and the two asset ones now
@@ -194,7 +195,8 @@ def client():
             # the grant is still the thing that has to be looked up against
             # the addressed owner, and a wrong lookup still answers 404.
             bind_bot_access_seam(
-                binder, collaborators=SeamCollaborators(PermissionLevel.MEMBER)
+                binder,
+                collaborators=SeamCollaborators(PermissionLevel.MEMBER),
             )
 
     app = FastAPI()

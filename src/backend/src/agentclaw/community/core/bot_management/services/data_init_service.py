@@ -26,7 +26,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, TYPE_CHECKING
 
-from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
@@ -37,9 +36,6 @@ if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_service import DeviceService
     from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
     from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-    from agentclaw.community.core.skill_center.services.skill_set_service import (
-        SkillSetActivatorFactory,
-    )
     from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 
 logger = get_logger()
@@ -79,7 +75,6 @@ class DataInitService:
         resource_repo: "ResourceRepositoryProtocol",
         device_service: "DeviceService",
         skill_set_factory: "SkillSetServiceFactory",
-        skill_set_activator_factory: "SkillSetActivatorFactory",
         device_plugin: "DeviceAccessor",
         bot_service_provider: Callable[[], "BotService"],
         skill_md_path: str,
@@ -95,13 +90,9 @@ class DataInitService:
         # ``resolver`` 是全仓唯一 provider 解析点 — ``_get_engine_connection``
         # 通过 (bot_id, owner_id) 拿 typed ``DeviceContext`` 替代旧的
         # ``device_service.get_device_connection_v2(binding_id, ...)``。
-        #
-        # ``skill_set_activator_factory`` — Task 6 收口后,_activate_and_sync_skill_sets
-        # 走 factory.create(...) 拿 activator,避免在业务层手拼 ctor 参数。
         self._resource_repo = resource_repo
         self._device_service = device_service
         self._skill_set_factory = skill_set_factory
-        self._skill_set_activator_factory = skill_set_activator_factory
         self._device_plugin = device_plugin
         self._bot_service_provider = bot_service_provider
         self._skill_md_path = skill_md_path
@@ -382,21 +373,6 @@ class DataInitService:
             f"cost_ms={(_time.time() - _t_collect) * 1000:.0f}"
         )
 
-        # 1.5 激活所有 skillset 并同步软链到设备（失败不阻塞）
-        _t_skill = _time.time()
-        try:
-            await self._activate_and_sync_skill_sets(bot_id, owner_id, entity_id)
-            logger.info(
-                f"bot_id={bot_id} execute_init skillset_sync_done "
-                f"cost_ms={(_time.time() - _t_skill) * 1000:.0f}"
-            )
-        except Exception as e:
-            logger.warning(
-                f"bot_id={bot_id} execute_init skillset_sync_failed exc={e} "
-                f"cost_ms={(_time.time() - _t_skill) * 1000:.0f} non_blocking=true",
-                exc_info=True,
-            )
-
         # 2. 通过 Engine 让 LLM 执行 data-init Skill
         # _send_to_engine 内部使用同步 I/O（requests + websocket-client），
         # 通过 asyncio.to_thread() 在线程池中执行，避免阻塞 asyncio 事件循环
@@ -469,62 +445,6 @@ class DataInitService:
             "downstream_sync": downstream_sync,
         })
         logger.info(f"bot_id={bot_id} execute_init completed")
-
-    async def _activate_and_sync_skill_sets(
-        self,
-        bot_id: str,
-        owner_id: str,
-        entity_id: str,
-    ) -> None:
-        """激活所有 skillset 并同步软链到设备。
-
-        1. 对每个 skillset 调用 activate（未激活的走完整流程，已激活的跳过）
-        2. 无条件补一次 device sync（处理已激活但缺软链的情况）
-
-        engine_type 必须按 bot 真实 active_engine 透传，否则
-        SkillSetService.__init__ 会把 engine_type=None 兜底成 openclaw,
-        导致 claude_code 等 engine 的 bot 在 data_init 全量同步时被
-        错按 openclaw 捞技能集 / 算软链路径（曾把 claude_code 已下的
-        10 个软链覆盖成 openclaw 默认集的 4 个）。
-        """
-        # 取 bot 真实 active_engine；取不到时降级 DEFAULT_ENGINE_TYPE 继续走完流程，
-        # 不让本步骤的失败整段跳过 skillset 激活（保持修复前的容错性）。
-        engine_type = DEFAULT_ENGINE_TYPE
-        try:
-            bot = self._bot_service_provider().get_bot(bot_id, owner_id)
-            engine_type = bot.get("active_engine") or DEFAULT_ENGINE_TYPE
-        except Exception as exc:
-            logger.warning(
-                f"bot_id={bot_id} activate_and_sync_skill_sets get_bot failed, "
-                f"fallback engine_type={engine_type} exc={exc}",
-                exc_info=True,
-            )
-
-        activator = self._skill_set_activator_factory.create(
-            entity_id=entity_id,
-            bot_id=bot_id,
-            engine_type=engine_type,
-        )
-        skill_sets = activator.skill_set_service.skill_set_repo.list_all(
-            user_id=entity_id, bolt_id=bot_id
-        )
-        logger.info(
-            f"bot_id={bot_id} activate_and_sync_skill_sets found skill_sets={len(skill_sets)} entity_id={entity_id}"
-        )
-
-        for ss in skill_sets:
-            ss_id = str(ss.get('id', ''))
-            result = await activator.activate_skill_set(ss_id, user_id=owner_id)
-            logger.info(
-                f"bot_id={bot_id} activate_and_sync_skill_sets activate skill_set={ss_id} "
-                f"success={result.success} message={result.message}"
-            )
-
-        # 无条件同步软链到设备（全量覆盖）
-        sync_result = activator._do_device_sync(
-            user_id=owner_id, caller="DataInitService"
-        )
-        logger.info(f"bot_id={bot_id} activate_and_sync_skill_sets device_sync result={sync_result}")
 
     def _collect_bot_info(
         self,

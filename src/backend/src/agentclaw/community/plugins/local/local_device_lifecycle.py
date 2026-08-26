@@ -1,46 +1,31 @@
-"""LocalDeviceLifecycle — singlebox device boot/shutdown participant.
+"""Lifecycle hooks for the local test runtime.
 
-Split out of ``LocalDeviceAccessor`` in B9: the ``DeviceAccessor`` contract
-(``get_connection_info`` / ``get_engine_config_path``) is neutral and lives in
-``core/devices/services/local_device_accessor.py``, but the singlebox process
-Lifecycle below is inherently local-runtime machinery — it drives other
-``plugins/local`` components (process manager, device-sync symlinker, stale-
-binding cleanup) — so it stays here in ``plugins/local`` (where importing
-``plugins.local.*`` is allowed) as a standalone ``LifecycleBase`` participant.
-
-- ``startup()``  releases stale bindings from a prior crash, re-allocates
-  orphaned PENDING bots, and rebuilds the symlink tree under
-  ``~/.openclaw/workspace/skills/`` from the DB's active skill sets.
-- ``shutdown()`` stops every spawned adapter/openclaw process and releases all
-  local device bindings so the next boot starts clean.
-
-These hooks exist because local mode runs adapter + openclaw processes in-tree
-(they die with the backend), unlike prod where Arca sandboxes survive backend
-restarts and manage their own per-bot lifecycle.
-
-Body lifted verbatim from the former ``LocalDevicePlugin`` lifecycle hooks.
-B10 folds this into the local→baas device migration.
+The participant releases stale bindings, reallocates orphaned local-test bots,
+restores their host skill symlinks, and stops spawned processes. Production
+Singlebox uses the BaaS device runtime and does not bind this lifecycle.
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Callable
 
 from injector import inject
 
-from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
-from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugins.local.skill_symlink_sync import (
+    LocalSkillSymlinkSynchronizer,
+)
 
 logger = get_logger()
 
 
 class LocalDeviceLifecycle(LifecycleBase):
-    """Singlebox device boot/shutdown hooks (local-mode only)."""
+    """Boot/shutdown hooks for the local test runtime."""
 
     @inject
     def __init__(
@@ -50,32 +35,17 @@ class LocalDeviceLifecycle(LifecycleBase):
         skill_set_repo: SkillSetRepository,
         skill_set_factory_provider: Callable[[], SkillSetServiceFactory],
         bot_service_provider: Callable[[], BotService],
+        symlink_synchronizer: LocalSkillSymlinkSynchronizer,
     ) -> None:
-        # database: route lifecycle DB work through the locked local plugin.
-        # bot_repository: resolve per-bot engine type during symlink restore.
-        # skill_set_repo: walk active skill sets on startup.
-        # skill_set_factory_provider / bot_service_provider: injected as lazy
-        # ``Callable[[], …]`` because the eager type closes a construction cycle
-        # through the skill-set service graph.
         self._database = database
         self._bot_repository = bot_repository
         self._skill_set_repo = skill_set_repo
         self._skill_set_factory_provider = skill_set_factory_provider
         self._bot_service_provider = bot_service_provider
+        self._symlink_synchronizer = symlink_synchronizer
 
     async def startup(self) -> None:
-        """Lifecycle hook — clean prior-session state and rebuild symlinks.
-
-        Three steps:
-          1. ``release_all_stale_bindings()`` — safeguard against a crash
-             that bypassed the shutdown hook.
-          2. ``reallocate_orphaned_bots(BotService)`` — PENDING bots with
-             no binding get fresh device allocation.
-          3. ``_restore_local_symlinks()`` — full sync of active skill
-             sets' symlink mappings to ``~/.openclaw/workspace/skills/``.
-
-        Errors propagate (fail-fast boot).
-        """
+        """Clean prior-session state, reallocate bots, and restore skill links."""
         from agentclaw.community.plugins.local.device_lifecycle import (
             reallocate_orphaned_bots,
             release_all_stale_bindings,
@@ -90,7 +60,7 @@ class LocalDeviceLifecycle(LifecycleBase):
         logger.info("LocalDeviceLifecycle started via Lifecycle.startup()")
 
     async def shutdown(self) -> None:
-        """Lifecycle hook — stop spawned processes and release bindings."""
+        """Stop spawned processes and release bindings."""
         from agentclaw.community.plugins.local.device_lifecycle import (
             release_all_stale_bindings,
         )
@@ -103,42 +73,27 @@ class LocalDeviceLifecycle(LifecycleBase):
         logger.info("LocalDeviceLifecycle shut down via Lifecycle.shutdown()")
 
     async def _restore_local_symlinks(self) -> None:
-        """Rebuild ``~/.openclaw/workspace/skills/`` from active skill sets.
-
-        Local environment runs a single shared OpenClaw process that reads
-        symlinks from one directory. On boot, walk every active skill set,
-        merge its mappings, and full-sync the result. The internal try/except
-        around the per-skill-set loop is preserved so one bad skill set doesn't
-        block the rest.
-        """
+        """Rebuild local test-runtime skill links from active skill sets."""
         from agentclaw.community.core.bot_management.services.engine_resolver import (
             resolve_engine_for_bot,
             resolve_runtime_engine_for_bot,
         )
-        from agentclaw.community.plugins.local.device_sync import LocalDeviceSyncPlugin
 
         active_sets = self._skill_set_repo.get_all_active_skill_sets()
         if not active_sets:
-            logger.info(
-                "[restore_local_symlinks] No active skill sets found, skipping"
-            )
+            logger.info("[restore_local_symlinks] No active skill sets found, skipping")
             return
 
-        logger.info(
-            f"[restore_local_symlinks] Found {len(active_sets)} active skill sets"
-        )
-
-        # 合并所有 active skill sets 的 symlink mappings
         all_symlinks: list[dict[str, str]] = []
         seen_targets: set[str] = set()
-
         for skill_set in active_sets:
             skill_set_id = str(skill_set.get("id"))
             user_id = skill_set.get("user_id")
             bot_id = skill_set.get("bolt_id", "default")
             if not user_id:
                 logger.warning(
-                    f"[restore_local_symlinks] Skipping skill_set_id={skill_set_id}: missing user_id"
+                    "[restore_local_symlinks] Skipping skill_set_id=%s: missing user_id",
+                    skill_set_id,
                 )
                 continue
             try:
@@ -163,22 +118,18 @@ class LocalDeviceLifecycle(LifecycleBase):
                     user_id=str(user_id),
                     bolt_id=bot_id,
                 )
-                for sm in mappings:
-                    d = sm.to_dict()
-                    target = d.get("target", "")
+                for mapping in mappings:
+                    item = mapping.to_dict()
+                    target = item.get("target", "")
                     if target and target not in seen_targets:
                         seen_targets.add(target)
-                        all_symlinks.append(d)
-                logger.info(
-                    f"[restore_local_symlinks] skill_set_id={skill_set_id} (bot={bot_id}): {len(mappings)} mappings"
-                )
-            except Exception as e:
+                        all_symlinks.append(item)
+            except Exception as exc:
                 logger.error(
-                    f"[restore_local_symlinks] Failed for skill_set_id={skill_set_id}: {e}"
+                    "[restore_local_symlinks] Failed for skill_set_id=%s: %s",
+                    skill_set_id,
+                    exc,
                 )
 
-        # 一次性 full-sync 到 ~/.openclaw/workspace/skills/
-        openclaw_skills_dir = Path.home() / ".openclaw" / "workspace" / "skills"
-        plugin = LocalDeviceSyncPlugin(skills_dir=openclaw_skills_dir)
-        result = plugin.sync_symlinks(all_symlinks)
-        logger.info(f"[restore_local_symlinks] Done: {result}")
+        result = self._symlink_synchronizer.sync(all_symlinks)
+        logger.info("[restore_local_symlinks] Done: %s", result)

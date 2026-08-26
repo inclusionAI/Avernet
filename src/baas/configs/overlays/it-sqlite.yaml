@@ -6,9 +6,7 @@ workers: 1
 user_config:
   plugins:
     auth: stub
-    crypto: stub
     secret: stub
-    scheduler: stub
     cache: stub
     bot_service: stub
     engine_adapter: stub  # stub | real
@@ -16,12 +14,13 @@ user_config:
     sandbox:
       arca: stub
       desktop: stub
-      teclaw: stub
       k8s: stub
       docker: stub
       poolab: stub
-    database:
-      plugin_database: "SQLITE_ORM"
-      create_schema: true
-      seed_data: true
-      database_url: "sqlite:///:memory:"
+    bot:
+      teclaw: stub
+    database: sqlite
+  database:
+    database_url: "sqlite:///:memory:"
+    create_schema: true
+    seed_data: true

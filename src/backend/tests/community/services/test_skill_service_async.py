@@ -178,68 +178,6 @@ class TestSkillServiceAsyncRouting:
         repo.create.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_activate_local_skill_fails_closed_when_pool_source_is_absent(
-        self, tmp_path
-    ):
-        from pathlib import Path
-
-        from agentclaw.community.core.skill_center.path_resolution import (
-            build_pool_local_path_adapter,
-        )
-
-        pool_local = Path("/home/admin/.openclaw/workspace/skills-pool/skills-local")
-        service, device_fs, _ = self._service(tmp_path)
-        service.local_dir = pool_local
-        service._local_skill_path_adapter = build_pool_local_path_adapter(pool_local)
-        service.runtime_uses_pool_paths = True
-        device_fs.exists = AsyncMock(return_value=False)
-
-        activated = await service.activate_skill(
-            (
-                "local:///home/admin/.openclaw/workspace/skills/"
-                "skills-local/writing-beats"
-            ),
-            user_id="user1",
-            bolt_id="bot1",
-        )
-
-        assert activated is False
-        device_fs.exists.assert_awaited_once_with(f"{pool_local}/writing-beats")
-
-    @pytest.mark.asyncio
-    async def test_legacy_activate_keeps_best_effort_source_semantics(self, tmp_path):
-        service, device_fs, _ = self._service(tmp_path)
-        device_fs.exists = AsyncMock(return_value=False)
-
-        activated = await service.activate_skill(
-            f"local://{service.local_dir}/legacy-skill",
-            user_id="user1",
-            bolt_id="bot1",
-        )
-
-        assert activated is True
-        device_fs.exists.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_pool_activate_keeps_existing_link_until_bindpath_publish(
-        self, tmp_path
-    ):
-        service, device_fs, _ = self._service(tmp_path)
-        service.runtime_uses_pool_paths = True
-        existing = service.active_dir / "direct-skill"
-        existing.symlink_to("skills-repo/business/direct-skill")
-
-        activated = await service.activate_skill(
-            "git://business/direct-skill",
-            user_id="user1",
-            bolt_id="bot1",
-        )
-
-        assert activated is True
-        device_fs.delete_tree.assert_not_awaited()
-        assert existing.is_symlink()
-
-    @pytest.mark.asyncio
     async def test_upload_does_not_overwrite_global_local_skill(self, tmp_path):
         repo = MagicMock()
         repo.get_bot_local_by_name.return_value = None

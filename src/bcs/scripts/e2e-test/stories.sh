@@ -1347,15 +1347,15 @@ print(json.dumps({
 # User story: A provider operator publishes, governs, and retires a provider-backed agent.
 #
 # Flow:
-#   Register a provider -> configure stream rollout -> inspect and update metadata
+#   Register a provider -> inspect and update metadata
 #   -> publish and list an agent -> exercise runtime callbacks and guardrails
-#   -> disable and re-enable the provider -> retire the agent -> restore rollout state.
+#   -> disable and re-enable the provider -> retire the agent.
 #
 # Critical assertions:
 #   - Provider registration returns admin, callback, and runtime credentials as applicable.
 #   - Provider and agent identities remain stable across update and list operations.
 #   - Unknown callbacks and unauthorized delivery takeover fail with precise errors.
-#   - Disable/enable and retirement are observable, and temporary rollout state is restored.
+#   - Disable/enable and retirement are observable.
 story_provider_operator_publishes_agent() {
     info "Story: provider operator registers a provider, publishes an agent, and retires it"
 
@@ -1370,16 +1370,6 @@ story_provider_operator_publishes_agent() {
     assert_not_empty "provider registration returns admin token" "$admin_token"
     assert_not_empty "provider registration returns BCS callback token" "$bcs_token"
     [[ -n "$provider_id" && -n "$admin_token" ]] || return
-
-    api_get "/providers/stream-gray"
-    require_status "operator reads provider streaming rollout" "200" || return
-    assert_json_not_empty "stream rollout exposes enabled flag" "$RESPONSE" "enabled"
-
-    api_put "/providers/stream-gray" \
-        "{\"enabled\":true,\"created_by\":[\"${BCS_MOCK_USER_ID}\"]}"
-    require_status "operator enables streaming for the current owner" "200" || return
-    assert_json_eq "stream rollout is enabled" "$RESPONSE" "enabled" "true"
-    assert_json_array_contains "stream rollout contains current owner" "$RESPONSE" "created_by" "$BCS_MOCK_USER_ID"
 
     api_request_headers GET "/providers/${provider_id}" "" \
         "Authorization: Bearer ${admin_token}"
@@ -1503,11 +1493,6 @@ print("1" if any(i.get("bot_uuid") == target for i in d.get("items", [])) else "
         "Authorization: Bearer ${admin_token}"
     require_status "operator verifies provider agent retirement" "200" || return
     assert_json_eq "provider agent list is empty after retirement" "$RESPONSE" "items" "[]"
-
-    api_put "/providers/stream-gray" '{"enabled":false,"created_by":[]}'
-    require_status "operator restores provider streaming rollout" "200" || return
-    assert_json_eq "stream rollout is restored to disabled" "$RESPONSE" "enabled" "false"
-    assert_json_eq "stream rollout owner list is cleared" "$RESPONSE" "created_by" "[]"
 }
 
 _story_provider_manages_organization() {

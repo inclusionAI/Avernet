@@ -1,37 +1,40 @@
 # `agentclaw.community.core.skill_center`
 
-Skill Center domain — skill set switching, market sync, repository sync, skill auth, propagation logging.
+Skill Center domain — Bot capability desired state (Skills and MCPs), market
+sync, repository sync, skill auth, propagation logging.
 
 ## Context Boundary
 
 ```yaml
-purpose: "Skill Center domain — skill set switching, market sync, repository sync, skill auth, propagation logging."
+purpose: "Skill Center domain — Bot capability desired state (Skills and MCPs), market sync, repository sync, skill auth, propagation logging."
 provides:
   - "SkillSetService"
-  - "SkillSetActivator"
-  - "SkillSetSwitcher"
   - "MarketSyncService"
   - "RepositoryCatalogService"
   - "GitSyncService"
   - "SkillAuthService"
   - "CurrentRuntimeLayoutProbeService"
-  - "LocalSkillQueryService"
+  - "SkillQueryService"
   - "LocalSkillUploadService"
-  - "LocalSkillStateService"
+  - "DirectActivationService"
   - "LocalSkillDeleteService"
   - "BotCapabilityAuthorizationHookProtocol"
-  - "SkillSetControlPlaneService"
-  - "SkillInstallationRepositoryProtocol"
-  - "BotSkillAssetService"
+  - "SkillSetManagementService"
   - "RuntimeProjectionResolver"
-  - "BotRuntimeProjectionReconciler"
-  - "BotRuntimeProjectionReconcilerProtocol"
-  - "ActiveSkillSetInstallationMaterializer"
+  - "BotCapabilityStateReader"
+  - "BotRuntimeProjector"
+  - "BotRuntimeProjectorProtocol"
   - "LocalSkillCleanupWorkModel"
   - "SkillActivationSyncAction"
   - "SkillActivationSyncScope"
   - "SkillActivationSyncTaskHandler"
   - "SkillActivationSyncWork"
+  - "SkillParser"
+  - "SkillMetadata"
+  - "SkillManifestError"
+  - "SkillManifestErrorCode"
+  - "SkillManifestValidationIssue"
+  - "SkillManifestValidationResult"
   - "enqueue_skill_activation_sync"
   - "build_skill_activation_sync_payload"
   - "parse_skill_activation_sync_payload"
@@ -53,20 +56,20 @@ consumes:
   - "SkillRepoSyncPlugin"
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
-  - "BotRuntimeProjectionReconcilerProtocol"
+  - "BotRuntimeProjectorProtocol"
 internal_dependencies:
   - agentclaw.community.api.skill_parameter_service_factory
   - agentclaw.community.api.skill_market_service
   - agentclaw.community.api.space_skill_query_service
-  - agentclaw.community.api.local_skill_query_service # Protocol LocalSkillQueryService inherits
-  - agentclaw.community.api.bot_skill_asset_service # Protocol BotSkillAssetService inherits
+  - agentclaw.community.api.skill_query_service # Protocol SkillQueryService inherits
+  - agentclaw.community.api.bot_capability_state_reader # Protocol BotCapabilityStateReader implements
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
   - agentclaw.community.core.repository.protocols.skill_installation
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module
-  - agentclaw.community.core.repository.protocols.skill_set_control_plane
-  - agentclaw.community.core.repository.skill_set_control_plane_types
+  - agentclaw.community.core.repository.protocols.capability_desired_state
+  - agentclaw.community.core.repository.capability_desired_state_types
   - agentclaw.community.core.access
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_collaborator
@@ -91,6 +94,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.devices
+  - agentclaw.community.plugin_api.device_sync_dispatcher
   - agentclaw.community.plugin_api.mcp_center
   - agentclaw.community.plugin_api.mcp_auth
   - agentclaw.community.plugin_api.passport
@@ -106,31 +110,69 @@ internal_dependencies:
 
 ### Change impact
 
-Skill-set switching is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols.
+Capability activation is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols. Changes to `SkillMetadataParserProtocol`, `SkillMetadata`, or stable manifest error codes affect Local folder upload immediately and the shared fixtures consumed by Git import, Draft validation and publication validation; coordinate those consumers before changing fields, limits or codes. List/detail/market readers must continue consuming parser-derived projections rather than inventing a second name or description source.
+
+### One writer, one flush, one reader, one rule book
+
+Installation (`ac_bot_skill_installation` / `ac_bot_mcp_installation`) is the
+single source of truth for a Bot's active capabilities, and four seams keep it
+that way:
+
+- **One writer.** Each Installation/exclusion table's SQL lives in exactly one
+  command module under
+  `core/repository/implementations/skill_center/tables/`; only the
+  `CapabilityDesiredStateRepository` unit of work composes them. An
+  architecture test (`test_installation_table_write_ownership.py`) fails any
+  other module that writes the models.
+- **One flush.** `flush_installations` is the only reconciliation from Set
+  configuration into Installation, and every read-side consumer runs it first
+  (details below).
+- **One reader.** `BotCapabilityStateReader` answers every "what is active on
+  this Bot" question — it flushes, then reads Installation alone.
+  `SkillQueryService` (listing/detail/content/parameters) and
+  `DirectActivationService.list_installed_mcps` answer through it.
+- **One rule book.** `policies/capability_ownership.py` owns the ownership
+  rules: R1 a Set-held capability (Default included, excluded or not) refuses
+  direct control; R2 a directly-active capability refuses joining a Set; R3 a
+  capability lives in at most one Set. Engine/template Default MCPs are a
+  separate platform policy input rather than Set membership; they likewise
+  refuse Direct control and change only through Default exclusion/un-exclusion.
+  Command services consult these policies before and inside the write
+  transaction; nothing else re-derives those decisions.
+
+Writes go through two command services, one per scope, with identical shape —
+authorize, mutate desired state in one UoW transaction, project the complete
+runtime, compensate on failure: `SkillSetManagementService` for Set-scoped
+mutations (Default-Set edits become per-Bot exclusion rows) and
+`DirectActivationService` for Set-free single-capability activation, Skills
+and MCPs alike.
 
 `ac_bot_skill_installation` materializes the current active Desired State with
-identity `(tenant, env, owner_id, bot_id, skill_id)`. During Phase 1 cutover,
-`ActiveSkillSetInstallationMaterializer` lazily
-inserts missing rows for a Bot's ordinary active SkillSet members. It is
-invoked only before a complete runtime reconcile and before a new Service Bot
-Artifact build; it never
-deletes rows, reads historical Default exclusions, or runs in HTTP GET/list,
-Pool convergence, or file-snapshot paths.
-
-`GET /openapi/v1/bots/{bot_id}/skills` is the one deliberate exception, through
-`repair_bot_skillset_installations` rather than the materializer. It lists every
-Skill a Bot reaches — the rows it owns plus the ones a SkillSet bridges — and
-`active` is a *filter*, deciding `total` and the page boundary, so the listing
-repairs before it filters. Unlike the materializer this repair also deletes rows
-and reads Default exclusions. It writes only the difference, in one transaction,
-after the caller's Bot access has been checked, and never reconciles runtime.
-See `specs/2026-08-23-openapi-v1-bot-skill-listing/`.
+identity `(tenant, env, owner_id, bot_id, skill_id)`. Installation tables were
+never globally backfilled, so every read-side consumer runs the lazy flush
+first: `CapabilityDesiredStateRepository.flush_installations` atomically makes
+Installation agree with Set configuration for one exact Bot — inserting active
+(and non-excluded Default) members' rows, Skills and MCPs alike, and deleting
+rows only inactive claims account for. It runs before a complete runtime
+projection, before a new Service Bot Artifact build, and before flush-fronted
+reads such as `GET /openapi/v1/bots/{bot_id}/skills` (see
+`specs/2026-08-23-openapi-v1-bot-skill-listing/` and
+`specs/2026-08-24-installation-single-source-of-truth/`). It writes only the
+difference, in one transaction, after the caller's Bot access has been checked,
+and never touches runtime.
 
 MCP Direct activation and ordinary SkillSet MCP membership share the same
 active-only desired-state and compensation boundary as Skills.  The MCP
 catalogue, user configuration, and permission grant remain separate facts;
 the control plane consults the MCP authorization Service API before any MCP
 membership or Direct-installation write.
+
+Engine/template Default MCPs never become Installation provenance: Direct
+commands reject them, while exclusion removes any legacy Direct row left by an
+older process so the installed union cannot bypass policy. Runtime projection
+resolves template Default MCP context strictly; a provider failure aborts the
+projection and enters command compensation rather than becoming an empty
+Default policy.
 
 `RuntimeProjectionResolver` is the only source of a mutation/restart runtime
 snapshot. It receives Installation, active ordinary SkillSet membership,
@@ -160,12 +202,10 @@ the registry key and the payload validation, and its `_run` seam reports
 `Fail` until the body lands. It is not registered, and no call site enqueues,
 so the control plane's inline mutate-then-reconcile path is unchanged.
 
-Phase 1 does not run a global Local Installation backfill and does not treat
-historical Default exclusions as an active-state source. The small number of
-such historical residues is corrected through DB operations. Normal
+Phase 1 does not run a global Local Installation backfill. Normal
 SkillSet/Direct commands continue to maintain Installation synchronously; the
-lazy materializer only fills the missing active ordinary SkillSet rows that
-pre-date the new command path.
+lazy flush reconciles the rows that pre-date the new command path, treating a
+Default-Set exclusion as that Set's per-Bot deactivation of the member.
 
 Local Skill replacement is defined only for an existing complete package at the
 stable layout-owned `skills-local/<skill-name>` locator. It stages and verifies

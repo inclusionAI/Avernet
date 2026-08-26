@@ -373,17 +373,18 @@ class FakeSkillRepository:
         assert owner_id == "owner-1"
         return self.registered
 
-    def list_bot_active_assets(
+    def active_skill_assets(
         self,
         *,
-        env: str,
         bot_id: str,
         owner_id: str,
-        engine: str,
-    ) -> list[RegisteredSkillAsset]:
-        assert (env, bot_id) == (SCOPE.env, SCOPE.bot_id)
-        assert (owner_id, engine) == ("owner-1", self.engine)
-        return self.active
+        bot=None,
+    ) -> tuple[RegisteredSkillAsset, ...]:
+        # Reader-shaped: the pool consumers hand over the Bot row they hold.
+        assert bot_id == SCOPE.bot_id
+        assert owner_id == "owner-1"
+        assert bot is not None
+        return tuple(self.active)
 
 
 class FakeRuntime:
@@ -551,10 +552,12 @@ def build_service(
     skills: FakeSkillRepository | None = None,
     bot_type: str = "personal",
 ) -> SkillsPoolReconcileService:
+    skills = skills or FakeSkillRepository(engine)
     return SkillsPoolReconcileService(
         bot_repository=FakeBotRepository(engine, bot_type=bot_type),
         layout_repository=layouts,
-        skill_repository=skills or FakeSkillRepository(engine),
+        skill_repository=skills,
+        reader=skills,
         runtime=runtime,
     )
 
@@ -1946,10 +1949,12 @@ async def test_mixed_image_bots_reconcile_independently_in_one_environment() -> 
 
     layouts = MultiLayoutRepository()
     runtime = MixedImageRuntime()
+    skills = FakeSkillRepository()
     service = SkillsPoolReconcileService(
         bot_repository=MultiBotRepository(),
         layout_repository=layouts,
-        skill_repository=FakeSkillRepository(),
+        skill_repository=skills,
+        reader=skills,
         runtime=runtime,
     )
 
@@ -2650,10 +2655,12 @@ def test_stale_signal_uses_current_resolved_binding_for_real_mutations() -> None
         adapter_transport=transport,
         probe_service=ReadyProbeService(),
     )
+    skills = FakeSkillRepository()
     reconcile = SkillsPoolReconcileService(
         bot_repository=FakeBotRepository(),
         layout_repository=layouts,
-        skill_repository=FakeSkillRepository(),
+        skill_repository=skills,
+        reader=skills,
         runtime=runtime,
     )
     handler = SkillsPoolReconcileTaskHandler(
@@ -2911,6 +2918,7 @@ def _pool_active_aicoding_service(
         bot_repository=FakeBotRepository("aicoding"),
         layout_repository=layouts,
         skill_repository=skills,
+        reader=skills,
         runtime=runtime,
     )
     return service, transport, probe, active_root, repo_bridge

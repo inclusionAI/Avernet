@@ -54,119 +54,6 @@ class TestSkillServiceLinkName:
         assert SkillService.get_relative_path_from_link_name("infra_demo_skill") == "infra/demo/skill"
 
 
-# ── TestSkillServiceActivation ───────────────────────────────────────
-
-
-class TestSkillServiceActivation:
-    """activate_skill / deactivate_skill"""
-
-    @pytest.mark.asyncio
-    async def test_activate_git_skill(self, skill_dirs, mock_skill_repo):
-        repo_dir = skill_dirs["repo_dir"]
-        _make_skill_dir(repo_dir, "infra/demo")
-
-        svc = SkillService(
-            skill_repo=mock_skill_repo,
-            skill_repo_sync=_lenient_skill_repo_sync(),
-            category_repo=MagicMock(),
-            active_dir=skill_dirs["active_dir"],
-            repo_dir=repo_dir,
-            local_dir=skill_dirs["local_dir"],
-            market_cache=MagicMock(),
-            device_fs_factory=MagicMock(),
-            git_sync_service_factory=MagicMock(),
-        )
-        result = await svc.activate_skill("git://infra/demo")
-        # R2 改造后, activate_skill 不再 pathlib 本地建链;
-        # 软链建立由 device_sync → adapter bindpath 单方面负责。
-        # 这里只断言返回成功标记, 不再检查本地文件系统副作用。
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_activate_reserved_name_rejected(self, skill_dirs, mock_skill_repo):
-        svc = SkillService(
-            skill_repo=mock_skill_repo,
-            skill_repo_sync=_lenient_skill_repo_sync(),
-            category_repo=MagicMock(),
-            active_dir=skill_dirs["active_dir"],
-            repo_dir=skill_dirs["repo_dir"],
-            local_dir=skill_dirs["local_dir"],
-            market_cache=MagicMock(),
-            device_fs_factory=MagicMock(),
-            git_sync_service_factory=MagicMock(),
-        )
-        result = await svc.activate_skill("git://skills-repo")
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_deactivate_skill(self, skill_dirs, mock_skill_repo):
-        repo_dir = skill_dirs["repo_dir"]
-        _make_skill_dir(repo_dir, "infra/demo")
-
-        mock_device_fs = MagicMock()
-        mock_device_fs.delete_tree = AsyncMock(return_value=True)
-
-        svc = SkillService(
-            skill_repo=mock_skill_repo,
-            skill_repo_sync=_lenient_skill_repo_sync(),
-            category_repo=MagicMock(),
-            active_dir=skill_dirs["active_dir"],
-            repo_dir=repo_dir,
-            local_dir=skill_dirs["local_dir"],
-            market_cache=MagicMock(),
-            device_fs_factory=lambda b, u: mock_device_fs,
-            git_sync_service_factory=MagicMock(),
-        )
-        # R2: activate_skill 不再本地建链, 要测 deactivate, 得手工模拟
-        # bindpath 已建好的软链（线上是 adapter 建, 这里测 backend 删的路径）。
-        link = skill_dirs["active_dir"] / "infra_demo"
-        link.symlink_to(Path("skills-repo/infra/demo"))
-
-        result = await svc.deactivate_skill("infra_demo", user_id="u-1", bolt_id="bolt-1")
-        assert result is True
-        # _delete_active_entry 走 device_fs.delete_tree (mock 直接返回 True), 不真删本地文件,
-        # 所以这里只断言"路由到了 device_fs.delete_tree", 不再断言本地链消失。
-        mock_device_fs.delete_tree.assert_awaited()
-
-    @pytest.mark.asyncio
-    async def test_deactivate_reserved_name_rejected(self, skill_dirs, mock_skill_repo):
-        svc = SkillService(
-            skill_repo=mock_skill_repo,
-            skill_repo_sync=_lenient_skill_repo_sync(),
-            category_repo=MagicMock(),
-            active_dir=skill_dirs["active_dir"],
-            repo_dir=skill_dirs["repo_dir"],
-            local_dir=skill_dirs["local_dir"],
-            market_cache=MagicMock(),
-            device_fs_factory=MagicMock(),
-            git_sync_service_factory=MagicMock(),
-        )
-        result = await svc.deactivate_skill("skills-repo")
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_deactivate_nonexistent(self, skill_dirs, mock_skill_repo):
-        device_fs = MagicMock()
-        device_fs.delete_tree = AsyncMock(return_value=True)
-        svc = SkillService(
-            skill_repo=mock_skill_repo,
-            skill_repo_sync=_lenient_skill_repo_sync(),
-            category_repo=MagicMock(),
-            active_dir=skill_dirs["active_dir"],
-            repo_dir=skill_dirs["repo_dir"],
-            local_dir=skill_dirs["local_dir"],
-            market_cache=MagicMock(),
-            device_fs_factory=MagicMock(return_value=device_fs),
-            git_sync_service_factory=MagicMock(),
-        )
-        result = await svc.deactivate_skill("does-not-exist")
-        assert result is True
-        device_fs.delete_tree.assert_awaited_once()
-
-
-# ── TestSkillServiceSync ─────────────────────────────────────────────
-
-
 class TestSkillServiceSync:
     """sync_skills_from_git"""
 
@@ -643,9 +530,8 @@ class TestSkillServiceGetActiveSkills:
             device_fs_factory=MagicMock(),
             git_sync_service_factory=MagicMock(),
         )
-        await svc.activate_skill("git://infra/demo")
-        # R2: activate_skill 不再本地建链, 软链由 device_sync → adapter bindpath 创建。
-        # 单测里手工模拟 bindpath 已经建好链, 然后跑 get_active_skills 扫描。
+        # 软链由 device_sync → adapter bindpath 创建; 单测里手工模拟
+        # bindpath 已经建好链, 然后跑 get_active_skills 扫描。
         link = skill_dirs["active_dir"] / "infra_demo"
         link.symlink_to(Path("skills-repo/infra/demo"))
 
