@@ -33,6 +33,9 @@ from agentclaw.community.core.harness.models import (
     Layer,
     PatchDefinition,
 )
+from agentclaw.community.api.bot_app_grant_service import (
+    BotAppGrantServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import (
     BotAppGrantRepositoryProtocol,
     BotRepository,
@@ -201,6 +204,20 @@ def _seed_collaborator_grant(world, caller_id: str = _COLLABORATOR) -> None:
             "user_id": caller_id,
             "owner_id": _OWNER,
         }
+    )
+
+
+def _seed_grant_reader_error(world, caller_id: str = _COLLABORATOR) -> None:
+    """Seed the bot/patch and stand in a grant service whose lookup raises."""
+    _seed_patch_with_engine(world)
+    bind_overrides(
+        world,
+        BotAppGrantServiceProtocol,
+        {
+            "find": lambda *_a, **_kw: (_ for _ in ()).throw(
+                RuntimeError("grant lookup failure")
+            ),
+        },
     )
 
 
@@ -419,6 +436,26 @@ def apply_application_with_grant_is_allowed():
 )
 def apply_application_without_grant_is_refused():
     """An app-only caller holding no grant is refused before the engine runs."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/harness/apply",
+    scenario="application_grant_lookup_error_is_refused",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _COLLABORATOR},
+        headers=_APP_HEADERS,
+        json_body={**_BODY_ENTITY, "entity_id": _COLLABORATOR, "patch_id_list": [_PATCH_ID]},
+    ),
+    seed=_seed_grant_reader_error,
+    expect=ExpectError(
+        status=404,
+        json_contains={"code": 404000, "message": "Not Found", "data": None},
+    ),
+)
+def apply_application_grant_lookup_error_is_refused():
+    """An app-only caller whose grant lookup raises is refused, not 500."""
 
 
 @endpoint_test(
