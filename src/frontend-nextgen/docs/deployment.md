@@ -26,12 +26,43 @@ The current frontend development proxy proves that space, work-order and work-or
 
 ## Build
 
+Run from the Avernet repository root. The shared build script resolves
+`frontend-nextgen.dockerfile` under `docker/services/` and always uses the
+repository root as the Docker build context.
+
 ```bash
-docker build -t <ACR_REGISTRY>/<NAMESPACE>/avernet-frontend-nextgen:<VERSION> .
-docker push <ACR_REGISTRY>/<NAMESPACE>/avernet-frontend-nextgen:<VERSION>
+./docker/build-image.sh frontend-nextgen.dockerfile \
+  --image <ACR_REGISTRY>/<NAMESPACE>/service-frontend-nextgen \
+  --tag <VERSION>
+
+docker push <ACR_REGISTRY>/<NAMESPACE>/service-frontend-nextgen:<VERSION>
 ```
 
 `<...>` values are operator inputs, not literal defaults.
+
+To let the build script push after a successful build, authenticate to the
+registry first and append `--push` to the build command.
+
+## Kubernetes deployment helper
+
+`docker/kube-deploy.sh` recognizes `frontend-nextgen`, exposes port `8080`,
+and renders liveness and readiness probes for `GET /healthz`.
+
+The host-level deployment wrapper expects a service-specific environment file
+named `frontend-nextgen.env`. It must contain the seven required upstream
+variables listed above. Preview the rendered manifest before applying it:
+
+```bash
+./deploy.sh frontend-nextgen \
+  <ACR_REGISTRY>/<NAMESPACE>/service-frontend-nextgen:<VERSION> \
+  --dry-run
+
+./deploy.sh frontend-nextgen \
+  <ACR_REGISTRY>/<NAMESPACE>/service-frontend-nextgen:<VERSION>
+```
+
+The generic manifest creates a Kubernetes Deployment and ClusterIP Service. It
+does not create an Ingress or configure a public domain and TLS certificate.
 
 ## ECS deployment
 

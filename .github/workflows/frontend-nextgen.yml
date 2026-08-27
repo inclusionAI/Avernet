@@ -8,6 +8,9 @@ on:
       - 'REL*'
     paths:
       - 'src/frontend-nextgen/**'
+      - 'docker/services/frontend-nextgen.dockerfile'
+      - 'docker/services/service-deployment.yaml'
+      - 'docker/kube-deploy.sh'
       - '.github/workflows/frontend-nextgen.yml'
   push:
     branches:
@@ -15,6 +18,9 @@ on:
       - main
     paths:
       - 'src/frontend-nextgen/**'
+      - 'docker/services/frontend-nextgen.dockerfile'
+      - 'docker/services/service-deployment.yaml'
+      - 'docker/kube-deploy.sh'
       - '.github/workflows/frontend-nextgen.yml'
   workflow_dispatch:
 
