@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
     from agentclaw.community.core.common_config.service import CommonConfigService
+    from agentclaw.community.core.devices.protocols import McpSyncProtocol
     from agentclaw.community.core.bot_app_grant.protocols import (
         BotAppGrantSweepProtocol,
     )
@@ -335,6 +336,7 @@ class BotService:
         baas_service_provider: "Callable[[], BaasService] | None" = None,
         task_queue_service: "TaskQueueService | None" = None,
         common_config_service: "CommonConfigService | None" = None,
+        mcp_sync: "McpSyncProtocol | None" = None,
     ) -> None:
         self._repository = repository
         self._allocation_config = allocation_config
@@ -397,6 +399,7 @@ class BotService:
         self._baas_template_resolver = baas_template_resolver
         self._task_queue_service = task_queue_service
         self._common_config_service = common_config_service
+        self._mcp_sync = mcp_sync
 
     def _service_bot_image_policy_enabled(self) -> bool:
         """Whether draft create/restart should opt into image policy."""
@@ -1937,7 +1940,7 @@ class BotService:
                             refresh_ctx,
                             bot_record or {},
                             extra_configs,
-                            mcp_sync=service.mcp_sync,
+                            mcp_sync=self._mcp_sync,
                             skill_set_factory=self._skill_set_factory,
                         )
                     except Exception as exc:
@@ -4520,7 +4523,7 @@ class BotService:
                         refresh_ctx,
                         bot,
                         extra_configs,
-                        mcp_sync=self._device_service_provider().mcp_sync,
+                        mcp_sync=self._mcp_sync,
                         skill_set_factory=self._skill_set_factory,
                     )
                 except Exception as exc:
