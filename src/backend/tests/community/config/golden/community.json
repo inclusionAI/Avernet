@@ -134,6 +134,7 @@
       "desktop_ttl_minutes": 0,
       "personal_bot_template_uuid": "",
       "teclaw_template_uuid": "",
+      "eval_template_uuid": "",
       "template_uuid": "",
       "tenant": "community"
     },

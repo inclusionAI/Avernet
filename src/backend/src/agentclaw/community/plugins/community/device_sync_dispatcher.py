@@ -5,6 +5,12 @@ decorated ``@plugin_impl``. It holds a DI-injected
 ``Callable[[DeviceContext], DeviceSync]`` factory and returns its Core service for any
 ``ctx``, Concrete service construction stays in
 the DI module.
+
+Both binding-routed providers are accepted: ``baas`` (per-domain push through
+the invoke-http transport) and ``teclaw`` (whole-artifact delivery). They share
+the BaaS runtime transport but differ in delivery strategy, so the *factory*
+picks the concrete service off ``ctx.provider`` — this dispatcher stays
+selection-only and just guards the provider set.
 """
 from __future__ import annotations
 
@@ -22,6 +28,11 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
+# Providers this dispatcher routes. Mirrors
+# ``device_context_resolver._BINDING_ROUTED_PROVIDERS`` — every binding-routed
+# provider resolves to a community DeviceSync service.
+_SUPPORTED_PROVIDERS = frozenset({"baas", "teclaw"})
+
 
 @plugin_impl(
     mode=Mode.LOCAL,
@@ -29,9 +40,9 @@ logger = get_logger()
     rationale="singlebox reuses the community BaaS DeviceSync dispatcher",
 )
 class CommunityDeviceSyncDispatcher(DeviceSyncDispatcher):
-    """BaaS ``DeviceSyncDispatcher`` for community.
+    """``DeviceSyncDispatcher`` for community (baas + teclaw).
 
-    Returns the DI-factory-produced BaaS ``DeviceSync`` for ``ctx``.
+    Returns the DI-factory-produced ``DeviceSync`` for ``ctx``.
     """
 
     @inject
@@ -43,7 +54,7 @@ class CommunityDeviceSyncDispatcher(DeviceSyncDispatcher):
             UnknownProviderError,
         )
 
-        if ctx.provider != "baas":
+        if ctx.provider not in _SUPPORTED_PROVIDERS:
             raise UnknownProviderError(
                 f"CommunityDeviceSyncDispatcher: unsupported provider={ctx.provider!r} "
                 f"(bot={ctx.bot_id})"

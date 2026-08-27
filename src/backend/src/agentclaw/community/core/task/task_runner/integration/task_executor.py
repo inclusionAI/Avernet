@@ -400,39 +400,32 @@ class TaskExecutor:
             req_kwargs["caller_bot_token"] = self._bot_token_provider.get_token(
                 req_kwargs.get("driver_bot") or ""
             )
-        # BCN 事件回调订阅(创建协作群入参 event_subscriptions):BCS 把协作事件 CloudEvent 推到本后端
-        # task 模块回调路径。sink.url = api_base_url + 回调路径(api_base_url 去尾斜杠)。
-        # event_filters 按 collab_mode 分流:state_machine 订阅 state_machine.*;manager_worker/chat
-        # 无状态机 run,去 state_machine.*、保留 group/session/task/message(§4 生命周期事件)。
+        # BCN 事件回调订阅仅对 manager_worker 生效。state_machine/chat 使用 poller
+        # 兜底收敛，避免 BCS require_human 拒绝 Bot/HMAC-only 建群请求。
         _api_base = gf.extend_props.get("api_base_url")
-        # 回投 sink origin:优先 corp 经 BcsClientPort 动态注入的 task_callback_url
-        # (BcsHttpAdapter 读 CorpBcsTokenProvider.task_callback_url,env-aware
-        # bcs_client.task_callback_url[_pre]);空则回落 economy_governance 派生的 api_base_url;
-        # 两者皆空即不挂订阅(旧行为)。getattr-guard 兼容 _DoubleBcsClient 等 bcs 端口。
         _corp_cb = ""
         if self._bcs is not None:
             _cb_fn = getattr(self._bcs, "task_callback_url", None)
             if callable(_cb_fn):
                 _corp_cb = (_cb_fn() or "").strip()
-        # 回投 sink origin:corp 经 BcsClientPort 动态注入的 task_callback_url 优先,空则 api_base_url 兜底;
-        # state_machine / manager_worker / chat 同一 sink_base,不按 mode 分别判断。
-        _sink_base = _corp_cb or _api_base
-        logger.info(f"[task][task_executor] _sink_base=%s", _sink_base)
-        if _sink_base:
-            _event_filters = (
-                ["group.*", "session.*", "task.*", "state_machine.*", "message.created"]
-                if mode == "state_machine"
-                else ["group.*", "session.*", "task.*", "message.created"]
-            )
+        _sink_base = _corp_cb or _api_base or self._api_base_url
+        if mode == "manager_worker" and _sink_base:
+            _sink_base = str(_sink_base).rstrip("/")
             req_kwargs["event_subscriptions"] = [
                 {
-                    "name": "group-webhook",
-                    "event_filters": _event_filters,
-                    "payload": {"mode": "metadata_only"},
+                    "name": "avernet-manager-worker",
+                    "event_filters": [
+                        "group.created",
+                        "session.created",
+                        "task.assigned",
+                        "task.completed",
+                        "session.completed",
+                    ],
+                    "payload": {"mode": "full"},
                     "sink": {
                         "type": "webhook",
-                        "url": str(_sink_base).rstrip("/") + _BCN_EVENT_CALLBACK_PATH,
-                        "request_timeout_ms": 2000,
+                        "url": _sink_base + _BCN_EVENT_CALLBACK_PATH,
+                        "request_timeout_ms": 10000,
                     },
                 }
             ]

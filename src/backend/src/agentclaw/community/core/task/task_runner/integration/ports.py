@@ -84,9 +84,7 @@ class BcsClientPort(Protocol):
     async def get_state_machine_run(self, run_id: str) -> dict[str, Any]: ...
     async def validate_definition(self, definition_yaml: str) -> None: ...
     def task_callback_url(self) -> str:
-        """任务回投目标 origin(scheme://netloc);corp 由 ``BcsClientConfig.task_callback_url[_pre]`` 经
-        ``CorpBcsTokenProvider`` 注入,建群时 TaskExecutor 动态取作 event_subscriptions sink 前缀。
-        社区/singlebox 返空(TaskExecutor 兜底 api_base_url)。"""
+        """Return the callback origin used by task event subscriptions."""
         ...
 
 
