@@ -11,6 +11,8 @@ git pull
 
 ## 2. 构建并推送镜像
 
+用公网 registry endpoint 构建、推送（xhunter 能访问）：
+
 ```bash
 ./docker/build-image.sh docker/bcsfuse.Dockerfile \
   --image avernet-registry.cn-beijing.cr.aliyuncs.com/avernet/service-bcsfuse \
@@ -28,17 +30,22 @@ git pull
 
 ## 3. 部署
 
-推荐用 `docker/deploy.sh`：
+`docker/deploy.sh` 会自动把公网 registry 改写成 ACK 能拉到的 VPC endpoint：
 
 ```bash
 cd /home/xhunter/avernet-deploy
 
-# 第一次会生成 bcsfuse.env 模板，填写后再跑一次
-/path/to/Avernet/docker/deploy.sh bcsfuse \
+# 第一次：生成 bcsfuse.env 模板
+/home/xhunter/bcsfuse_deploy/Avernet/docker/deploy.sh bcsfuse \
+  avernet-registry.cn-beijing.cr.aliyuncs.com/avernet/service-bcsfuse:20260826
+
+# 编辑 bcsfuse.env，替换 REPLACE_WITH_*
+vi bcsfuse.env
+
+# 第二次：真正部署
+/home/xhunter/bcsfuse_deploy/Avernet/docker/deploy.sh bcsfuse \
   avernet-registry.cn-beijing.cr.aliyuncs.com/avernet/service-bcsfuse:20260826
 ```
-
-首次运行会创建 `bcsfuse.env` 并提示你填写 `REPLACE_WITH_*`。填好后再次执行同一命令即可部署。
 
 ## 4. 验证
 
@@ -56,12 +63,12 @@ kubectl logs -l app=bcsfuse --tail=100 -f
 cp docker/bcsfuse.env.example /home/xhunter/avernet-deploy/bcsfuse.env
 vi /home/xhunter/avernet-deploy/bcsfuse.env
 
-# 2. 生成 yaml
+# 2. 生成 yaml（用 VPC endpoint）
 python docker/generate_deploy_config.py \
   --env /home/xhunter/avernet-deploy/bcsfuse.env \
   --no-mask \
   /home/xhunter/avernet-deploy \
-  avernet-registry.cn-beijing.cr.aliyuncs.com/avernet/service-bcsfuse:20260826
+  avernet-registry-vpc.cn-beijing.cr.aliyuncs.com/avernet/service-bcsfuse:20260826
 
 # 3. 部署
 kubectl apply -f /home/xhunter/avernet-deploy/bcsfuse-deployment.yaml

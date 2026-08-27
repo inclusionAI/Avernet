@@ -46,12 +46,20 @@ if grep -q 'REPLACE_WITH_' "$ENV_FILE"; then
     exit 2
 fi
 
-echo "==> generating ${DEPLOYMENT_FILE} for ${IMAGE}"
+# Rewrite public registry endpoint to VPC endpoint for ACK pull.
+DEPLOY_IMAGE="${IMAGE/avernet-registry.cn-beijing.cr.aliyuncs.com/avernet-registry-vpc.cn-beijing.cr.aliyuncs.com}"
+
+if [ "$DEPLOY_IMAGE" != "$IMAGE" ]; then
+    echo "==> using VPC registry for deployment: ${DEPLOY_IMAGE}"
+else
+    echo "==> generating ${DEPLOYMENT_FILE} for ${IMAGE}"
+fi
+
 python3 "${SCRIPT_DIR}/generate_deploy_config.py" \
     --env "$ENV_FILE" \
     --no-mask \
     "$PWD" \
-    "$IMAGE"
+    "$DEPLOY_IMAGE"
 
 echo "==> applying ${DEPLOYMENT_FILE}"
 kubectl apply -f "$DEPLOYMENT_FILE"
