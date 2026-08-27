@@ -224,36 +224,48 @@ The teclaw win it was aimed at still needs the corp-side work in 4.7, and the
 seam for it is now `sync_mcp_projection` rather than the projector reaching
 past `SkillSetService` into the dispatcher.
 
-### Original tasks, unchanged for reference
+### Superseded — the original `DeviceSync` design, kept for reference
 
-- [ ] 4.1 Define `RuntimeProjectionIntent` (symlinks, MCP claimed/released,
+**Not built, and not pending.** 4a.1–4a.5 above replaced these; the checkbox
+form is dropped deliberately so they cannot be misread as outstanding work.
+The one item that survives is 4.7, listed separately below because it is real
+and belongs to another repository.
+
+- ~~4.1~~ Define `RuntimeProjectionIntent` (symlinks, MCP claimed/released,
       full allow-list, the `ProjectionScope`) and add
       `DeviceSync.apply_runtime_projection(intent)` to
       `core/devices/services/device_sync.py`, with a **default implementation
       reproducing today's per-call sequence** so no impl breaks and teclaw
       stays correct until its own override lands.
-- [ ] 4.2 `BaasDeviceSyncService.apply_runtime_projection`: symlinks only when
+- ~~4.2~~ `BaasDeviceSyncService.apply_runtime_projection`: symlinks only when
       `intent.scope.skills`; MCP config + `filter-servers` only when
       `intent.scope.mcp`.
-- [ ] 4.3 `SingleboxDeviceSyncService`: delegate, preserving its
+- ~~4.3~~ `SingleboxDeviceSyncService`: delegate, preserving its
       `sync_all_mcp_servers` no-op (`singlebox_device_sync.py:47`).
-- [ ] 4.4 `BotRuntimeProjector` hands the intent to
+- ~~4.4~~ `BotRuntimeProjector` hands the intent to
       `DeviceSyncDispatcher.dispatch(ctx)` instead of orchestrating the device
       calls itself. It keeps plan resolution, the Passport payload (AgentPass
       is not the device, and every provider updates it identically), and
       `SkillSetRuntimeReconcileError`. No branch on provider or engine type in
       shared code.
-- [ ] 4.5 Keep `project_mcp_and_cli` as a thin alias for
+- ~~4.5~~ Keep `project_mcp_and_cli` as a thin alias for
       `project(scope=ProjectionScope(mcp=True))` so `skill_center_module.py:918`
       and `SkillSymlinkListener` need no edit.
-- [ ] 4.6 Tests: on the baas impl an MCP-only scope performs no
+- ~~4.6~~ Tests: on the baas impl an MCP-only scope performs no
       `sync_symlinks`, and a skills-only scope performs no
       `sync_all_mcp_servers` and no per-MCP write; a fake whole-artifact
       `DeviceSync` receives exactly one `apply_runtime_projection` call for a
       both-halves scope.
+### Open, and outside this repository
+
 - [ ] 4.7 Flag for the corp side: teclaw needs its own
       `apply_runtime_projection` composing and delivering once, or it keeps
-      the default (correct, not yet cheaper). Out of this repository.
+      the default (correct, not yet cheaper). **Out of this repository, so it
+      does not gate this PR** — it is the one half of spec criterion 4 that
+      does not hold, and the seam it now attaches to is
+      `SkillSetService.sync_mcp_projection` rather than the projector reaching
+      past that service into the dispatcher. Until it lands teclaw keeps
+      today's behaviour, which is correct and merely not yet cheaper.
 
 ## Group 5 — Dead code (problem 5)
 
@@ -355,6 +367,17 @@ per group is the intent; this group is the checklist that nothing was missed.
 
 ## Verification
 
-- [ ] V1 Backend test suite green.
-- [ ] V2 Lint / typecheck per the repo's contributor commands.
-- [ ] V3 Re-read the spec's six success criteria against the diff.
+- [x] V1 Backend test suite green. Full `tests/community` locally: 14748
+      passed, 58 skipped. The two failures in
+      `test_bot_build_service_skill_artifact.py` need `rsync` on `PATH` and
+      fail identically without this diff; CI has it, and the eight checks on
+      `28d6c9eb5` are green.
+- [x] V2 Lint. `ruff check --select F` over every changed file reports one
+      `F841`, on a `cli_mock` binding that is unused on `origin/dev` too —
+      pre-existing, untouched here. Recorded rather than silently fixed: the
+      backend CI job runs pytest only, so the repo does not enforce ruff on
+      this package and cleaning unrelated findings would widen the diff.
+- [x] V3 Re-read the spec's six success criteria against the diff. Five hold;
+      criterion 4 holds by half. Written up in the spec's Resolution section
+      rather than summarised here, so the criteria and their verdicts stay in
+      one place.
