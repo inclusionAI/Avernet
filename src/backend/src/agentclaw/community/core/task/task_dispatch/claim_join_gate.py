@@ -123,7 +123,7 @@ class TaskClaimJoinGate(TaskClaimJoinGateProtocol):
             config_value=bool(enabled),
             env=env,
             description=_DESCRIPTION,
-            creator=operator,
+            operator=operator,
         )
         with self._lock:
             self._cache = bool(enabled)
