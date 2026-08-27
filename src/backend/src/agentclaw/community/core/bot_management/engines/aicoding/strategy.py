@@ -57,8 +57,10 @@ _THETA_KEY_PATH = ("bot_template_config", "ext_config", "thetaKey")
 _ENCRYPTED_VALUE_PREFIX = "enc:v1:"
 _RESTART_RUNTIME_RESYNC_RETRY_DELAYS_SECONDS = (0, 2, 5, 10, 20)
 _RESTART_RUNTIME_NOT_READY_MARKERS = (
+    # BaaS returns this explicit error code while a restarted container has no
+    # active device yet. Avoid matching free-text wrapper messages such as
+    # "get_ws_info failed"; only declared provider signals should drive retry.
     "NO_ACTIVE_DEVICES",
-    "get_ws_info failed",
 )
 logger = get_logger()
 
