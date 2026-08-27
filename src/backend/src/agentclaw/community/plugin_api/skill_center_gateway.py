@@ -374,6 +374,9 @@ class SkillCenterVersion:
     released_at: str | None = None
     note: str | None = None
 
+    def __post_init__(self) -> None:
+        _require(self.version_number, "version_number")
+
 
 @dataclass(frozen=True)
 class SkillCenterMcpService:
