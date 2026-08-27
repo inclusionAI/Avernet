@@ -11,17 +11,45 @@ Each engine implements its own runtime contract behind a protocol; the
 projector resolves one from a registry and delegates. `BotRuntimeProjector`
 stops knowing what a teclaw is.
 
+**Today**, `project` runs two scope-gated halves, and the Passport update is
+an unnamed `try/except` block at the *tail of the MCP half* rather than a
+step of its own:
+
 ```
-BotRuntimeProjector.project(...)
+project(...)
+  ├─ (service, bot, engine, projection, cli_items, identity_modes) = _resolve_plan(...)
+  │        └─ if engine == "teclaw" and any center://  → refuse        (_build_plan:332)
   │
-  ├─ plan = _resolve_plan(...)                 ← flushes Installation, validates
+  ├─ if scope.skills or retired_mappings:  _apply_skill_projection(...)
+  │        ├─ if engine == "teclaw" and any center corpus → refuse           (:417)
+  │        ├─ if engine == "teclaw": sync_runtime(...); return               (:426)
+  │        └─ else: Pool publish+verify, or legacy sync_runtime
+  │
+  └─ if scope.mcp:                         _apply_non_skill_projection(...)
+           ├─ service.sync_mcp_projection(claimed, released, declared)   ← engine-specific
+           └─ try: self._passport.update_passport(...)                   ← inline, :549-574
+```
+
+**After**, the two statements inside the MCP half are separated because they
+have different owners — `sync_mcp_projection` is a runtime write that only
+per-domain engines need, `update_passport` is the platform authorization
+record that every engine needs identically:
+
+```
+project(...)
+  ├─ plan = _resolve_plan(...)                 ← flushes Installation
   │     └─ runtime.validate_plan(...)          ← engine refuses what it can't carry
   │
   ├─ runtime = registry.for_engine(plan.engine)
   ├─ await runtime.apply(plan, scope, retired_mappings)
   │
-  └─ if scope.mcp: _apply_passport_projection(...)   ← engine-agnostic, stays here
+  └─ if scope.mcp: _apply_passport_projection(...)
 ```
+
+`_apply_passport_projection` is **new** — it does not exist today. It is the
+`:549-574` block above, given a name so the projector can call it directly
+once `sync_mcp_projection` has moved out from in front of it (`tasks.md` 3.5).
+Its trigger is unchanged: `scope.mcp` before, `scope.mcp` after.
 
 Two implementations of `EngineRuntimeProjection`:
 

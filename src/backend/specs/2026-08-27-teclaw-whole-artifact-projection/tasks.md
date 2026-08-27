@@ -110,11 +110,16 @@ This is the relocation. Nothing here may change what any engine does.
       method is for, and that the engine test inside it is scaffolding.
 
 - [ ] 3.5 **Extract** `_apply_passport_projection(*, plan, bot_id, owner_id)`
-      from the Passport tail and keep it on `BotRuntimeProjector`. **Move the
-      body with no edits**: it is the identity-coloured `resource_scope` fix
-      from `specs/2026-08-26-mcp-sync-and-passport-regressions` problem 1, and
-      a drifted copy silently reasserts `identityMode: "owner"`. Highest-risk
-      step in the change.
+      and keep it on `BotRuntimeProjector`. This method does **not** exist
+      today: the Passport update is currently an unnamed `try/except` block at
+      the tail of `_apply_non_skill_projection` (`:549-574`), reached only by
+      falling through `sync_mcp_projection`. 3.3 moves that call out to
+      `per_domain.py`, so the tail needs a name to be invoked on its own.
+      **Move the body with no edits**: it is the identity-coloured
+      `resource_scope` fix from
+      `specs/2026-08-26-mcp-sync-and-passport-regressions` problem 1, and a
+      drifted copy silently reasserts `identityMode: "owner"`. Highest-risk
+      step in the change. Its trigger stays `scope.mcp`, unchanged.
 
 - [ ] 3.6 In `bot_runtime_projector.py`: add `registry:
       EngineRuntimeProjectionRegistry` to `__init__`, drop `pool_runtime` and
