@@ -116,30 +116,6 @@ class PerDomainRuntimeProjection:
         retired = list(retired_mappings)
         bot = plan.bot
 
-        # TRANSITIONAL — removed once ``WholeArtifactRuntimeProjection`` is
-        # registered to receive teclaw. Until then this class is still the
-        # only implementation, so teclaw arrives here and must keep behaving
-        # exactly as it does today; deleting these two arms before the
-        # registry can route teclaw elsewhere would silently push it onto the
-        # Pool/legacy path below. Both move to that class's ``validate_plan``
-        # and ``apply``.
-        if plan.engine == "teclaw" and any(
-            mapping.corpus == "center" for mapping in [*mappings, *retired]
-        ):
-            # Teclaw v4 has no Center request contract. Phase 2 adds its
-            # OSS-backed Center Store; Phase 1 must fail before any runtime,
-            # MCP, Passport, probe, or mapping request is emitted.
-            raise SkillSetRuntimeReconcileError()
-        if plan.engine == "teclaw":
-            # Teclaw v4 consumes a complete Artifact projection through the
-            # existing DeviceSync dispatcher. It has no Skills Pool mapping
-            # endpoint; Repo/Local and their retirements must stay on v4.
-            if not plan.service.sync_runtime(
-                desired_skills=self._desired_skills(plan.projection)
-            ):
-                raise SkillSetRuntimeReconcileError()
-            return
-
         scope = BotSkillLayoutScope(
             env=str(bot["env"]),
             entity_id=str(bot.get("entity_id") or plan.owner_id),

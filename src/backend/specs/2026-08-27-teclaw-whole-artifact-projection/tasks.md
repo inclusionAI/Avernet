@@ -163,14 +163,14 @@ This is the relocation. Nothing here may change what any engine does.
 
 ## Group 4 — Teclaw delivers once
 
-- [ ] 4.1 Add the regression guard **first**:
+- [x] 4.1 Add the regression guard **first**:
       `test_per_domain_engine_keeps_the_scope_split` — an openclaw Bot with
       `ProjectionScope(mcp=True, claimed_mcp=frozenset({"x"}))`:
       `runtime_syncs == []`, `len(mcp_projections) == 1`, and `claimed` still
       guarded down to the projected set. It must pass before 4.3 and after.
       (criterion 5)
 
-- [ ] 4.2 Extend `_RuntimeFactoryService` (`:474`) so call counts are
+- [x] 4.2 Extend `_RuntimeFactoryService` (`:474`) so call counts are
       observable, following its existing `deliveries` list idiom rather than
       integer counters: `runtime_syncs` appended in `sync_runtime` (`:484`),
       and `mcp_projections` appended at the top of `sync_mcp_projection`
@@ -179,7 +179,7 @@ This is the relocation. Nothing here may change what any engine does.
       `deliveries`, `collect_calls` and the unrelated stub at `:2865` alone.
       Re-run: still green, unedited.
 
-- [ ] 4.3 Create `runtime_projections/whole_artifact.py` with
+- [x] 4.3 Create `runtime_projections/whole_artifact.py` with
       `WholeArtifactRuntimeProjection` — no injected collaborators.
       `validate_plan` refuses `center://` assets and `center` retirements (the
       union of today's `:118`, `:332` and `:417` checks, which were three
@@ -190,24 +190,24 @@ This is the relocation. Nothing here may change what any engine does.
       docstring states the invariant: the plan is resolved, so one delivery
       carries both halves.
 
-- [ ] 4.4 Register `{"teclaw": WholeArtifactRuntimeProjection()}` in the DI
+- [x] 4.4 Register `{"teclaw": WholeArtifactRuntimeProjection()}` in the DI
       provider from 3.9. From here teclaw routes to the new implementation, so
       the transitional teclaw code in `per_domain.py` is dead.
 
-- [ ] 4.5 Delete the now-dead teclaw arms and Center checks from
+- [x] 4.5 Delete the now-dead teclaw arms and Center checks from
       `per_domain.py` (the ones 3.2/3.4 carried over), and point
       `snapshot_skill_mappings` and `_build_plan` at
       `registry.for_engine(engine).validate_plan(...)`. Both already have
       `engine` and `skill_assets` in hand. Do 4.4 before this: reversed, teclaw
       would take the Pool/legacy path in between.
 
-- [ ] 4.6 Verify the end state — `teclaw` appears in exactly two places under
+- [x] 4.6 Verify the end state — `teclaw` appears in exactly two places under
       `core/skill_center/`: `whole_artifact.py` (where it is the subject) and
       the registry entry (where it is the key). Neither
       `bot_runtime_projector.py` nor `per_domain.py` may contain it.
       (criterion 6)
 
-- [ ] 4.7 Behaviour tests:
+- [x] 4.7 Behaviour tests:
       - `test_teclaw_projects_the_whole_artifact_once_per_scope_shape` —
         parametrised over `skills=True`; `mcp=True, claimed_mcp={"x"}`;
         `mcp=True, released_mcp={"x"}`; both halves; and `everything()`. Each:
@@ -232,7 +232,7 @@ This is the relocation. Nothing here may change what any engine does.
         `per_domain.py`. Blunt, but it is criterion 6 stated exactly; put the
         reason in the assertion message.
 
-- [ ] 4.8 Confirm unedited (beyond 3.10's `registry=`):
+- [x] 4.8 Confirm unedited (beyond 3.10's `registry=`):
       `test_teclaw_v4_rejects_center_without_any_center_runtime_request:2493`
       — the direct test that the Center refusal survived consolidation into
       `validate_plan`;

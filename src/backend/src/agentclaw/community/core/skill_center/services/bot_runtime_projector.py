@@ -108,10 +108,12 @@ class BotRuntimeProjector:
                 bot_id=bot_id, owner_id=owner_id, bot=bot
             )
         )
-        if engine == "teclaw" and any(
-            asset.git_path.startswith("center://") for asset in skill_assets
-        ):
-            raise SkillSetRuntimeReconcileError()
+        # The engine refuses what its runtime has no contract for. Asked here
+        # rather than tested here, so a caller of this module never has to
+        # know which engines those are.
+        self._registry.for_engine(engine).validate_plan(
+            skill_assets=skill_assets
+        )
         return tuple(build_logical_skill_mappings(skill_assets))
 
     async def project(
@@ -291,13 +293,13 @@ class BotRuntimeProjector:
                 bot_id=bot_id, owner_id=owner_id, bot=bot
             )
         )
-        if engine == "teclaw" and (
-            any(asset.git_path.startswith("center://") for asset in skill_assets)
-            or any(mapping.corpus == "center" for mapping in retired_mappings)
-        ):
-            # Reject before querying or writing any external MCP, Passport, or
-            # runtime boundary. Teclaw Center delivery belongs to Phase 2.
-            raise SkillSetRuntimeReconcileError()
+        # Reject before querying or writing any external MCP, Passport, or
+        # runtime boundary. What an engine's runtime cannot carry is the
+        # engine's own statement — see ``EngineRuntimeProjection.validate_plan``.
+        self._registry.for_engine(engine).validate_plan(
+            skill_assets=skill_assets,
+            retired_mappings=retired_mappings,
+        )
         # Resolved here, with the other pre-flight checks, because it can fail:
         # doing it at the Passport call would abort after the device allow-list
         # was already written, and the compensating projection would then hit

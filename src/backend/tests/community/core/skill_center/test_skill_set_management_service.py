@@ -485,12 +485,18 @@ def _registry(*, pool_runtime, pool_layouts):
     from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
         EngineRuntimeProjectionRegistry,
     )
+    from agentclaw.community.core.skill_center.services.runtime_projections.whole_artifact import (
+        WholeArtifactRuntimeProjection,
+    )
 
+    # The same routing the DI provider builds. If these two drift, these tests
+    # stop describing production.
     return EngineRuntimeProjectionRegistry(
         default=PerDomainRuntimeProjection(
             pool_runtime=pool_runtime,
             pool_layouts=pool_layouts,
         ),
+        by_engine={"teclaw": WholeArtifactRuntimeProjection()},
     )
 
 
@@ -503,9 +509,17 @@ class _RuntimeFactoryService:
         # them separately: mcp_codes is the whole allow-list, deliveries are
         # only what a mutation actually changed.
         self.deliveries: list[tuple[frozenset[str], frozenset[str]]] = []
+        # Same reason as ``deliveries``, for the other two calls: the scalars
+        # above are last-write-wins and cannot tell one call from four, which
+        # is the whole question on a whole-artifact engine.
+        self.runtime_syncs: list[list[dict]] = []
+        self.mcp_projections: list[
+            tuple[frozenset[str], frozenset[str], set[str]]
+        ] = []
 
     def sync_runtime(self, *, desired_skills: list[dict]) -> bool:
         self.desired_skills = desired_skills
+        self.runtime_syncs.append(desired_skills)
         return True
 
     async def sync_mcp_delivery(
@@ -532,6 +546,7 @@ class _RuntimeFactoryService:
         contract these tests assert on, so a double that flattened it could
         not catch the order being lost.
         """
+        self.mcp_projections.append((claimed, released, declared))
         if not await self.sync_mcp_delivery(claimed=claimed, released=released):
             return False
         return await self.sync_mcp_desired_state(server_codes=declared)
@@ -2571,6 +2586,250 @@ async def test_non_skill_projection_never_writes_skill_mappings():
     assert factory.service.mcp_codes is not None
     assert pool.publish_calls == []
     assert pool.verify_calls == []
+
+
+
+def _teclaw_runtime(factory, *, pool=None, passport=None):
+    """A projector over a teclaw Bot, wired the way production wires one."""
+    return BotRuntimeProjector(
+        factory=factory,
+        bot_repo=_TeclawRuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_TeclawRuntimeSkills()),
+        registry=_registry(
+            pool_runtime=pool or _RuntimePool(),
+            pool_layouts=_RuntimeLayouts(),
+        ),
+        passport=passport or _RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        ProjectionScope(skills=True),
+        ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.a"})),
+        ProjectionScope(mcp=True, released_mcp=frozenset({"mcp.a"})),
+        ProjectionScope(
+            skills=True, mcp=True, claimed_mcp=frozenset({"mcp.a"})
+        ),
+        ProjectionScope.everything(),
+    ],
+    ids=["skills", "mcp-claim", "mcp-release", "both", "everything"],
+)
+@pytest.mark.asyncio
+async def test_teclaw_projects_the_whole_artifact_once_per_scope_shape(scope):
+    """One projection, one delivery — whatever the mutation declared.
+
+    Every shape a production caller constructs. The runtime recomposes the
+    whole artifact from the database and discards its arguments, so a second
+    call could only restate the first; which half a mutation touched cannot
+    change that.
+    """
+    factory = _RuntimeFactory()
+    runtime = _teclaw_runtime(factory)
+
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner", scope=scope,
+    )
+
+    assert len(factory.service.runtime_syncs) == 1
+    assert factory.service.mcp_projections == []
+
+
+@pytest.mark.asyncio
+async def test_teclaw_mcp_only_scope_still_delivers_the_skill_bearing_artifact():
+    """An MCP-only scope still delivers the Skills, because it must.
+
+    Pins the behaviour most likely to be optimised back out: on a per-domain
+    engine ``skills=False`` means "leave the Skill half alone", but here there
+    is no Skill half to leave alone — the one document carries both.
+    """
+    factory = _RuntimeFactory()
+    runtime = _teclaw_runtime(factory)
+
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.a"})),
+    )
+
+    assert len(factory.service.runtime_syncs) == 1
+    assert factory.service.runtime_syncs[0] == [
+        {
+            "id": "8",
+            "name": "repo-skill",
+            "git_path": "git://team/repo-skill",
+            "skill_uuid": None,
+            "sc_version_number": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_teclaw_still_updates_the_passport_with_identity_coloured_items():
+    """The Passport is the platform's record, not the runtime's — it still runs.
+
+    A whole-artifact container is issued a passport-service token as an egress
+    rule, so the manifest must keep pace with the configuration the artifact
+    delivered. And it must still carry ``identity_mode``: sending codes alone
+    asserts Owner for every MCP.
+    """
+    passport = _RuntimePassport()
+    runtime = _teclaw_runtime(_RuntimeFactory(), passport=passport)
+
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.a"})),
+    )
+
+    assert len(passport.calls) == 1
+    scope_sent = passport.calls[0]["resource_scope"]
+    assert "mcp_codes" in scope_sent
+    assert "cli_items" in scope_sent
+    assert all("identity_mode" in item for item in scope_sent["mcp_items"])
+
+
+@pytest.mark.asyncio
+async def test_teclaw_skill_only_scope_makes_no_passport_call():
+    """No MCP change declared, no manifest write — unchanged from today."""
+    passport = _RuntimePassport()
+    runtime = _teclaw_runtime(_RuntimeFactory(), passport=passport)
+
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope(skills=True),
+    )
+
+    assert passport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_teclaw_empty_scope_delivers_nothing():
+    """A scope declaring neither half stays a no-op, as it is today."""
+    passport = _RuntimePassport()
+    factory = _RuntimeFactory()
+    runtime = _teclaw_runtime(factory, passport=passport)
+
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner", scope=ProjectionScope(),
+    )
+
+    assert factory.service.runtime_syncs == []
+    assert factory.service.mcp_projections == []
+    assert passport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_teclaw_failed_delivery_raises_reconcile_error():
+    """A refused delivery still fails closed, so the mutation compensates.
+
+    Teclaw converts compose and transport errors into a falsy result rather
+    than an exception, so the falsy return is the only signal there is.
+    """
+    passport = _RuntimePassport()
+    factory = _RuntimeFactory()
+    factory.service.sync_runtime = lambda **_: False
+    runtime = _teclaw_runtime(factory, passport=passport)
+
+    with pytest.raises(SkillSetRuntimeReconcileError):
+        await runtime.project(
+            bot_id="bot-1", owner_id="true-owner",
+            scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.a"})),
+        )
+
+    assert passport.calls == []
+
+
+def test_registry_defaults_unknown_engines_to_the_per_domain_projection():
+    """An unregistered engine gets the per-domain contract.
+
+    What keeps ``claude_code`` / ``aicoding`` / ``hermes`` working without an
+    entry each, and what makes mis-routing an engine take a wrong entry rather
+    than a forgotten right one.
+    """
+    from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
+        PerDomainRuntimeProjection,
+    )
+    from agentclaw.community.core.skill_center.services.runtime_projections.whole_artifact import (
+        WholeArtifactRuntimeProjection,
+    )
+
+    registry = _registry(
+        pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()
+    )
+
+    for engine in ("openclaw", "claude_code", "aicoding", "hermes", "unheard-of"):
+        assert isinstance(
+            registry.for_engine(engine), PerDomainRuntimeProjection
+        ), engine
+    assert isinstance(
+        registry.for_engine("teclaw"), WholeArtifactRuntimeProjection
+    )
+
+
+def test_projector_and_per_domain_contain_no_engine_identity_test():
+    """Neither module may test which engine it is looking at.
+
+    The point of the seam: how a runtime consumes a projection is the engine's
+    fact, answered by its own implementation. A reintroduced ``== "teclaw"``
+    here would work, which is exactly why it needs catching mechanically.
+    """
+    from pathlib import Path
+
+    from agentclaw.community.core.skill_center.services import (
+        bot_runtime_projector,
+    )
+    from agentclaw.community.core.skill_center.services.runtime_projections import (
+        per_domain,
+    )
+
+    for module in (bot_runtime_projector, per_domain):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        assert "teclaw" not in source, (
+            f"{Path(module.__file__).name} names an engine. Engine-specific "
+            "runtime behaviour belongs in that engine's "
+            "EngineRuntimeProjection, registered by engine, not branched on "
+            "here."
+        )
+
+
+
+@pytest.mark.asyncio
+async def test_per_domain_engine_keeps_the_scope_split():
+    """A per-domain engine still writes only the half the mutation declared.
+
+    The regression guard for the whole change: whatever a whole-artifact
+    engine does, an engine whose Skill and MCP halves have separate runtime
+    endpoints must keep saving the round trip. An MCP-only scope touches the
+    MCP half and nothing else, and the claimed set is still guarded down to
+    what the projection actually resolved.
+    """
+    pool = _RuntimePool()
+    factory = _RuntimeFactory()
+    runtime = BotRuntimeProjector(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.a"})),
+    )
+
+    assert factory.service.runtime_syncs == []
+    assert len(factory.service.mcp_projections) == 1
+    claimed, released, declared = factory.service.mcp_projections[0]
+    # Guarded against the projected set: a code the projection never resolved
+    # cannot be claimed just because the mutation named it.
+    assert claimed <= set(declared)
+    assert released == frozenset()
+    assert pool.publish_calls == []
 
 
 # ── Skill mutations carry the Skill's MCP dependencies ───────────────

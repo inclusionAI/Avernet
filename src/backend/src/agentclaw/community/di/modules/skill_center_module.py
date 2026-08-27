@@ -571,12 +571,16 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
             PerDomainRuntimeProjection,
         )
+        from agentclaw.community.core.skill_center.services.runtime_projections.whole_artifact import (
+            WholeArtifactRuntimeProjection,
+        )
 
         return EngineRuntimeProjectionRegistry(
             default=PerDomainRuntimeProjection(
                 pool_runtime=pool_runtime,
                 pool_layouts=pool_layouts,
             ),
+            by_engine={"teclaw": WholeArtifactRuntimeProjection()},
         )
 
     @singleton
