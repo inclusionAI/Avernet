@@ -17,6 +17,8 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
+import httpx
+
 from agentclaw.community.core.task.task_discovery.models import (
     DiscoveredTask,
     DiscoverySession,
@@ -52,6 +54,7 @@ class OpenApiBotSessionInitiator:
         openapi_bot: OpenApiBotPort,
         *,
         frontend_url: str = "http://localhost:8000",
+        backend_url: str = "http://localhost:8888",
         ensure_grant: bool = False,
     ):
         """
@@ -59,11 +62,13 @@ class OpenApiBotSessionInitiator:
             openapi_bot: BaaS Open API 适配器 (已内含 Bearer api_key 鉴权)。
             frontend_url: 前端 workbench 地址 (用于构建 session_url)。
                 运行时可通过 ``FrontendUrlHolder`` (API 注入) 覆盖。
+            backend_url: 当前 backend 服务地址 (用于创建 session 后更新 title)。
             ensure_grant: 是否对 bot 执行 allowed-bots 校验 + grant 流程。
                 corp 预授权模式默认 False (OOB 预授权); 测试/联调可设 True。
         """
         self._openapi_bot = openapi_bot
         self._frontend_url = frontend_url
+        self._backend_url = backend_url
         self._ensure_grant = ensure_grant
 
     async def initiate_session(
@@ -138,7 +143,10 @@ class OpenApiBotSessionInitiator:
             session_id, result.run_id, bot_id,
         )
 
-        # ── Step 4: 构建 session_url ────────────────────────────
+        # ── Step 4: 更新 session title (send_message 不传 title，需单独调) ──
+        await self._update_session_title(session_id, title, bot_id, owner_id)
+
+        # ── Step 5: 构建 session_url ────────────────────────────
         session_url = self._build_session_url(session_id, bot_id, owner_id)
 
         return DiscoverySession(
@@ -158,7 +166,7 @@ class OpenApiBotSessionInitiator:
           验收标准   ← task.acceptances (为空则提示确认时补充)
           约束       ← task.background
         """
-        lines = ["/task 我为您发现了以下可能有意义的事情，请确认是否执行：\n"]
+        lines = ["/task 用taskloop 这个skill。\n"]
         for i, task in enumerate(tasks, 1):
             lines.append(f"{i}. 【{task.title}】")
             lines.append(f"   目标：{task.objective or task.title}")
@@ -176,6 +184,44 @@ class OpenApiBotSessionInitiator:
         lines.append("请向用户展示以上任务，并询问是否确认执行。")
         return "\n".join(lines)
 
+    async def _update_session_title(
+        self, session_id: str, title: str, bot_id: str, owner_id: str,
+    ) -> None:
+        """创建 session 后单独更新 title（BaaS send_message 不传 title，需额外调一次）。
+
+        调用 backend 自身的 ``PATCH /openapi/v1/bots/{bot_id}/sessions/{session_id}``
+        接口，backend 内部通过 relay 转发到 engine 的
+        ``POST /api/sessions/{session_id}/update``。
+
+        失败不阻断主流程（non-fatal），仅记录 warning。
+        """
+        base = self._backend_url.rstrip("/")
+        encoded_sid = quote(f"agent:main:{session_id}", safe="")
+        url = f"{base}/openapi/v1/bots/{bot_id}/sessions/{encoded_sid}"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as cli:
+                resp = await cli.patch(
+                    url,
+                    json={"title": title},
+                    params={"user_id": owner_id, "owner_id": owner_id},
+                    headers={"x-user-id": owner_id},
+                )
+                if resp.status_code == 200:
+                    logger.info(
+                        "[task_discovery] session title updated: id=%s title=%s",
+                        session_id, title,
+                    )
+                else:
+                    logger.warning(
+                        "[task_discovery] session title update failed (non-fatal): "
+                        "HTTP %s — %s",
+                        resp.status_code, resp.text[:200],
+                    )
+        except Exception as exc:
+            logger.warning(
+                "[task_discovery] session title update error (non-fatal): %s", exc,
+            )
+
     def _build_session_url(self, session_id: str, bot_id: str, owner_id: str) -> str:
         """构建前端 workbench session URL — 生产前端路由格式。
 
@@ -185,7 +231,11 @@ class OpenApiBotSessionInitiator:
         动态解析 frontend URL — 支持运行时 API 注入 (FrontendUrlHolder)。
         """
         base = (FrontendUrlHolder.get() or self._frontend_url).rstrip("/")
-        full_session_key = f"agent:main:{session_id}"
+        full_session_key = (
+            session_id
+            if session_id.startswith("agent:main:")
+            else f"agent:main:{session_id}"
+        )
         bot_value = f"{bot_id}:{owner_id}"
         return (
             f"{base}/workspace"

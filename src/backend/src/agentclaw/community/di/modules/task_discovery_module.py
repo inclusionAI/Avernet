@@ -177,6 +177,7 @@ class TaskDiscoveryModule(Module):
                     return OpenApiBotSessionInitiator(
                         openapi_bot=openapi_bot,
                         frontend_url=_resolve_frontend_url(),
+                        backend_url=_resolve_backend_url(),
                     )
                 logger.warning(
                     "[task_discovery] OpenApiBotPort resolved to None (fail-closed) "
