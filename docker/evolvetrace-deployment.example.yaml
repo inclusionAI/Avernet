@@ -1,0 +1,103 @@
+# -----------------------------------------------------------------------------
+# Example Kubernetes manifests for deploying evolvetrace on Aliyun ACK.
+#
+# Usage:
+#   1. Replace placeholder values in evolvetrace.env.
+#   2. Generate and apply deployment via docker/deploy.sh, or apply manually:
+#      kubectl apply -f evolvetrace-secret.yaml
+#      kubectl apply -f evolvetrace-configmap.yaml
+#      kubectl apply -f evolvetrace-deployment.yaml
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: evolvetrace-config
+  namespace: default
+data:
+  # Non-sensitive configuration
+  PORT: "3001"
+  DATABASE_MODE: "mysql"
+  MYSQL_HOST: "rm-xxxxxxxxxxxxxxxx.mysql.cn-beijing.rds.aliyuncs.com"
+  MYSQL_PORT: "3306"
+  MYSQL_DATABASE: "evolvetrace"
+  EVOLVETRACE_ENV: "prod"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: evolvetrace-secrets
+  namespace: default
+type: Opaque
+stringData:
+  # Sensitive values. Use kubectl create secret or external secrets manager.
+  MYSQL_USER: "REPLACE_WITH_REAL_MYSQL_USER"
+  MYSQL_PASSWORD: "REPLACE_WITH_REAL_MYSQL_PASSWORD"
+  ADMIN_USER_IDS: ""
+  EVOLVETRACE_INTERNAL_PUBLIC_KEY_B64: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: evolvetrace
+  namespace: default
+  labels:
+    app: evolvetrace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: evolvetrace
+  template:
+    metadata:
+      labels:
+        app: evolvetrace
+    spec:
+      containers:
+        - name: evolvetrace
+          image: avernet-registry.cn-beijing.cr.aliyuncs.com/avernet/service-evolvetrace:20260826
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3001
+              name: http
+          envFrom:
+            - configMapRef:
+                name: evolvetrace-config
+            - secretRef:
+                name: evolvetrace-secrets
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: evolvetrace
+  namespace: default
+spec:
+  type: ClusterIP
+  selector:
+    app: evolvetrace
+  ports:
+    - port: 80
+      targetPort: 3001
+      name: http

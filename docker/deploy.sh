@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Deploy bcsfuse to Kubernetes.
+# Deploy a service to Kubernetes.
 #
 # Usage:
 #   cd /home/xhunter/avernet-deploy
-#   /path/to/Avernet/docker/deploy.sh bcsfuse <image:tag>
+#   /path/to/Avernet/docker/deploy.sh <service> <image:tag>
+#
+# Supported services: bcsfuse, evolvetrace
 #
 # Example:
 #   /path/to/Avernet/docker/deploy.sh bcsfuse \
 #     avernet-registry.cn-beijing.cr.aliyuncs.com/avernet/service-bcsfuse:20260826
+#   /path/to/Avernet/docker/deploy.sh evolvetrace \
+#     avernet-registry.cn-beijing.cr.aliyuncs.com/avernet/service-evolvetrace:20260826
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -17,18 +21,19 @@ SERVICE="${1:-}"
 IMAGE="${2:-}"
 
 if [ -z "$SERVICE" ] || [ -z "$IMAGE" ]; then
-    echo "usage: $(basename "$0") bcsfuse <image:tag>" >&2
+    echo "usage: $(basename "$0") <service> <image:tag>" >&2
+    echo "  services: bcsfuse, evolvetrace" >&2
     exit 2
 fi
 
-if [ "$SERVICE" != "bcsfuse" ]; then
-    echo "error: unsupported service '${SERVICE}' (only 'bcsfuse' is supported)" >&2
+if [ "$SERVICE" != "bcsfuse" ] && [ "$SERVICE" != "evolvetrace" ]; then
+    echo "error: unsupported service '${SERVICE}' (only 'bcsfuse' and 'evolvetrace' are supported)" >&2
     exit 2
 fi
 
-ENV_FILE="./bcsfuse.env"
-DEPLOYMENT_FILE="./bcsfuse-deployment.yaml"
-EXAMPLE_ENV_FILE="${SCRIPT_DIR}/bcsfuse.env.example"
+ENV_FILE="./${SERVICE}.env"
+DEPLOYMENT_FILE="./${SERVICE}-deployment.yaml"
+EXAMPLE_ENV_FILE="${SCRIPT_DIR}/${SERVICE}.env.example"
 
 if [ ! -f "$ENV_FILE" ]; then
     if [ ! -f "$EXAMPLE_ENV_FILE" ]; then
@@ -56,6 +61,7 @@ else
 fi
 
 python3 "${SCRIPT_DIR}/generate_deploy_config.py" \
+    --service "$SERVICE" \
     --env "$ENV_FILE" \
     --no-mask \
     "$PWD" \
