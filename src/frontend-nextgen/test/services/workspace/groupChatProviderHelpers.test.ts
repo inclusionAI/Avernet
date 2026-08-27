@@ -127,17 +127,11 @@ describe('resolveGroupGatewayOrigin — 资源标签直连网关', () => {
   });
 
   it('renderoffice PRE/DEV hostname 返回 https pre 网关', () => {
-    expect(resolveGroupGatewayOrigin('app-pre.example.com')).toBe(
-      'https://gateway-pre.example.com',
-    );
-    expect(resolveGroupGatewayOrigin('app-dev.example.com')).toBe(
-      'https://gateway-pre.example.com',
-    );
+    expect(resolveGroupGatewayOrigin('app-pre.example.com')).toBe('https://gateway-pre.example.com');
+    expect(resolveGroupGatewayOrigin('app-dev.example.com')).toBe('https://gateway-pre.example.com');
   });
 
   it('renderoffice PROD hostname 返回 https prod 网关', () => {
-    expect(resolveGroupGatewayOrigin('app.example.com')).toBe(
-      'https://gateway.example.com',
-    );
+    expect(resolveGroupGatewayOrigin('app.example.com')).toBe('https://gateway.example.com');
   });
 });

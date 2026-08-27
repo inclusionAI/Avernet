@@ -7,7 +7,8 @@ if (!preset) throw new Error(`Unknown PRESET: ${presetName}`);
 
 const gateway = process.env.TEAMCLAW_GW_BASE || preset.servers.TEAMCLAW_GW;
 const admin = process.env.TEAMCLAW_ADMIN_BASE || preset.servers.TEAMCLAW_ADMIN;
-const privateChatManagement = process.env.TEAMCLAW_PRIVATE_CHAT_MANAGEMENT_BASE || preset.servers.PRIVATE_CHAT_MANAGEMENT;
+const privateChatManagement =
+  process.env.TEAMCLAW_PRIVATE_CHAT_MANAGEMENT_BASE || preset.servers.PRIVATE_CHAT_MANAGEMENT;
 const privateChatSession = process.env.TEAMCLAW_PRIVATE_CHAT_SESSION_BASE || preset.servers.PRIVATE_CHAT_SESSION;
 const clawweb = process.env.TEAMCLAW_CLAWWEB_BASE || preset.servers.CLAWWEB;
 const auth = process.env.TEAMCLAW_AUTH_BASE || gateway;
@@ -34,7 +35,8 @@ export default defineConfig({
     },
   },
   define: {
-    TEAMCLAW_DEV_ENV: presetName === 'prod' ? 'PROD' : presetName === 'pre' ? 'PRE' : presetName === 'dev' ? 'DEV' : 'LOCAL',
+    TEAMCLAW_DEV_ENV:
+      presetName === 'prod' ? 'PROD' : presetName === 'pre' ? 'PRE' : presetName === 'dev' ? 'DEV' : 'LOCAL',
     TEAMCLAW_OPENAPI_USER_ID: '',
     TEAMCLAW_GW_BASE: gateway,
     TEAMCLAW_ADMIN_BASE: admin,

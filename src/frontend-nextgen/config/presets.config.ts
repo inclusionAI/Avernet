@@ -1,7 +1,11 @@
 import type { ServerConfig, ServerConfigMap } from './servers.config';
 
 type LogLevel = 'silent' | 'error' | 'warn' | 'debug';
-export interface PresetConfig { name: string; servers: ServerConfig; logLevel: LogLevel }
+export interface PresetConfig {
+  name: string;
+  servers: ServerConfig;
+  logLevel: LogLevel;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const SERVERS = require('./servers.config').SERVERS as ServerConfigMap;

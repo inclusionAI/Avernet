@@ -1,7 +1,13 @@
 jest.mock('@umijs/max', () => ({ request: jest.fn() }));
 
+import {
+  AUTH_ENDPOINTS,
+  getAuthProviders,
+  getCurrentAuthUser,
+  logoutAuthSession,
+  refreshAuthSession,
+} from '@/services/auth/authApiController';
 import { request } from '@umijs/max';
-import { AUTH_ENDPOINTS, getAuthProviders, getCurrentAuthUser, logoutAuthSession, refreshAuthSession } from '@/services/auth/authApiController';
 
 describe('authApiController', () => {
   beforeEach(() => jest.clearAllMocks());

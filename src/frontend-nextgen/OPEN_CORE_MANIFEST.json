@@ -1,7 +1,7 @@
 {
   "sourceRepository": "teamclaw",
-  "sourceCommit": "3ca1301e102a1a85d2fadae5a6b01cf5d14f42c2",
-  "sourceDirty": true,
+  "sourceCommit": "ef7c6e2e9e33b3671eb6343b028117afa032f7c6",
+  "sourceDirty": false,
   "exportSchemaVersion": 1,
   "target": "src/frontend-nextgen",
   "tcChatVersion": "2.0.0"
