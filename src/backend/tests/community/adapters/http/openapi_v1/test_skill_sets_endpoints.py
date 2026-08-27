@@ -9,8 +9,8 @@ from injector import Injector, Module
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.skill_sets.router import router
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
+from agentclaw.community.api.skill_set_management_service import (
+    SkillSetManagementServiceProtocol,
 )
 from tests.community.adapters.http.openapi_v1.conftest import (
     bind_bot_access_seam,
@@ -88,14 +88,14 @@ class _ControlPlane:
             "changed": True,
         }
 
-    def resources(self, **_kwargs):
+    def list_resources(self, **_kwargs):
         return []
 
 
 def _client(control: _ControlPlane) -> TestClient:
     class Bindings(Module):
         def configure(self, binder):
-            binder.bind(SkillSetControlPlaneServiceProtocol, to=control)
+            binder.bind(SkillSetManagementServiceProtocol, to=control)
             # These operations now declare ``Check(MEMBER)``, so every route
             # here carries the seam and it fails closed against an unwired app.
             # ``actor`` owns ``bot-1`` in these tests, so the level resolves to
@@ -157,7 +157,7 @@ def test_a_caller_with_no_relation_is_refused_before_the_control_plane_runs():
 
     class Bindings(Module):
         def configure(self, binder):
-            binder.bind(SkillSetControlPlaneServiceProtocol, to=control)
+            binder.bind(SkillSetManagementServiceProtocol, to=control)
             # Default ``SeamCollaborators`` holds ``PermissionLevel.NONE``, and
             # here the caller does not own the bot either, so nothing
             # short-circuits to OWNER.

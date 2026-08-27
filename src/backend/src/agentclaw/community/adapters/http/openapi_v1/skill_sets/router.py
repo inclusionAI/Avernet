@@ -23,8 +23,8 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
+from agentclaw.community.api.skill_set_management_service import (
+    SkillSetManagementServiceProtocol,
 )
 from agentclaw.community.di import Injected
 
@@ -74,8 +74,8 @@ async def list_skill_sets(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[list[SkillSetItem]]:
     items = service.list_sets(
@@ -95,8 +95,8 @@ async def create_skill_set(
     user_id: UserIdDep,
     request: Request,
     response: Response,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[SkillSetItem]:
     item = service.create_set(
@@ -117,11 +117,11 @@ async def resources(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[list[SkillSetResourceItem]]:
-    items = service.resources(
+    items = service.list_resources(
         bot_id=bot_id,
         owner_id=owner_id,
         user_id=user_id,
@@ -147,8 +147,8 @@ async def get_skill_set(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[SkillSetItem]:
     item = service.get_set(
@@ -169,8 +169,8 @@ async def update_skill_set(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[SkillSetItem]:
     item = service.update_set(
@@ -192,8 +192,8 @@ async def delete_skill_set(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[Deleted]:
     service.delete_set(
@@ -213,8 +213,8 @@ async def list_set_skills(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[list[SkillSetSkillItem]]:
     items = service.list_skills(
@@ -248,8 +248,8 @@ async def add_skill(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[SkillSetMembershipResult]:
     result = await service.add_skill(
@@ -274,8 +274,8 @@ async def remove_skill(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[SkillSetMembershipResult]:
     result = await service.remove_skill(
@@ -296,8 +296,8 @@ async def list_set_mcps(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[list[SkillSetMcpItem]]:
     items = service.list_mcps(
@@ -320,11 +320,11 @@ async def mcp_permissions(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[list[SkillSetMcpPermission]]:
-    items = service.mcp_permissions(
+    items = service.list_mcp_permissions(
         bot_id=bot_id,
         owner_id=owner_id,
         user_id=user_id,
@@ -345,8 +345,8 @@ async def request_mcp_permissions(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[list[SkillSetMcpPermissionRequest]]:
     items = service.request_mcp_permissions(
@@ -374,8 +374,8 @@ async def add_mcp(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[SkillSetMembershipResult]:
     result = await service.add_mcp(
@@ -400,8 +400,8 @@ async def remove_mcp(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[SkillSetMembershipResult]:
     result = await service.remove_mcp(
@@ -422,8 +422,8 @@ async def activate(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[SkillSetItem]:
     item = await service.activate(
@@ -443,8 +443,8 @@ async def deactivate(
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
-    service: SkillSetControlPlaneServiceProtocol = Injected(
-        SkillSetControlPlaneServiceProtocol
+    service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[SkillSetItem]:
     item = await service.deactivate(

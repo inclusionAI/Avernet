@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session, sessionmaker
 
 from gateway.community.logger import get_logger
-from gateway.community.spi.database import DatabasePluginConfig, DataSourcePlugin
+from gateway.community.spi.database import DataSourcePlugin
 
 logger = get_logger("database")
 
@@ -48,11 +48,21 @@ class SqliteDatabasePlugin(DataSourcePlugin):
     Supports both sync and async sessions.
     """
 
-    def __init__(self, database_url: str = "sqlite:///:memory:") -> None:
-        logger.info("SqliteDatabasePlugin initializing, database_url=%s", database_url)
+    def __init__(
+        self,
+        database_url: str = "sqlite:///:memory:",
+        *,
+        create_schema: bool = True,
+        seed_data: bool = True,
+    ) -> None:
+        self._create_schema = create_schema
+        self._seed_data = seed_data
+
+        resolved_url = database_url or "sqlite:///:memory:"
+        logger.info("SqliteDatabasePlugin initializing, database_url=%s", resolved_url)
 
         self._sync_engine: Engine = create_engine(
-            database_url,
+            resolved_url,
             echo=False,
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
@@ -68,7 +78,7 @@ class SqliteDatabasePlugin(DataSourcePlugin):
         self._async_engine = None
         self._async_session_factory = None
         try:
-            async_url = database_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+            async_url = resolved_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
             self._async_engine = create_async_engine(
                 async_url,
                 echo=False,
@@ -143,22 +153,25 @@ class SqliteDatabasePlugin(DataSourcePlugin):
         composition root, which may import core) to respect layer rules.
         """
 
-    def init_database(self, config: DatabasePluginConfig) -> None:
-        """Configure schema and create tables.
+    def init_database(self) -> None:
+        """Create schema using the ``create_schema`` / ``seed_data`` flags.
 
-        Resolves the database URL from ``DATABASE_URL`` env var,
-        ``config.db_url``, or falls back to ``sqlite:///:memory:``.
-        Calls ``create_all()`` only — seeding is handled by the bootstrap
-        composition root (``bootstrap._database.initialize_database``).
+        URL and flags are sealed in ``__init__`` (matching the baas
+        ``SqliteOrmPlugin`` pattern); this no-arg activation runs
+        ``create_all()`` and (optionally) ``seed()``.
         """
-        import os
+        if self._create_schema:
+            self.create_all()
+        else:
+            logger.info(
+                "SqliteDatabasePlugin: schema creation disabled (create_schema=false)"
+            )
 
-        resolved_url = (
-            os.environ.get("DATABASE_URL") or config.db_url or "sqlite:///:memory:"
-        )
-        logger.info("init_database: database_url=%s", resolved_url)
-
-        self.create_all()
+        if self._seed_data:
+            with self.orm_session() as session:
+                self.seed(session)
+        else:
+            logger.info("SqliteDatabasePlugin: seed disabled (seed_data=false)")
 
         logger.info("init_database: schema created")
 

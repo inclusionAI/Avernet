@@ -52,6 +52,31 @@ class StaffDeptInfo:
     dept_path: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class UserIdentityInfo:
+    """A person's identity + department, read from the staff directory for an
+    arbitrary work number.
+
+    Every field except ``work_no`` is ``str | None``: ``None`` is an
+    intentional contract state (the directory genuinely supplies no value),
+    null rather than invented when absent. An all-``None`` info (identity and
+    dept all null) means "looked up, no record" — the ``200`` + null answer,
+    distinct from a :class:`DeptLookupError` ("directory down", 5xx). Used by
+    the ``GET /openapi/v1/org/user?user_id=`` directory-lookup branch to return
+    another user's identity + dept; the whoami no-param branch still reads
+    identity off the verified principal and uses ``get_dept_by_work_no`` for
+    dept only (self identity is authoritative from the signed principal).
+    """
+
+    work_no: str
+    username: Optional[str] = None
+    display_name: Optional[str] = None
+    full_name: Optional[str] = None
+    dept_no: Optional[str] = None
+    dept_name: Optional[str] = None
+    dept_path: Optional[str] = None
+
+
 class DeptSearchItem(BaseModel):
     """One department returned by a keyword search of the directory.
 
@@ -92,6 +117,19 @@ class StaffDeptPlugin(Plugin, Protocol):
         ``StaffDeptInfo()`` — "no dept", not a failure. A real impl that reached
         the service and found no record / a record with no dept returns the same
         all-``None`` shape. Only an unreachable or erroring service raises.
+        """
+        ...
+
+    def get_user_by_work_no(self, *, work_no: str) -> UserIdentityInfo:
+        """Return the identity+department for ``work_no``, or an all-``None`` info.
+
+        Implementations with no staff service (community / local) return
+        ``UserIdentityInfo(work_no=work_no)`` — "no record", not a failure. A
+        real impl that reached the service and found no record returns the same
+        all-``None`` shape. Only an unreachable or erroring service raises
+        :class:`DeptLookupError` — so the caller answers "no record" (200 +
+        null) apart from "directory down" (5xx), the same split
+        ``get_dept_by_work_no`` makes.
         """
         ...
 

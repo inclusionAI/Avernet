@@ -11,20 +11,11 @@ from typing import Callable
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
-from agentclaw.community.api.bot_runtime_projection_reconciler import (
-    BotRuntimeProjectionReconcilerProtocol as ApiBotRuntimeProjectionReconcilerProtocol,
-)
-from agentclaw.community.api.bot_skill_asset_service import (
-    BotSkillAssetServiceProtocol,
+from agentclaw.community.api.bot_runtime_projector import (
+    BotRuntimeProjectorProtocol as ApiBotRuntimeProjectorProtocol,
 )
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
-)
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
-)
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
 )
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
@@ -36,8 +27,17 @@ from agentclaw.community.api.skill_market_service import SkillMarketServiceProto
 from agentclaw.community.api.skill_parameter_service_factory import (
     SkillParameterServiceFactoryProtocol,
 )
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
+from agentclaw.community.api.bot_capability_state_reader import (
+    BotCapabilityStateReaderProtocol as ApiBotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
+)
+from agentclaw.community.api.skill_query_service import (
+    SkillQueryServiceProtocol,
+)
+from agentclaw.community.api.skill_set_management_service import (
+    SkillSetManagementServiceProtocol,
 )
 from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
 from agentclaw.community.core.bot_collaborator.protocols import (
@@ -51,18 +51,15 @@ from agentclaw.community.core.devices.services.device_filesystem_dispatcher impo
     DeviceFilesystemDispatcher,
     DeviceFileSystemResolver,
 )
-from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+from agentclaw.community.plugin_api.device_sync_dispatcher import (
     DeviceSyncDispatcher,
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
-from agentclaw.community.core.repository.implementations.skill_center.installation import (
-    SkillInstallationRepository,
-)
 from agentclaw.community.core.repository.implementations.skill_center.propagation_log import \
     SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository
-from agentclaw.community.core.repository.implementations.skill_center.skill_set_control_plane import (
-    SkillSetControlPlaneRepository,
+from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
+    CapabilityDesiredStateRepository,
 )
 from agentclaw.community.core.repository.implementations.skill_center.space_skill import (
     SpaceSkillRepository as UnifiedSpaceSkillRepository,
@@ -92,17 +89,11 @@ from agentclaw.community.core.repository.protocols.skill_center import (
 from agentclaw.community.core.repository.protocols.skill_center import (
     SpaceSkillRepository,
 )
-from agentclaw.community.core.repository.protocols.skill_installation import (
-    SkillInstallationRepositoryProtocol,
-)
-from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
-    SkillSetControlPlaneRepositoryProtocol,
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
-)
-from agentclaw.community.core.repository.protocols.skills_pool import (
-    SkillsPoolSkillRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.authorization_hook import (
     BotCapabilityAuthorizationHookProtocol,
@@ -116,17 +107,20 @@ from agentclaw.community.core.skill_center.factories import (
 from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
     LegacySkillSetCompatibilityFactoryProtocol,
 )
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol as CoreBotCapabilityStateReaderProtocol,
+)
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
-    BotRuntimeProjectionReconcilerProtocol as CoreBotRuntimeProjectionReconcilerProtocol,
+    BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
 )
-from agentclaw.community.core.skill_center.services.active_skillset_installation_materializer import (
-    ActiveSkillSetInstallationMaterializer,
+from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
+    PlatformDefaultMcpPolicy,
 )
-from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
-    BotRuntimeProjectionReconciler,
+from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
+    BotCapabilityStateReader,
 )
-from agentclaw.community.core.skill_center.services.bot_skill_asset_service import (
-    BotSkillAssetService,
+from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
+    BotRuntimeProjector,
 )
 from agentclaw.community.core.skill_center.services.git_sync import (
     GitSyncConfig,
@@ -134,12 +128,6 @@ from agentclaw.community.core.skill_center.services.git_sync import (
 )
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
-)
-from agentclaw.community.core.skill_center.services.local_skill_query_service import (
-    LocalSkillQueryService,
-)
-from agentclaw.community.core.skill_center.services.local_skill_state_service import (
-    LocalSkillStateService,
 )
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
@@ -167,16 +155,19 @@ from agentclaw.community.core.skill_center.services.skill_member_service import 
 from agentclaw.community.core.skill_center.services.skill_propagation_service import (
     SkillPropagationService,
 )
+from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.services.skill_publish_service import (
     SkillPublishService,
 )
-from agentclaw.community.core.skill_center.services.skill_scan import SkillScanService
-from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
-    SkillSetControlPlaneService,
+from agentclaw.community.core.skill_center.services.skill_query_service import (
+    SkillQueryService,
 )
-from agentclaw.community.core.skill_center.services.skill_set_service import (
-    SkillSetActivatorFactory,
-    SkillSetSwitcherFactory,
+from agentclaw.community.core.skill_center.services.skill_scan import SkillScanService
+from agentclaw.community.core.skill_center.services.direct_activation_service import (
+    DirectActivationService,
+)
+from agentclaw.community.core.skill_center.services.skill_set_management_service import (
+    SkillSetManagementService,
 )
 from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
     SkillSymlinkListener,
@@ -205,7 +196,9 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.impl_registry import IMPL_REGISTRY, Mode
+from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
+from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
@@ -223,9 +216,12 @@ def _template_service_cls():
 
 def _build__ext_info_provider(injector: Injector):
     def provider(bot_id: str) -> dict | None:
-        template_config = injector.get(_template_service_cls()).get_template_config(
-            bot_id
-        )
+        # The strict lookup: "no template" is None, a repository failure
+        # raises. Read-side consumers catch and degrade; the Default-MCP
+        # exclusion gate must not mistake a failed lookup for "no presets".
+        template_config = injector.get(
+            _template_service_cls()
+        ).get_template_config_strict(bot_id)
         if not isinstance(template_config, dict):
             return None
         return {"template_config": template_config}
@@ -300,23 +296,13 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             scope=singleton,
         )
         binder.bind(
-            SkillInstallationRepositoryProtocol,
-            to=SkillInstallationRepository,
+            CapabilityDesiredStateRepository,
+            to=CapabilityDesiredStateRepository,
             scope=singleton,
         )
         binder.bind(
-            SkillSetControlPlaneRepository,
-            to=SkillSetControlPlaneRepository,
-            scope=singleton,
-        )
-        binder.bind(
-            SkillSetControlPlaneRepositoryProtocol,
-            to=SkillSetControlPlaneRepository,
-            scope=singleton,
-        )
-        binder.bind(
-            ActiveSkillSetInstallationMaterializer,
-            to=ActiveSkillSetInstallationMaterializer,
+            CapabilityDesiredStateRepositoryProtocol,
+            to=CapabilityDesiredStateRepository,
             scope=singleton,
         )
         binder.bind(
@@ -325,13 +311,18 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             scope=singleton,
         )
         binder.bind(
-            BotRuntimeProjectionReconciler,
-            to=BotRuntimeProjectionReconciler,
+            BotRuntimeProjector,
+            to=BotRuntimeProjector,
             scope=singleton,
         )
         binder.bind(
-            SkillSetControlPlaneServiceProtocol,
-            to=SkillSetControlPlaneService,
+            DirectActivationServiceProtocol,
+            to=DirectActivationService,
+            scope=singleton,
+        )
+        binder.bind(
+            BotCapabilityStateReader,
+            to=BotCapabilityStateReader,
             scope=singleton,
         )
         binder.bind(
@@ -348,9 +339,27 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
     @singleton
     @provider
     @inject
+    def core_capability_state_reader_protocol(
+        self, service: BotCapabilityStateReader
+    ) -> CoreBotCapabilityStateReaderProtocol:
+        """Expose the one reader singleton to Core consumers."""
+        return service
+
+    @singleton
+    @provider
+    @inject
+    def api_capability_state_reader_protocol(
+        self, service: BotCapabilityStateReader
+    ) -> ApiBotCapabilityStateReaderProtocol:
+        """Expose that same singleton through the public Service API."""
+        return service
+
+    @singleton
+    @provider
+    @inject
     def core_runtime_projection_reconciler_protocol(
-        self, service: BotRuntimeProjectionReconciler
-    ) -> CoreBotRuntimeProjectionReconcilerProtocol:
+        self, service: BotRuntimeProjector
+    ) -> CoreBotRuntimeProjectorProtocol:
         """Expose the one reconciler singleton to Core consumers."""
         return service
 
@@ -358,10 +367,19 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
     @provider
     @inject
     def api_runtime_projection_reconciler_protocol(
-        self, service: BotRuntimeProjectionReconciler
-    ) -> ApiBotRuntimeProjectionReconcilerProtocol:
+        self, service: BotRuntimeProjector
+    ) -> ApiBotRuntimeProjectorProtocol:
         """Expose that same singleton through the public Service API."""
         return service
+
+    @singleton
+    @provider
+    @inject
+    def platform_default_mcp_policy(
+        self, injector: Injector
+    ) -> PlatformDefaultMcpPolicy:
+        """Strict engine/template Default MCP policy shared by Direct writes."""
+        return PlatformDefaultMcpPolicy(_build__ext_info_provider(injector))
 
     @singleton
     @provider
@@ -399,19 +417,60 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
     @singleton
     @provider
     @inject
-    def local_skill_query_service(
+    def skill_query_service(
         self,
         skill_repo: SkillRepository,
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
-        skill_sets: SkillSetControlPlaneRepositoryProtocol,
-    ) -> LocalSkillQueryServiceProtocol:
-        """Bind the public Bot-Skill desired-state query service."""
-        return LocalSkillQueryService(
-            skill_repo=skill_repo,
-            bot_repo=bot_repo,
-            collaborator_service=collaborator_service,
-            skill_sets=skill_sets,
+        reader: CoreBotCapabilityStateReaderProtocol,
+        skill_service_factory: SkillServiceFactory,
+        parameter_service_factory: SkillParameterServiceFactoryProtocol,
+        injector: Injector,
+    ) -> SkillQueryServiceProtocol:
+        """Bind the one Bot-Skill query seam (listing/detail/content/params)."""
+        return SkillQueryService(
+            skill_repo,
+            bot_repo,
+            collaborator_service,
+            reader,
+            skill_service_factory,
+            parameter_service_factory,
+            lambda: injector.get(DeviceContextResolver),
+        )
+
+    @singleton
+    @provider
+    @inject
+    def skill_set_management_service(
+        self,
+        repository: CapabilityDesiredStateRepositoryProtocol,
+        bot_repo: BotRepository,
+        runtime: CoreBotRuntimeProjectorProtocol,
+        legacy_factory: LegacySkillSetCompatibilityFactoryProtocol,
+        passport: PassportPlugin,
+        authorization: BotCapabilityAuthorizationHookProtocol,
+        audit_log_repo: BotCollabLogRepositoryProtocol,
+        mcp_center: MCPCenterPlugin,
+        mcp_auth: MCPAuthPlugin,
+        injector: Injector,
+    ) -> SkillSetManagementServiceProtocol:
+        """Bind the Set-scoped command service with the template ext seam.
+
+        A provider rather than a class binding because the ext-info provider
+        is a plain callable, not an injectable key — it carries the same
+        best-effort template context the read-side default-MCP union uses.
+        """
+        return SkillSetManagementService(
+            repository,
+            bot_repo,
+            runtime,
+            legacy_factory,
+            passport,
+            authorization,
+            audit_log_repo,
+            mcp_center,
+            mcp_auth,
+            ext_info_provider=_build__ext_info_provider(injector),
         )
 
     @singleton
@@ -420,19 +479,16 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
     def local_skill_upload_service(
         self,
         skill_repo: SkillRepository,
-        skill_set_repo: SkillSetRepository,
-        installations: SkillInstallationRepositoryProtocol,
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
         audit_log_repo: BotCollabLogRepositoryProtocol,
         edit_guard: SkillsPoolEditGuard,
         injector: Injector,
-        runtime_reconciler: CoreBotRuntimeProjectionReconcilerProtocol,
+        runtime_reconciler: CoreBotRuntimeProjectorProtocol,
     ) -> LocalSkillUploadServiceProtocol:
         return LocalSkillUploadService(
             skill_repo,
-            skill_set_repo,
             bot_repo,
             collaborator_service,
             skill_service_factory,
@@ -440,31 +496,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             edit_guard,
             lambda: injector.get(DeviceContextResolver),
             runtime_reconciler,
-        )
-
-    @singleton
-    @provider
-    @inject
-    def local_skill_state_service(
-        self,
-        skill_repo: SkillRepository,
-        skill_set_repo: SkillSetRepository,
-        installations: SkillInstallationRepositoryProtocol,
-        bot_repo: BotRepository,
-        collaborator_service: CollaboratorServiceProtocol,
-        skill_set_service_factory: SkillSetServiceFactory,
-        pool_skills: SkillsPoolSkillRepositoryProtocol,
-        runtime_reconciler: CoreBotRuntimeProjectionReconcilerProtocol,
-    ) -> LocalSkillStateServiceProtocol:
-        return LocalSkillStateService(
-            skill_repo,
-            installations,
-            bot_repo,
-            collaborator_service,
-            skill_set_service_factory,
-            pool_skills,
-            skill_set_repo,
-            runtime_reconciler,
+            SkillParser(),
         )
 
     @singleton
@@ -488,29 +520,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             skill_service_factory,
             edit_guard,
             lambda: injector.get(DeviceContextResolver),
-        )
-
-    @singleton
-    @provider
-    @inject
-    def bot_skill_asset_service(
-        self,
-        skill_repo: SkillRepository,
-        bot_repo: BotRepository,
-        collaborator_service: CollaboratorServiceProtocol,
-        skill_service_factory: SkillServiceFactory,
-        parameter_service_factory: SkillParameterServiceFactoryProtocol,
-        local_state_service: LocalSkillStateServiceProtocol,
-        injector: Injector,
-    ) -> BotSkillAssetServiceProtocol:
-        return BotSkillAssetService(
-            skill_repo,
-            bot_repo,
-            collaborator_service,
-            skill_service_factory,
-            parameter_service_factory,
-            lambda: injector.get(DeviceContextResolver),
-            local_state_service,
         )
 
     @singleton
@@ -544,8 +553,8 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         ``oss_provider`` and ``composer_provider`` are lazy thunks: only teclaw bots
         resolve them, so local/dev boots that never hit teclaw don't trigger the OSS
         client's remote secret fetch or build the composer.
-        ``device_sync_dispatcher_provider`` resolves the prod ``DeviceSyncDispatcher``
-        to build the ``TeclawDeviceSyncPlugin`` for the whole-artifact redeliver;
+        ``device_sync_dispatcher_provider`` resolves ``DeviceSyncDispatcher``
+        for whole-artifact Teclaw redelivery;
         ``composer_provider`` yields the composer whose ``oss_location`` derives
         the OSS write key (== the artifact ref). All cycle-safe — the
         composer/oss are resolved lazily on first teclaw edit, not at construction."""
@@ -643,8 +652,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         return svc
 
     # ``MCPConfigService`` and ``MCPAuthService`` are owned by
-    # :class:`McpModule` (Task 16); skill_center services receive them
-    # via @inject from the injector, no transitional bridge needed.
+    # :class:`McpModule`; skill-center services receive them through DI.
 
     # ── Service factories & stateless services ──────────────────────
     # ``SkillServiceFactory`` / ``SkillSetServiceFactory`` /
@@ -657,8 +665,8 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
 
     # ``device_sync_dispatcher`` is bound by the per-profile infrastructure
     # column (``infrastructure/{corp,test,community}/device_sync.py``) under the
-    # neutral ``DeviceSyncDispatcher`` key (B6 T24) — corp/test build the
-    # prod ``DeviceSyncDispatcher``, community a no-op. This business module no
+    # neutral ``DeviceSyncDispatcher`` key — corp/corp_test bind the prod
+    # dispatcher, while community/test/singlebox bind the no-op dispatcher. This module no
     # longer imports ``plugins.prod`` for it; consumers below resolve the key.
 
     @singleton
@@ -715,7 +723,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         self,
         skill_repo: SkillRepository,
         skill_set_repo: SkillSetRepository,
-        installations: SkillInstallationRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
         mcp_config_service: MCPConfigService,
         skill_service_factory: SkillServiceFactory,
@@ -723,6 +730,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         bot_repo: BotRepository,
         device_plugin: DeviceAccessor,
         path_factory: WorkspacePathFactory,
+        reader: CoreBotCapabilityStateReaderProtocol,
         injector: Injector,
     ) -> SkillSetServiceFactory:
         return SkillSetServiceFactory(
@@ -739,7 +747,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             path_factory=path_factory,
             pool_layout_paths=skill_service_factory.resolve_pool_paths,
             ext_info_provider=_build__ext_info_provider(injector),
-            installations=installations,
+            reader=reader,
         )
 
     @singleton
@@ -863,60 +871,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
 
     @singleton
     @provider
-    def skill_set_activator_factory(
-        self,
-        skill_set_factory: SkillSetServiceFactory,
-        resolver: DeviceContextResolver,
-        device_sync_dispatcher: DeviceSyncDispatcher,
-        device_plugin: DeviceAccessor,
-        path_factory: WorkspacePathFactory,
-        edit_guard: SkillsPoolEditGuard,
-    ) -> SkillSetActivatorFactory:
-        """Construct the per-request ``SkillSetActivator`` factory."""
-        return SkillSetActivatorFactory(
-            skill_set_factory=skill_set_factory,
-            resolver=resolver,
-            device_sync_dispatcher=device_sync_dispatcher,
-            device_plugin=device_plugin,
-            path_factory=path_factory,
-            edit_guard=edit_guard,
-        )
-
-    @singleton
-    @provider
-    @inject
-    def skill_set_switcher_factory(
-        self,
-        skill_set_factory: SkillSetServiceFactory,
-        resolver: DeviceContextResolver,
-        device_sync_dispatcher: DeviceSyncDispatcher,
-        device_plugin: DeviceAccessor,
-        path_factory: WorkspacePathFactory,
-        device_fs_dispatcher: DeviceFilesystemDispatcher,
-        edit_guard: SkillsPoolEditGuard,
-    ) -> SkillSetSwitcherFactory:
-        """Construct the per-request ``SkillSetSwitcher`` factory.
-
-        Wired via ``@provider`` because ``SkillSetSwitcherFactory``
-        types its deps as TYPE_CHECKING forward refs.
-
-        ``device_fs_dispatcher`` (added plan-05) routes
-        ``SkillSetSwitcher._cleanup_all_non_reserved_items`` via the
-        DeviceFileSystem (singlebox → BaaS, contract tests →
-        pathlib) instead of direct ``shutil.rmtree``.
-        """
-        return SkillSetSwitcherFactory(
-            skill_set_factory=skill_set_factory,
-            resolver=resolver,
-            device_sync_dispatcher=device_sync_dispatcher,
-            device_plugin=device_plugin,
-            path_factory=path_factory,
-            device_fs_dispatcher=device_fs_dispatcher,
-            edit_guard=edit_guard,
-        )
-
-    @singleton
-    @provider
     def skill_symlink_listener(
         self,
         bot_repo: BotRepository,
@@ -925,7 +879,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         device_sync_dispatcher: DeviceSyncDispatcher,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         skills_pool_wakeup: SkillsPoolReconcileWakeupListener,
-        runtime_reconciler: CoreBotRuntimeProjectionReconcilerProtocol,
+        runtime_reconciler: CoreBotRuntimeProjectorProtocol,
     ) -> SkillSymlinkListener:
         def desktop_layout_authority(bot: dict) -> str | None:
             if bot.get("bot_type") != "desktop":
@@ -957,11 +911,11 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             device_sync_dispatcher=device_sync_dispatcher,
             desktop_layout_authority=desktop_layout_authority,
             desktop_reconcile_wakeup=skills_pool_wakeup.handle,
-            runtime_reconcile=lambda bot_id, owner_id: runtime_reconciler.reconcile(
+            runtime_reconcile=lambda bot_id, owner_id: runtime_reconciler.project(
                 bot_id=bot_id, owner_id=owner_id
             ),
             runtime_non_skill_reconcile=lambda bot_id, owner_id: (
-                runtime_reconciler.reconcile_non_skill_projection(
+                runtime_reconciler.project_mcp_and_cli(
                     bot_id=bot_id,
                     owner_id=owner_id,
                 )

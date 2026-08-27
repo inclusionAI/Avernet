@@ -56,6 +56,7 @@ _OWNER = "lifecycle-owner"
 _BOT_ID = "lifecycle-bot"
 _KEY = "service-publications-framework-signing-key-32b"
 _LIFECYCLE = "/openapi/v1/bots/{bot_id}/lifecycle"
+_LIFECYCLE_UPGRADE = f"{_LIFECYCLE}/{{publication_id}}/upgrade"
 _EDIT_LOCK = "/openapi/v1/bots/{bot_id}/edit-lock"
 _PATH_PARAMS = {"bot_id": _BOT_ID}
 #: Timestamps as a string, the shape the facade's own projection emits and the
@@ -168,6 +169,12 @@ def _seed_happy_services(world) -> None:
     def convert_to_service(_self, bot_id, **_kwargs):
         return _publication(bot_id)
 
+    def upgrade_publication(_self, bot_id, publication_id, **_kwargs):
+        result = _publication(bot_id)
+        result["publication_id"] = publication_id
+        result["card_id"] = f"service:{bot_id}:{publication_id}"
+        return result
+
     def get_service_config(_self, bot_id, **_kwargs):
         return {"bot_id": bot_id, "should_approval": False}
 
@@ -211,6 +218,7 @@ def _seed_happy_services(world) -> None:
         {
             "list_publications": list_publications,
             "convert_to_service": convert_to_service,
+            "upgrade_publication": upgrade_publication,
             "get_service_config": get_service_config,
             "update_service_config": update_service_config,
             "advance": advance,
@@ -260,6 +268,17 @@ _HAPPY_CASES = (
         "POST",
         f"{_LIFECYCLE}/upgrade",
         _case(),
+        200,
+        {"code": 200000, "data": {"card_id": _CARD_ID, "status": "draft"}},
+    ),
+    (
+        "POST",
+        _LIFECYCLE_UPGRADE,
+        CaseInput(
+            path_params={**_PATH_PARAMS, "publication_id": _PUBLICATION_ID},
+            query_params=_QUERY,
+            headers=_HEADERS,
+        ),
         200,
         {"code": 200000, "data": {"card_id": _CARD_ID, "status": "draft"}},
     ),
@@ -367,7 +386,7 @@ for _method, _path, _input, _status, _contains in _HAPPY_CASES:
         path=_path,
         scenario="forbidden_user_scope",
         input=CaseInput(
-            path_params=_PATH_PARAMS,
+            path_params=_input.path_params,
             query_params=_FORBIDDEN_QUERY,
             headers=_HEADERS,
             json_body=_input.json_body,

@@ -77,6 +77,7 @@ impl ConnectService for RecordingSearchConnectService {
         _: &str,
         _: &str,
         _: Option<String>,
+        _: Option<bcs_service_api::RequestAuthHeaders>,
     ) -> ServiceResult<ConnectResult> {
         Ok(ConnectResult {
             request_ids: vec![],

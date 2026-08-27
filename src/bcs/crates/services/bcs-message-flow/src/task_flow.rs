@@ -301,17 +301,6 @@ pub async fn handle_task_dispatch(
             .unwrap_or_else(|| cmd.driver_bot_id.clone()),
     };
 
-    let frame = build_task_dispatch_frame(
-        &group,
-        &cmd.driver_bot_id,
-        &driver_name,
-        &target_bot_id,
-        &target_bot_name,
-        &message,
-        &effective_task_id,
-        &manager_session_id,
-        now,
-    );
     let ledger_session_id = (manager_session_id != group_id).then_some(manager_session_id.as_str());
     log_task_dispatch_created(
         &group_id,
@@ -341,6 +330,23 @@ pub async fn handle_task_dispatch(
             return Err(error);
         }
     };
+    let provider_tags = if delivery_target.is_http_provider() {
+        target.tags.as_slice()
+    } else {
+        &[]
+    };
+    let frame = build_task_dispatch_frame(
+        &group,
+        &cmd.driver_bot_id,
+        &driver_name,
+        &target_bot_id,
+        &target_bot_name,
+        &message,
+        &effective_task_id,
+        &manager_session_id,
+        provider_tags,
+        now,
+    );
     let delivery_kind = BotDeliveryKind::TaskDispatch;
     let result = match flow
         .bot_delivery
@@ -719,16 +725,6 @@ pub async fn handle_task_message(
     let worker_name = resolve_participant_name(flow, worker).await;
     let manager_name = resolve_participant_name(flow, &manager).await;
     let run_id = uuid::Uuid::new_v4().to_string();
-    let frame = build_task_message_frame(
-        &group,
-        &manager_session_id,
-        &cmd.worker_bot_id,
-        &worker_name,
-        &manager.bot_uuid,
-        &manager_name,
-        &message,
-        &run_id,
-    );
     let delivery_target = match flow.registry.resolve_delivery_target(&manager.bot_uuid).await {
         Ok(target) => target,
         Err(error) => {
@@ -747,6 +743,22 @@ pub async fn handle_task_message(
             return Err(error);
         }
     };
+    let provider_tags = if delivery_target.is_http_provider() {
+        manager.tags.as_slice()
+    } else {
+        &[]
+    };
+    let frame = build_task_message_frame(
+        &group,
+        &manager_session_id,
+        &cmd.worker_bot_id,
+        &worker_name,
+        &manager.bot_uuid,
+        &manager_name,
+        &message,
+        &run_id,
+        provider_tags,
+    );
     let delivery_kind = BotDeliveryKind::TaskMessage;
     let result = flow
         .bot_delivery
@@ -1102,7 +1114,7 @@ fn task_session_id(payload: &Value) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
-async fn apply_session_participants(
+pub(crate) async fn apply_session_participants(
     flow: &BcsMessageFlow,
     group: &mut Group,
     group_id: &str,
@@ -1142,6 +1154,7 @@ fn build_task_dispatch_frame(
     message: &str,
     task_id: &str,
     manager_session_id: &str,
+    tags: &[String],
     now_ms: u64,
 ) -> BcsFrame {
     let participant_names: Vec<String> = group
@@ -1176,7 +1189,7 @@ fn build_task_dispatch_frame(
         from_bot_id: None,
         from_bot_owner: None,
     };
-    let params = serde_json::json!({
+    let mut params = serde_json::json!({
         "session_key": manager_session_id,
         "bcs_group_id": manager_session_id,
         "bcs_session_id": manager_session_id,
@@ -1196,6 +1209,9 @@ fn build_task_dispatch_frame(
         "timeout_ms": null,
         "idempotency_key": null,
     });
+    if !tags.is_empty() {
+        params["tags"] = serde_json::json!(tags);
+    }
 
     BcsFrame::Request(RequestFrame::new(
         task_id.to_string(),
@@ -1213,6 +1229,7 @@ fn build_task_message_frame(
     manager_name: &str,
     message: &str,
     run_id: &str,
+    tags: &[String],
 ) -> BcsFrame {
     let participant_names: Vec<String> = group
         .participants
@@ -1246,7 +1263,7 @@ fn build_task_message_frame(
         from_bot_id: Some(worker_bot.to_string()),
         from_bot_owner: None,
     };
-    let params = serde_json::json!({
+    let mut params = serde_json::json!({
         "session_key": manager_session_id,
         "bcs_group_id": manager_session_id,
         "bcs_session_id": manager_session_id,
@@ -1266,6 +1283,9 @@ fn build_task_message_frame(
         "timeout_ms": null,
         "idempotency_key": null,
     });
+    if !tags.is_empty() {
+        params["tags"] = serde_json::json!(tags);
+    }
 
     BcsFrame::Request(RequestFrame::new(
         run_id.to_string(),

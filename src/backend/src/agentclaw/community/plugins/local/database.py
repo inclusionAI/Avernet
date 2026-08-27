@@ -117,15 +117,11 @@ class SqliteDB(MockSeam, DatabasePlugin, LifecycleBase):
     """DatabasePlugin implementation for local mode (SQLite via SQLAlchemy)."""
 
     async def bootstrap(self) -> None:
-        """Lifecycle hook — populate ``Base.metadata`` and CREATE TABLE.
+        """Lifecycle hook — populate the ORM metadata and CREATE TABLE.
 
-        Eagerly imports every ORM model so its ``class`` statement runs
-        and SQLAlchemy's declarative metaclass registers a ``Table`` on
-        ``Base.metadata``. Without this, ``create_all`` would only emit
-        DDL for tables whose class was already transitively imported via
-        the router chain — and method-level lazy imports in many
-        repositories make that set non-deterministic. First request would
-        hit ``no such table: ac_xxx``.
+        The model registration and DDL themselves live in
+        ``core/schema.py`` so the community plugin runs the identical
+        bootstrap against a real store.
 
         Order matters: we resolve ``_get_session_factory`` *before*
         ``create_all`` so the TestingDatabaseModule's first-resolution
@@ -134,61 +130,10 @@ class SqliteDB(MockSeam, DatabasePlugin, LifecycleBase):
         about to be wiped, and the next request would lazy-init a fresh
         empty one.
         """
-        from agentclaw.community.core.base import Base
-
-        # Side-effect imports — register each ORM class on ``Base.metadata``
-        # (the class statement runs, the declarative metaclass attaches a
-        # ``Table`` to the shared ``MetaData``). ``noqa: F401`` because the
-        # name itself is intentionally unused — only the import side effect
-        # matters.
-        import agentclaw.community.plugin_api.models  # noqa: F401  ac_bots / ac_resource / ac_channel_config
-        import agentclaw.community.core.models  # noqa: F401  ac_skill* / ac_skill_set_mcp / ac_user_mcp_config / propagation_log / center_sync_log
-        import agentclaw.community.core.skill_center.orm  # noqa: F401  ac_default_skillset_*
-        import agentclaw.community.core.access.sqlite_models  # noqa: F401  ac_access_control_policy / ac_user_info
-        import agentclaw.community.core.service_bot.repository.models  # noqa: F401  ac_bot_publish
-        import agentclaw.community.core.bot_public.repository.models  # noqa: F401  ac_bot_friend
-        import agentclaw.community.core.expert_chat.sqlite_models  # noqa: F401  ac_expert_chat_bot_sessions
-        import agentclaw.community.core.devices.repository.models  # noqa: F401  ac_entity_device_binding
-        import agentclaw.community.core.bot_management.repository.models  # noqa: F401  ac_templates / ac_bot_restart_lock
-        import agentclaw.community.core.bot_startup_script.repository.models  # noqa: F401  ac_bot_startup_script
-        import agentclaw.community.core.bot_management.render_screen.sqlite_models  # noqa: F401  ac_bot_render_screen
-        import agentclaw.community.core.system_config.orm  # noqa: F401  ac_config_*
-        import agentclaw.community.core.harness.sqlite_models  # noqa: F401  ac_harness_*
-        import agentclaw.community.core.bot_chat.models  # noqa: F401  bot_chat private-Base tables
-        import agentclaw.community.core.bot_dormant.sqlite_models  # noqa: F401  ac_bot_dormant_*
-        import agentclaw.community.core.task_queue.repository.models  # noqa: F401  ac_task_queue
-        import agentclaw.community.core.task.repository.models  # noqa: F401  task_info / task_node / task_node_run_info / task_node_relation / task_callback
-        import agentclaw.community.core.task.task_discovery.discovered_task_models  # noqa: F401  ac_discovered_tasks
-        import agentclaw.community.core.skills_pool.repository.models  # noqa: F401  ac_bot_skill_layout_state
-        import agentclaw.community.core.session_resources.repository.models  # noqa: F401  ac_session_resource
-        import agentclaw.community.core.economy.governance.orm  # noqa: F401  governance_*
-        import agentclaw.community.core.caller_identity.models  # noqa: F401  caller identity tables
-        import agentclaw.community.core.bot_app_grant.models  # noqa: F401  ac_bot_app_grant / ac_bot_app_grant_log
-        import agentclaw.community.core.user_list.models  # noqa: F401  ac_entity_user_list
-        import agentclaw.community.core.spaces.repository.models  # noqa: F401  ac_space / ac_space_member
-        import agentclaw.community.core.market_favorites.repository.models  # noqa: F401  ac_market_favorite
-        import agentclaw.community.core.work_orders.repository.models  # noqa: F401  ac_work_order / ac_work_order_notification
-
-        # bot_chat uses a private ``Base = declarative_base()`` instead of
-        # the canonical ``agentclaw.community.core.base.Base``. Side-effect import
-        # registers ``AwLangfuseTrace`` + ``AcBot`` on the private metadata;
-        # the canonical ``create_all`` below won't see them, so we call
-        # ``create_all`` on the private Base too. ``ac_bots`` is also
-        # defined on the canonical Base (BotModel) — SQLAlchemy permits the
-        # same table name across different MetaData objects, and
-        # ``create_all`` is idempotent (``checkfirst=True`` skips already-
-        # existing tables), so the order of the two calls doesn't matter
-        # for correctness; we still register canonical ``ac_bots`` first
-        # for clarity. Without this block, ``/api/v1/bot-chats`` list/get
-        # crashes at runtime with ``sqlite3.OperationalError: no such
-        # table: aw_langfuse_traces``.
-        # Any future ORM class added to core/bot_chat/models.py is picked up
-        # automatically via the same create_all — no further bootstrap edits needed.
-        import agentclaw.community.core.bot_chat.models as _bot_chat_models  # noqa: F401  bot_chat private Base
+        from agentclaw.community.core.schema import create_all
 
         _get_session_factory()
-        Base.metadata.create_all(_engine)
-        _bot_chat_models.Base.metadata.create_all(_engine)
+        create_all(_engine)
 
     @contextmanager
     def session(self):

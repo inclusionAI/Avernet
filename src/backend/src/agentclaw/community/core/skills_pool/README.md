@@ -177,6 +177,7 @@ consumes:
   - "DeviceBindingRepository"
   - "TaskQueueService and HandlerRegistry"
 internal_dependencies:
+  - agentclaw.community.core.skill_center.capability_state_contract    # flush-then-read contract for active Skill assets
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.common_config
   - agentclaw.community.core.devices

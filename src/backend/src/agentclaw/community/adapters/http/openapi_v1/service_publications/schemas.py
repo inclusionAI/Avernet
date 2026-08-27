@@ -83,6 +83,7 @@ class ServicePublication(BaseModel):
             "publish_online",
             "restart_publish",
             "cancel_staging",
+            "upgrade",
             "offline",
             "retry",
             "delete",
@@ -187,7 +188,7 @@ class EditLock(BaseModel):
         default=False, description="Whether the current lock holder is the Bot Owner."
     )
     need_lock: bool = Field(
-        description="Whether collaborative draft writes require an edit lock."
+        description="Whether collaborative Bot writes require an edit lock."
     )
 
 

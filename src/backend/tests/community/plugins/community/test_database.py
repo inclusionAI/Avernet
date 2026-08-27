@@ -1,7 +1,13 @@
 """Unit tests for the community CommunityDatabase (B3).
 
-CommunityDatabase is a pure connection provider — it does NOT create tables, so
-these tests provision the schema themselves (as a community operator would).
+CommunityDatabase owns the real schema by default: ``bootstrap()`` runs
+``core/schema.py``'s ``create_all`` unless ``create_schema=False``. The
+session-level tests below are about connection and transaction behaviour rather
+than the app schema, so they provision their own throwaway tables from a
+private ``Base`` — ``bootstrap()`` would emit the *real* metadata, which these
+tests do not need. The bootstrap wiring itself is covered separately at the
+bottom of this file.
+
 Tests run against a temp on-disk SQLite file (a real persistent store, unlike
 the in-memory local impl).
 """
@@ -34,7 +40,9 @@ class _Child(Base):
 def db(tmp_path) -> CommunityDatabase:
     url = f"sqlite:///{tmp_path}/b3.db"
     database = CommunityDatabase(url)
-    # Operator-provisioned schema — the impl does not create tables.
+    # These tests exercise session/transaction behaviour against throwaway
+    # tables, so the private Base is provisioned directly instead of going
+    # through bootstrap() (which would emit the real application schema).
     Base.metadata.create_all(database._engine)
     return database
 
@@ -115,3 +123,72 @@ def test_sqlite_foreign_key_cascade_fires(db):
     with db.session() as s:
         assert s.query(_Child).filter_by(id=50).first() is None
 
+
+
+class TestBootstrapSchemaOwnership:
+    """``bootstrap()`` is what makes a container deployment self-provisioning.
+
+    The DDL itself lives in ``core/schema.py`` and is tested there; what matters
+    here is the wiring — that the plugin calls it at all, honours
+    ``create_schema``, and passes the dialect flag matching its own URL.
+    """
+
+    @staticmethod
+    def _record_create_all(monkeypatch) -> list[dict]:
+        """Capture core.schema.create_all calls without emitting real DDL."""
+        calls: list[dict] = []
+
+        def _fake_create_all(engine, *, mysql: bool = False) -> None:
+            calls.append({"engine": engine, "mysql": mysql})
+
+        monkeypatch.setattr(
+            "agentclaw.community.core.schema.create_all", _fake_create_all
+        )
+        return calls
+
+    @pytest.mark.asyncio
+    async def test_creates_the_schema_by_default(self, tmp_path, monkeypatch):
+        calls = self._record_create_all(monkeypatch)
+        database = CommunityDatabase(f"sqlite:///{tmp_path}/boot.db")
+
+        await database.bootstrap()
+
+        assert len(calls) == 1
+        assert calls[0]["engine"] is database._engine
+
+    @pytest.mark.asyncio
+    async def test_skips_ddl_when_the_operator_owns_the_schema(
+        self, tmp_path, monkeypatch
+    ):
+        calls = self._record_create_all(monkeypatch)
+        database = CommunityDatabase(
+            f"sqlite:///{tmp_path}/boot.db", create_schema=False
+        )
+
+        await database.bootstrap()
+
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_sqlite_url_does_not_request_the_mysql_ddl_pass(
+        self, tmp_path, monkeypatch
+    ):
+        calls = self._record_create_all(monkeypatch)
+        database = CommunityDatabase(f"sqlite:///{tmp_path}/boot.db")
+
+        await database.bootstrap()
+
+        assert calls[0]["mysql"] is False
+
+    @pytest.mark.asyncio
+    async def test_mysql_url_requests_the_mysql_ddl_pass(self, monkeypatch):
+        # create_engine is lazy, so this needs no reachable server. Without the
+        # flag the index keys would exceed InnoDB's cap and CREATE INDEX fails.
+        calls = self._record_create_all(monkeypatch)
+        database = CommunityDatabase(
+            "mysql+pymysql://u:p@db.example:3306/agentclaw?charset=utf8mb4"
+        )
+
+        await database.bootstrap()
+
+        assert calls[0]["mysql"] is True

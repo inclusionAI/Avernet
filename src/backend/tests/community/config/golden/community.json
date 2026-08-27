@@ -8,6 +8,7 @@
     },
     "baas": {
       "api_base_url": "http://localhost:8890",
+      "deploy_runtime": "managed",
       "template_uuid": "",
       "tenant": "community"
     },
@@ -44,7 +45,9 @@
       "adapter_service_port": 20003
     },
     "database": {
-      "url": "sqlite:///./data/agentclaw.db"
+      "backend": "mysql",
+      "create_schema": true,
+      "url": "${DATABASE_URL}"
     },
     "desktop_bot_periodic_scan": {
       "apply_owner_whitelist": [],
@@ -167,6 +170,9 @@
         "http://localhost:8080",
         "http://localhost:8888"
       ]
+    },
+    "deploy_runtime": {
+      "runtime": "managed"
     },
     "desktop_bot_periodic_scan": {
       "apply_owner_whitelist": [],

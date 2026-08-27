@@ -139,9 +139,6 @@ from agentclaw.community.core.task_queue.services.task_queue_service import (
 )
 from agentclaw.community.core.system_config import SystemConfigService
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-from agentclaw.community.core.skill_center.services.skill_set_service import (
-    SkillSetActivatorFactory,
-)
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
@@ -399,7 +396,6 @@ class BotManagementModule(Module):
         resource_repo: ResourceRepositoryProtocol,
         device_service: DeviceService,
         skill_set_factory: SkillSetServiceFactory,
-        skill_set_activator_factory: SkillSetActivatorFactory,
         device_plugin: DeviceAccessor,
         bot_service_provider: Callable[[], BotService],
         skill_repo_sync: SkillRepoSyncPlugin,
@@ -423,7 +419,6 @@ class BotManagementModule(Module):
             resource_repo=resource_repo,
             device_service=device_service,
             skill_set_factory=skill_set_factory,
-            skill_set_activator_factory=skill_set_activator_factory,
             device_plugin=device_plugin,
             bot_service_provider=bot_service_provider,
             skill_md_path=skill_repo_sync.get_data_init_skill_md_path(),

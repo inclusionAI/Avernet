@@ -68,17 +68,6 @@ class TestGetActiveSkillSetIds:
         ids = writer._get_active_skill_set_ids()
         assert ids == {"1", "3"}
 
-    def test_fallback_to_file_when_db_empty(self, tmp_path):
-        writer = _make_writer(tmp_path)
-        writer.skill_set_repo = MagicMock()
-        writer.skill_set_repo.list_all.return_value = []  # no active sets
-
-        current_set_file = writer.skills_dir / ".current_skill_set"
-        current_set_file.write_text(json.dumps({"skill_set_id": "fallback-42"}))
-
-        ids = writer._get_active_skill_set_ids()
-        assert ids == {"fallback-42"}
-
     def test_fallback_to_empty_when_no_file(self, tmp_path):
         writer = _make_writer(tmp_path)
         writer.skill_set_repo = MagicMock()
@@ -86,17 +75,6 @@ class TestGetActiveSkillSetIds:
 
         ids = writer._get_active_skill_set_ids()
         assert ids == set()
-
-    def test_db_exception_falls_back_to_file(self, tmp_path):
-        writer = _make_writer(tmp_path)
-        writer.skill_set_repo = MagicMock()
-        writer.skill_set_repo.list_all.side_effect = Exception("db down")
-
-        current_set_file = writer.skills_dir / ".current_skill_set"
-        current_set_file.write_text(json.dumps({"skill_set_id": "db-fallback"}))
-
-        ids = writer._get_active_skill_set_ids()
-        assert ids == {"db-fallback"}
 
     def test_file_exception_returns_empty(self, tmp_path):
         writer = _make_writer(tmp_path)

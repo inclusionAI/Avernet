@@ -213,9 +213,9 @@ class DefaultBotTeclawNotAllowedError(BotServiceError):
         super().__init__(DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE)
 
 
-# 仅允许中英文、数字、下划线、中划线、空格；禁止 @ # / 等特殊字符。
+# 仅允许中英文、数字、下划线、中划线、空格，以及产品名/版本说明所需的 +、(、) ；禁止 @ # / 等特殊字符。
 _BOT_NAME_MAX_LEN = 32
-_BOT_NAME_ALLOWED_RE = re.compile(r"^[\w一-鿿 \-]+$", re.UNICODE)
+_BOT_NAME_ALLOWED_RE = re.compile(r"^[\w一-鿿 \-()+]+$", re.UNICODE)
 
 
 def validate_bot_name(bot_name: Optional[str]) -> str:
@@ -224,7 +224,7 @@ def validate_bot_name(bot_name: Optional[str]) -> str:
     Rules:
     - must be non-empty after strip
     - length <= 32 characters
-    - only Chinese/letters/digits/underscore/hyphen/space allowed
+    - only Chinese/letters/digits/underscore/hyphen/space and + ( ) allowed
     """
     if bot_name is None:
         raise BotNameInvalidError("Bot 名称不能为空")
@@ -237,7 +237,8 @@ def validate_bot_name(bot_name: Optional[str]) -> str:
         )
     if not _BOT_NAME_ALLOWED_RE.match(trimmed):
         raise BotNameInvalidError(
-            "Bot 名称只能包含中英文、数字、下划线、中划线和空格，不允许 @、# 等特殊字符"
+            "Bot 名称只能包含中英文、数字、下划线、中划线、空格以及 +、(、) ，"
+            "不允许 @、# 等特殊字符"
         )
     return trimmed
 

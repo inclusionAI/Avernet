@@ -35,6 +35,10 @@ from agentclaw.community.core.devices.services.device_instance_service import (
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
     ServicePublicationFacade,
 )
+from agentclaw.community.core.service_bot.services.publish_exceptions import (
+    PublishNotFoundError,
+    PublishStatusInvalidError,
+)
 
 
 NOW = datetime(2026, 8, 17, 12, 0, 0)
@@ -91,6 +95,7 @@ def deps():
         PermissionLevel.OWNER
     )
     values.publish_repo.list_by_source_bot.return_value = []
+    values.publish_service.can_upgrade_publish.return_value = True
     values.lock_service.get_lock_info.return_value = SimpleNamespace(
         lock=None,
         holder_name=None,
@@ -175,7 +180,9 @@ def test_list_containers_reports_missing_live_runtime_as_conflict(deps):
 
 
 def test_restart_container_accepts_owned_abnormal_instance(deps):
-    deps.device_service.get_instances_by_bot.return_value = {"devices": [_container()]}
+    deps.device_service.get_instances_by_bot.return_value = {
+        "devices": [_container()]
+    }
     deps.device_service.restart_device_by_bot.return_value = {"publish_id": 42}
 
     result = deps.facade.restart_container(
@@ -258,9 +265,7 @@ def test_restart_container_still_carries_the_owner_bar():
     ],
 )
 def test_restart_container_normalizes_runtime_failures(deps, failure, expected):
-    deps.device_service.get_instances_by_bot.return_value = {
-        "devices": [_container()]
-    }
+    deps.device_service.get_instances_by_bot.return_value = {"devices": [_container()]}
     deps.device_service.restart_device_by_bot.side_effect = failure
 
     with pytest.raises(expected):
@@ -285,7 +290,11 @@ def test_restart_container_normalizes_runtime_failures(deps, failure, expected):
             ["publish_online", "restart_publish", "cancel_staging"],
         ),
         (PublishStatus.ONLINE_PUB, "deploying", []),
-        (PublishStatus.SUCCESS, "running", ["restart_publish", "offline"]),
+        (
+            PublishStatus.SUCCESS,
+            "running",
+            ["upgrade", "restart_publish", "offline"],
+        ),
         (PublishStatus.RELEASED, "offline", []),
         (PublishStatus.FAILED, "deploying", ["retry"]),
     ],
@@ -334,6 +343,230 @@ def test_draft_delete_is_blocked_while_an_online_version_exists(deps):
         level=PermissionLevel.OWNER,
         all_records=[draft, online],
     ) == ["publish_staging"]
+
+
+def test_running_upgrade_is_hidden_when_a_non_failed_successor_exists(deps):
+    online = record(1, PublishStatus.SUCCESS, version=1)
+    successor = record(2, PublishStatus.DRAFT, version=2)
+    successor.last_pub_id = online.id
+
+    assert deps.facade._actions(
+        online,
+        level=PermissionLevel.ADMIN,
+        all_records=[online, successor],
+    ) == ["restart_publish", "offline"]
+
+
+def test_running_upgrade_remains_available_after_a_failed_successor(deps):
+    online = record(1, PublishStatus.SUCCESS, version=1)
+    failed = record(2, PublishStatus.FAILED, version=2)
+    failed.last_pub_id = online.id
+
+    assert deps.facade._actions(
+        online,
+        level=PermissionLevel.ADMIN,
+        all_records=[online, failed],
+    ) == ["upgrade", "restart_publish", "offline"]
+
+
+def test_running_upgrade_is_hidden_from_members(deps):
+    online = record(1, PublishStatus.SUCCESS, version=1)
+
+    assert deps.facade._actions(
+        online,
+        level=PermissionLevel.MEMBER,
+        all_records=[online],
+    ) == ["restart_publish", "offline"]
+
+
+def test_upgrade_publication_creates_and_projects_the_next_draft(deps, monkeypatch):
+    monkeypatch.setattr(
+        "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
+        lambda: "dev",
+    )
+    online = record(1, PublishStatus.SUCCESS, version=1)
+    created = record(2, PublishStatus.DRAFT, version=2)
+    created.last_pub_id = online.id
+    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.ADMIN
+    deps.publish_repo.get_by_id.side_effect = [online, created]
+    deps.publish_repo.list_by_source_bot.side_effect = [[online], [online, created]]
+    deps.publish_service.upgrade_publish.return_value = created
+
+    result = deps.facade.upgrade_publication(
+        "bot-1",
+        online.id,
+        actor_id="admin",
+        owner_id="owner",
+    )
+
+    assert result["publication_id"] == created.id
+    assert result["version"] == 2
+    assert result["status"] == "draft"
+    deps.publish_service.upgrade_publish.assert_called_once_with(
+        publish_id=online.id,
+        owner_id="owner",
+    )
+
+
+def test_upgrade_publication_rejects_a_publication_from_another_bot(deps, monkeypatch):
+    monkeypatch.setattr(
+        "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
+        lambda: "dev",
+    )
+    deps.publish_repo.get_by_id.return_value = record(
+        1,
+        PublishStatus.SUCCESS,
+        source_bot_pk=99,
+    )
+
+    with pytest.raises(ServicePublicationNotFoundError):
+        deps.facade.upgrade_publication(
+            "bot-1",
+            1,
+            actor_id="admin",
+            owner_id="owner",
+        )
+
+    deps.publish_service.upgrade_publish.assert_not_called()
+
+
+def test_upgrade_publication_rejects_member_permission(deps):
+    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.MEMBER
+
+    with pytest.raises(ServicePublicationNotFoundError):
+        deps.facade.upgrade_publication(
+            "bot-1",
+            1,
+            actor_id="member",
+            owner_id="owner",
+        )
+
+    deps.publish_repo.get_by_id.assert_not_called()
+    deps.publish_service.upgrade_publish.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        PublishStatus.DRAFT,
+        PublishStatus.VALIDATING,
+        PublishStatus.RELEASED,
+        PublishStatus.FAILED,
+    ],
+)
+def test_upgrade_publication_requires_a_running_source(deps, monkeypatch, status):
+    monkeypatch.setattr(
+        "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
+        lambda: "dev",
+    )
+    source = record(1, status, version=1)
+    deps.publish_repo.get_by_id.return_value = source
+    deps.publish_repo.list_by_source_bot.return_value = [source]
+
+    with pytest.raises(ServicePublicationConflictError):
+        deps.facade.upgrade_publication(
+            "bot-1",
+            source.id,
+            actor_id="admin",
+            owner_id="owner",
+        )
+
+    deps.publish_service.upgrade_publish.assert_not_called()
+
+
+def test_upgrade_publication_rejects_when_a_non_failed_successor_exists(
+    deps, monkeypatch
+):
+    monkeypatch.setattr(
+        "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
+        lambda: "dev",
+    )
+    online = record(1, PublishStatus.SUCCESS, version=1)
+    successor = record(2, PublishStatus.DRAFT, version=2)
+    successor.last_pub_id = online.id
+    deps.publish_repo.get_by_id.return_value = online
+    deps.publish_repo.list_by_source_bot.return_value = [online, successor]
+    deps.publish_service.can_upgrade_publish.return_value = False
+
+    with pytest.raises(ServicePublicationConflictError):
+        deps.facade.upgrade_publication(
+            "bot-1",
+            online.id,
+            actor_id="admin",
+            owner_id="owner",
+        )
+
+    deps.publish_service.upgrade_publish.assert_not_called()
+
+
+def test_upgrade_publication_preserves_legacy_failed_successor_retry(
+    deps, monkeypatch
+):
+    monkeypatch.setattr(
+        "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
+        lambda: "dev",
+    )
+    online = record(1, PublishStatus.SUCCESS, version=1)
+    failed = record(2, PublishStatus.FAILED, version=2)
+    failed.last_pub_id = online.id
+    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.ADMIN
+    deps.publish_repo.get_by_id.side_effect = [online, failed]
+    deps.publish_repo.list_by_source_bot.side_effect = [
+        [online, failed],
+        [online, failed],
+    ]
+    deps.publish_service.upgrade_publish.return_value = failed
+
+    result = deps.facade.upgrade_publication(
+        "bot-1",
+        online.id,
+        actor_id="admin",
+        owner_id="owner",
+    )
+
+    assert result["publication_id"] == failed.id
+    assert result["internal_status"] == PublishStatus.FAILED.value
+    assert result["available_actions"] == ["retry"]
+    deps.publish_service.upgrade_publish.assert_called_once_with(
+        publish_id=online.id,
+        owner_id="owner",
+    )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [PublishNotFoundError("gone"), PublishStatusInvalidError("changed")],
+)
+def test_upgrade_publication_normalizes_concurrent_state_changes(
+    deps, monkeypatch, failure
+):
+    monkeypatch.setattr(
+        "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
+        lambda: "dev",
+    )
+    online = record(1, PublishStatus.SUCCESS, version=1)
+    deps.publish_repo.get_by_id.return_value = online
+    deps.publish_repo.list_by_source_bot.return_value = [online]
+    deps.publish_service.upgrade_publish.side_effect = failure
+
+    with pytest.raises(ServicePublicationConflictError):
+        deps.facade.upgrade_publication(
+            "bot-1",
+            online.id,
+            actor_id="admin",
+            owner_id="owner",
+        )
+
+
+def test_version_upgrade_keeps_the_legacy_admin_authorization_bar():
+    key = (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade",
+    )
+    rule = AUTHORIZATION[key]
+
+    assert isinstance(rule, Check)
+    assert rule.level is PermissionLevel.ADMIN
 
 
 def test_failed_projection_sanitizes_error_and_uses_source_status(deps, monkeypatch):
@@ -761,7 +994,7 @@ def test_lock_is_not_created_without_collaborators(deps):
     deps.lock_service.steal_lock.assert_not_called()
 
 
-def test_lock_projection_does_not_require_lock_without_draft(deps):
+def test_lock_projection_requires_lock_for_any_collaborative_write(deps):
     deps.lock_service.get_lock_info.return_value = SimpleNamespace(
         lock=None,
         holder_name=None,
@@ -775,7 +1008,7 @@ def test_lock_projection_does_not_require_lock_without_draft(deps):
     info = deps.facade.get_lock("bot-1", actor_id="member", owner_id="owner")
 
     assert info.has_collaborators is True
-    assert info.need_lock is False
+    assert info.need_lock is True
 
 
 def test_lock_takeover_still_requires_bot_membership():
@@ -878,7 +1111,7 @@ def test_the_four_owner_operations_kept_their_bar():
         )
 
 
-def test_lock_is_rejected_without_an_editable_draft(deps):
+def test_lock_can_be_acquired_without_an_editable_draft(deps):
     deps.lock_service.get_lock_info.return_value = SimpleNamespace(
         lock=None,
         holder_name=None,
@@ -889,7 +1122,11 @@ def test_lock_is_rejected_without_an_editable_draft(deps):
         record(1, PublishStatus.SUCCESS)
     ]
 
-    with pytest.raises(ServicePublicationConflictError):
-        deps.facade.acquire_lock("bot-1", actor_id="member", owner_id="owner")
+    deps.lock_service.acquire_lock.return_value = SimpleNamespace(
+        holder_user_id="member"
+    )
 
-    deps.lock_service.acquire_lock.assert_not_called()
+    result = deps.facade.acquire_lock("bot-1", actor_id="member", owner_id="owner")
+
+    assert result.holder_user_id == "member"
+    deps.lock_service.acquire_lock.assert_called_once_with("bot-1", "owner", "member")

@@ -17,8 +17,8 @@ from unittest.mock import MagicMock
 from agentclaw.community.core.skill_center.factories import SkillServiceFactory
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
+from agentclaw.community.api.skill_set_management_service import (
+    SkillSetManagementServiceProtocol,
 )
 
 from tests.community.contracts.gateway.conftest import (
@@ -122,7 +122,7 @@ def _bind_skillset_active_deps(app):
     bind_mock_service(BotRepository, mock_bot_repo, app)
     control = MagicMock()
     control.list_sets.return_value = mock_repo.get_all_active_skill_sets.return_value
-    bind_mock_service(SkillSetControlPlaneServiceProtocol, control, app)
+    bind_mock_service(SkillSetManagementServiceProtocol, control, app)
 
 
 class TestMarketList:

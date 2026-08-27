@@ -59,12 +59,19 @@ from agentclaw.community.core.service_bot.errors import (
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     BotPublishService,
 )
+from agentclaw.community.core.service_bot.services.publish_exceptions import (
+    PublishNotFoundError,
+    PublishStatusInvalidError,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 from agentclaw.community.core.service_bot.services.publish_approval_service import (
     PublishApprovalService,
 )
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
+)
+from agentclaw.community.core.service_bot.types import (
+    can_upgrade_publication_from_records,
 )
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -144,7 +151,7 @@ class ServicePublicationFacade:
         So both gates run, at the same bar, and the row is still honest: for
         ``/openapi/v1`` the seam is the *declared* authority and refuses first;
         this is the transport-agnostic one the Service API promises. Same shape
-        as ``bot_skill_asset_service`` and ``skill_set_control_plane``.
+        as ``skill_query_service`` and ``skill_set_management_service``.
 
         ``level`` is returned as well as enforced, because it answers a second
         question the bar does not: :meth:`_actions` reports what the caller may
@@ -282,6 +289,10 @@ class ServicePublicationFacade:
         elif record.status == PublishStatus.VALIDATING.value:
             actions.extend(("publish_online", "restart_publish", "cancel_staging"))
         elif record.status == PublishStatus.SUCCESS.value:
+            if level >= PermissionLevel.ADMIN and can_upgrade_publication_from_records(
+                record, all_records
+            ):
+                actions.append("upgrade")
             actions.extend(("restart_publish", "offline"))
         elif record.status == PublishStatus.FAILED.value:
             actions.append("retry")
@@ -484,6 +495,47 @@ class ServicePublicationFacade:
         return self.get_publication(
             bot_id,
             record.id,
+            actor_id=actor_id,
+            owner_id=owner_id,
+        )
+
+    def upgrade_publication(
+        self,
+        bot_id: str,
+        publication_id: int,
+        *,
+        actor_id: str,
+        owner_id: str,
+    ) -> dict[str, Any]:
+        """Create the next draft from one live service-Bot publication."""
+        bot, record, _ = self._resolve_publication(
+            bot_id,
+            publication_id,
+            actor_id=actor_id,
+            owner_id=owner_id,
+            required_level=PermissionLevel.ADMIN,
+        )
+        if (
+            record.status != PublishStatus.SUCCESS.value
+            or not self._publish_service.can_upgrade_publish(record.id)
+        ):
+            raise ServicePublicationConflictError("publication cannot be upgraded")
+
+        try:
+            created = self._publish_service.upgrade_publish(
+                publish_id=record.id,
+                owner_id=bot["owner_id"],
+            )
+        except (PublishNotFoundError, PublishStatusInvalidError) as exc:
+            # The record may have changed between the projection check and the
+            # domain write. Expose that race as the same stable state conflict.
+            raise ServicePublicationConflictError(
+                "publication cannot be upgraded"
+            ) from exc
+
+        return self.get_publication(
+            bot_id,
+            created.id,
             actor_id=actor_id,
             owner_id=owner_id,
         )
@@ -739,35 +791,25 @@ class ServicePublicationFacade:
         info = self._lock_service.get_lock_info(
             bot["bot_id"], bot["owner_id"], actor_id
         )
-        records = self._publish_repo.list_by_source_bot(bot["id"], get_current_env())
-        has_draft = any(
-            record.status == PublishStatus.DRAFT.value for record in records
-        )
         return _ServiceEditLockInfo(
             lock=info.lock,
             holder_name=info.holder_name,
             has_collaborators=info.has_collaborators,
             is_owner=info.is_owner,
-            need_lock=info.has_collaborators and has_draft,
+            need_lock=info.has_collaborators,
         )
 
     def get_lock(self, bot_id: str, *, actor_id: str, owner_id: str) -> Any:
         bot, _ = self._resolve_bot(bot_id, actor_id=actor_id, owner_id=owner_id)
         return self._service_lock_info(bot, actor_id=actor_id)
 
-    def _lockable_draft(self, bot: dict[str, Any], *, actor_id: str) -> bool:
+    def _lockable_bot(self, bot: dict[str, Any], *, actor_id: str) -> bool:
         info = self._service_lock_info(bot, actor_id=actor_id)
-        if not info.has_collaborators:
-            return False
-        if not info.need_lock:
-            raise ServicePublicationConflictError(
-                "edit lock is only available for a service bot draft"
-            )
-        return True
+        return info.has_collaborators
 
     def acquire_lock(self, bot_id: str, *, actor_id: str, owner_id: str) -> Any:
         bot, _ = self._resolve_bot(bot_id, actor_id=actor_id, owner_id=owner_id)
-        if not self._lockable_draft(bot, actor_id=actor_id):
+        if not self._lockable_bot(bot, actor_id=actor_id):
             return None
         return self._lock_service.acquire_lock(bot_id, bot["owner_id"], actor_id)
 
@@ -790,6 +832,6 @@ class ServicePublicationFacade:
             # Service API contract promises to anyone else.
             required_level=PermissionLevel.MEMBER,
         )
-        if not self._lockable_draft(bot, actor_id=actor_id):
+        if not self._lockable_bot(bot, actor_id=actor_id):
             return None
         return self._lock_service.steal_lock(bot_id, bot["owner_id"], actor_id)

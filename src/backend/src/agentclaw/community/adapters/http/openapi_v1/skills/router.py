@@ -37,14 +37,14 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
-from agentclaw.community.api.bot_skill_asset_service import (
-    BotSkillAssetServiceProtocol,
+from agentclaw.community.api.direct_activation_service import (
+    DirectActivationServiceProtocol,
 )
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
+from agentclaw.community.api.skill_query_service import (
+    SkillQueryServiceProtocol,
 )
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
@@ -260,8 +260,8 @@ async def list_skills(
         description="Filter: case-insensitive substring match against the "
         "skill's name and description.",
     ),
-    query_service: LocalSkillQueryServiceProtocol = Injected(
-        LocalSkillQueryServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
     ),
 ) -> Envelope[Page[Skill]]:
     """List every skill the bot has, from stored desired state (paginated).
@@ -295,12 +295,12 @@ async def get_skill(
     user_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
-    asset_service: BotSkillAssetServiceProtocol = Injected(
-        BotSkillAssetServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
     ),
 ) -> Envelope[Skill]:
     """Get public metadata for one Local Skill; the Skill ID selects its Bot."""
-    record = asset_service.get_skill(
+    record = query_service.get_skill(
         skill_id=skill_id,
         bot_id=bot_id,
         owner_id=owner_id,
@@ -326,11 +326,11 @@ async def get_skill_content(
     user_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
-    asset_service: BotSkillAssetServiceProtocol = Injected(
-        BotSkillAssetServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
     ),
 ) -> Envelope[SkillContent]:
-    record = asset_service.get_skill(
+    record = query_service.get_skill(
         skill_id=skill_id,
         bot_id=bot_id,
         owner_id=owner_id,
@@ -338,7 +338,7 @@ async def get_skill_content(
     )
     _require_addressed_bot(record, bot_id)
     _require_skills_grant(caller, record)
-    content = await asset_service.get_content(
+    content = await query_service.get_content(
         skill_id=skill_id,
         bot_id=bot_id,
         owner_id=owner_id,
@@ -360,11 +360,11 @@ async def get_skill_parameters(
     user_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
-    asset_service: BotSkillAssetServiceProtocol = Injected(
-        BotSkillAssetServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
     ),
 ) -> Envelope[SkillParameters]:
-    record = asset_service.get_skill(
+    record = query_service.get_skill(
         skill_id=skill_id,
         bot_id=bot_id,
         owner_id=owner_id,
@@ -372,7 +372,7 @@ async def get_skill_parameters(
     )
     _require_addressed_bot(record, bot_id)
     _require_skills_grant(caller, record)
-    parameters = await asset_service.get_parameters(
+    parameters = await query_service.get_parameters(
         skill_id=skill_id,
         bot_id=bot_id,
         owner_id=owner_id,
@@ -395,11 +395,11 @@ async def replace_skill_parameters(
     user_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
-    asset_service: BotSkillAssetServiceProtocol = Injected(
-        BotSkillAssetServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
     ),
 ) -> Envelope[SkillParameters]:
-    record = asset_service.get_skill(
+    record = query_service.get_skill(
         skill_id=skill_id,
         bot_id=bot_id,
         owner_id=owner_id,
@@ -407,7 +407,7 @@ async def replace_skill_parameters(
     )
     _require_addressed_bot(record, bot_id)
     _require_skills_grant(caller, record)
-    parameters = await asset_service.replace_parameters(
+    parameters = await query_service.replace_parameters(
         skill_id=skill_id,
         bot_id=bot_id,
         owner_id=owner_id,
@@ -539,8 +539,11 @@ async def activate_skill(
     user_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
-    asset_service: BotSkillAssetServiceProtocol = Injected(
-        BotSkillAssetServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
+    ),
+    direct_activation: DirectActivationServiceProtocol = Injected(
+        DirectActivationServiceProtocol
     ),
 ) -> Envelope[SkillState]:
     """Activate a skill so its bot can use it.
@@ -548,7 +551,7 @@ async def activate_skill(
     Idempotent — activating an already-active skill succeeds with changed
     false. The bot's runtime is reconciled synchronously either way.
     """
-    record = asset_service.get_skill(
+    record = query_service.get_skill(
         skill_id=skill_id,
         bot_id=bot_id,
         owner_id=owner_id,
@@ -556,12 +559,11 @@ async def activate_skill(
     )
     _require_addressed_bot(record, bot_id)
     _require_skills_grant(caller, record)
-    result = await asset_service.set_active(
+    result = await direct_activation.activate_skill(
         skill_id=skill_id,
         bot_id=bot_id,
         owner_id=owner_id,
-        user_id=user_id,
-        active=True,
+        actor_id=user_id,
     )
     return envelope(
         SkillState(skill=_to_skill(result), changed=bool(result["changed"])),
@@ -582,8 +584,11 @@ async def deactivate_skill(
     user_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
-    asset_service: BotSkillAssetServiceProtocol = Injected(
-        BotSkillAssetServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
+    ),
+    direct_activation: DirectActivationServiceProtocol = Injected(
+        DirectActivationServiceProtocol
     ),
 ) -> Envelope[SkillState]:
     """Deactivate a skill so its bot stops using it.
@@ -591,7 +596,7 @@ async def deactivate_skill(
     Idempotent — deactivating an already-inactive skill succeeds with changed
     false. The bot's runtime is reconciled synchronously either way.
     """
-    record = asset_service.get_skill(
+    record = query_service.get_skill(
         skill_id=skill_id,
         bot_id=bot_id,
         owner_id=owner_id,
@@ -599,12 +604,11 @@ async def deactivate_skill(
     )
     _require_addressed_bot(record, bot_id)
     _require_skills_grant(caller, record)
-    result = await asset_service.set_active(
+    result = await direct_activation.deactivate_skill(
         skill_id=skill_id,
         bot_id=bot_id,
         owner_id=owner_id,
-        user_id=user_id,
-        active=False,
+        actor_id=user_id,
     )
     return envelope(
         SkillState(skill=_to_skill(result), changed=bool(result["changed"])),
@@ -628,8 +632,8 @@ async def delete_skill(
     delete_service: LocalSkillDeleteServiceProtocol = Injected(
         LocalSkillDeleteServiceProtocol
     ),
-    asset_service: BotSkillAssetServiceProtocol = Injected(
-        BotSkillAssetServiceProtocol
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
     ),
 ) -> Envelope[Deleted]:
     """Delete a skill by id.
@@ -637,7 +641,7 @@ async def delete_skill(
     Only an inactive skill can be deleted — deactivate it first; deleting an
     active one answers 409.
     """
-    record = asset_service.get_skill(
+    record = query_service.get_skill(
         skill_id=skill_id,
         bot_id=bot_id,
         owner_id=owner_id,

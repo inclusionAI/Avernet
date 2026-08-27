@@ -25,7 +25,7 @@ from agentclaw.community.core.skill_center.services import (
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
 )
-from agentclaw.community.core.skill_center.services.skill_service import SkillService
+from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditBusyError,
     SkillsPoolEditGuard,
@@ -98,66 +98,6 @@ class _Repo:
     def delete(self, skill_id):
         self.created.clear()
         return True
-
-    def list_bot_active_assets(self, **_kwargs):
-        from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
-
-        return [
-            RegisteredSkillAsset(
-                skill_id=int(row["id"]), name=row["name"], git_path=row["git_path"]
-            )
-            for row in self.created
-            if row.get("active")
-        ]
-
-
-class _Sets:
-    def __init__(self, fail_at=None, default_exists=True):
-        self.default_args = None
-        self.fail_at = fail_at
-        self.default_exists = default_exists
-        self.created_sets: list[dict] = []
-        self.associations: list[tuple] = []
-        self.exclusions: list[tuple] = []
-
-    def get_default(self, **kwargs):
-        self.default_args = kwargs
-        if not self.default_exists and not self.created_sets:
-            return None
-        return {"id": "4", **(self.created_sets[-1] if self.created_sets else {})}
-
-    def create(self, row):
-        created = {**row, "id": "4"}
-        self.created_sets.append(created)
-        return created
-
-    def add_skill_to_set(self, *args, **kwargs):
-        if self.fail_at == "association":
-            raise RuntimeError("association")
-        self.associations.append(args)
-        return True
-
-    def get_skills_in_set(self, skill_set_id):
-        return [
-            {"id": skill_id}
-            for set_id, skill_id, *_rest in self.associations
-            if str(set_id) == str(skill_set_id)
-        ]
-
-    def remove_skill_from_set(self, *args):
-        self.associations.remove(args)
-        return True
-
-    def add_default_skill_exclusion(self, *args):
-        if self.fail_at == "exclusion":
-            return False
-        self.exclusions.append(args)
-        return True
-
-    def remove_default_skill_exclusion(self, *args):
-        self.exclusions.remove(args)
-        return True
-
 
 class _Bot:
     def __init__(
@@ -492,7 +432,7 @@ class _RuntimeFactory:
     def sync_runtime(self, *, desired_skills=None):
         return True
 
-    async def reconcile(self, **_kwargs):
+    async def project(self, **_kwargs):
         return None
 
 
@@ -502,17 +442,6 @@ class _ReplacementRepo(_Repo):
         self.rows = rows
         self.updates = []
         self.atomic_replacements = []
-
-    def list_bot_active_assets(self, **_kwargs):
-        from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
-
-        return [
-            RegisteredSkillAsset(
-                skill_id=int(row["id"]), name=row["name"], git_path=row["git_path"]
-            )
-            for row in self.rows
-            if row.get("active")
-        ]
 
     def list_bot_local_by_name(self, **_kwargs):
         return self.rows
@@ -601,7 +530,7 @@ class _ReplacementRuntime:
         self.calls += 1
         return next(self.results)
 
-    async def reconcile(self, **_kwargs):
+    async def project(self, **_kwargs):
         self.calls += 1
         if not next(self.results):
             raise RuntimeError("runtime reconcile failed")
@@ -623,11 +552,9 @@ def _replacement_service(
     guard=None,
     *,
     provider="local",
-    sets=None,
 ):
     return LocalSkillUploadService(
         repo,
-        sets or _Sets(),
         _Bot(),
         _Collaborators(),
         _ReplacementFactory(filesystem),
@@ -635,6 +562,7 @@ def _replacement_service(
         guard or _Guard(),
         lambda: _DeviceResolver(provider),
         runtime,
+        SkillParser(),
     )
 
 
@@ -644,7 +572,6 @@ def _service(
     status="ACTIVE",
     collaborators=None,
     repo=None,
-    sets=None,
     audit=None,
     bot=None,
     factory=None,
@@ -653,7 +580,6 @@ def _service(
 ):
     return LocalSkillUploadService(
         repo or _Repo(),
-        sets or _Sets(),
         bot or _Bot(status),
         collaborators or _Collaborators(),
         factory or _Factory(filesystem),
@@ -661,6 +587,7 @@ def _service(
         guard or _Guard(),
         lambda: _DeviceResolver(provider),
         _RuntimeFactory(),
+        SkillParser(),
     )
 
 
@@ -714,8 +641,7 @@ async def test_upload_uses_existing_bot_runtime_without_product_matrix():
 async def test_upload_keeps_bot_owner_when_collaborator_is_actor():
     filesystem = _Filesystem()
     audit = _Audit()
-    sets = _Sets()
-    service = _service(filesystem, audit=audit, sets=sets)
+    service = _service(filesystem, audit=audit)
     result = await service.upload_local_skill(
         bot_id="bot",
         owner_id="owner",
@@ -736,7 +662,6 @@ async def test_upload_keeps_bot_owner_when_collaborator_is_actor():
             "detail": '{"action": "local_skill_upload", "skill_id": "9"}',
         }
     ]
-    assert sets.default_args is None
 
 
 @pytest.mark.asyncio
@@ -801,8 +726,7 @@ async def test_upload_resolves_package_storage_with_bot_entity():
 @pytest.mark.asyncio
 async def test_upload_stays_inactive_without_creating_a_default_set_membership():
     filesystem = _Filesystem()
-    sets = _Sets(default_exists=False)
-    service = _service(filesystem, sets=sets)
+    service = _service(filesystem)
 
     result = await service.upload_local_skill(
         bot_id="bot",
@@ -812,9 +736,6 @@ async def test_upload_stays_inactive_without_creating_a_default_set_membership()
     )
 
     assert result["operation"] == "created"
-    assert sets.default_args is None
-    assert sets.created_sets == []
-    assert sets.associations == []
 
 
 @pytest.mark.asyncio
@@ -1126,9 +1047,8 @@ async def test_each_creation_failure_compensates_and_never_returns_success(stage
     package = _zip({"SKILL.md": _skill_md()})
     filesystem = _Filesystem(fail=stage == "write")
     repo = _FailRepo() if stage == "create" else _Repo()
-    sets = _Sets(fail_at=stage)
     audit = _FailAudit() if stage == "audit" else _Audit()
-    service = _service(filesystem, repo=repo, sets=sets, audit=audit)
+    service = _service(filesystem, repo=repo, audit=audit)
     with pytest.raises(LocalSkillStorageError):
         await service.upload_local_skill(
             bot_id="bot", owner_id="owner", actor_id="owner", package=package
@@ -1140,11 +1060,8 @@ async def test_each_creation_failure_compensates_and_never_returns_success(stage
 async def test_failed_rollback_step_does_not_stop_package_cleanup():
     package = _zip({"SKILL.md": _skill_md()})
     repo = _Repo()
-    sets = _Sets()
-    sets.remove_default_skill_exclusion = lambda *args: (_ for _ in ()).throw(
-        RuntimeError()
-    )
-    service = _service(_Filesystem(), repo=repo, sets=sets, audit=_FailAudit())
+    repo.delete = lambda *args: (_ for _ in ()).throw(RuntimeError())
+    service = _service(_Filesystem(), repo=repo, audit=_FailAudit())
     with pytest.raises(LocalSkillStorageError):
         await service.upload_local_skill(
             bot_id="bot", owner_id="owner", actor_id="owner", package=package
@@ -1160,8 +1077,7 @@ async def test_failed_final_cleanup_leaves_no_database_authority_or_success():
     package = _zip({"SKILL.md": _skill_md()})
     filesystem = _Filesystem(cleanup_results=[False, False])
     repo = _Repo()
-    sets = _Sets()
-    service = _service(filesystem, repo=repo, sets=sets, audit=_FailAudit())
+    service = _service(filesystem, repo=repo, audit=_FailAudit())
 
     with pytest.raises(LocalSkillStorageError):
         await service.upload_local_skill(
@@ -1169,8 +1085,6 @@ async def test_failed_final_cleanup_leaves_no_database_authority_or_success():
         )
 
     assert repo.created == []
-    assert sets.associations == []
-    assert sets.exclusions == []
     assert filesystem.deleted == ["/private/skills-local/upload-skill"]
 
 
@@ -1210,10 +1124,9 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
     filesystem = _Filesystem()
     filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
     repo = _ReplacementRepo([_existing_skill(active=False)])
-    sets = _Sets()
     runtime = _ReplacementRuntime([True])
     result = await _replacement_service(
-        filesystem, repo, runtime, sets=sets
+        filesystem, repo, runtime
     ).upload_local_skill(
         bot_id="bot",
         owner_id="owner",
@@ -1225,7 +1138,6 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
     assert result["skill"]["user_id"] == "owner"
     assert result["skill"]["active"] is False
     assert result["skill"]["git_path"] == "local:///private/skills-local/upload-skill"
-    assert sets.exclusions == []
     assert runtime.calls == 1
     assert "/private/skills-local/upload-skill" in filesystem.deleted
     assert not any("replacement-" in path for path in filesystem.files)
@@ -1426,17 +1338,15 @@ async def test_active_replacement_keeps_installation_owned_state_before_sync():
     filesystem = _Filesystem()
     filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
     repo = _ReplacementRepo([_existing_skill(active=True)])
-    sets = _Sets()
     runtime = _ReplacementRuntime([True])
 
-    await _replacement_service(filesystem, repo, runtime, sets=sets).upload_local_skill(
+    await _replacement_service(filesystem, repo, runtime).upload_local_skill(
         bot_id="bot",
         owner_id="owner",
         actor_id="owner",
         package=_zip({"SKILL.md": _skill_md(description="new description")}),
     )
 
-    assert sets.associations == []
     assert runtime.calls == 1
 
 

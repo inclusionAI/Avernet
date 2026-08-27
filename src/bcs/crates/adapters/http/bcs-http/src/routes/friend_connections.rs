@@ -23,11 +23,41 @@ use bcs_protocol::http::friends::{
     RevokeFriendResponse, StatusResponse, envelope,
 };
 use bcs_service_api::application::{ConnectStatus, RequestDirection};
+use bcs_service_api::RequestAuthHeaders;
 
 use crate::error::HttpAdapterError;
-use crate::state::HttpAppState;
+use crate::{headers::extract_bearer_token, state::HttpAppState};
 
 use super::{bots::bot_use_case_error_to_http, caller::caller_actor_id_from_headers};
+
+
+fn request_auth_headers(headers: &HeaderMap) -> RequestAuthHeaders {
+    let authorization = extract_bearer_token(headers).map(|token| format!("Bearer {token}"));
+    let cookie = headers
+        .get(axum::http::header::COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let mut forwarded_headers = Vec::new();
+    if let Some(value) = &authorization {
+        forwarded_headers.push(("authorization".to_string(), value.clone()));
+    }
+    if let Some(value) = &cookie {
+        forwarded_headers.push(("cookie".to_string(), value.clone()));
+    }
+    for name in ["x-avernet-principal", "x-one-id", "x-request-id", "x-trace-id"] {
+        if let Some(value) = headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            forwarded_headers.push((name.to_string(), value.to_string()));
+        }
+    }
+    RequestAuthHeaders { authorization, cookie, forwarded_headers }
+}
 
 /// `POST /collaboration/friend-connections/requests` — create a friend connection request.
 pub async fn create_friend_request(
@@ -39,7 +69,12 @@ pub async fn create_friend_request(
     let from = resolve_caller(&state, &headers, &uri, body.from_actor.as_deref(), body.actor_kind.as_deref()).await?;
     let res = state
         .connect
-        .create_connect(&from, &body.to_bot, body.message.clone())
+        .create_connect(
+            &from,
+            &body.to_bot,
+            body.message.clone(),
+            Some(request_auth_headers(&headers)),
+        )
         .await?;
     let status = match res.status {
         ConnectStatus::Pending => "pending",

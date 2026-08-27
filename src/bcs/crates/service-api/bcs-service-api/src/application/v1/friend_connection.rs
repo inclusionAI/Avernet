@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::{ApplicationError, AuthenticatedCaller, DeleteResult};
+use crate::RequestAuthHeaders;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -105,6 +106,9 @@ pub struct CreateFriendConnectionRequest {
     pub from_actor: Option<FriendConnectionActor>,
     pub to_actor: FriendConnectionActor,
     pub message: Option<String>,
+    /// Caller credential (Authorization/Cookie) forwarded to the backend
+    /// work-order API so its user-scoped auth accepts the notification.
+    pub request_auth: Option<RequestAuthHeaders>,
 }
 
 #[derive(Debug, Clone)]

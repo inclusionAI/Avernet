@@ -26,6 +26,8 @@ def record(
     source_bot_id: str,
     status: PublishStatus,
     version: int,
+    *,
+    last_pub_id: int = 0,
 ) -> BotPublishRecord:
     return BotPublishRecord(
         id=record_id,
@@ -36,6 +38,7 @@ def record(
         owner_id="owner",
         status=status.value,
         version=version,
+        last_pub_id=last_pub_id,
         env="dev",
         permission_owner="owner",
         gmt_create=NOW,
@@ -138,7 +141,13 @@ def test_missing_publish_rows_keep_a_safe_read_only_card(monkeypatch) -> None:
         ),
         (
             PublishStatus.SUCCESS,
-            (BotAction.VIEW, BotAction.CHAT, BotAction.RESTART, BotAction.OFFLINE),
+            (
+                BotAction.VIEW,
+                BotAction.CHAT,
+                BotAction.RESTART,
+                BotAction.UPGRADE,
+                BotAction.OFFLINE,
+            ),
         ),
         (PublishStatus.FAILED, (BotAction.VIEW, BotAction.RETRY)),
         (PublishStatus.RELEASED, (BotAction.VIEW,)),
@@ -158,3 +167,31 @@ def test_draft_delete_is_blocked_while_an_online_version_exists() -> None:
     actions = ServiceLifecycleView._record_actions(draft, [draft, online])
 
     assert BotAction.DELETE not in actions
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("successor_status", "upgrade_available"),
+    [
+        (PublishStatus.FAILED, True),
+        (PublishStatus.DRAFT, False),
+        (PublishStatus.VALIDATING, False),
+    ],
+)
+def test_online_upgrade_action_follows_legacy_successor_rule(
+    successor_status: PublishStatus,
+    upgrade_available: bool,
+) -> None:
+    online = record(1, 10, "service-1", PublishStatus.SUCCESS, 1)
+    successor = record(
+        2,
+        10,
+        "service-1",
+        successor_status,
+        2,
+        last_pub_id=online.id,
+    )
+
+    actions = ServiceLifecycleView._record_actions(online, [online, successor])
+
+    assert (BotAction.UPGRADE in actions) is upgrade_available

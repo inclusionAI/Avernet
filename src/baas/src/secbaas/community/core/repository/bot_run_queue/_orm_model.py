@@ -17,7 +17,7 @@ from ._record import BotRunQueueRecord, _parse_meta_json
 class BotRunQueueModel(Base):
     """``baas_bot_run_queue`` 队列工作项表（与 ``baas_bot_run`` 1:1，按 run_id 关联）。
 
-    DDL 见 ``sqls/migrate_bot_run_queue.sql``（纯 CREATE TABLE，不触碰既有热表）。
+    DDL 见 ``sqls/baas_schema.sql``（纯 CREATE TABLE，不触碰既有热表）。
     """
 
     __tablename__ = "baas_bot_run_queue"

@@ -13,7 +13,6 @@ import pytest
 
 from gateway.community.bootstrap import initialize_database
 from gateway.community.bootstrap._authn import build_authenticator
-from gateway.community.bootstrap._configs import DatabaseConfig
 from gateway.community.config import UserConfig
 from gateway.community.core.access_key import AccessKeyRepository
 from gateway.community.core.app import APIKeyGenerator, AppRepository, AppRow
@@ -54,9 +53,7 @@ _LEGACY_APP_JWT = (
 
 
 def _db() -> DataSourcePlugin:
-    db = initialize_database(
-        SqliteDatabasePlugin(), DatabaseConfig(plugin_type="SQLITE_ORM", db_url="")
-    )
+    db = initialize_database(SqliteDatabasePlugin())
     with db.orm_session() as session:
         session.add(
             AppRow(

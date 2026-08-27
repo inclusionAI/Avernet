@@ -16,9 +16,11 @@ use bcs_service_api::application::v1::{
     ApplicationError, CompleteSessionFile, DeleteResult, DeleteSessionFile,
     DownloadSessionFile, DownloadSharedSessionFile, GetSessionFile, IdentityPolicy,
     ListSessionFiles, PrepareSessionFile, PrepareSessionFileResult, Principal,
-    SessionFileActor, SessionFileActorKind, SessionFileApplicationService, SessionFileContent,
-    SessionFilePage, SessionFileStatus, SessionFileView, ShareSessionFile,
-    ShareSessionFileResult, UploadSessionFileContent, UploadSessionFileResult, select_principal,
+    SessionFileActor, SessionFileActorKind, SessionFileApplicationService,
+    SessionFileContent, SessionFilePage, SessionFileInternalContentUrlProjector,
+    SessionFileStatus, SessionFileView, ShareSessionFile, ShareSessionFileResult,
+    UPLOAD_COMPLETION_SHARE_TTL_SECONDS, UploadSessionFileContent,
+    UploadSessionFileResult, select_principal,
 };
 use bcs_service_api::{
     BotRegistryCoreService, GroupCoreService, ServiceError, SystemMessageService,
@@ -30,6 +32,7 @@ pub struct SessionFileApplicationServiceImpl {
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     system_message: Arc<dyn SystemMessageService>,
+    internal_content_projector: Arc<dyn SessionFileInternalContentUrlProjector>,
 }
 
 impl SessionFileApplicationServiceImpl {
@@ -39,6 +42,7 @@ impl SessionFileApplicationServiceImpl {
         groups: Arc<dyn GroupCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
         system_message: Arc<dyn SystemMessageService>,
+        internal_content_projector: Arc<dyn SessionFileInternalContentUrlProjector>,
     ) -> Self {
         Self {
             files,
@@ -46,6 +50,7 @@ impl SessionFileApplicationServiceImpl {
             groups,
             registry,
             system_message,
+            internal_content_projector,
         }
     }
 
@@ -218,6 +223,60 @@ impl SessionFileApplicationServiceImpl {
         })
     }
 
+    /// Mints a no-auth share link for the just-completed file and returns the
+    /// public shared-content URL to embed in the upload-completion notification.
+    /// Returns `None` on any failure (logged) so the caller can skip the
+    /// notification instead of sending an unusable link.
+    async fn mint_completion_share_url(
+        &self,
+        principal: &Principal,
+        session: &Session,
+        file: &SessionFile,
+    ) -> Option<String> {
+        let caller_identities = match self.caller_identities(principal).await {
+            Ok(identities) => identities,
+            Err(error) => {
+                tracing::warn!(
+                    session_id = %session.id,
+                    file_id = %file.file_id,
+                    error = %error,
+                    "failed to resolve caller identities for upload completion share link",
+                );
+                return None;
+            }
+        };
+        match self
+            .files
+            .share_mint(ShareMintCommand {
+                session_id: session.id.clone(),
+                file_id: file.file_id.clone(),
+                caller: actor_ref(principal),
+                ttl_seconds: Some(UPLOAD_COMPLETION_SHARE_TTL_SECONDS),
+                caller_identities,
+                session_participants: session
+                    .participants
+                    .iter()
+                    .map(|participant| participant.bot_uuid.clone())
+                    .collect(),
+            })
+            .await
+        {
+            Ok(result) => Some(
+                self.internal_content_projector
+                    .shared_content_url(&result.share_token),
+            ),
+            Err(error) => {
+                tracing::warn!(
+                    session_id = %session.id,
+                    file_id = %file.file_id,
+                    error = %error,
+                    "failed to mint share link for upload completion notification",
+                );
+                None
+            }
+        }
+    }
+
     async fn notify_completed(
         &self,
         principal: &Principal,
@@ -359,13 +418,18 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
             .complete_upload(&command.session_id, &command.file_id)
             .await
             .map_err(map_file_error)?;
-        self.notify_completed(
-            &principal,
-            &session,
-            &file,
-            &command.notification_content_url,
-        )
-        .await;
+        // The system-message download URL points at a no-auth share link instead
+        // of the authenticated content endpoint, so every receiver (including
+        // other bots) can fetch the file. The link is minted with the
+        // upload-completion TTL (15 days). Minting is best-effort: on failure we
+        // log and skip the notification rather than advertising a broken link.
+        if let Some(share_url) = self
+            .mint_completion_share_url(&principal, &session, &file)
+            .await
+        {
+            self.notify_completed(&principal, &session, &file, &share_url)
+                .await;
+        }
         Ok(project_file(file))
     }
 

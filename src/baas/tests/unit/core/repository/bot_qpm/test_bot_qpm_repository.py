@@ -16,8 +16,7 @@ def db() -> DatabaseManager:
     plugin = SqliteOrmPlugin("sqlite:///:memory:")
     plugin.create_all()
     mgr = DatabaseManager()
-    mgr._sync_session_factory = plugin._sync_session_factory
-    mgr._sync_engine = plugin._sync_engine
+    mgr.init_plugin(plugin)
     return mgr
 
 

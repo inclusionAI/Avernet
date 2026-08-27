@@ -24,12 +24,32 @@ pub enum UserDirectoryError {
     Response(String),
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UserDirectoryLookupContext {
+    /// Auth-related headers forwarded from the ingress request. Values may
+    /// contain credentials; implementations must not log or persist them.
+    pub forwarded_headers: Vec<(String, String)>,
+}
+
 #[async_trait]
 pub trait UserDirectoryPlugin: Send + Sync {
     async fn lookup_by_staff_no(
         &self,
         staff_no: &str,
     ) -> Result<Option<UserDirectoryProfile>, UserDirectoryError>;
+
+    async fn lookup_department_by_staff_no(
+        &self,
+        staff_no: &str,
+    ) -> Result<Option<String>, UserDirectoryError>;
+
+    async fn lookup_department_by_staff_no_with_context(
+        &self,
+        staff_no: &str,
+        _context: &UserDirectoryLookupContext,
+    ) -> Result<Option<String>, UserDirectoryError> {
+        self.lookup_department_by_staff_no(staff_no).await
+    }
 }
 
 #[cfg(test)]

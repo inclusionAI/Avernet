@@ -52,6 +52,10 @@ src/bcs/configs/bcs-config.toml
 *.pem
 *.key
 
+# Sidecar MITM CA certificates (build-time secrets, never committed)
+docker/agent/avernet-sidecar/mitm-ca.crt
+docker/agent/avernet-sidecar/mitm-ca.key
+
 # IDE and OS metadata
 .idea/
 .vscode/
@@ -98,3 +102,5 @@ src/bcs/target
 .idea
 .codefuse
 .codegraph
+.opencode
+openspec

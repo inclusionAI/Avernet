@@ -2,7 +2,7 @@
 
 A skill activation is two writes that must land together: the desired-state
 change in the database and the RPC that repoints the Bot's runtime symlinks.
-``SkillSetControlPlaneService._mutate`` performs them inline today and, when the
+``SkillSetManagementService._mutate`` performs them inline today and, when the
 RPC fails, compensates by restoring the previous desired state and reconciling
 again — a best-effort path that a pod restart between the two writes defeats
 outright. This module is the enqueue half of the durable replacement the

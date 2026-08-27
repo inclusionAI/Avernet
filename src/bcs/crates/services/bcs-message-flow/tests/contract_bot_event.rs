@@ -1187,6 +1187,169 @@ async fn bot_final_event_relays_through_bot_delivery_port() {
 }
 
 #[tokio::test]
+async fn failed_provider_bot_event_send_uses_unified_system_message() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    support
+        .registry
+        .set_delivery_target(
+            "bot-driver",
+            support::FakeRegistryService::provider_target("bot-driver"),
+        )
+        .await;
+    support.bot_delivery.fail_for("bot-driver").await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.routing_policy = Some(RoutingPolicy {
+        mode: RoutingMode::Structured,
+        default_bot_final_delivery: DefaultDelivery::SendToDriver,
+        ..RoutingPolicy::default()
+    });
+    support.group.upsert(group).await.unwrap();
+    let system_message = Arc::new(RecordingSystemMessage::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_system_message(system_message.clone());
+
+    let outcome = flow
+        .handle_bot_event(BotEventCommand {
+            bot_id: "bot-observer".to_string(),
+            run_id: "run-provider-failure".to_string(),
+            group_id: "group-1".to_string(),
+            event_type: "chat".to_string(),
+            event_payload: json!({
+                "state": "final",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "done"}],
+                },
+            }),
+            state: ChatEventState::Final,
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.bot_deliveries.len(), 1);
+    assert!(!outcome.bot_deliveries[0].delivered);
+    let notifications = system_message.notifications.lock().await;
+    assert_eq!(notifications.len(), 1);
+    let SystemMessageEvent::GenericNotification { message, .. } = &notifications[0].event else {
+        panic!("expected generic notification");
+    };
+    assert_eq!(message, "消息投递失败，请稍后重试。");
+}
+
+#[tokio::test]
+async fn bot_final_event_relay_uses_each_provider_targets_session_tags() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    support
+        .registry
+        .insert_named_actor("bot-consultant", "Consultant")
+        .await;
+    support
+        .registry
+        .set_delivery_target(
+            "bot-driver",
+            support::FakeRegistryService::provider_target("bot-driver"),
+        )
+        .await;
+    support
+        .registry
+        .set_delivery_target(
+            "bot-consultant",
+            support::FakeRegistryService::provider_target("bot-consultant"),
+        )
+        .await;
+
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.routing_policy = Some(RoutingPolicy {
+        mode: RoutingMode::Structured,
+        default_bot_final_delivery: DefaultDelivery::SendToDriver,
+        ..RoutingPolicy::default()
+    });
+    let mut stale_consultant =
+        Participant::bot("bot-consultant", ParticipantRole::Consultant);
+    stale_consultant.tags = vec!["stale-consultant".to_string()];
+    group.participants.push(stale_consultant);
+    group
+        .participants
+        .iter_mut()
+        .find(|participant| participant.bot_uuid == "bot-driver")
+        .expect("driver participant")
+        .tags = vec!["stale-driver".to_string()];
+    support.group.upsert(group).await.unwrap();
+
+    let mut driver = Participant::bot("bot-driver", ParticipantRole::Driver);
+    driver.tags = vec!["draft".to_string(), "driver-only".to_string()];
+    let mut sender = Participant::bot("bot-observer", ParticipantRole::Observer);
+    sender.tags = vec!["sender-tag".to_string()];
+    let mut consultant = Participant::bot("bot-consultant", ParticipantRole::Consultant);
+    consultant.tags = vec!["online".to_string(), "consultant-only".to_string()];
+    let mut session = test_session(
+        "group-1:abcdef12",
+        "group-1",
+        SessionKind::ServiceInvocation,
+    );
+    session.participants = vec![driver, sender, consultant];
+    let session_management = Arc::new(RecordingSessionManagement::new(vec![session]));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_session_management(session_management);
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "run-provider-tags".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({
+            "state": "final",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "done with tags"}],
+            },
+        }),
+        state: ChatEventState::Final,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    let frames = support.bot_delivery.frames().await;
+    assert_eq!(frames.len(), 2);
+    assert!(support
+        .bot_delivery
+        .targets()
+        .await
+        .iter()
+        .all(BotDeliveryTarget::is_http_provider));
+    let send = frames
+        .iter()
+        .find(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.send"))
+        .expect("driver chat.send frame");
+    assert_eq!(
+        request_params(send)["tags"],
+        json!(["draft", "driver-only"])
+    );
+    let inject = frames
+        .iter()
+        .find(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.inject"))
+        .expect("consultant chat.inject frame");
+    assert_eq!(
+        request_params(inject)["tags"],
+        json!(["online", "consultant-only"])
+    );
+}
+
+#[tokio::test]
 async fn bot_final_event_relay_preserves_session_id_for_legacy_target() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
@@ -2236,6 +2399,55 @@ async fn native_mcp_tool_result_coordination_echo_dispatches_from_exact_provider
             .await,
         1
     );
+}
+
+#[tokio::test]
+async fn native_mcp_assign_task_echo_forwards_provider_participant_tags() {
+    let (support, _, flow) = manager_worker_flow_with_repo().await;
+    configure_provider_v2_target(&support, "bot-worker", "worker-owner").await;
+    support
+        .registry
+        .set_coordination_surface(
+            "bot-manager",
+            CoordinationSurface {
+                mode: CoordinationMode::NativeMcp,
+                mcp_server: Some("bcs".to_string()),
+                mcporter_command: None,
+                tool_name_mapping: BTreeMap::from([(
+                    "mcp_mcp.ant.agentclawscs.bcs_mcp_bcs_assign_task".to_string(),
+                    "bcs_assign_task".to_string(),
+                )]),
+            },
+        )
+        .await;
+    let echo = coordination_echo(
+        "bcs_assign_task",
+        json!({
+            "target_bot": "bot-worker",
+            "message": "review this file",
+        }),
+    );
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-manager".to_string(),
+        run_id: "native-manager-provider-run".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: agent_tool_result_payload(
+            Some("mcp_mcp.ant.agentclawscs.bcs_mcp_bcs_assign_task"),
+            "native-provider-tool-1",
+            &echo,
+            false,
+        ),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .expect("native MCP echo should dispatch to provider worker");
+
+    assert_eq!(support.bot_delivery.kinds().await, vec![BotDeliveryKind::TaskDispatch]);
+    assert!(support.bot_delivery.targets().await[0].is_http_provider());
+    assert_frame_tags(&support.bot_delivery.frames().await[0], &["online"]);
 }
 
 #[tokio::test]
@@ -3391,6 +3603,89 @@ async fn manager_worker_task_final_delta_mode_flushes_only_open_worker_segment()
         manager_result.content,
         json!("intro before tool. answer after tool")
     );
+}
+
+#[tokio::test]
+async fn manager_worker_sse_task_response_appends_raw_deltas_across_thinking_boundary() {
+    let (_support, repo, flow) = manager_worker_flow_with_repo().await;
+    register_manager_worker_task(
+        &flow,
+        "task-response-delta-thinking",
+        ChatResponseMode::AfterLastToolCall,
+    )
+    .await;
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-worker".to_string(),
+        run_id: "task-response-delta-thinking".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({ "state": "delta", "delta_text": "A" }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-worker".to_string(),
+        run_id: "task-response-delta-thinking".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: json!({
+            "stream": "thinking",
+            "data": { "delta": "checking" },
+        }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+    for delta in ["B1", "B2"] {
+        flow.handle_bot_event(BotEventCommand {
+            bot_id: "bot-worker".to_string(),
+            run_id: "task-response-delta-thinking".to_string(),
+            group_id: "group-1".to_string(),
+            event_type: "chat.event".to_string(),
+            event_payload: json!({ "state": "delta", "delta_text": delta }),
+            state: ChatEventState::Delta,
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+        })
+        .await
+        .unwrap();
+    }
+
+    assert_eq!(
+        flow.task_store
+            .get("task-response-delta-thinking")
+            .await
+            .unwrap()
+            .response_content,
+        "AB1B2",
+        "TaskStore must append raw SSE deltas instead of synthesized segment snapshots"
+    );
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-worker".to_string(),
+        run_id: "task-response-delta-thinking".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({ "state": "final" }),
+        state: ChatEventState::Final,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    let appended = repo.appended().await;
+    let manager_result = appended
+        .iter()
+        .find(|msg| {
+            msg.sender_id == "bot-worker"
+                && msg.message_type == "chat"
+                && msg.owner_bot_id.is_none()
+        })
+        .expect("manager result history");
+    assert_eq!(manager_result.content, json!("AB1B2"));
 }
 
 #[tokio::test]
@@ -4599,10 +4894,11 @@ async fn manager_worker_flow_with_repo() -> (
     let mut group = support.group.get("group-1").await.unwrap();
     group.driver_bot = "control-plane-owner".to_string();
     group.group_strategy = GroupStrategy::ManagerWorker;
-    group.participants = vec![
-        Participant::bot("bot-manager", ParticipantRole::Manager),
-        Participant::bot("bot-worker", ParticipantRole::Worker),
-    ];
+    let mut manager = Participant::bot("bot-manager", ParticipantRole::Manager);
+    manager.tags = vec!["draft".to_string()];
+    let mut worker = Participant::bot("bot-worker", ParticipantRole::Worker);
+    worker.tags = vec!["online".to_string()];
+    group.participants = vec![manager, worker];
     support.group.upsert(group).await.unwrap();
     let repo = Arc::new(RecordingMessageRepo::default());
     let flow = BcsMessageFlow::new(
@@ -4614,6 +4910,14 @@ async fn manager_worker_flow_with_repo() -> (
     )
     .with_message_repo(repo.clone());
     (support, repo, flow)
+}
+
+fn assert_frame_tags(frame: &BcsFrame, expected: &[&str]) {
+    let BcsFrame::Request(request) = frame else {
+        panic!("expected request frame");
+    };
+    let params = request.params.as_ref().expect("request params");
+    assert_eq!(params.get("tags"), Some(&serde_json::json!(expected)));
 }
 
 async fn configure_provider_v2_target(
@@ -4730,6 +5034,7 @@ async fn manager_worker_task_dispatch_uses_sse_for_eligible_provider_worker() {
 
     assert_eq!(support.bot_delivery.kinds().await, vec![BotDeliveryKind::TaskDispatch]);
     assert!(support.bot_delivery.targets().await[0].is_http_provider());
+    assert_frame_tags(&support.bot_delivery.frames().await[0], &["online"]);
 }
 
 #[tokio::test]
@@ -4751,6 +5056,7 @@ async fn manager_worker_task_message_uses_sse_for_eligible_provider_manager() {
 
     assert_eq!(support.bot_delivery.kinds().await, vec![BotDeliveryKind::TaskMessage]);
     assert!(support.bot_delivery.targets().await[0].is_http_provider());
+    assert_frame_tags(&support.bot_delivery.frames().await[0], &["draft"]);
 }
 
 #[tokio::test]
@@ -4796,6 +5102,78 @@ async fn manager_worker_task_result_uses_sse_for_eligible_provider_manager() {
         vec![BotDeliveryKind::TaskDispatch, BotDeliveryKind::TaskResult]
     );
     assert!(support.bot_delivery.targets().await[1].is_http_provider());
+    assert_frame_tags(&support.bot_delivery.frames().await[1], &["draft"]);
+}
+
+#[tokio::test]
+async fn manager_worker_provider_task_flow_uses_session_participant_tags() {
+    let (support, _, _) = manager_worker_flow_with_repo().await;
+    configure_provider_v2_target(&support, "bot-manager", "manager-owner").await;
+    configure_provider_v2_target(&support, "bot-worker", "worker-owner").await;
+
+    let mut manager = Participant::bot("bot-manager", ParticipantRole::Manager);
+    manager.tags = vec!["draft".to_string()];
+    let mut worker = Participant::bot("bot-worker", ParticipantRole::Worker);
+    worker.tags = vec!["online".to_string()];
+    let mut session = test_session("group-1:abcdef12", "group-1", SessionKind::Chat);
+    session.participants = vec![manager, worker];
+    let session_management = Arc::new(RecordingSessionManagement::new(vec![session]));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_session_management(session_management);
+
+    let dispatch = flow
+        .handle_task_dispatch(TaskDispatchCommand {
+            driver_bot_id: "bot-manager".to_string(),
+            group_id: "group-1".to_string(),
+            target_bot_id: "bot-worker".to_string(),
+            target_bot_name: None,
+            payload: json!({
+                "message": "do work",
+                "bcs_session_id": "group-1:abcdef12",
+            }),
+        })
+        .await
+        .expect("task dispatch should use worker session tags");
+
+    flow.handle_task_message(TaskMessageCommand {
+        worker_bot_id: "bot-worker".to_string(),
+        group_id: "group-1".to_string(),
+        payload: json!({
+            "message": "progress update",
+            "bcs_session_id": "group-1:abcdef12",
+        }),
+    })
+    .await
+    .expect("task message should use manager session tags");
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-worker".to_string(),
+        run_id: dispatch.task_id,
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({
+            "state": "final",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "task done"}],
+            },
+        }),
+        state: ChatEventState::Final,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .expect("worker final should use manager session tags");
+
+    let frames = support.bot_delivery.frames().await;
+    assert_frame_tags(&frames[0], &["online"]);
+    assert_frame_tags(&frames[1], &["draft"]);
+    assert_frame_tags(&frames[2], &["draft"]);
 }
 
 #[tokio::test]

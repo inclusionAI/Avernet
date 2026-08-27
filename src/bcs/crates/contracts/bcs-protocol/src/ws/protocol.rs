@@ -589,6 +589,8 @@ pub struct ChatInjectParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bcs_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<Attachment>,
 }
 
@@ -924,6 +926,7 @@ pub fn build_chat_inject_frame(
     from_bot_name: &str,
     mentions: &[String],
     target_bot: &str,
+    tags: &[String],
     attachments: &Option<Vec<Attachment>>,
     is_self: bool,
     protocol_version: u32,
@@ -968,6 +971,7 @@ pub fn build_chat_inject_frame(
         } else {
             None
         },
+        tags: tags.to_vec(),
         attachments: attachments.clone().unwrap_or_default(),
     };
     let mut payload = serde_json::to_value(inject).unwrap_or_else(|error| {
@@ -1083,6 +1087,7 @@ pub fn build_direct_chat_send_frame(
     from_actor_id: &str,
     from_actor_name: &str,
     target_bot: &str,
+    tags: &[String],
     attachments: &Option<Vec<Attachment>>,
     thinking: &Option<String>,
     protocol_version: u32,
@@ -1123,7 +1128,7 @@ pub fn build_direct_chat_send_frame(
         } else {
             None
         },
-        tags: Vec::new(),
+        tags: tags.to_vec(),
         attachments: attachments.clone().unwrap_or_default(),
     };
     let mut params = serde_json::to_value(send).unwrap_or_else(|error| {
@@ -1152,6 +1157,7 @@ pub fn build_direct_chat_inject_frame(
     from_actor_id: &str,
     from_actor_name: &str,
     target_bot: &str,
+    tags: &[String],
     attachments: &Option<Vec<Attachment>>,
     protocol_version: u32,
     bcs_session_id: Option<&str>,
@@ -1189,6 +1195,7 @@ pub fn build_direct_chat_inject_frame(
         } else {
             None
         },
+        tags: tags.to_vec(),
         attachments: attachments.clone().unwrap_or_default(),
     };
     let mut payload = serde_json::to_value(inject).unwrap_or_else(|error| {
@@ -2141,7 +2148,7 @@ mod tests {
         let ctx = test_group_context_input();
         let frame = build_chat_inject_frame(
             "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target",
-            &None, false, 2, None, None, Some("grp-test:00000000"),
+            &[], &None, false, 2, None, None, Some("grp-test:00000000"),
         );
         match frame {
             BcsFrame::Request(req) => {
@@ -2157,9 +2164,10 @@ mod tests {
     fn build_chat_inject_frame_with_bcs_session_id() {
         let ctx = test_group_context_input();
         let session_id = "grp-test:channel_dingtalk_abc12345";
+        let tags = vec!["draft".to_string(), "tenant-a".to_string()];
         let frame = build_chat_inject_frame(
             "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target",
-            &None, false, 3, None, None, Some(session_id),
+            &tags, &None, false, 3, None, None, Some(session_id),
         );
         match frame {
             BcsFrame::Request(req) => {
@@ -2169,6 +2177,7 @@ mod tests {
                 assert_eq!(p.channel.user_id.as_deref(), Some("Bot1"));
                 assert_eq!(p.channel.actor_id.as_deref(), Some("b1"));
                 assert_eq!(p.channel.actor_name.as_deref(), Some("Bot1"));
+                assert_eq!(p.tags, tags);
             }
             _ => panic!("expected Request frame"),
         }

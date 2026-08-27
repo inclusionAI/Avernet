@@ -27,6 +27,7 @@ use tower::ServiceExt;
 
 struct RecordingConnectService {
     create_commands: Mutex<Vec<(String, String, Option<String>)>>,
+    create_request_auths: Mutex<Vec<Option<bcs_service_api::RequestAuthHeaders>>>,
     approve_commands: Mutex<Vec<(String, String)>>,
     reject_commands: Mutex<Vec<(String, String, Option<String>)>>,
     cancel_commands: Mutex<Vec<String>>,
@@ -43,6 +44,7 @@ impl Default for RecordingConnectService {
     fn default() -> Self {
         Self {
             create_commands: Mutex::new(Vec::new()),
+            create_request_auths: Mutex::new(Vec::new()),
             approve_commands: Mutex::new(Vec::new()),
             reject_commands: Mutex::new(Vec::new()),
             cancel_commands: Mutex::new(Vec::new()),
@@ -80,7 +82,9 @@ impl ConnectService for RecordingConnectService {
         caller: &str,
         to_bot: &str,
         message: Option<String>,
+        request_auth: Option<bcs_service_api::RequestAuthHeaders>,
     ) -> ServiceResult<ConnectResult> {
+        self.create_request_auths.lock().await.push(request_auth);
         self.create_commands
             .lock()
             .await
@@ -354,6 +358,59 @@ async fn friend_connection_request_requires_bearer_even_with_from_actor() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+
+#[tokio::test]
+async fn friend_connection_request_forwards_whitelisted_auth_headers_to_connect_service() {
+    let connect = Arc::new(RecordingConnectService::default());
+    let temp_dir = TempDir::new().unwrap();
+    let app = build_app(
+        &temp_dir,
+        connect.clone(),
+        Arc::new(RecordingBotQueryService::default()),
+        Some(Arc::new(StaticUserIdentityPort::human("10001"))),
+        None,
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/collaboration/friend-connections/requests")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer caller-token")
+                .header("cookie", "SSO=caller-cookie")
+                .header("x-avernet-principal", "signed-principal")
+                .header("x-request-id", "req-1")
+                .header("x-ignore-me", "nope")
+                .body(Body::from(
+                    serde_json::json!({
+                        "to_bot": "peer-bot"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let request_auths = connect.create_request_auths.lock().await;
+    assert_eq!(request_auths.len(), 1);
+    let request_auth = request_auths[0].as_ref().expect("request auth forwarded");
+    assert_eq!(request_auth.authorization.as_deref(), Some("Bearer caller-token"));
+    assert_eq!(request_auth.cookie.as_deref(), Some("SSO=caller-cookie"));
+    assert_eq!(
+        request_auth.forwarded_headers,
+        vec![
+            ("authorization".to_string(), "Bearer caller-token".to_string()),
+            ("cookie".to_string(), "SSO=caller-cookie".to_string()),
+            ("x-avernet-principal".to_string(), "signed-principal".to_string()),
+            ("x-request-id".to_string(), "req-1".to_string()),
+        ]
+    );
 }
 
 #[tokio::test]

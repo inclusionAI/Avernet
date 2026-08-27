@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Path, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
@@ -45,6 +45,11 @@ from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPI
 router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/lifecycle", route_class=PublicAPIRoute)
 edit_lock_router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/edit-lock", route_class=PublicAPIRoute)
 
+PublicationIdPath = Annotated[
+    int,
+    Path(ge=1, description="The service-Bot publication version to upgrade."),
+]
+
 
 def _lock_payload(info: Any, *, acquired: bool | None = None) -> EditLock:
     lock = getattr(info, "lock", None)
@@ -73,6 +78,31 @@ async def upgrade_to_service(
 ) -> Envelope[ServicePublication]:
     """Irreversibly upgrade an eligible personal cloud Bot to a service Bot."""
     result = facade.convert_to_service(bot_id, actor_id=actor_id, owner_id=owner_id)
+    return envelope(ServicePublication.model_validate(result), request)
+
+
+@router.post(
+    "/{publication_id}/upgrade",
+    response_model=Envelope[ServicePublication],
+)
+@envelope_errors
+async def upgrade_publication(
+    bot_id: BotIdPath,
+    publication_id: PublicationIdPath,
+    request: Request,
+    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    facade: ServicePublicationFacadeProtocol = Injected(
+        ServicePublicationFacadeProtocol
+    ),
+) -> Envelope[ServicePublication]:
+    """Create the next draft version from a running service publication."""
+    result = facade.upgrade_publication(
+        bot_id,
+        publication_id,
+        actor_id=actor_id,
+        owner_id=owner_id,
+    )
     return envelope(ServicePublication.model_validate(result), request)
 
 

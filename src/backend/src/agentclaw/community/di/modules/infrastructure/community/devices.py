@@ -6,8 +6,8 @@ is baas-only: no ``ArcaDeviceService``, no ``config_corp`` config, no ARCA
 sandbox factory. The neutral pieces (repos, conn-info builders, the
 device-filesystem resolver, the BaaS device service, ``NotifyBotLister``, the
 rollout policy) come from the base ``DevicesModule`` installed for every profile;
-this module only adds the community device accessor + a baas-only
-``DeviceServiceRouter``.
+this module adds the community device accessor, adapter transport, and a
+baas-only ``DeviceServiceRouter``.
 
 Corp-free by construction: it imports only ``core`` + ``plugin_api``.
 """
@@ -30,6 +30,9 @@ from agentclaw.community.core.devices.services.device_service import (
 )
 from agentclaw.community.core.devices.services.device_service_router import DeviceServiceRouter
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterTransport,
+)
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 
@@ -38,6 +41,10 @@ class CommunityDevicesModule(Module):
     """community: BaaS-only device runtime wiring (no ARCA)."""
 
     def configure(self, binder: Binder) -> None:
+        from agentclaw.community.plugins.community.device_adapter_transport import (
+            CommunityDeviceAdapterTransport,
+        )
+
         # Passthrough token vault: the community build has no Mist master key, so
         # ``encrypt`` returns plaintext. The base ``DevicesModule.baas_device_service``
         # @injects this ``TokenVault`` to build the BaaS device service.
@@ -50,6 +57,11 @@ class CommunityDevicesModule(Module):
         # ``BaasDeviceAccessor`` has an ``@inject`` ctor (lazy BotService /
         # BaasService providers + WorkspacePathFactory), all base bindings.
         binder.bind(DeviceAccessor, to=BaasDeviceAccessor, scope=singleton)
+        binder.bind(
+            DeviceAdapterTransport,
+            to=CommunityDeviceAdapterTransport,
+            scope=singleton,
+        )
         # No Moltis bot-to-bot gateway in the community build (it is a corp
         # runtime); bind the community noop so the ``DeviceConnectionManagerPlugin``
         # the approvals router injects resolves.

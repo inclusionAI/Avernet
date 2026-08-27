@@ -359,10 +359,21 @@ class BotInventoryService:
         if level >= PermissionLevel.OWNER:
             return actions, disabled
         if kind is BotInventoryKind.SERVICE and level >= PermissionLevel.MEMBER:
-            allowed = tuple(action for action in actions if action is not BotAction.DELETE)
+            allowed = tuple(
+                action
+                for action in actions
+                if action is not BotAction.DELETE
+                and not (
+                    action is BotAction.UPGRADE and level < PermissionLevel.ADMIN
+                )
+            )
             if BotAction.DELETE in actions:
                 disabled.setdefault(
                     BotAction.DELETE.value, "Bot Owner permission required"
+                )
+            if BotAction.UPGRADE in actions and level < PermissionLevel.ADMIN:
+                disabled.setdefault(
+                    BotAction.UPGRADE.value, "Bot Admin permission required"
                 )
             return allowed, disabled
         # MEMBER is defined as "edit content only": editing (skills/skill-sets,

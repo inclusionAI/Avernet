@@ -2,7 +2,7 @@
 
 > 状态：**正式 Spec / 开发与团队 Review 共同基线**
 > 日期：2026-08-20
-> 目标分支：`dev_refactory_collaboration`
+> 目标分支：`dev`
 > 本文是 Phase 1、Phase 2 开发、测试、Ticket 拆分和团队 Review 的唯一方案基线。
 
 ## Problem Statement
@@ -69,7 +69,7 @@ artifact。本文先冻结待实现合同；实现完成后生成的 OpenAPI JSO
 23. 作为 Bot 用户，我希望 Bot 重启时根据数据库 Desired State 重建全部 Skill/MCP 投影。
 24. 作为 Bot 用户，我希望一次 Runtime 明确失败不会留下新的半套 Desired State。
 25. 作为运维人员，我希望再次 activate/deactivate 或修改 active SkillSet 能全量修复上次崩溃窗口。
-26. 作为 Space 用户，我希望从 ZIP 或 Git 创建全新的 Space Skill Identity，而不转换 Legacy Repo。
+26. 作为 Space 用户，我希望从本地文件夹或 Git 创建全新的 Space Skill Identity，而不转换 Legacy Repo。
 27. 作为 Space Skill Owner，我希望升级只创建新 Draft/Version，skill_id 和 skill_uuid 永远不变。
 28. 作为 Space Skill Owner，我希望名称和描述只来自 SKILL.md，避免页面和发布内容不一致。
 29. 作为 Team Skill Owner/Manager，我希望编辑前取得可抢占的数据库 Lease，旧页面在抢占后不能保存。
@@ -89,6 +89,9 @@ artifact。本文先冻结待实现合同；实现完成后生成的 OpenAPI JSO
 43. 作为产品负责人，我希望仍被 SkillSet、Artifact 或进行中操作引用的 Skill 不能退役。
 44. 作为前端开发者，我希望实现后直接使用 Gateway OpenAPI/Swagger 获取准确请求、响应和错误合同。
 45. 作为发布负责人，我希望 Phase 1 和 Phase 2 各有独立验收门禁，并能定位安全回滚下限。
+46. 作为 Team Space 普通成员，我希望可以向当前 Skill Owner 申请编辑权限，并在工单中查询结果。
+47. 作为 Skill Owner，我希望批准编辑申请后申请人原子获得 Manager Grant，拒绝时不改变 Skill Grant。
+48. 作为前端开发者，我希望列表返回稳定的 Skill/Draft/Attempt/Lease 领域摘要与当前调用者权限，而不把页面按钮 ViewModel 写入公共合同。
 
 ## Implementation Decisions
 
@@ -117,6 +120,10 @@ Backend 真实提供，同时避免在 Review 阶段暴露返回 `501` 的占位
 - Space Skill Identity、Draft、Version、Edit Lease、Publication Attempt。
 - Skill Center 发布、精确版本物化、升级传播和整体退役。
 - 七桃负责的 Space、Member、Join Request、Favorite 接口保持现有合同，不在本文重构。
+- 当前 `GET /openapi/v1/bots/spaces/{space_id}/skills` 的旧 `SpaceSkillItem` 尚无真实
+  调用方，且已与前端确认不作为兼容合同；Phase 2 直接以本节的
+  `SpaceSkillSummary` 替换，不保留 `status/draft_status/current_user_skill_role/
+  can_edit/can_grant/can_apply_edit` 双轨字段。
 
 ### 3. 最终领域模型
 
@@ -196,6 +203,10 @@ RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET
 - 安装、加入 SkillSet、激活前执行服务端权限校验。
 - MCP Catalog、用户配置、调用身份仍是独立事实。
 
+Engine/Template Default MCP Policy 与 Active Skill MCP dependency 的统一深模块边界仍为
+**TBD**。本次 Phase 2 合同收口不修改现有 MCP Effective/Runtime 语义，也不得在
+Asset、Draft、Grant、Lease、Publication 或 Version 实现中复制另一套 MCP Union。
+
 #### 3.5 持久化合同
 
 Phase 1 新增两张 Desired State 表：
@@ -220,8 +231,14 @@ Phase 2 复用一条 `ac_skill` 作为跨版本稳定 Identity：
 - `ac_skill_grant` 表达恰好一个 Owner 和多个 Manager，不读取 Legacy 权限表。
 - `ac_skill_draft_edit_lease` 是永久协作锁事实，保存 holder 与单调递增 fencing
   token；本期没有 TTL、expires、renewal 或自动释放语义。
+- Draft 内容存储的 `DraftContentStore` Protocol、物理 OSS 根、临时区布局以及 OSS/DB
+  失败补偿仍标记为 **TBD**，必须在 P2-01/P2-03 实现前另行冻结。本轮 Grant、Editor
+  Request 与 Lease 只建立可被 Draft 命令复用的领域 seam，不实现或猜测 Draft 文件存储。
 - `ac_skill_version` 保存不可变 version ordinal、SC version number/version id、
   冻结元信息和 MATERIALIZING/PUBLISHED 状态，不保存长期 Snapshot URI/Hash。
+  `publication_attempt_id` 必须允许为空：TeamClaw 工坊发布产生的 Version 指向
+  Publication Attempt；SC Public 懒加载 Version 没有 TeamClaw 发布动作，值为 `null`，
+  不得伪造 Publication Attempt。
 - `ac_skill_publication_attempt` 保存幂等键、目标版本、外部提交阶段、失败原因和
   RESULT_UNKNOWN；一个 Skill 同时最多一个进行中 Attempt。
 - 所有新增表的 `env` 非空，所有查询和唯一键同时包含 tenant/env。
@@ -320,17 +337,25 @@ deactivate
 
 旧 `POST /openapi/v1/bots/market/skills` 保留为 TeamClaw 市场兼容入口。Skill Center 的团队搜索不得作为工坊目录；TC 才是 Space、Grant、Draft 和消费状态的权威。
 
-Skill Center 市场有万级且持续增长的外部记录，禁止全量扫描/写入 `ac_skill`。用户确认引用时才按需物化，目标公开命令为：
+Skill Center 市场有万级且持续增长的外部记录，禁止全量扫描/写入 `ac_skill`。用户确认引用时才按需物化。公开 Interface 使用 Bot/SkillSet-scoped 的专用异步 Reference，不复用通用 Membership 的 `skill_id`，也不传 `market_source`：
 
 ```text
-POST /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/market-skill-references
+POST /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references
+GET  /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references/{reference_id}
+
+Idempotency-Key: required
 {
-  market_source: SKILLCENTER,
-  skill_code: <SkillCenter stable code>
+  "skill_code": "<SkillCenter stable code>"
 }
 ```
 
-该命令的后续实现必须完成 SC 授权、稳定 `skillCode` 解析、TeamClaw 可消费引用的幂等物化，并仅在成功取得 TeamClaw `skill_id` 后写 `ac_skill_set_skill`。当前阶段只冻结合同；不得提前发布为可成功调用的 Gateway 路由。
+POST 返回 `202 Accepted` 与持久 `reference_id`；前端通过 GET 查询
+`PENDING/RUNNING/SUCCEEDED/FAILED`。Reference 首次受理时解析并冻结精确
+`sc_version_number`，内部完成 SC PUBLIC 授权、`ac_skill/ac_skill_version` 幂等创建、
+TeamClaw Canonical Store Ready 和最终 ACL/SkillSet 状态复验；只有 Version=`PUBLISHED` 后才调用
+`SkillSetManagementService` 写 Membership，active Set 再维护 Installation 与 Runtime
+Projection。已物化但最终 Membership 失败时保留共享只读 Asset/Version，不写悬空
+Membership。当前阶段只冻结合同；没有真实 Backend 实现前不得加入 Gateway 正式 OpenAPI artifact。
 
 ### 6. Phase 1：Repo Catalog
 
@@ -408,17 +433,17 @@ GET/PUT /openapi/v1/bots/mcp/servers/{server_code}/config
 以下接口以七桃当前方案和已发布合同为准，本文不重构：
 
 ```text
-GET    /openapi/v1/spaces
-POST   /openapi/v1/spaces/create
-POST   /openapi/v1/spaces/personal/initialize
-GET    /openapi/v1/spaces/{space_id}/members
-POST   /openapi/v1/spaces/{space_id}/members
-PUT    /openapi/v1/spaces/{space_id}/members/{user_id}/role
-DELETE /openapi/v1/spaces/{space_id}/members/{user_id}
-POST   /openapi/v1/spaces/{space_id}/join-requests
-POST   /openapi/v1/spaces/{space_id}/market-favorites
-POST   /openapi/v1/spaces/{space_id}/market-favorites/cancel
-POST   /openapi/v1/spaces/{space_id}/market-favorites/search
+GET    /openapi/v1/bots/spaces
+POST   /openapi/v1/bots/spaces/create
+POST   /openapi/v1/bots/spaces/personal/initialize
+GET    /openapi/v1/bots/spaces/{space_id}/members
+POST   /openapi/v1/bots/spaces/{space_id}/members
+PUT    /openapi/v1/bots/spaces/{space_id}/members/{user_id}/role
+DELETE /openapi/v1/bots/spaces/{space_id}/members/{user_id}
+POST   /openapi/v1/bots/spaces/{space_id}/join-requests
+POST   /openapi/v1/bots/spaces/{space_id}/market-favorites
+POST   /openapi/v1/bots/spaces/{space_id}/market-favorites/cancel
+POST   /openapi/v1/bots/spaces/{space_id}/market-favorites/search
 ```
 
 本期不支持 Space 删除，不调用 Skill Center close/disable/delete Team。
@@ -429,13 +454,13 @@ POST   /openapi/v1/spaces/{space_id}/market-favorites/search
 
 | Method | Path | 语义 |
 | --- | --- | --- |
-| GET | `/openapi/v1/spaces/{space_id}/skills` | 能力工坊 Skill 列表 |
-| POST | `/openapi/v1/spaces/{space_id}/skills` | raw ZIP + 幂等键创建 Identity、V1 Draft、Binding、Owner |
-| POST | `/openapi/v1/spaces/{space_id}/skills/import-from-git` | JSON Git source + 幂等键，映射同一创建命令 |
-| GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}` | 创作详情：Draft、Version、Attempt、权限 |
+| GET | `/openapi/v1/bots/spaces/{space_id}/skills` | 能力工坊 Skill 列表 |
+| POST | `/openapi/v1/bots/spaces/{space_id}/skills` | multipart 本地文件夹 + 幂等键创建 Identity、V1 Draft、Binding、Owner |
+| POST | `/openapi/v1/bots/spaces/{space_id}/skills/import-from-git` | JSON Git source + 幂等键，映射同一创建命令 |
+| GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}` | 创作详情：Draft、Version、Attempt、权限 |
 | GET | `/openapi/v1/bots/skills/repository/{skill_id}` | 消费详情：只返回 latest Published |
 
-创建事务包含 `ac_skill Identity + V1 Draft facts + ac_skill_space_binding + 唯一 Skill Owner`；SC RPC 不进入事务。Git 导入后与 ZIP 创建同模型，不转换 Legacy Repo Skill。
+创建事务包含 `ac_skill Identity + V1 Draft facts + ac_skill_space_binding + 唯一 Skill Owner`；SC RPC 不进入事务。本地文件夹上传使用重复 `files` 与可选 JSON `file_paths` 字段保存相对目录结构，不要求前端生成 ZIP。Git 导入后与本地文件夹创建同模型，不转换 Legacy Repo Skill。
 
 详情分别返回：
 
@@ -448,40 +473,132 @@ publication_status
 
 SKILL.md 是名称和描述的唯一事实来源。
 
+##### 10.1.1 工坊列表领域摘要
+
+`GET /openapi/v1/bots/spaces/{space_id}/skills` 是能力工坊的集合读取接口。
+它返回稳定领域摘要，而不是数据库表行或页面按钮 ViewModel。工坊列表包含已退役
+Skill 供历史查看；消费型 Repository/Consumable 列表仍排除已退役 Skill。
+
+当前代码中的旧 `SpaceSkillItem` 从未被产品或外部调用方使用，不承担向前兼容；实现时
+直接删除旧 `status/draft_status/current_user_skill_role/can_edit/can_grant/
+can_apply_edit` 投影，以本节 `SpaceSkillSummary` 作为唯一响应模型。
+
+每个 `SpaceSkillSummary` 至少返回：
+
+```text
+skill_id / skill_uuid / name / description / space_type / owner
+lifecycle_status = DRAFT_ONLY | PUBLISHED | RETIRED
+latest_published_version
+draft = { target_version, status = EDITING | FROZEN } | null
+active_publication = { attempt_id, target_version, status } | null
+actor = {
+  skill_role = OWNER | MANAGER | null,
+  permissions,
+  pending_editor_request
+}
+lease_summary
+gmt_created / gmt_modified
+```
+
+Published V1 与 Draft V2 可同时存在。`active_publication` 只返回当前进行中 Attempt
+的摘要；历史仍通过 Publications 资源查询。`pending_editor_request` 只投影当前
+调用者对该 Skill 的 PENDING `SKILL_COLLABORATOR` 工单，无待审申请时为 `null`。
+
+`actor.permissions` 只表达当前调用者基于 ACL/Grant 是否有资格发起领域命令：
+
+```text
+edit_draft
+publish_draft
+delete_draft
+create_upgrade_draft
+retire_skill
+manage_grants
+transfer_owner
+request_edit_access
+takeover_lease
+```
+
+Permission 不表示命令在当前 Draft/Lease/Attempt 状态下一定成功。公共接口不返回
+`AVAILABLE/BLOCKED/HIDDEN`、按钮文案或 Tooltip；前端根据领域事实和 permissions 生成页面。
+所有命令接口仍必须在执行时重新校验权限和当前状态。
+
+`lease_summary` 仅服务于列表锁图标和 holder 展示：
+
+```text
+required
+state = NOT_REQUIRED | FREE | HELD_BY_ME | HELD_BY_OTHER
+holder_user_id
+holder_display_name
+```
+
+无 Draft 时 `lease_summary=null`；Personal Draft 返回 `required=false,state=NOT_REQUIRED`。列表不返回
+fencing token；点击编辑后通过 Lease 资源重新查询/变更实时状态。列表也不内联全量
+Grants、Versions、Publication 历史、文件树或升级/退役影响列表，这些由对应资源接口提供。
+
 #### 10.2 Draft 与 Version
 
 | Method | Path | 语义 |
 | --- | --- | --- |
-| POST | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft/upgrade` | 创建下一版本 Draft；要求幂等键 |
-| GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft` | Draft 状态和 Git metadata |
-| GET/PUT | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft/files/{path}` | 读取/保存单文件 |
-| GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft/files` | Draft 文件树 |
-| POST | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft/replace` | ZIP 原子替换 |
-| POST | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft/refresh-from-git` | 从原 Git 来源手动刷新 |
-| GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/versions` | Published Version 列表 |
-| GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/versions/{version}` | 精确业务版本详情 |
-| GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/versions/{version}/files` | 精确版本文件树 |
-| GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/versions/{version}/files/{path}` | 精确版本文件内容 |
+| POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/upgrade` | 创建下一版本 Draft；要求幂等键 |
+| GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft` | Draft 状态和 Git metadata |
+| GET/PUT | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path}` | 读取/保存单文件 |
+| GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files` | Draft 文件树 |
+| POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/replace` | multipart 本地文件夹原子替换 |
+| POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/refresh-from-git` | 从原 Git 来源手动刷新 |
+| GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions` | Published Version 列表 |
+| GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}` | 精确业务版本详情 |
+| GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files` | 精确版本文件树 |
+| GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files/{path}` | 精确版本文件内容 |
 
 URL 中 `{version}` 是业务序号 `1/2/3`，不是 `ac_skill_version.id`。Published Version 不可修改、删除或单独下线。Git 刷新失败时 Draft 完全不变。
 
-#### 10.3 Owner、Manager 与放弃 Draft
+#### 10.3 Owner、Manager、编辑权申请与放弃 Draft
 
 | Method | Path | 语义 |
 | --- | --- | --- |
-| GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/grants` | 返回唯一 Owner 与 Managers |
-| PUT | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/managers/{user_id}` | Owner 幂等添加当前 Space Member 为 Manager |
-| DELETE | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/managers/{user_id}` | Owner 幂等移除 Manager |
-| POST | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/owner-transfer` | 原子转移唯一 Owner |
-| DELETE | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft` | 放弃当前 EDITING Draft |
+| GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants` | 返回唯一 Owner 与 Managers |
+| PUT | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{user_id}` | Owner 幂等添加当前 Space Member 为 Manager |
+| DELETE | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{user_id}` | Owner 幂等移除 Manager |
+| POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/owner-transfer` | 原子转移唯一 Owner |
+| POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-requests` | Team Space 普通成员申请 Manager 编辑权；创建 `SKILL_COLLABORATOR` Work Order |
+| DELETE | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft` | 放弃当前 EDITING Draft |
 
 - 当前 Owner 可以转移 Owner；Space Administrator 也可从详情页执行转移，但必须记录
   原因。接收人必须是当前 Space Member。
 - Owner 转移与旧 Lease 失效在同一事务完成；原 Owner 不自动保留 Manager 权限。
 - 本期只有 Owner/Manager 两种 Skill Grant，不新增 Editor 或普通 Skill Member。
-- 删除升级 Draft 只放弃本次升级；首次从未发布的 Draft 只有在没有 Attempt、Version、
-  Binding、Artifact 或其他历史事实时才可连同 Identity 物理取消。
+- Owner 直接 `PUT/DELETE managers` 不生成 Work Order。移除当前 Lease holder 的
+  Manager Grant 时，必须在同一事务内使该 Lease/fencing token 失效。
+- 删除升级 Draft 只放弃本次升级；首次从未发布的 Draft 在没有 Attempt、Version、
+  Installation、SkillSet Membership、Artifact 或其他外部历史事实时，可以在同一事务中
+  删除 Draft 事实、Owner/Manager Grant、该 Skill 自己的 Space Binding 和 Skill Identity。
 - FROZEN Draft 不能放弃，必须先由 Attempt 收敛到明确结果。
+
+编辑权申请 body：
+
+```json
+{ "reason": "需要共同维护该 Skill" }
+```
+
+申请人必须是当前 Active Team Space Member，且尚不是 Owner/Manager。同一
+`tenant + env + skill_id + applicant_user_id` 同时最多一个 PENDING 工单。前端不得调用
+`/openapi/v1/bots/work-orders/events` 自行指定审批人；Skill 模块必须从当前唯一
+Owner Grant 解析 reviewer。
+
+申请成功返回 `work_order_id/work_order_no/status=PENDING`。申请人和 Owner 复用：
+
+```text
+GET  /openapi/v1/bots/work-orders?query_type=INITIATED_BY_ME&item_type=APPROVAL&biz_type=SKILL_COLLABORATOR&biz_id={skill_id}
+GET  /openapi/v1/bots/work-orders?query_type=PENDING_FOR_ME&item_type=APPROVAL&biz_type=SKILL_COLLABORATOR&biz_id={skill_id}
+GET  /openapi/v1/bots/work-orders/{work_order_id}
+POST /openapi/v1/bots/work-orders/{work_order_id}/approval
+```
+
+审批通过必须在同一事务内锁定 Work Order、确认仍为 PENDING、重新确认
+reviewer 仍是当前 Skill Owner、申请人仍是 Active Space Member、幂等写入
+`ac_skill_grant(role=MANAGER,status=ACTIVE)`，再将 Work Order 收敛为 APPROVED 并写结果通知。
+拒绝只关闭工单，不写 Skill Grant。Owner 转移后，待审 Skill 工单必须改由新
+Owner 审批，旧 Owner 不得继续审批。
 
 ### 11. Phase 2：Edit Lease
 
@@ -489,10 +606,10 @@ URL 中 `{version}` 是业务序号 `1/2/3`，不是 `ac_skill_version.id`。Pub
 
 | Method | Path | 语义 |
 | --- | --- | --- |
-| GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft/lease` | 查询 holder |
-| PUT | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft/lease` | 获取锁和新 fencing token |
-| DELETE | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft/lease` | holder 主动释放 |
-| POST | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover` | Owner/Manager 抢锁 |
+| GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease` | 查询 holder |
+| PUT | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease` | 获取锁和新 fencing token |
+| DELETE | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease` | holder 主动释放 |
+| POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover` | Owner/Manager 抢锁 |
 
 本期不建设 TTL 或续租。关闭编辑抽屉主动释放；遗留锁由 Takeover。旧 fencing token 永久不能写入。
 
@@ -500,13 +617,13 @@ URL 中 `{version}` 是业务序号 `1/2/3`，不是 `ac_skill_version.id`。Pub
 
 | Method | Path | 语义 |
 | --- | --- | --- |
-| GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/upgrade-impact` | 发布前查看受影响 Bot |
-| POST | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/publications` | 冻结 Draft、创建 Attempt 和 task；幂等；202 |
-| GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/publications` | Attempt 历史 |
-| GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}` | Attempt 详情 |
-| POST | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/versions/{version}/materialization-retry` | 只重试同一 Version 物化 |
-| GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/retirement-impact` | 退役影响检查 |
-| POST | `/openapi/v1/spaces/{space_id}/skills/{skill_id}/retirement` | 整体退役 Skill |
+| GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/upgrade-impact` | 发布前查看受影响 Bot |
+| POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications` | 冻结 Draft、创建 Attempt 和 task；幂等；202 |
+| GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications` | Attempt 历史 |
+| GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}` | Attempt 详情 |
+| POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/materialization-retry` | 只重试同一 Version 物化 |
+| GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/retirement-impact` | 退役影响检查 |
+| POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/retirement` | 整体退役 Skill |
 
 发布事务：
 
@@ -525,12 +642,19 @@ PREPARING → SC_SUBMITTING → WAITING_SC → MATERIALIZING
 ```
 
 - 明确失败：Draft 恢复 EDITING，相同 target version 可修改后再次提交。
-- SC Published：创建不可变 Version，记录 `versionId/versionNumber`，完成 Store 物化后 SUCCEEDED 并清 Draft。
+- SC Published：创建不可变 Version，记录 `versionId/versionNumber`；只有 TeamClaw
+  Canonical Store Ready 后才将 Version 置为 PUBLISHED、Attempt 置为 SUCCEEDED 并清 Draft。
 - 物化失败：不再次 POST SC，只重试同一 Version。
 - RESULT_UNKNOWN：Draft 保持 FROZEN，普通用户不能处理。
 - 不建设长期 Snapshot URI/Hash，不提供 Attempt cancel。
 - Runtime reconcile 不使用 `ac_task_queue`；SC 发布与物化继续使用持久任务。
 - Bot Binding、Service Artifact 或进行中操作存在时阻断整体退役。
+
+前端阶段投影固定为：`PREPARING/SC_SUBMITTING/WAITING_SC` 显示“发布中”；SC 已形成
+精确 Version 且处于 `MATERIALIZING` 时显示“物化中”；只有
+`ac_skill_version.status=PUBLISHED` 且 Attempt=`SUCCEEDED` 才显示“发布成功”。
+`RESULT_UNKNOWN` 单独显示“发布结果确认中”，不得提供普通重新发布按钮。Bot Track
+Latest 是发布成功后的 Best-Effort 异步刷新，不参与发布成功门禁。
 
 ### 13. Skill Center 映射与精确版本物化
 
@@ -552,11 +676,16 @@ PREPARING → SC_SUBMITTING → WAITING_SC → MATERIALIZING
   解压、扫描和物化同一精确版本；Runtime reconcile 不复用该任务机制。
 - 文件型 Runtime 的唯一 Center corpus 是
   `skills-pool/skill-center/<skill_uuid>/<sc_version_number>/`。Center 对 Local/Repo
-  layout 切流中立，但进入 mapping publish/verify/inventory 生命周期。
+  layout 切流中立：无论 Bot 当前 Local/Repo 是 Legacy 还是 Pool，Center 都使用这一
+  canonical root，不创建 `legacy_center`，但进入 mapping publish/verify/inventory 生命周期。
+- 共享 OSS 物理根由服务端环境配置提供，不写入 Spec、业务代码或公开合同；文件型
+  Engine Adapter 将其暴露为容器内 `skills-pool/skill-center/` 视图。
 - Teclaw 沿用 Artifact v4，新增 `skill-center` OSS Store，SkillRef path 为
   `<skill_uuid>/<sc_version_number>`；Bucket/Base 来自服务端配置。
-- 文件型 Store 与 Teclaw Store 全部就绪后 Version 才转 PUBLISHED。任一失败保持
-  MATERIALIZING，只重试同一 Version，不再次发布 SC。
+- **TeamClaw Canonical Store Ready** 是发布成功门槛：该 Version 面向本期支持消费者
+  所需的文件型 Store 与 Teclaw Store 全部就绪后，Version 才转 PUBLISHED。SC 已发布
+  或只完成其中一个 Store 都不算 TeamClaw 发布成功；任一失败保持 MATERIALIZING，
+  只重试同一 Version，不再次发布 SC。
 - 禁止 `current/latest`、版本覆盖和数量型 GC；历史 Service Artifact 可能继续引用
   任意旧版本。
 
@@ -569,6 +698,10 @@ PREPARING → SC_SUBMITTING → WAITING_SC → MATERIALIZING
 - 已发布 Service Bot 重启、扩容、回滚只读历史 Artifact，不动态解析 latest。
 - Skill 新版本只更新 Service Bot 草稿；下次发布 Service Bot 时才进入新 Artifact。
 - Local/Repo/Space 路径解析集中在统一 Resolver/Engine Adapter。
+- 文件型 OpenClaw/Claude Code Service Artifact 的 contract version、精确 Center dependency
+  字段和兼容读取规则标记为 **TBD**；“Artifact v5”目前只是未冻结的候选名称/版本，
+  不得作为已确认合同实现。上述内容必须在 P2-11 实现前冻结；Teclaw 继续使用已确认的
+  Artifact v4 `store=skill-center,path=<skill_uuid>/<sc_version_number>`。
 
 ### 15. Bot Type × Engine 兼容矩阵
 
@@ -604,7 +737,7 @@ PREPARING → SC_SUBMITTING → WAITING_SC → MATERIALIZING
 | 403 | ACL、Owner/Manager、MCP 权限失败 |
 | 404 | Skill/Space/Version/Attempt 不存在 |
 | 409 | 状态机、Membership、Bot ready、runtime name 冲突 |
-| 422 | SKILL.md、ZIP、Git 内容或参数校验失败 |
+| 422 | SKILL.md、本地文件夹、Git 内容或参数校验失败 |
 | 502/503 | Skill Center 或 Runtime 不可用 |
 
 继续使用已发布 Gateway Envelope，并提供稳定 `error_code`。
@@ -616,10 +749,12 @@ PREPARING → SC_SUBMITTING → WAITING_SC → MATERIALIZING
 3. Deprecated `/openapi/v1/bots/skills/**` 不删除。
 4. Legacy Skill/SkillSet BFF 只做 Compatibility Adapter，不拥有领域逻辑。
 5. 七桃负责的 Space/Member/Favorite wire 不变。
-6. Local、Repo、Space 不自动转换；Bot-local 长期保持 Bot-local。
-7. Legacy Local/Repo 不要求补 UUID 才能读取；公开身份仍是 `ac_skill.id`。
-8. Resolver 覆盖 Local/Repo/Space、OpenClaw、Claude Code(AICoding image)、Hermes、Teclaw 及产品支持的 Bot Type。
-9. Service Bot v4 旧 Artifact 继续可读；Center 精确依赖采用 additive contract/capability gate。
+6. 当前尚无真实调用方的 Space Skill 旧列表响应不属于兼容 wire；直接由
+   `SpaceSkillSummary` 替换，不保留旧按钮 ViewModel 字段。
+7. Local、Repo、Space 不自动转换；Bot-local 长期保持 Bot-local。
+8. Legacy Local/Repo 不要求补 UUID 才能读取；公开身份仍是 `ac_skill.id`。
+9. Resolver 覆盖 Local/Repo/Space、OpenClaw、Claude Code(AICoding image)、Hermes、Teclaw 及产品支持的 Bot Type。
+10. Service Bot v4 旧 Artifact 继续可读；Center 精确依赖采用 additive contract/capability gate。
 
 ### 18. 交付、切流与回滚
 
@@ -677,7 +812,7 @@ Legacy 全矩阵无回归。产品前端是否已经完成调用切换和页面 
 
 Phase 1 对新产品 PRD 的可测边界：Local 上传、Repo Catalog、MCP Catalog/权限、
 添加到 SkillSet、SkillSet 整体激活/停用、System Default 和 Runtime 恢复可做完整
-Backend 验收。真实 Space Skill 的 ZIP/Git 创建、Draft 编辑、Owner/Manager/Edit
+Backend 验收。真实 Space Skill 的本地文件夹/Git 创建、Draft 编辑、Owner/Manager/Edit
 Lease、发布、版本升级、Skill Center 物化、Track Latest、Service Artifact 精确版本
 和退役属于 Phase 2；Phase 1 只能通过兼容 Fixture 验证已有 Space wire 和消费边界，
 不能把它计为新产品主流程 E2E。
@@ -703,6 +838,7 @@ Phase 2 完成定义：产品主流程 E2E、SC pre 联调、多引擎矩阵、S
 - Local/Repo/Space 原地转换。
 - 任意 Git URL 导入 Legacy Repo Catalog。
 - 单个 Published Version 下线、删除或覆盖。
+- Skill 复制/Clone；最终 PRD 已移除该功能，本期不定义对应接口。
 - Publication Attempt cancel。
 - Runtime effective/reconcile 运维接口。
 - Runtime 持久重试或逐 Bot observed resolution 查询。
@@ -740,15 +876,18 @@ Phase 2 完成定义：产品主流程 E2E、SC pre 联调、多引擎矩阵、S
      `src/gateway/configs/schemas/bots.openapi.json`，供涔涔通过 Swagger/Redoc Review。
 - 不创建 Phase 1 前端实现 Ticket；前端切流只作为独立产品发布验收项，由前端团队
   依据生成 OpenAPI/Swagger 执行。
-- Phase 2 的核心纵向顺序为：P2-01 Identity/Initial Draft → P2-02
-  Owner/Manager/Edit Lease → P2-03 Draft 文件编辑；随后 P2-04 Git 导入和 P2-05
-  Publication Attempt 可并行。P2-06 文件型 Store、P2-07 Teclaw Store、P2-08
+- Phase 2 治理基础拆为可独立 Review 的深模块：#1166 Canonical Parser、#1169
+  Team-scoped SkillCenterGateway、#1174 P2-02A Grant 可与 P2-01 并行；#1515 P2-02B
+  Editor Request 与 #1516 P2-02C Draft Edit Lease 只依赖 #1174，二者可并行。
+- P2-01 Identity/Initial Draft 与 P2-03 Draft 文件编辑必须等待
+  `DraftContentStore` 及失败补偿合同冻结；P2-03 还依赖 #1516 的 Lease/fencing seam。
+  随后 P2-04 Git 导入和 P2-05 Publication Attempt 可并行。P2-06 文件型 Store、P2-07 Teclaw Store、P2-08
   真实 SC 映射在 P2-05 后按真实依赖并行，汇合到 P2-09 PUBLISHED/升级/版本读取；
   再执行 P2-10 Track Latest、P2-11 Service Artifact、P2-12 退役和最终 Gate/Rollback。
 - 旧 #1165～#1187 必须逐条归类为“已完成并关闭”“修订复用”或“被新 Ticket
   取代并关闭”；禁止保留两套同时可领取的 ready-for-agent 工作。
 - 每个实现 Ticket 使用独立上下文和 `implement` 流程，以小 PR 合入
-  `dev_refactory_collaboration`；一个 PR 只关闭一个可独立验收的纵向行为。
+  `dev`；一个 PR 只关闭一个可独立验收的纵向行为。
 - Phase 2 Ticket 可以在其真实 blockers 完成后并行，但 Phase 2 功能启用必须等待
   Phase 1 Gate。
 

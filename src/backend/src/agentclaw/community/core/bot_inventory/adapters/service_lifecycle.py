@@ -19,6 +19,9 @@ from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
     PublishStatus,
 )
+from agentclaw.community.core.service_bot.types import (
+    can_upgrade_publication_from_records,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -124,7 +127,10 @@ class ServiceLifecycleView(ServiceLifecyclePort):
                 BotAction.CANCEL_STAGING,
             )
         elif record.status == PublishStatus.SUCCESS.value:
-            add(BotAction.CHAT, BotAction.RESTART, BotAction.OFFLINE)
+            add(BotAction.CHAT, BotAction.RESTART)
+            if can_upgrade_publication_from_records(record, all_records):
+                add(BotAction.UPGRADE)
+            add(BotAction.OFFLINE)
         elif record.status == PublishStatus.FAILED.value:
             add(BotAction.RETRY)
         return tuple(actions)

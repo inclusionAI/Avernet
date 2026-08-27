@@ -10,17 +10,37 @@ use bcs_service_api::{
     RedactedToken, ServiceError, WebSendCommand,
     ServiceResult, Session, SessionHistoryCommand, SessionKind, SessionManagementService,
     SessionStatus, SessionUseCaseError,
+    SystemMessageEvent, SystemMessageService,
     interceptor::{BlockReason, InterceptorDecision, MessageInterceptor, OutboundMessage},
     port::{EventRecordFactoryPort, NewEvent},
 };
 use serde_json::json;
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 #[path = "../../../test-support/message_flow_contract_support.rs"]
 mod support;
 
 struct BlockingInterceptor;
+
+#[derive(Default)]
+struct RecordingSystemMessage {
+    events: Mutex<Vec<SystemMessageEvent>>,
+}
+
+#[async_trait::async_trait]
+impl SystemMessageService for RecordingSystemMessage {
+    async fn notify(
+        &self,
+        _group_id: &str,
+        event: SystemMessageEvent,
+        _session_id: &str,
+        _session_participants: &[Participant],
+    ) -> ServiceResult<usize> {
+        self.events.lock().await.push(event);
+        Ok(1)
+    }
+}
 
 #[async_trait::async_trait]
 impl MessageInterceptor for BlockingInterceptor {
@@ -1490,6 +1510,52 @@ async fn web_send_delivers_to_registered_provider_target_without_ws_connection()
 }
 
 #[tokio::test]
+async fn failed_provider_web_send_uses_unified_system_message() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    install_provider_driver_group(&support, "provider-owner").await;
+    support.bot_delivery.fail_for("bot-provider").await;
+    let system_message = Arc::new(RecordingSystemMessage::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_system_message(system_message.clone());
+
+    let outcome = flow
+        .handle_web_send(WebSendCommand {
+            caller: CallerContext::Human(HumanActor {
+                actor_id: "human_1".to_string(),
+                staff_no: "1".to_string(),
+            }),
+            group_id: "group-provider".to_string(),
+            session_id: Some("group-provider:abcdef12".to_string()),
+            from_actor_id: "human_1".to_string(),
+            from_name: Some("Human One".to_string()),
+            message: "hello".to_string(),
+            mentions: vec![],
+            attachments: None,
+            thinking: None,
+            idempotency_key: None,
+            source_im_message_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.failed_count, 1);
+    let events = system_message.events.lock().await;
+    assert_eq!(events.len(), 1);
+    let SystemMessageEvent::GenericNotification { message, .. } = &events[0] else {
+        panic!("expected generic notification");
+    };
+    assert_eq!(message, "消息投递失败，请稍后重试。");
+}
+
+#[tokio::test]
 async fn deprecated_provider_stream_gray_match_keeps_provider_delivery_target() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     install_provider_driver_group(&support, "gray-user").await;
@@ -2196,6 +2262,12 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
         .find(|participant| participant.bot_uuid == "bot-driver")
         .expect("driver participant")
         .tags = vec!["group-tag".to_string()];
+    group
+        .participants
+        .iter_mut()
+        .find(|participant| participant.bot_uuid == "bot-observer")
+        .expect("observer participant")
+        .tags = vec!["stale-observer-tag".to_string()];
     support.group.upsert(group).await.expect("update group tags");
     support
         .registry
@@ -2204,13 +2276,23 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
             support::FakeRegistryService::provider_target("bot-driver"),
         )
         .await;
+    support
+        .registry
+        .set_delivery_target(
+            "bot-observer",
+            support::FakeRegistryService::provider_target("bot-observer"),
+        )
+        .await;
     let mut provider = Participant::bot("bot-driver", ParticipantRole::Driver);
     provider.tags = vec!["session-tag".to_string(), "tenant-a".to_string()];
+    let mut observer = Participant::bot("bot-observer", ParticipantRole::Observer);
+    observer.tags = vec!["online".to_string(), "tenant-b".to_string()];
     let session = test_session(
         session_id,
         "group-1",
         vec![
             provider,
+            observer,
             {
                 let mut human = Participant::human("human_1", ParticipantRole::Observer);
                 human.mode = Some(ParticipantMode::Present);
@@ -2249,16 +2331,36 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
     .unwrap();
 
     let frames = support.bot_delivery.frames().await;
-    assert_eq!(frames.len(), 1);
-    assert!(support.bot_delivery.targets().await[0].is_http_provider());
-    let BcsFrame::Request(req) = &frames[0] else {
-        panic!("expected request frame");
+    assert_eq!(frames.len(), 2);
+    assert!(support
+        .bot_delivery
+        .targets()
+        .await
+        .iter()
+        .all(BotDeliveryTarget::is_http_provider));
+    let send = frames
+        .iter()
+        .find(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.send"))
+        .expect("provider chat.send frame");
+    let send_params = match send {
+        BcsFrame::Request(req) => req.params.as_ref().expect("send params"),
+        _ => unreachable!(),
     };
-    let params = req.params.as_ref().expect("params");
-    assert_eq!(params["bcs_group_id"], "group-1");
-    assert_eq!(params["bcs_session_id"], session_id);
-    assert_eq!(params["session_key"], session_id);
-    assert_eq!(params["tags"], json!(["session-tag", "tenant-a"]));
+    assert_eq!(send_params["bcs_group_id"], "group-1");
+    assert_eq!(send_params["bcs_session_id"], session_id);
+    assert_eq!(send_params["session_key"], session_id);
+    assert_eq!(send_params["tags"], json!(["session-tag", "tenant-a"]));
+
+    let inject = frames
+        .iter()
+        .find(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.inject"))
+        .expect("provider chat.inject frame");
+    let inject_params = match inject {
+        BcsFrame::Request(req) => req.params.as_ref().expect("inject params"),
+        _ => unreachable!(),
+    };
+    assert_eq!(inject_params["bcs_session_id"], session_id);
+    assert_eq!(inject_params["tags"], json!(["online", "tenant-b"]));
 }
 
 #[tokio::test]

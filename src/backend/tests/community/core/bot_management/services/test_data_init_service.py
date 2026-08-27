@@ -4,7 +4,6 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from agentclaw.community.core.bot_management.services.data_init_service import DataInitService
-from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 
 
 class TestShouldRunInit:
@@ -15,7 +14,6 @@ class TestShouldRunInit:
             resource_repo=MagicMock(),
             device_service=MagicMock(),
             skill_set_factory=MagicMock(),
-            skill_set_activator_factory=MagicMock(),
             device_plugin=MagicMock(),
             bot_service_provider=lambda: MagicMock(),
             skill_md_path="/test/SKILL.md",
@@ -104,7 +102,6 @@ class TestGetStatus:
             resource_repo=MagicMock(),
             device_service=MagicMock(),
             skill_set_factory=MagicMock(),
-            skill_set_activator_factory=MagicMock(),
             device_plugin=MagicMock(),
             bot_service_provider=lambda: self.bot_service,
             skill_md_path="/test/SKILL.md",
@@ -229,7 +226,6 @@ class TestCollectBotInfo:
             resource_repo=MagicMock(),
             device_service=MagicMock(),
             skill_set_factory=MagicMock(),
-            skill_set_activator_factory=MagicMock(),
             device_plugin=MagicMock(),
             bot_service_provider=lambda: MagicMock(),
             skill_md_path="/test/SKILL.md",
@@ -279,7 +275,6 @@ class TestTriggerInit:
             resource_repo=MagicMock(),
             device_service=MagicMock(),
             skill_set_factory=MagicMock(),
-            skill_set_activator_factory=MagicMock(),
             device_plugin=MagicMock(),
             bot_service_provider=lambda: MagicMock(),
             skill_md_path="/test/SKILL.md",
@@ -372,108 +367,3 @@ class TestTriggerInit:
         self.service._should_run_init.assert_called_once()
 
 
-class TestActivateAndSyncSkillSets:
-    """_activate_and_sync_skill_sets 测试。
-
-    覆盖修复:engine_type 必须按 bot 真实 active_engine 透传给
-    SkillSetActivatorFactory.create,否则会被兜底成 openclaw,
-    导致 claude_code 等 engine 的 bot 在 data_init 全量同步时
-    被错按 openclaw 捞技能集 / 算软链路径(曾把 claude_code 已下的
-    10 个软链覆盖成 openclaw 默认集的 4 个)。
-    """
-
-    def setup_method(self):
-        self.bot_service = MagicMock()
-        self.service = DataInitService(
-            resource_repo=MagicMock(),
-            device_service=MagicMock(),
-            skill_set_factory=MagicMock(),
-            skill_set_activator_factory=MagicMock(),
-            device_plugin=MagicMock(),
-            bot_service_provider=lambda: self.bot_service,
-            skill_md_path="/test/SKILL.md",
-            resolver=MagicMock(),
-        )
-        # activator mock: list_all 返回空,避免 for 循环进入(个别用例再覆写)
-        self.activator = MagicMock()
-        # activate_skill_set 在源码里是 await 调用,必须用 AsyncMock
-        self.activator.activate_skill_set = AsyncMock()
-        self.activator.skill_set_service.skill_set_repo.list_all.return_value = []
-        self.service._skill_set_activator_factory.create.return_value = self.activator
-
-    async def _run(self):
-        await self.service._activate_and_sync_skill_sets(
-            bot_id="bot1", owner_id="437240", entity_id="437240",
-        )
-
-    @pytest.mark.asyncio
-    async def test_openclaw_bot_passes_openclaw_engine(self):
-        """openclaw bot 应透传 engine_type=openclaw(零回归验证)。"""
-        self.bot_service.get_bot.return_value = {"active_engine": "openclaw"}
-        await self._run()
-        kwargs = self.service._skill_set_activator_factory.create.call_args.kwargs
-        assert kwargs["engine_type"] == "openclaw"
-        assert kwargs["entity_id"] == "437240"
-        assert kwargs["bot_id"] == "bot1"
-
-    @pytest.mark.asyncio
-    async def test_claude_code_bot_passes_claude_code_engine(self):
-        """claude_code bot 应透传 engine_type=claude_code(修复验证)。"""
-        self.bot_service.get_bot.return_value = {"active_engine": "claude_code"}
-        await self._run()
-        kwargs = self.service._skill_set_activator_factory.create.call_args.kwargs
-        assert kwargs["engine_type"] == "claude_code"
-
-    @pytest.mark.asyncio
-    async def test_missing_active_engine_falls_back_to_default(self):
-        """active_engine 缺字段时降级 DEFAULT_ENGINE_TYPE。"""
-        self.bot_service.get_bot.return_value = {}
-        await self._run()
-        kwargs = self.service._skill_set_activator_factory.create.call_args.kwargs
-        assert kwargs["engine_type"] == DEFAULT_ENGINE_TYPE
-
-    @pytest.mark.asyncio
-    async def test_none_active_engine_falls_back_to_default(self):
-        """active_engine 显式为 None 时降级 DEFAULT_ENGINE_TYPE。"""
-        self.bot_service.get_bot.return_value = {"active_engine": None}
-        await self._run()
-        kwargs = self.service._skill_set_activator_factory.create.call_args.kwargs
-        assert kwargs["engine_type"] == DEFAULT_ENGINE_TYPE
-
-    @pytest.mark.asyncio
-    async def test_get_bot_failure_falls_back_and_continues(self):
-        """get_bot 抛异常时降级 DEFAULT_ENGINE_TYPE 且流程继续(不外传,
-        不整段跳过 skillset 激活与 device sync)。"""
-        self.bot_service.get_bot.side_effect = RuntimeError("bot not found")
-        await self._run()  # 不应抛出
-        kwargs = self.service._skill_set_activator_factory.create.call_args.kwargs
-        assert kwargs["engine_type"] == DEFAULT_ENGINE_TYPE
-        # 流程继续:仍调了 list_all 与 _do_device_sync
-        self.activator.skill_set_service.skill_set_repo.list_all.assert_called_once()
-        self.activator._do_device_sync.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_zero_skill_sets_still_runs_device_sync(self):
-        """0 个 skill_set 时,for 循环不进入但 _do_device_sync 仍调用一次。"""
-        self.bot_service.get_bot.return_value = {"active_engine": "openclaw"}
-        self.activator.skill_set_service.skill_set_repo.list_all.return_value = []
-        await self._run()
-        self.activator.activate_skill_set.assert_not_called()
-        self.activator._do_device_sync.assert_called_once_with(
-            user_id="437240", caller="DataInitService"
-        )
-
-    @pytest.mark.asyncio
-    async def test_n_skill_sets_all_activated(self):
-        """N 个 skill_set 时,每个都 await activate_skill_set 一次。"""
-        self.bot_service.get_bot.return_value = {"active_engine": "claude_code"}
-        self.activator.skill_set_service.skill_set_repo.list_all.return_value = [
-            {"id": 101}, {"id": 102}, {"id": 103},
-        ]
-        await self._run()
-        assert self.activator.activate_skill_set.await_count == 3
-        called_ids = [
-            call.args[0] for call in self.activator.activate_skill_set.await_args_list
-        ]
-        assert called_ids == ["101", "102", "103"]
-        self.activator._do_device_sync.assert_called_once()

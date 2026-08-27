@@ -2,7 +2,36 @@
 
 Open-source side-panel components bundled as a UMD asset for BCS.
 
-The BCS manifest exposes the generated bundle at:
+## Install From npm
+
+```bash
+npm install @avernet-assets/bcs-panel
+```
+
+The prebuilt UMD bundle is installed at:
+
+```text
+node_modules/@avernet-assets/bcs-panel/dist/index.umd.js
+```
+
+## Load From CDN
+
+Public npm releases are also available from npm-backed CDNs. Production
+configurations must pin an exact package version so that deployments are
+reproducible and can be rolled back safely:
+
+```toml
+[[manifest.bundles]]
+name = "bcsPanel"
+type = "url"
+url = "https://cdn.jsdelivr.net/npm/@avernet-assets/bcs-panel@<exact-version>/dist/index.umd.js"
+```
+
+Do not use an unversioned URL or the `latest` dist-tag in production.
+
+## Load From a Local Build
+
+The BCS manifest can expose a locally generated bundle instead:
 
 ```toml
 [[manifest.bundles]]
@@ -24,10 +53,8 @@ The chat renderer opens components with names such as:
 ## Development
 
 ```bash
-npm install
-npm run build
-npm run test:umd
-npm run scan:public
+npm ci
+npm run verify
 ```
 
 `dist/index.umd.js` is ignored by git. Build it before starting BCS when using
@@ -43,3 +70,24 @@ the panel implementation dependencies needed at runtime.
 
 `test:umd` checks that the generated bundle exports `StateMachineRunView`,
 which is the entry name used by `bcsPanel.StateMachineRunView`.
+
+## Publishing
+
+Releases are published by GitHub Actions when a maintainer pushes a tag named
+`bcs-panel-v<version>`. The tag version must exactly match the `version` in
+`package.json`.
+
+Configure `@avernet-assets/bcs-panel` with the `publish-bcs-panel.yml` trusted
+publisher on npm. The workflow uses OIDC and does not require an npm token.
+
+Review the package contents locally before opening a release pull request:
+
+```bash
+npm ci
+npm run verify
+npm pack --dry-run
+```
+
+The `prepack` lifecycle also runs verification before the GitHub Action creates
+or publishes the package archive. See [PUBLISHING.md](PUBLISHING.md) for the
+OIDC configuration, versioning, tag, verification, and troubleshooting steps.

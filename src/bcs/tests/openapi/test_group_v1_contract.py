@@ -229,7 +229,7 @@ def test_group_create_inline_event_subscriptions_cannot_supply_scope() -> None:
         assert "event_subscriptions" not in response_variant["required"]
 
 
-def test_group_detail_uses_implicit_human_or_owned_bot_participant_access() -> None:
+def test_group_detail_uses_human_or_owned_bot_resource_access() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operation = contract["paths"][GROUP_PATH]["get"]
 
@@ -241,9 +241,9 @@ def test_group_detail_uses_implicit_human_or_owned_bot_participant_access() -> N
     forbidden = operation["responses"]["403"]
     assert forbidden["x-error-codes"] == ["forbidden"]
     description = forbidden["description"]
-    assert "Human Actor" in description
-    assert "created by that Human" in description
-    assert "Group Participant" in description
+    assert "HumanOrOwnedBot Principal" in description
+    assert "participant relation" in description
+    assert "Bot management actor" in description
 
 
 def test_contract_bundles_to_a_deterministic_document(
@@ -353,15 +353,34 @@ def test_delete_group_accepts_optional_acting_bot_id_query() -> None:
             "name": "acting_bot_id",
             "in": "query",
             "required": False,
-            "description": "Optional Bot identity perspective for the delete decision. Omit to evaluate the authenticated Human perspective.",
+            "description": "Optional Bot identity perspective for the delete decision. A Human caller may select an owned Bot; a Bot caller may select only itself. Omit to use the selected HumanOrOwnedBot Principal.",
             "schema": {"type": "string", "minLength": 1},
         }
     }
 
 
+def test_group_detail_and_mutations_use_human_or_owned_bot() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+
+    for method in ("get", "patch", "delete"):
+        operation = contract["paths"][GROUP_PATH][method]
+        assert operation["x-avernet-security"] == {
+            "user": "optional",
+            "app": "required",
+            "bot": "optional",
+        }
+        assert operation["x-bcn-identity-policy"] == "human_or_owned_bot"
+
+
 def test_create_group_request_defaults_private_visibility_and_chat_delivery() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operation = contract["paths"][GROUPS_PATH]["post"]
+    assert operation["x-avernet-security"] == {
+        "user": "optional",
+        "app": "required",
+        "bot": "optional",
+    }
+    assert operation["x-bcn-identity-policy"] == "human_or_owned_bot"
     request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
     create_group_schema = next(
         schema
@@ -417,3 +436,35 @@ def test_update_group_does_not_accept_context() -> None:
 
     assert "context" not in schema["properties"]
     assert set(schema["properties"]) == {"name", "visibility", "delivery_policy"}
+
+
+PUBLIC_GROUPS_PATH = "/openapi/v1/collaboration/public-groups"
+
+
+def test_list_public_groups_endpoint_exists() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][PUBLIC_GROUPS_PATH]["get"]
+
+    assert operation["operationId"] == "list_public_groups"
+    query_names = {
+        parameter["name"]
+        for parameter in operation["parameters"]
+        if parameter["in"] == "query"
+    }
+    assert query_names == {"offset", "limit", "q", "strategy"}
+    assert operation["x-avernet-security"] == {"user": "required"}
+    # load_contract 会递归解析并内联所有 $ref（validate_openapi_contract.py:68-99），
+    # 解析后 200 响应 schema 是完整的 GroupPageEnvelope 对象，无 "$ref" 键。
+    # 按解析后的形状断言，仿既有测试风格。
+    schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert schema["properties"]["code"]["const"] == 20_000
+    assert "items" in schema["properties"]["data"]["properties"]
+
+
+def test_public_groups_path_does_not_collide_with_group_id_path() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+
+    # The plaza catalog lives at a distinct top-level path so the
+    # {group_id} parameter on /groups/{group_id} cannot shadow it.
+    assert PUBLIC_GROUPS_PATH in contract["paths"]
+    assert "/openapi/v1/collaboration/groups/public" not in contract["paths"]

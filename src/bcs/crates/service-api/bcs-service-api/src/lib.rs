@@ -102,7 +102,7 @@ pub use application::collaboration_template::{
     ListCollaborationTemplatesQuery,
 };
 pub use application::principal::{
-    AdminActor, BotActor, CallerContext, HumanActor, IntegrationClient,
+    AdminActor, BotActor, CallerContext, HumanActor, IntegrationClient, RequestAuthHeaders,
 };
 pub use bot_runtime_use_cases::{
     BotRuntimeConnectCommand, BotRuntimeConnectOutcome, BotRuntimeConnectionService,

@@ -34,6 +34,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import envelope_erro
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.adapters.http.openapi_v1.authorization import (
     AUTHORIZATION,
+    EDIT_LOCK,
     INHERITED,
     OWNER_SCOPED,
     SCAFFOLDING_MODES,
@@ -318,7 +319,7 @@ def test_scaffolding_burn_down_is_reported():
 
 
 #: The exact operations that may still be ``ServiceChecked`` once this feature
-#: lands — twenty-five of them, deferred for six reasons recorded in
+#: lands — twenty-seven of them, deferred for seven reasons recorded in
 #: ``spec.md``'s *Out of Scope*. It was ten when the plan was written; the
 #: engine-runtime and bot-chat traces added the rest, each for a reason the
 #: table could not have shown. That is what this set is for.
@@ -345,11 +346,13 @@ _DEFERRED_OPERATIONS = frozenset(
         ("GET", "/openapi/v1/bots/{bot_id}/harness/dim-report"),
         ("POST", "/openapi/v1/bots/{bot_id}/harness/preview"),
         ("POST", "/openapi/v1/bots/{bot_id}/harness/rollback"),
-        # Checked in local_skill_query_service / local_skill_upload_service,
-        # which also keep six retiring skills addresses checked — four of them
-        # unreachable by the seam, since the skill id resolves its own bot
-        # inside the handler. Migrating these three would uncover those six.
+        # The read remains checked in skill_query_service, which also keeps the
+        # retiring skills addresses checked.
         ("GET", "/openapi/v1/bots/{bot_id}/skills"),
+        # Upload authorization remains owned by local_skill_upload_service.
+        # This change only adds lock declarations to settled ``Check`` rows;
+        # migrating ``ServiceChecked`` handlers is a separate authorization
+        # change and stays out of scope here.
         ("POST", "/openapi/v1/bots/{bot_id}/skills"),
         ("POST", "/openapi/v1/bots/{bot_id}/skills/upload-folder"),
         # Its check guards what may be *composed* — a credential granting
@@ -468,13 +471,8 @@ def test_only_the_deferred_operations_remain_service_checked():
     )
 
 
-def test_service_level_edit_locks_are_untouched():
-    """The seam carries no lock; that must not read as "the surface lost locks".
-
-    Channels and service publications enforce one today and keep doing so
-    (``spec.md`` *Decisions* 1). If these helpers are ever removed, the seam's
-    "no lock" decision silently becomes "no lock anywhere".
-    """
+def test_existing_service_level_edit_lock_defences_are_preserved():
+    """The declarative seam supplements the established service defences."""
     channels = importlib.import_module(
         "agentclaw.community.adapters.http.openapi_v1.channels.router"
     )
@@ -484,6 +482,66 @@ def test_service_level_edit_locks_are_untouched():
 
     assert hasattr(channels, "_require_edit_lock")
     assert hasattr(publications.ServicePublicationFacade, "_require_draft_lock")
+    assert (
+        AUTHORIZATION[("POST", "/openapi/v1/bots/{bot_id}/channels")].edit_lock
+        is EDIT_LOCK
+    )
+    assert (
+        AUTHORIZATION[("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance")].edit_lock
+        is EDIT_LOCK
+    )
+
+
+def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
+    expected = {
+        ("POST", "/openapi/v1/bots/{bot_id}/channels"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
+        ("PATCH", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"),
+        ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/lifecycle/approval"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/cancel-staging"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/offline"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/restart"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/retry"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skill-sets"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/activate"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/deactivate"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"),
+    }
+    actual = {
+        key
+        for key, rule in AUTHORIZATION.items()
+        if isinstance(rule, Check) and rule.edit_lock is EDIT_LOCK
+    }
+
+    assert actual == expected
+
+
+def test_every_edit_lock_operation_declares_423_in_openapi():
+    routes = {
+        key: original_route_of(ctx)
+        for key, ctx in operations(build_public_router())
+    }
+    edit_locked = {
+        key
+        for key, rule in AUTHORIZATION.items()
+        if isinstance(rule, Check) and rule.edit_lock is EDIT_LOCK
+    }
+
+    missing = sorted(key for key in edit_locked if 423 not in routes[key].responses)
+
+    assert missing == []
 
 
 def test_a_router_cannot_opt_out_of_the_route_class():
@@ -715,7 +773,7 @@ def test_bot_id_anywhere_on_the_path_is_accepted():
 #: Every entry here must *also* be one the seam could not adjudicate anyway —
 #: asserted below, so this cannot become a place to park a twin that simply was
 #: not migrated. These four reach ``_bot_behind``, which calls
-#: ``local_skill_query_service.get_local_skill`` and therefore
+#: ``skill_query_service.get_local_skill`` and therefore
 #: ``_require_view_access`` — a MEMBER check on the bot the skill record names.
 #: This feature does not touch that module; deferring the three current skills
 #: rows that share it is precisely what keeps it in place.
@@ -803,13 +861,16 @@ def test_a_retiring_twin_migrates_with_its_replacement():
         twin = AUTHORIZATION.get((method, legacy_path))
         if not isinstance(twin, Check):
             abandoned.append(f"{method} {legacy_path} -> {replacement_path}")
-        elif twin.level is not replacement.level:
+        elif (
+            twin.level is not replacement.level
+            or twin.edit_lock is not replacement.edit_lock
+        ):
             # Matching bars, not merely both being Check. Tasks 12 and 13 bring
             # ADMIN and OWNER rows, and a MEMBER twin of an ADMIN replacement is
             # a way around the bar rather than a copy of it.
             mismatched.append(
-                f"{method} {legacy_path} at {twin.level.name} "
-                f"but {replacement_path} at {replacement.level.name}"
+                f"{method} {legacy_path} at {twin!r} "
+                f"but {replacement_path} at {replacement!r}"
             )
 
     assert not abandoned, (
@@ -820,8 +881,8 @@ def test_a_retiring_twin_migrates_with_its_replacement():
     )
     assert not mismatched, (
         "these retiring addresses migrated with their replacement but at a "
-        "different bar, so the old address is a way around the new one: "
-        + ", ".join(sorted(mismatched))
+        "different bar or lock requirement, so the old address is a way around "
+        "the new one: " + ", ".join(sorted(mismatched))
     )
 
 
@@ -861,7 +922,7 @@ def test_the_check_the_exempted_twins_rely_on_still_exists():
     locks: name the function, and fail if it stops doing the thing.
     """
     query_service = importlib.import_module(
-        "agentclaw.community.core.skill_center.services.local_skill_query_service"
+        "agentclaw.community.core.skill_center.services.skill_query_service"
     )
     legacy_skills = importlib.import_module(
         "agentclaw.community.adapters.http.openapi_v1.deprecated.skills"
@@ -871,15 +932,14 @@ def test_the_check_the_exempted_twins_rely_on_still_exists():
         "the exempted twins resolve their bot through _bot_behind; without it "
         "they no longer reach the check they are exempted on account of"
     )
-
-    get_source = inspect.getsource(query_service.LocalSkillQueryService.get_local_skill)
+    get_source = inspect.getsource(query_service.SkillQueryService.get_local_skill)
     assert "_require_view_access" in get_source, (
         "get_local_skill no longer calls _require_view_access, so _bot_behind "
         "reaches no collaborator check and the four exempted legacy skills "
         "twins are unguarded — the ends of the chain being intact is not enough"
     )
 
-    source = inspect.getsource(query_service.LocalSkillQueryService._require_view_access)
+    source = inspect.getsource(query_service.SkillQueryService._require_view_access)
     assert "check_collaborator_permission" in source, (
         "_require_view_access no longer performs a collaborator check, so the "
         "four legacy skills twins exempted in _TWINS_CHECKED_INDEPENDENTLY are "
@@ -895,7 +955,7 @@ def test_the_asset_service_check_the_unseamed_surfaces_rely_on_still_exists():
     """The seven ``{skill_id}`` rows moved; their service check deliberately did not.
 
     Task 8 deleted ``can_manage_bot`` outright, because the hook had exactly one
-    caller family and the seam replaced all of it. ``bot_skill_asset_service``
+    caller family and the seam replaced all of it. ``skill_query_service``
     is not that: its two permission sites are reached from three surfaces and
     the seam covers only one of them.
 
@@ -917,12 +977,12 @@ def test_the_asset_service_check_the_unseamed_surfaces_rely_on_still_exists():
     at the same bar.
     """
     asset_service = importlib.import_module(
-        "agentclaw.community.core.skill_center.services.bot_skill_asset_service"
+        "agentclaw.community.core.skill_center.services.skill_query_service"
     )
 
     guarded = {
         "_resolve_local": inspect.getsource(
-            asset_service.BotSkillAssetService._resolve_local
+            asset_service.SkillQueryService._resolve_local
         ),
         "_RepoAssetAdapter.resolve": inspect.getsource(
             asset_service._RepoAssetAdapter.resolve

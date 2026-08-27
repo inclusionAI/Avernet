@@ -16,10 +16,11 @@ pub use bcs_config_api::{
 // data-contract crate so downstream modules can depend on them without
 // pulling in the rest of the `bcs` binary.
 pub use bcs_config_api::{
-    AuthChainConfig, AuthSdkConfig, ChannelConfigSection, DingTalkAccountConfig, EventingConfig,
-    FusionProviderConfig, LeaderElectionConfig, LlmConfig, LlmProviderType, LogOutputConfig,
-    LogOutputFormat, LoggingConfig, ManifestConfig, SecretConfig, SecurityConfig,
-    StructuredOutputMode, UserDirectoryConfig, UserDirectoryProviderConfig,
+    AuthChainConfig, AuthSdkConfig,
+    ChannelConfigSection, DingTalkAccountConfig, EventingConfig, FusionProviderConfig,
+    LeaderElectionConfig, LlmConfig, LlmProviderType, LogOutputConfig, LogOutputFormat,
+    LoggingConfig, ManifestConfig, SecretConfig, SecurityConfig, StructuredOutputMode,
+    UserDirectoryConfig, UserDirectoryProviderConfig,
     deserialize_optional_secret, serialize_optional_secret,
 };
 #[allow(unused_imports)]
@@ -275,12 +276,19 @@ pub struct CollaborationConfig {
 pub struct OpenApiV1Config {
     #[serde(default = "default_openapi_v1_public_collaboration_base_url")]
     pub public_collaboration_base_url: String,
+    /// Base URL for internal-collaboration endpoints that live under a
+    /// different gateway path than the public openapi prefix (e.g. the no-auth
+    /// shared-file download at `/api/v1/collaboration/sessions/shared-file/content`).
+    /// Defaults to `public_collaboration_base_url` when unset.
+    #[serde(default)]
+    pub internal_collaboration_base_url: Option<String>,
 }
 
 impl Default for OpenApiV1Config {
     fn default() -> Self {
         Self {
             public_collaboration_base_url: default_openapi_v1_public_collaboration_base_url(),
+            internal_collaboration_base_url: None,
         }
     }
 }
@@ -308,6 +316,44 @@ impl OpenApiV1Config {
         if url.query().is_some() || url.fragment().is_some() {
             return Err(
                 "openapi_v1.public_collaboration_base_url must not contain query or fragment"
+                    .to_string(),
+            );
+        }
+        let normalized_path = url.path().trim_end_matches('/').to_string();
+        url.set_path(&normalized_path);
+        Ok(url.to_string().trim_end_matches('/').to_string())
+    }
+
+    /// Returns the validated internal-collaboration base URL, falling back to
+    /// `public_collaboration_base_url` when `internal_collaboration_base_url`
+    /// is not set.
+    pub fn validated_internal_collaboration_base_url(&self) -> Result<String, String> {
+        let raw = self
+            .internal_collaboration_base_url
+            .as_deref()
+            .map(|v| v.trim())
+            .unwrap_or("");
+        if raw.is_empty() {
+            return self.validated_public_collaboration_base_url();
+        }
+        let mut url = url::Url::parse(raw).map_err(|_| {
+            "openapi_v1.internal_collaboration_base_url must be an absolute HTTP(S) URL"
+                .to_string()
+        })?;
+        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+            return Err(
+                "openapi_v1.internal_collaboration_base_url must be an absolute HTTP(S) URL"
+                    .to_string(),
+            );
+        }
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(
+                "openapi_v1.internal_collaboration_base_url must not contain userinfo".to_string(),
+            );
+        }
+        if url.query().is_some() || url.fragment().is_some() {
+            return Err(
+                "openapi_v1.internal_collaboration_base_url must not contain query or fragment"
                     .to_string(),
             );
         }
@@ -1384,49 +1430,45 @@ impl BcsConfig {
     pub fn from_file(path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let content = std::fs::read_to_string(path)?;
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let path_display = path.display().to_string();
 
-        match ext.to_lowercase().as_str() {
-            "json" => {
-                let mut config: Self = serde_json::from_str(&content)?;
-                let local_path_base_dir = local_path_base_dir_for_config_file(path);
-                normalize_local_paths(&mut config, &local_path_base_dir);
-                validate_loaded_config_for_environment(
-                    &config,
-                    crate::config_loader::Environment::resolve(),
-                )?;
-                Ok(config)
-            }
-            "toml" => {
-                let mut config: Self = toml::from_str(&content)?;
-                let local_path_base_dir = local_path_base_dir_for_config_file(path);
-                normalize_local_paths(&mut config, &local_path_base_dir);
-                validate_loaded_config_for_environment(
-                    &config,
-                    crate::config_loader::Environment::resolve(),
-                )?;
-                Ok(config)
-            }
-            _ => {
-                // Try JSON first, then TOML
-                if let Ok(mut config) = serde_json::from_str::<Self>(&content) {
-                    let local_path_base_dir = local_path_base_dir_for_config_file(path);
-                    normalize_local_paths(&mut config, &local_path_base_dir);
-                    validate_loaded_config_for_environment(
-                        &config,
-                        crate::config_loader::Environment::resolve(),
-                    )?;
-                    return Ok(config);
+        // Parse to a JSON `Value`, expand `${VAR}` references, then deserialize.
+        // Routing through `Value` (instead of parsing straight into `Self`) keeps
+        // env-reference expansion consistent with the multi-env loader path and
+        // applies it to standalone/single-file configs too.
+        let parse_and_expand = |fmt: &str| -> Result<Self, Box<dyn std::error::Error>> {
+            let mut value = crate::config_loader::parse_config_content(fmt, &content, &path_display)?;
+            crate::config_loader::expand_env_vars(&mut value)?;
+            Ok(serde_json::from_value(value)?)
+        };
+
+        let mut config = match ext.to_lowercase().as_str() {
+            "json" => parse_and_expand("json")?,
+            "toml" => parse_and_expand("toml")?,
+            // Unknown extension: try JSON first, then TOML. Only fall through to
+            // TOML when the content fails to *parse* as JSON — a valid JSON
+            // document must surface its own expansion/deserialize errors instead
+            // of being retried (and mis-reported) as a TOML parse error.
+            _ => match crate::config_loader::parse_config_content(
+                "json",
+                &content,
+                &path_display,
+            ) {
+                Ok(mut value) => {
+                    crate::config_loader::expand_env_vars(&mut value)?;
+                    serde_json::from_value(value)?
                 }
-                let mut config: Self = toml::from_str(&content)?;
-                let local_path_base_dir = local_path_base_dir_for_config_file(path);
-                normalize_local_paths(&mut config, &local_path_base_dir);
-                validate_loaded_config_for_environment(
-                    &config,
-                    crate::config_loader::Environment::resolve(),
-                )?;
-                Ok(config)
-            }
-        }
+                Err(_) => parse_and_expand("toml")?,
+            },
+        };
+
+        let local_path_base_dir = local_path_base_dir_for_config_file(path);
+        normalize_local_paths(&mut config, &local_path_base_dir);
+        validate_loaded_config_for_environment(
+            &config,
+            crate::config_loader::Environment::resolve(),
+        )?;
+        Ok(config)
     }
 
     /// Validate `api_keys` (Part B Task 3, spec §9.6.2):
@@ -1570,6 +1612,72 @@ mod tests {
         unsafe {
             std::env::remove_var(key);
         }
+    }
+
+    #[test]
+    fn from_file_expands_env_references_in_string_fields() {
+        safe_set_var("BCS_TEST_FROM_FILE_TOKEN", "expanded-via-from-file");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bcs-config.toml");
+        std::fs::write(
+            &path,
+            r#"
+bots_base_dir = "/bots"
+botchat_url = "${BCS_TEST_FROM_FILE_TOKEN}"
+"#,
+        )
+        .unwrap();
+
+        let config = BcsConfig::from_file(&path).unwrap();
+        assert_eq!(config.botchat_url.as_deref(), Some("expanded-via-from-file"));
+        safe_remove_var("BCS_TEST_FROM_FILE_TOKEN");
+    }
+
+    #[test]
+    fn from_file_errors_when_a_required_env_reference_is_unset() {
+        safe_remove_var("BCS_TEST_FROM_FILE_MISSING");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bcs-config.toml");
+        std::fs::write(
+            &path,
+            r#"
+bots_base_dir = "/bots"
+botchat_url = "${BCS_TEST_FROM_FILE_MISSING}"
+"#,
+        )
+        .unwrap();
+
+        let result = BcsConfig::from_file(&path);
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("BCS_TEST_FROM_FILE_MISSING"),
+            "error should name the missing var: {err}"
+        );
+    }
+
+    #[test]
+    fn from_file_unknown_ext_json_with_unset_env_reports_env_error_not_toml() {
+        // A valid JSON document with an unset `${VAR}` must surface the env
+        // error directly, not be retried as TOML and mis-reported. Guards the
+        // `_` (unknown extension) branch swallowing expansion errors.
+        safe_remove_var("BCS_TEST_UNKNOWN_EXT_VAR");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bcs-config"); // no extension -> unknown-ext branch
+        std::fs::write(
+            &path,
+            r#"{"bots_base_dir":"/bots","botchat_url":"${BCS_TEST_UNKNOWN_EXT_VAR}"}"#,
+        )
+        .unwrap();
+
+        let err = BcsConfig::from_file(&path).unwrap_err().to_string();
+        assert!(
+            err.contains("BCS_TEST_UNKNOWN_EXT_VAR"),
+            "should surface the unset env-var error, got: {err}"
+        );
+        assert!(
+            !err.to_lowercase().contains("toml"),
+            "should not misreport as a TOML parse error, got: {err}"
+        );
     }
 
     #[test]
@@ -2421,9 +2529,55 @@ tenant = "teamclaw"
         ] {
             let cfg = OpenApiV1Config {
                 public_collaboration_base_url: value.to_string(),
+                ..Default::default()
             };
             assert!(
                 cfg.validated_public_collaboration_base_url().is_err(),
+                "expected invalid URL: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn internal_collaboration_base_url_falls_back_to_collaboration_base_url() {
+        let cfg = OpenApiV1Config::default();
+        assert_eq!(
+            cfg.validated_internal_collaboration_base_url().unwrap(),
+            cfg.validated_public_collaboration_base_url().unwrap(),
+        );
+    }
+
+    #[test]
+    fn internal_collaboration_base_url_uses_independent_value_when_set() {
+        let cfg: OpenApiV1Config = toml::from_str(
+            r#"public_collaboration_base_url = "https://gw.example.com/openapi/v1/collaboration"
+            internal_collaboration_base_url = "https://gw.example.com/api/v1/collaboration""#,
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.validated_public_collaboration_base_url().unwrap(),
+            "https://gw.example.com/openapi/v1/collaboration",
+        );
+        assert_eq!(
+            cfg.validated_internal_collaboration_base_url().unwrap(),
+            "https://gw.example.com/api/v1/collaboration",
+        );
+    }
+
+    #[test]
+    fn internal_collaboration_base_url_rejects_unsafe_values() {
+        for value in [
+            "/api/v1/collaboration",
+            "ftp://gw.example.com/api/v1/collaboration",
+            "https://user@gw.example.com/api/v1/collaboration",
+            "https://gw.example.com/api/v1/collaboration?tenant=x",
+        ] {
+            let cfg = OpenApiV1Config {
+                internal_collaboration_base_url: Some(value.to_string()),
+                ..Default::default()
+            };
+            assert!(
+                cfg.validated_internal_collaboration_base_url().is_err(),
                 "expected invalid URL: {value}"
             );
         }

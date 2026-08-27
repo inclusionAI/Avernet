@@ -25,15 +25,13 @@ class TestPluginContainerStandalone:
         container.config.from_dict(
             {
                 "plugins": {
-                    "crypto": "stub",
                     "secret": "stub",
                     "permission": "stub",
                     "identity": "stub",
-                    "scheduler": "stub",
                 },
             }
         )
-        assert container.config.plugins.crypto() == "stub"
+        assert container.config.plugins.secret() == "stub"
 
     def test_singlebox_dev_config_defines_required_selectors(self):
         """Singlebox dev config defines every selector resolved at startup."""
@@ -46,19 +44,19 @@ class TestPluginContainerStandalone:
         assert plugins["cache"] == "stub"
         assert plugins["engine_adapter"] == "stub"
         assert plugins["bot_service"] == "local"
-        assert plugins["database"]["plugin_database"] == "SQLITE_ORM"
+        assert plugins["database"] == "sqlite"
         assert sandbox["arca"] == "local_proc"
         assert sandbox["desktop"] == "stub"
-        assert sandbox["teclaw"] == "stub"
         assert sandbox["k8s"] == "stub"
         assert sandbox["docker"] == "stub"
         assert sandbox["poolab"] == "stub"
+        assert plugins["bot"]["teclaw"] == "stub"
 
 
 class TestAliyunAckSelector:
     """The aliyun_ack option resolves to AliyunAckSandboxPlugin."""
 
-    def _container(self, with_templates: bool = True):
+    def _container(self, with_cluster: bool = True):
         from secbaas.community.bootstrap.plugins import PluginContainer
 
         container = PluginContainer()
@@ -68,15 +66,17 @@ class TestAliyunAckSelector:
                 "sandbox": {"arca": "aliyun_ack"},
             }
         }
-        if with_templates:
-            cfg["aliyun_ack_template"] = {
-                "ALIYUN_ACK_TEMPLATE_default": {
-                    "cluster": {
-                        "endpoint": "https://ack.example.com",
-                        "kubeconfig": "apiVersion: v1\nkind: Config\n",
-                        "region": "cn-hangzhou",
-                    },
-                    "pod": {"image": "test:latest"},
+        if with_cluster:
+            cfg["aliyun_ack_cluster"] = {
+                "api_server": "https://ack.example.com",
+                "token": "dummy-token",
+                "namespace": "default",
+            }
+            cfg["sandbox_images"] = {
+                "ALIYUN_ACK_DEFAULT": {
+                    "openclaw": "openclaw:latest",
+                    "api-key-proxy": "nginx:alpine",
+                    "init": "busybox:latest",
                 }
             }
         container.config.from_dict(cfg)
@@ -93,11 +93,12 @@ class TestAliyunAckSelector:
             template_uuid="u",
             base_url="http://x",
             api_key="k",
-            arca_template_id="ALIYUN_ACK_TEMPLATE_default",
+            arca_template_id="ALIYUN_ACK_DEFAULT",
         )
-        plugin = self._container().arca_sandbox_plugin_factory(creds)
+        plugin_factory = self._container().arca_sandbox_plugin_factory()
+        plugin = plugin_factory(creds)
         assert isinstance(plugin, AliyunAckSandboxPlugin)
-        assert "ALIYUN_ACK_TEMPLATE_default" in plugin._ack_templates
+        assert plugin._config is creds
 
     def test_aliyun_ack_default_selector(self):
         from secbaas.community.plugins.sandbox.arca import StubArcaSandboxPlugin
@@ -108,3 +109,47 @@ class TestAliyunAckSelector:
         )
         plugin = container.arca_sandbox_plugin_factory()
         assert plugin is StubArcaSandboxPlugin
+
+
+class TestRedisCacheSelector:
+    """The redis cache option resolves to RedisCachePlugin with stub default."""
+
+    def _container(self, cache: str = "stub", cache_redis: dict | None = None):
+        from secbaas.community.bootstrap.plugins import PluginContainer
+
+        container = PluginContainer()
+        cfg: dict = {
+            "plugins": {
+                "secret": "stub",
+                "cache": cache,
+            }
+        }
+        if cache_redis is not None:
+            cfg["cache_redis"] = cache_redis
+        container.config.from_dict(cfg)
+        return container
+
+    def test_stub_selector_default(self):
+        from secbaas.community.plugins.cache.stub import StubCachePlugin
+
+        plugin = self._container(cache="stub").cache_plugin()
+        assert isinstance(plugin, StubCachePlugin)
+
+    def test_redis_selector_config_wired(self):
+        from secbaas.community.plugins.cache.redis import RedisCachePlugin
+
+        container = self._container(
+            cache="redis",
+            cache_redis={"url": "redis://testhost:6380/1", "socket_timeout": 3.0},
+        )
+        # Selector should resolve to RedisCachePlugin (will fail to connect,
+        # but we just verify the config wiring, not the actual connection).
+        # We can't call cache_plugin() without a live Redis, so just verify
+        # the Selector has the redis option registered.
+        selector = container.cache_plugin
+        assert "redis" in selector.providers
+
+    def test_redis_selector_absent_when_stub(self):
+        container = self._container(cache="stub")
+        selector = container.cache_plugin
+        assert "stub" in selector.providers

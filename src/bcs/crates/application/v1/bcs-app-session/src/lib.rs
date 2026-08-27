@@ -5,9 +5,9 @@
 //! while delegating the legacy session lifecycle to
 //! [`SessionManagementService`]. No HTTP type crosses this boundary.
 //!
-//! All current V1 operations are Human-facing. Detail reads, actor-relative
-//! lists, message history, and mutations intentionally use separate
-//! authorization rules defined by the V1 contract.
+//! V1 operations select their effective Actor according to the route contract.
+//! Detail reads, actor-relative lists, message history, and mutations retain
+//! separate resource-authorization rules.
 
 mod connection;
 mod file;
@@ -22,9 +22,10 @@ use async_trait::async_trait;
 use bcs_service_api::application::session::{SessionManagementService, SessionUseCaseError};
 use bcs_service_api::application::system_message::SystemMessageService;
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedCaller, DeleteResult, HumanPrincipal, Page, Principal,
+    ApplicationError, AuthenticatedCaller, DeleteResult, HumanPrincipal, IdentityPolicy, Page,
+    Principal,
     message::{ListSessionMessages, SessionMessageService},
-    require_authenticated_user, require_human,
+    require_authenticated_user, require_human, select_principal,
     session::{
         AddSessionParticipant, CollectSession, CompleteSession, CreateSession, CreateSessionOutcome,
         DeleteSession, DeleteSessionParticipant, GetSession, ListSessions, SessionCollectionResult,
@@ -210,7 +211,6 @@ impl SessionServiceImpl {
     async fn authorize_human_self_mode_update(
         &self,
         principal: &Principal,
-        caller: &AuthenticatedCaller,
         session: &Session,
         actor_id: &str,
     ) -> Result<(), ApplicationError> {
@@ -219,7 +219,7 @@ impl SessionServiceImpl {
                 "A Human participant may only update its own mode",
             ));
         }
-        if !self.can_read_session_detail(caller, session).await? {
+        if !self.can_read_session_detail(principal, session).await? {
             return Err(ApplicationError::forbidden(
                 "The authenticated Human cannot access this Session",
             ));
@@ -388,19 +388,22 @@ impl SessionServiceImpl {
 
     async fn can_read_session_detail(
         &self,
-        caller: &AuthenticatedCaller,
+        principal: &Principal,
         session: &Session,
     ) -> Result<bool, ApplicationError> {
-        let user = require_authenticated_user(caller)?;
-        let human_actor_id = format!("human_{}", user.id);
-        if session.participants.iter().any(|participant| {
-            participant.actor_kind == ActorKind::Human && participant.bot_uuid == human_actor_id
-        }) {
+        if session
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == principal.actor_id())
+        {
             return Ok(true);
         }
+        let Principal::Human(human) = principal else {
+            return Ok(false);
+        };
         let owned_bot_ids = self
             .registry
-            .try_list_bots_by_creator(&user.id)
+            .try_list_bots_by_creator(&human.subject.id)
             .await
             .map_err(map_service_error)?
             .into_iter()
@@ -418,11 +421,12 @@ impl SessionServiceImpl {
         caller: &AuthenticatedCaller,
         session_id: &str,
     ) -> Result<Session, ApplicationError> {
+        let principal = select_principal(caller, IdentityPolicy::HumanOrOwnedBot)?;
         let session = self.load_session(session_id).await?;
         self.load_group(&session.group_id).await?;
-        if !self.can_read_session_detail(caller, &session).await? {
+        if !self.can_read_session_detail(&principal, &session).await? {
             return Err(ApplicationError::forbidden(
-                "Neither the Human Actor nor an owned Bot is a Session Participant",
+                "The selected Principal is not a Session Participant",
             ));
         }
         Ok(session)
@@ -694,7 +698,7 @@ impl SessionService for SessionServiceImpl {
     }
 
     async fn update(&self, command: UpdateSession) -> Result<SessionDetail, ApplicationError> {
-        let principal = require_human(&command.caller)?;
+        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
         // Only `title` is mutable in phase one; a request carrying no field is
         // rejected (mirrors the sibling Group V1 facade).
         if command.title.is_none() {
@@ -714,7 +718,7 @@ impl SessionService for SessionServiceImpl {
     }
 
     async fn delete(&self, command: DeleteSession) -> Result<DeleteResult, ApplicationError> {
-        let principal = require_human(&command.caller)?;
+        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
         // Idempotent: a missing session yields `deleted: false` rather than a
         // 404 so repeat deletes converge. Non-managers still get 403.
         let session = match self
@@ -727,10 +731,18 @@ impl SessionService for SessionServiceImpl {
             None => return Ok(DeleteResult { deleted: false }),
         };
         let group = self.load_group(&session.group_id).await?;
-        let can_delete = if command.acting_bot_id.is_some() {
-            let acting_actor_id = self
-                .resolve_view_actor(&command.caller, command.acting_bot_id.as_deref())
-                .await?;
+        let can_delete = if let Some(requested) = command.acting_bot_id.as_deref() {
+            let acting_actor_id = match &principal {
+                Principal::Human(_) => {
+                    self.resolve_view_actor(&command.caller, Some(requested)).await?
+                }
+                Principal::Bot(bot) if requested == bot.bot_uuid => requested.to_string(),
+                Principal::Bot(_) => {
+                    return Err(ApplicationError::forbidden(
+                        "The explicit acting Bot must identify the authenticated Bot",
+                    ));
+                }
+            };
             let management_actor_ids = Self::group_management_actor_ids(&group);
             management_actor_ids
                 .iter()
@@ -999,7 +1011,6 @@ impl SessionService for SessionServiceImpl {
                 ActorKind::Human => {
                     self.authorize_human_self_mode_update(
                         &principal,
-                        &command.caller,
                         &session,
                         &command.bot_uuid,
                     )
@@ -1019,7 +1030,6 @@ impl SessionService for SessionServiceImpl {
             // the authenticated Human and the existing V1 read boundary.
             self.authorize_human_self_mode_update(
                 &principal,
-                &command.caller,
                 &session,
                 &command.bot_uuid,
             )

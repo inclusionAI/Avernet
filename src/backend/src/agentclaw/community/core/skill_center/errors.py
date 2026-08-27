@@ -95,10 +95,6 @@ class ActiveSkillSetReferenceError(RuntimeError):
     """A Skill became referenced by an active custom SkillSet."""
 
 
-class SkillManagedBySkillSetError(Exception):
-    """A Direct command addressed a Skill owned by a normal SkillSet."""
-
-
 class SkillRuntimeNameConflictError(Exception):
     """A Direct activation would create an ambiguous runtime entry name."""
 
@@ -170,7 +166,7 @@ class SkillSetControlPlaneLockUnavailableError(DomainError):
         super().__init__(detail)
 
 
-class SkillSetManagedResourceError(Exception):
+class SkillSetManagedResourceError(DomainError):
     """A Direct command targets a resource managed by an ordinary SkillSet."""
 
 

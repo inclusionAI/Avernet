@@ -15,8 +15,10 @@ Required behavior:
 1. H→A and A→A friend add must auto-approve when the target bot config says no
    approval is required.
 2. If approval is required but the target bot config has an approval-free
-   department list, then the applicant's department must be checked. If the
-   applicant department is in that list, the request is also auto-approved.
+   department list, then the applicant's department must be checked. A match
+   succeeds when the applicant department is exactly equal to an allowlist
+   entry or is a more specific descendant of that entry. If the applicant
+   department matches, the request is also auto-approved.
 3. If neither auto-approval condition applies, a friend-add station notification
    / approval work order must be sent to the target bot's owner/reviewer.
 4. WorkOrder approval vs notice semantics must be driven by backend-created
@@ -209,7 +211,7 @@ After addability and idempotency gates:
 if friend_check_in_strategy == OPEN:
     auto approve
 elif friend_check_in_strategy == DEPT_FREE
-     and applicant department is in target approval-free department list:
+     and applicant department matches target approval-free department list:
     auto approve
 else:
     create pending approval request
@@ -221,7 +223,7 @@ Supported strategy values should be normalized case-insensitively:
 | --- | --- |
 | `OPEN` / `open` | No approval needed. |
 | `APPROVAL` / `approval` | Approval required. |
-| `DEPT_FREE` / `dept_free` | Department allowlist can bypass approval; otherwise approval required. |
+| `DEPT_FREE` / `dept_free` | Department allowlist can bypass approval; otherwise approval required. Exact and ancestor department matches are both accepted. |
 
 ## 5. Bot Internal Attribute Contract
 
@@ -239,25 +241,25 @@ pub struct BotInternalAttributes {
 
 ### 5.2 Proposed `friend_ext` Keys
 
+`friend_ext` continues to carry target-side policy metadata such as:
+
 ```json
 {
-  "department_code": "TECH",
   "no_check_scope_friend_deps": ["TECH", "AI_PLATFORM"],
   "view_scope_user_friend_deps": [],
   "view_scope_agent_friend_deps": []
 }
 ```
 
-Rationale:
+`department_code` is **not** a BCS contract input for friend-connect approval.
+Department lookup is now delegated to the outbound `UserDirectoryPlugin` seam.
+Open-source builds can omit the directory plugin or wire a no-op implementation;
+private builds may inject a backend or staff-directory implementation through
+composition-root configuration.
 
-- `department_code` describes the actor/bot's own department.
-- `no_check_scope_friend_deps` is the target bot's approval-free department
-  allowlist for friend add.
-- `view_scope_user_friend_deps` and `view_scope_agent_friend_deps` are carried
-  through as existing friend_ext metadata and are not consulted by the current
-  connect decision path.
-- All fields stay inside the existing `friend_ext` extension object; no new
-  `bcs_bots` columns are introduced.
+If no department plugin is configured, or if the plugin returns `None` / an
+error for the applicant, the department is treated as unknown and will never
+match `DEPT_FREE` allowlist entries.
 
 ### 5.3 BCS Read Model Change
 
@@ -292,13 +294,18 @@ Add a small BCS outbound seam:
 
 ```rust
 #[async_trait]
-pub trait ActorDepartmentRepoPort: Send + Sync {
-    async fn department_code(&self, actor_id: &str, env: &str) -> Option<String>;
+pub trait UserDirectoryPlugin: Send + Sync {
+    async fn lookup_department_by_staff_no(
+        &self,
+        staff_no: &str,
+    ) -> Result<Option<String>, UserDirectoryError>;
 }
 ```
 
 This keeps `ConnectService` focused on friend-add policy while allowing local,
-test, and production adapters to resolve departments differently.
+test, and production adapters to resolve departments differently. The
+open-source/default behavior is to return `None` when no directory plugin is
+available.
 
 ### 6.2 Resolution Rules
 
@@ -306,19 +313,28 @@ For H→A:
 
 ```text
 actor_id = human_{staff_no}
-department = staff department for staff_no
+department = department lookup for staff_no via UserDirectoryPlugin.lookup_department_by_staff_no
 ```
 
 For A→A:
 
 ```text
-1. read applicant bot internal attribute friend_ext.department_code
-2. if missing, fallback to applicant bot created_by owner's staff department
-3. if still missing, department is unknown
+1. resolve the applicant bot's owner from created_by
+2. query the owner human's department through UserDirectoryPlugin.lookup_department_by_staff_no
+3. if missing, department is unknown
 ```
 
 Unknown department never matches department allowlist. It falls back to manual
 approval when `friend_check_in_strategy == DEPT_FREE`.
+
+Department allowlist entries are compared by path prefix boundary:
+
+- exact match: `蚂蚁集团-大安全-大安全技术部-AI基础设施-系统智能`
+- ancestor match: `蚂蚁集团-大安全-大安全技术部-AI基础设施`
+- ancestor match: `蚂蚁集团-大安全-大安全技术部`
+
+So a more specific department is considered to be inside any of its ancestor
+entries, but not vice versa.
 
 ## 7. WorkOrder Creation Semantics
 
@@ -653,17 +669,21 @@ Recommended first version:
 - Synchronous call with idempotent Backend create.
 - Return failure if pending approval WorkOrder cannot be created.
 
+Implementation note:
+
+- In the BCS open-source / no-backend-credential deployment, the work-order
+  adapter may intentionally degrade to a no-op when the backend rejects the
+  call with 401/403, because the friend-connect flow has no user delegation
+  credential to forward. That keeps the friend request itself runnable while
+  leaving the backend inbox empty.
+
 ### 12.4 Applicant department source for H→A
 
-Question:
+Resolved:
 
-- Does BCS already have a production-accessible staff department source, or must
-  Backend provide applicant department in the WorkOrder/Friend facade?
-
-Recommended:
-
-- Add BCS `ActorDepartmentRepoPort` with local noop + production adapter.
-- Missing department means no DEPT_FREE match.
+- Add department lookup to `UserDirectoryPlugin` with local no-op + production implementation.
+- Missing department means no `DEPT_FREE` match and the request stays on the manual approval path.
+- When no department plugin is configured, the behavior is the same as a lookup returning `None`.
 
 ### 12.5 Notice recipients for auto approval
 
@@ -700,7 +720,7 @@ is `visibility=public`.
 
 1. Extend `BotActorConfig` with `friend_ext`.
 2. Parse `bot_info.friend_ext` in `DbBotActorConfigStore`.
-3. Add `ActorDepartmentRepoPort` and test/noop adapter.
+3. Add department lookup to `UserDirectoryPlugin` and test/no-op adapter.
 4. Implement `DEPT_FREE` allowlist matcher.
 5. Add BCS unit tests for OPEN, DEPT_FREE hit, DEPT_FREE miss, missing dept.
 

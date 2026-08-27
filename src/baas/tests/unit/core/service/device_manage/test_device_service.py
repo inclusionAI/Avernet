@@ -2326,6 +2326,7 @@ class TestStopDeviceByUuid:
             tenant="test_tenant",
             env="test",
             status=DeviceStatus.STOPPED.value,
+            modifier="test_user",
         )
 
     @pytest.mark.asyncio
@@ -2482,6 +2483,7 @@ class TestStopDeviceByUuid:
             tenant="test_tenant",
             env="test",
             status=DeviceStatus.STOPPED.value,
+            modifier="test_user",
         )
 
 
