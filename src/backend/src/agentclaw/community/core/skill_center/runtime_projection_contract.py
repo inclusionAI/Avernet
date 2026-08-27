@@ -38,11 +38,24 @@ class ProjectionScope:
     released_mcp: frozenset[str] = frozenset()
     #: Treat *every* projected MCP code as claimed, ignoring ``claimed_mcp``.
     #:
-    #: Only for callers with no delta to name — a device-activated restart or
-    #: a Skill upload — where the device may hold no configuration at all and
-    #: the projection is the whole truth. They cannot fill ``claimed_mcp``
-    #: because they do not know the projected set until the projector resolves
-    #: it, which is why this is a flag and not a code set.
+    #: Exactly one caller sets this: the device-activated listener
+    #: (``SkillSymlinkListener``, via ``DeviceActivatedEvent``). It is the one
+    #: place where "just re-declare the allow-list" is not enough, because a
+    #: newly active container holds *no* MCP configuration to refresh — there
+    #: is no prior state to converge on, only an empty device. Every other
+    #: path is mutation-triggered and names its own delta.
+    #:
+    #: It is load-bearing, not a convenience: ``report_device_alive``
+    #: deliberately does not push MCP details itself (see
+    #: ``test_pending_activation_has_one_mcp_writer_owned_by_device_event``,
+    #: which asserts the legacy ``_sync_mcps_when_device_active`` stays
+    #: uncalled), so this projection is the only production path that writes
+    #: per-MCP configuration to a freshly activated device. Drop it and every
+    #: MCP is whitelisted with no endpoint or api_key behind it.
+    #:
+    #: A flag rather than a code set because the caller cannot fill
+    #: ``claimed_mcp``: the projected set is only known once the projector has
+    #: resolved the plan, which is after the caller is done.
     #:
     #: It says nothing about which halves run: ``skills`` and ``mcp`` decide
     #: that on their own. An MCP-only reconcile — ``ProjectionScope(mcp=True,
@@ -56,8 +69,9 @@ class ProjectionScope:
     def everything(cls) -> "ProjectionScope":
         """Both halves, with every projected MCP code counted as claimed.
 
-        The shape for callers that have no mutation to describe: a
-        device-activated restart, a Skill upload. See ``claim_all_mcp``.
+        The shape for the device-activated listener, which has no mutation to
+        describe and faces a container that may hold nothing. See
+        ``claim_all_mcp`` for why that case cannot be served by a refresh.
         """
         return cls(skills=True, mcp=True, claim_all_mcp=True)
 

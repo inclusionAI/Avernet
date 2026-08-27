@@ -569,6 +569,24 @@ half-measure: the wrapper is unreachable, the callee is load-bearing.
 declares scope then pushes all details. The projector's fan-out is
 duplicative with it, not load-bearing for it.
 
+> **Correction — this is false on `dev`.** `_sync_mcps_when_device_active`
+> has **zero production callers** here; only three tests reference it, and
+> they mock it out. The mocking is deliberate:
+> `test_pending_activation_has_one_mcp_writer_owned_by_device_event` asserts
+> it must *not* run — *"The Device callback publishes one event; it must not
+> also sync MCP."*
+>
+> Ownership moved to the event path: `report_device_alive` publishes
+> `DeviceActivatedEvent`, `SkillSymlinkListener` handles it, and its
+> `project(scope=ProjectionScope.everything())` is the **only** production
+> path that writes per-MCP configuration to a newly active container. The
+> other full-detail push (`device_service.py:1529`) sits inside the dead
+> method.
+>
+> So the projector's whole-set push on that path is load-bearing, not
+> duplicative — which is why `claim_all_mcp` survives with exactly one
+> caller. Every other path is mutation-triggered and names its own delta.
+
 **Skill-carried MCP dependencies.** `RuntimeProjectionResolver` folds each
 skill's `mcp_dependencies` into `mcp_server_codes`, so those codes reach the
 allow-list. REL had no such mechanism at all. Narrowing the detail push must

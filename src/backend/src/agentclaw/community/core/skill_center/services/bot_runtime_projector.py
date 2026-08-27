@@ -514,11 +514,13 @@ class BotRuntimeProjector:
     ) -> None:
         codes = set(projection.mcp_server_codes)
         if scope.claim_all_mcp:
-            # The caller had no delta to name — a device-activated restart or
-            # a Skill upload — so it asked for every projected code to count
-            # as claimed. It cannot have named them itself: the projected set
-            # is only known here, after the plan resolves. Nothing is released
-            # on this path, so a reconcile can only add configuration.
+            # The device-activated listener, and only it. A freshly active
+            # container holds no MCP configuration, so there is nothing to
+            # refresh against — the allow-list alone would whitelist every MCP
+            # with no endpoint or api_key behind it. The caller cannot name
+            # the codes itself: the projected set is only known here, after
+            # the plan resolves. Nothing is released on this path, so it can
+            # only ever add configuration.
             claimed, released = frozenset(codes), frozenset()
         else:
             # A guard, never a source. ``claimed`` cannot grow past what the

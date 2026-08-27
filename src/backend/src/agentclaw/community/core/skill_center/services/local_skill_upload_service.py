@@ -533,13 +533,18 @@ class LocalSkillUploadService:
 
     async def _sync_runtime(self, owner_id: str, bot_id: str) -> bool:
         try:
-            # An upload changes the Skill set and can pull in new MCP
-            # dependencies with it, and this path holds no delta describing
-            # either — so it declares the whole projection explicitly.
+            # Skills only. Both callers are the Local Skill *replace* flow
+            # (and its compensating restore), and a replace cannot move the
+            # MCP set: ``replace_bot_local_skill`` writes ``description``,
+            # ``user_id`` and ``gmt_modified``, refuses outright to change
+            # ``git_path``, and never touches ``mcp_dependencies`` — nothing
+            # here rescans them either. The projected MCP codes are therefore
+            # identical before and after, so claiming or releasing anything
+            # would be a device write to restate what is already true.
             await self._runtime_reconciler.project(
                 bot_id=bot_id,
                 owner_id=owner_id,
-                scope=ProjectionScope.everything(),
+                scope=ProjectionScope(skills=True),
             )
             return True
         except Exception:
