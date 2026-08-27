@@ -142,6 +142,9 @@ class SkillCenterTeam:
     ref_source: str
     ref_source_id: str
 
+    def __post_init__(self) -> None:
+        _require(self.team_id, "team_id")
+
 
 @dataclass(frozen=True)
 class SkillCenterPublicSkillSearchRequest:
