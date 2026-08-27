@@ -219,6 +219,7 @@ from .resources import router as resources_router
 from .render_screens import router as render_screens_router
 from .repository_catalog import router as repository_catalog_router
 from .routines import router as routines_router
+from .routines.owner_router import router as routines_owner_router
 from .skills import publish_status_router as skill_publish_status_router
 from .skills import router as skills_router
 from .skill_sets import router as skill_sets_router
@@ -309,6 +310,11 @@ _SUBGROUPS = [
     # check via `HarnessBotAccessDep`, so it joins the plain subgroups with
     # only `_PUBLIC_AUTH` + the user-scoped error table.
     harness_router,
+    # The owner-level routine aggregate is a literal under `bots/routines` —
+    # it must mount before the *legacy* routines shim's `/{routine_id}`
+    # wildcard (which the legacy groups, mounted later, contribute) or that
+    # route captures a literal "all" as a routine id.
+    routines_owner_router,
 ]
 
 # These groups may address a shared Bot. ``OwnerIdDep`` performs the same grant

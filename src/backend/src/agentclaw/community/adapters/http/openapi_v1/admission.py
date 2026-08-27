@@ -257,6 +257,9 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # path, so the shared dependency checks it like every other operation.
     ("GET", "/openapi/v1/bots/{bot_id}/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    # The owner-level aggregate lists the named user's fleet, not one bot —
+    # gated on a live delegation like the ceiling (see owner_router).
+    ("GET", "/openapi/v1/bots/routines/all"): AdmissionMode.USER_GATED,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/routines/{routine_id}",
