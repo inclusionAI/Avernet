@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from unittest.mock import MagicMock
+
+import jwt
 
 import pytest
 from fastapi import FastAPI, Request
@@ -12,14 +15,11 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from agentclaw.community.adapters.http.auth.dependencies import get_current_user
-from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.adapters.http.work_orders.router import router
 from agentclaw.community.api.work_order_service import WorkOrderServiceProtocol
 from agentclaw.community.core.errors import (
     DomainError,
-    LoginRedirectRequired,
-    Unauthorized,
 )
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
@@ -31,13 +31,67 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderEventCreatedResult,
     WorkOrderEventStatus,
 )
+from agentclaw.community.utils.gateway_principal_config import (
+    init_principal_verifier_config,
+    reset_principal_verifier_config_cache,
+)
 
 _PATH = "/api/v1/work-orders/events"
-_USER = AuthenticatedUser(
-    id="identity-1",
-    staffId="staff-1",
-    operatorName="operator-1",
-)
+_USER_ID = "staff-1"
+_SIGNING_KEY = "work-order-router-signing-key-at-least-32-bytes"
+
+
+class _Secret:
+    secret_user = "test"
+    secret_value = _SIGNING_KEY
+
+
+class _Resolver:
+    def get_secret(self, _secret_name: str) -> _Secret:
+        return _Secret()
+
+
+def _principal_token(*, user: bool = True, app: bool = False) -> str:
+    now = int(time.time())
+    principals: list[dict[str, object]] = []
+    if user:
+        principals.append(
+            {
+                "type": "user",
+                "subject": {
+                    "id": _USER_ID,
+                    "username": "operator-1@example.test",
+                },
+            }
+        )
+    if app:
+        principals.append(
+            {
+                "type": "app",
+                "tenant": "teamclaw",
+                "app": {
+                    "app_id": 7,
+                    "app_name": "work-order-client",
+                    "owners": "platform",
+                    "tenant": "teamclaw",
+                },
+            }
+        )
+    return jwt.encode(
+        {
+            "iss": "gateway",
+            "aud": "backend",
+            "iat": now,
+            "exp": now + 3600,
+            "principals": principals,
+        },
+        _SIGNING_KEY,
+        algorithm="HS256",
+    )
+
+
+def _principal_headers(*, user: bool = True, app: bool = False) -> dict[str, str]:
+    return {PRINCIPAL_HEADER: _principal_token(user=user, app=app)}
 
 
 def _result(
@@ -78,19 +132,13 @@ def service() -> MagicMock:
 
 
 @pytest.fixture
-def app(service: MagicMock) -> FastAPI:
+def app(service: MagicMock):
     class _Bindings(Module):
         def configure(self, binder) -> None:
             binder.bind(WorkOrderServiceProtocol, to=service)
 
     test_app = FastAPI()
     test_app.include_router(router)
-
-    async def _authenticated(request: Request) -> AuthenticatedUser:
-        request.state.trace_id = "trace-work-order"
-        return _USER
-
-    test_app.dependency_overrides[get_current_user] = _authenticated
     attach_injector(test_app, Injector([_Bindings()]))
 
     # Use the assembled application's handlers instead of duplicating their
@@ -99,6 +147,7 @@ def app(service: MagicMock) -> FastAPI:
     from agentclaw.community.adapters.http.app import (
         _domain_error_handler,
         _http_exception_handler,
+        _principal_error_handler,
         _unhandled_exception_handler,
         _validation_error_handler,
     )
@@ -107,12 +156,24 @@ def app(service: MagicMock) -> FastAPI:
     test_app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     test_app.add_exception_handler(RequestValidationError, _validation_error_handler)
     test_app.add_exception_handler(Exception, _unhandled_exception_handler)
-    return test_app
+    from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
+    test_app.add_exception_handler(MissingPrincipalError, _principal_error_handler)
+
+    @test_app.middleware("http")
+    async def _trace(request: Request, call_next):
+        request.state.trace_id = "trace-work-order"
+        return await call_next(request)
+
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    yield test_app
+    reset_principal_verifier_config_cache()
 
 
 @pytest.fixture
 def client(app: FastAPI) -> TestClient:
-    return TestClient(app, raise_server_exceptions=False)
+    client = TestClient(app, raise_server_exceptions=False)
+    client.headers.update(_principal_headers())
+    return client
 
 
 def test_create_approval_event_uses_authenticated_actor_and_shared_contract(
@@ -244,16 +305,21 @@ def test_validation_errors_are_enveloped(
     service.create_work_order_event.assert_not_called()
 
 
-def test_unauthenticated_request_is_enveloped(
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {PRINCIPAL_HEADER: "not-a-jwt"},
+        _principal_headers(user=False, app=True),
+    ],
+)
+def test_request_without_a_verified_user_is_enveloped(
     app: FastAPI,
     service: MagicMock,
+    headers: dict[str, str],
 ) -> None:
-    async def _unauthenticated() -> AuthenticatedUser:
-        raise Unauthorized("missing identity")
-
-    app.dependency_overrides[get_current_user] = _unauthenticated
     response = TestClient(app, raise_server_exceptions=False).post(
-        _PATH, json=_approval_payload()
+        _PATH, json=_approval_payload(), headers=headers
     )
 
     assert response.status_code == 401
@@ -261,31 +327,22 @@ def test_unauthenticated_request_is_enveloped(
         "code": 401000,
         "message": "Unauthorized",
         "data": None,
-        "request_id": "",
+        "request_id": "trace-work-order",
     }
     service.create_work_order_event.assert_not_called()
 
 
-def test_login_redirect_semantics_are_preserved(
+def test_user_and_app_principal_still_uses_the_user_as_actor(
     app: FastAPI,
     service: MagicMock,
 ) -> None:
-    async def _login_redirect() -> AuthenticatedUser:
-        raise LoginRedirectRequired("restart login")
-
-    app.dependency_overrides[get_current_user] = _login_redirect
+    service.create_work_order_event.return_value = _result()
     response = TestClient(app, raise_server_exceptions=False).post(
-        _PATH, json=_approval_payload(), follow_redirects=False
+        _PATH, json=_approval_payload(), headers=_principal_headers(app=True)
     )
 
-    assert response.status_code == 302
-    assert response.json() == {
-        "code": 302000,
-        "message": "Found",
-        "data": None,
-        "request_id": "",
-    }
-    service.create_work_order_event.assert_not_called()
+    assert response.status_code == 201
+    assert service.create_work_order_event.call_args.kwargs["actor_id"] == _USER_ID
 
 
 def test_unexpected_error_is_enveloped_without_leaking_details(

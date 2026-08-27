@@ -627,6 +627,7 @@ def mark_notification_read_wrong_user():
     method="POST",
     path="/api/v1/work-orders/events",
     scenario="happy",
+    seed=_enable_public_auth,
     input=CaseInput(
         json_body={
             "event_category": "NOTICE",
@@ -637,7 +638,7 @@ def mark_notification_read_wrong_user():
             "title": "Member added",
             "content": {"message": "A member was added to the Space."},
         },
-        headers={"cookie": f"staff_id={_USER_ID}"},
+        headers=_principal_headers(),
     ),
     expect=ExpectSuccess(
         status=201,
@@ -655,6 +656,7 @@ def create_work_order_event_http_happy():
     method="POST",
     path="/api/v1/work-orders/events",
     scenario="unauthenticated",
+    seed=_enable_public_auth,
     input=CaseInput(
         json_body={
             "event_category": "NOTICE",

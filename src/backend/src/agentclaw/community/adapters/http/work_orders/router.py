@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
-from agentclaw.community.adapters.http.auth.dependencies import get_current_user
-from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from agentclaw.community.adapters.http.org_user.dependencies import (
+    require_gateway_user,
+)
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
@@ -19,6 +20,7 @@ from agentclaw.community.adapters.http.work_orders.converter import (
     create_work_order_event_data,
 )
 from agentclaw.community.api.work_order_service import WorkOrderServiceProtocol
+from agentclaw.community.core.gateway_principal import VerifiedCaller
 from agentclaw.community.di import Injected
 
 router = APIRouter(prefix="/api/v1/work-orders", tags=["work-orders"])
@@ -33,13 +35,13 @@ router = APIRouter(prefix="/api/v1/work-orders", tags=["work-orders"])
 async def create_work_order_event_http(
     body: CreateWorkOrderEventRequest,
     request: Request,
-    user: AuthenticatedUser = Depends(get_current_user),
+    caller: VerifiedCaller = Depends(require_gateway_user),
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderEventCreated]:
     """Create an approval or notice event for the authenticated user."""
     data = create_work_order_event_data(
         body=body,
-        actor_id=user.staffId,
+        actor_id=caller.user_id,
         service=service,
     )
     return created(data, request)

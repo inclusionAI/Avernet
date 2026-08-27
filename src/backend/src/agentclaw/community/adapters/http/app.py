@@ -126,6 +126,7 @@ from agentclaw.community.adapters.http.quality.router import router as quality_r
 # configuration declares the collaboration domain.
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router  # noqa: E402
 from agentclaw.community.adapters.http.work_orders.router import router as work_orders_http_router  # noqa: E402
+from agentclaw.community.adapters.http.org_user.router import router as org_user_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_render_screen.router import router as render_screen_router  # noqa: E402
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
 from agentclaw.community.adapters.http.antcode.router import router as antcode_router  # noqa: E402
@@ -144,10 +145,7 @@ from agentclaw.community.adapters.http.aicoding.data_proxy_router import router 
 from agentclaw.community.adapters.http.aicoding.workitem_noauth_router import router as workitem_noauth_router  # noqa: E402
 from agentclaw.community.adapters.http.enums.router import router as enums_router  # noqa: E402
 from agentclaw.community.adapters.http.resources import router as resources_router  # noqa: E402
-from agentclaw.community.adapters.http.session_resources import (  # noqa: E402
-    internal_router as session_resources_internal_router,
-    router as session_resources_router,
-)
+from agentclaw.community.adapters.http.session_resources import internal_router as session_resources_internal_router, router as session_resources_router  # noqa: E402
 from agentclaw.community.adapters.http.mcp import router as mcp_router  # noqa: E402
 from agentclaw.community.adapters.http.cron import router as cron_router  # noqa: E402
 from agentclaw.community.adapters.http.cron.cron_noauth_router import router as cron_noauth_router  # noqa: E402
@@ -926,6 +924,7 @@ app.include_router(task_internal_router)
 app.include_router(task_callback_router)
 app.include_router(task_router)
 app.include_router(work_orders_http_router)
+app.include_router(org_user_router)
 try:
     app.include_router(render_screen_router)
     logger.info("[RenderScreen] Router registered successfully: prefix=%s", render_screen_router.prefix)
