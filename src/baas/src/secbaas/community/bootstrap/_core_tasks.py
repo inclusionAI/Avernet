@@ -39,6 +39,7 @@ class CoreTaskContainer(containers.DeclarativeContainer):
     bot_repo = providers.Dependency()
     bot_device_rel_repo = providers.Dependency()
     arca_ttl_schedule_repository = providers.Dependency()
+    system_config_service = providers.Dependency()
 
     # ── DeviceTtlTimer task ──────────────────────────────────────────────────
 
@@ -166,4 +167,5 @@ class CoreTaskContainer(containers.DeclarativeContainer):
         bot_manage_service=bot_manage_service,
         bot_repo=bot_repo,
         bot_device_rel_repo=bot_device_rel_repo,
+        system_config_service=system_config_service,
     )

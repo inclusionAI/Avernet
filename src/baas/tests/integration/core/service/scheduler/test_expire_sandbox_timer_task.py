@@ -50,6 +50,7 @@ def _build_task(container) -> ExpireSandboxTimerTask:
         bot_manage_service=container.services.bot_management_service(),
         bot_repo=container.repository.bot_repository(),
         bot_device_rel_repo=container.repository.bot_device_rel_repository(),
+        system_config_service=container.services.system_config_service(),
     )
 
 
@@ -182,3 +183,95 @@ class TestExpireSandboxStopsBot:
         device = device_repository.get_by_id(device_id, tenant=tenant, env=TEST_ENV)
         assert device is not None
         assert device.status == DeviceStatus.ACTIVE.value
+
+
+class TestExpireSandboxWhitelist:
+    @pytest.mark.asyncio
+    async def test_whitelisted_bot_is_skipped(
+        self,
+        bot_repository,
+        device_repository,
+        rel_repository,
+        system_config_repository,
+        created_bot_ids,
+        created_device_ids,
+        created_rel_ids,
+        created_config_ids,
+    ):
+        tenant = f"t-{uuid4().hex[:8]}"
+
+        bot_uuid = uuid4().hex
+        bot_id = bot_repository.insert_bot(
+            bot_uuid=bot_uuid,
+            tenant=tenant,
+            env=TEST_ENV,
+            domain="test",
+            creator="tester",
+            modifier="tester",
+            status=BotStatus.ACTIVE.value,
+            name="whitelisted-bot",
+            description=None,
+            template_uuid=None,
+            replica_desired=1,
+            replica_minimum=1,
+            replica_maximum=10,
+            auto_scaling_enabled=0,
+            sla_grade="standard",
+            extra_config={},
+        )
+        created_bot_ids.append(bot_id)
+
+        device_uuid = uuid4().hex
+        device_id = device_repository.insert_device(
+            device_uuid=device_uuid,
+            tenant=tenant,
+            env=TEST_ENV,
+            domain="test",
+            creator="tester",
+            modifier="tester",
+            status=DeviceStatus.ACTIVE.value,
+            provider_type="ARCA",
+            provider_device_id="sbx-whitelisted",
+            provider_device_props={
+                "sandbox_id": "sbx-whitelisted",
+                "ttl_expiration_timestamp": int((time.time() - 3600) * 1000),
+            },
+            extra_config={"deploy_config": {"ttl_in_minutes": 10080}},
+        )
+        created_device_ids.append(device_id)
+
+        rel_id = rel_repository.insert_rel(
+            bot_id=bot_id,
+            device_uuid=device_uuid,
+            tenant=tenant,
+            env=TEST_ENV,
+            domain="test",
+            creator="tester",
+            modifier="tester",
+        )
+        created_rel_ids.append(rel_id)
+
+        config_id = system_config_repository.insert_config(
+            conf_key="expire_sandbox.whitelist_bot_uuids",
+            conf_value=bot_uuid,
+            env=TEST_ENV,
+            name="expire whitelist",
+            description=None,
+            creator="tester",
+            modifier="tester",
+        )
+        created_config_ids.append(config_id)
+
+        container = get_container()
+        task = _build_task(container)
+        report = await task.run()
+
+        assert report is not None
+        assert report.scanned >= 1
+        assert report.skipped >= 1
+        assert report.skipped_reasons.get("whitelisted", 0) >= 1
+        assert report.stopped == 0
+
+        bot = bot_repository.get_by_id(bot_id, tenant=tenant, env=TEST_ENV)
+        assert bot is not None
+        assert bot.status == BotStatus.ACTIVE.value
