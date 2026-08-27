@@ -90,7 +90,7 @@
   - [x] `src/engine/.../api/tests/test_skills_router.py` still passes.
 - **Depends on:** —
 
-## Task 4: Consume the inline verification signal and drop the second round trip
+## Task 4 `[x]`: Consume the inline verification signal and drop the second round trip
 
 - **Goal:** The projector makes one device call to publish when the runtime
   verified inline, and two when it did not.
@@ -98,14 +98,14 @@
   - `src/backend/src/agentclaw/community/core/skills_pool/runtime.py`
   - `src/backend/src/agentclaw/community/core/skill_center/services/bot_runtime_projector.py`
 - **Done when:**
-  - [ ] `publish_and_verify_mappings` reads `data["verified"]` from the publish
+  - [x] `publish_and_verify_mappings` reads `data["verified"]` from the publish
         response; only literal `True` skips the fallback verify.
-  - [ ] A response with no `verified` key falls back to a separate `/verify` call.
-  - [ ] A response with `verified: false` is treated as not converged — no
+  - [x] A response with no `verified` key falls back to a separate `/verify` call.
+  - [x] A response with `verified: false` is treated as not converged — no
         fallback call, `verified=False` returned.
-  - [ ] `_apply_pool_mappings` calls `publish_and_verify_mappings` and still
+  - [x] `_apply_pool_mappings` calls `publish_and_verify_mappings` and still
         raises `SkillSetRuntimeReconcileError` when the outcome is not verified.
-  - [ ] Tests cover all three signal states and assert the transport call count
+  - [x] Tests cover all three signal states and assert the transport call count
         for each.
 - **Depends on:** Task 2, Task 3
 

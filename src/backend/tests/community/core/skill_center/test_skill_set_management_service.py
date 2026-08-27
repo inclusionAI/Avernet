@@ -691,6 +691,18 @@ class _RuntimePool:
         self.verify_calls.append(kwargs)
         return True
 
+    async def publish_and_verify_mappings(self, **kwargs):
+        # Records into the same two lists the two-call API filled, so every
+        # existing assertion on publish_calls / verify_calls keeps its meaning.
+        # The real runtime skips the verify leg when the device reports a
+        # verdict inline; this double stands in for one that does not, so the
+        # projector is exercised on the round-trip path it must still support.
+        from agentclaw.community.core.skills_pool.models import MappingPublishOutcome
+
+        published = await self.publish_mappings(**kwargs)
+        verified = published and await self.verify_mappings(**kwargs)
+        return MappingPublishOutcome(published=published, verified=verified)
+
 
 class _CenterRuntimePool(_RuntimePool):
     def __init__(self) -> None:
@@ -3553,3 +3565,80 @@ async def test_unexcluding_a_default_mcp_still_requires_marketplace_permission()
             set_id="9", server_code="mcp.back",
         )
     assert repository.exclusion_calls == []
+
+
+
+# ── P2: the projector's device-call count follows the runtime's verdict ──
+
+
+class _InlineVerifiedRuntimePool(_RuntimePool):
+    """A device that verifies its own publish, as engines do after P2."""
+
+    def __init__(self, verified: bool = True) -> None:
+        super().__init__()
+        self.verified = verified
+
+    async def publish_and_verify_mappings(self, **kwargs):
+        from agentclaw.community.core.skills_pool.models import MappingPublishOutcome
+
+        self.publish_calls.append(kwargs)
+        return MappingPublishOutcome(
+            published=True, verified=self.verified, reported_inline=True
+        )
+
+
+def _projector(pool):
+    repository = _McpInstallations()
+    return BotRuntimeProjector(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBots(),
+        repository=repository,
+        reader=_reader(_RuntimeSkills(), repository=repository),
+        pool_runtime=pool,
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_inline_verified_runtime_costs_one_device_call() -> None:
+    """The saving P2 exists for: no verify leg when the publish already knows."""
+    pool = _InlineVerifiedRuntimePool()
+
+    await _projector(pool).project(
+        bot_id="bot-1", owner_id="true-owner",
+        retired_mappings=_Runtime._skill_mappings(),
+        scope=ProjectionScope.everything(),
+    )
+
+    assert len(pool.publish_calls) == 1
+    assert pool.verify_calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_without_the_signal_still_gets_both_calls() -> None:
+    """Older devices report nothing, and must keep the separate verify."""
+    pool = _RuntimePool()
+
+    await _projector(pool).project(
+        bot_id="bot-1", owner_id="true-owner",
+        retired_mappings=_Runtime._skill_mappings(),
+        scope=ProjectionScope.everything(),
+    )
+
+    assert len(pool.publish_calls) == 1
+    assert len(pool.verify_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_reporting_failure_still_fails_the_projection() -> None:
+    """Skipping the round trip must not soften what an unverified publish means."""
+    pool = _InlineVerifiedRuntimePool(verified=False)
+
+    with pytest.raises(SkillSetRuntimeReconcileError):
+        await _projector(pool).project(
+            bot_id="bot-1", owner_id="true-owner",
+            retired_mappings=_Runtime._skill_mappings(),
+            scope=ProjectionScope.everything(),
+        )

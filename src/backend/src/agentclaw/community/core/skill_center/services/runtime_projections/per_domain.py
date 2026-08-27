@@ -218,15 +218,11 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                     "supported_mapping_contract_versions"
                 )
             contract = mapping_contract_for(contract_mappings, supported_versions)
-            published = await self._pool_runtime.publish_mappings(
-                bot_id=bot_id,
-                user_id=owner_id,
-                mappings=mappings,
-                retired_mappings=retired_mappings,
-                source_layout=source_layout,
-                mapping_contract_version=contract,
-            )
-            verified = published and await self._pool_runtime.verify_mappings(
+            # One entry point, not publish-then-verify: it resolves the device
+            # once for however many adapter calls it makes, and skips the
+            # verify round trip when the publish response already carried the
+            # verdict. What it returns is unchanged — converged or not.
+            outcome = await self._pool_runtime.publish_and_verify_mappings(
                 bot_id=bot_id,
                 user_id=owner_id,
                 mappings=mappings,
@@ -236,7 +232,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
             )
         except Exception as exc:
             raise SkillSetRuntimeReconcileError() from exc
-        if not verified:
+        if not outcome.verified:
             raise SkillSetRuntimeReconcileError()
 
     @staticmethod
