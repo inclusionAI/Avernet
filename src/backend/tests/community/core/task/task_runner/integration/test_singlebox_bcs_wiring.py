@@ -106,3 +106,18 @@ def test_create_group_state_machine_body_sets_start_initial_run_false():
     assert seen["body"]["group_strategy"] == "state_machine"
     assert seen["body"]["start_initial_run"] is False
     assert seen["body"]["collaboration_definition_yaml"] == "states: [s1, s2]"
+
+
+def test_create_group_forwards_caller_bot_token_as_bearer():
+    """SingleboxBcsAdapter 手写镜像 BcsHttpAdapter.create_group,须同样透传 caller_bot_token 为 Authorization: Bearer。"""
+    seen: dict = {}
+
+    def h(req: httpx.Request) -> httpx.Response:
+        seen["auth"] = req.headers.get("authorization")
+        return httpx.Response(200, json={"id": "g_b", "session_id": None})
+
+    _run(_adapter(httpx.MockTransport(h)).create_group(BcsCreateGroupRequest(
+        driver_bot="bot_ceo", participants=[{"bot_uuid": "bot_p"}],
+        caller_bot_token="drv-tok",
+    )))
+    assert seen["auth"] == "Bearer drv-tok"
