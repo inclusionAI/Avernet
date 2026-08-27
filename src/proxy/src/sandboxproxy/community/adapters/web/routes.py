@@ -22,10 +22,12 @@ def build_router(container: ApplicationContainer, loaded: Config) -> APIRouter:
     relay_secret = loaded.user_config.jwt.secret
 
     def _auth(request: Request) -> dict[str, Any] | None:
-        auth = request.headers.get("authorization", "")
-        if not auth.lower().startswith("bearer "):
+        from sandboxproxy.community.core.authn.relay_auth import extract_token
+
+        token = extract_token(request.headers, str(request.url))
+        if not token:
             return None
-        return cast(dict[str, Any], jwt_verifier.verify(auth[7:].strip()))
+        return cast(dict[str, Any], jwt_verifier.verify(token))
 
     @router.get("/health")
     async def health() -> dict[str, str]:

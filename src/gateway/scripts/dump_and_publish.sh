@@ -73,7 +73,11 @@ _upstream_dir() {
 
 _upstream_env() {
     case "$1" in
-        backend) echo "DEPLOY_PROFILE=community" ;;
+        # The community overlay requires a deployment-supplied DATABASE_URL (it is
+        # the Aliyun/OceanBase profile, so its url placeholder has no default).
+        # Dumping the schema only imports the app; no connection is opened, so a
+        # placeholder DSN is enough to get past config resolution.
+        backend) echo "DEPLOY_PROFILE=community DATABASE_URL=mysql+pymysql://dump:dump@127.0.0.1:3306/agentclaw" ;;
         baas)    echo "SECBAAS_RUN_MODE=bare" ;;
         bcn)     echo "" ;;
         bcn-internal) echo "" ;;

@@ -4,13 +4,12 @@
 use std::sync::Arc;
 
 use bcs_bot::{Bot, BotCore};
+use bcs_config::resolve_env_str;
 use bcs_bot_store::PersistentBotRepo;
 use bcs_cache_local::InMemoryCachePlugin;
-use bcs_db_api::{DbPlugin, DbStatement};
+use bcs_db_api::{DbPlugin, DbStatement, DbValue as Value};
 use bcs_db_local::LocalSqliteDbPlugin;
-use bcs_service_api::{
-    BotCapabilities, BotQueryService, BotRegistryCoreService, BotRepoPort, SearchBotsCommand,
-};
+use bcs_service_api::{BotCapabilities, BotQueryService, BotRegistryCoreService, BotRepoPort, SearchBotsCommand};
 use tempfile::TempDir;
 
 fn capabilities(name: &str, visibility: &str) -> BotCapabilities {
@@ -37,6 +36,7 @@ async fn sqlite_db() -> Arc<dyn DbPlugin> {
             is_deleted INTEGER NOT NULL DEFAULT 0,
             agent_code TEXT DEFAULT NULL,
             env TEXT NOT NULL,
+            gmt_create TEXT DEFAULT CURRENT_TIMESTAMP,
             registered_at TEXT,
             updated_at TEXT,
             PRIMARY KEY (bot_uuid, env)
@@ -54,27 +54,55 @@ async fn build_bot() -> (Bot, Arc<BotCore>, TempDir) {
     (bot, core, data_dir)
 }
 
+async fn insert_bot_row(
+    db: &Arc<dyn DbPlugin>,
+    bot_uuid: &str,
+    name: &str,
+    visibility: &str,
+    created_by: Option<&str>,
+) {
+    let bot_info = serde_json::json!({
+        "summary": "test bot",
+        "domains": [],
+        "skills": [],
+        "scopes": [],
+        "binding_channels": null,
+        "hidden": false,
+        "visibility": visibility,
+        "agent_code": null,
+        "agent_token": null
+    })
+    .to_string();
+    db.execute(DbStatement::with_params(
+        "INSERT INTO bcs_bots (
+            bot_uuid, name, bot_info, session_token, created_by, visibility,
+            status, actor_kind, is_deleted, agent_code, env, registered_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'online', 'bot', 0, NULL, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        vec![
+            Value::from(bot_uuid),
+            Value::from(name),
+            Value::from(bot_info),
+            Value::from(format!("{bot_uuid}-token")),
+            Value::from(created_by.map(str::to_string)),
+            Value::from(visibility),
+            Value::from(resolve_env_str()),
+        ],
+    ))
+    .await
+    .expect("insert bot row");
+}
+
 #[tokio::test]
 async fn search_bots_tc_bot_filter_keeps_only_owner_suffixed_bots() {
-    let (bot, core, _data_dir) = build_bot().await;
+    let db = sqlite_db().await;
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    let repo = Arc::new(PersistentBotRepo::with_plugins(cache, db.clone()));
+    let core = Arc::new(BotCore::with_repo(repo.clone()));
+    let bot = Bot::new(core.clone() as Arc<dyn BotRegistryCoreService>);
 
-    // Native WebSocket bot: no owner-suffix, no `created_by`. Registered via
-    // the plain `register` (no owner binding).
-    core.register("ws-native-bot".to_string(), capabilities("Native", "public"))
-        .await
-        .expect("register native bot");
+    insert_bot_row(&db, "ws-native-bot", "Native", "public", None).await;
+    insert_bot_row(&db, "tc-prefix:85020", "TC Assistant", "public", Some("85020")).await;
 
-    // TC backend bot: owner-suffixed `bot_uuid` with matching `created_by`.
-    core.register_with_owner_and_token(
-        "tc-prefix:85020".to_string(),
-        capabilities("TC Assistant", "public"),
-        "85020",
-        "token-irrelevant",
-    )
-    .await
-    .expect("register tc bot");
-
-    // No filter → both bots present.
     let all = bot
         .search_bots(SearchBotsCommand::default())
         .await
@@ -83,7 +111,6 @@ async fn search_bots_tc_bot_filter_keeps_only_owner_suffixed_bots() {
     assert!(all_uuids.contains(&"ws-native-bot"));
     assert!(all_uuids.contains(&"tc-prefix:85020"));
 
-    // tc_bot=true → only the TC bot.
     let only_tc = bot
         .search_bots(SearchBotsCommand {
             tc_bot: Some(true),
@@ -94,7 +121,6 @@ async fn search_bots_tc_bot_filter_keeps_only_owner_suffixed_bots() {
     let tc_uuids: Vec<&str> = only_tc.items.iter().map(|b| b.bot_uuid.as_str()).collect();
     assert_eq!(tc_uuids, vec!["tc-prefix:85020"]);
 
-    // tc_bot=false → only the native bot.
     let only_native = bot
         .search_bots(SearchBotsCommand {
             tc_bot: Some(false),
@@ -109,8 +135,6 @@ async fn search_bots_tc_bot_filter_keeps_only_owner_suffixed_bots() {
         .collect();
     assert_eq!(native_uuids, vec!["ws-native-bot"]);
 }
-
-
 
 #[tokio::test]
 async fn search_bots_visibility_filter_accepts_multiple_values() {

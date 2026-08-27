@@ -5,7 +5,7 @@ Open-source side-panel components bundled as a UMD asset for BCS.
 ## Install From npm
 
 ```bash
-npm install @avernet-assets/bcs-panel@1.2.0
+npm install @avernet-assets/bcs-panel
 ```
 
 The prebuilt UMD bundle is installed at:
@@ -24,7 +24,7 @@ reproducible and can be rolled back safely:
 [[manifest.bundles]]
 name = "bcsPanel"
 type = "url"
-url = "https://cdn.jsdelivr.net/npm/@avernet-assets/bcs-panel@1.2.0/dist/index.umd.js"
+url = "https://cdn.jsdelivr.net/npm/@avernet-assets/bcs-panel@<exact-version>/dist/index.umd.js"
 ```
 
 Do not use an unversioned URL or the `latest` dist-tag in production.
@@ -73,13 +73,21 @@ which is the entry name used by `bcsPanel.StateMachineRunView`.
 
 ## Publishing
 
-Review the package contents before publishing a public release:
+Releases are published by GitHub Actions when a maintainer pushes a tag named
+`bcs-panel-v<version>`. The tag version must exactly match the `version` in
+`package.json`.
+
+Configure `@avernet-assets/bcs-panel` with the `publish-bcs-panel.yml` trusted
+publisher on npm. The workflow uses OIDC and does not require an npm token.
+
+Review the package contents locally before opening a release pull request:
 
 ```bash
+npm ci
+npm run verify
 npm pack --dry-run
-npm publish --access public
 ```
 
-The `prepack` lifecycle runs type checking, creates a fresh UMD bundle, verifies
-its runtime export contract, and scans the public package content before either
-command creates the package archive.
+The `prepack` lifecycle also runs verification before the GitHub Action creates
+or publishes the package archive. See [PUBLISHING.md](PUBLISHING.md) for the
+OIDC configuration, versioning, tag, verification, and troubleshooting steps.

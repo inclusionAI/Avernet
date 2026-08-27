@@ -5,7 +5,7 @@ hook semantics via a subclass instead of inline hooks in the community
 _device_service.py core path (D-08'/D-09'):
 
 - start_device() — after a successful create, register the ARCA container
-  in the baas_arca_ttl_renewal_schedule cold table (defensive posture:
+  in the baas_bot_ttl_renewal_schedule cold table (defensive posture:
   never blocks device creation).
 - stop_device_by_uuid() / destroy_device_by_uuid() — after a successful
   stop/destroy (DestroyDeviceResponse.success is True), mark the schedule
@@ -29,7 +29,7 @@ from __future__ import annotations
 from secbaas.community.core.repository.arca_ttl import TtlRenewalScheduleRepository
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.core.utils.time_utils import (
-    naive_utc_fromtimestamp,
+    naive_cst_fromtimestamp,
     renewal_window,
 )
 from secbaas.community.logger import get_logger
@@ -72,9 +72,13 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
     def _try_register_schedule(self, response, device_uuid) -> None:
         """Best-effort register/re-register of the ARCA schedule row.
 
-        Reads ttl_expiration_time from provider_device_props — the exact
+        Reads ttl_expiration_timestamp (ms epoch) from provider_device_props — the exact
         creation_result.model_dump() payload the community device service
-        persists (D-06). A missing key logs a warning and defers
+        persists (D-06). WR-02 dual-key fallback: devices created before
+        the field-pair release persist only the legacy integer-ms
+        ttl_expiration_time key, so that key is read as a fallback and
+        pre-release creations register with their real expiry. A
+        missing/zero/non-numeric value logs a warning and defers
         registration to the discovery scan; any repository failure only
         emits CRITICAL + [arca_ttl_metrics] register_error=1. Never raises
         (INTG-01 defensive posture: cold-table problems must never affect
@@ -82,15 +86,32 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
         """
         try:
             props = response.provider_device_props or {}
-            ttl_ms = props.get("ttl_expiration_time")
-            if ttl_ms is None:
+            ttl_ms = props.get("ttl_expiration_timestamp")
+            if not ttl_ms:
+                # WR-02: pre-release rows persisted only the legacy
+                # integer-ms ttl_expiration_time key.
+                ttl_ms = props.get("ttl_expiration_time")
+            if not ttl_ms:
                 log.warning(
-                    "[arca_ttl] provider_device_props missing ttl_expiration_time "
+                    "[arca_ttl] provider_device_props missing ttl_expiration_timestamp "
                     "for device %s — registration deferred to discovery scan",
                     device_uuid,
                 )
                 return
-            expiration_dt = naive_utc_fromtimestamp(ttl_ms / 1000)
+            # Numeric contract: the persisted value is an int ms epoch, but
+            # numeric strings are possible — coerce with the same
+            # int(float()) contract the scheduler consumers use; an
+            # unparseable value defers to the discovery scan.
+            try:
+                ttl_ms = int(float(ttl_ms))
+            except (TypeError, ValueError, OverflowError):
+                log.warning(
+                    "[arca_ttl] provider_device_props non-numeric TTL for "
+                    "device %s — registration deferred to discovery scan",
+                    device_uuid,
+                )
+                return
+            expiration_dt = naive_cst_fromtimestamp(ttl_ms / 1000)
             self._schedule_repo.register(
                 get_current_env(),
                 sandbox_id=response.provider_device_id,

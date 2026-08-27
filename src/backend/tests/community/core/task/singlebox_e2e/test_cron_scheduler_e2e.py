@@ -28,13 +28,8 @@ import os
 import unittest
 import warnings
 from datetime import datetime
-from pathlib import Path
 
 import httpx
-
-from agentclaw.community.core.task.task_discovery.task_reader import (
-    init_discovered_tasks_db,
-)
 
 _LIVE = os.environ.get("SINGLEBOX_CRON_E2E", "").strip() in {"1", "true"}
 _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
@@ -65,12 +60,6 @@ _MOCK_TASKS: list[dict] = [
     },
 ]
 
-_DATA_FILE = Path(__file__).resolve()
-for _ in range(8):
-    _DATA_FILE = _DATA_FILE.parent
-_DATA_FILE = _DATA_FILE / "scripts" / ".dependencies" / "data" / "discovered_tasks.db"
-
-
 def _write_mock_data(bot_id: str, owner_id: str) -> None:
     tasks = []
     for t in _MOCK_TASKS:
@@ -79,8 +68,13 @@ def _write_mock_data(bot_id: str, owner_id: str) -> None:
         task["owner_id"] = owner_id
         task["task_id"] = f"cron_e2e_{bot_id}_{owner_id}_{_TODAY}"
         tasks.append(task)
-    init_discovered_tasks_db(_DATA_FILE, tasks)
-    print(f"[setup] mock 数据已写入 {_DATA_FILE} ({len(tasks)} tasks, bot={bot_id})")
+    r = httpx.post(
+        f"{_BACKEND}/api/v1/collaboration/tasks/discovery/tasks",
+        json={"tasks": tasks},
+        timeout=15.0, headers=_HDRS,
+    )
+    r.raise_for_status()
+    print(f"[setup] written {len(tasks)} tasks via HTTP /discovery/tasks (bot={bot_id})")
 
 
 @unittest.skipUnless(_LIVE, "设置 SINGLEBOX_CRON_E2E=1 启用")

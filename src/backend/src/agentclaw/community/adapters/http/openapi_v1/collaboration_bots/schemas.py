@@ -45,16 +45,18 @@ class BcsPublicRequest(BaseModel):
 class BcsPublishResult(BaseModel):
     """The approval-start result returned by public_bcs_bot.
 
-    Mirrors the ApprovalWorkflowPlugin.start_approval return shape; extra fields
-    are kept (forward-compat) so the response surface stays stable as the prod
-    approval reply adds keys.
+    Limited to the declared fields. The upstream approval reply and the publish
+    service carry keys that are not part of the public contract — the
+    last-operate marker (in either casing) and the private-path visibility
+    fields — so the model drops unknown keys rather than surfacing them. Track
+    the open ticket via puid and approval_url; read state for an immediate
+    outcome and error_msg when success is false.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     success: bool = Field(description="Whether submitting the approval ticket (or the private direct BCS PATCH) succeeded.")
     puid: Optional[str] = Field(default=None, description="The approval ticket's global-unique id (None on the private direct-update path).")
     approval_url: Optional[str] = Field(default=None, description="The approval ticket's review URL (None on the private direct-update path).")
     state: Optional[str] = Field(default=None, description="The ticket's state at submit (PROCESSING / COMPLETED).")
-    last_operate: Optional[str] = Field(default=None, description="The ticket's last-operate marker on COMPLETED (AGREE / DISAGREE / CANCEL).")
     error_msg: Optional[str] = Field(default=None, description="Error message when success is False.")

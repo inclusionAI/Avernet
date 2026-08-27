@@ -37,7 +37,14 @@ WORKDIR /app
 
 RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        procps \
+        net-tools \
+        iproute2 \
+        vim \
+        less \
+        jq \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 admin \
     && useradd --uid 10001 --gid admin --create-home --shell /bin/bash admin

@@ -11,12 +11,18 @@
 #       [--namespace avernet] \
 #       [--apply]                 # apply with kubectl (default: dry-run print)
 #
-# Supported services (with default port):
-#   baas       — SecBaaS platform service (port 8888)
-#   gateway    — API gateway (port 8080)
-#   bcs        — BCS coordination service (port 21000)
-#   backend    — Backend service (port 8090)
-#   bcsfuse    — BCS Fuse open-source service (port 8765)
+# Supported services (default port, probe path):
+#   baas       — SecBaaS platform service   (8080,  /health)
+#   gateway    — API gateway                (8888,  /health)
+#   proxy      — Sandbox proxy              (8888,  /health)
+#   bcs        — BCS coordination service   (21000, /health)
+#   backend    — Backend service            (8888,  /api/health)
+#   bcsfuse    — BCS Fuse open-source service (8765,  /health)
+#
+# Each default is the port that service actually listens on out of the box, and
+# the path it actually serves. Override the port with PORT=... in the
+# environment; see the note on DEFAULT_PORT below for which services can honour
+# that inside the container.
 #
 # The script renders docker/services/service-deployment.yaml via
 # envsubst, then optionally applies it with kubectl.
@@ -61,18 +67,77 @@ APPLY=0
 ENV_VARS=()
 ENV_FILE=""
 
-# Service-specific defaults
+# Service-specific defaults.
+#
+# These were all 8080, which no service listens on: baas/gateway/proxy default
+# module_config.web.port to 8888, bcs's toml sets 21000, and the backend's
+# main.py defaults to 8888. Every rendered manifest therefore published a port
+# with no listener behind it. Each entry below is the service's real default.
 declare -A DEFAULT_PORT=(
+    # baas is the exception: it has NO port env override (nothing in src/baas/
+    # reads BAAS_PORT), so its listener is whatever the mounted config says.
+    # Every k8s deployment here sets SERVER_ENV=prod (scripts/k8s-tests/*/baas.env),
+    # which merges application-prod.yaml and pins web.port to 8080 — the base
+    # application.yaml's 8888 never applies there. Publishing 8888 would point
+    # the Service at a dead port. NB: BAAS_PORT=8888 in those env files is inert;
+    # it is read by nothing.
     [baas]=8080
-    [gateway]=8080
-    [proxy]=8080
-    [bcs]=8080
+    [gateway]=8888
+    [proxy]=8888
+    [bcs]=21000
+    [backend]=8888
     [bcsfuse]=8765
-    [backend]=8080
 )
 
-# All services default to 4 CPU / 8Gi spec, 2 replicas.
-DEFAULT_REPLICAS=2
+# The HTTP path each service answers health probes on. The backend mounts its
+# routes under /api and serves /api/health; the rest serve /health at the root.
+# A wrong path here is silent and fatal: readiness never turns true and liveness
+# restarts an otherwise healthy pod on a loop.
+declare -A DEFAULT_PROBE_PATH=(
+    [baas]=/health
+    [gateway]=/health
+    [proxy]=/health
+    [bcs]=/health
+    [backend]=/api/health
+    [bcsfuse]=/health
+)
+
+# The env var (if any) through which a service lets the environment override the
+# port from its config file. gateway, proxy and backend each read one and let it
+# win; injecting it below keeps the container's listener on the port this
+# manifest publishes, so PORT=... moves both together instead of only
+# relabelling the Service. baas and bcs have no such override — their port comes
+# from the mounted config / toml alone, so overriding PORT for them means
+# editing that config to match.
+declare -A PORT_ENV_VAR=(
+    [baas]=""
+    [gateway]=GATEWAY_PORT
+    [proxy]=SANDBOXPROXY_PORT
+    [bcs]=""
+    [backend]=BACKEND_PORT
+    [bcsfuse]=BCSFUSE_PORT
+)
+
+# All services default to a 4 CPU / 8Gi spec.
+#
+# Replicas are per-service because the backend cannot safely run more than one
+# pod on the shipped community defaults, and nothing fails loudly when it does:
+#   * /app/data is pod-local — workspace/*, oss, nas and the default
+#     object_storage.backend "fs" all live there, so replicas diverge and a pod
+#     replacement drops what it held.
+#   * cache.redis_url defaults to empty, which CommunityCache serves with an
+#     in-process lock; the overlay itself calls that "single-process only".
+#     Startup work that takes those locks (GitSyncService, SkillCenterSyncService,
+#     the task-discovery scheduler) would then run concurrently in every pod,
+#     each believing it holds the lock.
+# Configure S3 object storage and REDIS_URL, then raise it with REPLICAS=N.
+declare -A DEFAULT_REPLICAS=(
+    [baas]=2
+    [gateway]=2
+    [proxy]=2
+    [bcs]=2
+    [backend]=1
+)
 DEFAULT_CPU_REQUEST="4"
 DEFAULT_CPU_LIMIT="4"
 DEFAULT_MEM_REQUEST="8Gi"
@@ -81,7 +146,11 @@ DEFAULT_MEM_LIMIT="8Gi"
 # --- Parse arguments ---
 
 usage() {
-    sed -n '2,/^# ====/p; /^# ====/q' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
+    # Print the header comment block: everything between the opening and closing
+    # banner, with the leading "# " stripped. The previous sed quit on the first
+    # /^# ====/ line, which is the opening banner itself, so --help emitted that
+    # single line and nothing else. Same shape as docker/build-image.sh.
+    awk 'NR>2 { if ($0 ~ /^# ====/) exit; sub(/^# ?/,""); print }' "${BASH_SOURCE[0]}"
     exit 0
 }
 
@@ -128,7 +197,8 @@ if [[ -z "${DEFAULT_PORT[$SERVICE]:-}" ]]; then
 fi
 
 PORT="${PORT:-${DEFAULT_PORT[$SERVICE]}}"
-REPLICAS="${REPLICAS:-$DEFAULT_REPLICAS}"
+PROBE_PATH="${PROBE_PATH:-${DEFAULT_PROBE_PATH[$SERVICE]}}"
+REPLICAS="${REPLICAS:-${DEFAULT_REPLICAS[$SERVICE]}}"
 CPU_REQUEST="${CPU_REQUEST:-$DEFAULT_CPU_REQUEST}"
 CPU_LIMIT="${CPU_LIMIT:-$DEFAULT_CPU_LIMIT}"
 MEMORY_REQUEST="${MEMORY_REQUEST:-$DEFAULT_MEM_REQUEST}"
@@ -155,6 +225,35 @@ fi
 
 ENV_VARS+=("DEPLOY_TIME=$(date '+%Y-%m-%dT%H:%M:%S%z')")
 
+# --- Keep the container's listener on the port this manifest publishes ---
+
+# For a service that reads a port env var, inject it set to PORT. Without this a
+# PORT override renamed the Service's target while the process kept listening
+# where its config said, which is the same dead port the old uniform 8080
+# produced. An explicit --env for the same key wins: the operator asked for it by
+# name, so we leave it alone and only warn if it disagrees with what we publish.
+PORT_ENV="${PORT_ENV_VAR[$SERVICE]:-}"
+if [[ -n "$PORT_ENV" ]]; then
+    explicit=""
+    for entry in "${ENV_VARS[@]}"; do
+        if [[ "${entry%%=*}" == "$PORT_ENV" ]]; then
+            explicit="${entry#*=}"
+            break
+        fi
+    done
+    if [[ -z "$explicit" ]]; then
+        ENV_VARS+=("${PORT_ENV}=${PORT}")
+    elif [[ "$explicit" != "$PORT" ]]; then
+        echo "warning: --env ${PORT_ENV}=${explicit} disagrees with the published port ${PORT};" >&2
+        echo "         the Service and probes will target ${PORT} while the container listens on ${explicit}." >&2
+        echo "         Set PORT=${explicit} to move both together." >&2
+    fi
+elif [[ "${PORT}" != "${DEFAULT_PORT[$SERVICE]}" ]]; then
+    echo "warning: ${SERVICE} takes its port from its mounted config, not the environment;" >&2
+    echo "         PORT=${PORT} only changes the manifest. Edit that config to match, or the" >&2
+    echo "         Service and probes will target a port with no listener." >&2
+fi
+
 # --- Render env vars into YAML ---
 
 ENV_YAML=""
@@ -163,6 +262,11 @@ if [[ ${#ENV_VARS[@]} -gt 0 ]]; then
     for entry in "${ENV_VARS[@]}"; do
         key="${entry%%=*}"
         val="${entry#*=}"
+        # The value goes into a YAML double-quoted scalar, where \ and " are
+        # escapes. A DSN password may legally contain either. Backslash first,
+        # so the quote escape we add is not itself doubled.
+        val="${val//\\/\\\\}"
+        val="${val//\"/\\\"}"
         ENV_YAML="${ENV_YAML}
         - name: ${key}
           value: \"${val}\""
@@ -172,17 +276,25 @@ fi
 # --- Render template ---
 
 # envsubst first for ${...} placeholders (won't touch __ENV_VARS__)
-export SERVICE NAMESPACE IMAGE PORT REPLICAS CPU_REQUEST CPU_LIMIT MEMORY_REQUEST MEMORY_LIMIT
+export SERVICE NAMESPACE IMAGE PORT PROBE_PATH REPLICAS CPU_REQUEST CPU_LIMIT MEMORY_REQUEST MEMORY_LIMIT
 RENDERED="$(cat "$TEMPLATE" | envsubst)"
 
-# Then replace __ENV_VARS__ with the env block (or remove if empty)
+# Then replace __ENV_VARS__ with the env block (or remove if empty).
+# This MUST come after the last envsubst pass. There used to be a second pass
+# here, which re-expanded the values just inserted: a DATABASE_URL whose
+# password contained a legal '$' had everything from the '$' onward eaten
+# (mysql://u:pa$FOO@h → mysql://u:pa@h), so the pod booted with silently
+# corrupted credentials. The template's own ${...} placeholders are all
+# resolved by the first pass, so nothing is lost by dropping the second.
+# Splice by splitting on the marker rather than ${RENDERED//marker/$ENV_YAML}:
+# bash processes backslashes in a substitution's REPLACEMENT text, so a value
+# containing a backslash lost one level on the way in — undoing the escaping
+# just applied above. Concatenation copies the payload verbatim.
 if [[ -n "$ENV_YAML" ]]; then
-    RENDERED="${RENDERED//__ENV_VARS__/$ENV_YAML}"
+    RENDERED="${RENDERED%%__ENV_VARS__*}${ENV_YAML}${RENDERED#*__ENV_VARS__}"
 else
-    RENDERED="${RENDERED//        __ENV_VARS__/}"
+    RENDERED="${RENDERED%%        __ENV_VARS__*}${RENDERED#*        __ENV_VARS__}"
 fi
-export SERVICE NAMESPACE IMAGE PORT REPLICAS CPU_REQUEST CPU_LIMIT MEMORY_REQUEST MEMORY_LIMIT
-RENDERED="$(echo "$RENDERED" | envsubst)"
 
 # --- Output or apply ---
 
@@ -190,6 +302,7 @@ if [[ "$APPLY" -eq 1 ]]; then
     echo "==> Deploying $SERVICE to namespace $NAMESPACE"
     echo "    image: $IMAGE"
     echo "    port:  $PORT"
+    echo "    probe: $PROBE_PATH"
     if [[ ${#ENV_VARS[@]} -gt 0 ]]; then
         echo "    env:   ${#ENV_VARS[@]} vars"
     fi

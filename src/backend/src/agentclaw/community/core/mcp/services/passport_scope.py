@@ -5,7 +5,29 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from agentclaw.community.core.mcp.services.local_mcp_registry import LocalMCPRegistry
-from agentclaw.community.plugin_api.passport import McpScopeItem
+from agentclaw.community.plugin_api.passport import CliItem, McpScopeItem
+
+
+def merge_passport_cli_items(
+    current: list[CliItem] | None,
+    defaults: list[CliItem] | None,
+) -> list[CliItem]:
+    """Merge Passport CLI scope and defaults, de-duplicated by cli_code.
+
+    Passport replaces the complete resource manifest. Existing CLI items win
+    over defaults so a scope refresh cannot clear a user's CLI metadata.
+    """
+    merged: list[CliItem] = []
+    seen: set[str] = set()
+    for item in (current or []) + (defaults or []):
+        if not isinstance(item, dict):
+            continue
+        cli_code = item.get("cli_code")
+        if not cli_code or cli_code in seen:
+            continue
+        seen.add(cli_code)
+        merged.append(dict(item))
+    return merged
 
 
 def filter_passport_mcp_codes(

@@ -32,13 +32,16 @@ import json
 import os
 
 import httpx
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
-from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
+from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    envelope,
+    envelope_errors,
+    page as page_envelope,
+)
 from agentclaw.community.adapters.http.task.auth import CallbackAuthenticator
 from agentclaw.community.adapters.http.task.schemas import (
     BbsAttachDTO,
@@ -74,12 +77,15 @@ from agentclaw.community.core.task.task_discovery.scheduler import (
     TaskDiscoveryScheduler,
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
-    SqliteTaskReader,
+    TaskReader,
+    clear_discovered_tasks,
+    upsert_discovered_tasks,
 )
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -126,20 +132,53 @@ async def get_task_dashboard_internal(
     return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
 
 
-@router.get("/list", response_model=Envelope[list[TaskInfoRecordDTO]])
+@router.get(
+    "/list",
+    response_model=Envelope[list[TaskInfoRecordDTO] | Page[TaskInfoRecordDTO]],
+)
 @envelope_errors
 async def list_tasks_internal(
     request: Request,
     status: str | None = None,
+    user_id: str | None = Query(
+        None,
+        description="可选:按 owner_user_id 过滤;为空返回全量。与公开面 "
+        "``/openapi/v1/.../list`` 的 owner 作用域语义对齐(内部镜像用查询参数身份,非签名 principal)",
+    ),
+    page: int | None = Query(
+        None, ge=1, description="分页页码(1-based);不传则不分页,返回全量。"
+    ),
+    page_size: int | None = Query(
+        None, ge=1, le=100, description="每页条数(1-100);不传则不分页,返回全量。"
+    ),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[list[TaskInfoRecordDTO]]:
-    """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选状态过滤)。
+) -> Envelope[list[TaskInfoRecordDTO] | Page[TaskInfoRecordDTO]]:
+    """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选状态/owner 过滤)。
 
-    非法 ``status`` 过滤值 → 400(经 ``HTTPException`` → 中央 handler → ``ErrorEnvelope``)。"""
+    非法 ``status`` 过滤值 → 400(经 ``HTTPException`` → 中央 handler → ``ErrorEnvelope``)。
+    ``user_id`` 为空时不按 owner 过滤(返回全量,供内部可信调用方);传入则按 ``owner_user_id``
+    过滤,与公开面 ``/openapi/v1/.../list`` 的 owner 作用域一致。
+
+    分页为可选入参(与公开面同步):page/page_size 均不传时 data 为列表(历史契约);
+    两者同时传入时返回 Page(total, items);仅传其一 → 400。"""
     if status is not None and status not in {s.value for s in Status}:
         raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
-    items = service.list_tasks(status)
-    return envelope([task_info_record_to_dto(item) for item in items], request)
+    if (page is None) != (page_size is None):
+        raise HTTPException(
+            status_code=400,
+            detail="page and page_size must be both provided or both omitted",
+        )
+    if page_size is None:
+        items = service.list_tasks(status, owner_user_id=user_id)
+        return envelope([task_info_record_to_dto(item) for item in items], request)
+    items, total = service.list_tasks_page(
+        status, owner_user_id=user_id, page=page or 1, page_size=page_size
+    )
+    return page_envelope(
+        total,
+        [task_info_record_to_dto(item) for item in items],
+        request,
+    )
 
 
 # ===== 回投 / BBS 接力 =====
@@ -227,17 +266,6 @@ async def bbs_result(
 
 # ===== 任务发现阶段(任务模块的一个阶段,非独立模块)=====
 
-#: 默认 db 文件路径(9 级上溯到仓库根 → scripts/.dependencies/data/discovered_tasks.db)
-_PROJECT_ROOT = Path(__file__).resolve()
-for _ in range(9):
-    _PROJECT_ROOT = _PROJECT_ROOT.parent
-_DEFAULT_DB = str(_PROJECT_ROOT / "scripts" / ".dependencies" / "data" / "discovered_tasks.db")
-
-
-def _resolve_db_path() -> str:
-    """从环境变量或默认路径解析 db 文件路径。"""
-    return os.environ.get("TASK_DISCOVERY_DATA_FILE", _DEFAULT_DB)
-
 
 @router.post("/discovery/discover", response_model=Envelope[dict[str, Any]])
 @envelope_errors
@@ -289,6 +317,7 @@ async def discover_tasks(
 @envelope_errors
 async def get_discovery_status(
     request: Request,
+    reader: TaskReader = Injected(TaskReader),  # noqa: B008
     service: DiscoveryService = Injected(DiscoveryService),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
     """查看任务发现状态。
@@ -297,9 +326,7 @@ async def get_discovery_status(
     有 session_id 的 task 会标注 discover 已执行；没有的说明 discover 还没跑过。
     db 读失败 → ``InternalError`` → 500。
     """
-    db_path = _resolve_db_path()
     try:
-        reader = SqliteTaskReader(db_path)
         tasks = reader.read_discovered_tasks()
     except Exception as exc:
         raise InternalError("status read failed") from exc
@@ -339,6 +366,46 @@ async def get_discovery_status(
         },
         request,
     )
+
+
+@router.post("/discovery/tasks", response_model=Envelope[dict[str, Any]])
+@envelope_errors
+async def write_discovered_tasks(
+    request: Request,
+    tasks: list[dict[str, Any]] = Body(..., embed=True),
+    db: DatabasePlugin = Injected(DatabasePlugin),  # noqa: B008
+) -> Envelope[dict[str, Any]]:
+    """写入已发现任务（upsert 语义）。
+
+    按 ``task_id`` 自然键判断：已存在则更新，不存在则插入。
+    跨 SQLite / OceanBase 兼容。供外部系统或 e2e 测试写入已发现任务数据。
+
+    Body::
+
+        {"tasks": [{"task_id": "...", "bot_id": "...", ...}, ...]}
+    """
+    try:
+        count = upsert_discovered_tasks(db, tasks)
+    except Exception as exc:
+        raise InternalError("write discovered tasks failed") from exc
+    return envelope({"written": count}, request)
+
+
+@router.delete("/discovery/tasks", response_model=Envelope[dict[str, Any]])
+@envelope_errors
+async def clear_discovered_tasks_endpoint(
+    request: Request,
+    db: DatabasePlugin = Injected(DatabasePlugin),  # noqa: B008
+) -> Envelope[dict[str, Any]]:
+    """清空所有已发现任务数据。
+
+    供测试清理或运维重置使用。
+    """
+    try:
+        count = clear_discovered_tasks(db)
+    except Exception as exc:
+        raise InternalError("clear discovered tasks failed") from exc
+    return envelope({"cleared": count}, request)
 
 
 # ===== task-discovery 调度端点（discovery 阶段；外部 cron / 运维触发）=====

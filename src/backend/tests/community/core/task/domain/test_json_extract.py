@@ -122,10 +122,13 @@ class TestDispatchParserWiring:
     def test_parses_prose_fence_hit_single(self):
         from agentclaw.community.core.task.task_dispatch.strategies import _parse_search_result, SearchOutcome
         run = {"status": "COMPLETED",
-               "result": {"content": "分析后决出:\n```json\n{\"outcome\":\"HIT_SINGLE\",\"bot_id\":\"行业信息抓取Bot\"}\n```\n完毕"}}
+               "result": {"content": "分析后决出:\n```json\n{\"outcome\":\"HIT_SINGLE\",\"bot_id\":\"行业信息抓取Bot\",\"bot_name\":\"行业信息抓取Bot\",\"owner_id\":\"146836\",\"owner_name\":\"栖真\"}\n```\n完毕"}}
         sr = _parse_search_result(run)
         assert sr.outcome == SearchOutcome.HIT_SINGLE
         assert sr.bot_id == "行业信息抓取Bot"
+        assert sr.bot_name == "行业信息抓取Bot"
+        assert sr.owner_id == "146836"
+        assert sr.owner_name == "栖真"
 
     def test_parses_multi_bots_formation(self):
         from agentclaw.community.core.task.task_dispatch.strategies import _parse_search_result, SearchOutcome

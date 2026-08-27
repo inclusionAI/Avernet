@@ -9,6 +9,18 @@ from pydantic import BaseModel, Field, field_serializer
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
 
 
+class SpaceListScope(_DocumentedEnum):
+    """Visibility scope used when listing Spaces."""
+
+    ALL = "all"
+    ACCESSIBLE = "accessible"
+
+    __descriptions__ = {
+        "all": "Return all live Spaces visible in the current environment.",
+        "accessible": "Return the user's personal Space and active team memberships.",
+    }
+
+
 class SpaceType(_DocumentedEnum):
     """Kind of Space and its ownership model."""
 

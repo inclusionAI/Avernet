@@ -9,7 +9,7 @@ import time
 from contextlib import contextmanager
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -169,10 +169,19 @@ def test_second_worker_gets_nothing_while_leases_live(repo):
 
 def test_lease_reclaim_before_and_after_expiry(repo):
     rec = _enqueue(repo)
-    _claim(repo, "A", lease=1)
-    # Still within the lease → not reclaimable.
-    assert _claim(repo, "B", lease=1) == []
-    time.sleep(2.1)  # cross the 1s lease (DB clock is second-granular)
+    _claim(repo, "A", lease=60)
+    # A live lease is not reclaimable.
+    assert _claim(repo, "B", lease=60) == []
+
+    # Do not sleep across SQLite's second-granular DB clock. Make the stored
+    # lease deterministically stale, then verify the same claim predicate lets
+    # a different worker take it over.
+    with repo._db.orm_session() as db:
+        db.query(TaskQueueModel).filter(TaskQueueModel.id == rec.id).update(
+            {TaskQueueModel.lease_expires_at: func.datetime("now", "-1 minute")},
+            synchronize_session=False,
+        )
+
     reclaimed = _claim(repo, "B", lease=60)
     assert len(reclaimed) == 1
     stored = repo.get_by_id(rec.id)

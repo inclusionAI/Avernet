@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
+use bcs_service_api::RequestAuthHeaders;
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptFriendConnectionRequest, AcceptInvitation, AddGroupParticipant,
     AddSessionParticipant, ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity,
@@ -928,6 +929,49 @@ async fn openapi_friend_connection_routes_forward_commands_and_serialize_respons
         assert_eq!(listed.actor.actor_type, FriendConnectionActorType::Human);
         assert_eq!(listed.actor.id, "1001");
     }
+}
+
+#[tokio::test]
+async fn openapi_friend_connection_create_forwards_caller_auth_headers() {
+    let service = Arc::new(FakeFriendConnectionService::default());
+    let app = openapi_test_router(service.clone());
+
+    let create_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/openapi/v1/collaboration/friend-connections/requests")
+                .header("content-type", "application/json")
+                .header("x-test-auth", "yes")
+                .header("x-request-id", "request-123")
+                .header("authorization", "Bearer forwarded-user-token")
+                .header("cookie", "session=abc")
+                .header("x-one-id", "uid-42")
+                .body(Body::from(
+                    json!({"to_actor": {"type": "bot", "id": "bot-2"}}).to_string(),
+                ))
+                .expect("create request"),
+        )
+        .await
+        .expect("create response");
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+
+    let created = service.created_request.lock().expect("create request lock");
+    let created = created.as_ref().expect("create command");
+    assert_eq!(created.to_actor.id, "bot-2");
+    assert_eq!(
+        created.request_auth,
+        Some(RequestAuthHeaders {
+            authorization: Some("Bearer forwarded-user-token".to_string()),
+            cookie: Some("session=abc".to_string()),
+            forwarded_headers: vec![
+                ("authorization".to_string(), "Bearer forwarded-user-token".to_string()),
+                ("cookie".to_string(), "session=abc".to_string()),
+                ("x-one-id".to_string(), "uid-42".to_string()),
+                ("x-request-id".to_string(), "request-123".to_string()),
+            ],
+        })
+    );
 }
 
 #[tokio::test]

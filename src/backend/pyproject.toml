@@ -66,6 +66,14 @@ dependencies = [
   # to match the 3.x API (BackgroundScheduler, CronTrigger.from_crontab);
   # APScheduler 4.x is a breaking rewrite with a different API surface.
   "apscheduler>=3.10.0,<4.0.0",
+  # PyMySQL: the DBAPI behind `database.backend: mysql` (mysql+pymysql://…), the
+  # community path for a managed MySQL instance. Pure Python, so it needs no
+  # libmysqlclient in the runtime image. SQLite deployments never import it.
+  "pymysql>=1.1.0",
+  # jieba: SearchBasedDispatchStrategy tokenizes task title/objective/background
+  # before querying the public Bot name/owner-name LIKE catalogue. This must be
+  # installed in every runtime profile, not only in test tooling.
+  "jieba>=0.42",
 ]
 
 # Community test tooling — so the extracted community repo can run its own CI.
@@ -89,10 +97,6 @@ dev = [
   # payloads against JSON Schemas. Test-only (no runtime src import); transitive
   # in the monorepo, must be named for the standalone community suite.
   "jsonschema>=4.20",
-  # jieba: 中文分词,供 SearchBasedDispatchStrategy._prefetch_candidates 对节点
-  # title/objective/background 拆词做 LIKE 预查(避免整串 LIKE 命中 0);singlebox 本地
-  # 候选预查用,corp 走 BCSFuse 语义搜索不依赖。strategies 内 lazy import,未装则退回整串。
-  "jieba>=0.42",
 ]
 
 # Specify pypi index

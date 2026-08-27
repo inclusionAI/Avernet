@@ -211,6 +211,37 @@ def test_form_coop_group_subscribes_bcn_event_callback_with_api_base_url():
     assert "state_machine.*" in sub["event_filters"]
 
 
+def test_form_coop_group_opening_message_params_is_object():
+    """state_machine 群带 task_id 时,opening_message.params 必须是 JSON object,不能字符串化。
+
+    BCS 契约(ocb-public/src/bcs/docs/custom-collaboration-opening-message-integration-guide.md §4):
+    params 是传给业务组件的 JSON object。字符串化会被真实 BCS 的 untagged enum ``OpeningMessage``
+    422("data did not match any variant of untagged enum OpeningMessage");singlebox double 不校验
+    opening_message,故此断言守住真实 BCS 契约、防 params 被错字符串化回退。
+    """
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["drv"], collab_mode="state_machine",
+        members_info=[{"bot_id": "drv", "role": "manager"}],
+        extend_props={"collaboration_definition_yaml": "kind: collab",
+                      "task_id": "sm_task_1",
+                      "api_base_url": "https://cb.example.com/"},
+    )))
+    om = bcs.created_req.opening_message
+    assert om is not None, "state_machine + task_id 应构造 opening_message"
+    assert om["type"] == "panel"
+    assert om["component"] == "partnerPanel.CollaborationRunView"
+    # 契约核心:params 必须是 JSON object(dict),不是字符串(否则真实 BCS 422)
+    assert isinstance(om["params"], dict), f"opening_message.params 必须是 object,实际 {type(om['params'])!r}"
+    assert om["params"]["taskId"] == "sm_task_1"
+    assert om["params"]["apiBaseUrl"] == "https://cb.example.com/"
+    assert om["params"]["groupId"] == "{{bcs.group_id}}"
+    assert om["params"]["runId"] == "{{bcs.run_id}}"
+    assert om["params"]["businessScene"] == "release_review"
+
+
 def test_form_coop_group_sets_group_context_from_task_context():
     """form_coop_group 把 extend_props['task_context'] 设进 BCS 建群的 context(→ <GroupContext> `目标`)。"""
     bcs = _Bcs()
@@ -221,4 +252,6 @@ def test_form_coop_group_sets_group_context_from_task_context():
         members_info=[{"bot_id": "drv", "role": "manager"}],
         extend_props={"task_context": "写一篇关于远程办公协作工具趋势的短文"},
     )))
-    assert bcs.created_req.context == "写一篇关于远程办公协作工具趋势的短文"
+    assert "写一篇关于远程办公协作工具趋势的短文" in bcs.created_req.context
+    assert "reporter_bot_id=drv" in bcs.created_req.context
+    assert "execution_mode=coop_group" in bcs.created_req.context

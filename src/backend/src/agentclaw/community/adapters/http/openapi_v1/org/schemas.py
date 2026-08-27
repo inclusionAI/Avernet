@@ -1,4 +1,4 @@
-"""Schemas for the org group — the verified caller's own identity."""
+"""Schemas for the org group — directory-identity lookups by `?user_id=`."""
 
 from __future__ import annotations
 
@@ -6,14 +6,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class OrgUserIdentity(BaseModel):
-    """The end user the caller's credential names, as resolved at the gateway.
+    """The identity+department of the user named by `?user_id=`, from the staff
+    directory.
 
-    Every field is read off the verified principal — nothing is taken from the
-    request, so the answer cannot be steered. The display attributes are
-    optional because absence is a real state of the identity contract: an
-    identity provider may not supply them, and they are null rather than
-    invented when absent. The department attributes are optional the same way:
-    they are null until the identity provider supplies them.
+    A directory lookup, not a whoami: the response is the user whose work
+    number was passed, resolved off the staff directory (the gateway signs only
+    the caller, so another user's identity is read off HR, not the principal).
+    The identity and department attributes are optional because absence is a
+    real state — the directory may supply no value (or no record at all), and
+    they are null rather than invented when absent. `tenant` is the caller's,
+    scoped off the verified principal.
     """
 
     # The docstring above is published verbatim as the schema's description
@@ -35,14 +37,12 @@ class OrgUserIdentity(BaseModel):
     )
 
     user_id: str = Field(
-        description="The caller's end-user id — the exact value to pass as the "
-        "`user_id` query parameter on delegable user-scoped operations of this "
-        "API. Non-delegable self-service operations derive it from this "
-        "verified identity instead."
+        description="The work number this lookup was for — the `?user_id=` "
+        "value the caller passed to name whose identity+department to return."
     )
-    username: str = Field(
-        description="The login name the identity provider resolved for the "
-        "caller."
+    username: str | None = Field(
+        description="The login name, when the staff directory supplied one; "
+        "null otherwise (e.g. the reader is unwired or the user has no record)."
     )
     display_name: str | None = Field(
         description="Short display name, when the identity provider supplied "

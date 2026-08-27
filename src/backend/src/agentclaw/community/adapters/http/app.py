@@ -124,10 +124,6 @@ from agentclaw.community.adapters.http.quality.router import router as quality_r
 # configuration routes and secures (tests/community/contracts/gateway/
 # test_public_namespace.py), so ``openapi_v1/task`` stays unmounted until that
 # configuration declares the collaboration domain.
-from agentclaw.community.adapters.http.task import (  # noqa: E402
-    task_callback_router,
-    task_internal_router,
-)
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_render_screen.router import router as render_screen_router  # noqa: E402
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
@@ -363,6 +359,7 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerMcpSyncError,
 )
 from agentclaw.community.core.skill_center.errors import (  # noqa: E402
+    McpPermissionDeniedError,
     LocalSkillNotReadyError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneConflictError,
@@ -401,6 +398,7 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     # decides the wire, exactly as every other domain error already works.
     SkillSetControlPlaneNotFoundError: 404,
     SkillSetAccessDeniedError: 403,
+    McpPermissionDeniedError: 403,
     # 400, not 409: the published wire echoes the reason code as a rejected
     # request and clients already parse it that way. Kept as-is deliberately.
     SkillSetControlPlaneConflictError: 400,

@@ -365,6 +365,31 @@ user_config:
       user: required
       app: required
 
+    # Group creation selects either the Human or an authenticated Bot as its
+    # effective Actor. App remains required as the integration credential;
+    # BCN rejects missing actors and mismatched User/Bot ownership claims.
+    "POST /openapi/v1/collaboration/groups":
+      user: optional
+      app: required
+      bot: optional
+
+    # Resource-level authorization stays in BCN: the selected Bot must have a
+    # readable or management relation to the target Group/Session.
+    "/openapi/v1/collaboration/groups/{group_id}":
+      user: optional
+      app: required
+      bot: optional
+
+    "POST /openapi/v1/collaboration/groups/{group_id}/sessions":
+      user: optional
+      app: required
+      bot: optional
+
+    "/openapi/v1/collaboration/sessions/{session_id}":
+      user: optional
+      app: required
+      bot: optional
+
     # New-version publish-to-users: served by the backend (the antprocess
     # approval + bcs_pub callback live there), pulled out of the
     # collaboration→bcs domain by the `collaboration-publish` match upstream. A

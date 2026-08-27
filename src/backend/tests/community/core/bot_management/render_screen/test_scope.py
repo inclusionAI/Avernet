@@ -1,7 +1,7 @@
 from agentclaw.community.core.bot_management.render_screen.scope import resolve_render_screen_scope
 
 
-def test_resolve_render_screen_scope_owner_for_normal_bot():
+def test_resolve_render_screen_scope_owner_for_normal_cc_bot():
     bot = {
         "bot_id": "bot_001",
         "owner_id": "user_001",
@@ -12,56 +12,82 @@ def test_resolve_render_screen_scope_owner_for_normal_bot():
     assert resolve_render_screen_scope(bot) == "owner"
 
 
-def test_resolve_render_screen_scope_bot_for_dynamic_template_member_management():
+def test_resolve_render_screen_scope_owner_for_normal_template_bot():
+    bot = {
+        "bot_id": "bot_001",
+        "owner_id": "user_001",
+        "active_engine": "claude_code",
+        "template_type": "normal",
+    }
+
+    assert resolve_render_screen_scope(bot) == "owner"
+
+
+def test_resolve_render_screen_scope_owner_for_empty_template_bot():
+    bot = {
+        "bot_id": "bot_001",
+        "owner_id": "user_001",
+        "active_engine": "claude_code",
+        "template_type": "",
+    }
+
+    assert resolve_render_screen_scope(bot) == "owner"
+
+
+def test_resolve_render_screen_scope_owner_for_none_template_bot():
+    bot = {
+        "bot_id": "bot_001",
+        "owner_id": "user_001",
+        "active_engine": "claude_code",
+        "template_type": None,
+    }
+
+    assert resolve_render_screen_scope(bot) == "owner"
+
+
+def test_resolve_render_screen_scope_bot_for_legacy_application_coding():
+    bot = {
+        "bot_id": "bot_001",
+        "owner_id": "user_001",
+        "active_engine": "claude_code",
+        "template_type": "applicationCoding",
+    }
+
+    assert resolve_render_screen_scope(bot) == "bot"
+
+
+def test_resolve_render_screen_scope_bot_for_legacy_personal_coding():
+    bot = {
+        "bot_id": "bot_001",
+        "owner_id": "user_001",
+        "active_engine": "claude_code",
+        "template_type": "personalCoding",
+    }
+
+    assert resolve_render_screen_scope(bot) == "bot"
+
+
+def test_resolve_render_screen_scope_bot_for_dynamic_template():
     bot = {
         "bot_id": "bot_001",
         "owner_id": "user_001",
         "active_engine": "claude_code",
         "template_type": "architect",
-        "template_config": {
-            "capabilities": {
-                "member_management": True,
-            },
-        },
     }
 
     assert resolve_render_screen_scope(bot) == "bot"
 
 
-def test_resolve_render_screen_scope_bot_for_nested_template_ext_member_management():
-    bot = {
-        "bot_id": "bot_001",
-        "owner_id": "user_001",
-        "active_engine": "claude_code",
-        "template_type": "customAgent",
-        "ext": {
-            "template_config": {
-                "bot_template_config": {
-                    "advanced_config": {
-                        "member_management": True,
-                    },
-                },
-            },
-        },
-    }
-
-    assert resolve_render_screen_scope(bot) == "bot"
-
-
-def test_resolve_render_screen_scope_bot_for_openclaw_with_member_management_flag():
-    # 只要模板明确开启了 member_management，各引擎 Bot 均支持成员协作
+def test_resolve_render_screen_scope_owner_for_non_claude_code_bot():
     bot = {
         "bot_id": "bot_001",
         "owner_id": "user_001",
         "active_engine": "openclaw",
         "template_type": "chat",
-        "template_config": {
-            "bot_template_config": {
-                "advanced_config": {
-                    "member_management": True,
-                },
-            },
-        },
     }
 
-    assert resolve_render_screen_scope(bot) == "bot"
+    assert resolve_render_screen_scope(bot) == "owner"
+
+
+def test_resolve_render_screen_scope_owner_for_none_bot():
+    assert resolve_render_screen_scope(None) == "owner"

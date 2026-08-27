@@ -23,7 +23,7 @@ tags: [task, planning, decompose]
 
 ## 触发条件
 
-收到 prompt 头部 `[planning]` 标记的指令,且 prompt 含 `目标节点 node_id=...` 与 `任务态快照{...}`。
+收到 prompt 头部 `[task-planning]` 标记的指令,且 prompt 含 `目标节点 node_id=...` 与 `任务态快照{...}`。
 
 ## 输入(框架组装,prompt 内嵌)
 

@@ -3,30 +3,33 @@ from __future__ import annotations
 
 from typing import Any, Literal, Mapping
 
-from agentclaw.community.core.bot_collaborator.services.aicoding.member_management_capability import (
-    AICodingMemberManagementCapability,
-)
-from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
-    MemberManagementCapabilityService,
-)
-
 RenderScreenScope = Literal["owner", "bot"]
 
+# Template types that represent plain Claude Code bots (non-collaborative).
+# Empty string and None are included because some legacy bots have no template_type.
+_NORMAL_CC_TEMPLATE_TYPES = frozenset({"normal", "normalCC", "", None})
 
-def _is_member_managed_coding_bot(bot: Mapping[str, Any]) -> bool:
-    # Construct coordinator dynamically on demand to comply with the architecture
-    # rule forbidding module-level service instances.
-    capability_service = MemberManagementCapabilityService(
-        engine_capabilities=(AICodingMemberManagementCapability(),),
+
+def _is_agent_coding_bot(bot: Mapping[str, Any]) -> bool:
+    """Return True when the bot is an Agent Coding Bot (collaborative).
+
+    Rule: active_engine == "claude_code" AND template_type is not a plain CC type.
+    Plain CC types are: empty/None, "normal", "normalCC".
+    Everything else on claude_code is an Agent Coding Bot.
+    """
+    active_engine = bot.get("active_engine")
+    template_type = bot.get("template_type")
+    return (
+        active_engine == "claude_code"
+        and template_type not in _NORMAL_CC_TEMPLATE_TYPES
     )
-    return capability_service.uses_member_management_semantics(bot)
 
 
 def resolve_render_screen_scope(bot: Mapping[str, Any] | None) -> RenderScreenScope:
     """Resolve whether a bot's render-screen CDN is owner-scoped or shared."""
     if not bot:
         return "owner"
-    if _is_member_managed_coding_bot(bot):
+    if _is_agent_coding_bot(bot):
         return "bot"
     return "owner"
 

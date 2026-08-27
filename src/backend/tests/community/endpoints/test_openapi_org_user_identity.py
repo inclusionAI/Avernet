@@ -1,14 +1,14 @@
-"""Endpoint-framework coverage for the user-identity read.
+"""Endpoint-framework coverage for the directory-identity read.
 
 The framework owns invocation, so these two cases are what makes
-``GET /openapi/v1/org/user`` *covered* rather than merely tested: the happy path
-— a verified user reads the identity the gateway signed — and the refusal the
-operation most needs pinned, because its whole answer is an identity: no
-signed principal, no answer.
+``GET /openapi/v1/org/user?user_id=`` *covered* rather than merely tested: the
+happy path — a verified caller names a ``user_id`` and gets that user's
+directory entry (``user_id`` echoed; identity null with no reader wired) — and
+the refusal the operation most needs pinned: no signed principal, no answer.
 
 ``test_org_user_identity.py`` covers the same outcomes plus the app-only refusal
-and the tenant rules in the adapter's own suite. The duplication is the
-coverage gate's design: it reads this registry, not that file.
+and the missing-``user_id``→422 behaviour in the adapter's own suite. The
+duplication is the coverage gate's design: it reads this registry, not that file.
 """
 
 from __future__ import annotations
@@ -81,19 +81,18 @@ def _boot_verifier(_world) -> None:
 @endpoint_test(
     method="GET",
     path=_PATH,
-    scenario="returns_the_verified_identity",
-    input=CaseInput(headers={PRINCIPAL_HEADER: _principal()}),
+    scenario="directory_lookup_by_passed_user_id",
+    input=CaseInput(
+        headers={PRINCIPAL_HEADER: _principal()},
+        query_params={"user_id": _CALLER},
+    ),
     seed=_boot_verifier,
     expect=ExpectSuccess(
         status=200,
         json_contains={
             "code": 200000,
             "message": "OK",
-            "data": {
-                "user_id": _CALLER,
-                "username": "caller@example.test",
-                "display_name": "Caller",
-            },
+            "data": {"user_id": _CALLER, "username": None},
         },
     ),
 )

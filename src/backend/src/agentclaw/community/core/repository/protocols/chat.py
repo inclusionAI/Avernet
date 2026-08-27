@@ -356,6 +356,13 @@ class BotChatDbRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def has_group_trace_access(
+        self, user_id: str, session_id: str | None, session_key: str | None
+    ) -> bool:
+        """Check whether the user can access a trace through a participating group bot."""
+        ...
+
+    @abstractmethod
     def enrich_labels(
         self,
         rows: list[Any],

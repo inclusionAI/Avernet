@@ -72,6 +72,7 @@ def _is_engine_runtime(path: str) -> bool:
 #: assertion below is what proves.
 _STAGE_ADDRESSED_ELSEWHERE = {
     ("post", "/openapi/v1/bots/{bot_id}/iam-token"),
+    ("get", "/openapi/v1/bots/{bot_id}/caller-context"),
     ("get", "/openapi/v1/bots/{bot_id}/engine/config"),
     ("put", "/openapi/v1/bots/{bot_id}/engine/config"),
     ("get", "/openapi/v1/bots/{bot_id}/identity"),
@@ -86,6 +87,8 @@ _STAGE_ADDRESSED_ELSEWHERE = {
 #: **not** take ``stage``: there is no runtime in question when you are
 #: recording who may reach a bot, or listing a bot's stored skills.
 _OWNER_ADDRESSED_ELSEWHERE = {
+    ("get", "/openapi/v1/bots/{bot_id}/caller-context"),
+    ("patch", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"),
     ("get", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("post", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("delete", "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}"),

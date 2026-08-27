@@ -213,7 +213,9 @@ class TaskInfoRecordDTO(BaseModel):
     task_id: str = Field(..., description="任务ID")
     source_type: str = Field(..., description="触发渠道类型(bot/coop_group/api)")
     owner_user_id: str = Field(..., description="归属 userId")
+    owner_user_name: str | None = Field(None, description="归属用户名称")
     owner_bot_id: str = Field(..., description="归属 botId")
+    owner_bot_name: str | None = Field(None, description="归属 Bot 名称")
     execution_config: dict[str, Any] | None = Field(None, description="执行配置(task_type/yaml/workflow_id + 透传键)")
     task_spec: dict[str, Any] = Field(..., description="任务规格(元数据/上下文/目标)")
     status: str = Field(..., description="任务状态(product 态)")
@@ -391,7 +393,9 @@ def task_info_record_to_dto(record) -> TaskInfoRecordDTO:
         task_id=record.task_id,
         source_type=record.source_type,
         owner_user_id=record.owner_user_id,
+        owner_user_name=getattr(record, "owner_user_name", None),
         owner_bot_id=record.owner_bot_id,
+        owner_bot_name=getattr(record, "owner_bot_name", None),
         execution_config=(dict(record.execution_config)
                           if record.execution_config is not None else None),
         task_spec=dict(record.task_spec),

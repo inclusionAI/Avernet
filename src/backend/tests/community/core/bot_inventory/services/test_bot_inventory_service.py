@@ -99,6 +99,29 @@ def test_list_items_combines_filters_and_paginates(service) -> None:
 
 
 @pytest.mark.unit
+def test_cloud_pull_opts_out_of_template_attach(service) -> None:
+    # Inventory cards never surface template_config, so every pulled page must
+    # skip the batched template read — one fewer DB round trip per page on the
+    # /bots/all path.
+    inventory, bot, _ = service
+
+    inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.CLOUD,
+        is_service=None,
+        page=1,
+        page_size=10,
+    )
+
+    assert bot.list_bots_by_conditions.call_args.kwargs["attach_templates"] is False
+
+
+@pytest.mark.unit
 def test_cloud_source_fetches_all_pages_for_exact_total(service) -> None:
     inventory, bot, desktop = service
     cloud_rows = [
@@ -419,6 +442,7 @@ def test_team_space_lists_all_owners_and_scopes_actions_by_bot_permission() -> N
         engine=None,
         status=None,
         bot_ids=None,
+        attach_templates=False,
         page=1,
         page_size=200,
     )

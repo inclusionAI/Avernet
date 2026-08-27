@@ -11,6 +11,7 @@ from agentclaw.community.core.runtime_binding.errors import (
 from agentclaw.community.core.runtime_binding.models import (
     RuntimeBindingRequest,
     RuntimeBindingSource,
+    RuntimeBindingTarget,
 )
 from agentclaw.community.core.runtime_binding.service import (
     RuntimeBindingResolutionService,
@@ -134,6 +135,56 @@ def test_caller_bot_uses_the_authenticated_users_online_instance_record():
     )
 
     resolved = service.resolve(RuntimeBindingRequest(BOT, OWNER, CALLER, "online"))
+
+    assert resolved.binding_id == 41
+    assert resolved.source is RuntimeBindingSource.CALLER_INSTANCE
+    assert caller_repository.calls == [(CALLER, BOT, OWNER)]
+
+
+def test_caller_bot_can_explicitly_resolve_its_shared_online_service_binding():
+    service, caller_repository = _service(
+        {"id": 3, "bot_type": "service", "call_type": "caller", "binding_id": 12},
+        bindings={31: _Binding(31)},
+        records=[_PublishRecord(31)],
+        caller_instance={"status": "success", "ext": {"binding_id": 41}},
+    )
+
+    resolved = service.resolve(
+        RuntimeBindingRequest(
+            BOT,
+            OWNER,
+            CALLER,
+            "online",
+            target=RuntimeBindingTarget.CALLER_SERVICE,
+        )
+    )
+
+    assert resolved.binding_id == 31
+    assert resolved.source is RuntimeBindingSource.SERVICE_ONLINE
+    assert caller_repository.calls == []
+
+
+def test_caller_bot_can_explicitly_resolve_its_caller_instance():
+    service, caller_repository = _service(
+        {"id": 3, "bot_type": "service", "call_type": "caller"},
+        bindings={41: _Binding(
+            41,
+            entity_id=OWNER,
+            apply_reason=f"caller_instance:{BOT}",
+            applied_by=CALLER,
+        )},
+        caller_instance={"status": "success", "ext": {"binding_id": 41}},
+    )
+
+    resolved = service.resolve(
+        RuntimeBindingRequest(
+            BOT,
+            OWNER,
+            CALLER,
+            "online",
+            target=RuntimeBindingTarget.CALLER_INSTANCE,
+        )
+    )
 
     assert resolved.binding_id == 41
     assert resolved.source is RuntimeBindingSource.CALLER_INSTANCE

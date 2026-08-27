@@ -49,6 +49,9 @@ class SearchResult:
 
     outcome: SearchOutcome
     bot_id: str | None = None                       # HIT_SINGLE
+    bot_name: str | None = None                     # HIT_SINGLE Bot display name
+    owner_id: str | None = None                     # HIT_SINGLE Bot owner
+    owner_name: str | None = None                   # HIT_SINGLE Bot owner display name
     group_id: str | None = None                     # HIT_GROUP
     group_formation: GroupFormation | None = None   # HIT_MULTI_BOTS
     miss_reason: str | None = None                  # MISS
@@ -86,7 +89,7 @@ class DirectDispatchStrategy:
 
 
 class SearchBasedDispatchStrategy:
-    """默认兜底:搜推匹配(决策非查找)。两步:① 框架语义预查候选集(分字段 title/objective/background)
+    """默认兜底:搜推匹配(决策非查找)。两步:① 框架关键字预查候选集(分字段 title/objective/background)
     → ② 投 owner bot search skill 在候选里决出 who+how → 4 态 SearchResult。端口(bot/discover)由 DI 注入;
     省略端口 = stub 路径(纯内核单测)恒 MISS。搜推 skill 不自取 BCSFuse,候选集由框架预查喂入 prompt。
 
@@ -114,6 +117,9 @@ class SearchBasedDispatchStrategy:
         if not owner:
             return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_owner")
         candidates = await _prefetch_candidates(self._discover, node, graph)
+        if not candidates:
+            logger.info("[task][search] node=%s 候选为空→MISS(no_candidates)", node.node_id)
+            return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_candidates")
         prompt = _compose_search_prompt(node, candidates)
         logger.info("[task][search] owner=%s node=%s 候选=%s", owner, node.node_id,
                     [c.get("bot_id") for c in candidates])
@@ -156,7 +162,8 @@ def _tokenize(text: str) -> list[str]:
 
 
 async def _prefetch_candidates(discover, node: TaskNode, graph: TaskExecutionGraph) -> list[dict]:
-    """框架候选预查:对 node 的 title/objective/background 各 jieba 分词,每 token 调 search_by_keyword
+    """框架候选预查:对 node 的 title/objective/background 各 jieba 分词,每 token 调 name/owner LIKE
+    ``search_by_keyword``
     (命中 0→空,不 fallback 全量),合并去重按 recommend.score 降序。discover.search_by_keyword 是同步
     requests,经 asyncio.to_thread 包;多 token 用 asyncio.gather 并发。user_id 取 graph 派生
     owner_bot_id;filters={"runtime_state":["online"]},top_k=10,min_score=0.01。"""
@@ -215,6 +222,8 @@ def _compose_search_prompt(node: TaskNode, candidates: list[dict]) -> str:
     catalog = [
         {
             "bot_id": c.get("bot_id"),
+            "owner_id": c.get("owner_id"),
+            "owner_name": c.get("owner_name"),
             "bot_name": c.get("bot_name"),
             "bot_desc": c.get("bot_desc"),
             "score": (c.get("recommend") or {}).get("score"),
@@ -227,7 +236,7 @@ def _compose_search_prompt(node: TaskNode, candidates: list[dict]) -> str:
     return_fmt = (
         '## 返回数据格式约定\n'
         '返回 JSON 字符串,``outcome`` 标 4 态之一,其余字段随态而定: \n'
-        '- **HIT_SINGLE**(单 bot 足够): ``{"outcome":"HIT_SINGLE","bot_id":"<bot_id>"}``\n'
+        '- **HIT_SINGLE**(单 bot 足够): ``{"outcome":"HIT_SINGLE","bot_id":"<bot_id>","bot_name":"<bot_name>","owner_id":"<owner_id>","owner_name":"<owner_name>"}``\n'
         '- **HIT_GROUP**(已有协作群可复用): ``{"outcome":"HIT_GROUP","group_id":"<group_id>"}``\n'
         '- **HIT_MULTI_BOTS**(多 bot 协同,需动态拉协作群):\n'
         '  ``{"outcome":"HIT_MULTI_BOTS","bot_ids":["b1","b2"],"collab_mode":"chat|manager_worker|state_machine",\n'
@@ -237,7 +246,7 @@ def _compose_search_prompt(node: TaskNode, candidates: list[dict]) -> str:
         '- **MISS**(候选都不匹配): ``{"outcome":"MISS","miss_reason":"<原因>"}``\n\n'
         '### 示例数据(HIT_SINGLE)\n'
         '```json\n'
-        '{"outcome":"HIT_SINGLE","bot_id":"供应链专家Bot"}\n'
+        '{"outcome":"HIT_SINGLE","bot_id":"供应链专家Bot","bot_name":"供应链专家Bot","owner_id":"<owner_id>","owner_name":"<owner_name>"}\n'
         '```\n'
         '### 示例数据(HIT_MULTI_BOTS,主从协作群)\n'
         '```json\n'
@@ -251,7 +260,7 @@ def _compose_search_prompt(node: TaskNode, candidates: list[dict]) -> str:
         '{"outcome":"MISS","miss_reason":"候选 bot 均无法覆盖子任务需求"}\n'
         '```'
     )
-    return (f"[search] 请基于以下子任务需求与候选 bot 集决出执行者(who)与协作方式(how)。\n"
+    return (f"[task-search] 请基于以下子任务需求与候选 bot 集决出执行者(who)与协作方式(how)。\n"
             f"子任务需求+候选集\n{_json.dumps({'demand': demand, 'catalog': catalog}, ensure_ascii=False)}\n\n{return_fmt}\n\n{NO_WEB_SEARCH_CONSTRAINT}")
 
 
@@ -280,7 +289,13 @@ def _parse_search_result(run: dict) -> SearchResult:
         return SearchResult(outcome=SearchOutcome.MISS, miss_reason="not_object")
     outcome = str(data.get("outcome") or "").upper()
     if outcome == "HIT_SINGLE":
-        return SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id=data.get("bot_id"))
+        return SearchResult(
+            outcome=SearchOutcome.HIT_SINGLE,
+            bot_id=data.get("bot_id"),
+            bot_name=data.get("bot_name"),
+            owner_id=data.get("owner_id"),
+            owner_name=data.get("owner_name"),
+        )
     if outcome == "HIT_GROUP":
         return SearchResult(outcome=SearchOutcome.HIT_GROUP, group_id=data.get("group_id"))
     if outcome == "HIT_MULTI_BOTS":

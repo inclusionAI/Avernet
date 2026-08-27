@@ -27,6 +27,12 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotPermissionError,
 )
+from agentclaw.community.core.caller_identity.contracts import (
+    CallerIdentityNotFoundError,
+    CallerIdentityReadOnlyError,
+    CallerLockEpochError,
+    CallerMcpSyncError,
+)
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillEditBusyError,
     LocalSkillEditLockUnavailableError,
@@ -346,6 +352,25 @@ def _lookup(exc: Exception) -> tuple[int, str]:
     ],
 )
 def test_local_skill_edit_errors_have_distinct_public_responses(error, expected):
+    assert _lookup(error) == expected
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (CallerIdentityNotFoundError(), (404, "Not found")),
+        (
+            CallerIdentityReadOnlyError(),
+            (409, "Caller identity configuration is read-only"),
+        ),
+        (CallerLockEpochError(), (423, "Edit lock required")),
+        (
+            CallerMcpSyncError(),
+            (502, "Caller identity synchronization failed"),
+        ),
+    ],
+)
+def test_caller_identity_errors_have_stable_public_responses(error, expected):
     assert _lookup(error) == expected
 
 

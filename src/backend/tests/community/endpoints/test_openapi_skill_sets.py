@@ -214,6 +214,24 @@ def _seed_active(world) -> None:
         )
 
 
+def _seed_inactive(world) -> None:
+    """Seed a Set and switch it off — the only shape DELETE accepts.
+
+    ``create_set`` persists ``is_active=True``, and an active Set cannot be
+    deleted (that is ``rejects_active_set``, the error case next door). So the
+    happy path deactivates first rather than relying on how a Set is born.
+    """
+    _seed(world)
+    with avernet_tenant_scope(_TENANT):
+        world.get(CapabilityDesiredStateRepositoryProtocol).set_skill_set_active(
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            set_id="1",
+            active=False,
+            engine_type="openclaw",
+        )
+
+
 def _assert_reconciled(_response, world) -> None:
     assert world.get(SkillSetManagementServiceProtocol)._runtime.calls == [
         (_BOT_ID, _OWNER)
@@ -275,8 +293,8 @@ def list_sets_error():
 @_case(
     "POST",
     "/openapi/v1/bots/{bot_id}/skill-sets",
-    "creates_inactive_set",
-    ExpectSuccess(status=201, json_contains={"data": {"is_active": False}}),
+    "creates_active_set",
+    ExpectSuccess(status=201, json_contains={"data": {"is_active": True}}),
     json_body={"name": "Created"},
     headers={**_HEADERS, "Idempotency-Key": "create-set"},
 )
@@ -373,6 +391,7 @@ def update_set_error():
     "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}",
     "deletes_inactive_set",
     ExpectSuccess(status=200, json_contains={"data": {"deleted": True}}),
+    seed=_seed_inactive,
 )
 def delete_set_happy():
     pass
@@ -508,8 +527,55 @@ def _seed_mcp_member(world) -> None:
             owner_id=_OWNER,
             set_id="1",
             server_code="mcp.test",
+            name="Test MCP",
+            description=None,
+            icon=None,
             engine_type="openclaw",
         )
+
+
+def _seed_mcp_catalog(world) -> None:
+    world.get(MCPCenterPlugin).set_override(
+        "get_mcp_detail",
+        lambda server_code: {
+            "serverCode": server_code,
+            "name": "Dima MCP",
+            "description": "Dima workflow tools",
+            "icon": "https://example.test/dima.png",
+        },
+    )
+    _seed(world)
+
+
+def _assert_mcp_catalog_metadata_persisted(_response, world) -> None:
+    # Read through the control-plane service, whose list_mcps hands back the
+    # membership rows verbatim — so this asserts what was persisted, not what
+    # the request echoed back.
+    with avernet_tenant_scope(_TENANT):
+        assert world.get(SkillSetManagementServiceProtocol).list_mcps(
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            user_id=_OWNER,
+            set_id="1",
+        ) == [
+            {
+                "id": "1",
+                "server_code": "mcp.test",
+                "name": "Dima MCP",
+                "description": "Dima workflow tools",
+                "icon": "https://example.test/dima.png",
+            }
+        ]
+
+
+def _assert_no_mcp_membership(_response, world) -> None:
+    with avernet_tenant_scope(_TENANT):
+        assert world.get(SkillSetManagementServiceProtocol).list_mcps(
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            user_id=_OWNER,
+            set_id="1",
+        ) == []
 
 
 @_case("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps", "lists_mcps", ExpectSuccess(status=200, json_contains={"data": []}))
@@ -522,8 +588,31 @@ def list_mcps_error():
     pass
 
 
-@_case("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}", "adds_mcp", ExpectSuccess(status=200, json_contains={"data": {"changed": True}}))
+@_case(
+    "PUT",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}",
+    "adds_mcp_with_catalog_metadata",
+    ExpectSuccess(status=200, json_contains={"data": {"changed": True}}),
+    seed=_seed_mcp_catalog,
+    extra=(_assert_mcp_catalog_metadata_persisted,),
+)
 def add_mcp_happy():
+    pass
+
+
+@_case(
+    "PUT",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}",
+    "rejects_missing_mcp_catalog_entry",
+    ExpectError(status=404),
+    path_params={
+        "bot_id": _BOT_ID,
+        "set_id": "1",
+        "server_code": "mcp.unknown",
+    },
+    extra=(_assert_no_mcp_membership,),
+)
+def add_missing_mcp_error():
     pass
 
 

@@ -2209,6 +2209,7 @@ class BotService:
         page: int = 1,
         page_size: int = 20,
         bot_ids: Optional[List[str]] = None,
+        attach_templates: bool = True,
     ) -> Dict[str, Any]:
         """
         List bots by conditions with pagination.
@@ -2228,6 +2229,9 @@ class BotService:
                 an empty list means none. The distinction is load-bearing —
                 treating empty as unrestricted would show a caller entitled to
                 nothing everything.
+            attach_templates: Attach ac_templates.ext as template_config to
+                each returned bot (the get/list consistency contract). Pass
+                False only when the caller provably never reads that field.
 
         Returns:
             Dictionary with 'total' and 'items' keys
@@ -2245,7 +2249,12 @@ class BotService:
             page_size=page_size,
             bot_ids=bot_ids,
         )
-        self._attach_template_configs_to_bots(items)
+        # Callers that never surface template_config (the bot inventory pulls
+        # every matching row) pay one batched template read per page for data
+        # they drop; they opt out here. Default stays True for the established
+        # list/detail consistency contract.
+        if attach_templates:
+            self._attach_template_configs_to_bots(items)
         return {
             "total": total,
             "items": items,

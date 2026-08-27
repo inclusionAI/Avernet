@@ -16,8 +16,10 @@ dependencies = [
     { name = "fastapi-injector" },
     { name = "httpx" },
     { name = "injector" },
+    { name = "jieba" },
     { name = "pycryptodome" },
     { name = "pyjwt" },
+    { name = "pymysql" },
     { name = "python-multipart" },
     { name = "pyyaml" },
     { name = "redis" },
@@ -31,7 +33,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "fakeredis" },
-    { name = "jieba" },
     { name = "jsonschema" },
     { name = "moto", extra = ["s3"] },
     { name = "pytest" },
@@ -55,8 +56,10 @@ requires-dist = [
     { name = "fastapi-injector", specifier = ">=0.7,<1.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "injector", specifier = ">=0.21,<1.0" },
+    { name = "jieba", specifier = ">=0.42" },
     { name = "pycryptodome", specifier = ">=3.23.0" },
     { name = "pyjwt", specifier = ">=2.8.0" },
+    { name = "pymysql", specifier = ">=1.1.0" },
     { name = "python-multipart", specifier = ">=0.0.18" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "redis", specifier = "==7.4.0" },
@@ -70,7 +73,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "fakeredis", specifier = ">=2.20" },
-    { name = "jieba", specifier = ">=0.42" },
     { name = "jsonschema", specifier = ">=4.20" },
     { name = "moto", extras = ["s3"], specifier = ">=5.0" },
     { name = "pytest", specifier = ">=8.0.0" },
@@ -793,6 +795,15 @@ source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
 sdist = { url = "https://mirrors.aliyun.com/pypi/packages/3b/81/58d0ac84e1ef3a3843791d6954d94c0b33d526c75eeb1efbce9d0a4c4077/pyjwt-2.13.0.tar.gz", hash = "sha256:41571c89ca91598c79e8ef18a2d07367d4810fbbd6f637794879baf1b7703423" }
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/a3/5e/ecf12fdb62546d64385c158514e9b2b671f7832108ef2ecd2020ce0af2d1/pyjwt-2.13.0-py3-none-any.whl", hash = "sha256:66adcc2aff09b3f1bbd95fc1e1577df8ac8723c978552fd43304c8a290ac5728" },
+]
+
+[[package]]
+name = "pymysql"
+version = "1.2.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/c9/bc/1c6a92f385940f727daeecf3bacaf186e03875dff57197801046c583bcf0/pymysql-1.2.0.tar.gz", hash = "sha256:6c7b17ca686988104d7426c27895b455cdeea3e9d3ceb1270f0c3704fead8c33" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/c4/bd/2534e130295c8cfd4f0a2e31623baab7502278f1e97bcfe61db75656a77f/pymysql-1.2.0-py3-none-any.whl", hash = "sha256:62169ce6d5510f08e140c5e7990ee884a9764024e4a9a27b2cc11f1099322ae0" },
 ]
 
 [[package]]
