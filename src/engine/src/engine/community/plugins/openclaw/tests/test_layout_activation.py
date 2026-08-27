@@ -2295,7 +2295,7 @@ def test_cutover_reports_sync_pending_when_the_fallback_verify_cannot_run(
     )
 
     assert result.status is PoolActivationStatus.POST_CUTOVER_SYNC_PENDING
-    assert result.evidence["reason"] == "pool_mapping_verify_failed"
+    assert result.evidence["reason"] == "pool_mapping_verify_io_error"
     assert result.evidence["error_type"] == "OSError"
     assert result.evidence["errno"] == errno.EIO
 
@@ -2325,3 +2325,42 @@ def test_the_failure_list_in_the_digest_is_truncated(tmp_path: Path, monkeypatch
     digest = published.evidence["verification"]
     assert digest["failure_count"] == 9
     assert digest["first_failures"] == failures[:5]
+
+
+def test_resume_reports_sync_pending_rather_than_a_false_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The dangerous half of the same mis-classification.
+
+    On a resume — no active marker, ``legacy_local`` already a symlink into
+    the pool — an escaping OSError reaches a handler that decides by probing
+    ``legacy_local``, finds the symlink, and reports COMMITTED. The active
+    marker and the bridges would never have been written, so the control plane
+    would record a finished cutover that did not finish.
+    """
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    shutil.rmtree(legacy_local)
+    legacy_local.symlink_to(pool_local, target_is_directory=True)
+
+    def _raise(**_kwargs):
+        raise OSError(errno.EIO, "verification unavailable")
+
+    monkeypatch.setattr(layout_activation, "verify_skill_mappings", _raise)
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[
+            SkillMapping(
+                source=str(pool_local / "handmade"),
+                target=str(legacy_local.parent / "handmade"),
+            )
+        ],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is not PoolActivationStatus.COMMITTED
+    assert result.status is PoolActivationStatus.POST_CUTOVER_SYNC_PENDING
+    assert result.evidence["reason"] == "pool_mapping_verify_io_error"

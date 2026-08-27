@@ -3169,9 +3169,10 @@ async def test_an_inactive_set_still_skips_projection_entirely():
 
 
 def _scoped_projector(pool=None, passport=None, factory=None):
-    # One store for both, as the DI composition root injects one
-    # CapabilityDesiredStateRepository into the projector and the reader:
-    # projector-side flushes have to be visible to reader-side reads.
+    # One store for both, mirroring the DI composition root, which injects a
+    # single CapabilityDesiredStateRepository into the projector and the
+    # reader. The fake holds no state a read observes, so this is fixture
+    # fidelity rather than something the assertions here exercise.
     repository = _McpInstallations()
     return BotRuntimeProjector(
         factory=factory or _RuntimeFactory(),

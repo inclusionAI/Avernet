@@ -608,3 +608,31 @@ async def test_publish_and_verify_send_the_same_mapping_set() -> None:
     assert bodies["publish"] == bodies["verify"]
     assert bodies["verify"]["retired_mappings"] == [retired[0].to_dict()]
     assert bodies["verify"]["source_layout"] == SkillMappingSourceLayout.LEGACY.value
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_evidence_payload_does_not_break_the_warning() -> None:
+    """This log is the only diagnostic on a final failed verdict, so it must
+    survive a device that puts something unexpected in ``evidence``."""
+
+    class MalformedEvidence(FakeTransport):
+        async def invoke(self, conn_info, method, path, *, body, timeout):
+            response = await super().invoke(
+                conn_info, method, path, body=body, timeout=timeout
+            )
+            if path.endswith("/publish"):
+                response["data"] = {
+                    "published": True,
+                    "verified": False,
+                    "evidence": "mapping_invalid",
+                }
+            return response
+
+    outcome = await _runtime(
+        FakeResolver(), MalformedEvidence()
+    ).publish_and_verify_mappings(
+        bot_id="bot-1", user_id="user-1", mappings=_local_mappings()
+    )
+
+    assert outcome.published is True
+    assert outcome.verified is False

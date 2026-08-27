@@ -473,12 +473,17 @@ def _finalize_active_root(
             return PoolActivationResult(
                 PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
                 {
-                    "reason": "pool_mapping_verify_failed",
-                    # Top level as well as in the digest: the sibling OSError
-                    # handlers put them here, and monitors read them here.
+                    # Distinct from pool_mapping_verify_failed below: that one
+                    # ran and found the mappings wrong, which needs repair;
+                    # this one could not run, which needs a retry. The module
+                    # names its other I/O escapes the same way.
+                    "reason": "pool_mapping_verify_io_error",
+                    # Top level, where the sibling OSError handlers put them
+                    # and monitors read them — and only there, so there is no
+                    # second copy to drift.
                     "error_type": type(error).__name__,
                     "errno": error.errno,
-                    "mapping": _verification_digest(None, error),
+                    "mapping": _verification_digest(None),
                 },
             )
         verified_valid = verified.valid

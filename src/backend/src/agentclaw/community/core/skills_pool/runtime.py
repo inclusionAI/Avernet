@@ -241,9 +241,11 @@ class SkillsPoolRuntime:
                 # retry. Not the envelope's ``message`` or the evidence
                 # ``reason`` either — the first is a constant on this route
                 # and the second only exists on a failed publish, which
-                # returns before this branch. ``data`` is known to be a dict:
-                # a verdict came out of it.
-                evidence = response["data"].get("evidence") or {}
+                # returns before this branch. ``data`` is known to be a dict
+                # — a verdict came out of it — but nothing has vetted what is
+                # inside, and this log must not be the thing that raises.
+                evidence = response["data"].get("evidence")
+                evidence = evidence if isinstance(evidence, dict) else {}
                 logger.warning(
                     "[skills_pool.runtime] mapping publish reported verification "
                     "inline as failed bot_id=%s user_id=%s contract=%s "
