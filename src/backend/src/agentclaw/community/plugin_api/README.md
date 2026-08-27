@@ -27,6 +27,14 @@ internal_dependencies:
 
 Changing a Protocol signature breaks every local + prod impl + the contract-test suite (Rule 25). `SkillCenterGateway` is separate from the legacy `SkillCenterClient`: its typed request objects carry no endpoint or credential configuration, every Team catalogue/publication operation requires a request-level Team ID, and its adapters do not own publication retries or domain state. Version/download reads require an explicit `PUBLIC` or `TEAM` scope; Public Reference reads omit Team only after the consumer verifies public visibility, because Skill Center skill codes are globally unique. Adding a new Protocol requires updating BOUNDARY_SIGNIFICANT_MODULES if it joins a new module, and adding paired impls (Rule 20).
 
+The Interface belongs here because Avernet-owned consumers include Space Team
+binding today and the governed Publication/Reference flows in the Phase 2
+contract. This does **not** make Skill Center a community implementation:
+Community fails closed, while OCB owns the sole Prod HTTP Adapter and binds it
+to this consumer-owned Interface at the corp composition root. Moving the
+Interface into OCB would reverse the dependency direction and require Avernet
+core to import `agentclaw.corp`.
+
 The Gateway models the governed SC wire without exposing its envelope or field
 names: public catalogue search/detail and tags, Team create/lookup and paged
 Skill listing/detail, one-shot publish submission and status diagnostics,
@@ -49,3 +57,6 @@ credentials. DTO validation plus adapter-specific endpoint/auth configuration
 enforce that boundary. It has no startup or shutdown phase and owns no durable
 resource; each synchronous operation either returns a normalized DTO or raises
 a stable `SkillCenterGatewayError`, with no cleanup callback or hidden retry.
+This PR intentionally does not predeclare Catalog, Publication, Public
+Reference, or Track Latest application modules; each is introduced only with
+its real consumer workflow.

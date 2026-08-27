@@ -133,6 +133,9 @@ A separate Avernet change migrates the `openapi_v1` public catalogue and
 publication consumers onto domain services backed by this seam. Until both are
 present, existing routers keep using the legacy client; this module is not a
 claim that production traffic has migrated.
+No Catalog, Publication, Public Reference, or Track Latest application module
+is introduced speculatively by this change; those modules remain owned by their
+later workflow PRs.
 
 ### One writer, one flush, one reader, one rule book
 
