@@ -45,7 +45,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.20.2'
+          node-version: '22'
           cache: npm
           cache-dependency-path: src/frontend-nextgen/package-lock.json
           registry-url: https://registry.npmjs.org
