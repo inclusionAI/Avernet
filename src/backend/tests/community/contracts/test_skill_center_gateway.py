@@ -41,6 +41,7 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterTeamSkillListRequest,
     SkillCenterTeamSkill,
     SkillCenterTeamSkillPage,
+    SkillCenterVersion,
     SkillCenterVersionListRequest,
     SkillCenterVisibility,
 )
@@ -665,6 +666,11 @@ def test_team_response_rejects_empty_team_id() -> None:
             ref_source="TEAMCLAW",
             ref_source_id="space-1",
         )
+
+
+def test_version_response_rejects_empty_version_number() -> None:
+    with pytest.raises(ValueError, match="version_number is required"):
+        SkillCenterVersion(version_number="")
 
 
 def test_publish_request_rejects_more_than_one_sc_tag() -> None:
