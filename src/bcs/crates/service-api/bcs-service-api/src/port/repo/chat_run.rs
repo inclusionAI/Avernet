@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{ChatResponseMode, ChatRunMetricCount, DirectChatClientKind};
+use crate::{ChatResponseMode, ChatRunMetricCount};
 
 /// Maximum accumulated content kept for a single run (1 MiB). Slicing past
 /// this uses char-boundary-safe truncation; see `ChatRunStore::append_delta`.
@@ -198,21 +198,24 @@ pub trait ChatRunRepoPort: Send + Sync + 'static {
     /// timeout sweep that marks overdue runs failed.
     async fn list_active(&self, now_ms: u64) -> Result<Vec<ChatRunRecord>, ChatRunRepoError>;
 
-    /// Delete terminal runs past their retention window. Returns the run IDs that
-    /// were actually removed, so the engine can emit per-run lifecycle events.
+    /// Delete terminal runs past their retention window and return the records
+    /// that were actually removed, so the engine can attribute per-run lifecycle
+    /// events to the right client without a separate full-table scan (the
+    /// records already carry `client`).
+    ///
+    /// Backend policy: the in-memory and SQLite impls prune here; the MySQL
+    /// impl is a no-op because production terminal-row retention/pruning is
+    /// delegated to the MySQL platform's scheduled cleanup task (see spec §11).
     async fn delete_expired_terminal(
         &self,
         now_ms: u64,
         retention_ms: u64,
-    ) -> Result<Vec<String>, ChatRunRepoError>;
+    ) -> Result<Vec<ChatRunRecord>, ChatRunRepoError>;
 
-    /// Aggregate counts by state × client kind for metrics.
+    /// Aggregate counts by state × client kind for metrics. Only active
+    /// (non-terminal) runs are counted: terminal runs are short-lived in memory
+    /// mode and retained long-term in MySQL mode, so counting them as a gauge
+    /// would be either noisy or a meaningless cumulative. Terminal totals come
+    /// from the lifecycle counter, not this gauge.
     async fn metric_counts(&self) -> Result<Vec<ChatRunMetricCount>, ChatRunRepoError>;
-
-    /// Scan every run's `run_id → client kind` mapping. Used by the cleanup
-    /// loop to attribute lifecycle events to the right client after a run may
-    /// already have been deleted. Sub-identity (not aggregated) on purpose.
-    async fn list_client_kinds(
-        &self,
-    ) -> Result<std::collections::HashMap<String, DirectChatClientKind>, ChatRunRepoError>;
 }

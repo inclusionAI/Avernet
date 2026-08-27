@@ -885,33 +885,32 @@ impl A2aChatService for A2aChat {
         now_ms: u64,
         retention_ms: u64,
     ) -> ServiceResult<(Vec<String>, Vec<String>)> {
-        let client_kinds = self.run_store.metric_client_kinds().await;
+        // cleanup_expired returns (run_id, client_kind) pairs for both the
+        // timed-out-expired and retention-dropped sets, attributed from the
+        // records the engine already fetched (no full-table client-kind scan).
         let (expired, dropped) = self.run_store.cleanup_expired(now_ms, retention_ms).await;
-        for run_id in &expired {
+        for (_, client_kind) in &expired {
             self.emit_run_lifecycle(
                 DirectChatRunEvent::Expired,
                 MetricsResult::Error,
-                client_kinds
-                    .get(run_id)
-                    .copied()
-                    .unwrap_or(DirectChatClientKind::Unknown),
+                *client_kind,
                 DirectChatRunReason::Timeout,
             )
             .await;
         }
-        for run_id in &dropped {
+        for (_, client_kind) in &dropped {
             self.emit_run_lifecycle(
                 DirectChatRunEvent::Dropped,
                 MetricsResult::Success,
-                client_kinds
-                    .get(run_id)
-                    .copied()
-                    .unwrap_or(DirectChatClientKind::Unknown),
+                *client_kind,
                 DirectChatRunReason::None,
             )
             .await;
         }
-        Ok((expired, dropped))
+        Ok((
+            expired.into_iter().map(|(id, _)| id).collect(),
+            dropped.into_iter().map(|(id, _)| id).collect(),
+        ))
     }
 }
 

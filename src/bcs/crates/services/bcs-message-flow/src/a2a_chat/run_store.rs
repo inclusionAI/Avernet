@@ -156,16 +156,6 @@ impl ChatRunStore {
             })
     }
 
-    pub(crate) async fn metric_client_kinds(&self) -> HashMap<String, DirectChatClientKind> {
-        self.repo
-            .list_client_kinds()
-            .await
-            .unwrap_or_else(|err| {
-                error!(error = %err, "chat run list_client_kinds failed");
-                HashMap::new()
-            })
-    }
-
     /// Apply a state transition under version CAS. Returns false on conflict,
     /// terminal, missing, or backend error (logged). Single attempt — mirrors
     /// the pre-refactor single-lock mutate semantics.
@@ -464,7 +454,10 @@ impl ChatRunStore {
         &self,
         now_ms_v: u64,
         retention_ms: u64,
-    ) -> (Vec<String>, Vec<String>) {
+    ) -> (
+        Vec<(String, DirectChatClientKind)>,
+        Vec<(String, DirectChatClientKind)>,
+    ) {
         let mut expired = Vec::new();
         let active = match self.repo.list_active(now_ms_v).await {
             Ok(active) => active,
@@ -475,12 +468,23 @@ impl ChatRunStore {
         };
         for record in active {
             if self.force_fail(&record.run_id, "timeout").await {
-                expired.push(record.run_id.clone());
+                expired.push((
+                    record.run_id.clone(),
+                    direct_chat_client_kind(record.client.as_deref()),
+                ));
             }
         }
 
         let dropped = match self.repo.delete_expired_terminal(now_ms_v, retention_ms).await {
-            Ok(ids) => ids,
+            Ok(records) => records
+                .into_iter()
+                .map(|record| {
+                    (
+                        record.run_id.clone(),
+                        direct_chat_client_kind(record.client.as_deref()),
+                    )
+                })
+                .collect(),
             Err(err) => {
                 error!(error = %err, "chat run delete_expired_terminal failed");
                 Vec::new()

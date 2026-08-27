@@ -113,11 +113,45 @@ run_context_store = "redis" # | "memory";缺省 "memory"
 - 迁移:SQLite `SQLITE_DDL_STATEMENTS` + `migrations/mysql/016_chat_runs.sql`。
 - `cargo check -p bcs` 通过;`cargo test -p bcs-chat-run-store`、`cargo test -p bcs-message-flow` 通过。
 
-## 11. 待后续补齐(follow-ups)
+## 11. 持久化运维/审计收紧(已落地)
+针对 persistent(MySQL)模式的 cleanup / retention / 审计 / 指标做了以下收紧(独立后续改动):
+
+### 11.1 两种 retention 分离
+- **Polling retention**(短,~2min):终态 run 仍可被慢轮询者查询的窗口。仅 memory 模式有意义(HHashMap 2min 后删,防内存无界、dev 无需审计)。
+- **Audit retention**(长,30/90 天):MySQL 终态行作为审计记录留存多久。persistent 模式专属。
+- 之前两者焊成同一个 `async_chat_run_retention_ms`(2min)→ persistent 模式终态正文 2min 即删,违背审计承诺;现已按模式区分。
+
+### 11.2 终态行删除:B1,外包给 MySQL 平台(persistent 代码不删)
+- 决定:persistent 模式终态行删除交由**内部 MySQL 平台的定时清理任务**,BCS 代码侧不实现删除定时器(除非将来有代码级定时任务基础设施,再以 `bcs-admin retention prune` / leader-gated housekeeping 作为 B2 备选)。
+- `SqlChatRunRepo::delete_expired_terminal`:`flavor == MySQL` 时 **no-op**(返回空,平台负责);`flavor == SQLite`(dev/test,无平台)仍照常删并返回被删记录。memory 实现照常删。引擎 `cleanup_expired` 对两模式统一调用,差异封在实现里。
+- 10s cleanup 循环只保留**活性职责**:`list_active`(索引范围扫,命中本窗口超时的非终态)+ `force_fail`(UPDATE 成 `failed("timeout")`——状态转移,不是删除)。
+- 交给平台的清理 SQL(用 `idx_chat_runs_completed` 索引,分块批量):
+  ```sql
+  DELETE FROM bcs_chat_runs
+   WHERE state IN ('completed','failed','cancelled')
+     AND completed_at_ms < <now - audit_retention_ms>
+   LIMIT 1000;   -- 循环到 affected_rows=0,框住单事务锁持有时间
+  ```
+- 查询性反而更好:终态 run 在整个 audit retention 窗口都 `GET` 得到。
+
+### 11.3 删除 `metric_client_kinds` 全表扫
+- 原 `metric_client_kinds`(`SELECT run_id, client FROM bcs_chat_runs`,无 WHERE 全表扫,每 10s × 副本,返回全表行建 HashMap)用于 cleanup 删前快照做 Expired/Dropped 的 client_kind 归属——属 memory 模式"遍历 slots 近乎零成本"的 port-到-SQL 成本陷阱,且 B1 下 persistent 的 `dropped` 恒空,快照失去意义。
+- 已删掉该端口(`list_client_kinds`)+ 引擎方法(`metric_client_kinds`)。归属改用 cleanup **已 fetch 的记录**:
+  - `delete_expired_terminal` 返回 `Vec<ChatRunRecord>`(被删记录,带 `client`)→ Dropped 归属。
+  - `list_active` 返回的完整记录(带 `client`)→ Expired 归属。
+  - 引擎 `cleanup_expired` 返回 `Vec<(String, DirectChatClientKind)>` 两个元组;mod.rs 直接用于 `emit_run_lifecycle`。
+- 改完 cleanup 的 DB 操作全是"本窗口有界 + 索引",与表大小无关;长 audit retention 才安全。
+
+### 11.4 `metric_counts` 限定非终态活跃 run
+- `metric_counts`(`SELECT state, client, COUNT(*) … GROUP BY`)改为 `WHERE state NOT IN (terminal)`,只统计活跃 run。理由:终态在 memory 模式是已被删的瞬态、在 persistent 模式是 30/90 天累计——作为 gauge 既噪又无意义;终态总量应来自生命周期 **counter**(`emit_run_lifecycle` 的 Completed/Failed/Cancelled),不是 gauge。
+- 也避免长 retention 表下 GROUP BY 扫 30/90 天终态行。
+
+## 12. 待后续补齐(follow-ups)
 - **A2aChat ↔ BotRun 终态协同**:直聊终态化(`mark_completed/failed/cancelled`)成功后,在 `A2aChat`(mod.rs)best-effort 调用 `bot_run_context.mark_terminal(run_id)`,使 BotRun 登记簿与 ChatRun 终态对齐(当前直聊路径未主动终态化 BotRun,沿用既有行为——靠 deadline/cleanup)。低风险增量改动,建议在独立小改动里落地。
 - **Drain 路径写失败传播的显式化**:引擎 mutator 在 `Backend` 错误时已记 `error!` 并返回 `false`(不假装成功);`create` 路径错误已映射为 `ServiceError::InternalError`(不发 202)。可选:在 `record_run_event`/drain 把 `Backend` 显式映射为 `emit_run_lifecycle(Failed, InternalError)`。
 - **bootstrap 集成测试(重启/跨副本/审计/配置切换)**:本机磁盘受限(20G,`-p bcs` 测试构建超限),未能运行 `bcs` 测试二进制;建议在 CI(无磁盘约束)新增 `crates/bootstrap/bcs/tests/run_governance_restart.rs` 覆盖验收用例:重启可查、两引擎共享 repo 的跨副本一致、终态幂等 CAS、cancel 幂等、注入 DbPlugin 失败→5xx、TTL 不误删、审计 SQL 可查、SSE reader 死→超时、memory/persistent 切换。
-- **生产部署前**:确保 `[cache.redis]` 与 `bcs-chat-run-store` 持久化模式在真实 MySQL/Redis 上演练;`016_chat_runs.sql` 经 `bcs-admin migrate` 应用。
+- **MySQL audit retention 配置化**:当前 persistent 删除交平台(平台侧配 retention cutoff);若后续需代码侧可配,再加 `async_chat_run_audit_retention_ms` 配置。
+- **生产部署前**:确保 `[cache.redis]` 与 `bcs-chat-run-store` 持久化模式在真实 MySQL/Redis 上演练;`016_chat_runs.sql` 经 `bcs-admin migrate` 应用;MySQL 平台定时清理任务按 §11.2 SQL 配置。
 
 ## 12. 不在范围
 SSE 文本装配统一(`StreamTextAssembler`)、group `MessageTracker`/`ProviderBotEvents.visible_text`(decision pending)、admin invocation / interaction 持久化、`ChatRunEventPort`/`RunChannelManager` 跨节点路由、SSE 活读流跨节点接管(issue 非本期验收)。

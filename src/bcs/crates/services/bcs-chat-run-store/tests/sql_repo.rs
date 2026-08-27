@@ -127,16 +127,27 @@ async fn list_active_and_delete_expired_terminal() {
         .await
         .unwrap();
     let dropped = repo.delete_expired_terminal(100, 50).await.unwrap();
-    assert_eq!(dropped, vec!["overdue".to_string()]);
+    assert_eq!(dropped.len(), 1);
+    assert_eq!(dropped[0].run_id, "overdue");
+    // The deleted record carries `client` so the engine can attribute the
+    // Dropped lifecycle event without a separate full-table client scan.
+    assert_eq!(dropped[0].client.as_deref(), Some("http-chat-async"));
     assert!(repo.get("overdue").await.unwrap().is_none());
     assert!(repo.get("future").await.unwrap().is_some());
 }
 
 #[tokio::test]
-async fn metric_counts_and_client_kinds() {
+async fn metric_counts_counts_active_runs_only() {
     let repo = repo();
     repo.create(record("m1", 1)).await.unwrap();
     repo.create(record("m2", 1)).await.unwrap();
+    // A terminal run must NOT appear on the gauge — terminal totals come from
+    // the lifecycle counter, and counting retained terminal rows would be a
+    // meaningless cumulative.
+    let mut done = record("done", 1);
+    done.state = ChatRunState::Completed;
+    done.completed_at_ms = Some(0);
+    repo.create(done).await.unwrap();
     let counts = repo.metric_counts().await.unwrap();
     let pending = counts
         .iter()
@@ -144,10 +155,10 @@ async fn metric_counts_and_client_kinds() {
         .map(|c| c.count)
         .unwrap_or(0);
     assert_eq!(pending, 2);
-    let kinds = repo.list_client_kinds().await.unwrap();
-    assert_eq!(kinds.len(), 2);
-    assert_eq!(
-        kinds["m1"],
-        bcs_service_api::DirectChatClientKind::HttpChatAsync
+    assert!(
+        counts
+            .iter()
+            .all(|c| !matches!(c.state, bcs_service_api::DirectChatRunState::Completed)),
+        "terminal runs must be excluded from the gauge"
     );
 }

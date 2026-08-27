@@ -180,7 +180,7 @@ impl ChatRunRepoPort for MemoryChatRunRepo {
         &self,
         now_ms: u64,
         retention_ms: u64,
-    ) -> Result<Vec<String>, ChatRunRepoError> {
+    ) -> Result<Vec<ChatRunRecord>, ChatRunRepoError> {
         let mut guard = self.inner.write().await;
         let drop_ids: Vec<String> = guard
             .runs
@@ -194,15 +194,23 @@ impl ChatRunRepoPort for MemoryChatRunRepo {
             })
             .map(|(key, _)| key.clone())
             .collect();
+        let mut dropped = Vec::with_capacity(drop_ids.len());
         for key in &drop_ids {
-            guard.runs.remove(key);
+            if let Some(record) = guard.runs.remove(key) {
+                dropped.push(record);
+            }
         }
-        Ok(drop_ids)
+        Ok(dropped)
     }
 
     async fn metric_counts(&self) -> Result<Vec<ChatRunMetricCount>, ChatRunRepoError> {
         let mut counts: Vec<ChatRunMetricCount> = Vec::new();
         for record in self.inner.read().await.runs.values() {
+            // Only active (non-terminal) runs belong on the gauge; terminal
+            // totals come from the lifecycle counter.
+            if record.state.is_terminal() {
+                continue;
+            }
             let state = metric_state(record.state);
             let client_kind = client_kind(record.client.as_deref());
             if let Some(existing) = counts
@@ -219,15 +227,5 @@ impl ChatRunRepoPort for MemoryChatRunRepo {
             }
         }
         Ok(counts)
-    }
-
-    async fn list_client_kinds(
-        &self,
-    ) -> Result<HashMap<String, DirectChatClientKind>, ChatRunRepoError> {
-        let mut map = HashMap::new();
-        for record in self.inner.read().await.runs.values() {
-            map.insert(record.run_id.clone(), client_kind(record.client.as_deref()));
-        }
-        Ok(map)
     }
 }

@@ -540,26 +540,32 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         &self,
         now_ms: u64,
         retention_ms: u64,
-    ) -> Result<Vec<String>, ChatRunRepoError> {
-        let cutoff = now_ms.saturating_sub(retention_ms);
-        let select = DbStatement::with_params(
-            &format!(
-                "SELECT run_id FROM bcs_chat_runs \
-                 WHERE state IN ({TERMINAL_STATES}) AND completed_at_ms < ?"
-            ),
-            vec![DbValue::from(cutoff as i64)],
-        );
-        let rows = self.db.query(select).await.map_err(backend)?;
-        let ids: Vec<String> = rows
-            .into_iter()
-            .filter_map(|row| db_get_column::<String>(&row, "run_id").ok())
-            .collect();
-        if ids.is_empty() {
+    ) -> Result<Vec<ChatRunRecord>, ChatRunRepoError> {
+        // Production MySQL delegates terminal-row pruning to the platform's
+        // scheduled cleanup task (spec §11): keep the auditable rows, do not
+        // hard-delete from the 10s loop. SQLite (dev/test, no platform) still
+        // self-prunes here so the local table stays bounded and the delete path
+        // stays covered by tests.
+        if self.flavor != DbSqlFlavor::Sqlite {
             return Ok(Vec::new());
         }
-        // Delete one-by-one reusing the same cutoff guard to stay portable across
-        // SQLite/MySQL (no parameterized IN-list with variable arity).
-        for id in &ids {
+        let cutoff = now_ms.saturating_sub(retention_ms);
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                &format!(
+                    "SELECT {SELECT_COLS} FROM bcs_chat_runs \
+                     WHERE state IN ({TERMINAL_STATES}) AND completed_at_ms < ?"
+                ),
+                vec![DbValue::from(cutoff as i64)],
+            ))
+            .await
+            .map_err(backend)?;
+        let mut dropped = Vec::new();
+        for row in rows {
+            let record = row_to_record(&row)?;
+            // Delete one-by-one reusing the same cutoff guard to stay portable
+            // across SQLite/MySQL (no parameterized IN-list with variable arity).
             let _ = self
                 .db
                 .execute(DbStatement::with_params(
@@ -567,20 +573,25 @@ impl ChatRunRepoPort for SqlChatRunRepo {
                         "DELETE FROM bcs_chat_runs \
                          WHERE run_id = ? AND state IN ({TERMINAL_STATES}) AND completed_at_ms < ?"
                     ),
-                    vec![DbValue::from(id.clone()), DbValue::from(cutoff as i64)],
+                    vec![DbValue::from(record.run_id.clone()), DbValue::from(cutoff as i64)],
                 ))
                 .await;
-            self.delete_overlay(id).await;
+            self.delete_overlay(&record.run_id).await;
+            dropped.push(record);
         }
-        Ok(ids)
+        Ok(dropped)
     }
 
     async fn metric_counts(&self) -> Result<Vec<ChatRunMetricCount>, ChatRunRepoError> {
+        // Only active (non-terminal) runs belong on the gauge; terminal totals
+        // come from the lifecycle counter. This also keeps the GROUP BY off the
+        // long-retention terminal rows in MySQL mode.
         let rows = self
             .db
-            .query(DbStatement::new(
-                "SELECT state, client, COUNT(*) AS c FROM bcs_chat_runs GROUP BY state, client",
-            ))
+            .query(DbStatement::new(&format!(
+                "SELECT state, client, COUNT(*) AS c FROM bcs_chat_runs \
+                 WHERE state NOT IN ({TERMINAL_STATES}) GROUP BY state, client"
+            )))
             .await
             .map_err(backend)?;
         let mut counts: Vec<ChatRunMetricCount> = Vec::new();
@@ -611,22 +622,5 @@ impl ChatRunRepoPort for SqlChatRunRepo {
             }
         }
         Ok(counts)
-    }
-
-    async fn list_client_kinds(
-        &self,
-    ) -> Result<std::collections::HashMap<String, DirectChatClientKind>, ChatRunRepoError> {
-        let rows = self
-            .db
-            .query(DbStatement::new("SELECT run_id, client FROM bcs_chat_runs"))
-            .await
-            .map_err(backend)?;
-        let mut map = std::collections::HashMap::new();
-        for row in rows {
-            let run_id: String = db_get_column(&row, "run_id").map_err(backend)?;
-            let client: Option<String> = db_get_column_opt::<String>(&row, "client").map_err(backend)?;
-            map.insert(run_id, client_kind(client.as_deref()));
-        }
-        Ok(map)
     }
 }

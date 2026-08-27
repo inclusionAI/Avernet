@@ -141,7 +141,7 @@ async fn delete_expired_terminal_only_removes_past_retention() {
     repo.create(fresh).await.unwrap();
     let removed = repo.delete_expired_terminal(100, 50).await.unwrap();
     assert_eq!(removed.len(), 1);
-    assert_eq!(removed[0], "old");
+    assert_eq!(removed[0].run_id, "old");
     assert!(repo.get("old").await.unwrap().is_none());
     assert!(repo.get("fresh").await.unwrap().is_some());
 }
