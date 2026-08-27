@@ -119,6 +119,7 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
         passport_plugin: object,
         skill_set_factory: object,
         template_service: object,
+        caller_identity_repo: object,
     ) -> None:
         return None
 

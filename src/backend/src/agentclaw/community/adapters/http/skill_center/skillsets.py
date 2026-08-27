@@ -61,7 +61,15 @@ from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_engine_for_bot,
     resolve_runtime_engine_for_bot,
 )
-from agentclaw.community.core.mcp.services.passport_scope import filter_passport_mcp_codes
+from agentclaw.community.core.mcp.errors import McpIdentityUnresolvedError
+from agentclaw.community.core.mcp.services.passport_scope import (
+    filter_passport_mcp_codes,
+    passport_mcp_items_from_codes,
+    resolve_mcp_identity_modes,
+)
+from agentclaw.community.core.repository.protocols.identity import (
+    CallerIdentityRepositoryProtocol,
+)
 from agentclaw.community.di import Injected
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
 from agentclaw.community.api.skill_set_service_factory import (
@@ -1957,6 +1965,9 @@ async def remove_cli_from_default_skill_set(
         SkillSetServiceFactoryProtocol
     ),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
+    caller_identity_repo: CallerIdentityRepositoryProtocol = Injected(
+        CallerIdentityRepositoryProtocol
+    ),
 ) -> MessageResponse:
     """Remove a CLI from the default skill set by updating AgentPass CLI scope."""
     (
@@ -2014,13 +2025,42 @@ async def remove_cli_from_default_skill_set(
             status_code=500, detail="Failed to collect MCP scope"
         ) from e
 
+    # 覆盖式更新连 identityMode 一起替换：只传 code 等于把每个 MCP 断言成
+    # owner，会静默抹掉 caller 授权。删 CLI 不该动 MCP 身份，所以这里必须
+    # 把当前身份原样带上；查不到身份就整体失败，不猜默认值。
+    try:
+        bot = bot_repo.get_by_id_and_owner(effective_bot_id, effective_entity_id)
+        identity_modes = resolve_mcp_identity_modes(
+            caller_identity_repo,
+            bot_pk=(bot or {}).get("id"),
+            engine_type=effective_engine,
+            bot_id=effective_bot_id,
+        )
+        mcp_items = passport_mcp_items_from_codes(
+            passport_mcp_codes, identity_modes=identity_modes
+        )
+    except (McpIdentityUnresolvedError, ValueError) as e:
+        logger.warning(
+            "[remove_cli_from_default_skill_set] resolve MCP identity failed: "
+            "bot_id=%s, cli=%s, error=%s",
+            effective_bot_id,
+            resource_code,
+            e,
+        )
+        raise HTTPException(
+            status_code=500, detail="Failed to resolve MCP execution identity"
+        ) from e
+
     try:
         # resource_scope 成套提交 MCP+CLI；不涉及 Skill，Skill 由 AgentPass 侧自行订正。
         passport_plugin.update_passport(
             bot_id=effective_bot_id,
             user_id=effective_entity_id,
             resource_scope={
-                "mcp_codes": passport_mcp_codes,
+                # mcp_codes 由 mcp_items 派生：unpack_resource_scope 在有
+                # mcp_items 时忽略 mcp_codes，两份独立列表只会悄悄分叉。
+                "mcp_codes": [item["mcp_code"] for item in mcp_items],
+                "mcp_items": mcp_items,
                 "cli_items": remaining,
             },
         )
