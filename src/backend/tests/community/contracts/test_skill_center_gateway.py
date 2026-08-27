@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 import hashlib
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -33,6 +34,7 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterSkillPage,
     SkillCenterSortOrder,
     SkillCenterStandardCheckResult,
+    SkillCenterTeam,
     SkillCenterTeamCreateRequest,
     SkillCenterTeamLookupRequest,
     SkillCenterTeamSkillDetailRequest,
@@ -305,6 +307,10 @@ def test_local_gateway_round_trips_documented_public_skill_and_tags(world) -> No
 
     assert page.items == (detail,)
     assert detail is not None
+    assert type(detail) is SkillCenterSkill
+    assert type(page.items[0]) is SkillCenterSkill
+    assert "team_id" not in asdict(detail)
+    assert "skill_status" not in asdict(detail)
     assert detail.skill_id is not None
     assert detail.skill_code == "yuque-doc-skill"
     assert detail.skill_name == "语雀文档处理"
@@ -331,6 +337,53 @@ def test_local_gateway_round_trips_documented_public_skill_and_tags(world) -> No
     assert [version.version_number for version in versions] == ["v1.0"]
     assert download.version_number == "v1.0"
     assert download.sha256
+
+
+def test_local_gateway_rejects_cross_team_skill_code_reuse(world) -> None:
+    service = world.get(SkillCenterGatewayService)
+    owner_team = service.create_team(
+        SkillCenterTeamCreateRequest("space-owner", "Owner", "TEAMCLAW", "space-owner")
+    )
+    another_team = service.create_team(
+        SkillCenterTeamCreateRequest(
+            "space-another", "Another", "TEAMCLAW", "space-another"
+        )
+    )
+    service.submit_publish(
+        SkillCenterPublishSubmitRequest(
+            team_id=owner_team.team_id,
+            skill_code="globally-unique-skill",
+            skill_name="Owned Skill",
+            version_number="1",
+            package_url="https://example.invalid/owned.zip",
+        )
+    )
+
+    with pytest.raises(SkillCenterGatewayError) as raised:
+        service.submit_publish(
+            SkillCenterPublishSubmitRequest(
+                team_id=another_team.team_id,
+                skill_code="globally-unique-skill",
+                skill_name="Conflicting Skill",
+                version_number="1",
+                package_url="https://example.invalid/conflicting.zip",
+            )
+        )
+
+    assert raised.value.code is SkillCenterGatewayErrorCode.BUSINESS
+    assert service.get_team_skill(
+        SkillCenterTeamSkillDetailRequest(
+            team_id=owner_team.team_id, skill_code="globally-unique-skill"
+        )
+    ) is not None
+    assert (
+        service.get_team_skill(
+            SkillCenterTeamSkillDetailRequest(
+                team_id=another_team.team_id, skill_code="globally-unique-skill"
+            )
+        )
+        is None
+    )
 
 
 def test_gateway_service_rejects_mismatched_publish_identity(world) -> None:
@@ -450,6 +503,25 @@ def test_gateway_service_rejects_private_skill_from_public_detail(world) -> None
     assert raised.value.code is SkillCenterGatewayErrorCode.PROTOCOL
 
 
+def test_gateway_service_rejects_team_identity_from_public_detail(world) -> None:
+    service = world.get(SkillCenterGatewayService)
+    gateway = world.get(SkillCenterGateway)
+    gateway.set_override(
+        "get_public_skill",
+        lambda request: SkillCenterTeamSkill(
+            skill_code=request.skill_code,
+            skill_name="Public Skill",
+            access_level=SkillCenterAccessLevel.PUBLIC,
+            team_id="private-team-context",
+        ),
+    )
+
+    with pytest.raises(SkillCenterGatewayError) as raised:
+        service.get_public_skill(SkillCenterPublicSkillDetailRequest("public-skill"))
+
+    assert raised.value.code is SkillCenterGatewayErrorCode.PROTOCOL
+
+
 def test_gateway_service_rejects_private_skill_from_public_search(world) -> None:
     service = world.get(SkillCenterGatewayService)
     gateway = world.get(SkillCenterGateway)
@@ -461,6 +533,32 @@ def test_gateway_service_rejects_private_skill_from_public_search(world) -> None
                     skill_code="private-skill",
                     skill_name="Private Skill",
                     access_level=SkillCenterAccessLevel.PRIVATE,
+                ),
+            ),
+            total=1,
+            page_num=request.page_num,
+            page_size=request.page_size,
+        ),
+    )
+
+    with pytest.raises(SkillCenterGatewayError) as raised:
+        service.search_public_skills(SkillCenterPublicSkillSearchRequest())
+
+    assert raised.value.code is SkillCenterGatewayErrorCode.PROTOCOL
+
+
+def test_gateway_service_rejects_team_identity_from_public_search(world) -> None:
+    service = world.get(SkillCenterGatewayService)
+    gateway = world.get(SkillCenterGateway)
+    gateway.set_override(
+        "search_public_skills",
+        lambda request: SkillCenterSkillPage(
+            items=(
+                SkillCenterTeamSkill(
+                    skill_code="public-skill",
+                    skill_name="Public Skill",
+                    access_level=SkillCenterAccessLevel.PUBLIC,
+                    team_id="private-team-context",
                 ),
             ),
             total=1,
@@ -556,6 +654,17 @@ def test_local_gateway_rejects_an_unknown_exact_version(world, operation: str) -
 def test_team_scoped_requests_reject_empty_team_id(factory) -> None:
     with pytest.raises(ValueError, match="team_id is required"):
         factory()
+
+
+def test_team_response_rejects_empty_team_id() -> None:
+    with pytest.raises(ValueError, match="team_id is required"):
+        SkillCenterTeam(
+            team_id="",
+            team_code="space-1",
+            team_name="Space 1",
+            ref_source="TEAMCLAW",
+            ref_source_id="space-1",
+        )
 
 
 def test_publish_request_rejects_more_than_one_sc_tag() -> None:

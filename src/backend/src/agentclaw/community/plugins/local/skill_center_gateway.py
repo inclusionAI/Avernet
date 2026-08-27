@@ -73,6 +73,37 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
             for item in self._versions.get((team_id, skill_code), ())
         )
 
+    @staticmethod
+    def _to_public_skill(skill: SkillCenterTeamSkill) -> SkillCenterSkill:
+        return SkillCenterSkill(
+            skill_code=skill.skill_code,
+            skill_name=skill.skill_name,
+            access_level=skill.access_level,
+            description=skill.description,
+            skill_id=skill.skill_id,
+            creator_id=skill.creator_id,
+            creator_work_no=skill.creator_work_no,
+            creator_name=skill.creator_name,
+            latest_version_number=skill.latest_version_number,
+            official_version_number=skill.official_version_number,
+            updated_at=skill.updated_at,
+            icon_url=skill.icon_url,
+            belong_to=skill.belong_to,
+            owner_name=skill.owner_name,
+            homepage_url=skill.homepage_url,
+            office_download_url=skill.office_download_url,
+            intranet_download_url=skill.intranet_download_url,
+            sha256=skill.sha256,
+            tags=skill.tags,
+            favorite_count=skill.favorite_count,
+            download_count=skill.download_count,
+            is_official=skill.is_official,
+            is_recommended=skill.is_recommended,
+            is_test=skill.is_test,
+            network_types=skill.network_types,
+            antcode_url=skill.antcode_url,
+        )
+
     def _resolve_read_team_id(
         self, scope: SkillCenterReadScope, team_id: str | None, skill_code: str
     ) -> str:
@@ -175,13 +206,16 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
         start = (request.page_num - 1) * request.page_size
         page = items[start : start + request.page_size]
         return SkillCenterSkillPage(
-            tuple(page), len(items), request.page_num, request.page_size
+            tuple(self._to_public_skill(skill) for skill in page),
+            len(items),
+            request.page_num,
+            request.page_size,
         )
 
     def get_public_skill(
         self, request: SkillCenterPublicSkillDetailRequest
     ) -> SkillCenterSkill | None:
-        return next(
+        skill = next(
             (
                 skill
                 for (_, skill_code), skill in self._skills.items()
@@ -190,6 +224,7 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
             ),
             None,
         )
+        return self._to_public_skill(skill) if skill is not None else None
 
     def list_public_tags(self) -> tuple[SkillCenterTag, ...]:
         names = sorted(
@@ -233,6 +268,16 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
     ) -> SkillCenterPublishSubmission:
         if not self._has_team(request.team_id):
             self._missing(f"team {request.team_id} does not exist")
+        existing_team_id = next(
+            (
+                team_id
+                for team_id, skill_code in self._skills
+                if skill_code == request.skill_code
+            ),
+            None,
+        )
+        if existing_team_id is not None and existing_team_id != request.team_id:
+            self._missing(f"skill {request.skill_code} already belongs to another team")
         key = (request.team_id, request.skill_code)
         self._skills[key] = SkillCenterTeamSkill(
             skill_code=request.skill_code,

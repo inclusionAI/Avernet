@@ -104,7 +104,9 @@ class SkillCenterGatewayService:
         page = self._gateway.search_public_skills(request)
         self._validate_page(page, page_num=request.page_num, page_size=request.page_size)
         if any(
-            item.access_level is not SkillCenterAccessLevel.PUBLIC for item in page.items
+            isinstance(item, SkillCenterTeamSkill)
+            or item.access_level is not SkillCenterAccessLevel.PUBLIC
+            for item in page.items
         ):
             self._reject("Skill Center returned a non-public catalogue item")
         return page
@@ -114,7 +116,8 @@ class SkillCenterGatewayService:
     ) -> SkillCenterSkill | None:
         skill = self._gateway.get_public_skill(request)
         if skill is not None and (
-            skill.skill_code != request.skill_code
+            isinstance(skill, SkillCenterTeamSkill)
+            or skill.skill_code != request.skill_code
             or skill.access_level is not SkillCenterAccessLevel.PUBLIC
         ):
             self._reject("Skill Center returned a non-public or different Skill")
