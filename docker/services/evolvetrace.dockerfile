@@ -18,6 +18,7 @@ WORKDIR /build
 # Copy package metadata first for layer caching.
 COPY src/evolverun/evolvetrace/package.json src/evolverun/evolvetrace/package-lock.json ./
 RUN npm config set registry "${npm_config_registry}" \
+    && npm config set legacy-peer-deps true \
     && npm ci --no-audit --no-fund
 
 # Copy source and build both frontend and server.
@@ -51,6 +52,7 @@ COPY --from=builder --chown=appuser:appuser /build/package-lock.json ./package-l
 
 # Install production dependencies only (mysql2 etc.).
 RUN npm config set registry "${npm_config_registry}" \
+    && npm config set legacy-peer-deps true \
     && npm ci --omit=dev --no-audit --no-fund \
     && rm -rf ~/.npm
 
