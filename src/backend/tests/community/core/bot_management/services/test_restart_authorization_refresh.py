@@ -26,6 +26,7 @@ from agentclaw.community.core.bot_management.engines.provisioning import (
 )
 
 _AICODING_THREADING = "agentclaw.community.core.bot_management.engines.aicoding.strategy.threading"
+_AICODING_SLEEP = "agentclaw.community.core.bot_management.engines.aicoding.strategy.time.sleep"
 
 
 class _InlineThread:
@@ -191,7 +192,141 @@ def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
     skill_set_service.sync_runtime.return_value = False
     factory.create.return_value = skill_set_service
 
-    with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
+    with (
+        patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)),
+        patch(_AICODING_SLEEP, return_value=None),
+    ):
+        assert strategy.refresh_restart_authorization(
+            _ctx(active_engine="aicoding"),
+            _bot(),
+            {"confirmed_template_update": True},
+            mcp_sync=mcp_sync,
+            skill_set_factory=factory,
+        ) is True
+
+    mcp_sync.sync_mcp_details.assert_awaited_once()
+    assert skill_set_service.sync_runtime.call_count == 5
+
+
+
+def test_aicoding_refresh_retries_mcp_detail_until_runtime_ready() -> None:
+    strategy = AicodingProvisioningStrategy("aicoding")
+    mcp_sync = MagicMock()
+    mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
+    mcp_sync.sync_mcp_details = AsyncMock(
+        side_effect=[
+            {"success": False, "error": "NO_ACTIVE_DEVICES"},
+            {"success": True},
+        ]
+    )
+    factory = MagicMock()
+    skill_set_service = MagicMock()
+    skill_set_service.sync_runtime.return_value = True
+    factory.create.return_value = skill_set_service
+
+    with (
+        patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)),
+        patch(_AICODING_SLEEP, return_value=None),
+    ):
+        assert strategy.refresh_restart_authorization(
+            _ctx(active_engine="aicoding"),
+            _bot(),
+            {"confirmed_template_update": True},
+            mcp_sync=mcp_sync,
+            skill_set_factory=factory,
+        ) is True
+
+    assert mcp_sync.sync_mcp_details.await_count == 2
+    skill_set_service.sync_runtime.assert_called_once_with()
+
+
+def test_aicoding_refresh_retries_mcp_detail_exception_until_runtime_ready() -> None:
+    strategy = AicodingProvisioningStrategy("aicoding")
+    mcp_sync = MagicMock()
+    mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
+    mcp_sync.sync_mcp_details = AsyncMock(
+        side_effect=[
+            RuntimeError("BaaS API error: NO_ACTIVE_DEVICES"),
+            {"success": True},
+        ]
+    )
+
+    with (
+        patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)),
+        patch(_AICODING_SLEEP, return_value=None),
+    ):
+        assert strategy.refresh_restart_authorization(
+            _ctx(active_engine="aicoding"),
+            _bot(),
+            {"confirmed_template_update": True},
+            mcp_sync=mcp_sync,
+            skill_set_factory=None,
+        ) is True
+
+    assert mcp_sync.sync_mcp_details.await_count == 2
+
+
+def test_aicoding_refresh_retries_skill_symlink_until_runtime_ready() -> None:
+    strategy = AicodingProvisioningStrategy("aicoding")
+    factory = MagicMock()
+    skill_set_service = MagicMock()
+    skill_set_service.sync_runtime.side_effect = [False, True]
+    factory.create.return_value = skill_set_service
+
+    with (
+        patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)),
+        patch(_AICODING_SLEEP, return_value=None),
+    ):
+        assert strategy.refresh_restart_authorization(
+            _ctx(active_engine="aicoding"),
+            _bot(),
+            {"confirmed_template_update": True},
+            mcp_sync=None,
+            skill_set_factory=factory,
+        ) is True
+
+    assert skill_set_service.sync_runtime.call_count == 2
+
+
+def test_aicoding_refresh_retries_skill_symlink_exception_until_runtime_ready() -> None:
+    strategy = AicodingProvisioningStrategy("aicoding")
+    factory = MagicMock()
+    skill_set_service = MagicMock()
+    skill_set_service.sync_runtime.side_effect = [
+        RuntimeError("BaaS API error: NO_ACTIVE_DEVICES"),
+        True,
+    ]
+    factory.create.return_value = skill_set_service
+
+    with (
+        patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)),
+        patch(_AICODING_SLEEP, return_value=None),
+    ):
+        assert strategy.refresh_restart_authorization(
+            _ctx(active_engine="aicoding"),
+            _bot(),
+            {"confirmed_template_update": True},
+            mcp_sync=None,
+            skill_set_factory=factory,
+        ) is True
+
+    assert skill_set_service.sync_runtime.call_count == 2
+
+
+def test_aicoding_refresh_swallows_non_transient_runtime_exceptions() -> None:
+    strategy = AicodingProvisioningStrategy("aicoding")
+    mcp_sync = MagicMock()
+    mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
+    mcp_sync.sync_mcp_details = AsyncMock(side_effect=RuntimeError("detail down"))
+    factory = MagicMock()
+    skill_set_service = MagicMock()
+    skill_set_service.sync_runtime.side_effect = RuntimeError("skill down")
+    factory.create.return_value = skill_set_service
+
+    with (
+        patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)),
+        patch(_AICODING_SLEEP, return_value=None),
+    ):
         assert strategy.refresh_restart_authorization(
             _ctx(active_engine="aicoding"),
             _bot(),
