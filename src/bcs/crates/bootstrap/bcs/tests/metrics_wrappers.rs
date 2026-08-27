@@ -64,12 +64,13 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
 
     let direct = Arc::new(A2aRunFake);
     let direct = InstrumentedA2aChatRunService::new(direct, env.clone());
-    assert!(
+    assert_eq!(
         direct
-            .run_blocking_chat(blocking_chat_cmd())
+            .start_async_chat(async_chat_cmd())
             .await
             .unwrap()
-            .delivered
+            .status,
+        "pending"
     );
 
     let bot_delivery = MetricsBotDeliveryPort::new(Arc::new(BotDeliveryFake {
@@ -392,26 +393,14 @@ struct A2aRunFake;
 
 #[async_trait]
 impl A2aChatRunService for A2aRunFake {
-    async fn run_blocking_chat(
-        &self,
-        _cmd: BlockingA2aChatCommand,
-    ) -> ServiceResult<BlockingA2aChatOutcome> {
-        Ok(BlockingA2aChatOutcome {
-            delivered: true,
-            bot_uuid: "bot-target".to_string(),
-            session_id: "session-wrapper".to_string(),
-            content: "ok".to_string(),
-        })
-    }
-
     async fn start_async_chat(
         &self,
-        _cmd: AsyncA2aChatCommand,
+        cmd: AsyncA2aChatCommand,
     ) -> ServiceResult<AsyncA2aChatAccepted> {
         Ok(AsyncA2aChatAccepted {
-            run_id: "run-wrapper".to_string(),
-            bot_uuid: "bot-target".to_string(),
-            session_id: "session-wrapper".to_string(),
+            run_id: cmd.run_id,
+            bot_uuid: cmd.target_bot_id,
+            session_id: cmd.session_key,
             status: "pending".to_string(),
             expires_at_ms: 1,
         })
@@ -420,7 +409,7 @@ impl A2aChatRunService for A2aRunFake {
     async fn get_run(&self, _cmd: ChatRunQueryCommand) -> ServiceResult<A2aRunStatus> {
         Ok(A2aRunStatus {
             run_id: "run-wrapper".to_string(),
-            status: "completed".to_string(),
+            status: "running".to_string(),
             response: None,
         })
     }
@@ -431,6 +420,26 @@ impl A2aChatRunService for A2aRunFake {
             status: "cancelled".to_string(),
             response: None,
         })
+    }
+}
+
+fn async_chat_cmd() -> AsyncA2aChatCommand {
+    AsyncA2aChatCommand {
+        caller: CallerContext::Public,
+        target_bot_id: "bot-target".to_string(),
+        message: "hello".to_string(),
+        from_actor_id: None,
+        run_channel_from: None,
+        authenticated_staff_id: None,
+        run_id: "run-wrapper".to_string(),
+        session_key: "session-wrapper".to_string(),
+        timeout_ms: 1,
+        client: None,
+        tags: Vec::new(),
+        response_mode: ChatResponseMode::Full,
+        caller_wait_mode: None,
+        organization_code: None,
+        provider_bypass_headers: Vec::new(),
     }
 }
 
@@ -645,25 +654,6 @@ fn task_complete_cmd() -> TaskCompleteCommand {
         bot_id: "bot-target".to_string(),
         via_echo: false,
         payload: serde_json::json!({}),
-    }
-}
-
-fn blocking_chat_cmd() -> BlockingA2aChatCommand {
-    BlockingA2aChatCommand {
-        caller: CallerContext::Public,
-        target_bot_id: "bot-target".to_string(),
-        message: "hello".to_string(),
-        from_actor_id: None,
-        run_channel_from: None,
-        authenticated_staff_id: None,
-        tags: Vec::new(),
-        run_id: "run-wrapper".to_string(),
-        session_key: "session-wrapper".to_string(),
-        timeout_ms: 1,
-        client: None,
-        response_mode: ChatResponseMode::Full,
-        organization_code: None,
-        provider_bypass_headers: Vec::new(),
     }
 }
 

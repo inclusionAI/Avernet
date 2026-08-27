@@ -1705,13 +1705,6 @@ pub struct NoopA2aChatRunService;
 
 #[async_trait]
 impl A2aChatRunService for NoopA2aChatRunService {
-    async fn run_blocking_chat(
-        &self,
-        _cmd: BlockingA2aChatCommand,
-    ) -> ServiceResult<BlockingA2aChatOutcome> {
-        Err(service_not_configured("a2a chat run service"))
-    }
-
     async fn start_async_chat(
         &self,
         _cmd: AsyncA2aChatCommand,
