@@ -121,6 +121,16 @@ REVIEWED_EVENT_TYPES: dict[WorkOrderEventType, WorkOrderEventType] = {
 }
 
 
+def reviewed_event_type_for(*, source_event_type: str | None, biz_type: str) -> str:
+    """Resolve the notice event produced after an approval decision."""
+
+    try:
+        mapped = REVIEWED_EVENT_TYPES.get(WorkOrderEventType(source_event_type))
+    except (TypeError, ValueError):
+        mapped = None
+    return mapped.value if mapped is not None else f"{biz_type}_REVIEWED"
+
+
 NOTICE_EVENT_TYPES: frozenset[WorkOrderEventType] = frozenset(
     event_type
     for event_type, category in EVENT_CATEGORIES.items()

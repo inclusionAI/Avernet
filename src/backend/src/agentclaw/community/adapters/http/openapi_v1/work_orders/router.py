@@ -83,7 +83,6 @@ _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
 _CALLBACK_HEADER_NAMES = {
     "authorization",
-    "cookie",
     "x-request-id",
     "x-trace-id",
 }

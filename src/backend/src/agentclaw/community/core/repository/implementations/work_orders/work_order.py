@@ -30,7 +30,6 @@ from agentclaw.community.core.work_orders.errors import (
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
-    REVIEWED_EVENT_TYPES,
     WorkOrderApprovalContext,
     WorkOrderApproverRecord,
     WorkOrderBizType,
@@ -47,7 +46,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderDecision,
     WorkOrderApproverStatus,
     WorkOrderEventCreatedResult,
-    WorkOrderEventType,
+    reviewed_event_type_for,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderModel,
@@ -323,15 +322,10 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 .first()
             )
             source_event_type = source_event[0] if source_event is not None else None
-            reviewed_event_type = f"{order.biz_type}_REVIEWED"
-            try:
-                mapped_event_type = REVIEWED_EVENT_TYPES.get(
-                    WorkOrderEventType(source_event_type)
-                )
-            except (TypeError, ValueError):
-                mapped_event_type = None
-            if mapped_event_type is not None:
-                reviewed_event_type = mapped_event_type.value
+            reviewed_event_type = reviewed_event_type_for(
+                source_event_type=source_event_type,
+                biz_type=order.biz_type,
+            )
             db.add(
                 self._Notification(
                     work_order_id=work_order_id,

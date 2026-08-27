@@ -135,6 +135,7 @@ def test_process_approval_forwards_only_callback_identity_headers(
         json={"decision": "APPROVED"},
         headers={
             "Authorization": "Bearer token",
+            "Cookie": "backend_session=must-not-forward",
             "X-Request-Id": "request-1",
             "X-Trace-Id": "trace-1",
             "X-Avernet-Principal": "must-not-forward",
