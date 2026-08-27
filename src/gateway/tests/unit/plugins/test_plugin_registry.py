@@ -270,14 +270,3 @@ class TestRegisterSecretResolverOption:
         assert isinstance(
             container.plugins().secret_resolver(), CommunitySecretResolver
         )
-
-    def test_env_secret_resolver_is_selectable(self) -> None:
-        from gateway.community.bootstrap._configs import init_container_config
-        from gateway.community.bootstrap._container import ApplicationContainer
-        from gateway.community.plugins.secret_resolver.env import EnvSecretResolver
-
-        container = ApplicationContainer()
-        init_container_config(container)
-        container.config.plugins.secret.override("env")
-
-        assert isinstance(container.plugins().secret_resolver(), EnvSecretResolver)

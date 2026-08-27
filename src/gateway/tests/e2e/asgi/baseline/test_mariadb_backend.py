@@ -38,7 +38,7 @@ _MARIADB_PASSWORD = os.environ.get("MARIADB_PASSWORD", "gatewaypass")
 
 def _signing_key() -> str:
     """Community env-var signing key name (configs/application.yaml)."""
-    return "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE"
+    return "PRINCIPAL_SIGNING_KEY"
 
 
 def _probe_mariadb() -> str | None:
@@ -91,7 +91,7 @@ def _require_live_mariadb() -> None:
 @pytest.fixture(autouse=True)
 def _provision_signing_key(monkeypatch: pytest.MonkeyPatch) -> None:
     # Access-key issuance signs with the principal signing key resolved from
-    # ``{env_prefix}{NAME}_VALUE`` (configs/application.yaml).
+    # ``{NAME}`` directly (configs/application.yaml).
     monkeypatch.setenv(_signing_key(), "e2e-mariadb-signing-key-32bytes!!")
 
 

@@ -25,7 +25,6 @@ user_config:
   plugins:
     cache: "redis"
     database: "mariadb"
-    secret: "env"
 
   # MariaDB connection config (plugins.database = "mariadb").
   database:
