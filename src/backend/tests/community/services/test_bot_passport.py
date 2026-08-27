@@ -38,6 +38,7 @@ class TestBotServicePassportIntegration:
         """Create BotService with mocked dependencies."""
         from agentclaw.community.core.bot_management.services.bot_service import BotService
         service = BotService(
+            caller_identity_repo=MagicMock(),
             drm_reader=MagicMock(),
             repository=mock_bot_repository,
             allocation_config=MagicMock(mode="multi", max_devices_per_entity=5),
@@ -682,6 +683,7 @@ class TestCreateServiceBotPublish:
         """Create BotService with mocked dependencies."""
         from agentclaw.community.core.bot_management.services.bot_service import BotService
         service = BotService(
+            caller_identity_repo=MagicMock(),
             drm_reader=MagicMock(),
             repository=mock_bot_repository,
             allocation_config=MagicMock(mode="multi", max_devices_per_entity=5),

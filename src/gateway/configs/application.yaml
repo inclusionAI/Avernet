@@ -445,10 +445,13 @@ user_config:
 
 # The harness operations sit beneath the addressed bot, so the wide
     # "/openapi/v1/bots/**" rule above would otherwise admit them with no user
-    # on the wire. They diagnose and patch a bot's live config files — a human
-    # stays on the boundary, and the extra literal segment outranks the prefix.
+    # on the wire. They now participate in the addressed-bot grant seam and
+    # accept delegated application callers in addition to human operators; the
+    # extra literal segment outranks the prefix, and backend admission checks
+    # the grant once the request reaches it.
     "/openapi/v1/bots/{bot_id}/harness/**":
-      user: required
+      user: optional
+      app: optional
 
     # HarnessFlow (task escort) — served by clawweb. Authz is delegated to
     # clawweb; the gateway passes through both identities when present.

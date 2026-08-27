@@ -508,6 +508,7 @@ class _ReplacementRuntime:
     def __init__(self, results):
         self.results = iter(results)
         self.calls = 0
+        self.scopes: list = []
 
     def create(self, **_kwargs):
         return self
@@ -516,8 +517,9 @@ class _ReplacementRuntime:
         self.calls += 1
         return next(self.results)
 
-    async def project(self, **_kwargs):
+    async def project(self, *, scope=None, **_kwargs):
         self.calls += 1
+        self.scopes.append(scope)
         if not next(self.results):
             raise RuntimeError("runtime reconcile failed")
 
@@ -1740,3 +1742,35 @@ def test_directory_package_rejects_path_traversal_before_it_can_be_archived():
         LocalSkillUploadService._pack_directory(
             [("skill/../outside/SKILL.md", _skill_md())]
         )
+
+
+@pytest.mark.asyncio
+async def test_a_local_skill_replacement_never_touches_the_mcp_half():
+    """A replace changes package bytes and description — never the MCP set.
+
+    ``replace_bot_local_skill`` writes only description/user_id/gmt_modified
+    and refuses to move ``git_path``; nothing in this flow rescans
+    ``mcp_dependencies``. So the projected MCP codes are identical before and
+    after, and claiming or releasing any of them would be a device write to
+    restate what is already true.
+    """
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+    repo = _ReplacementRepo([_existing_skill(active=False)])
+    runtime = _ReplacementRuntime([True])
+
+    await _replacement_service(filesystem, repo, runtime).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="collaborator",
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
+    )
+
+    (scope,) = runtime.scopes
+    assert scope.skills is True
+    assert scope.mcp is False
+    assert scope.claim_all_mcp is False, (
+        "a replace has prior state to converge on; it is not a bare device"
+    )
+    assert scope.claimed_mcp == frozenset()
+    assert scope.released_mcp == frozenset()

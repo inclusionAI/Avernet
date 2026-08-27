@@ -16,7 +16,7 @@ use bcs_ws::{bot::BOT_WS_ENDPOINT, web::FRONTEND_WS_ENDPOINT};
 #[cfg(feature = "prometheus-metrics")]
 use bcs_service_api::{
     A2aChatRunService, A2aRunStatus, ActorKind, ActorStatus, AsyncA2aChatAccepted, AsyncA2aChatCommand,
-    BlockingA2aChatCommand, BlockingA2aChatOutcome, BotDeliveryCommand, BotDeliveryKind,
+    BotDeliveryCommand, BotDeliveryKind,
     BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotEventCommand, BotEventOutcome,
     BotMetricCount, BotMetricsSnapshotPort,
     ChatAbortCommand, ChatAbortOutcome, ChatRunCancelCommand, ChatRunMetricCount, ChatRunQueryCommand,
@@ -901,15 +901,6 @@ impl InstrumentedA2aChatRunService {
 #[cfg(feature = "prometheus-metrics")]
 #[async_trait::async_trait]
 impl A2aChatRunService for InstrumentedA2aChatRunService {
-    async fn run_blocking_chat(
-        &self,
-        cmd: BlockingA2aChatCommand,
-    ) -> ServiceResult<BlockingA2aChatOutcome> {
-        let result = self.inner.run_blocking_chat(cmd).await;
-        self.record(result.is_ok());
-        result
-    }
-
     async fn start_async_chat(
         &self,
         cmd: AsyncA2aChatCommand,

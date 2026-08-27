@@ -94,6 +94,19 @@ def unpack_resource_scope(
 
     Non-resource updates, such as admins or metadata, intentionally omit
     resource_scope so existing MCP/CLI grants are left untouched.
+
+    A scope that grants MCPs must say under whose identity each one runs.
+    ``mcp_codes`` alone cannot: the port fills the missing ``identity_mode``
+    with ``"owner"``, so a code-only scope does not leave identity alone — it
+    asserts Owner for every MCP and discards the Caller grants
+    ``update_mcp_identity_to_agent_principal`` wrote through the same field.
+    Because ``updatePassport`` replaces each resource list wholesale, that
+    demotion is silent and total. So a non-empty ``mcp_codes`` without
+    ``mcp_items`` is rejected here rather than accepted and quietly widened:
+    the caller holds the Bot and can read the identities; this function does
+    not. An empty list stays legal — it grants nothing, so there is no
+    identity to lose — which is what lets a caller clear MCP scope without
+    assembling items for it.
     """
     if resource_scope is None:
         return None, None
@@ -111,7 +124,13 @@ def unpack_resource_scope(
         raise ValueError(
             "resource_scope must include mcp_codes and cli_items"
         ) from e
-    return [{"mcp_code": code} for code in mcp_codes], cli_items
+    if mcp_codes:
+        raise ValueError(
+            "resource_scope granting MCPs must include mcp_items: bare "
+            "mcp_codes would assert identity_mode=owner for every MCP and "
+            "drop the bot's caller grants"
+        )
+    return [], cli_items
 
 
 @runtime_checkable

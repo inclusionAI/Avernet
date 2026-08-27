@@ -25,11 +25,44 @@ from agentclaw.community.core.skill_center.errors import (
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
+    ProjectionScope,
 )
 from agentclaw.community.core.skills_pool.mapping_intent import (
     retired_logical_skill_mappings,
 )
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
+
+
+def skill_claim_scope(result: DesiredStateMutation) -> ProjectionScope:
+    """A Skill mutation that adds the Skill, and with it its MCP dependencies.
+
+    ``mcp`` follows the dependencies rather than being hard-coded: a Skill with
+    none leaves the MCP set untouched, so projecting that half would re-declare
+    an unchanged allow-list and re-push an unchanged Passport manifest.
+
+    The codes are candidates. The projector intersects them with the set it
+    actually resolved, so a dependency that does not survive projection is
+    never delivered.
+    """
+    return ProjectionScope(
+        skills=True,
+        mcp=bool(result.mcp_codes),
+        claimed_mcp=result.mcp_codes,
+    )
+
+
+def skill_release_scope(result: DesiredStateMutation) -> ProjectionScope:
+    """The mirror of ``skill_claim_scope`` for a Skill leaving the Bot.
+
+    Also candidates: another Skill or the default policy may still supply the
+    same code, and the projector subtracts the projected set before deleting
+    any device configuration.
+    """
+    return ProjectionScope(
+        skills=True,
+        mcp=bool(result.mcp_codes),
+        released_mcp=result.mcp_codes,
+    )
 
 
 class MutationProjectionFlow:
@@ -57,6 +90,10 @@ class MutationProjectionFlow:
         engine_type: str | None,
         mutation: Callable[[], DesiredStateMutation],
         runtime_required: bool = True,
+        scope: ProjectionScope | None = None,
+        scope_from_result: (
+            Callable[[DesiredStateMutation], ProjectionScope] | None
+        ) = None,
     ) -> dict:
         """Run the command; return ``{**item, "changed": ..., **details}``.
 
@@ -64,7 +101,25 @@ class MutationProjectionFlow:
         an inactive-set membership change has no runtime projection to apply,
         preserving the legacy inactive draft contract. ``engine_type`` scopes
         a compensation's restore to the Sets the mutation could have touched.
+
+        ``scope`` is what this mutation changed, declared by the command that
+        knows it. Exactly one of ``scope`` / ``scope_from_result`` must be
+        given: there is no "forgot to say" default, because the fallback would
+        be a full reconcile — the expensive answer, and never the one a
+        mutation wants. A caller with genuinely nothing to narrow passes
+        ``ProjectionScope.everything()`` and says so out loud.
+
+        ``scope_from_result`` covers the commands that cannot name their scope
+        up front: activate, deactivate, and the Skill commands learn which
+        MCPs they claimed or released only from the mutation result, which the
+        repository fills in under the row lock it already holds. Building the
+        scope from a second, unlocked query instead could disagree with what
+        was actually installed.
         """
+        if (scope is None) == (scope_from_result is None):
+            raise ValueError(
+                "exactly one of scope / scope_from_result is required"
+            )
         if not runtime_required:
             result = mutation()
             return {**result.item, "changed": result.changed, **result.details}
@@ -76,12 +131,17 @@ class MutationProjectionFlow:
             owner_id=owner_id,
         )
         result = mutation()
+        effective_scope = (
+            scope_from_result(result) if scope_from_result is not None else scope
+        )
+        assert effective_scope is not None  # guaranteed by the check above
         await self._project_or_compensate(
             bot_id=bot_id,
             owner_id=owner_id,
             engine_type=engine_type,
             mutation=result,
             previous_mappings=previous_mappings,
+            scope=effective_scope,
         )
         return {**result.item, "changed": result.changed, **result.details}
 
@@ -93,6 +153,7 @@ class MutationProjectionFlow:
         engine_type: str | None,
         mutation: DesiredStateMutation,
         previous_mappings: Sequence[PoolSkillMapping],
+        scope: ProjectionScope,
     ) -> None:
         current_mappings: Sequence[PoolSkillMapping] = ()
         try:
@@ -107,6 +168,7 @@ class MutationProjectionFlow:
                     list(previous_mappings),
                     list(current_mappings),
                 ),
+                scope=scope,
             )
         except Exception as exc:
             self._repository.restore_desired_state(
@@ -123,6 +185,9 @@ class MutationProjectionFlow:
                         list(current_mappings),
                         list(previous_mappings),
                     ),
+                    # Same swap as the mappings above: what the forward
+                    # projection claimed is what this one releases.
+                    scope=scope.inverted(),
                 )
             except Exception as restore_error:
                 raise SkillSetRuntimeReconcileError() from restore_error

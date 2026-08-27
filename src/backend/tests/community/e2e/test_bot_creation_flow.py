@@ -135,6 +135,7 @@ class TestBotCreationFlow:
     def bot_service(self, fake_repo, mock_device_service):
         """创建 BotService 实例，注入 Fake 仓库 + mock device_service。"""
         service = BotService(
+            caller_identity_repo=MagicMock(),
             drm_reader=MagicMock(),
             repository=fake_repo,
             allocation_config=MagicMock(mode="multi", max_devices_per_entity=5),

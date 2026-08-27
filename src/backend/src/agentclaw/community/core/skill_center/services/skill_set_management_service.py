@@ -35,8 +35,16 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
 )
+from agentclaw.community.core.repository.capability_desired_state_types import (
+    DesiredStateMutation,
+)
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ProjectionScope,
+)
 from agentclaw.community.core.skill_center.services._mutation_flow import (
     MutationProjectionFlow,
+    skill_claim_scope,
+    skill_release_scope,
 )
 from agentclaw.community.core.workspace.skill_layout import (
     runtime_layout_engine_for_bot,
@@ -292,6 +300,11 @@ class SkillSetManagementService:
         set_id: str,
         skill_id: str,
     ) -> dict:
+        # Scope comes from the mutation result, not from up here: a Skill can
+        # carry ``mcp_dependencies``, and those codes join the Bot's MCP set
+        # along with the Skill. The repository reads them under the row lock it
+        # already holds, so the scope names what was actually installed rather
+        # than what a second, unlocked query happened to see.
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         target = self._target_set(bot=bot, bot_id=bot_id, set_id=set_id)
         if target["is_default"]:
@@ -307,6 +320,7 @@ class SkillSetManagementService:
                 bot_id=bot_id,
                 actor_id=user_id,
                 action="default_set_unexclude_skill",
+                scope_from_result=skill_claim_scope,
                 mutation=lambda: self._repository.unexclude_default_skill(
                     bot_id=bot_id,
                     owner_id=str(bot["owner_id"]),
@@ -322,6 +336,7 @@ class SkillSetManagementService:
             actor_id=user_id,
             action="skill_set_add_skill",
             runtime_required=bool(target.get("is_active")),
+            scope_from_result=skill_claim_scope,
             mutation=lambda: self._repository.add_skill(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -341,6 +356,7 @@ class SkillSetManagementService:
         set_id: str,
         skill_id: str,
     ) -> dict:
+        # Scope from the result, mirroring ``add_skill``.
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         target = self._target_set(bot=bot, bot_id=bot_id, set_id=set_id)
         if target["is_default"]:
@@ -351,6 +367,7 @@ class SkillSetManagementService:
                 bot_id=bot_id,
                 actor_id=user_id,
                 action="default_set_exclude_skill",
+                scope_from_result=skill_release_scope,
                 mutation=lambda: self._repository.exclude_default_skill(
                     bot_id=bot_id,
                     owner_id=str(bot["owner_id"]),
@@ -366,6 +383,7 @@ class SkillSetManagementService:
             actor_id=user_id,
             action="skill_set_remove_skill",
             runtime_required=bool(target.get("is_active")),
+            scope_from_result=skill_release_scope,
             mutation=lambda: self._repository.remove_skill(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -460,6 +478,9 @@ class SkillSetManagementService:
                 bot_id=bot_id,
                 actor_id=user_id,
                 action="default_set_unexclude_mcp",
+                scope=ProjectionScope(
+                    mcp=True, claimed_mcp=frozenset({server_code})
+                ),
                 mutation=lambda: self._repository.unexclude_default_mcp(
                     bot_id=bot_id,
                     owner_id=str(bot["owner_id"]),
@@ -476,6 +497,7 @@ class SkillSetManagementService:
             actor_id=user_id,
             action="skill_set_add_mcp",
             runtime_required=bool(target.get("is_active")),
+            scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({server_code})),
             mutation=lambda: self._repository.add_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -506,6 +528,9 @@ class SkillSetManagementService:
                 bot_id=bot_id,
                 actor_id=user_id,
                 action="default_set_exclude_mcp",
+                scope=ProjectionScope(
+                    mcp=True, released_mcp=frozenset({server_code})
+                ),
                 mutation=lambda: self._repository.exclude_default_mcp(
                     bot_id=bot_id,
                     owner_id=str(bot["owner_id"]),
@@ -524,6 +549,7 @@ class SkillSetManagementService:
             actor_id=user_id,
             action="skill_set_remove_mcp",
             runtime_required=bool(target.get("is_active")),
+            scope=ProjectionScope(mcp=True, released_mcp=frozenset({server_code})),
             mutation=lambda: self._repository.remove_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -552,6 +578,9 @@ class SkillSetManagementService:
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_activate",
+            scope_from_result=lambda result: ProjectionScope(
+                skills=True, mcp=True, claimed_mcp=result.mcp_codes
+            ),
             mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -571,6 +600,9 @@ class SkillSetManagementService:
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_deactivate",
+            scope_from_result=lambda result: ProjectionScope(
+                skills=True, mcp=True, released_mcp=result.mcp_codes
+            ),
             mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -593,6 +625,9 @@ class SkillSetManagementService:
             bot_id=bot_id,
             actor_id=actor_id,
             action="skill_set_sync",
+            scope_from_result=lambda result: ProjectionScope(
+                skills=True, mcp=True, claimed_mcp=result.mcp_codes
+            ),
             mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -670,6 +705,8 @@ class SkillSetManagementService:
         action: str,
         mutation,
         runtime_required: bool = True,
+        scope: ProjectionScope | None = None,
+        scope_from_result: Callable[[DesiredStateMutation], ProjectionScope] | None = None,
     ) -> dict:
         """Apply one desired-state mutation and synchronously reconcile runtime.
 
@@ -677,6 +714,11 @@ class SkillSetManagementService:
         contract: an inactive-set membership change has no runtime projection
         to apply. The mutate-project-compensate orchestration itself is the
         shared :class:`MutationProjectionFlow`.
+
+        Both scope arguments stay optional *here* only because each command
+        supplies whichever one it can — every one of the eleven call sites
+        below passes exactly one. The flow enforces that; neither is a
+        "forgot to say" default.
         """
         result = await self._flow.apply(
             bot=bot,
@@ -684,6 +726,8 @@ class SkillSetManagementService:
             engine_type=self._engine(bot),
             mutation=mutation,
             runtime_required=runtime_required,
+            scope=scope,
+            scope_from_result=scope_from_result,
         )
         self._audit(
             bot_id=bot_id,

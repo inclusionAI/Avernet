@@ -356,10 +356,22 @@ class CompositeWorkerProfileSource:
         final_fragments = api_fragments if use_api_fragments else registry_fragments
         final_skills = api_skills if use_api_skills else registry_skills
 
+        # 合并后 Profile 的 profile_id：
+        # 当实际使用 API 提供的内容时，应使用 API profile 的 profile_id，
+        # 这样 profile_key 才能与 bcsfuse_worker_profile_contents 里实际持久化的内容一致。
+        # Registry profile_id 只来自 worker.active_profile_key，可能已过时。
+        use_api_content = use_api_fragments or use_api_skills
+        merged_profile_id = api_profile.profile_id if use_api_content else registry_profile.profile_id
+        if use_api_content and merged_profile_id != registry_profile.profile_id:
+            logger.info(
+                "[CompositeSource] Merge uses API profile_id: registry=%s, api=%s",
+                registry_profile.profile_id, api_profile.profile_id
+            )
+
         # 创建合并后的 Profile
         merged_profile = WorkerProfile(
             staff_id=registry_profile.staff_id,
-            profile_id=registry_profile.profile_id,
+            profile_id=merged_profile_id,
             profile_type=registry_profile.profile_type,
             source_type=registry_profile.source_type,
             source_root=registry_profile.source_root,

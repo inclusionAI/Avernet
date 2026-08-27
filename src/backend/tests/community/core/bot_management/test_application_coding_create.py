@@ -435,6 +435,7 @@ def test_auth_completion_rejects_invalid_combo_before_passport_query() -> None:
 
 def _create_bot_service() -> BotService:
     service = BotService(
+        caller_identity_repo=MagicMock(),
         drm_reader=MagicMock(),
         repository=MagicMock(),
         allocation_config=MagicMock(mode="multi", max_devices_per_entity=5),

@@ -464,13 +464,169 @@ class TestGetSetSkillsExclusion:
         assert result == []
 
 
-class TestSyncMcpDesiredState:
-    """sync_mcp_desired_state: projection contract + delegation to the batch entrypoint.
+class TestSyncMcpDelivery:
+    """sync_mcp_delivery: per-MCP configuration, scoped to what changed.
 
-    The fan-out itself lives in ``MCPSyncService.sync_mcp_details_for_bot`` (which
-    resolves the device once for the whole batch); what matters here is that the
-    desired state is handed over in one call and that a failed delivery still
-    withholds the allow-list declaration.
+    Delivery is deliberately not total. Re-pushing an unchanged MCP rewrites
+    its device-side configuration from the DB for nothing, and removing one
+    still supplied elsewhere would break it — so this only ever sees the codes
+    a mutation declared, already guarded against the projected set.
+    """
+
+    def _make_svc(self, *, delivery=None, removal=None):
+        from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
+
+        with patch("agentclaw.community.core.skill_center.services.skill_set_service.WorkspacePathFactory"):
+            svc = SkillSetService(
+                skill_repo=MagicMock(),
+                skill_set_repo=MagicMock(),
+                mcp_center=MagicMock(),
+                mcp_config_service=MagicMock(),
+                skill_service=MagicMock(),
+                bot_repo=MagicMock(),
+                path_factory=MagicMock(),
+            )
+        svc.bot_id = "bot1"
+        svc.user_id = "user1"
+        svc.entity_id = "staff_user1"
+        svc.engine_type = "moltis"
+        svc.mcp_center = MagicMock()
+        svc.mcp_center.get_mcp_detail.side_effect = lambda code: {"server_code": code}
+        svc._mcp_sync_service = MagicMock()
+        svc._mcp_sync_service.sync_mcp_details_for_bot = AsyncMock(
+            return_value=delivery if delivery is not None else {"success": True}
+        )
+        svc._mcp_sync_service.remove_mcp_detail = AsyncMock(
+            return_value=removal if removal is not None else {"success": True}
+        )
+        return svc
+
+    @pytest.mark.asyncio
+    async def test_one_claimed_code_costs_one_push(self):
+        """Problem 3, stated as a test.
+
+        Adding one MCP to a Bot that already has others must push exactly
+        that one — the batch entrypoint resolves the device once, so a
+        single-entry batch is one device write, not a fan-out.
+        """
+        svc = self._make_svc()
+
+        assert await svc.sync_mcp_delivery(
+            claimed=frozenset({"mcp.new"}), released=frozenset()
+        ) is True
+
+        svc._mcp_sync_service.sync_mcp_details_for_bot.assert_awaited_once_with(
+            user_id="user1",
+            mcp_entries=[{"server_code": "mcp.new"}],
+            bot_id="bot1",
+            entity_id="staff_user1",
+            engine_type="moltis",
+        )
+        svc._mcp_sync_service.remove_mcp_detail.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_released_code_is_removed_from_the_device(self):
+        """Problem 2: the removal that had no production caller at all.
+
+        Without it the MCP leaves the allow-list but its endpoint, api_key
+        and headers stay registered on the container indefinitely.
+        """
+        svc = self._make_svc()
+
+        assert await svc.sync_mcp_delivery(
+            claimed=frozenset(), released=frozenset({"mcp.gone"})
+        ) is True
+
+        svc._mcp_sync_service.remove_mcp_detail.assert_awaited_once_with(
+            server_code="mcp.gone", bot_id="bot1", user_id="staff_user1"
+        )
+        svc._mcp_sync_service.sync_mcp_details_for_bot.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_empty_scope_touches_the_device_at_all(self):
+        """A mutation that changed no MCP claim does no MCP I/O."""
+        svc = self._make_svc()
+
+        assert await svc.sync_mcp_delivery(
+            claimed=frozenset(), released=frozenset()
+        ) is True
+
+        svc._mcp_sync_service.sync_mcp_details_for_bot.assert_not_awaited()
+        svc._mcp_sync_service.remove_mcp_detail.assert_not_awaited()
+        svc.mcp_center.get_mcp_detail.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_catalogue_gap_on_a_claimed_code_fails_delivery(self):
+        """Still fails closed — but only for a code being installed.
+
+        The old combined method resolved every projected code, so an
+        unrelated delisted MCP blocked every add.
+        """
+        svc = self._make_svc()
+        svc.mcp_center.get_mcp_detail.side_effect = lambda code: None
+
+        assert await svc.sync_mcp_delivery(
+            claimed=frozenset({"mcp.delisted"}), released=frozenset()
+        ) is False
+        svc._mcp_sync_service.sync_mcp_details_for_bot.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_failed_push_reports_failure(self):
+        svc = self._make_svc(delivery={"success": False, "error": "device refused"})
+
+        assert await svc.sync_mcp_delivery(
+            claimed=frozenset({"mcp.new"}), released=frozenset()
+        ) is False
+
+    @pytest.mark.asyncio
+    async def test_failed_removal_reports_failure(self):
+        svc = self._make_svc(removal={"success": False, "error": "device refused"})
+
+        assert await svc.sync_mcp_delivery(
+            claimed=frozenset(), released=frozenset({"mcp.gone"})
+        ) is False
+
+    @pytest.mark.asyncio
+    async def test_a_raising_push_does_not_escape(self):
+        svc = self._make_svc()
+        svc._mcp_sync_service.sync_mcp_details_for_bot = AsyncMock(
+            side_effect=RuntimeError("device refused the payload")
+        )
+
+        assert await svc.sync_mcp_delivery(
+            claimed=frozenset({"mcp.new"}), released=frozenset()
+        ) is False
+
+    @pytest.mark.asyncio
+    async def test_configuration_lands_before_it_is_withdrawn(self):
+        """Claims are pushed before releases are removed.
+
+        Within one scope the two are independent, but the order is fixed so a
+        code that is both released and re-claimed cannot end up deleted.
+        """
+        svc = self._make_svc()
+        order: list[str] = []
+        svc._mcp_sync_service.sync_mcp_details_for_bot = AsyncMock(
+            side_effect=lambda **kw: order.append("push") or {"success": True}
+        )
+        svc._mcp_sync_service.remove_mcp_detail = AsyncMock(
+            side_effect=lambda **kw: order.append("remove") or {"success": True}
+        )
+
+        await svc.sync_mcp_delivery(
+            claimed=frozenset({"mcp.new"}), released=frozenset({"mcp.gone"})
+        )
+
+        assert order == ["push", "remove"]
+
+
+class TestSyncMcpDesiredState:
+    """sync_mcp_desired_state: declaration only.
+
+    Declaration is total and overwrite-style — ``sync_all_mcp_servers`` is the
+    device's reconciliation command, so it carries the whole projected set and
+    runs even when that set is empty. Per-MCP configuration delivery is a
+    separate, scoped act; see ``TestSyncMcpDelivery``.
     """
 
     def _make_svc(self, *, delivery=None):
@@ -505,61 +661,50 @@ class TestSyncMcpDesiredState:
         return svc, plugin
 
     @pytest.mark.asyncio
-    async def test_whole_desired_state_is_delivered_in_one_call(self):
-        """One batch call, not one per MCP — that is what lets the device be
-        resolved once instead of once per entry."""
+    async def test_declares_every_projected_code_in_sorted_order(self):
         svc, plugin = self._make_svc()
         codes = {"mcp.s2", "mcp.s0", "mcp.s1"}
 
         assert await svc.sync_mcp_desired_state(server_codes=codes) is True
 
-        svc._mcp_sync_service.sync_mcp_details_for_bot.assert_awaited_once_with(
-            user_id="user1",
-            mcp_entries=[{"server_code": code} for code in sorted(codes)],
-            bot_id="bot1",
-            entity_id="staff_user1",
-            engine_type="moltis",
-        )
-        # The allow-list declaration still carries every entry, in sorted order.
+        # Dicts, not bare strings: ``filter_servers`` reads server_code off
+        # each entry, so a list of strings would declare an empty allow-list.
         plugin.sync_all_mcp_servers.assert_called_once_with(
             [{"server_code": code} for code in sorted(codes)]
         )
 
     @pytest.mark.asyncio
-    async def test_failed_delivery_withholds_the_allow_list_declaration(self):
-        svc, plugin = self._make_svc(
-            delivery={"success": False, "error": "bot=bot1 推送失败: mcp.s1"}
-        )
+    async def test_declaration_pushes_no_configuration(self):
+        """The regression this split exists to fix.
 
-        result = await svc.sync_mcp_desired_state(server_codes={"mcp.s0", "mcp.s1"})
-
-        assert result is False
-        plugin.sync_all_mcp_servers.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_raising_delivery_fails_the_projection_without_escaping(self):
+        Declaring the allow-list used to also re-push every projected MCP's
+        configuration, so adding one MCP rewrote the device-side config of
+        every other MCP the Bot had.
+        """
         svc, plugin = self._make_svc()
-        svc._mcp_sync_service.sync_mcp_details_for_bot = AsyncMock(
-            side_effect=RuntimeError("device refused the payload")
-        )
 
-        result = await svc.sync_mcp_desired_state(server_codes={"mcp.s0"})
+        await svc.sync_mcp_desired_state(server_codes={"mcp.s0", "mcp.s1"})
 
-        assert result is False
-        plugin.sync_all_mcp_servers.assert_not_called()
+        svc._mcp_sync_service.sync_mcp_details_for_bot.assert_not_awaited()
+        svc.mcp_center.get_mcp_detail.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_missing_mcp_center_detail_skips_delivery_entirely(self):
+    async def test_a_catalogue_gap_no_longer_blocks_the_declaration(self):
+        """Declaration needs codes, not payloads.
+
+        It used to resolve every code through MCP Center, so one delisted MCP
+        anywhere on the Bot failed the whole projection.
+        """
         svc, plugin = self._make_svc()
         svc.mcp_center.get_mcp_detail.side_effect = (
             lambda code: None if code == "mcp.s1" else {"server_code": code}
         )
 
-        result = await svc.sync_mcp_desired_state(server_codes={"mcp.s0", "mcp.s1"})
-
-        assert result is False
-        svc._mcp_sync_service.sync_mcp_details_for_bot.assert_not_awaited()
-        plugin.sync_all_mcp_servers.assert_not_called()
+        assert (
+            await svc.sync_mcp_desired_state(server_codes={"mcp.s0", "mcp.s1"})
+            is True
+        )
+        plugin.sync_all_mcp_servers.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_empty_desired_state_still_declares_the_empty_allow_list(self):
