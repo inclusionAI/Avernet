@@ -17,7 +17,7 @@ tags: [task, planning, decompose]
 > 一切判断基于 prompt 中已提供的 `{goal, context, snapshot, done_children, gaps}` 与你自身知识进行,缺数据用合理假设/占位补全并标注。
 ## 触发条件
 
-收到 prompt 头部 `[planning]` 标记的指令,且 prompt 含 `目标节点 node_id=...` 与 `任务态快照{...}`。
+收到 prompt 头部 `[task-planning]` 标记的指令,且 prompt 含 `目标节点 node_id=...` 与 `任务态快照{...}`。
 
 ## 输入(框架组装,prompt 内嵌)
 

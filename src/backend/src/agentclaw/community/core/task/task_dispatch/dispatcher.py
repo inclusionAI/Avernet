@@ -62,6 +62,12 @@ class TaskDispatcher:
                 if result.outcome == SearchOutcome.HIT_SINGLE:
                     node.run_info.run_mode = "single_bot"
                     node.run_info.assignee = result.bot_id
+                    if result.bot_name is not None:
+                        node.run_info.extend_props["assignee_name"] = result.bot_name
+                    if result.owner_id is not None:
+                        node.run_info.extend_props["assignee_owner_id"] = result.owner_id
+                    if result.owner_name is not None:
+                        node.run_info.extend_props["assignee_owner_name"] = result.owner_name
                 elif result.outcome == SearchOutcome.HIT_GROUP:
                     node.run_info.run_mode = "coop_group"
                     node.run_info.assignee = result.group_id

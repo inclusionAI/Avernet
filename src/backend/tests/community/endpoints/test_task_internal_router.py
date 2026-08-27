@@ -4,7 +4,6 @@ from __future__ import annotations
 from datetime import datetime
 from types import SimpleNamespace
 
-from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.models import (
     NodeOpResult,
@@ -89,6 +88,10 @@ def _seed_task_service(world, *, expected_owner=None) -> None:
             )
         ]
 
+    def list_tasks_page(_self, status=None, owner_user_id=None, page=1, page_size=20):
+        items = list_tasks(_self, status, owner_user_id=owner_user_id)
+        return items[:page_size], len(items)
+
     def claim(_self, task_id, _bot_id):
         return NodeOpResult(task_id=task_id, node_id="root", success=True)
 
@@ -105,6 +108,7 @@ def _seed_task_service(world, *, expected_owner=None) -> None:
             "execute": execute,
             "get_task_dashboard": dashboard,
             "list_tasks": list_tasks,
+            "list_tasks_page": list_tasks_page,
             "claim_bbs_task": claim,
             "attach_bbs_node": attach,
             "report_bbs_result": result,
@@ -234,6 +238,35 @@ def list_error():
 )
 def list_scoped_by_user_id():
     pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/list",
+    scenario="pagination_requires_page_and_page_size_together",
+    input=CaseInput(query_params={"page": 1}),
+    expect=ExpectError(status=400),
+)
+def list_pagination_requires_both_arguments():
+    """A partial pagination request is rejected instead of silently changing shape."""
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/list",
+    scenario="paginated_ok",
+    seed=_seed_task_service,
+    input=CaseInput(query_params={"page": 1, "page_size": 20}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"total": 1, "items": [{"task_id": "task-endpoint-1"}]},
+        },
+    ),
+)
+def list_paginated():
+    """A complete pagination request returns the Page envelope."""
 
 
 # Legacy callback/report adapter.

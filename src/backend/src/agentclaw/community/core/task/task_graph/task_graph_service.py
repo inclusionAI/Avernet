@@ -11,7 +11,10 @@ import time
 import uuid
 from typing import Any
 
-from agentclaw.community.core.repository.protocols.task import TaskGraphRepositoryProtocol
+from agentclaw.community.core.repository.protocols.task import (
+    TaskGraphRepositoryProtocol,
+    TaskInfoRepositoryProtocol,
+)
 from agentclaw.community.core.task.domain.errors import (
     GraphAlreadyInitializedError,
     GraphIntegrityError,
@@ -94,10 +97,15 @@ class TaskGraphService:
     结构归属由 relations 分解树(单入)表达;depth/结构子/结构父均从 relations 派生。
     """
 
-    def __init__(self, graph_repo: TaskGraphRepositoryProtocol | None = None) -> None:
+    def __init__(self, graph_repo: TaskGraphRepositoryProtocol | None = None,
+                 task_info_repo: TaskInfoRepositoryProtocol | None = None) -> None:
         self._graphs: dict[str, TaskExecutionGraph] = {}
         self._graph_versions: dict[str, int] = {}
         self._graph_repo = graph_repo
+        # Fallback task_info status sink for deployments that persist task_info
+        # without attaching the aggregate graph repository. When graph_repo is
+        # present, it updates task_info atomically with the graph snapshot.
+        self._task_info_repo = task_info_repo
         self._locks: dict[str, threading.RLock] = {}
         self._registry_lock = threading.RLock()
         self._run_id_counter = 0
@@ -110,6 +118,15 @@ class TaskGraphService:
     @property
     def has_repository(self) -> bool:
         return self._graph_repo is not None
+
+    def bind_task_info_repository(self, task_info_repo: TaskInfoRepositoryProtocol) -> None:
+        """Attach the task_info status sink at the composition root.
+
+        The aggregate graph repository remains the preferred atomic persistence
+        path. This sink covers lightweight/profile-specific wiring where only
+        the task_info repository is available.
+        """
+        self._task_info_repo = task_info_repo
 
     def _lock_for(self, task_id: str) -> threading.RLock:
         with self._registry_lock:
@@ -137,9 +154,13 @@ class TaskGraphService:
 
     def _persist_locked(self, graph: TaskExecutionGraph, *, action_events=None) -> None:
         """Persist after a successful in-memory mutation, then advance cache version."""
-        if self._graph_repo is None:
-            return
         events = action_events or []
+        if self._graph_repo is None:
+            if self._task_info_repo is not None:
+                root = next((node for node in graph.tasks if node.node_id == graph.task_id), None)
+                runtime_status = root.status if root is not None else graph.status
+                self._task_info_repo.update_status(graph.task_id, runtime_status)
+            return
         expected = self._graph_versions.get(graph.task_id, 0)
         root = next((node for node in graph.tasks if node.node_id == graph.task_id), None)
         runtime_status = root.status if root is not None else graph.status
@@ -161,6 +182,7 @@ class TaskGraphService:
                 self._graph_versions[graph.task_id] = self._graph_repo.get_version(graph.task_id) or 0
             raise
         self._graph_versions[graph.task_id] = version
+        return
 
     def _hydrate_locked(self, task_id: str) -> TaskExecutionGraph | None:
         if self._graph_repo is None:

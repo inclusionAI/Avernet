@@ -252,4 +252,6 @@ def test_form_coop_group_sets_group_context_from_task_context():
         members_info=[{"bot_id": "drv", "role": "manager"}],
         extend_props={"task_context": "写一篇关于远程办公协作工具趋势的短文"},
     )))
-    assert bcs.created_req.context == "写一篇关于远程办公协作工具趋势的短文"
+    assert "写一篇关于远程办公协作工具趋势的短文" in bcs.created_req.context
+    assert "reporter_bot_id=drv" in bcs.created_req.context
+    assert "execution_mode=coop_group" in bcs.created_req.context

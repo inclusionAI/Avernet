@@ -25,7 +25,8 @@ class PromptFormatterImpl(PromptFormatter):
             for acceptance in node.task_spec.goal.acceptances
         ]
         parts = [
-            "请执行任务，并在完成后根据验收标准进行自验收。",
+            "[task-execute]",
+            "请执行任务。执行完成后，必须调用 task-loop 中的任务验收(acceptance)逻辑，逐条检查验收标准并上报结果。",
             f"目标:{goal}",
             f"指令:{instr}",
             f"验收标准:{json.dumps(acceptances, ensure_ascii=False)}",
@@ -33,7 +34,7 @@ class PromptFormatterImpl(PromptFormatter):
         if siblings:
             parts.append(f"上游产出:{json.dumps(siblings, ensure_ascii=False, default=str)}")
         parts.append(
-            "最终只能输出一个 JSON 对象，不要输出 Markdown 代码块或额外解释。"
+            "验收完成后，最终只能输出一个 JSON 对象，不要输出 Markdown 代码块或额外解释。"
             "通过示例:{\"success\":true,\"data\":{\"result\":\"任务实际产出\"},\"gaps\":[]};"
             "未通过示例:{\"success\":false,\"data\":{\"result\":\"当前已有产出\"},"
             "\"gaps\":[\"尚未满足的验收差距\"]}。"
