@@ -119,6 +119,40 @@ implementations. Keeping it in the projector means the identity-coloured
 skill-set mutations silently demoting every Caller MCP to Owner — lives in
 exactly one place and cannot drift between two implementations.
 
+**Does a teclaw Bot need it at all?** Yes, and the artifact does not subsume
+it. A teclaw container is issued an AgentPass token that is written onto it as
+an *egress rule*:
+
+```python
+# core/bot_management/services/teclaw_publish_task_handler.py:261,283
+agent_pass_token = self._passport_plugin.query_token(bot_id, owner_id) or ""
+updated = self._baas.update_teclaw_outbound_rule_by_bot_uuid(
+    bot_uuid, agent_pass_token=agent_pass_token,
+)
+```
+
+`TeclawProvisionService`'s module docstring describes the same wiring — the
+publish-poll task *"pushes the bot's passport-token outbound rule to the
+started container"*, deferred only because the PaaS device does not exist
+until BaaS executes the create publish.
+
+The two carry different things. The artifact is the container's
+*configuration*: MCP endpoints with `api_key` and headers inlined by
+`McporterComposer`. The passport is the platform's *authorization*: which MCPs
+the Bot may reach and under whose `identityMode`, enforced at the gateway that
+token opens. Skipping `update_passport` for teclaw would leave a container
+holding a valid token against a stale manifest — MCPs configured in its
+artifact that the authorization record does not list, or listed under the
+wrong identity. The token itself is unaffected; it is minted once at bot
+creation by `apply_first_agent_passport`.
+
+Nothing in this repository gates the passport on engine. Note, though, that
+the community implementation (`SelfIssuedPassportPlugin`) makes
+`update_passport` a deliberate no-op — it validates the scope shape and
+returns, a community deployment being its own authority — so the call is only
+load-bearing in the corp deployment, whose `PassportPlugin` brokers through
+tcauthmng/AgentPass and is not in this repository.
+
 ### A Core protocol, not a Plugin one
 
 `plugin_api/` is for contracts where core calls out to a swappable external
