@@ -4,6 +4,7 @@
  * Admin status is determined by ADMIN_USER_IDS env var.
  */
 import type { Request, Response, NextFunction } from "express";
+import { getCurrentEnv } from "../env.js";
 
 export type AdminConfig = {
   admins: Set<string>;
@@ -32,6 +33,7 @@ function getRequestCookie(req: Request, name: string): string | undefined {
 
 export function adminAuthMiddleware(config: AdminConfig) {
   const { admins } = config;
+  const isDev = getCurrentEnv() === "dev" || getCurrentEnv() === "development";
   return (req: Request, _res: Response, next: NextFunction): void => {
     const userId =
       (req.headers["x-evolvetrace-user-id"] as string | undefined)?.trim() ??
@@ -41,8 +43,8 @@ export function adminAuthMiddleware(config: AdminConfig) {
       req.userId = userId;
       req.isAdmin = admins.has(userId);
       req.isLogAdmin = req.isAdmin;
-    } else {
-      // Simplified auth fallback: treat anonymous local requests as the default dev admin.
+    } else if (isDev) {
+      // Dev fallback: treat anonymous local requests as the default dev admin.
       // This keeps the standalone Evolvetrace usable without an external SSO provider.
       req.userId = "dev_local";
       req.isAdmin = true;

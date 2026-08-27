@@ -1243,3 +1243,21 @@ CREATE TABLE IF NOT EXISTS aw_langfuse_observation (
 CREATE INDEX IF NOT EXISTS idx_langfuse_obs_trace_id ON aw_langfuse_observation (trace_id);
 CREATE INDEX IF NOT EXISTS idx_langfuse_obs_observation_id ON aw_langfuse_observation (observation_id);
 
+
+-- Table: bot_workflow_permissions
+-- Required by BotWorkflowPermissionRepository.
+CREATE TABLE IF NOT EXISTS bot_workflow_permissions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  bot_id TEXT,
+  bot_owner_id TEXT NOT NULL,
+  workflow_id TEXT NOT NULL,
+  env TEXT NOT NULL,
+  can_view INTEGER NOT NULL DEFAULT 0,
+  can_execute INTEGER NOT NULL DEFAULT 0,
+  can_edit INTEGER NOT NULL DEFAULT 0,
+  gmt_create INTEGER NOT NULL DEFAULT (unixepoch()),
+  gmt_modified INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_bot_wf_perm_workflow ON bot_workflow_permissions(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_bot_wf_perm_owner ON bot_workflow_permissions(bot_owner_id, workflow_id);
+CREATE INDEX IF NOT EXISTS idx_bot_wf_perm_bot ON bot_workflow_permissions(bot_id, bot_owner_id, workflow_id);

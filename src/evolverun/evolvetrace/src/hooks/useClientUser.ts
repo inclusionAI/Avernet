@@ -5,6 +5,7 @@ import type { ClientUser } from '../types'
 export interface UserReq {
   userId?: string
   isAdmin?: boolean
+  isLogAdmin?: boolean
 }
 
 function getInjectedReq(): UserReq {
@@ -14,11 +15,22 @@ function getInjectedReq(): UserReq {
 
 export function getClientUser(): ClientUser | null {
   const req = getInjectedReq()
-  if (!req.userId) return null
+  // Dev fallback: treat anonymous local requests as the default dev admin.
+  // In production the server must inject a real user via window.__REQ__.
+  if (import.meta.env.DEV && !req.userId) {
+    return {
+      userId: 'dev_local',
+      isAdmin: true,
+      isLogAdmin: true,
+    }
+  }
+  if (!req.userId) {
+    return null
+  }
   return {
     userId: req.userId,
     isAdmin: req.isAdmin === true,
-    isLogAdmin: req.isAdmin === true,
+    isLogAdmin: req.isLogAdmin === true,
   }
 }
 
