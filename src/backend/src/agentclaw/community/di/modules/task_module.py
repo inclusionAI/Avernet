@@ -185,6 +185,18 @@ class TaskModule(Module):
             gov = injector.get(EconomyGovernanceConfig)
         except Exception:  # noqa: BLE101 EconomyGovernanceModule 未装(纯内核/轻量测试列) → 取不到
             gov = None
+        # driver-bot session_token 取数:corp 可经 DI 显式 bind BcsBotTokenProvider 注入(优先)——
+        # corp 侧实现读 bcs_bots.session_token 作建群 driver-bot 的 Authorization: Bearer caller 身份
+        # (corp 注入口子未就绪前,如 ocb corp_task_integration 尚未装配,取不到 → 回退 Null)。
+        # 未绑(纯内核/本地/singlebox/轻量测试)→ NullBcsBotTokenProvider:HMAC 匿名建群
+        # (去 event_subscriptions 后 no-sub 分支),不发 Bearer,降级不阻断。
+        from agentclaw.community.core.task.task_runner.integration.bcs_bot_token_provider import (
+            BcsBotTokenProvider, NullBcsBotTokenProvider,
+        )
+        try:
+            bot_token_provider = injector.get(BcsBotTokenProvider)  # corp 注入优先
+        except Exception:  # noqa: BLE101 未绑(纯内核/本地/测试/corp 未就绪)→ Null(降级不阻断建群)
+            bot_token_provider = NullBcsBotTokenProvider()
         return TaskService(
             graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
             bcn=bcn, bcs_identity=bcs_identity, task_info_repo=task_info_repo,
@@ -192,6 +204,7 @@ class TaskModule(Module):
             task_node_run_info_repo=task_node_run_info_repo,
             bot_service=bot_service, staff_dept=staff_dept,
             api_base_url=self._resolve_api_base_url(gov.iframe_callback_url if gov else ""),
+            bot_token_provider=bot_token_provider,
         )
 
     @singleton

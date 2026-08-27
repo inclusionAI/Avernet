@@ -234,6 +234,7 @@ class EngineProvisioningStrategy(ABC):
         passport_plugin: Any,
         skill_set_factory: Any,
         template_service: Any,
+        caller_identity_repo: Any,
     ) -> None:
         """Re-sync engine-owned external authorization on restart.
 
@@ -247,6 +248,13 @@ class EngineProvisioningStrategy(ABC):
         strategy may require an opt-in flag (e.g. ``confirmed_template_update``)
         before performing any side effect so a plain restart never silently
         rewrites authorization.
+
+        ``caller_identity_repo`` reads each MCP's stored execution identity.
+        A strategy that republishes an overwrite-style MCP scope needs it:
+        without identity the scope asserts Owner for every MCP and discards
+        the Bot's Caller grants. Required rather than defaulted — the caller
+        always has it, and an accidental omission would otherwise be a silent
+        privilege change rather than a type error.
 
         Failures must not block the restart: the call site wraps this in the
         same try/except as the restart extension envelope.

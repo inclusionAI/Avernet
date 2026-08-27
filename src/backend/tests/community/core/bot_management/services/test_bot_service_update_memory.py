@@ -10,6 +10,7 @@ _PATCH_TARGET = "agentclaw.community.core.bot_management.utils.trigger_memory_in
 
 def _make_bot_service(repository=None, template_service=None) -> BotService:
     return BotService(
+        caller_identity_repo=MagicMock(),
         drm_reader=MagicMock(),
         repository=repository or Mock(),
         allocation_config=MagicMock(),

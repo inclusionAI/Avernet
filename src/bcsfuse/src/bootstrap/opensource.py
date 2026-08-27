@@ -99,7 +99,7 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
     from src.infra.public.stores.mysql_worker_profile_binding_store import MySQLWorkerProfileBindingStore
     from src.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
     from src.infra.public.audit.mysql_worker_audit_log_store import MySQLWorkerAuditLogStore
-    from src.infra.public.vectorstores.qdrant_local_vector_store import QdrantLocalVectorStore
+    from src.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
     from src.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
     from src.infra.public.reranker.http_reranker import HttpReranker
     from src.infra.public.llm.anthropic_compatible_provider import AnthropicCompatibleProvider
@@ -143,22 +143,42 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
     worker_audit_log_store = MySQLWorkerAuditLogStore(connection_pool=mysql_pool)
     registry.register("worker_audit_log_store", worker_audit_log_store)
 
-    # Qdrant vector store
+    # Qdrant + MySQL durable vector store
+    # Local Qdrant is the disposable index; MySQL is the durable source of truth.
     from src.infra.config.data_paths import resolve_data_path
-    # Priority: QDRANT_LOCAL_PATH env var > resolve_data_path fallback
     qdrant_path = os.getenv("QDRANT_LOCAL_PATH") or resolve_data_path("data/qdrant_storage")
-    vector_store = QdrantLocalVectorStore(
+    vector_store = QdrantMySQLVectorStore(
         collection_name=config.get("vector.qdrant.collection", "bcsfuse_profiles"),
-        path=qdrant_path,
+        qdrant_path=qdrant_path,
         dimension=config.get_int("embedding.dimension", 4096),
+        distance=config.get("vector.qdrant.distance", "Cosine"),
+        mysql_host=os.getenv("MYSQL_HOST", "localhost"),
+        mysql_port=int(os.getenv("MYSQL_PORT", "3306")),
+        mysql_user=os.getenv("MYSQL_USER", ""),
+        mysql_password=os.getenv("MYSQL_PASSWORD", ""),
+        mysql_database=os.getenv("MYSQL_DATABASE", "bcsfuse"),
     )
     registry.register("vector_store", vector_store)
 
-    # QDRANT_SINGLETON_FIX: Log shared vector_store creation for tracking
+    # Rebuild local Qdrant index from MySQL durable backend on startup
+    try:
+        rebuild_result = vector_store.rebuild_from_mysql()
+        logger.info(
+            "[QdrantMySQLVectorStore] Bootstrap rebuild completed: "
+            f"loaded={rebuild_result.get('loaded_count', 0)}, "
+            f"indexed={rebuild_result.get('indexed_count', 0)}, "
+            f"qdrant_size={rebuild_result.get('qdrant_size', 0)}"
+        )
+    except Exception as rebuild_err:
+        logger.warning(
+            "[QdrantMySQLVectorStore] Bootstrap rebuild failed (will continue with empty index): %s",
+            rebuild_err
+        )
+
     logger.info(
-        "[LOCAL_QDRANT_SINGLETON] component=Bootstrap "
+        "[QdrantMySQLVectorStore] component=Bootstrap "
         f"vector_store_id={id(vector_store)} "
-        f"storage_path={vector_store.path} "
+        f"qdrant_path={qdrant_path} "
         f"collection={vector_store.collection_name} "
         f"source=created dimension={vector_store.dimension}"
     )

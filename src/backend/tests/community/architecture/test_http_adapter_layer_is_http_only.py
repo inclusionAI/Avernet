@@ -230,6 +230,13 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     # Pure-function helpers / generators:
     "generate_bot_id", "validate_bot_name", "resolve_engine_for_bot",
     "resolve_runtime_engine_for_bot", "filter_passport_mcp_codes",
+    # The other two pure helpers in core/mcp/services/passport_scope, used
+    # together with filter_passport_mcp_codes above: a Passport resource scope
+    # that grants MCPs must carry each one's execution identity, so the caller
+    # assembling the scope reads the identities and shapes the items. Both are
+    # module-level functions over a repository handle the router already holds
+    # via Injected(...), not service instances.
+    "resolve_mcp_identity_modes", "passport_mcp_items_from_codes",
     # Pure functions in core/mcp/services/_defaults that build the passport
     # resource scope (default MCP server codes / default CLI items) from
     # engine-scoped module constants. Read-only helpers, not service instances;

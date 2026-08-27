@@ -75,6 +75,9 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.repository.protocols.identity import (
+    CallerIdentityRepositoryProtocol,
+)
 from agentclaw.community.core.bot_management.services.bot_space_service import (
     BotSpaceService,
 )
@@ -342,6 +345,7 @@ class BotManagementModule(Module):
         drm_reader: DRMReaderPlugin,
         task_queue_service: TaskQueueService,
         common_config_service: CommonConfigService,
+        caller_identity_repo: CallerIdentityRepositoryProtocol,
         injector: Injector,
     ) -> BotService:
         # Explicit provider: ``BotService.__init__`` types several
@@ -386,6 +390,10 @@ class BotManagementModule(Module):
             baas_service_provider=lambda: injector.get(BaasService),
             task_queue_service=task_queue_service,
             common_config_service=common_config_service,
+            # Read only by the restart authorization refresh, which republishes
+            # an overwrite-style Passport MCP scope and must carry each MCP's
+            # execution identity rather than asserting Owner for all of them.
+            caller_identity_repo=caller_identity_repo,
         )
 
     @singleton
