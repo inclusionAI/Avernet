@@ -14,6 +14,7 @@ interface SidebarProps {
   search: string
   onSearchChange: (value: string) => void
   onSelect: (id: string) => void
+  onCreateClick?: () => void
   loading?: boolean
 }
 
@@ -23,26 +24,51 @@ export default function Sidebar({
   search,
   onSearchChange,
   onSelect,
+  onCreateClick,
   loading,
 }: SidebarProps) {
   return (
     <aside className="flex h-full w-72 flex-col border-r border-gray-200 bg-white">
       <div className="border-b border-gray-200 p-4">
-        <div className="mb-3 flex items-center gap-2">
-          <svg
-            className="h-5 w-5 text-gray-400"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 6h16M4 12h16M4 18h16"
-            />
-          </svg>
-          <h2 className="text-sm font-semibold text-gray-900">工作流</h2>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <svg
+              className="h-5 w-5 text-gray-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 6h16M4 12h16M4 18h16"
+              />
+            </svg>
+            <h2 className="text-sm font-semibold text-gray-900">工作流</h2>
+          </div>
+          {onCreateClick && (
+            <button
+              onClick={onCreateClick}
+              title="新建工作流"
+              className="flex items-center gap-1 rounded-md bg-blue-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-700"
+            >
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2.5}
+                  d="M12 4v16m8-8H4"
+                />
+              </svg>
+              新建
+            </button>
+          )}
         </div>
         <SearchInput
           value={search}

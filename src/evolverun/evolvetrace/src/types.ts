@@ -136,6 +136,64 @@ export interface WorkflowNodeStats {
   nodes: unknown[]
 }
 
+
+// ── Workflow Spec ──
+
+export interface WorkflowNode {
+  id: string
+  title: string
+  phase?: string
+  businessStatus?: string
+  executor: {
+    type: string
+    [key: string]: unknown
+  }
+  dependsOn?: string[]
+  branchId?: string
+  join?: 'all' | 'any'
+  triggerRule?: 'all_success' | 'one_success' | 'all_done'
+  retry?: unknown
+  outputContract?: unknown
+  outputSchema?: unknown
+  mock?: unknown
+  knowledge?: unknown
+  knowledgeBaseId?: string
+  knowledgeQuery?: string
+  validationTemplateId?: string
+  validationMinScore?: number
+  onSuccess?: unknown
+  onFailure?: unknown
+  onFeedback?: unknown
+  onResult?: Array<{ value: string; target: string }>
+  alerting?: unknown
+  progressMessage?: string
+  [key: string]: unknown
+}
+
+export interface WorkflowSpec {
+  id: string
+  version: string
+  title: string
+  nodes: WorkflowNode[]
+  config?: Record<string, unknown>
+  params?: Record<string, unknown>
+  tests?: unknown[]
+  requiredParams?: string[]
+  input?: unknown
+  identity?: unknown
+  outputs?: unknown
+  debug?: unknown
+  defaults?: unknown
+  collaboration?: unknown
+  workflow?: unknown
+  messages?: unknown
+  allowedBots?: string[]
+  facade?: {
+    command?: string
+    remark?: string
+  }
+  [key: string]: unknown
+}
 // ── TCLog 迁移类型 ──
 
 export type TraceDataSource = 'auto' | 'tc' | 'langfuse'

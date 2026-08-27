@@ -17,6 +17,7 @@ import type {
   TCLogTaskSearchResponse,
   TCLogTrace,
   TCLogTraceDetail,
+  WorkflowSpec,
 } from '../types'
 
 const BASE = '/api'
@@ -131,6 +132,42 @@ export function useDeleteWorkflow() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['workflow-types'] })
+    },
+  })
+}
+
+export function useCreateWorkflow() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workflowId,
+      spec,
+      facade,
+      botOwnerId,
+      botId,
+    }: {
+      workflowId: string
+      spec: WorkflowSpec
+      facade?: { command?: string; remark?: string }
+      botOwnerId?: string
+      botId?: string
+    }) =>
+      fetchJson<WorkflowSpec>(`${BASE}/workflows/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workflowId,
+          spec,
+          facade,
+          botOwnerId,
+          botId,
+        }),
+      }),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['workflow-types'] })
+      void queryClient.invalidateQueries({ queryKey: ['db-workflows'] })
+      void queryClient.invalidateQueries({ queryKey: ['facade-bindings'] })
+      void queryClient.invalidateQueries({ queryKey: ['db-workflow', variables.workflowId] })
     },
   })
 }
