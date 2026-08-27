@@ -8,6 +8,7 @@ services.
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from typing import Any, Dict
 
@@ -24,6 +25,7 @@ from agentclaw.community.core.workspace.runtime_identity import (
 
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.utils import secret_utils
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.log import get_logger
 
 from ..provisioning import (
@@ -52,7 +54,6 @@ LEGACY_BOT_TYPE_ENV_MAP = {
 }
 _THETA_KEY_PATH = ("bot_template_config", "ext_config", "thetaKey")
 _ENCRYPTED_VALUE_PREFIX = "enc:v1:"
-
 logger = get_logger()
 
 
@@ -593,128 +594,116 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         bot: Dict[str, Any],
         extra_configs: Dict[str, Any] | None,
         *,
-        passport_plugin: Any,
-        skill_set_factory: Any,
-        template_service: Any,
-        caller_identity_repo: Any,
-    ) -> None:
-        """Refresh this bot's Passport authorization scope on restart.
+        mcp_sync: Any = None,
+        skill_set_factory: Any = None,
+    ) -> bool:
+        """Refresh AICoding restart authorization and runtime skill symlinks.
 
-        Mirrors the create-time passport scope (``create_flow._apply_passport``)
-        so an ``aicoding`` / ``claude_code`` bot keeps the same MCP + CLI grants
-        after a restart: recompute the passport MCP codes and the engine default
-        CLI items, then push them to Passport via ``update_passport`` as a full
-        ``resource_scope`` snapshot (Passport treats each resource list as a
-        full replacement). Best-effort: failures are logged by the caller and
-        must not block the restart.
-
-        Opt-in: only runs when ``extra_configs['confirmed_template_update']`` is
-        truthy — a plain restart must never silently rewrite the Passport
-        authorization scope. Anything falsy (missing key, None, false) no-ops.
-
-        The pushed scope carries each MCP's execution identity, not just its
-        code: ``resource_scope`` replaces the MCP resource list wholesale, so a
-        code-only snapshot would assert Owner for every MCP and drop the Bot's
-        Caller grants on every confirmed template update. An *unreadable*
-        identity therefore skips the refresh, leaving the existing scope
-        standing rather than replacing it with an owner-only snapshot. An
-        absent repository is not a case this handles: it is required.
+        This is intentionally AICoding-owned: only a confirmed template update
+        opts in. The refresh is fire-and-forget and best-effort so restart is
+        never blocked.
         """
-        if not (
+        should_resync = (
             isinstance(extra_configs, dict)
-            and extra_configs.get("confirmed_template_update")
-        ):
+            and bool(extra_configs.get("confirmed_template_update"))
+        )
+        if not should_resync:
             logger.info(
-                "[aicoding.restart] skip passport refresh: "
+                "[aicoding.restart] skip authorization/runtime resync: "
                 "confirmed_template_update is not set for bot_id=%s",
                 ctx.bot_id,
             )
-            return
-        # Imported lazily: create_flow imports this module's registry, so a
-        # module-level import would cycle.
-        from agentclaw.community.core.bot_management.create_flow import (
-            _get_bot_mcp_codes,
-        )
-        from agentclaw.community.core.mcp.errors import McpIdentityUnresolvedError
-        from agentclaw.community.core.mcp.services._defaults import (
-            get_default_cli_items,
-        )
-        from agentclaw.community.core.mcp.services.passport_scope import (
-            passport_mcp_items_from_codes,
-            resolve_mcp_identity_modes,
-        )
+            return False
 
-        stored_config: Dict[str, Any] = (
-            template_service.get_template_config(ctx.bot_id) or {}
-        )
-        engine_type = ctx.active_engine or self.engine_type
-        entity_id = str(bot.get("entity_id") or "")
-        entity_type = str(bot.get("entity_type") or "staff")
-        owner_id = ctx.owner_id
+        effective_entity_id = str(bot.get("entity_id") or ctx.owner_id or "")
+        effective_entity_type = str(bot.get("entity_type") or "staff")
+        effective_engine = ctx.active_engine or self.engine_type
 
-        mcp_codes = _get_bot_mcp_codes(
-            skill_set_factory,
-            owner_id,
-            ctx.bot_id,
-            entity_id,
-            entity_type,
-            engine_type,
-        )
-        cli_items = get_default_cli_items(
-            engine_type,
-            ctx.template_type,
-            ext_info={"template_config": stored_config}
-            if stored_config
-            else None,
-        )
+        def _run() -> None:
+            import asyncio
 
-        try:
-            identity_modes = resolve_mcp_identity_modes(
-                caller_identity_repo,
-                bot_pk=bot.get("id"),
-                engine_type=engine_type,
-                bot_id=ctx.bot_id,
-            )
-            mcp_items = passport_mcp_items_from_codes(
-                mcp_codes, identity_modes=identity_modes
-            )
-        except (McpIdentityUnresolvedError, ValueError):
-            logger.warning(
-                "[aicoding.restart] skip passport refresh: MCP execution "
-                "identity unresolved for bot_id=%s; leaving the existing "
-                "scope in place",
-                ctx.bot_id,
-                exc_info=True,
-            )
-            return
+            if mcp_sync is not None:
+                try:
+                    async def _do_mcp_sync() -> tuple[dict, dict | None]:
+                        scope_result = await mcp_sync.refresh_mcp_scope(
+                            user_id=effective_entity_id,
+                            entity_id=effective_entity_id,
+                            bot_id=ctx.bot_id,
+                            entity_type=effective_entity_type,
+                            engine_type=effective_engine,
+                        )
+                        if not scope_result.get("success"):
+                            return scope_result, None
 
-        passport_plugin.update_passport(
-            bot_id=ctx.bot_id,
-            user_id=owner_id,
-            bot_name=bot.get("bot_name"),
-            bot_desc=bot.get("bot_desc"),
-            engine_type=engine_type,
-            resource_scope={
-                # Derived from the items: ``unpack_resource_scope`` ignores
-                # ``mcp_codes`` once ``mcp_items`` is present, so two
-                # independent lists could only ever drift apart.
-                "mcp_codes": [item["mcp_code"] for item in mcp_items],
-                "mcp_items": mcp_items,
-                "cli_items": cli_items,
-            },
-        )
-        caller_count = sum(
-            1 for item in mcp_items if item.get("identity_mode") == "caller"
-        )
-        logger.info(
-            "[aicoding.restart] refreshed passport authorization scope: "
-            "bot_id=%s mcp_codes=%s caller=%s owner=%s cli_items=%s",
-            ctx.bot_id,
-            mcp_codes,
-            caller_count,
-            len(mcp_items) - caller_count,
-            cli_items,
-        )
+                        detail_result = await mcp_sync.sync_mcp_details(
+                            user_id=effective_entity_id,
+                            entity_id=effective_entity_id,
+                            bot_id=ctx.bot_id,
+                            entity_type=effective_entity_type,
+                            engine_type=effective_engine,
+                        )
+                        return scope_result, detail_result
+
+                    scope_result, detail_result = asyncio.run(_do_mcp_sync())
+                    if not scope_result.get("success"):
+                        logger.error(
+                            "[aicoding.restart] MCP scope resync failed: "
+                            "bot_id=%s, engine_type=%s, error=%s",
+                            ctx.bot_id, effective_engine, scope_result.get("error"),
+                        )
+                    elif detail_result and not detail_result.get("success"):
+                        logger.error(
+                            "[aicoding.restart] MCP detail resync failed: "
+                            "bot_id=%s, engine_type=%s, error=%s",
+                            ctx.bot_id, effective_engine, detail_result.get("error"),
+                        )
+                    else:
+                        logger.info(
+                            "[aicoding.restart] MCP resync succeeded: "
+                            "bot_id=%s, engine_type=%s",
+                            ctx.bot_id, effective_engine,
+                        )
+                except Exception as mcp_error:
+                    logger.error(
+                        "[aicoding.restart] MCP resync error: "
+                        "bot_id=%s, engine_type=%s, error=%s",
+                        ctx.bot_id, effective_engine, mcp_error,
+                        exc_info=True,
+                    )
+
+            if skill_set_factory is not None:
+                try:
+                    skill_set_service = skill_set_factory.create(
+                        user_id=effective_entity_id,
+                        entity_id=effective_entity_id,
+                        bot_id=ctx.bot_id,
+                        entity_type=effective_entity_type,
+                        engine_type=effective_engine,
+                    )
+                    if skill_set_service.sync_runtime():
+                        logger.info(
+                            "[aicoding.restart] skill symlink sync succeeded: "
+                            "bot_id=%s, engine_type=%s",
+                            ctx.bot_id, effective_engine,
+                        )
+                    else:
+                        logger.error(
+                            "[aicoding.restart] skill symlink sync failed: "
+                            "bot_id=%s, engine_type=%s",
+                            ctx.bot_id, effective_engine,
+                        )
+                except Exception as skill_error:
+                    logger.error(
+                        "[aicoding.restart] skill symlink sync error: "
+                        "bot_id=%s, engine_type=%s, error=%s",
+                        ctx.bot_id, effective_engine, skill_error,
+                        exc_info=True,
+                    )
+
+        threading.Thread(
+            target=bind_current_avernet_tenant(_run), daemon=True
+        ).start()
+        return True
 
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         # Application-only hooks (DIMA workspace/memory/cron) intentionally stay
