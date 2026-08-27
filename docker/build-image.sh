@@ -120,9 +120,9 @@ _resolve_service() {
         node-fe)
             echo "docker/node-fe.Dockerfile node-fe" ;;
         bcsfuse)
-            echo "docker/bcsfuse.Dockerfile bcsfuse" ;;
+            echo "docker/services/bcsfuse.dockerfile bcsfuse" ;;
         evolvetrace)
-            echo "docker/evolvetrace.Dockerfile evolvetrace" ;;
+            echo "docker/services/evolvetrace.dockerfile evolvetrace" ;;
 
         *)
             echo "" ;;
