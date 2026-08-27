@@ -80,9 +80,7 @@ class _Runtime:
     async def snapshot_skill_mappings(self, **_kwargs):
         return ()
 
-    async def project(
-        self, *, bot_id: str, owner_id: str, retired_mappings=()
-    ) -> None:
+    async def project(self, *, bot_id: str, owner_id: str, **_kwargs) -> None:
         self.calls.append((bot_id, owner_id))
 
 

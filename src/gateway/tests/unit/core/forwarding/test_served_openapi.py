@@ -34,7 +34,7 @@ _BCN_INTERNAL_ARTIFACT = (
 )
 _SHIPPED_CONFIG = Path(__file__).resolve().parents[4] / "configs" / "application.yaml"
 _METHODS = {"get", "post", "put", "delete", "patch"}
-_RULES = RouteSecurity.from_table({"/**": {"user": "required"}})
+_RULES = RouteSecurity.from_table({"/**": {"user": "optional", "app": "optional"}})
 _SHIPPED_RULES = RouteSecurity.from_yaml(_SHIPPED_CONFIG)
 
 
@@ -89,9 +89,10 @@ def test_every_served_operation_carries_security() -> None:
     for path, item in _served()["paths"].items():
         for method, operation in item.items():
             if method in _METHODS:
-                assert operation["x-avernet-security"] == {"user": "required"}, (
-                    f"{method} {path}"
-                )
+                assert operation["x-avernet-security"] == {
+                    "user": "optional",
+                    "app": "optional",
+                }, f"{method} {path}"
 
 
 def test_components_pruned_to_referenced() -> None:
@@ -355,8 +356,8 @@ def test_harness_paths_served_with_user_security() -> None:
     They live under ``/openapi/v1/bots/{bot_id}/harness/…`` now, so the bots
     domain routes and documents them: no separate domain can pin a match behind
     the ``{bot_id}`` parameter, and the bots artifact carries their description.
-    Their rule is the one thing that stays their own — a user on the wire,
-    outranking the wide optional rule the rest of the bots surface admits.
+    Their rule is the one thing that stays their own — both user and app are
+    optional, with the backend admission check enforcing the live grant.
     """
     dm = DomainMap.from_yaml(_SHIPPED_CONFIG, variables=_BCSFUSE_VARS)
     mount_prefixes = {name: domain.mount_prefix for name, domain in dm.domains.items()}
@@ -387,6 +388,7 @@ def test_harness_paths_served_with_user_security() -> None:
     for path in harness_paths:
         for method, operation in document["paths"][path].items():
             if method in _METHODS:
-                assert operation["x-avernet-security"] == {"user": "required"}, (
-                    f"{method} {path}"
-                )
+                assert operation["x-avernet-security"] == {
+                    "user": "optional",
+                    "app": "optional",
+                }, f"{method} {path}"

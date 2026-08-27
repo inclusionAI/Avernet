@@ -7,6 +7,7 @@ from agentclaw.community.core.bot_management.services.bot_service import BotServ
 def _make_bot_service(repository, device_status_client, teclaw_provision=None) -> BotService:
     teclaw_provision = teclaw_provision or MagicMock()
     return BotService(
+        caller_identity_repo=MagicMock(),
         drm_reader=MagicMock(),
         repository=repository,
         allocation_config=MagicMock(),

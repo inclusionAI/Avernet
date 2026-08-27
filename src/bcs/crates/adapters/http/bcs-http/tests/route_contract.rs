@@ -22,7 +22,7 @@ use bcs_http::{
 use bcs_service_api::{
     A2aChatCommand, A2aChatOutcome, A2aChatRunService, A2aChatService, A2aRunStatus,
     ActorDirectoryService, ActorStatus, AsyncA2aChatAccepted, AsyncA2aChatCommand,
-    BlockingA2aChatCommand, BlockingA2aChatOutcome, BotCapabilities, BotOnboardingService,
+    BotCapabilities, BotOnboardingService,
     BotRegistryCoreService, CallerContext, ChatRunCancelCommand, ChatRunQueryCommand,
     FriendCoreService, Group, GroupCoreService, GroupKind, GroupStatus,
     GroupStrategy, HumanActorService, Participant, ParticipantRole, RelationCoreService,
@@ -51,13 +51,6 @@ impl RecordingA2aChat {
 
 #[async_trait::async_trait]
 impl A2aChatRunService for RecordingA2aChat {
-    async fn run_blocking_chat(
-        &self,
-        _cmd: BlockingA2aChatCommand,
-    ) -> ServiceResult<BlockingA2aChatOutcome> {
-        unreachable!("run_blocking_chat is not used by route contract tests")
-    }
-
     async fn start_async_chat(
         &self,
         _cmd: AsyncA2aChatCommand,

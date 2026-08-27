@@ -50,3 +50,15 @@ class McpMarketUnavailableError(McpError):
     A dependency problem, not a caller mistake — distinct from a genuinely empty
     result, which is a success with no rows.
     """
+
+
+class McpIdentityUnresolvedError(McpError):
+    """This Bot's per-MCP execution identity could not be established.
+
+    Raised instead of falling back to a default, because the fallback is
+    ``owner``: ``updatePassport`` replaces the MCP resource list wholesale, so
+    a scope assembled without identity does not "leave identity alone" — it
+    asserts Owner for every MCP and discards the Caller grants
+    ``update_mcp_identity_to_agent_principal`` wrote through the same field.
+    On a privilege boundary a guess is worse than a failure.
+    """

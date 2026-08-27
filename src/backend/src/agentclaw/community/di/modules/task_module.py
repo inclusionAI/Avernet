@@ -226,6 +226,13 @@ class TaskModule(Module):
             gov = injector.get(EconomyGovernanceConfig)
         except Exception:  # noqa: BLE101 EconomyGovernanceModule 未装(纯内核/轻量测试列) → 取不到
             gov = None
+        from agentclaw.community.core.task.task_runner.integration.bcs_bot_token_provider import (
+            BcsBotTokenProvider, NullBcsBotTokenProvider,
+        )
+        try:
+            bot_token_provider = injector.get(BcsBotTokenProvider)
+        except Exception:  # noqa: BLE101 未绑定时降级为无 token provider
+            bot_token_provider = NullBcsBotTokenProvider()
         return TaskService(
             graph,
             harness=harness,
@@ -244,6 +251,7 @@ class TaskModule(Module):
             api_base_url=self._resolve_api_base_url(
                 gov.iframe_callback_url if gov else ""
             ),
+            bot_token_provider=bot_token_provider,
         )
 
     @singleton

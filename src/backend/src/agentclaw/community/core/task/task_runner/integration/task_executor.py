@@ -56,6 +56,7 @@ class TaskExecutor:
         graph=None,
         api_base_url: str = "",
         bcn: BcnService | None = None,
+        bot_token_provider=None,
     ) -> None:
         """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None;
         context: TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。
@@ -73,6 +74,7 @@ class TaskExecutor:
         self._identity_resolver = identity_resolver
         self._graph = graph
         self._api_base_url = api_base_url
+        self._bot_token_provider = bot_token_provider
         self._group_meta: dict[
             str, dict[str, Any]
         ] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
@@ -389,6 +391,10 @@ class TaskExecutor:
         service_spec = gf.extend_props.get("service_spec")
         if service_spec:
             req_kwargs["service_spec"] = service_spec
+        if self._bot_token_provider is not None:
+            req_kwargs["caller_bot_token"] = self._bot_token_provider.get_token(
+                req_kwargs.get("driver_bot") or ""
+            )
         # BCN 事件回调订阅(创建协作群入参 event_subscriptions):BCS 把协作事件 CloudEvent 推到本后端
         # task 模块回调路径。sink.url = api_base_url + 回调路径(api_base_url 去尾斜杠)。
         # event_filters 按 collab_mode 分流:state_machine 订阅 state_machine.*;manager_worker/chat

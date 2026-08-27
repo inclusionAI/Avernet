@@ -211,6 +211,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.MEMBER),
     ("PATCH", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
     ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
+    ("GET", "/openapi/v1/bots/{bot_id}/caller-context"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/chats"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.bot_chat.service"),
     ("GET", "/openapi/v1/bots/{bot_id}/chats/{trace_id}"):
@@ -272,6 +273,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/mcps"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"): Check(PermissionLevel.MEMBER),
+    ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"): Check(PermissionLevel.OWNER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/models"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/nodes"): Check(PermissionLevel.MEMBER),

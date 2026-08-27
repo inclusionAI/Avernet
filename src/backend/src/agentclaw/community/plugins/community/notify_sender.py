@@ -30,7 +30,7 @@ log = get_logger(__name__)
 class DingTalkCredentialHolder:
     """运行时钉钉凭证 holder — 允许通过 API 动态注入凭证，无需重启 backend。
 
-    优先级：holder > env > 空（skip）。
+    优先级：API holder > YAML holder > env > 空（skip）。
     """
     _creds: dict[str, str] = {}
 
@@ -43,6 +43,32 @@ class DingTalkCredentialHolder:
             "card_template_id": card_template_id,
         }
         log.info("[DingTalkCredentialHolder] credentials injected at runtime")
+
+    @classmethod
+    def get(cls, key: str) -> str:
+        return cls._creds.get(key, "")
+
+    @classmethod
+    def clear(cls) -> None:
+        cls._creds = {}
+
+
+class DingTalkYamlHolder:
+    """YAML 配置钉钉凭证 holder — 由 DI 模块在启动时从 application-*.yaml 的
+    ``task_discovery_dingtalk`` 块读取并注入。
+
+    优先级低于 API holder（运行时注入可覆盖 YAML 配置），高于 env 变量。
+    """
+    _creds: dict[str, str] = {}
+
+    @classmethod
+    def set(cls, creds: dict[str, str]) -> None:
+        cls._creds = {k: v for k, v in creds.items() if v}
+        if cls._creds:
+            log.info(
+                "[DingTalkYamlHolder] credentials loaded from YAML (keys=%s)",
+                sorted(cls._creds.keys()),
+            )
 
     @classmethod
     def get(cls, key: str) -> str:
@@ -137,8 +163,11 @@ class DingTalkNotifySender(NotifySenderPlugin):
 
     @staticmethod
     def _resolve(key: str, env_name: str, env_fallback: str) -> str:
-        """优先从 holder 读，回退到 env。"""
+        """优先级：API holder > YAML holder > env。"""
         val = DingTalkCredentialHolder.get(key)
+        if val:
+            return val
+        val = DingTalkYamlHolder.get(key)
         if val:
             return val
         return _env(env_name, env_fallback)

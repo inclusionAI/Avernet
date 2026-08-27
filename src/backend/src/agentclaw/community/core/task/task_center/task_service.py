@@ -52,6 +52,19 @@ from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 logger = logging.getLogger("task.service")
 
 
+def _resolve_coop_collab_mode(has_yaml: bool, group_kind: str | None) -> str:
+    """Resolve the BCS collaboration mode from task execution metadata."""
+    if has_yaml:
+        return "state_machine"
+    if group_kind in ("chat", "manager_worker"):
+        return group_kind
+    if group_kind is None:
+        return "manager_worker"
+    if group_kind == "state_machine":
+        raise ValueError("group_kind=state_machine 需要 yaml 定义")
+    raise ValueError(f"未知 group_kind: {group_kind!r}")
+
+
 # TaskService 结构化实现 api.task.task_service.TaskServiceProtocol —— 依 api/README 四层
 # 契约,core/ 不 import api/(见 test_service_api_conformance.py:core 服务不继承 api Protocol,
 # 由 @runtime_checkable 的 isinstance/issubclass 做结构化一致性校验)。此处置空基类即可。
@@ -80,6 +93,7 @@ class TaskService:
         staff_dept: StaffDeptPlugin | None = None,
         task_auth_gate=None,
         api_base_url: str | None = None,
+        bot_token_provider=None,
     ) -> None:
         """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
         bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。
@@ -104,6 +118,7 @@ class TaskService:
         self._staff_dept = staff_dept
         self._api_base_url = api_base_url
         self._task_auth_gate = task_auth_gate
+        self._bot_token_provider = bot_token_provider
         # _build_engine(seam)签名保持不变(测试子类按旧签名覆写);claim_on JOIN 经 self._task_auth_gate
         # 传入 ExecutionEngine→dispatcher,不进签名避免破坏覆写 seam。
         self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
@@ -140,6 +155,7 @@ class TaskService:
             bcs_identity=self._bcs_identity,
             auth_gate=self._task_auth_gate,
             api_base_url=self._api_base_url,
+            bot_token_provider=self._bot_token_provider,
         )
 
     @property
@@ -273,7 +289,7 @@ class TaskService:
         ).strip()
         gf = GroupFormation(
             bot_ids=[request.owner_bot_id, *ec.get("participant_bot_ids", [])],
-            collab_mode="state_machine" if has_yaml else "manager_worker",
+            collab_mode=_resolve_coop_collab_mode(has_yaml, ec.get("group_kind")),
             group_name=ec.get("group_name", f"task-{task_id}"),
             members_info=[],
             extend_props={

@@ -50,6 +50,27 @@ class GroupFormation:
     )
     extend_props: dict[str, Any] = field(default_factory=dict)
 
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-serializable form for persistence (run_info.extend_props round-trip)."""
+        return {
+            "bot_ids": list(self.bot_ids),
+            "collab_mode": self.collab_mode,
+            "group_name": self.group_name,
+            "members_info": list(self.members_info) if self.members_info is not None else None,
+            "extend_props": dict(self.extend_props),
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "GroupFormation":
+        """Inverse of ``to_dict``; used when hydrating a graph from the shared store."""
+        return cls(
+            bot_ids=list(value.get("bot_ids") or []),
+            collab_mode=value["collab_mode"],
+            group_name=value.get("group_name"),
+            members_info=list(value["members_info"]) if value.get("members_info") else None,
+            extend_props=dict(value.get("extend_props") or {}),
+        )
+
 
 @dataclass
 class SearchResult:

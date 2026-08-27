@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import pytest
 
+from dataclasses import replace
+
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ProjectionScope,
+)
 from agentclaw.community.core.repository.capability_desired_state_types import (
     CapabilityDesiredState,
     DesiredStateMutation,
@@ -33,9 +38,17 @@ class _Repository:
         self.uninstall_skill_calls: list[dict] = []
         self.restore_calls: list[dict] = []
 
-    @staticmethod
-    def _mutation() -> DesiredStateMutation:
+    #: Dependencies the Skill under test declares, mirrored onto the mutation
+    #: result the way the real repository fills it under the row lock.
+    skill_mcp_codes: frozenset[str] = frozenset()
+
+    def _mutation(self) -> DesiredStateMutation:
         return DesiredStateMutation({}, True, CapabilityDesiredState(set(), {}, {}))
+
+    def _skill_mutation(self) -> DesiredStateMutation:
+        # Derived from ``_mutation`` rather than rebuilt, so a subclass that
+        # overrides it (to return ``changed=False``, say) still governs.
+        return replace(self._mutation(), mcp_codes=self.skill_mcp_codes)
 
     def install_mcp(self, **kwargs) -> DesiredStateMutation:
         self.install_mcp_calls.append(kwargs)
@@ -47,11 +60,11 @@ class _Repository:
 
     def install_skill(self, **kwargs) -> DesiredStateMutation:
         self.install_skill_calls.append(kwargs)
-        return self._mutation()
+        return self._skill_mutation()
 
     def uninstall_skill(self, **kwargs) -> DesiredStateMutation:
         self.uninstall_skill_calls.append(kwargs)
-        return self._mutation()
+        return self._skill_mutation()
 
     def restore_desired_state(self, **kwargs) -> None:
         self.restore_calls.append(kwargs)
@@ -129,6 +142,16 @@ class _SuccessfulRuntime:
 
     async def project(self, **_kwargs) -> None:
         return None
+
+
+class _ScopeRecordingRuntime(_SuccessfulRuntime):
+    """Captures the ``ProjectionScope`` each projection was handed."""
+
+    def __init__(self) -> None:
+        self.scopes: list[ProjectionScope] = []
+
+    async def project(self, *, scope, **_kwargs) -> None:
+        self.scopes.append(scope)
 
 
 class _FailingRuntime(_SuccessfulRuntime):
@@ -477,3 +500,98 @@ async def test_an_idempotent_deactivate_still_projects_the_runtime():
     assert result["changed"] is False
     assert result["active"] is False
     assert runtime.projections == 1
+
+
+# ── Direct activation declares the half it actually changed ──────────
+#
+# These commands are Set-free, but they move the same runtime facts a Set
+# mutation does, so projecting both halves for each of them re-sent a whole
+# snapshot nothing had touched.
+
+
+@pytest.mark.asyncio
+async def test_activating_one_mcp_claims_only_that_code():
+    runtime = _ScopeRecordingRuntime()
+    service = _service(runtime=runtime)
+
+    await service.activate_mcp(
+        server_code="mcp.weather", bot_id="bot-1",
+        owner_id="true-owner", actor_id="true-owner",
+    )
+
+    (scope,) = runtime.scopes
+    assert scope.mcp is True
+    assert scope.skills is False, "activating an MCP touches no Skill"
+    assert scope.claimed_mcp == frozenset({"mcp.weather"})
+    assert scope.released_mcp == frozenset()
+
+
+@pytest.mark.asyncio
+async def test_deactivating_one_mcp_releases_only_that_code():
+    runtime = _ScopeRecordingRuntime()
+    service = _service(runtime=runtime)
+
+    await service.deactivate_mcp(
+        server_code="mcp.weather", bot_id="bot-1",
+        owner_id="true-owner", actor_id="true-owner",
+    )
+
+    (scope,) = runtime.scopes
+    assert scope.mcp is True
+    assert scope.skills is False
+    assert scope.released_mcp == frozenset({"mcp.weather"})
+    assert scope.claimed_mcp == frozenset()
+
+
+@pytest.mark.asyncio
+async def test_activating_a_dependency_free_skill_leaves_the_mcp_half_alone():
+    runtime = _ScopeRecordingRuntime()
+    service = _service(runtime=runtime)
+
+    await service.activate_skill(
+        skill_id="8", bot_id="bot-1", owner_id="true-owner", actor_id="true-owner",
+    )
+
+    (scope,) = runtime.scopes
+    assert scope.skills is True
+    assert scope.mcp is False, "no dependencies, so no MCP projection"
+
+
+@pytest.mark.asyncio
+async def test_activating_a_skill_claims_the_mcps_it_depends_on():
+    """The reason this cannot simply be ``ProjectionScope(skills=True)``.
+
+    A Skill's ``mcp_dependencies`` join the Bot's projected MCP set along with
+    it, so declaring ``mcp=False`` regardless would whitelist a dependency the
+    device is never configured for.
+    """
+    repository = _Repository()
+    repository.skill_mcp_codes = frozenset({"mcp.weather"})
+    runtime = _ScopeRecordingRuntime()
+    service = _service(repository=repository, runtime=runtime)
+
+    await service.activate_skill(
+        skill_id="8", bot_id="bot-1", owner_id="true-owner", actor_id="true-owner",
+    )
+
+    (scope,) = runtime.scopes
+    assert scope.skills is True
+    assert scope.mcp is True
+    assert scope.claimed_mcp == frozenset({"mcp.weather"})
+
+
+@pytest.mark.asyncio
+async def test_deactivating_a_skill_releases_the_mcps_it_depended_on():
+    repository = _Repository()
+    repository.skill_mcp_codes = frozenset({"mcp.weather"})
+    runtime = _ScopeRecordingRuntime()
+    service = _service(repository=repository, runtime=runtime)
+
+    await service.deactivate_skill(
+        skill_id="8", bot_id="bot-1", owner_id="true-owner", actor_id="true-owner",
+    )
+
+    (scope,) = runtime.scopes
+    assert scope.skills is True
+    assert scope.released_mcp == frozenset({"mcp.weather"})
+    assert scope.claimed_mcp == frozenset()

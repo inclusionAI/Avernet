@@ -65,8 +65,6 @@ async def list_render_screens(
             owner_id=owner_id,
             current_user_id=user_id,
         )
-    except PermissionError as e:
-        return RenderScreenApiResponse(success=False, message=str(e), error_code=403, data=None)
     except Exception as e:
         logger.exception("[RenderScreen] list_render_screens error: %s", e)
         return RenderScreenApiResponse(success=False, message=str(e), error_code=500, data=None)

@@ -174,3 +174,76 @@ def test_execute_yaml_forwards_participant_bindings_to_group():
     assert ep.get("participant_bindings") == bindings
     # 任务描述(目标)从 task_spec.goal.objective 透传进 extend_props(→ BCS 建群 context → <GroupContext> 目标)
     assert ep.get("task_context") == "o"
+
+
+# ===== execution_config.group_kind(补充,不破坏既有 has_yaml→state_machine 判断) =====
+
+def _start_recording(eng):
+    async def start(gf):
+        eng.calls.append(("yaml", gf.collab_mode))
+        return eng.group_start
+    eng.start_coop_group = start
+
+
+def test_execute_yaml_group_kind_chat_without_yaml():
+    """group_kind=chat + 无 yaml → collab_mode=chat(新增口子)。"""
+    eng = _FakeEngine(graph=None)
+    _start_recording(eng)
+    svc, _, _ = _service(eng)
+    asyncio.new_event_loop().run_until_complete(
+        svc.execute(_request(TaskType.YAML, group_kind="chat")))
+    assert ("yaml", "chat") in eng.calls
+
+
+def test_execute_yaml_group_kind_explicit_manager_worker_without_yaml():
+    """group_kind=manager_worker + 无 yaml → collab_mode=manager_worker(显式确认,现有默认)。"""
+    eng = _FakeEngine(graph=None)
+    _start_recording(eng)
+    svc, _, _ = _service(eng)
+    asyncio.new_event_loop().run_until_complete(
+        svc.execute(_request(TaskType.YAML, group_kind="manager_worker")))
+    assert ("yaml", "manager_worker") in eng.calls
+
+
+def test_execute_yaml_group_kind_absent_without_yaml_still_manager_worker():
+    """group_kind 缺省 + 无 yaml → manager_worker(既有默认不变)。"""
+    eng = _FakeEngine(graph=None)
+    _start_recording(eng)
+    svc, _, _ = _service(eng)
+    asyncio.new_event_loop().run_until_complete(svc.execute(_request(TaskType.YAML)))
+    assert ("yaml", "manager_worker") in eng.calls
+
+
+def test_execute_yaml_group_kind_state_machine_without_yaml_raises():
+    """group_kind=state_machine 但无 yaml 定义 → ValueError(没定义跑不了 state_machine)。"""
+    eng = _FakeEngine(graph=None)
+    _start_recording(eng)
+    svc, _, _ = _service(eng)
+    with pytest.raises(ValueError):
+        asyncio.new_event_loop().run_until_complete(
+            svc.execute(_request(TaskType.YAML, group_kind="state_machine")))
+    assert not any(c[0] == "yaml" for c in eng.calls)   # 没建群
+
+
+def test_execute_yaml_group_kind_unknown_raises():
+    """group_kind 未知值 → ValueError。"""
+    eng = _FakeEngine(graph=None)
+    _start_recording(eng)
+    svc, _, _ = _service(eng)
+    with pytest.raises(ValueError):
+        asyncio.new_event_loop().run_until_complete(
+            svc.execute(_request(TaskType.YAML, group_kind="nonsense")))
+
+
+def test_execute_yaml_with_yaml_ignores_group_kind_chat():
+    """有 yaml → state_machine(既有 has_yaml 判断不变;group_kind=chat 被忽略,不介入)。"""
+    eng = _FakeEngine(graph=None)
+
+    async def start(gf):
+        eng.calls.append(("yaml", gf.collab_mode, gf.extend_props.get("definition_yaml")))
+        return eng.group_start
+    eng.start_coop_group = start
+    svc, _, _ = _service(eng)
+    asyncio.new_event_loop().run_until_complete(
+        svc.execute(_request(TaskType.YAML, yaml="def: x", group_kind="chat")))
+    assert ("yaml", "state_machine", "def: x") in eng.calls

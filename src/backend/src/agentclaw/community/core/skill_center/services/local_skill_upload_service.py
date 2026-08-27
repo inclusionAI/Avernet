@@ -43,6 +43,7 @@ from agentclaw.community.core.skill_center.factories import (
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
+    ProjectionScope,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import (
     SkillParser,
@@ -532,9 +533,18 @@ class LocalSkillUploadService:
 
     async def _sync_runtime(self, owner_id: str, bot_id: str) -> bool:
         try:
+            # Skills only. Both callers are the Local Skill *replace* flow
+            # (and its compensating restore), and a replace cannot move the
+            # MCP set: ``replace_bot_local_skill`` writes ``description``,
+            # ``user_id`` and ``gmt_modified``, refuses outright to change
+            # ``git_path``, and never touches ``mcp_dependencies`` — nothing
+            # here rescans them either. The projected MCP codes are therefore
+            # identical before and after, so claiming or releasing anything
+            # would be a device write to restate what is already true.
             await self._runtime_reconciler.project(
                 bot_id=bot_id,
                 owner_id=owner_id,
+                scope=ProjectionScope(skills=True),
             )
             return True
         except Exception:

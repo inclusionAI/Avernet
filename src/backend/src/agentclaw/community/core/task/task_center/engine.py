@@ -82,6 +82,7 @@ class ExecutionEngine:
         bcs_identity=None,
         auth_gate=None,
         api_base_url: str = "",
+        bot_token_provider=None,
     ) -> None:
         """graph: TaskGraphService;bot: OpenApiBotPort;bcs: BcsClientPort;discover: BotDiscoverServiceProtocol。
         端口由 DI 从配置注入(local/prod/double 只换端口实现,引擎代码不变)。prod 必传;测试子类覆写
@@ -99,6 +100,7 @@ class ExecutionEngine:
         self._bcs_identity = bcs_identity
         self._auth_gate = auth_gate
         self._api_base_url = api_base_url
+        self._bot_token_provider = bot_token_provider
         self._bg_tasks: set[asyncio.Task] = set()
         self._locks: dict[str, threading.RLock] = {}
         self._locks_guard = threading.RLock()
@@ -172,6 +174,7 @@ class ExecutionEngine:
             graph=self._graph,
             api_base_url=self._api_base_url,
             bcn=self._bcn,
+            bot_token_provider=self._bot_token_provider,
         )
         import threading as _t
 

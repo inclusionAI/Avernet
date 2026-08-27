@@ -15,6 +15,9 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
     RuntimeMappingNameConflictError,
     build_logical_skill_mappings,
 )
+from agentclaw.community.core.skill_center.mcp_dependency_scope import (
+    mcp_dependency_codes,
+)
 from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
     RegisteredSkillAsset,
@@ -80,15 +83,14 @@ class RuntimeProjectionResolver:
         mcp_codes = set(state.installed_mcp_server_codes)
         mcp_codes.update(state.system_default_mcp_server_codes)
         for asset in assets:
-            for dependency in asset.mcp_dependencies:
-                if isinstance(dependency, str):
-                    mcp_codes.add(dependency)
-                elif isinstance(dependency, dict) and isinstance(
-                    dependency.get("server_code") or dependency.get("code"), str
-                ):
-                    mcp_codes.add(dependency.get("server_code") or dependency["code"])
-                else:
-                    raise ValueError("invalid Skill MCP dependency in runtime projection")
+            try:
+                # Shared with the command that scopes a Skill mutation, so the
+                # set a mutation declares is the set this resolves.
+                mcp_codes.update(mcp_dependency_codes(asset.mcp_dependencies))
+            except ValueError as exc:
+                raise ValueError(
+                    "invalid Skill MCP dependency in runtime projection"
+                ) from exc
         if any(not isinstance(code, str) or not code for code in mcp_codes):
             raise ValueError("invalid MCP server code in runtime projection")
         return RuntimeProjection(

@@ -108,6 +108,41 @@ class TestLoadYamlConfigsOverlaySelection:
         assert str(first_configs) in str(error.value)
         assert str(fallback_configs) in str(error.value)
 
+    def test_corp_overlay_merges_on_top(self, monkeypatch, tmp_path):
+        """Three-layer merge: base + community overlay + corp overlay.
+
+        The corp overlay (``{stem}-corp.yaml``) injects real credentials that
+        must not live in community source. When present alongside the config
+        pair, ``_load_yaml_configs`` deep-merges it on top.
+        """
+        overlay_name = "application-test.yaml"
+        configs = tmp_path / "configs"
+        configs.mkdir()
+        (configs / "application.yaml").write_text("user_config:\n  base: base-val\n")
+        (configs / overlay_name).write_text("user_config:\n  overlay: overlay-val\n")
+        corp_name = "application-test-corp.yaml"
+        (configs / corp_name).write_text(
+            "user_config:\n  overlay: corp-override\n  corp_secret: real-secret\n"
+        )
+
+        community_root = tmp_path / "community"
+        community_configs = community_root / "configs"
+        community_configs.mkdir(parents=True)
+        (community_configs / "application.yaml").write_text("user_config:\n  base: base-val\n")
+        (community_configs / overlay_name).write_text("user_config:\n  overlay: overlay-val\n")
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            yaml_provider,
+            "__file__",
+            str(community_root / "core" / "config" / "yaml_provider.py"),
+        )
+
+        result = _load_yaml_configs(overlay_name)
+        assert result["user_config"]["base"] == "base-val"
+        assert result["user_config"]["overlay"] == "corp-override"
+        assert result["user_config"]["corp_secret"] == "real-secret"
+
 
 @pytest.fixture(autouse=True)
 def _community_database_url(monkeypatch):
