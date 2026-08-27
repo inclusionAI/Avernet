@@ -58,10 +58,10 @@ class TaskSourceType(StrEnum):
 
 
 class TaskType(StrEnum):
-    """任务类型(yaml / workflow / dynamic)。"""
+    """任务类型(static-single-workflow / static-group-workflow / dynamic)。"""
 
-    YAML = "yaml"
-    WORKFLOW = "workflow"
+    STATIC_SINGLE_WORKFLOW = "STATIC-SINGLE-WORKFLOW"
+    STATIC_GROUP_WORKFLOW = "STATIC-GROUP-WORKFLOW"
     DYNAMIC = "dynamic"
 
 
