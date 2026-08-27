@@ -32,6 +32,7 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
+    ResolvedCapabilityPlan,
 )
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeDesiredState,
@@ -129,14 +130,7 @@ class BotRuntimeProjector:
         retired_mappings: Sequence[PoolSkillMapping] = (),
         scope: ProjectionScope,
     ) -> None:
-        (
-            service,
-            bot,
-            engine,
-            projection,
-            effective_cli_items,
-            identity_modes,
-        ) = self._resolve_plan(
+        plan = self._resolve_plan(
             bot_id=bot_id,
             owner_id=owner_id,
             retired_mappings=retired_mappings,
@@ -153,36 +147,36 @@ class BotRuntimeProjector:
         # would strand a published mapping the desired state no longer holds.
         if scope.skills or retired_mappings:
             await self._apply_skill_projection(
-                service=service,
-                bot=bot,
-                engine=engine,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                projection=projection,
+                service=plan.service,
+                bot=plan.bot,
+                engine=plan.engine,
+                bot_id=plan.bot_id,
+                owner_id=plan.owner_id,
+                projection=plan.projection,
                 retired_mappings=retired_mappings,
             )
         else:
             logger.info(
                 "[BotRuntimeProjector] Skill projection skipped, scope declares "
                 "no Skill change: bot_id=%s, engine=%s",
-                bot_id, engine,
+                plan.bot_id, plan.engine,
             )
         if scope.mcp:
             await self._apply_non_skill_projection(
-                service=service,
+                service=plan.service,
                 scope=scope,
-                identity_modes=identity_modes,
-                engine=engine,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                projection=projection,
-                effective_cli_items=effective_cli_items,
+                identity_modes=plan.identity_modes,
+                engine=plan.engine,
+                bot_id=plan.bot_id,
+                owner_id=plan.owner_id,
+                projection=plan.projection,
+                effective_cli_items=plan.effective_cli_items,
             )
         else:
             logger.info(
                 "[BotRuntimeProjector] MCP/CLI projection skipped, scope "
                 "declares no MCP change: bot_id=%s, engine=%s",
-                bot_id, engine,
+                plan.bot_id, plan.engine,
             )
 
     async def project_mcp_and_cli(
@@ -193,26 +187,19 @@ class BotRuntimeProjector:
         scope: ProjectionScope,
     ) -> None:
         """Rebuild MCP/CLI when a cutover task exclusively owns Skill mappings."""
-        (
-            service,
-            bot,
-            engine,
-            projection,
-            effective_cli_items,
-            identity_modes,
-        ) = self._resolve_plan(
+        plan = self._resolve_plan(
             bot_id=bot_id,
             owner_id=owner_id,
         )
         await self._apply_non_skill_projection(
-            service=service,
+            service=plan.service,
             scope=scope,
-            identity_modes=identity_modes,
-            engine=engine,
-            bot_id=bot_id,
-            owner_id=owner_id,
-            projection=projection,
-            effective_cli_items=effective_cli_items,
+            identity_modes=plan.identity_modes,
+            engine=plan.engine,
+            bot_id=plan.bot_id,
+            owner_id=plan.owner_id,
+            projection=plan.projection,
+            effective_cli_items=plan.effective_cli_items,
         )
 
     async def project_for_cleanup(
@@ -228,29 +215,25 @@ class BotRuntimeProjector:
         Local/Repo removal.  Center requires the Pool v3 contract and is never
         permitted on this compatibility path.
         """
-        (
-            service,
-            bot,
-            engine,
-            projection,
-            effective_cli_items,
-            identity_modes,
-        ) = self._resolve_cleanup_plan(bot_id=bot_id, owner_id=owner_id)
-        if any(mapping.corpus == "center" for mapping in projection.skill_mappings):
+        plan = self._resolve_cleanup_plan(bot_id=bot_id, owner_id=owner_id)
+        if any(
+            mapping.corpus == "center"
+            for mapping in plan.projection.skill_mappings
+        ):
             raise SkillSetRuntimeReconcileError()
-        if not service.sync_runtime(
-            desired_skills=self._desired_skills(projection)
+        if not plan.service.sync_runtime(
+            desired_skills=self._desired_skills(plan.projection)
         ):
             raise SkillSetRuntimeReconcileError()
         await self._apply_non_skill_projection(
-            service=service,
+            service=plan.service,
             scope=scope,
-            identity_modes=identity_modes,
-            engine=engine,
-            bot_id=bot_id,
-            owner_id=owner_id,
-            projection=projection,
-            effective_cli_items=effective_cli_items,
+            identity_modes=plan.identity_modes,
+            engine=plan.engine,
+            bot_id=plan.bot_id,
+            owner_id=plan.owner_id,
+            projection=plan.projection,
+            effective_cli_items=plan.effective_cli_items,
         )
 
     def _resolve_plan(
@@ -259,7 +242,7 @@ class BotRuntimeProjector:
         bot_id: str,
         owner_id: str,
         retired_mappings: Sequence[PoolSkillMapping] = (),
-    ):
+    ) -> ResolvedCapabilityPlan:
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()
@@ -275,7 +258,7 @@ class BotRuntimeProjector:
         *,
         bot_id: str,
         owner_id: str,
-    ):
+    ) -> ResolvedCapabilityPlan:
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()
@@ -312,7 +295,7 @@ class BotRuntimeProjector:
         bot_id: str,
         owner_id: str,
         retired_mappings: Sequence[PoolSkillMapping] = (),
-    ):
+    ) -> ResolvedCapabilityPlan:
         engine = str(bot.get("active_engine") or "openclaw")
         service = self._factory.create(
             user_id=owner_id,
@@ -392,13 +375,15 @@ class BotRuntimeProjector:
             )
         )
 
-        return (
-            service,
-            bot,
-            engine,
-            projection,
-            effective_cli_items,
-            identity_modes,
+        return ResolvedCapabilityPlan(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            service=service,
+            bot=bot,
+            engine=engine,
+            projection=projection,
+            effective_cli_items=effective_cli_items,
+            identity_modes=identity_modes,
         )
 
     async def _apply_skill_projection(

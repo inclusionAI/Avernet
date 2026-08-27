@@ -23,20 +23,20 @@ separately.
 
 ## Group 1 — The plan becomes a value (no behaviour change)
 
-- [ ] 1.1 In `core/skill_center/runtime_projection_contract.py`, add
+- [x] 1.1 In `core/skill_center/runtime_projection_contract.py`, add
       `ResolvedCapabilityPlan` — a `@dataclass(frozen=True, slots=True)` with
       `bot_id`, `owner_id`, `service`, `bot`, `engine`, `projection`,
       `effective_cli_items`, `identity_modes`. Type `service` loosely to avoid
       importing `SkillSetService` (cycle); say so in a comment. Export it.
 
-- [ ] 1.2 In `bot_runtime_projector.py`, make `_build_plan`, `_resolve_plan`
+- [x] 1.2 In `bot_runtime_projector.py`, make `_build_plan`, `_resolve_plan`
       and `_resolve_cleanup_plan` return `ResolvedCapabilityPlan`, and update
       the three unpack sites (`project`, `project_mcp_and_cli`,
       `project_for_cleanup`) to attribute access. `bot_id` / `owner_id` are
       already arguments to plan resolution — put them on the plan rather than
       threading them separately.
 
-- [ ] 1.3 Green check: `.venv/bin/python -m pytest
+- [x] 1.3 Green check: `.venv/bin/python -m pytest
       tests/community/core/skill_center/ tests/community/contracts/ -q`.
       Group 1 is a pure refactor — **every test must pass unedited**. If one
       needs a change, the tuple was carrying meaning the dataclass lost.

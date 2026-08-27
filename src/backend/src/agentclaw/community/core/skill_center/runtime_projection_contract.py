@@ -2,11 +2,55 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
+
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.skill_center.runtime_resolver import (
+        RuntimeProjection,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedCapabilityPlan:
+    """One Bot's desired capability state, resolved and ready to apply.
+
+    Everything read-only about a projection, gathered before anything is
+    written: the flush has run, the pre-flight checks have passed, and the
+    values below cannot change under the write that follows. A projection that
+    aborts does so while building this, with nothing half-applied behind it.
+
+    It exists as a value rather than a tuple because it crosses a seam — an
+    ``EngineRuntimeProjection`` acts from the plan alone — and a positional
+    six-tuple unpacked at three call sites was one reordering away from a
+    silent mix-up.
+    """
+
+    #: The Bot this plan is for, and the owner whose desired state it reads.
+    bot_id: str
+    owner_id: str
+    #: ``SkillSetService`` for this Bot. Typed loosely on purpose: importing
+    #: it here would close a cycle (``skill_center.services`` already imports
+    #: this module), and the contract needs no more than "the thing the
+    #: projection calls".
+    service: Any
+    #: The ``ac_bots`` row. Carries ``env`` / ``entity_id`` / ``active_engine``
+    #: that a filesystem-layout decision needs.
+    bot: dict
+    #: ``ac_bots.active_engine`` — the registry key. Whose runtime contract
+    #: applies is decided from this and nothing else.
+    engine: str
+    #: The deduplicated Skill/MCP/CLI snapshot to converge the runtime on.
+    projection: "RuntimeProjection"
+    #: Effective Default CLI facts, as the authorization service holds them.
+    effective_cli_items: list[dict]
+    #: Per-MCP execution identity, resolved during plan resolution because it
+    #: can fail — see ``BotRuntimeProjector._resolve_mcp_identity_modes``.
+    identity_modes: Mapping[str, object]
 
 
 @dataclass(frozen=True)
@@ -139,4 +183,8 @@ class BotRuntimeProjectorProtocol(Protocol):
         ...
 
 
-__all__ = ["BotRuntimeProjectorProtocol", "ProjectionScope"]
+__all__ = [
+    "BotRuntimeProjectorProtocol",
+    "ProjectionScope",
+    "ResolvedCapabilityPlan",
+]
