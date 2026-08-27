@@ -113,6 +113,15 @@ run_context_store = "redis" # | "memory";缺省 "memory"
 - 迁移:SQLite `SQLITE_DDL_STATEMENTS` + `migrations/mysql/016_chat_runs.sql`。
 - `cargo check -p bcs` 通过;`cargo test -p bcs-chat-run-store`、`cargo test -p bcs-message-flow` 通过。
 
+### 10.1 评审驱动修订(review-driven fixes)
+Codex 评审后修复(详见 PR 评论):
+- **C8**:ChatRun overlay TTL 由 `expires_at_ms` 改为 `expires_at_ms + retention`——超时清扫(`force_fail` 在 `expires_at < now` 后才跑)仍能合并流式正文,不再丢 `failed("timeout")` 的累积文本。
+- **C2**:`RedisBotRunContextStore` 的 context/transport/term 键 TTL 由固定 `retention`(120s)改为 `deadline_ms + retention`——长 provider run 不再在 120s 被驱逐成 `run_not_found`。两 store 统一"deadline + retention grace"模型。
+- **C11(回归)**:恢复 detached-delivery 清理语义——已 ack 的 `DetachDeliveryAck` run 不再被 `force_fail("timeout")`(已成功投递不应标失败);`list_active` 排除它们,新增 `drop_detached_expired` 端口按 `ack_at + retention` 静默退役(Dropped,非 Expired)。MySQL 侧 no-op 交平台。
+- **C5**:启动校验 `bot_run_context_store="redis"` 要求 `[cache.redis]` 真为 Redis(capability 校验),否则 `InvalidConfig` 拒绝启动——不再静默退化为进程本地。
+- **C12**:启动校验 `async_chat_run_store`/`bot_run_context_store` 为枚举,拼写错误(如 `"persisent"`)直接报错而非静默落回 memory。
+- 拒绝/非-issue:C1(SQL CAS version 守卫——版本漂移容差是设计内,终态合并 overlay 已正确,真实子问题即 C8)、C3(bind 原子性——sticky-session 下单副本单次绑定)、C10(wait 跨副本唤醒——sticky-session),均在 PR 内回复并 resolve。
+
 ## 11. 持久化运维/审计收紧(已落地)
 针对 persistent(MySQL)模式的 cleanup / retention / 审计 / 指标做了以下收紧(独立后续改动):
 

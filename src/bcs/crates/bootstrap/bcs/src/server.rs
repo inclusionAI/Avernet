@@ -33,7 +33,7 @@ use crate::config::{
 use crate::lifecycle::LifecycleOrchestrator;
 use crate::friend_connect_notification::HttpFriendConnectNotificationPort;
 use crate::plugins::{
-    DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
+    CachePluginKind, DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
     build_registered_channel_provider, build_registered_leader_election,
     build_registered_llm_provider, build_registered_security_gateway,
     build_registered_user_directory,
@@ -4225,6 +4225,16 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                 message_repo,
             )
         };
+        if config.bot_run_context_store == "redis"
+            && infrastructure_plugins.cache_kind() != CachePluginKind::Redis
+        {
+            return Err(crate::BcsError::InvalidConfig(
+                "bot_run_context_store='redis' requires a Redis cache backend \
+                 ([cache.redis]); the resolved cache is not Redis — refusing to \
+                 start with silently process-local run context"
+                    .to_string(),
+            ));
+        }
         let bot_run_context: Arc<dyn BotRunContextPort> =
             if config.bot_run_context_store == "redis" {
                 Arc::new(bcs_message_flow::RedisBotRunContextStore::new(
@@ -4267,6 +4277,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                         db_flavor,
                         cache_plugin.clone(),
                         cache_key_prefix.clone(),
+                        config.async_chat_run_retention_ms,
                     ));
                 Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_repo(chat_run_repo))
             } else {

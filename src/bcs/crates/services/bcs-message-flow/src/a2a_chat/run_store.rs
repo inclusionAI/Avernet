@@ -475,7 +475,7 @@ impl ChatRunStore {
             }
         }
 
-        let dropped = match self.repo.delete_expired_terminal(now_ms_v, retention_ms).await {
+        let mut dropped = match self.repo.delete_expired_terminal(now_ms_v, retention_ms).await {
             Ok(records) => records
                 .into_iter()
                 .map(|record| {
@@ -484,12 +484,23 @@ impl ChatRunStore {
                         direct_chat_client_kind(record.client.as_deref()),
                     )
                 })
-                .collect(),
+                .collect::<Vec<_>>(),
             Err(err) => {
                 error!(error = %err, "chat run delete_expired_terminal failed");
                 Vec::new()
             }
         };
+        // Acknowledged detached-delivery runs are retired silently (Dropped),
+        // never failed on timeout — they were successfully delivered.
+        match self.repo.drop_detached_expired(now_ms_v, retention_ms).await {
+            Ok(records) => dropped.extend(records.into_iter().map(|record| {
+                (
+                    record.run_id.clone(),
+                    direct_chat_client_kind(record.client.as_deref()),
+                )
+            })),
+            Err(err) => error!(error = %err, "chat run drop_detached_expired failed"),
+        }
 
         (expired, dropped)
     }

@@ -14,7 +14,8 @@ use async_trait::async_trait;
 use tokio::sync::RwLock;
 
 use bcs_service_api::port::repo::{
-    CasOutcome, ChatRunRecord, ChatRunRepoError, ChatRunRepoPort, ChatRunState,
+    CasOutcome, ChatRunCompletionPolicy, ChatRunRecord, ChatRunRepoError, ChatRunRepoPort,
+    ChatRunState,
 };
 use bcs_service_api::{ChatRunMetricCount, DirectChatClientKind, DirectChatRunState};
 
@@ -56,6 +57,14 @@ fn client_kind(client: Option<&str>) -> DirectChatClientKind {
         Some(raw) if raw.starts_with("bcs-cli") => DirectChatClientKind::BcsCli,
         Some(_) => DirectChatClientKind::Unknown,
     }
+}
+
+/// A run delivered under `DetachDeliveryAck` that has acknowledged delivery —
+/// it is successfully handed off and must NOT be failed on timeout. The timeout
+/// sweep (`list_active`) skips it; `drop_detached_expired` retires it silently.
+fn is_acked_detached(record: &ChatRunRecord) -> bool {
+    record.completion_policy == ChatRunCompletionPolicy::DetachDeliveryAck
+        && record.delivery_ack_at_ms.is_some()
 }
 
 impl MemoryChatRunRepo {
@@ -171,9 +180,41 @@ impl ChatRunRepoPort for MemoryChatRunRepo {
             .await
             .runs
             .values()
-            .filter(|record| !record.state.is_terminal() && record.expires_at_ms < now_ms)
+            .filter(|record| {
+                !record.state.is_terminal()
+                    && record.expires_at_ms < now_ms
+                    && !is_acked_detached(record)
+            })
             .cloned()
             .collect())
+    }
+
+    async fn drop_detached_expired(
+        &self,
+        now_ms: u64,
+        retention_ms: u64,
+    ) -> Result<Vec<ChatRunRecord>, ChatRunRepoError> {
+        let mut guard = self.inner.write().await;
+        let drop_ids: Vec<String> = guard
+            .runs
+            .iter()
+            .filter(|(_, record)| {
+                record.state == ChatRunState::Running
+                    && is_acked_detached(record)
+                    && record
+                        .delivery_ack_at_ms
+                        .map(|ack_at| now_ms.saturating_sub(ack_at) >= retention_ms)
+                        .unwrap_or(false)
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        let mut dropped = Vec::with_capacity(drop_ids.len());
+        for key in &drop_ids {
+            if let Some(record) = guard.runs.remove(key) {
+                dropped.push(record);
+            }
+        }
+        Ok(dropped)
     }
 
     async fn delete_expired_terminal(

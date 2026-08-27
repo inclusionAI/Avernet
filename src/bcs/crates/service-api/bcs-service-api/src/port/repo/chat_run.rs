@@ -212,6 +212,19 @@ pub trait ChatRunRepoPort: Send + Sync + 'static {
         retention_ms: u64,
     ) -> Result<Vec<ChatRunRecord>, ChatRunRepoError>;
 
+    /// Retire acknowledged detached-delivery runs past their retention: a run
+    /// with `completion_policy == DetachDeliveryAck` that has received its
+    /// delivery acknowledgement is considered successfully delivered and must
+    /// NOT be failed on timeout — it is silently retired (Dropped, not Expired)
+    /// once `now - delivery_ack_at_ms >= retention`. `list_active` excludes
+    /// these so the timeout sweep never marks a delivered run failed. Returns
+    /// the retired records (carrying `client`) for lifecycle attribution.
+    async fn drop_detached_expired(
+        &self,
+        now_ms: u64,
+        retention_ms: u64,
+    ) -> Result<Vec<ChatRunRecord>, ChatRunRepoError>;
+
     /// Aggregate counts by state × client kind for metrics. Only active
     /// (non-terminal) runs are counted: terminal runs are short-lived in memory
     /// mode and retained long-term in MySQL mode, so counting them as a gauge

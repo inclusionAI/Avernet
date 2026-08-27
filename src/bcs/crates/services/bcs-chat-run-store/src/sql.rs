@@ -37,6 +37,10 @@ pub struct SqlChatRunRepo {
     flavor: DbSqlFlavor,
     cache: Arc<dyn CachePlugin>,
     key_prefix: String,
+    /// Retention grace past `expires_at_ms` that the streaming overlay must
+    /// survive, so the timeout sweep (`force_fail`, which runs only after the
+    /// deadline) can still merge the accumulated text. See spec §11 / C8.
+    overlay_retention_ms: u64,
     schema_ready: AtomicBool,
 }
 
@@ -54,12 +58,14 @@ impl SqlChatRunRepo {
         flavor: DbSqlFlavor,
         cache: Arc<dyn CachePlugin>,
         key_prefix: String,
+        overlay_retention_ms: u64,
     ) -> Self {
         Self {
             db,
             flavor,
             cache,
             key_prefix,
+            overlay_retention_ms,
             schema_ready: AtomicBool::new(false),
         }
     }
@@ -136,7 +142,13 @@ impl SqlChatRunRepo {
 
     async fn write_overlay(&self, run_id: &str, overlay: &StreamingOverlay, expires_at_ms: u64) {
         let now = now_ms();
-        let ttl_ms = expires_at_ms.saturating_sub(now).max(1000);
+        // Overlay must survive the run deadline by the retention grace so the
+        // timeout sweep (which runs only once `expires_at_ms < now`) can still
+        // merge the streamed content instead of reading a stale DB row.
+        let ttl_ms = expires_at_ms
+            .saturating_add(self.overlay_retention_ms)
+            .saturating_sub(now)
+            .max(1000);
         if let Ok(bytes) = serde_json::to_vec(overlay) {
             let _ = self
                 .cache
@@ -518,12 +530,17 @@ impl ChatRunRepoPort for SqlChatRunRepo {
     }
 
     async fn list_active(&self, now_ms: u64) -> Result<Vec<ChatRunRecord>, ChatRunRepoError> {
+        // Exclude acknowledged detached-delivery runs: they are successfully
+        // delivered and must not be failed on timeout (drop_detached_expired
+        // retires them instead).
         let rows = self
             .db
             .query(DbStatement::with_params(
                 &format!(
                     "SELECT {SELECT_COLS} FROM bcs_chat_runs \
-                     WHERE state NOT IN ({TERMINAL_STATES}) AND expires_at_ms < ?"
+                     WHERE state NOT IN ({TERMINAL_STATES}) AND expires_at_ms < ? \
+                     AND NOT (completion_policy = 'detach_delivery_ack' \
+                              AND delivery_ack_at_ms IS NOT NULL)"
                 ),
                 vec![DbValue::from(now_ms as i64)],
             ))
@@ -534,6 +551,54 @@ impl ChatRunRepoPort for SqlChatRunRepo {
             records.push(row_to_record(&row)?);
         }
         Ok(records)
+    }
+
+    async fn drop_detached_expired(
+        &self,
+        now_ms: u64,
+        retention_ms: u64,
+    ) -> Result<Vec<ChatRunRecord>, ChatRunRepoError> {
+        // MySQL delegates (terminal-row pruning is platform-managed; detached
+        // retirement is analogous — keep the auditable row). SQLite (dev/test)
+        // self-prunes here so the local table stays bounded and the path is
+        // covered by tests.
+        if self.flavor != DbSqlFlavor::Sqlite {
+            return Ok(Vec::new());
+        }
+        let cutoff = now_ms.saturating_sub(retention_ms);
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                &format!(
+                    "SELECT {SELECT_COLS} FROM bcs_chat_runs \
+                     WHERE state = 'running' \
+                       AND completion_policy = 'detach_delivery_ack' \
+                       AND delivery_ack_at_ms IS NOT NULL \
+                       AND delivery_ack_at_ms < ?"
+                ),
+                vec![DbValue::from(cutoff as i64)],
+            ))
+            .await
+            .map_err(backend)?;
+        let mut dropped = Vec::new();
+        for row in rows {
+            let record = row_to_record(&row)?;
+            let _ = self
+                .db
+                .execute(DbStatement::with_params(
+                    &format!(
+                        "DELETE FROM bcs_chat_runs \
+                         WHERE run_id = ? AND state = 'running' \
+                           AND completion_policy = 'detach_delivery_ack' \
+                           AND delivery_ack_at_ms < ?"
+                    ),
+                    vec![DbValue::from(record.run_id.clone()), DbValue::from(cutoff as i64)],
+                ))
+                .await;
+            self.delete_overlay(&record.run_id).await;
+            dropped.push(record);
+        }
+        Ok(dropped)
     }
 
     async fn delete_expired_terminal(

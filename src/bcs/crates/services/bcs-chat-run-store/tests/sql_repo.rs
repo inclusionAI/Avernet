@@ -12,7 +12,7 @@ use bcs_service_api::ChatResponseMode;
 fn repo() -> SqlChatRunRepo {
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
     let cache = Arc::new(InMemoryCachePlugin::new());
-    SqlChatRunRepo::new(db, DbSqlFlavor::Sqlite, cache, "bcs:".to_string())
+    SqlChatRunRepo::new(db, DbSqlFlavor::Sqlite, cache, "bcs:".to_string(), 120_000)
 }
 
 fn record(run_id: &str, version: u64) -> ChatRunRecord {

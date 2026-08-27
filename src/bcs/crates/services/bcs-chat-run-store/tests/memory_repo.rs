@@ -162,3 +162,31 @@ async fn metric_counts_aggregates_by_state_and_client() {
         .unwrap_or(0);
     assert_eq!(pending_count, 2);
 }
+
+#[tokio::test]
+async fn list_active_excludes_acked_detached_and_drop_retires_them() {
+    let repo = MemoryChatRunRepo::new();
+    // Acknowledged detached-delivery run: delivered successfully, overdue, but
+    // must NOT be failed on timeout — list_active skips it.
+    let mut detached = record("detached", 1);
+    detached.state = ChatRunState::Running;
+    detached.completion_policy = ChatRunCompletionPolicy::DetachDeliveryAck;
+    detached.delivery_ack_at_ms = Some(0);
+    detached.expires_at_ms = 5;
+    // A plain overdue run: should appear in list_active (eligible for force_fail).
+    let mut overdue = record("overdue", 1);
+    overdue.expires_at_ms = 5;
+    repo.create(detached).await.unwrap();
+    repo.create(overdue).await.unwrap();
+
+    let active = repo.list_active(10).await.unwrap();
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].run_id, "overdue");
+
+    // Retire the acked-detached run past its retention (now=100, retention=50).
+    let dropped = repo.drop_detached_expired(100, 50).await.unwrap();
+    assert_eq!(dropped.len(), 1);
+    assert_eq!(dropped[0].run_id, "detached");
+    assert!(repo.get("detached").await.unwrap().is_none());
+    assert!(repo.get("overdue").await.unwrap().is_some());
+}

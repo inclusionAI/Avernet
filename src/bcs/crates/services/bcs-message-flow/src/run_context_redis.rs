@@ -27,7 +27,13 @@ const CLAIM_TTL_MS: u64 = 60_000;
 pub struct RedisBotRunContextStore {
     cache: Arc<dyn CachePlugin>,
     key_prefix: String,
-    ttl: Duration,
+    /// Grace past `deadline_ms` that context/transport/term keys are retained,
+    /// so a provider callback arriving just past the BCS timeout (or a
+    /// restart/relocation within the grace) can still route. The live TTL of
+    /// each entry is `deadline_ms + retention` (see `lifecycle_ttl`), not a
+    /// flat interval from insertion — otherwise long provider runs are evicted
+    /// mid-flight (C2).
+    retention_ms: u64,
 }
 
 impl RedisBotRunContextStore {
@@ -35,7 +41,7 @@ impl RedisBotRunContextStore {
         Self {
             cache,
             key_prefix,
-            ttl: Duration::from_millis(retention_ms.max(1)),
+            retention_ms: retention_ms.max(1),
         }
     }
 
@@ -50,6 +56,16 @@ impl RedisBotRunContextStore {
     }
     fn transport_key(&self, run_id: &str) -> String {
         format!("{}botrun:transport:{}", self.key_prefix, run_id)
+    }
+
+    /// TTL for a lifecycle key: keep the entry until the run's `deadline_ms`
+    /// plus the retention grace, measured from now. Matches the memory store's
+    /// "deadline + retention" lifecycle so long provider runs are not evicted
+    /// before they finish (C2).
+    fn lifecycle_ttl(&self, deadline_ms: u64) -> Duration {
+        let now = now_ms();
+        let target = deadline_ms.saturating_add(self.retention_ms);
+        Duration::from_millis(target.saturating_sub(now).max(1000))
     }
 
     async fn read_context(&self, run_id: &str) -> Option<BotRunContext> {
@@ -72,12 +88,20 @@ impl RedisBotRunContextStore {
 
     async fn write_context(&self, context: &BotRunContext) {
         if let Ok(bytes) = serde_json::to_vec(context) {
+            let ttl = self.lifecycle_ttl(context.deadline_ms);
             let _ = self
                 .cache
-                .set_value(&self.ctx_key(&context.run_id), bytes, Some(self.ttl), CacheSetMode::Upsert)
+                .set_value(&self.ctx_key(&context.run_id), bytes, Some(ttl), CacheSetMode::Upsert)
                 .await;
         }
     }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 fn transport_str(transport: ProviderRunTransport) -> &'static str {
@@ -137,25 +161,25 @@ impl BotRunContextPort for RedisBotRunContextStore {
     }
 
     async fn mark_terminal(&self, run_id: &str) -> bool {
-        if self.read_context(run_id).await.is_none() {
+        let Some(context) = self.read_context(run_id).await else {
             return false;
-        }
+        };
+        let ttl = self.lifecycle_ttl(context.deadline_ms);
         // First writer wins; everyone else observes terminal via the term key.
         let applied = self
             .cache
             .set_value(
                 &self.term_key(run_id),
                 b"1".to_vec(),
-                Some(self.ttl),
+                Some(ttl),
                 CacheSetMode::InsertOnly,
             )
             .await
             .unwrap_or(false);
         if applied {
-            if let Some(mut context) = self.read_context(run_id).await {
-                context.terminal = true;
-                self.write_context(&context).await;
-            }
+            let mut context = context;
+            context.terminal = true;
+            self.write_context(&context).await;
             let _ = self.cache.delete(&self.claim_key(run_id)).await;
         }
         applied
@@ -174,7 +198,7 @@ impl BotRunContextPort for RedisBotRunContextStore {
             return false;
         };
         self.cache
-            .set_value(&self.transport_key(run_id), bytes, Some(self.ttl), CacheSetMode::InsertOnly)
+            .set_value(&self.transport_key(run_id), bytes, Some(self.lifecycle_ttl(deadline_ms)), CacheSetMode::InsertOnly)
             .await
             .unwrap_or(false)
     }
@@ -203,7 +227,7 @@ impl BotRunContextPort for RedisBotRunContextStore {
                 if let Ok(payload) = serde_json::to_vec(&updated) {
                     let _ = self
                         .cache
-                        .set_value(&self.transport_key(run_id), payload, Some(self.ttl), CacheSetMode::Upsert)
+                        .set_value(&self.transport_key(run_id), payload, Some(self.lifecycle_ttl(entry.deadline_ms)), CacheSetMode::Upsert)
                         .await;
                 }
                 true
@@ -226,7 +250,7 @@ impl BotRunContextPort for RedisBotRunContextStore {
                 if let Ok(payload) = serde_json::to_vec(&entry) {
                     let _ = self
                         .cache
-                        .set_value(&self.transport_key(run_id), payload, Some(self.ttl), CacheSetMode::Upsert)
+                        .set_value(&self.transport_key(run_id), payload, Some(self.lifecycle_ttl(entry.deadline_ms)), CacheSetMode::Upsert)
                         .await;
                 }
             }

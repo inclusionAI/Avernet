@@ -1249,6 +1249,29 @@ impl BcsConfig {
         Ok(())
     }
 
+    /// Validate the run-store backend selectors. Unknown values (e.g. a typo
+    /// like `"persisent"`) must fail startup rather than silently fall back to
+    /// `memory`, since these control the advertised governance guarantee.
+    pub fn validate_run_store_selectors(&self) -> Result<(), String> {
+        match self.async_chat_run_store.as_str() {
+            "memory" | "persistent" => {}
+            other => {
+                return Err(format!(
+                    "async_chat_run_store must be 'memory' or 'persistent', got '{other}'"
+                ))
+            }
+        }
+        match self.bot_run_context_store.as_str() {
+            "memory" | "redis" => {}
+            other => {
+                return Err(format!(
+                    "bot_run_context_store must be 'memory' or 'redis', got '{other}'"
+                ))
+            }
+        }
+        Ok(())
+    }
+
     /// Load configuration with multi-environment support.
     ///
     /// This is the recommended way to load config for multi-environment deployment.
@@ -1296,6 +1319,7 @@ impl BcsConfig {
         normalize_local_paths(&mut config, &local_path_base_dir);
         validate_loaded_config_for_environment(&config, result.environment)
             .map_err(|err| err.to_string())?;
+        config.validate_run_store_selectors()?;
         Ok(config)
     }
 
