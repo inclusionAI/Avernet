@@ -7,7 +7,17 @@
 #   docker build -f docker/evolvetrace.Dockerfile -t evolvetrace:local .
 
 # --- Build stage: install deps, build Vite frontend, compile TS server ---
-FROM node:20-bookworm AS builder
+FROM node:22-bookworm AS builder
+
+# Install build tools for native modules (e.g. better-sqlite3).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Use python3 for node-gyp.
+ENV npm_config_python=/usr/bin/python3
 
 # Allow optional npm registry mirror (e.g. China CI builds).
 ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
@@ -23,10 +33,11 @@ RUN npm config set registry "${npm_config_registry}" \
 
 # Copy source and build both frontend and server.
 COPY src/evolverun/evolvetrace/ ./
-RUN npm run build && npm run build:server
+RUN npm run build && npm run build:server \
+    && npm prune --production
 
 # --- Runtime stage ---
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 # Allow optional npm registry mirror (must match builder stage).
 ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
@@ -50,11 +61,8 @@ COPY --from=builder --chown=appuser:appuser /build/scripts ./scripts
 COPY --from=builder --chown=appuser:appuser /build/package.json ./package.json
 COPY --from=builder --chown=appuser:appuser /build/package-lock.json ./package-lock.json
 
-# Install production dependencies only (mysql2 etc.).
-RUN npm config set registry "${npm_config_registry}" \
-    && npm config set legacy-peer-deps true \
-    && npm ci --omit=dev --no-audit --no-fund \
-    && rm -rf ~/.npm
+# Copy production node_modules from builder (avoids re-install and native rebuild).
+COPY --from=builder --chown=appuser:appuser /build/node_modules ./node_modules
 
 USER appuser
 
