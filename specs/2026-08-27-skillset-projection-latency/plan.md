@@ -1,8 +1,14 @@
 # Plan: SkillSet Projection Latency
 
+> **Scope of this change: P1 and P2 only.** The P3, P4 and P5 material below is
+> retained as the working design for inclusionAI/Avernet#1621, #1622 and #1623
+> respectively, and is not implemented here. Sections that mix the two are
+> tagged inline.
+
 ## Approach
 
-Five independent reductions, ordered by benefit-to-risk. Each removes duplicate
+Five independent reductions, ordered by benefit-to-risk — **P1 and P2 land in
+this change; P3–P5 are deferred to their issues**. Each removes duplicate
 work without changing what desired state is persisted or what the runtime ends
 up holding. Nothing becomes asynchronous; the mutate-project-compensate contract
 is untouched.
@@ -25,14 +31,15 @@ from a `changed` boolean.
   `.../devices/services/local_device_service.py`,
   `.../devices/services/baas_device_service.py` — stop re-reading a binding row
   the caller already holds (P1a).
-- `src/backend/.../core/skill_center/services/_mutation_flow.py` — reads
-  post-mutation state once, decides whether Skills moved (P3, P5).
-- `src/backend/.../core/skill_center/services/bot_runtime_projector.py` —
-  accepts pre-resolved state, skips an unchanged MCP half (P3, P4, P2).
-- `src/backend/.../core/skill_center/runtime_projection_contract.py`,
+- *(deferred → #1621, #1623)* `src/backend/.../core/skill_center/services/_mutation_flow.py`
+  — reads post-mutation state once, decides whether Skills moved (P3, P5).
+- `src/backend/.../core/skill_center/services/bot_runtime_projector.py` — calls
+  the combined publish entry point (P2, **now**); accepts pre-resolved state and
+  skips an unchanged MCP half (P3, P4, *deferred*).
+- *(deferred → #1621)* `src/backend/.../core/skill_center/runtime_projection_contract.py`,
   `src/backend/.../api/bot_runtime_projector.py` — projector protocol.
-- `src/backend/.../core/skill_center/services/skill_set_service.py` — accepts
-  pre-resolved installed MCP codes (P3).
+- *(deferred → #1621)* `src/backend/.../core/skill_center/services/skill_set_service.py`
+  — accepts pre-resolved installed MCP codes (P3).
 - `src/engine/.../plugins/skills_pool/layout_activation.py` — publish verifies
   inline and says so (P2). One file covers every engine: the openclaw, hermes,
   claude_code and aicoding wrappers all delegate here, and
@@ -99,7 +106,7 @@ can adopt the combined call later; `MappingPublishOutcome` keeps `published` and
 `verified` separate precisely so they can, since they report `PUBLISH_FAILED`
 and `VERIFY_FAILED` as distinct outcomes.
 
-### P3 — projector accepts pre-resolved Skill assets
+### P3 — projector accepts pre-resolved Skill assets *(deferred → #1621)*
 
 ```diff
 # src/backend/.../core/skill_center/runtime_projection_contract.py:92
@@ -334,7 +341,7 @@ three:
          )
 ```
 
-### P3 — resolve post-mutation state once
+### P3 — resolve post-mutation state once *(deferred → #1621)*
 
 ```diff
 # src/backend/.../skill_center/services/_mutation_flow.py:129
@@ -394,7 +401,7 @@ post-mutation at `:160`), `list_installed_mcps` goes 2 → 1. The pre-mutation
 flush must stay separate — it is what lets a rollback retire already-published
 mappings.
 
-### P4 — skip an MCP half that changed nothing
+### P4 — skip an MCP half that changed nothing *(deferred → #1622)*
 
 ```diff
 # src/backend/.../skill_center/services/bot_runtime_projector.py:531 — _apply_non_skill_projection
@@ -416,7 +423,7 @@ mappings.
 Placed inside the `else` branch so `claim_all_mcp` — which takes
 `claimed = frozenset(codes)` — is structurally unable to reach it.
 
-### P5 — skip a Skill half whose mapping set is unchanged
+### P5 — skip a Skill half whose mapping set is unchanged *(deferred → #1623)*
 
 ```diff
 # src/backend/.../skill_center/services/_mutation_flow.py — _project_or_compensate

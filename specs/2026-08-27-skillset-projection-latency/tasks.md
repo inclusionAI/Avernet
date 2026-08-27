@@ -2,6 +2,16 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
+> **Scope of this change: P1 and P2 only.** P3, P4 and P5 from `spec.md` are
+> deferred and tracked separately — the analysis and change sketches stay in
+> `spec.md` / `plan.md` for those issues to work from:
+>
+> | Spec | Issue | What |
+> |---|---|---|
+> | P3 | inclusionAI/Avernet#1621 | `flush_installations` runs four times per mutation |
+> | P4 | inclusionAI/Avernet#1622 | MCP allow-list and Passport rewritten when unchanged |
+> | P5 | inclusionAI/Avernet#1623 | Skill mappings published when provably unchanged |
+
 ## Task 1: Thread the loaded binding record through ARCA connection resolution
 
 - **Goal:** Stop re-reading a binding row that the caller already holds, so one
@@ -96,151 +106,59 @@
         for each.
 - **Depends on:** Task 2, Task 3
 
-## Task 5: Resolve post-mutation Skill assets once and pass them to the plan
-
-- **Goal:** Cut `flush_installations` from four runs per mutation to two.
-- **Files:**
-  - `src/backend/src/agentclaw/community/core/skill_center/services/bot_runtime_projector.py`
-  - `src/backend/src/agentclaw/community/core/skill_center/services/_mutation_flow.py`
-  - `src/backend/src/agentclaw/community/core/skill_center/runtime_projection_contract.py`
-  - `src/backend/src/agentclaw/community/api/bot_runtime_projector.py`
-- **Done when:**
-  - [ ] `snapshot_skill_assets` exists on `BotRuntimeProjector` and on both
-        protocol declarations, keeping the teclaw `center://` guard.
-  - [ ] `project` accepts `skill_assets: Sequence[RegisteredSkillAsset] | None = None`
-        and `_build_plan` uses it instead of calling the reader when supplied.
-  - [ ] `MutationProjectionFlow` resolves assets once after the mutation, derives
-        `current_mappings` from them, and passes them into `project`.
-  - [ ] `snapshot_skill_mappings` still exists and behaves as before for any
-        caller that does not need the assets.
-  - [ ] `skill_assets=None` still resolves internally, so
-        `SkillSymlinkListener`'s direct `project(...)` is unaffected.
-  - [ ] Test asserts the reader's flush runs exactly twice per mutation — once
-        before, once after.
-- **Depends on:** —
-
-## Task 6: Share one installed-MCP read between the Default union and the resolver
-
-- **Goal:** Remove the fourth flush and the duplicate `list_installed_mcps`.
-- **Files:**
-  - `src/backend/src/agentclaw/community/core/skill_center/services/bot_runtime_projector.py`
-  - `src/backend/src/agentclaw/community/core/skill_center/services/skill_set_service.py`
-- **Done when:**
-  - [ ] `collect_bot_active_mcps` accepts keyword-only
-        `installed_codes: frozenset[str] | None = None` and skips
-        `_installed_mcp_codes` when supplied.
-  - [ ] `_build_plan` reads installed MCPs once, after the Skill-asset flush, and
-        uses that one value for both `collect_bot_active_mcps` and
-        `RuntimeDesiredState.installed_mcp_server_codes`.
-  - [ ] The entity-keyed fallback inside `_installed_mcp_codes` is untouched for
-        callers that do not supply the codes.
-  - [ ] `tests/.../services/test_collect_bot_active_mcps_union.py` covers both the
-        supplied and the unsupplied path and still passes.
-- **Depends on:** Task 5
-
-## Task 7: Skip the MCP half when the projected set did not change
-
-- **Goal:** Stop sending an identical allow-list and Passport manifest when a
-  mutation's claims and releases both vanish against the projected set.
-- **Files:**
-  - `src/backend/src/agentclaw/community/core/skill_center/services/bot_runtime_projector.py`
-- **Done when:**
-  - [ ] Inside `_apply_non_skill_projection`, an empty `claimed` and empty
-        `released` in the non-`claim_all_mcp` branch returns before
-        `sync_mcp_projection` and before `update_passport`.
-  - [ ] The skip logs bot id, engine, and the declared set size.
-  - [ ] The guard is unreachable from the `claim_all_mcp` branch by construction.
-  - [ ] Test: a deactivate whose MCPs are all still supplied by the Default policy
-        performs zero device MCP calls and zero passport updates.
-  - [ ] Test: `ProjectionScope(mcp=True, claim_all_mcp=True)` still declares the
-        full set and pushes the passport.
-- **Depends on:** —
-
-## Task 8: Skip the Skill half when the mapping set is provably unchanged
-
-- **Goal:** A mutation that moves no Skill sends no publish and no verify.
-- **Files:**
-  - `src/backend/src/agentclaw/community/core/skill_center/services/_mutation_flow.py`
-- **Done when:**
-  - [ ] `_project_or_compensate` narrows `scope` to `skills=False` when
-        `set(current_mappings) == set(previous_mappings)` and there are no
-        retirements.
-  - [ ] The MCP half still runs; only the Skill flag is narrowed.
-  - [ ] The skip logs the reason.
-  - [ ] The compensating projection path is unaffected — a failed forward
-        projection still restores desired state and counter-projects.
-  - [ ] Test: deactivating an already-inactive Set issues no mapping publish.
-  - [ ] Test: a mutation with retirements still publishes even when the current
-        and previous sets compare equal.
-  - [ ] Test: `SkillSymlinkListener`'s direct `project(ProjectionScope.everything())`
-        still publishes — the skip lives in the flow, not the projector.
-- **Depends on:** Task 5
-
-## Task 9: Update the existing projection test surface
+## Task 5: Update the existing device and pool-runtime test surface
 
 - **Goal:** Bring the doubles and pinned assertions in the existing suite in line
   with the new signatures, without weakening what they assert.
 - **Files:**
   - `src/backend/tests/community/core/skill_center/test_skill_set_management_service.py`
-  - `src/backend/tests/community/contracts/test_bot_runtime_projector.py`
-  - `src/backend/tests/community/core/skill_center/test_bot_capability_state_reader.py`
+  - `src/backend/tests/community/core/devices/services/test_device_service_router.py`
+  - `src/backend/tests/community/core/devices/services/test_device_service.py`
+  - `src/backend/tests/community/core/devices/services/test_device_context_resolver.py`
 - **Done when:**
-  - [ ] The `_Runtime` double (`:259`) implements `snapshot_skill_assets` and
-        accepts `skill_assets=` on `project`.
-  - [ ] `_RecordingReconciler` (`contracts/test_bot_runtime_projector.py:20`)
-        implements `snapshot_skill_assets`; both protocol conformance assertions
-        still hold.
-  - [ ] `test_existing_claude_code_skill_set_deactivate_uses_full_projection` (`:1609`)
-        and `test_deactivate_retires_mappings_removed_from_the_runtime_projection` (`:821`)
-        pass unchanged — confirming P5 does not narrow a scope where mappings moved.
-  - [ ] `test_runtime_projection_flushes_installations_first` (`:1806`) is
-        re-read against the two-flush shape and still asserts flush-before-read
-        ordering rather than a stale count.
-- **Depends on:** Task 4, Task 6, Task 7, Task 8
+  - [ ] The `_RuntimePool` double (`test_skill_set_management_service.py:648`)
+        implements `publish_and_verify_mappings` and keeps recording publish and
+        verify calls separately, so existing assertions on those lists still mean
+        what they meant.
+  - [ ] `_CenterRuntimePool` (`:665`) still asserts the probe path for Center
+        projections.
+  - [ ] Device-service tests still pass with the added `record=` keyword; no test
+        is weakened to accommodate a signature change.
+  - [ ] `tests/community/di/test_skills_pool_wiring.py` still resolves
+        `SkillsPoolRuntimeProtocol` from the injector.
+- **Depends on:** Task 4
 
-## Task 10: Tests & Verification
+## Task 6: Tests & Verification
 
-- **Goal:** Confirm every spec acceptance criterion holds.
-- **Files:** the test files named in Tasks 1–9; `specs/2026-08-27-skillset-projection-latency/spec.md`
+- **Goal:** Confirm the P1 and P2 acceptance criteria hold.
+- **Files:** the test files named in Tasks 1-5
 - **Done when:**
+  - [ ] Exactly one device address resolution per projection, whatever the number
+        of device calls it makes.
+  - [ ] Exactly one binding row read per device address resolution.
   - [ ] At most one device publish call when the runtime verifies inline; two when
         it does not.
-  - [ ] Exactly one device address resolution per projection.
-  - [ ] Exactly one binding row read per device address resolution.
-  - [ ] At most two `flush_installations` per mutation; at most one
-        `list_installed_mcps` after the mutation.
-  - [ ] Empty claim and release ⇒ no allow-list declaration, no Passport update,
-        skip logged.
-  - [ ] Unchanged mapping set and no retirements ⇒ no publish, no verify, skip
-        logged.
-  - [ ] Projection failure still compensates and counter-projects.
-  - [ ] A runtime with no inline-verification signal still gets a separate verify,
-        and an unverified publish still raises `SkillSetRuntimeReconcileError`.
-  - [ ] `claim_all_mcp` still declares the full MCP set.
-  - [ ] Backend module gates pass: `scripts/ci/pre_push.sh` (or
-        `OCB_PRE_PUSH_RUN_CI=1`) for `src/backend` and `src/engine`.
-  - [ ] Wall-clock targets recorded as *expected*, to be confirmed against a
-        prepub bot after deploy — not asserted in CI.
-- **Depends on:** Task 9
+  - [ ] A runtime with no inline-verification signal still gets a separate verify;
+        `verified: false` is treated as not converged; an unverified publish still
+        raises `SkillSetRuntimeReconcileError`.
+  - [ ] Projection failure still compensates and counter-projects, unchanged.
+  - [ ] No change to what desired state is persisted or what the runtime holds.
+  - [ ] Backend and engine module gates pass: `scripts/ci/pre_push.sh`
+        (or `OCB_PRE_PUSH_RUN_CI=1`).
+  - [ ] Deferred criteria (flush counts, the two skips) are explicitly **not**
+        claimed here — they belong to #1621, #1622 and #1623.
+- **Depends on:** Task 5
 
 ---
 
 ## Groups
 
-- **Group A — Device resolution:** Tasks 1, 2
+- **Group A — Device resolution (P1):** Tasks 1, 2
   - Theme: One device address resolution per projection, and one binding read per
     resolution. Pure plumbing, no behavior change, independently shippable.
-- **Group B — Inline verification:** Tasks 3, 4
+- **Group B — Inline verification (P2):** Tasks 3, 4
   - Theme: The engine verifies its own publish and reports it; the backend drops
     the second round trip when it does, and falls back safely when it does not.
     Spans `src/engine` and `src/backend` — the two halves are only useful together.
-- **Group C — Read once:** Tasks 5, 6
-  - Theme: Resolve post-mutation Bot state once and thread it, taking flushes from
-    four to two and installed-MCP reads from two to one.
-- **Group D — Skip unchanged halves:** Tasks 7, 8
-  - Theme: The two evidence-based skips. This is the only group that changes
-    observable behavior (fewer device writes for no-op projections), so it is
-    reviewed on its own.
-- **Group E — Verification:** Tasks 9, 10
-  - Theme: Existing test surface brought in line, then the full spec acceptance
-    check.
+- **Group C — Verification:** Tasks 5, 6
+  - Theme: Existing test surface brought in line, then the P1/P2 acceptance check.

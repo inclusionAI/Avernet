@@ -52,6 +52,21 @@ five-second projection.
 
 ---
 
+## Scope of the current change
+
+**P1 and P2 are implemented now.** P3, P4 and P5 are deferred and tracked as
+their own issues; their analysis stays below because those issues work from it.
+
+| Spec | Issue | Deferred because |
+|---|---|---|
+| P3 | inclusionAI/Avernet#1621 | Independent of P1/P2; touches the mutation flow and plan build rather than the device boundary. |
+| P4 | inclusionAI/Avernet#1622 | Changes observable device-facing behavior and has a live question about drift repair. |
+| P5 | inclusionAI/Avernet#1623 | Same — changes behavior, and `/skillset/sync` against a Default Set becomes a no-op. |
+
+Acceptance criteria below are tagged **[now]** or **[deferred]** accordingly.
+
+---
+
 ## Problems
 
 ### P1 — The device address is resolved from scratch for every device call, and each resolution reads the same binding row four times
@@ -425,30 +440,35 @@ published, whatever the mutation claimed about itself.
 Behavioral criteria are stated as counts because they are deterministically
 testable; the latency targets are the observed outcome those counts produce.
 
-- [ ] A SkillSet activate or deactivate that changes Skills makes **at most one**
-      device call to publish mappings when the runtime reports inline
-      verification, and at most two when it does not.
-- [ ] A SkillSet activate or deactivate resolves the device address **exactly
-      once**, no matter how many device calls the projection makes.
-- [ ] One device address resolution reads the binding row **exactly once**.
-- [ ] `flush_installations` runs **at most twice** per mutation — once before the
-      mutation, once after — and `list_installed_mcps` runs at most once after.
-- [ ] When a mutation's claimed and released MCP codes are both empty after
-      narrowing against the projected set, **no** MCP allow-list declaration and
-      **no** Passport update is sent, and the skip is logged with the reason.
-- [ ] When the post-mutation mapping set equals the pre-mutation set and there
-      are no retirements, **no** mapping publish or verify is sent, and the skip
-      is logged with the reason.
-- [ ] A projection whose device write fails still compensates desired state and
-      still counter-projects, unchanged from today.
-- [ ] A device runtime that does not report inline verification still gets the
-      separate verify call, and a publish that is not verified by either route
-      still raises `SkillSetRuntimeReconcileError`.
-- [ ] The device-activated listener path (`claim_all_mcp`) still declares the
-      full MCP set to a freshly active container.
-- [ ] Measured against the 2026-08-27 trace shape (one Set, ~12 MCPs, ARCA
-      sandbox): a Skill-changing deactivate completes in **≤ 2.5 s** where the
-      runtime reports inline verification, and a no-op deactivate in **≤ 1.0 s**.
+- [ ] **[now, P2]** A SkillSet activate or deactivate that changes Skills makes
+      **at most one** device call to publish mappings when the runtime reports
+      inline verification, and at most two when it does not.
+- [ ] **[now, P1]** A SkillSet activate or deactivate resolves the device address
+      **exactly once**, no matter how many device calls the projection makes.
+- [ ] **[now, P1]** One device address resolution reads the binding row **exactly
+      once**.
+- [ ] **[deferred → #1621]** `flush_installations` runs **at most twice** per
+      mutation — once before the mutation, once after — and `list_installed_mcps`
+      runs at most once after.
+- [ ] **[deferred → #1622]** When a mutation's claimed and released MCP codes are
+      both empty after narrowing against the projected set, **no** MCP allow-list
+      declaration and **no** Passport update is sent, and the skip is logged.
+- [ ] **[deferred → #1623]** When the post-mutation mapping set equals the
+      pre-mutation set and there are no retirements, **no** mapping publish or
+      verify is sent, and the skip is logged.
+- [ ] **[now]** A projection whose device write fails still compensates desired
+      state and still counter-projects, unchanged from today.
+- [ ] **[now, P2]** A device runtime that does not report inline verification
+      still gets the separate verify call, and a publish that is not verified by
+      either route still raises `SkillSetRuntimeReconcileError`.
+- [ ] **[deferred → #1622]** The device-activated listener path (`claim_all_mcp`)
+      still declares the full MCP set to a freshly active container.
+- [ ] **[now]** Measured against the 2026-08-27 trace shape (one Set, ~12 MCPs,
+      ARCA sandbox): P1 and P2 together remove one device round trip and two of
+      three address resolutions, an expected **≈1.3 s** off the 4.98 s baseline
+      once devices carry the inline-verification signal. The **≤ 2.5 s** and
+      **≤ 1.0 s** end-state targets need the deferred items and are not claimed
+      by this change.
 
 ## In Scope
 
@@ -483,14 +503,19 @@ testable; the latency targets are the observed outcome those counts produce.
 
 ## Open Questions
 
-- **P4 drift repair.** Skipping the unchanged allow-list write gives up an
+> Questions 1 and 3 below moved with their problems: the P4 drift-repair
+> question now lives in #1622 and the `/skillset/sync` question in #1623. They
+> stay here for continuity of the analysis. Only the P2 question is live for the
+> current change.
+
+- **P4 drift repair.** *(moved to #1622)* Skipping the unchanged allow-list write gives up an
   incidental repair mechanism. Is `claim_all_mcp` on device activation
   sufficient as the deliberate repair path, or should an explicit reconcile
   entry point be added before the skip lands?
-- **P2 rollout ordering.** Backend and engine ship together, but devices update
+- **P2 rollout ordering.** *(live for this change)* Backend and engine ship together, but devices update
   on their own schedule. Is a metric on how often the fallback `verify` path is
   taken wanted, so the rollout's progress is observable?
-- **P5 and `POST /skillset/sync`.** A Default Set returns early from
+- **P5 and `POST /skillset/sync`.** *(moved to #1623)* A Default Set returns early from
   `set_skill_set_active` with `changed=False` and no MCP codes, so under P5 a
   sync against a Default Set becomes a complete no-op. The device-activation
   reconcile is safe — it calls `BotRuntimeProjector.project` directly with
