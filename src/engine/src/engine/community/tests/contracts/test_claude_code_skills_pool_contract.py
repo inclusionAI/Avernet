@@ -20,6 +20,9 @@ from engine.community.core.skills.models import (
 )
 
 
+_ABSENT = object()
+
+
 def _port() -> SimpleNamespace:
     return SimpleNamespace(
         activate_pool_layout=AsyncMock(
@@ -104,6 +107,9 @@ async def test_claude_code_adapter_exposes_complete_pool_runtime_contract() -> N
     assert cleaned.status == "CLEANED"
     assert cleaned.evidence == {"path_absent": True}
     assert published.published is True
+    # This port reports no verdict, so the adapter must report none either —
+    # the client has to fall back to the separate verify.
+    assert published.verified is None
     assert verified.valid is True
     port.probe_pool_layout.assert_awaited_once_with(
         {
@@ -306,3 +312,39 @@ def test_claude_mapping_serializer_rejects_incomplete_intent(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         _serialize_pool_mapping(mapping)
+
+
+@pytest.mark.parametrize(
+    "raw_verified, expected",
+    [
+        (True, True),
+        (False, False),
+        # All three mean "no verdict", and none may become False — the client
+        # reads False as a real, final verification failure and refuses to
+        # converge. `null` is its own case: it is what a client would see if
+        # the engine ever sent the key unconditionally.
+        (_ABSENT, None),
+        (None, None),
+        ("true", None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_claude_code_adapter_carries_the_inline_verdict(
+    raw_verified, expected
+) -> None:
+    """Compatibility coverage for the ``verified`` contract on this adapter.
+
+    It is the only hop that decodes the field into the core result for Claude
+    Code runtimes: discarding a ``true`` restores the verify round trip the
+    field exists to remove, and inventing a ``false`` breaks convergence.
+    """
+    raw: dict[str, object] = {"published": True, "evidence": {"total": 1}}
+    if raw_verified is not _ABSENT:
+        raw["verified"] = raw_verified
+    port = _port()
+    port.publish_pool_mappings = AsyncMock(return_value=raw)
+
+    published = await ClaudeCodeSkillsAdapter(port).publish_pool_mappings([])
+
+    assert published.published is True
+    assert published.verified is expected
