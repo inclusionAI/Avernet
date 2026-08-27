@@ -242,6 +242,13 @@ Versioning policy:
 - Removing fields, changing semantics, or adding required fields bumps the
   version.
 
+An opted-in Human Channel-to-Bot message may include
+`channel.identity_forwarding: true` together with `channel.user_id` and
+`channel.actor_name`. OpenClaw integrations should project those values to the
+standard inbound `SenderId` and `SenderName` metadata. If the marker is absent
+or false, integrations must retain their existing sender resolver. This
+metadata is not an authentication or authorization signal.
+
 When the engine receives `deprecation`, it should log a reminder for developers
 to upgrade:
 

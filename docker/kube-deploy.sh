@@ -18,6 +18,7 @@
 #   bcs        — BCS coordination service   (21000, /health)
 #   backend    — Backend service            (8888,  /api/health)
 #   bcsfuse    — BCS Fuse open-source service (8765,  /health)
+#   frontend-nextgen — Next-generation frontend workbench (8080, /healthz)
 #
 # Each default is the port that service actually listens on out of the box, and
 # the path it actually serves. Override the port with PORT=... in the
@@ -120,28 +121,22 @@ declare -A PORT_ENV_VAR=(
     [bcs]=""
     [backend]=BACKEND_PORT
     [bcsfuse]=BCSFUSE_PORT
+    [frontend-nextgen]=""
     [evolvetrace]=PORT
 )
 
 # All services default to a 4 CPU / 8Gi spec.
 #
-# Replicas are per-service because the backend cannot safely run more than one
-# pod on the shipped community defaults, and nothing fails loudly when it does:
-#   * /app/data is pod-local — workspace/*, oss, nas and the default
-#     object_storage.backend "fs" all live there, so replicas diverge and a pod
-#     replacement drops what it held.
-#   * cache.redis_url defaults to empty, which CommunityCache serves with an
-#     in-process lock; the overlay itself calls that "single-process only".
-#     Startup work that takes those locks (GitSyncService, SkillCenterSyncService,
-#     the task-discovery scheduler) would then run concurrently in every pod,
-#     each believing it holds the lock.
-# Configure S3 object storage and REDIS_URL, then raise it with REPLICAS=N.
+# Replica defaults remain service-specific so they can be tuned independently.
+# Override the selected service with REPLICAS=N when deploying.
 declare -A DEFAULT_REPLICAS=(
     [baas]=2
     [gateway]=2
     [proxy]=2
     [bcs]=2
     [backend]=2
+    [bcsfuse]=2
+    [frontend-nextgen]=2
     [evolvetrace]=1
 )
 DEFAULT_CPU_REQUEST="4"
@@ -189,7 +184,7 @@ done
 # --- Validate ---
 
 if [[ -z "$SERVICE" ]]; then
-    echo "error: --service is required (baas|gateway|proxy|bcs|bcsfuse|backend)" >&2
+    echo "error: --service is required (baas|gateway|proxy|bcs|bcsfuse|backend|frontend-nextgen)" >&2
     exit 2
 fi
 if [[ -z "$IMAGE" ]]; then
@@ -198,7 +193,7 @@ if [[ -z "$IMAGE" ]]; then
 fi
 if [[ -z "${DEFAULT_PORT[$SERVICE]:-}" ]]; then
     echo "error: unknown service '$SERVICE'" >&2
-    echo "  supported: baas, gateway, proxy, bcs, bcsfuse, backend" >&2
+    echo "  supported: baas, gateway, proxy, bcs, bcsfuse, backend, frontend-nextgen" >&2
     exit 2
 fi
 
