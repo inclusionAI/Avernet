@@ -186,6 +186,7 @@ from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
     WorkOrderAlreadyPendingError,
     WorkOrderAlreadyProcessedError,
+    WorkOrderCallbackError,
     WorkOrderApplicantAlreadyEditorError,
     WorkOrderApplicantAlreadyMemberError,
     WorkOrderBotEditorRequestNotAllowedError,
@@ -411,6 +412,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         409,
         WorkOrderPublicErrorMessage.ALREADY_PROCESSED,
     ),
+    WorkOrderCallbackError: (502, WorkOrderPublicErrorMessage.CALLBACK_FAILED),
     WorkOrderApplicantAlreadyMemberError: (
         409,
         WorkOrderPublicErrorMessage.APPLICANT_ALREADY_MEMBER,
@@ -771,6 +773,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     WorkOrderNotificationNotFoundError: WorkOrderErrorCode.NOTIFICATION_NOT_FOUND,
     WorkOrderAlreadyPendingError: WorkOrderErrorCode.ALREADY_PENDING,
     WorkOrderAlreadyProcessedError: WorkOrderErrorCode.ALREADY_PROCESSED,
+    WorkOrderCallbackError: WorkOrderErrorCode.CALLBACK_FAILED,
     WorkOrderApplicantAlreadyMemberError: WorkOrderErrorCode.APPLICANT_ALREADY_MEMBER,
     WorkOrderApplicantAlreadyEditorError: WorkOrderErrorCode.APPLICANT_ALREADY_EDITOR,
     WorkOrderNoReviewerError: WorkOrderErrorCode.NO_REVIEWER,

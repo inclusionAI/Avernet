@@ -30,6 +30,7 @@ from agentclaw.community.core.spaces.services.space_access_service import (
 )
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
+    WorkOrderAlreadyProcessedError,
     WorkOrderApplicantAlreadyEditorError,
     WorkOrderApplicantAlreadyMemberError,
     WorkOrderBotEditorRequestNotAllowedError,
@@ -41,8 +42,14 @@ from agentclaw.community.core.work_orders.errors import (
     WorkOrderNoReviewerError,
     WorkOrderInvalidEventError,
 )
+from agentclaw.community.core.work_orders.callbacks import (
+    WorkOrderCallbackCredential,
+    WorkOrderDecisionCallbackDispatcher,
+    validate_friend_approval_event,
+)
 from agentclaw.community.core.work_orders.models import (
     EVENT_CATEGORIES,
+    FRIEND_APPROVAL_EVENT_TYPES,
     NotificationCategory,
     WorkOrderBizType,
     WorkOrderDetail,
@@ -54,6 +61,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderNotificationDraft,
     WorkOrderQueryType,
     WorkOrderStatus,
+    WorkOrderApproverStatus,
     WorkOrderDecision,
     WorkOrderEventCreatedResult,
 )
@@ -81,6 +89,7 @@ class WorkOrderService:
         collaborators: CollaboratorServiceProtocol,
         member_management: MemberManagementCapabilityService,
         staff_dept: StaffDeptPlugin,
+        decision_callbacks: WorkOrderDecisionCallbackDispatcher,
     ) -> None:
         self._repository = repository
         self._spaces = spaces
@@ -91,6 +100,7 @@ class WorkOrderService:
         self._collaborators = collaborators
         self._member_management = member_management
         self._staff_dept = staff_dept
+        self._decision_callbacks = decision_callbacks
 
     @staticmethod
     def _required_text(value: str, *, limit: int, error: type[Exception]) -> str:
@@ -163,6 +173,11 @@ class WorkOrderService:
             raise WorkOrderInvalidEventError(
                 "apply_reason must contain no more than 512 characters"
             )
+        validate_friend_approval_event(
+            biz_type=biz_type,
+            event_type=event_type,
+            biz_data=biz_data,
+        )
         serialized_content = (
             json.dumps(content, ensure_ascii=False) if content is not None else None
         )
@@ -239,6 +254,7 @@ class WorkOrderService:
         actor_id: str,
         decision: WorkOrderDecision,
         review_remark: str | None,
+        callback_credential: WorkOrderCallbackCredential,
     ):
         normalized = (review_remark or "").strip() or None
         if normalized is not None and len(normalized) > 512:
@@ -261,6 +277,35 @@ class WorkOrderService:
                 actor_id=actor_id,
                 review_remark=normalized,
                 target_status=WorkOrderStatus(decision.value),
+            )
+        context = self._repository.get_approval_context(
+            work_order_id=work_order_id,
+            reviewer_user_id=actor_id,
+            env=get_current_env(),
+        )
+        source_event_type = context.source_event_type
+        if context.work_order.biz_type == WorkOrderBizType.BOT_FRIEND.value:
+            try:
+                source_event = WorkOrderEventType(source_event_type)
+            except (TypeError, ValueError) as exc:
+                raise WorkOrderInvalidEventError(
+                    "friend work order is missing its source approval event"
+                ) from exc
+            if source_event not in FRIEND_APPROVAL_EVENT_TYPES:
+                raise WorkOrderInvalidEventError(
+                    "BOT_FRIEND work order has an unsupported source event"
+                )
+        if self._decision_callbacks.requires_callback(source_event_type):
+            if (
+                context.work_order.status is not WorkOrderStatus.PENDING
+                or context.approver.status is not WorkOrderApproverStatus.PENDING
+            ):
+                raise WorkOrderAlreadyProcessedError("work order already processed")
+            self._decision_callbacks.dispatch(
+                context=context,
+                decision=decision,
+                review_remark=normalized,
+                credential=callback_credential,
             )
         return self._repository.process_approval(
             work_order_id=work_order_id,
