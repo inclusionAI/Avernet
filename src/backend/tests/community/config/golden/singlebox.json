@@ -203,11 +203,11 @@
       "storage_dir": "./data/skills_scan"
     },
     "task_discovery_dingtalk": {
-      "ak_id": "",
-      "ak_secret": "",
-      "card_template_id": "",
+      "ak_id": "dummy-ak-id",
+      "ak_secret": "dummy-ak-secret",
+      "card_template_id": "dummy-card-template-id.schema",
       "frontend_url": "http://localhost:8000",
-      "robot_code": ""
+      "robot_code": "dummy-robot-code"
     },
     "task_queue_worker": {
       "enabled": true,
