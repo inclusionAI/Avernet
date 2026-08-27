@@ -80,42 +80,74 @@ check `git status` before each one.
       is acceptance criterion 5 and the highest-value test in the change —
       it must pass **before** and after Group 2c.
 
-### 2c. Implementation
+### 2c. Implementation — the branch, then the cleanup behind it
+
+Order matters: 2.6 extracts before 2.7 consumes, and 2.9 deletes the teclaw
+arms only after 2.8 has given them a new home. Run 2.10 after each of
+2.6-2.9 rather than only at the end.
 
 - [ ] 2.4 `bot_runtime_projector.py`: import
       `runtime_delivers_whole_artifact` alongside the existing
       `ProjectionScope` import.
 
-- [ ] 2.5 In `project` (`:124`), after `_resolve_plan` returns, compute
-      `whole_artifact = runtime_delivers_whole_artifact(engine)` and widen the
-      Skill-half condition to
-      `(whole_artifact and (scope.skills or scope.mcp or retired_mappings))
-      or scope.skills or retired_mappings`. Extend the existing block comment
-      — do not replace it — with why a whole-artifact engine ignores the split
-      (both halves ride in one composed document; the scope can only pick how
-      many identical copies get sent). Leave the `else` skip-log untouched.
-
-- [ ] 2.6 Give `_apply_non_skill_projection` (`:503`) a keyword-only
-      `deliver_mcp_to_runtime: bool` and wrap **only** the claimed/released
-      guard plus the `sync_mcp_projection` call in it. The `else` branch logs
-      that MCP delivery folded into the whole-artifact projection. Keep
-      `codes = set(projection.mcp_server_codes)` above the branch, and leave
-      the Passport block below it unmoved, un-re-indented and un-re-gated.
-
-- [ ] 2.7 Pass `deliver_mcp_to_runtime=not whole_artifact` from all three
-      entry points — `project` (`:124`), `project_mcp_and_cli` (`:188`),
-      `project_for_cleanup` (`:218`) — each computing the predicate from the
-      `engine` its plan resolution already returned. `project_for_cleanup`
-      keeps its Center refusal (`:238`) and its unconditional `sync_runtime`
-      (`:240`) exactly as they are.
-
-- [ ] 2.8 Extend the `BotRuntimeProjector` class docstring's "Resolving and
+- [ ] 2.5 Extend the `BotRuntimeProjector` class docstring's "Resolving and
       applying are separated by the `ProjectionScope`" paragraph with the
-      whole-artifact case, in the register of the surrounding prose.
+      whole-artifact case, in the register of the surrounding prose. Doing the
+      prose first makes the following edits read against a stated invariant.
+
+- [ ] 2.6 **Extract** `_apply_passport_projection(*, identity_modes, engine,
+      bot_id, owner_id, projection, effective_cli_items)` from the `try/except`
+      tail of `_apply_non_skill_projection` (`:549-574`) and call it from
+      there. Synchronous — nothing in the block awaits. **Move the body with
+      no edits**: it is the identity-coloured `resource_scope` fix from
+      `specs/2026-08-26-mcp-sync-and-passport-regressions` problem 1, and a
+      drifted copy silently reasserts `identityMode: "owner"`.
+
+- [ ] 2.7 Add `_apply_whole_artifact_projection(*, service, bot_id, owner_id,
+      projection, retired_mappings, scope, identity_modes,
+      effective_cli_items)`: the Center refusal (moved from
+      `_apply_skill_projection:417-423`, comment included), then the
+      nothing-declared no-op guard `scope.skills or scope.mcp or
+      retired_mappings`, then one `service.sync_runtime(...)`, then
+      `_apply_passport_projection(...)` under `if scope.mcp`. Its docstring
+      states the invariant: the plan is resolved, so one delivery carries both
+      halves.
+
+- [ ] 2.8 In `project` (`:124`), **insert** immediately after `_resolve_plan`
+      and above the existing comment block:
+      ```python
+      if runtime_delivers_whole_artifact(engine):
+          await self._apply_whole_artifact_projection(...)
+          return
+      ```
+      with a comment on why this is the right line — `_resolve_plan` is what
+      flushed Installation, so desired state is final and the composer needs
+      nothing else. **Do not touch the two scope-driven halves below it**:
+      this task must show up in `git diff` as a pure insertion, with no
+      modified line in the per-domain path.
+
+- [ ] 2.9 `_apply_skill_projection`: delete both teclaw arms (`:417-423`,
+      `:426-432`) and drop the now-unused `engine` parameter; update its one
+      call site in `project`. The method is now purely per-domain (Pool vs
+      legacy). Dropping the parameter is deliberate — it turns a
+      reintroduced teclaw branch into a `NameError` rather than a silent
+      regression.
+
+- [ ] 2.10 `project_mcp_and_cli` (`:188`) and `project_for_cleanup` (`:218`):
+      one comment each recording that they are per-domain-only paths, with the
+      evidence (`project_for_cleanup` has no production caller;
+      `project_mcp_and_cli`'s only caller is desktop-gated and teclaw is never
+      Pool-capable). **No code change** in either.
+
+- [ ] 2.11 After each of 2.6-2.9:
+      `.venv/bin/python -m pytest
+      tests/community/core/skill_center/test_skill_set_management_service.py -q`.
+      2.6 and 2.10 must stay at the Group-1 count; 2.7-2.9 may only change
+      teclaw results.
 
 ### 2d. Behaviour tests
 
-- [ ] 2.9 `test_teclaw_projects_the_whole_artifact_once_per_scope_shape` —
+- [ ] 2.12 `test_teclaw_projects_the_whole_artifact_once_per_scope_shape` —
       parametrised over `ProjectionScope(skills=True)`,
       `ProjectionScope(mcp=True, claimed_mcp=frozenset({"x"}))`,
       `ProjectionScope(mcp=True, released_mcp=frozenset({"x"}))`,
@@ -124,39 +156,39 @@ check `git status` before each one.
       `len(runtime_syncs) == 1` and `mcp_projections == []`.
       (criteria 1, 2, 3)
 
-- [ ] 2.10 `test_teclaw_mcp_only_scope_still_delivers_the_skill_bearing_artifact`
+- [ ] 2.13 `test_teclaw_mcp_only_scope_still_delivers_the_skill_bearing_artifact`
       — `skills=False, mcp=True`: exactly one delivery, and the
       `desired_skills` it carried equal the projection's assets rather than
       being empty. Pins the behaviour most likely to be optimised back out.
       (criterion 2)
 
-- [ ] 2.11 `test_teclaw_still_updates_the_passport_with_identity_coloured_items`
+- [ ] 2.14 `test_teclaw_still_updates_the_passport_with_identity_coloured_items`
       — one `update_passport` call whose `resource_scope` carries `mcp_codes`,
       `mcp_items` with resolved `identity_mode`, and `cli_items`; and an
-      `mcp=False` scope makes no Passport call at all. (criterion 4)
+      `mcp=False` scope makes no Passport call at all. Guards the 2.6
+      extraction. (criterion 4)
 
-- [ ] 2.12 `test_teclaw_empty_scope_delivers_nothing` — `ProjectionScope()`:
+- [ ] 2.15 `test_teclaw_empty_scope_delivers_nothing` — `ProjectionScope()`:
       `runtime_syncs == []`, `mcp_projections == []`, no Passport call.
       (criterion 8)
 
-- [ ] 2.13 `test_teclaw_failed_delivery_raises_reconcile_error` — a fake whose
+- [ ] 2.16 `test_teclaw_failed_delivery_raises_reconcile_error` — a fake whose
       `sync_runtime` returns `False`: expect `SkillSetRuntimeReconcileError`
       and no Passport call, so `MutationProjectionFlow` still compensates.
       (criterion 7)
 
-- [ ] 2.14 `test_teclaw_cleanup_and_non_skill_entry_points_skip_mcp_runtime_delivery`
-      — `project_for_cleanup` and `project_mcp_and_cli` on a teclaw Bot:
-      `mcp_projections == []` with the Passport still updated. (criterion 6)
-
-- [ ] 2.15 Confirm the two pre-existing teclaw tests pass **unedited**:
+- [ ] 2.17 Confirm these pass **unedited**:
       `test_teclaw_v4_rejects_center_without_any_center_runtime_request:2493`
-      and
-      `test_teclaw_v4_repo_projection_uses_artifact_runtime_not_pool_mapping:2519`.
-      If either needs an edit, the implementation moved something it should
-      not have — fix the implementation, not the test.
+      (the direct test that the Center refusal survived its move in 2.7/2.9),
+      `test_teclaw_v4_repo_projection_uses_artifact_runtime_not_pool_mapping:2519`,
+      and `test_non_skill_projection_never_writes_skill_mappings:2552` (direct
+      cover that the 2.6 extraction changed nothing for openclaw). If any
+      needs an edit, the implementation moved something it should not have —
+      fix the implementation, not the test.
 
-- [ ] 2.16 Same for `test_non_skill_projection_never_writes_skill_mappings:2552`
-      (an openclaw bot on `project_mcp_and_cli`): must pass unedited.
+      No test is added for `project_mcp_and_cli` / `project_for_cleanup` on a
+      teclaw Bot: neither is reachable, and pinning behaviour of an
+      unreachable path would assert the wrong contract.
 
 ---
 
@@ -204,13 +236,17 @@ check `git status` before each one.
 None blocking. Two decisions taken unilaterally, both recorded in `plan.md`
 with their rejected alternatives:
 
-1. The single delivery rides the existing `_apply_skill_projection` teclaw
-   branch rather than a new `_deliver_whole_artifact` method — that branch is
-   already exactly one `sync_runtime` call and already carries the
-   Center-corpus refusal, and a second copy of either could drift.
-2. `project_mcp_and_cli` gets the same treatment as `project` even though it
-   is unreachable for teclaw today (desktop-only caller; teclaw is never
-   Pool-capable). Uniformity across entry points is acceptance criterion 6.
+1. The teclaw arms are **moved out of** `_apply_skill_projection` into the new
+   `_apply_whole_artifact_projection` rather than called into, so that past
+   the branch no per-domain code knows teclaw exists. Dropping the freed
+   `engine` parameter is part of that: it makes a reintroduced branch fail
+   loudly.
+2. Only `project` gets the branch. `project_for_cleanup` has no production
+   caller, and `project_mcp_and_cli`'s single caller is desktop-gated while
+   teclaw is never Pool-capable — so both are unreachable for teclaw, and its
+   premise ("a cutover owns the Skill mappings") is incoherent for an engine
+   that cannot deliver MCP without redelivering Skills. Both get a comment,
+   not speculative code.
 
 Two adjacent defects are deliberately **not** fixed here and are written up
 under `spec.md` → *Out of scope, reported*: Skill-declared MCP dependencies
