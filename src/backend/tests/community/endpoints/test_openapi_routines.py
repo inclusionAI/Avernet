@@ -289,3 +289,71 @@ for _method, _path, _input, _status, _body in _HAPPY_CASES:
         seed=_seed_verifier,
         expect=ExpectError(status=403, json_contains={"data": None}),
     )(lambda: None)
+
+
+# ── The owner-level aggregate: GET /openapi/v1/bots/routines/all ─────────────
+#
+# Same household, different shape: no ``{bot_id}`` to address, all runtime
+# stages at once, and ``bot_name`` on every row — the decoration the aggregate
+# adds over the per-bot listing. The relay stub answers with one routine
+# decorated the way ``cron_runtime_targets.py`` decorates it in production.
+
+
+def _decorated_routine() -> dict:
+    """One routine as the aggregate receives it, with the fleet metadata."""
+    return {
+        **_routine(),
+        "bot_name": "Routine Bot",
+        "owner_id": _OWNER,
+        "runtime_stage": "online",
+    }
+
+
+def _seed_aggregate_services(world) -> None:
+    _seed_verifier(world)
+
+    async def list_all_crons(_self, **_kwargs):
+        return {"success": True, "data": [_decorated_routine()]}
+
+    bind_overrides(
+        world,
+        CronRelayServiceProtocol,
+        {"list_all_crons": list_all_crons},
+    )
+
+
+endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/routines/all",
+    scenario="happy",
+    input=CaseInput(query_params=_QUERY, headers=_HEADERS),
+    seed=_seed_aggregate_services,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "data": {
+                "total": 1,
+                "items": [
+                    {
+                        "routine_id": _ROUTINE_ID,
+                        "bot_id": _BOT_ID,
+                        "bot_name": "Routine Bot",
+                        "runtime_stage": "online",
+                    }
+                ],
+            }
+        },
+    ),
+)(lambda: None)
+
+
+# The refusal every user-scoped operation on this surface owes — see the
+# per-bot cases above for why no service is seeded.
+endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/routines/all",
+    scenario="forbidden_user_scope",
+    input=CaseInput(query_params=_FORBIDDEN_QUERY, headers=_HEADERS),
+    seed=_seed_verifier,
+    expect=ExpectError(status=403, json_contains={"data": None}),
+)(lambda: None)

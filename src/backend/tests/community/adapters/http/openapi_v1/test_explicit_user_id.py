@@ -402,7 +402,15 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: publish-to-users route moved from /bots/{bot_id}/public-bcs to the external
 #: /collaboration/bots/{bot_uuid}/public, so one path-addressed {bot_id}
 #: operation became a {bot_uuid}-named one: path -1, none +1.
-_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 64}  # +2: tasks grant/revoke carry the bot in the request body (bcs_bot_id), never a bot_id parameter
+#:
+#: ``none`` then moved 62 → 63 with the owner-level routines aggregate
+#: (``GET /openapi/v1/bots/routines/all``): it lists the named user's whole
+#: fleet, so it addresses no single bot.
+#:
+#: The task grant/revoke operations also carry the target in ``bcs_bot_id``
+#: request-body fields rather than a ``bot_id`` parameter, adding two more
+#: operations without changing the path/query counts.
+_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 65}
 
 
 def _schema() -> dict:
@@ -525,7 +533,9 @@ def test_the_pinned_number_of_operations_take_it():
     # count: 182 → 181. execute/dashboard take no user_id at all — see
     # _NO_USER_DIMENSION.
     # Caller identity context and call-type update add two operations.
-    assert len(taking) == 183
+    # The owner-level routines aggregate (GET /bots/routines/all) adds one
+    # account-level operation: 183 → 184.
+    assert len(taking) == 184
 
 
 def test_the_exempt_operations_take_none():
