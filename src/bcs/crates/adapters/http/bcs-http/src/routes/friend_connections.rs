@@ -39,7 +39,24 @@ fn request_auth_headers(headers: &HeaderMap) -> RequestAuthHeaders {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
-    RequestAuthHeaders { authorization, cookie }
+    let mut forwarded_headers = Vec::new();
+    if let Some(value) = &authorization {
+        forwarded_headers.push(("authorization".to_string(), value.clone()));
+    }
+    if let Some(value) = &cookie {
+        forwarded_headers.push(("cookie".to_string(), value.clone()));
+    }
+    for name in ["x-avernet-principal", "x-one-id", "x-request-id", "x-trace-id"] {
+        if let Some(value) = headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            forwarded_headers.push((name.to_string(), value.to_string()));
+        }
+    }
+    RequestAuthHeaders { authorization, cookie, forwarded_headers }
 }
 
 /// `POST /collaboration/friend-connections/requests` — create a friend connection request.

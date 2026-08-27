@@ -67,6 +67,19 @@ impl HttpFriendConnectNotificationPort {
             if let Some(authorization) = auth.authorization.as_deref() {
                 request = request.header(reqwest::header::AUTHORIZATION, authorization);
             }
+            // Forward ingress auth-context headers (gateway principal,
+            // request-id, trace-id, ...) captured by the route so the
+            // backend's user-scoped auth accepts the notification. Skip
+            // authorization/cookie since they are applied above.
+            for (name, value) in &auth.forwarded_headers {
+                let lower = name.to_ascii_lowercase();
+                if lower == "authorization" || lower == "cookie" {
+                    continue;
+                }
+                if let Ok(header_name) = reqwest::header::HeaderName::try_from(name.as_str()) {
+                    request = request.header(header_name, value.as_str());
+                }
+            }
         }
         Ok(request.json(&payload))
     }
@@ -290,6 +303,12 @@ mod tests {
         let request_auth = bcs_service_api::RequestAuthHeaders {
             authorization: Some("Bearer user-token".to_string()),
             cookie: Some("session=abc".to_string()),
+            forwarded_headers: vec![
+                ("authorization".to_string(), "Bearer user-token".to_string()),
+                ("cookie".to_string(), "session=abc".to_string()),
+                ("x-avernet-principal".to_string(), "jwt-payload".to_string()),
+                ("x-request-id".to_string(), "rid-1".to_string()),
+            ],
         };
         let request = adapter
             .build_request(&FriendConnectNotificationCommand {
@@ -308,6 +327,13 @@ mod tests {
         assert_eq!(request.url().as_str(), "https://backend.example.com/openapi/v1/bots/work-orders/events?user_id=1001");
         assert_eq!(request.headers().get(reqwest::header::AUTHORIZATION).and_then(|value| value.to_str().ok()), Some("Bearer user-token"));
         assert_eq!(request.headers().get(reqwest::header::COOKIE).and_then(|value| value.to_str().ok()), Some("session=abc"));
+        assert_eq!(request.headers().get("x-avernet-principal").and_then(|value| value.to_str().ok()), Some("jwt-payload"));
+        assert_eq!(request.headers().get("x-request-id").and_then(|value| value.to_str().ok()), Some("rid-1"));
+        assert_eq!(
+            request.headers().get_all(reqwest::header::AUTHORIZATION).iter().count(),
+            1,
+            "authorization must not be duplicated by forwarded_headers"
+        );
     }
 
     #[tokio::test]
