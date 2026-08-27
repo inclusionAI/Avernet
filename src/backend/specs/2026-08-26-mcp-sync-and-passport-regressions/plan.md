@@ -549,6 +549,36 @@ updates it the same way.
 the named method kept as a thin alias, so `skill_center_module.py:918` and
 `SkillSymlinkListener` need no edit.
 
+### As built
+
+The `DeviceSync` half of the above did **not** ship; the seam it needed turned
+out to be one layer up. `BotRuntimeProjector` does not orchestrate `DeviceSync`
+calls — it calls three different ports, and `SkillSetService`, not the
+projector, owns device resolution (`_resolver.resolve_for_bot` +
+`_device_sync_dispatcher.dispatch`). So a projector handing an intent to
+`DeviceSyncDispatcher.dispatch(ctx)` would have been reaching past the service
+that already owns that resolution. Worse, for a Bot on the pool layout skills
+go through `SkillsPoolRuntimeProtocol` and MCP through `SkillSetService` — two
+subsystems — so "one delivery for a both-halves mutation" is unreachable there
+regardless of provider.
+
+What shipped instead:
+
+- `SkillSetService.sync_mcp_projection(*, claimed, released, declared)` — one
+  entry point on the service that owns device resolution, owning the
+  deliver-then-declare order. The projector makes one call where it made two.
+- `project()` gates each half on the declared scope. The branch is on the
+  caller's declared scope, never on provider or engine type — which is what
+  the rejected `ProjectionFacet` enum got wrong and what the registry exists
+  to avoid. Resolving stays unconditional: the plan is read-only, and every
+  pre-flight failure in it must happen before anything is written.
+- Retirements override the Skill flag. They are computed from the actual
+  before/after snapshots rather than declared, so they are evidence rather
+  than a claim.
+
+The whole-artifact win for teclaw is unchanged in substance and still needs
+the corp-side impl; its seam is now `sync_mcp_projection`.
+
 ### Scope declaration per command
 
 The service has seven commands routing through `_mutate`
@@ -560,11 +590,18 @@ the mapping is per command, not per repository call:
 | --- | --- |
 | `add_mcp` (incl. `default_set_unexclude_mcp`) | `mcp=True, claimed={server_code}` |
 | `remove_mcp` (incl. `default_set_exclude_mcp`) | `mcp=True, released={server_code}` |
-| `add_skill` | `skills=True`, plus `mcp=True, claimed=<deps>` when the skill has `mcp_dependencies` |
-| `remove_skill` | `skills=True`, plus `mcp=True, released=<deps>` when the skill has `mcp_dependencies` |
+| `add_skill` (incl. `default_set_unexclude_skill`) | `skills=True`, plus `mcp=True, claimed=<deps>` when the skill has `mcp_dependencies` |
+| `remove_skill` (incl. `default_set_exclude_skill`) | `skills=True`, plus `mcp=True, released=<deps>` when the skill has `mcp_dependencies` |
 | `activate` | `skills=True, mcp=True, claimed=<set's codes>` |
 | `deactivate` | `skills=True, mcp=True, released=<set's codes>` |
 | `legacy_activate` | `skills=True, mcp=True, claimed=<set's codes>` |
+
+The two Skill rows need the dependency lookup that did not exist when this
+was written; Group 8 built it. The codes are read under the row lock the
+mutation already holds and returned on `DesiredStateMutation.mcp_codes`, so
+the command scopes what was actually installed rather than what a second,
+unlocked query happened to see — the same reason activation reads its member
+codes there.
 
 Non-flow entry points — `SkillSymlinkListener` (`skill_center_module.py:914`)
 and `LocalSkillUploadService._sync_runtime` (`:533`) — pass

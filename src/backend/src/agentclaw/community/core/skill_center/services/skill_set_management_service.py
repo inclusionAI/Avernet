@@ -50,6 +50,38 @@ from agentclaw.community.core.workspace.skill_layout import (
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
+def _skill_claim_scope(result: DesiredStateMutation) -> ProjectionScope:
+    """A Skill mutation that adds the Skill, and with it its MCP dependencies.
+
+    ``mcp`` follows the dependencies rather than being hard-coded: a Skill with
+    none leaves the MCP set untouched, so projecting that half would re-declare
+    an unchanged allow-list and re-push an unchanged Passport manifest.
+
+    The codes are candidates. The projector intersects them with the set it
+    actually resolved, so a dependency that does not survive projection is
+    never delivered.
+    """
+    return ProjectionScope(
+        skills=True,
+        mcp=bool(result.mcp_codes),
+        claimed_mcp=result.mcp_codes,
+    )
+
+
+def _skill_release_scope(result: DesiredStateMutation) -> ProjectionScope:
+    """The mirror of ``_skill_claim_scope`` for a Skill leaving the Bot.
+
+    Also candidates: another Skill or the default policy may still supply the
+    same code, and the projector subtracts the projected set before deleting
+    any device configuration.
+    """
+    return ProjectionScope(
+        skills=True,
+        mcp=bool(result.mcp_codes),
+        released_mcp=result.mcp_codes,
+    )
+
+
 class SkillSetManagementService:
     @inject
     def __init__(
@@ -298,12 +330,11 @@ class SkillSetManagementService:
         set_id: str,
         skill_id: str,
     ) -> dict:
-        # Declares no ProjectionScope, so it reconciles the full projected set.
-        # A Skill can carry ``mcp_dependencies``, and this command does not
-        # have them without a lookup that does not exist yet; declaring an
-        # empty MCP scope would leave a dependency whitelisted but never
-        # configured on the device. Reconciling is today's behaviour and is
-        # correct — narrowing it needs the dependency lookup first.
+        # Scope comes from the mutation result, not from up here: a Skill can
+        # carry ``mcp_dependencies``, and those codes join the Bot's MCP set
+        # along with the Skill. The repository reads them under the row lock it
+        # already holds, so the scope names what was actually installed rather
+        # than what a second, unlocked query happened to see.
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         target = self._target_set(bot=bot, bot_id=bot_id, set_id=set_id)
         if target["is_default"]:
@@ -319,6 +350,7 @@ class SkillSetManagementService:
                 bot_id=bot_id,
                 actor_id=user_id,
                 action="default_set_unexclude_skill",
+                scope_from_result=_skill_claim_scope,
                 mutation=lambda: self._repository.unexclude_default_skill(
                     bot_id=bot_id,
                     owner_id=str(bot["owner_id"]),
@@ -334,6 +366,7 @@ class SkillSetManagementService:
             actor_id=user_id,
             action="skill_set_add_skill",
             runtime_required=bool(target.get("is_active")),
+            scope_from_result=_skill_claim_scope,
             mutation=lambda: self._repository.add_skill(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -353,7 +386,7 @@ class SkillSetManagementService:
         set_id: str,
         skill_id: str,
     ) -> dict:
-        # No ProjectionScope, for the same reason as ``add_skill``.
+        # Scope from the result, mirroring ``add_skill``.
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         target = self._target_set(bot=bot, bot_id=bot_id, set_id=set_id)
         if target["is_default"]:
@@ -364,6 +397,7 @@ class SkillSetManagementService:
                 bot_id=bot_id,
                 actor_id=user_id,
                 action="default_set_exclude_skill",
+                scope_from_result=_skill_release_scope,
                 mutation=lambda: self._repository.exclude_default_skill(
                     bot_id=bot_id,
                     owner_id=str(bot["owner_id"]),
@@ -379,6 +413,7 @@ class SkillSetManagementService:
             actor_id=user_id,
             action="skill_set_remove_skill",
             runtime_required=bool(target.get("is_active")),
+            scope_from_result=_skill_release_scope,
             mutation=lambda: self._repository.remove_skill(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),

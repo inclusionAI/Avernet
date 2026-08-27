@@ -576,6 +576,13 @@ not leave them whitelisted-but-unconfigured — a state neither branch has
 today. The plan settles which way this resolves; the spec records only that
 allow-list membership and device configuration must not diverge.
 
+> **Resolved in Group 8, no longer out of scope.** Skill mutations reconciled
+> for exactly this reason: they held only a `skill_id` and could not name the
+> dependencies. They now carry them on the mutation result, read under the
+> row lock, and declare them as claimed/released — so the codes are delivered,
+> not merely whitelisted. A dependency-free Skill mutation declares no MCP
+> scope and skips that half entirely.
+
 **Activation no longer deactivating peers.** Not a regression.
 `SkillSetActivator._activate_skill_set_unlocked` on REL was already
 incremental: *"激活单个能力集（增量激活）… 不会清除其他已激活的能力集"*.
@@ -608,3 +615,31 @@ authorization service, so merging static engine defaults would undo it.
    `MCPSyncService.refresh_mcp_scope` keeps its device-active caller.
 6. The existing `test_sync_service.py` resource-scope contract tests still
    pass unchanged.
+
+---
+
+## Resolution
+
+Five of the six hold. What was actually shipped, against each:
+
+1. **Holds.** The projector sends `mcp_items` with an explicit
+   `identity_mode`. Group 7 closed the last gap: two non-projector callers
+   built the code-only shape, and `remove_cli_from_default_skill_set` is
+   itself a skill-set mutation, so this criterion did not hold until
+   `unpack_resource_scope` began refusing that shape outright.
+2. **Holds.** `sync_mcp_delivery` removes released configuration, and the
+   projector subtracts the projected set first, so a code another claim still
+   supplies is never deleted.
+3. **Holds.** A declared claim is intersected with the projected set, so
+   adding one MCP is one entry to `sync_mcp_details_for_bot`, which resolves
+   the device once for the batch.
+4. **Half holds.** An MCP-only mutation touches no symlinks and a skill-only
+   mutation touches neither the device MCP calls nor the Passport, and the
+   branch is on the caller's *declared scope* — never on provider or engine
+   type, which is what the constraint was protecting. The whole-artifact
+   half does **not** hold: teclaw still recomposes per half, because the
+   `apply_runtime_projection` it needs is corp-side work outside this
+   repository. The seam for it is now `SkillSetService.sync_mcp_projection`.
+5. **Holds.** `SkillSetService.refresh_mcp_scope` is deleted;
+   `MCPSyncService.refresh_mcp_scope` keeps its device-active caller.
+6. **Holds.** Unchanged and passing.

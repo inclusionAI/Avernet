@@ -32,6 +32,15 @@ class ProjectionScope:
     released_mcp: frozenset[str] = frozenset()
     reconcile: bool = False
 
+    def __post_init__(self) -> None:
+        # ``reconcile`` means "no mutation to ask, project the whole thing",
+        # and the projector reads ``skills`` / ``mcp`` to decide which halves
+        # to write. A reconcile that left either flag off would therefore
+        # silently skip a half it was asked to reconcile — the one shape of
+        # this value object that cannot mean what it says.
+        if self.reconcile and not (self.skills and self.mcp):
+            raise ValueError("a reconcile scope must cover both halves")
+
     @classmethod
     def everything(cls) -> "ProjectionScope":
         """No mutation to ask, so every projected code counts as claimed.

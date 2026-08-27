@@ -2514,6 +2514,160 @@ async def test_non_skill_projection_never_writes_skill_mappings():
     assert pool.verify_calls == []
 
 
+# ── Skill mutations carry the Skill's MCP dependencies ───────────────
+#
+# A Skill's ``mcp_dependencies`` join the Bot's MCP set along with the Skill,
+# so a Skill mutation is an MCP mutation too — but only when the Skill
+# actually declares any.
+
+
+class _SkillRepository(_Repository):
+    """Answers the Skill commands with the dependencies the Skill carries."""
+
+    def __init__(self, mcp_codes=frozenset()) -> None:
+        super().__init__()
+        self._mcp_codes = frozenset(mcp_codes)
+        self.skill_calls: list[dict] = []
+
+    def _mutation(self, **kwargs) -> DesiredStateMutation:
+        self.skill_calls.append(kwargs)
+        return DesiredStateMutation(
+            item={"skill_id": kwargs["skill_id"]},
+            changed=True,
+            previous_state=CapabilityDesiredState(set(), {}, {}),
+            mcp_codes=self._mcp_codes,
+        )
+
+    def add_skill(self, **kwargs) -> DesiredStateMutation:
+        return self._mutation(**kwargs)
+
+    def remove_skill(self, **kwargs) -> DesiredStateMutation:
+        return self._mutation(**kwargs)
+
+
+def _skill_service(repository, runtime):
+    return SkillSetManagementService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=runtime,
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_add_skill_claims_the_skill_s_mcp_dependencies():
+    repository = _SkillRepository({"mcp.weather"})
+    runtime = _Runtime(fail_first=False)
+
+    await _skill_service(repository, runtime).add_skill(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+        skill_id="7",
+    )
+
+    (call,) = runtime.reconcile_calls
+    assert call["scope"].skills is True
+    assert call["scope"].mcp is True
+    assert call["scope"].claimed_mcp == frozenset({"mcp.weather"})
+    assert call["scope"].released_mcp == frozenset()
+
+
+@pytest.mark.asyncio
+async def test_add_skill_without_dependencies_leaves_the_mcp_half_alone():
+    """The whole point of the lookup: a dependency-free Skill is Skills-only.
+
+    Without it every Skill change re-declared the MCP allow-list and re-pushed
+    the Passport manifest to say nothing had changed.
+    """
+    repository = _SkillRepository()
+    runtime = _Runtime(fail_first=False)
+
+    await _skill_service(repository, runtime).add_skill(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+        skill_id="7",
+    )
+
+    (call,) = runtime.reconcile_calls
+    assert call["scope"].skills is True
+    assert call["scope"].mcp is False
+
+
+@pytest.mark.asyncio
+async def test_remove_skill_releases_the_skill_s_mcp_dependencies():
+    repository = _SkillRepository({"mcp.weather"})
+    runtime = _Runtime(fail_first=False)
+
+    await _skill_service(repository, runtime).remove_skill(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+        skill_id="7",
+    )
+
+    (call,) = runtime.reconcile_calls
+    assert call["scope"].released_mcp == frozenset({"mcp.weather"})
+    assert call["scope"].claimed_mcp == frozenset()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_skill_projection_withdraws_the_dependencies_it_claimed():
+    """Same invariant as the MCP commands: the undo releases what was claimed.
+
+    Otherwise a rolled-back Skill add leaves its dependency's endpoint and
+    api_key on the device with nothing in the database accounting for them.
+    """
+    repository = _SkillRepository({"mcp.weather"})
+    runtime = _Runtime()
+
+    with pytest.raises(SkillSetRuntimeReconcileError):
+        await _skill_service(repository, runtime).add_skill(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            user_id="true-owner",
+            set_id="set-1",
+            skill_id="7",
+        )
+
+    forward, compensating = runtime.reconcile_calls
+    assert forward["scope"].claimed_mcp == frozenset({"mcp.weather"})
+    assert compensating["scope"].released_mcp == frozenset({"mcp.weather"})
+    assert compensating["scope"].claimed_mcp == frozenset()
+
+
+@pytest.mark.asyncio
+async def test_an_inactive_set_still_skips_projection_entirely():
+    """Declaring a scope must not resurrect projection for an inactive Set."""
+
+    class _InactiveSetRepository(_SkillRepository):
+        def get_set(self, **_kwargs):
+            return {"id": "set-1", "is_default": False, "is_active": False}
+
+    repository = _InactiveSetRepository({"mcp.weather"})
+    runtime = _Runtime(fail_first=False)
+
+    await _skill_service(repository, runtime).add_skill(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+        skill_id="7",
+    )
+
+    assert runtime.reconcile_calls == []
+
+
 # ── Scoped projection: a mutation writes only the half it changed ────
 #
 # Both halves are whole-snapshot writes, so re-sending the unchanged one costs
@@ -2600,6 +2754,16 @@ async def test_retired_mappings_project_skills_even_when_the_scope_omits_them():
     )
 
     assert pool.publish_calls, "a retirement must still reach the runtime"
+
+
+def test_a_reconcile_scope_cannot_leave_a_half_uncovered():
+    """The projector reads the two flags to decide what to write, so a
+    reconcile that left one off would skip a half it was asked to reconcile."""
+    with pytest.raises(ValueError):
+        ProjectionScope(reconcile=True, skills=True)
+    with pytest.raises(ValueError):
+        ProjectionScope(reconcile=True, mcp=True)
+    assert ProjectionScope.everything().reconcile is True
 
 
 @pytest.mark.asyncio

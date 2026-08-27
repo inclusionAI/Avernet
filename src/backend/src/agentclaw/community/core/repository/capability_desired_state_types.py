@@ -35,6 +35,17 @@ class DesiredStateMutation:
     mcp_codes: frozenset[str] = frozenset()
     """MCP codes this mutation claimed or released, if it touched any.
 
+    Two kinds of command fill it, for the same reason: neither can name its
+    MCP scope before the mutation runs. Activation learns the Set's member
+    codes; a Skill mutation learns the Skill's ``mcp_dependencies``, which
+    join or leave the projected MCP set along with the Skill. Both are read
+    under the row lock the transaction already holds, so the scope names what
+    was actually installed rather than what a second, unlocked query saw.
+
+    Candidates, not a verdict — the projector intersects them with the set it
+    resolved, so a claim that does not survive projection is never delivered
+    and a release still supplied by something else is never deleted.
+
     Deliberately not part of ``details``: the flow spreads ``details`` into
     the command's return value and thence the HTTP response body, so putting
     runtime-projection facts there would leak them into the public API. This

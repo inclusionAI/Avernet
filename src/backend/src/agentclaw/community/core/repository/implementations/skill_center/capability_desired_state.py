@@ -44,6 +44,9 @@ from agentclaw.community.core.repository.implementations.skill_center.direct_ins
 from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_set_control_plane import (
     McpSkillSetControlPlaneCommands,
 )
+from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
+    skill_mcp_dependency_codes,
+)
 from agentclaw.community.core.repository.implementations.skill_center.legacy_skill_set_scope import LegacySkillSetScopeQueries
 from agentclaw.community.core.repository.capability_desired_state_types import (
     CapabilityDesiredState,
@@ -391,7 +394,17 @@ class CapabilityDesiredStateRepository(
                     skill_id=int(skill.id),
                 )
             session.flush()
-            return DesiredStateMutation(_item(row), True, old)
+            # This Skill's MCP dependencies are the MCPs the projection is
+            # about to add to the Bot's set. Read under the lock this
+            # transaction already holds, for the same reason the activate
+            # command reads its member codes here: a second, unlocked query
+            # could disagree with what was actually installed.
+            return DesiredStateMutation(
+                _item(row),
+                True,
+                old,
+                mcp_codes=skill_mcp_dependency_codes(skill),
+            )
 
     def remove_skill(
         self,
@@ -427,6 +440,13 @@ class CapabilityDesiredStateRepository(
             )
             if membership is None:
                 return DesiredStateMutation(_item(row), False, old)
+            # Read before the delete: after it, nothing links this Set to the
+            # Skill whose dependencies the projection is about to drop.
+            skill = (
+                self._scope(session.query(Skill), Skill)
+                .filter(Skill.id == int(skill_id))
+                .one_or_none()
+            )
             # The difference is what this membership was providing.
             before = self._teardown_ids(session, {int(row.id)})
             session.delete(membership)
@@ -441,7 +461,15 @@ class CapabilityDesiredStateRepository(
                     skill_ids=retired,
                 )
             session.flush()
-            return DesiredStateMutation(_item(row), True, old)
+            # Candidates for release, not a verdict: another Skill or the
+            # default policy may still supply the same code, and the projector
+            # subtracts the projected set before deleting anything.
+            return DesiredStateMutation(
+                _item(row),
+                True,
+                old,
+                mcp_codes=skill_mcp_dependency_codes(skill),
+            )
 
     def set_skill_set_active(
         self,

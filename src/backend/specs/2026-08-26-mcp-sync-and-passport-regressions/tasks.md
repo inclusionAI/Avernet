@@ -67,7 +67,10 @@ change. That touches a shared seam and breaks two tests pinning the current
 shapes (`contracts/gateway/test_rule15_skillsets.py:206`,
 `core/bot_management/services/test_restart_authorization_refresh.py:160`),
 so it is a scope call for the author rather than something to fold in
-silently. **Raised in the final report; not actioned.**
+silently.
+
+**Author chose the structural fix. Done in Group 7 below**, which is what
+closes spec criterion 1.
 
 ## Group 2 — Thread `ProjectionScope`, defaulting to everything (no behaviour change)
 
@@ -148,7 +151,7 @@ green at the end of this group *without* any test expectation changing.
 - [x] 3.9 Test — a `reconcile` scope pushes every projected code, so the
       device-activated reconcile path is unchanged.
 
-## Group 4 — Delivery shape decided per provider (problem 4) — **BLOCKED**
+## Group 4 — Delivery shape decided per provider (problem 4) — **DONE via (a)**
 
 **The plan's premise does not hold against the code.** Task 4.4 says
 `BotRuntimeProjector` should hand an intent to
@@ -193,8 +196,33 @@ Options for the author, none of which should be chosen silently:
 - **(c)** Drop Group 4. Problems 1–3 and 5 are the regressions; problem 4 is
   a cost issue whose main beneficiary needs corp work anyway.
 
-**Not actioned — raised for the author.** Groups 5 and 6 do not depend on it
-and are complete.
+**Author chose (a), plus the gating (b) would have bought.** What shipped:
+
+- [x] 4a.1 `SkillSetService.sync_mcp_projection(*, claimed, released, declared)`
+      — the projector's single MCP entry point. Owns the deliver-then-declare
+      order, because this service owns device resolution and the projector
+      does not. `sync_mcp_delivery` / `sync_mcp_desired_state` stay as its two
+      halves rather than being inlined: the declare-vs-deliver split is the
+      distinction problem 3 turned on.
+- [x] 4a.2 `_apply_non_skill_projection` makes that one call instead of two.
+- [x] 4a.3 `project()` gates each half on the declared scope. Resolving stays
+      unconditional — the plan is read-only and every pre-flight failure in it
+      must happen before anything is written, so an aborted projection still
+      leaves nothing half-applied for a compensation to unpick. `reconcile`
+      sets both flags, so an undeclared caller is unchanged.
+- [x] 4a.4 `retired_mappings` overrides the Skill flag. They are computed from
+      the actual before/after snapshots rather than declared, so they are
+      evidence Skills moved; skipping them would strand a published mapping
+      the desired state no longer holds.
+- [x] 4a.5 Tests: an MCP-only scope touches no Skill mapping; a Skill-only
+      scope touches neither the device MCP calls nor Passport; a retirement
+      projects Skills even against an MCP-only scope; an undeclared caller
+      still projects both; the projector makes exactly one MCP call.
+
+Not taken from the original plan: `apply_runtime_projection` on `DeviceSync`.
+The teclaw win it was aimed at still needs the corp-side work in 4.7, and the
+seam for it is now `sync_mcp_projection` rather than the projector reaching
+past `SkillSetService` into the dispatcher.
 
 ### Original tasks, unchanged for reference
 
@@ -267,6 +295,63 @@ per group is the intent; this group is the checklist that nothing was missed.
       diff for logged variables that could hold one before pushing.
 - [x] 6.5 Failure paths keep `exc_info=True` and name `bot_id` +
       `server_code`, so a partial delivery is diagnosable from one line.
+
+## Group 7 — Identity-less MCP scope refused at the seam (Group 1 deferral)
+
+- [x] 7.1 `unpack_resource_scope` rejects a non-empty `mcp_codes` with no
+      `mcp_items`. An empty list stays legal — it grants nothing, so there is
+      no identity to lose, and clearing MCP scope must not require an identity
+      lookup to satisfy the guard.
+- [x] 7.2 Extract the projector's fail-closed identity read as
+      `resolve_mcp_identity_modes` (`core/mcp/services/passport_scope.py`),
+      raising the new `McpIdentityUnresolvedError`. One definition of "refuse
+      rather than default", shared by all three callers.
+- [x] 7.3 `remove_cli_from_default_skill_set` resolves identity and sends
+      `mcp_items`; `mcp_codes` is derived from the items, since
+      `unpack_resource_scope` ignores it when items are present and two
+      independent lists could only drift.
+- [x] 7.4 `AicodingProvisioningStrategy.refresh_restart_authorization` does
+      the same. `caller_identity_repo` is threaded through the provisioning
+      protocol and wired from `BotService` (optional on the constructor so the
+      existing fixtures keep working; the DI provider always supplies it).
+      With no repository, or an unreadable one, the refresh **declines** —
+      leaving the bot's existing scope standing beats replacing it with an
+      owner-only snapshot, and the caller already treats this path as
+      best-effort.
+- [x] 7.5 Tests: `unpack_resource_scope` accepts items, rejects codes-only,
+      keeps the empty case legal; `resolve_mcp_identity_modes` refuses on a
+      missing pk and on an unreadable row; the restart carries a caller MCP
+      through unchanged and declines in each failure mode; the CLI-removal
+      contract test pins the `mcp_items` shape.
+- [x] 7.6 Allow-list the two new pure helpers in the R8 adapter-layer gate,
+      alongside `filter_passport_mcp_codes`.
+
+## Group 8 — Skill mutations declare their MCP dependencies
+
+- [x] 8.1 `mcp_dependency_codes` (`core/skill_center/mcp_dependency_scope.py`)
+      — the one decoder for the mixed stored shape (bare codes,
+      `{"server_code": ...}`, `{"code": ...}`). Deliberately stdlib-only: the
+      persistence layer reads the same column, and importing the modules that
+      own the richer Skill types from there closes an import cycle.
+- [x] 8.2 `RuntimeProjectionResolver` uses it instead of its own inline copy,
+      so a mutation scopes exactly the set the projection resolves.
+- [x] 8.3 `skill_mcp_dependency_codes` reads one `ac_skill` row through it.
+      A malformed row raises rather than reading as "none": the projection
+      decodes the same column moments later and would fail on it anyway, and
+      failing here rolls the mutation back instead.
+- [x] 8.4 `add_skill` / `remove_skill` and the Default-Set exclusion pair
+      return the codes on `DesiredStateMutation.mcp_codes`, read under the row
+      lock the transaction already holds — the same reason activation reads
+      its member codes there.
+- [x] 8.5 The four commands declare `scope_from_result`. `mcp` follows the
+      dependencies rather than being hard-coded, so a dependency-free Skill
+      mutation is Skills-only and skips the MCP half entirely.
+- [x] 8.6 Tests: both stored shapes decode and an unrecognised one raises; the
+      row reader handles JSON string, decoded list, empty and missing; the
+      repository reports dependencies on add/remove/exclude/unexclude and
+      reports none for a no-op; the commands claim, release, skip the MCP half
+      without dependencies, invert under compensation, and still skip
+      projection entirely for an inactive Set.
 
 ## Verification
 
