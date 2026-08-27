@@ -3,10 +3,12 @@
 为什么需要:BCS 建群(``POST /groups``)带 ``event_subscriptions`` 时走 ``require_human``,拒 Bot token;
 参考 ocb 把 driver-bot 的 session_token 作为 ``Authorization: Bearer`` 携带,让 BCS 把 caller 解析成
 driver/originator bot(带归属、统一个 caller 身份)。core 不挂厂商数据基建名;具体读法(DB 直读
-``bcs_bots.session_token`` 等)属 corp/数据源具体实现,放在 community/plugins(见 ``DbBcsBotTokenProvider``)。
+``bcs_bots.session_token`` 等)属 corp/数据源具体实现,由 corp 经 DI bind ``BcsBotTokenProvider`` 注入
+(见 task_module);未注入时默认 ``NullBcsBotTokenProvider``(不发 Bearer,去 event_subscriptions 后
+no-sub 分支 HMAC 匿名建群亦成,降级不阻断)。
 
 core 只暴露中性 ``BcsBotTokenProvider`` 端口 + ``CachingBcsBotTokenProvider`` 缓存包装 +
-``NullBcsBotTokenProvider``;联调/部署侧经 DI bind ``BcsBotTokenProvider`` 覆写默认提供方(见 task_module)。
+``NullBcsBotTokenProvider``。
 """
 from __future__ import annotations
 

@@ -1,15 +1,13 @@
-"""BcsBotTokenProvider:driver-bot 的 BCS session_token 取数(参考 ocb)。
+"""BcsBotTokenProvider:driver-bot 的 BCS session_token 取数端口(中性,在 core)。
 
-中性端口 + Null + Caching 在 core;DB-backed 默认 provider(``DbBcsBotTokenProvider``)
-在 community/plugins,经 prod ``DatabasePlugin`` 直读 ``bcs_bots.session_token``。
-本测用伪 DatabasePlugin 验证 SQL/缓存/降级,不触真实 DB。
+core 只含中性端口 + ``NullBcsBotTokenProvider`` + ``CachingBcsBotTokenProvider``(TTL 缓存包装);
+DB-backed 具体实现属 corp/数据源(经 DI 注入,见 task_module),不在 community 内,本测不覆盖。
 """
 from __future__ import annotations
 
 from agentclaw.community.core.task.task_runner.integration.bcs_bot_token_provider import (
     BcsBotTokenProvider, CachingBcsBotTokenProvider, NullBcsBotTokenProvider,
 )
-from agentclaw.community.plugins.community.bcs_bot_token_provider import DbBcsBotTokenProvider
 
 
 def test_null_provider_returns_none():
@@ -54,88 +52,4 @@ def test_caching_provider_none_result_short_caches_to_avoid_db_hammer():
 
 def test_caching_provider_is_a_bcs_bot_token_provider():
     p = CachingBcsBotTokenProvider(resolver=lambda _u: None)
-    assert isinstance(p, BcsBotTokenProvider)
-
-
-# ===== DbBcsBotTokenProvider:经 DatabasePlugin.orm_session() 直读 bcs_bots.session_token + TTL 缓存 =====
-
-class _FakeRow:  # 模拟 sqlalchemy Row:row[0] = session_token
-    def __init__(self, value):
-        self._value = value
-
-    def __getitem__(self, idx):
-        return self._value
-
-
-class _FakeResult:
-    def __init__(self, row):
-        self._row = row  # Row 或 None(未命中)
-
-    def first(self):
-        return self._row
-
-
-class _FakeSession:
-    def __init__(self, value=None, *, raises=False, execute_calls=None):
-        self._value = value
-        self._raises = raises
-        self._execute_calls = execute_calls
-
-    def execute(self, sql, params):
-        if self._execute_calls is not None:
-            self._execute_calls.append(params.get("uuid"))
-            assert "bcs_bots" in str(sql), "应直读 bcs_bots 表"
-        if self._raises:
-            raise RuntimeError("no such table: bcs_bots")
-        return _FakeResult(_FakeRow(self._value) if self._value is not None else None)
-
-
-class _FakeCm:
-    def __init__(self, session):
-        self._session = session
-
-    def __enter__(self):
-        return self._session
-
-    def __exit__(self, *exc):
-        return False
-
-
-class _FakeDbPlugin:
-    def __init__(self, session):
-        self._session = session
-
-    def orm_session(self):
-        return _FakeCm(self._session)
-
-
-def test_db_provider_reads_session_token_and_caches():
-    calls = []
-    now = [0.0]
-    p = DbBcsBotTokenProvider(
-        _FakeDbPlugin(_FakeSession("tok-drv", execute_calls=calls)),
-        ttl_s=300, clock=lambda: now[0],
-    )
-    assert p.get_token("drv:35983") == "tok-drv"
-    assert p.get_token("drv:35983") == "tok-drv"   # 命中缓存
-    assert calls == ["drv:35983"]                   # 只查一次
-    now[0] = 301                                    # 超过 TTL
-    assert p.get_token("drv:35983") == "tok-drv"
-    assert calls == ["drv:35983", "drv:35983"]      # 过期重查
-
-
-def test_db_provider_returns_none_when_not_found():
-    calls = []
-    p = DbBcsBotTokenProvider(_FakeDbPlugin(_FakeSession(None, execute_calls=calls)))
-    assert p.get_token("ghost") is None             # .first() 返 None → None
-    assert calls == ["ghost"]
-
-
-def test_db_provider_returns_none_when_db_errors():
-    p = DbBcsBotTokenProvider(_FakeDbPlugin(_FakeSession(raises=True)))  # 本地无 bcs_bots 表 → 抛错
-    assert p.get_token("drv:35983") is None         # 吞错降级,不发 Bearer
-
-
-def test_db_provider_is_a_bcs_bot_token_provider():
-    p = DbBcsBotTokenProvider(_FakeDbPlugin(_FakeSession(None)))
     assert isinstance(p, BcsBotTokenProvider)

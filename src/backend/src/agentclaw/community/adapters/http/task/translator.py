@@ -109,7 +109,8 @@ def translate_claw_mind(raw: dict, disposition: Literal["start", "result"]) -> T
     字段映射:
     - ``loop_task_id`` = ``flow_id``(run 实例 id,对齐 BCN 的 ``scope.run_id`` 回投键 → ``task_callback.run_id`` 列存 run 实例);工作流级回投,``node_id`` 空;
     - ``workflow_instance_id`` = ``ext_info.flow_runs.origin_session_id``(session_id → 落 task_callback.main_session_id);
-    - ``status`` 从底层 status 推:``ext_info.flow_runs.status`` > ``node_executions[0].status``(顶层 status 仅粗粒度事件类型);
+    - ``status`` = 底层 status(``ext_info.flow_runs.status`` > ``node_executions[0].status`` > 顶层)经
+      ``_claw_mind_status_to_task`` 映射的 task Status 枚举值(落 ``task_callback.status``,ClawMind 7 态 → task 7 态语义对应);
     - ``result.success`` 由底层 status 语义推(succeeded/completed→True;failed/cancelled/aborted→False;未知→不设 success);
     - ``result.data`` = ``node_executions[0].output_json``;``result.exec_error`` = ``node_executions[0].error_text``;
     - ``execution_graph`` = 全量 ``ext_info``(flow_runs + node_executions 快照 → task_callback.execution_graph);
@@ -148,7 +149,7 @@ def translate_claw_mind(raw: dict, disposition: Literal["start", "result"]) -> T
             "instance_id": 0,
             "workflow_source": "claw_mind",
             "workflow_instance_id": (flow_runs.get("origin_session_id") or ""),
-            "status": low_status,
+            "status": _claw_mind_status_to_task(low_status).value,
             "execution_graph": _build_claw_mind_execution_graph(ext, run_status=low_status),
             "_raw_callback_body": raw,
             "result": result,
@@ -170,7 +171,7 @@ _CLAW_MIND_TO_TASK_STATUS: dict[str, Status] = {
     "cancelled": Status.CANCELLED, "canceled": Status.CANCELLED, "aborted": Status.CANCELLED,
     "running": Status.RUNNING, "started": Status.RUNNING, "in_progress": Status.RUNNING,
     "active": Status.RUNNING,
-    "pending": Status.PENDING, "queued": Status.PENDING, "waiting": Status.PENDING,
+    "pending": Status.PENDING, "queued": Status.PENDING, "waiting": Status.PENDING, "blocked": Status.PENDING,
     "planning": Status.PLANNING,
 }
 

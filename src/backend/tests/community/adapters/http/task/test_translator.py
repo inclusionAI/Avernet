@@ -137,7 +137,7 @@ class TestClawMind:
         assert d["loop_task_id"] == "flow-abc-123"  # loop_task_id = flow_id(run 实例,对齐 BCN);node_id 空
         assert d["workflow_source"] == "claw_mind"
         assert d["workflow_instance_id"] == "S-9"        # session_id = origin_session_id
-        assert d["status"] == "succeeded"                # 从底层 flow_runs.status 推(非顶层 node_succeeded)
+        assert d["status"] == "DONE"                        # flow_runs.status=succeeded → task Status.DONE(落 task_callback.status)
         assert d["result"]["success"] is True
         assert d["result"]["data"] == {"answer": 42}
         # execution_graph 转结构化 TaskExecutionGraph(graph_to_dict 形状),非原始 ext 透传
@@ -167,7 +167,7 @@ class TestClawMind:
         }
         d = translate_claw_mind(body, "result").data.data
         assert d["loop_task_id"] == "f"  # loop_task_id = flow_id(run 实例,对齐 BCN)
-        assert d["status"] == "failed"
+        assert d["status"] == "FAILED"                      # node status=failed → task Status.FAILED
         assert d["workflow_instance_id"] == "S-1"
         assert d["result"]["success"] is False
         assert d["result"]["exec_error"] == "boom"
@@ -176,7 +176,7 @@ class TestClawMind:
         # 无 flow_runs.status / node_executions → status 退顶层;未知 status 不设 success
         body = {"workflow_id": "w", "flow_id": "f", "status": "started", "ext_info": {}}
         d = translate_claw_mind(body, "start").data.data
-        assert d["status"] == "started"
+        assert d["status"] == "RUNNING"                     # 顶层退到 status=started → task Status.RUNNING
         assert "success" not in d["result"]
 
     def test_translate_claw_mind_session_id_empty_when_absent(self):
@@ -301,11 +301,32 @@ class TestClawMind:
                          ("analysis", "report")}
         assert all(e["type"] == "DEPENDENCY" for e in g["relations"])
 
+    def test_top_status_maps_flow_runs_status_to_task_enum(self):
+        """task_callback.status 落映射后的 task Status 枚举(非原始 ClawMind 字符串)。
+        ClawMind flow_runs.status 仅 7 个枚举,按语义对应 task 7 态。"""
+        cases = {
+            "running": "RUNNING",
+            "succeeded": "DONE",
+            "failed": "FAILED",
+            "cancelled": "CANCELLED",
+            "waiting": "PENDING",
+            "aborted": "CANCELLED",
+            "blocked": "PENDING",
+        }
+        for src, want in cases.items():
+            body = {"workflow_id": "w", "flow_id": "f", "status": src,
+                    "ext_info": {"flow_runs": {"status": src, "origin_session_id": "S"},
+                                 "node_executions": []}}
+            d = translate_claw_mind(body, "result").data.data
+            assert d["status"] == want, (
+                f"flow_runs.status={src!r} → task_callback.status={d['status']!r}, want {want!r}")
+
     def test_execution_graph_status_mapping(self):
         cases = {
             "succeeded": "DONE", "completed": "DONE", "node_succeeded": "DONE", "success": "DONE",
             "failed": "FAILED", "node_failed": "FAILED",
             "cancelled": "CANCELLED", "canceled": "CANCELLED", "aborted": "CANCELLED",
+            "blocked": "PENDING", "waiting": "PENDING",
             "running": "RUNNING", "started": "RUNNING", "in_progress": "RUNNING",
             "": "PENDING", "unknown_xyz": "PENDING",
         }

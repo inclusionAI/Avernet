@@ -339,7 +339,7 @@ class TestClawMind:
         assert rec.run_id == "flow-abc-123"  # loop_task_id = flow_id(run 实例,对齐 BCN)
         assert rec.node_id == ""                      # workflow 级回投,node_id 空
         assert rec.main_session_id == "S-9"           # origin_session_id → main_session_id
-        assert rec.status == "succeeded"              # 底层 flow_runs.status(非顶层 node_succeeded)
+        assert rec.status == "DONE"                   # flow_runs.status=succeeded → task Status.DONE(非顶层 node_succeeded)
         assert rec.result_success is True
         assert rec.result == {"success": True, "data": {"answer": 42}}
         assert rec.exec_error is None
@@ -370,7 +370,7 @@ class TestClawMind:
                             InMemoryCallbackCorrelationRegistry()))
         rec = repo.calls[0]
         assert rec.run_id == "f"  # loop_task_id = flow_id(run 实例,对齐 BCN)
-        assert rec.status == "failed"
+        assert rec.status == "FAILED"              # node status=failed → task Status.FAILED
         assert rec.main_session_id == "S-1"
         assert rec.result_success is False
         assert rec.exec_error == "boom"
