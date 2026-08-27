@@ -79,10 +79,11 @@ class AliyunAckSandbox(ArcaSandbox):
     def get_info(self) -> ArcaSandboxInfo:
         """Extract Pod status into the unified ArcaSandboxInfo.
 
-        Also derives ``ttl_timestamp`` (ms epoch) from the Pod's
-        ``metadata.creation_timestamp`` plus the
-        ``avernet.arcasandbox/ttl-minutes`` annotation. This lets the renew path
-        treat an ACK Pod like any other Arca sandbox and extend its TTL.
+        Reads the absolute expiry deadline from the Pod's
+        ``avernet.arcasandbox/ttl_expiration_timestamp`` annotation (ms epoch) and
+        reports it as ``ttl_timestamp``. The remaining ``ttl_in_minutes`` is
+        derived from that deadline, so the renew path treats an ACK Pod like
+        any other Arca sandbox (absolute deadline as source of truth).
         """
         try:
             core_api = CoreV1Api(self._client)
@@ -91,8 +92,12 @@ class AliyunAckSandbox(ArcaSandbox):
             )
             status = getattr(pod, "status", None)
 
-            ttl_in_minutes = self._ttl_in_minutes
-            ttl_timestamp = self._derive_ttl_timestamp(pod, ttl_in_minutes)
+            ttl_timestamp = self._read_ttl_expiration_timestamp(pod)
+            if ttl_timestamp is None and self._ttl_in_minutes is not None:
+                ttl_timestamp = self._compute_expiration_from_creation(
+                    pod, self._ttl_in_minutes
+                )
+            ttl_in_minutes = self._remaining_minutes(ttl_timestamp)
 
             pod_ip = getattr(status, "pod_ip", None)
             if not pod_ip:
@@ -119,39 +124,57 @@ class AliyunAckSandbox(ArcaSandbox):
                 f"get_info failed for sandbox {self._sandbox_id} ({e.status})"
             ) from e
 
-    def _derive_ttl_timestamp(
-        self, pod: Any, ttl_in_minutes: float | int | None
-    ) -> int | None:
-        """Compute the Pod expiry as a ms epoch timestamp.
+    @staticmethod
+    def _read_ttl_expiration_timestamp(pod: Any) -> int | None:
+        """Read the absolute expiry deadline (ms epoch) from the Pod annotation.
 
-        Expiry = pod ``metadata.creation_timestamp`` + ``ttl-minutes`` annotation
-        (falling back to ``self._ttl_in_minutes``). Returns ``None`` when either
-        the creation time or the TTL cannot be resolved, so callers can fall back
-        to their own defaults rather than assuming a value.
+        Returns ``None`` when the annotation is absent or malformed.
+        """
+        metadata = getattr(pod, "metadata", None)
+        annotations = getattr(metadata, "annotations", None) or {}
+        raw = annotations.get("avernet.arcasandbox/ttl_expiration_timestamp")
+        if raw is None:
+            return None
+        try:
+            value = int(float(raw))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return value if value > 0 else None
+
+    @staticmethod
+    def _compute_expiration_from_creation(
+        pod: Any, ttl_in_minutes: float | int | None
+    ) -> int | None:
+        """Compute expiry as ``creation_timestamp + ttl_in_minutes`` (ms epoch).
+
+        Backward-compatible fallback for Pods created before the
+        ``ttl_expiration_timestamp`` annotation existed. Returns ``None`` when the
+        creation time or TTL cannot be resolved.
         """
         from datetime import datetime as _datetime
 
+        if ttl_in_minutes is None:
+            return None
         metadata = getattr(pod, "metadata", None)
         creation = getattr(metadata, "creation_timestamp", None) if metadata else None
         if not isinstance(creation, _datetime):
             return None
-
-        ttl = ttl_in_minutes
-        if ttl is None and metadata is not None:
-            annotations = getattr(metadata, "annotations", None) or {}
-            raw_ttl = annotations.get("avernet.arcasandbox/ttl-minutes")
-            if raw_ttl is not None:
-                try:
-                    ttl = float(raw_ttl)
-                except (TypeError, ValueError):
-                    ttl = None
-        if ttl is None:
-            return None
-
         import calendar
 
         created_epoch_s = calendar.timegm(creation.utctimetuple())
-        return int((created_epoch_s + ttl * 60) * 1000)
+        return int((created_epoch_s + ttl_in_minutes * 60) * 1000)
+
+    @staticmethod
+    def _remaining_minutes(ttl_timestamp: int | float | None) -> float | int | None:
+        """Derive remaining TTL minutes from an absolute expiry (ms epoch).
+
+        Returns ``None`` when the expiry is unknown; a zero/negative remaining
+        value means the deadline has already passed.
+        """
+        if ttl_timestamp is None:
+            return None
+        remaining_ms = float(ttl_timestamp) - time.time() * 1000
+        return remaining_ms / 60000.0
 
     def destroy(self) -> bool:
         """Delete the backing Deployment and associated resources. Idempotent on 404.
@@ -243,17 +266,28 @@ class AliyunAckSandbox(ArcaSandbox):
         raise NotImplementedError("update_outbound_rule not implemented")
 
     def extend_ttl(self, ttl_minutes: int) -> Any:
-        """Extend the Pod TTL annotation by ``ttl_minutes``."""
+        """Extend the Pod's absolute expiry deadline by ``ttl_minutes``.
+
+        Re-reads the current deadline from the ``ttl_expiration_timestamp``
+        annotation (falling back to now) and records ``deadline + ttl_minutes``
+        as the new annotation value.
+        """
         logger.info(
             "[aliyun_ack] extend_ttl sandbox_id=%s ttl_minutes=%d",
             self._sandbox_id,
             ttl_minutes,
         )
-        annotations = {
-            "avernet.arcasandbox/ttl-minutes": str(ttl_minutes),
-        }
         try:
             core_api = CoreV1Api(self._client)
+            pod = core_api.read_namespaced_pod(
+                name=self._pod_name, namespace=self._namespace
+            )
+            current = self._read_ttl_expiration_timestamp(pod)
+            base_ms = current if current is not None else time.time() * 1000
+            new_expiration = int(base_ms + ttl_minutes * 60 * 1000)
+            annotations = {
+                "avernet.arcasandbox/ttl_expiration_timestamp": str(new_expiration),
+            }
             core_api.patch_namespaced_pod(
                 name=self._pod_name,
                 namespace=self._namespace,

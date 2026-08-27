@@ -13,6 +13,7 @@ forward without blocking on every nested field.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -212,6 +213,70 @@ class CorsConfig:
 # NOTE: community-only config types (BcsAuthConfig + the data-plane Community*Config
 # classes) live in ``di/config_community.py`` — kept physically separate from the
 # corp config so the open-source distribution ships only the community surface.
+
+
+# ── Outbound HTTP transport ─────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class HttpClientPoolPolicy:
+    """Connection-pool + HTTP/2 settings for **one** ``HttpClient`` binding.
+
+    ``max_connections``
+        Hard ceiling on simultaneously open connections. It is **per binding and
+        pool-wide** — not process-wide, and not per origin: the ``general``
+        binding has ``base_url=""`` and its callers pass absolute URLs, so this
+        one budget is shared across every host it addresses. Past the ceiling a
+        request waits for a free connection and fails with
+        ``HttpClientTimeoutError`` (``httpx.PoolTimeout``) once the per-call
+        ``timeout`` elapses — the backpressure that keeps a burst of parallel
+        callers from opening an unbounded number of sockets.
+    ``max_keepalive_connections``
+        How many of those stay open for reuse once idle (httpx clamps it to
+        ``max_connections``).
+    ``keepalive_expiry``
+        Seconds an idle connection is kept. Keep this **below** the upstream's
+        own idle timeout: a connection the server has already closed but the pool
+        still believes is live surfaces as ``httpx.RemoteProtocolError`` on the
+        next request to pick it up, and nothing retries that.
+    ``http2``
+        Negotiate HTTP/2 (request multiplexing over one connection) where the
+        upstream offers it. Negotiation is via TLS ALPN, so it engages only on
+        ``https://`` upstreams and stays on HTTP/1.1 for ``http://`` ones —
+        httpx performs no cleartext h2c upgrade. Defaults off so it can be
+        enabled per environment and per binding after the wire change has been
+        watched somewhere safe.
+    """
+
+    max_connections: int = 100
+    max_keepalive_connections: int = 20
+    keepalive_expiry: float = 5.0
+    http2: bool = False
+
+
+@dataclass(frozen=True)
+class HttpClientPoolConfig:
+    """Shared transport defaults plus sparse per-qualifier overrides.
+
+    The four ``HttpClient`` bindings front different upstreams with different
+    traffic shapes — ``general`` alone carries LLM SSE streams and container
+    calls to many origins — so each resolves its own policy rather than all four
+    sharing one.
+
+    ``for_qualifier`` resolves **whole-policy**: a qualifier either has an
+    override or gets ``defaults``, with no field-level merging at the call site.
+    The provider is what makes a sparse override total, by building each one
+    starting from the resolved defaults. Merging at read time instead would let a
+    half-specified override drift silently as the shared defaults change, which
+    is not what someone reading the YAML would predict.
+    """
+
+    defaults: HttpClientPoolPolicy = field(default_factory=HttpClientPoolPolicy)
+    overrides: Mapping[str, HttpClientPoolPolicy] = field(default_factory=dict)
+
+    def for_qualifier(self, qualifier: str) -> HttpClientPoolPolicy:
+        """Effective policy for one binding: its override, else the defaults."""
+        return self.overrides.get(qualifier, self.defaults)
 
 
 # ── Object storage ──────────────────────────────────────────────────────

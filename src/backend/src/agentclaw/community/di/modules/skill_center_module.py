@@ -112,6 +112,7 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
+    ProjectionScope,
 )
 from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
     PlatformDefaultMcpPolicy,
@@ -911,13 +912,21 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             device_sync_dispatcher=device_sync_dispatcher,
             desktop_layout_authority=desktop_layout_authority,
             desktop_reconcile_wakeup=skills_pool_wakeup.handle,
+            # A device-activated listener has no mutation to describe, so it
+            # asks for the whole projection explicitly rather than relying on
+            # a default that a future caller could inherit by accident.
             runtime_reconcile=lambda bot_id, owner_id: runtime_reconciler.project(
-                bot_id=bot_id, owner_id=owner_id
+                bot_id=bot_id,
+                owner_id=owner_id,
+                scope=ProjectionScope.everything(),
             ),
+            # MCP/CLI only: this path exists because a cutover task owns the
+            # Skill mappings, so declaring the Skill half here would fight it.
             runtime_non_skill_reconcile=lambda bot_id, owner_id: (
                 runtime_reconciler.project_mcp_and_cli(
                     bot_id=bot_id,
                     owner_id=owner_id,
+                    scope=ProjectionScope(mcp=True, claim_all_mcp=True),
                 )
             ),
         )

@@ -7,9 +7,12 @@ the exclusion row together with the member's Installation delta.
 
 from __future__ import annotations
 
-from agentclaw.community.core.models.skill import SkillSet
+from agentclaw.community.core.models.skill import Skill, SkillSet
 from agentclaw.community.core.repository.implementations.skill_center.bot_skillset_installations import (
     set_member_skill_ids,
+)
+from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
+    skill_mcp_dependency_codes,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_set_projection import (
     skill_set_item as _item,
@@ -30,6 +33,20 @@ from agentclaw.community.utils.env_utils import get_current_env
 class DefaultExclusionCommands:
     """Mixed into the control-plane repository; uses its ``_db``, ``_scope``,
     ``_set``, ``_snapshot`` and ``_require_unique_runtime_names``."""
+
+    def _skill_mcp_codes(self, session, skill_id: str) -> frozenset[str]:
+        """The MCP dependencies the excluded/restored member carries.
+
+        Exclusion is the Default Set's per-Bot deactivation, so it moves this
+        member's MCP dependencies in or out of the projected set exactly as an
+        ordinary add/remove does — and the command has to name them to scope
+        its projection.
+        """
+        return skill_mcp_dependency_codes(
+            self._scope(session.query(Skill), Skill)
+            .filter(Skill.id == int(skill_id))
+            .one_or_none()
+        )
 
     def exclude_default_skill(
         self,
@@ -71,12 +88,15 @@ class DefaultExclusionCommands:
             )
             if not created:
                 return DesiredStateMutation(_item(row), False, old)
+            released = self._skill_mcp_codes(session, skill_id)
             skill_installations.uninstall(
                 session, bot_id=bot_id, owner_id=owner_id,
                 env=get_current_env(), skill_ids={int(skill_id)},
             )
             session.flush()
-            return DesiredStateMutation(_item(row), True, old)
+            return DesiredStateMutation(
+                _item(row), True, old, mcp_codes=released
+            )
 
     def unexclude_default_skill(
         self,
@@ -105,6 +125,7 @@ class DefaultExclusionCommands:
             )
             if not removed:
                 return DesiredStateMutation(_item(row), False, old)
+            claimed: frozenset[str] = frozenset()
             if int(skill_id) in set_member_skill_ids(
                 self._scope, session, skill_set_id=int(row.id)
             ):
@@ -116,8 +137,13 @@ class DefaultExclusionCommands:
                     session, bot_id=bot_id, owner_id=owner_id,
                     env=get_current_env(), skill_id=int(skill_id),
                 )
+                # Only a restored *member* re-enters the projection; lifting a
+                # stale exclusion on a non-member claims nothing.
+                claimed = self._skill_mcp_codes(session, skill_id)
             session.flush()
-            return DesiredStateMutation(_item(row), True, old)
+            return DesiredStateMutation(
+                _item(row), True, old, mcp_codes=claimed
+            )
 
     def excluded_default_skill_ids(
         self, *, bot_id: str, owner_id: str, set_id: str

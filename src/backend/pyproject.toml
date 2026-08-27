@@ -45,7 +45,12 @@ dependencies = [
   "cryptography>=37.0.4",
   "injector>=0.21,<1.0",
   "fastapi-injector>=0.7,<1.0",
-  "httpx>=0.27.0",
+  # httpx[http2] — the http2 extra pulls `h2`, enabling HTTP/2 (request
+  # multiplexing over one connection) on the pooled HttpClient plugins. It is
+  # negotiated by TLS ALPN, so it engages only on https:// upstreams offering
+  # h2 and is inert elsewhere; the `http_client.http2` config flag defaults to
+  # false so it can be turned on per environment without a dependency change.
+  "httpx[http2]>=0.27.0",
   "pyyaml>=6.0",
   "requests>=2.31",
   "aiohttp>=3.9",
@@ -74,6 +79,14 @@ dependencies = [
   # before querying the public Bot name/owner-name LIKE catalogue. This must be
   # installed in every runtime profile, not only in test tooling.
   "jieba>=0.42",
+  # aiomysql: the async DBAPI behind `mysql+aiomysql://` — needed when the
+  # DatabasePlugin opens an async SQLAlchemy engine for MySQL. Pure Python,
+  # same as PyMySQL.
+  "aiomysql>=0.2.0",
+  # greenlet: SQLAlchemy's async engine uses greenlets for context-local
+  # state; aiomysql pulls it in transitively but pinning it explicitly avoids
+  # a "No module named 'greenlet'" at runtime if the transitive dep is absent.
+  "greenlet>=3.0.0",
 ]
 
 # Community test tooling — so the extracted community repo can run its own CI.

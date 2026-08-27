@@ -146,3 +146,38 @@ class CommunitySecretConfig:
     """
 
     env_prefix: str = "AGENTCLAW_SECRET_"
+
+
+@dataclass(frozen=True)
+class OutboundRuleEntryConfig:
+    """One outbound-header rule from the ``outbound_rules.header_rules`` YAML list.
+
+    Maps 1:1 to :class:`~agentclaw.community.kernel.device_dto.HeaderOperationRule`.
+    Field names match the YAML keys, not the DTO field names, so the YAML reads
+    naturally to an operator::
+
+        - domains: ["*.example.com"]
+          action: "set"
+          header_name: "X-Custom-Header"
+          value: "my-value"
+    """
+
+    domains: tuple[str, ...] = ()
+    action: str = "set"
+    header_name: str = ""
+    value: str = ""
+    placeholder: str | None = None
+    separator: str | None = None
+
+
+@dataclass(frozen=True)
+class OutboundRulesConfig:
+    """Outbound-header rule set for the community ``CommunityOutboundRuleProvider``.
+
+    Community-only: sourced from the ``outbound_rules`` block of ``user_config``.
+    An empty ``header_rules`` tuple (the default) means no egress mutation —
+    the same behavior as before this was configurable. Corp/test never resolve
+    this type.
+    """
+
+    header_rules: tuple[OutboundRuleEntryConfig, ...] = ()

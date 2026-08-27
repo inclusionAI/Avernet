@@ -50,7 +50,12 @@ class SingleboxBcsAdapter(BcsHttpAdapter):  # pragma: no cover — live singlebo
             v = getattr(req, opt)
             if v is not None:
                 body[opt] = v
-        r = await self._req("POST", "/groups", json=body, idempotency_key=uuid.uuid4().hex)
+        # 与 BcsHttpAdapter.create_group 一致:透传 driver-bot Bearer(参考 ocb);本地 BCS 忽略鉴权,无害。
+        extra_headers: dict[str, str] | None = None
+        if req.caller_bot_token:
+            extra_headers = {"Authorization": f"Bearer {req.caller_bot_token}"}
+        r = await self._req("POST", "/groups", json=body, idempotency_key=uuid.uuid4().hex,
+                           extra_headers=extra_headers)
         data = r.json()
         # 本地用 "id";生产用 "group_id"。取其一,向后兼容 prod。
         group_id = data.get("group_id") or data.get("id")

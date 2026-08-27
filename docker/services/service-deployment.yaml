@@ -74,6 +74,6 @@ spec:
     app: ${SERVICE}
   ports:
   - name: http
-    port: ${PORT}
+    port: 80
     targetPort: ${PORT}
     protocol: TCP

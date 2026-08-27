@@ -106,7 +106,7 @@ fi
 
 # --- Service/env-style shortcut (backward compatibility with build_image.sh)
 # Allows: DOCKER_REGISTRY=... DOCKER_TAG=... ./docker/build-image.sh bcsfuse
-# Supported services: bcs/bcn, backend, baas, api-gateway, node-fe, bcsfuse
+# Supported services: bcs/bcn, backend, baas, api-gateway, node-fe, bcsfuse, evolvetrace
 _resolve_service() {
     case "$1" in
         bcs|bcn)
@@ -123,6 +123,7 @@ _resolve_service() {
             echo "docker/bcsfuse.Dockerfile bcsfuse" ;;
         evolvetrace)
             echo "docker/evolvetrace.Dockerfile evolvetrace" ;;
+
         *)
             echo "" ;;
     esac

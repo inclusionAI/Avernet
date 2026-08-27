@@ -314,8 +314,9 @@ def test_shipped_config_routes_harness_to_backend() -> None:
     )
     assert harness.schema.location == "schemas/bots.openapi.json"
 
-    # One rule beneath /openapi/v1/bots/** keeps a user on the wire for every
-    # harness operation, outranking the wide prefix on literal segments.
+    # The harness-specific rule now allows both human operators and delegated
+    # application callers, outranking the wide ``/openapi/v1/bots/**`` prefix on
+    # literal segments. The backend admission check enforces the live grant.
     for method, path in [
         ("POST", "/openapi/v1/bots/bot-1/harness/diagnose"),
         ("POST", "/openapi/v1/bots/bot-1/harness/preview"),
@@ -326,7 +327,8 @@ def test_shipped_config_routes_harness_to_backend() -> None:
     ]:
         requirement = security.resolve(method, path)
         assert requirement is not None, path
-        assert requirement[PrincipalType.USER] is Presence.REQUIRED, path
+        assert requirement[PrincipalType.USER] is Presence.OPTIONAL, path
+        assert requirement[PrincipalType.APP] is Presence.OPTIONAL, path
 
     # The old shape is unrouted: with the harness domain gone, no domain claims
     # /openapi/v1/harness/** and the gateway refuses it rather than forwarding.

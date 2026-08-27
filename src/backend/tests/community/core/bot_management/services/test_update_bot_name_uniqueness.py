@@ -24,6 +24,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 
 def _service(repository) -> BotService:
     return BotService(
+        caller_identity_repo=MagicMock(),
         drm_reader=MagicMock(),
         repository=repository,
         allocation_config=MagicMock(),

@@ -83,10 +83,12 @@ declare -A DEFAULT_PORT=(
     # it is read by nothing.
     [baas]=8080
     [gateway]=8888
-    [proxy]=8888
+    [proxy]=8080
     [bcs]=21000
     [backend]=8888
     [bcsfuse]=8765
+    [frontend-nextgen]=8080
+    [evolvetrace]=3001
 )
 
 # The HTTP path each service answers health probes on. The backend mounts its
@@ -100,6 +102,8 @@ declare -A DEFAULT_PROBE_PATH=(
     [bcs]=/health
     [backend]=/api/health
     [bcsfuse]=/health
+    [frontend-nextgen]=/healthz
+    [evolvetrace]=/health
 )
 
 # The env var (if any) through which a service lets the environment override the
@@ -116,6 +120,7 @@ declare -A PORT_ENV_VAR=(
     [bcs]=""
     [backend]=BACKEND_PORT
     [bcsfuse]=BCSFUSE_PORT
+    [evolvetrace]=PORT
 )
 
 # All services default to a 4 CPU / 8Gi spec.
@@ -136,7 +141,8 @@ declare -A DEFAULT_REPLICAS=(
     [gateway]=2
     [proxy]=2
     [bcs]=2
-    [backend]=1
+    [backend]=2
+    [evolvetrace]=1
 )
 DEFAULT_CPU_REQUEST="4"
 DEFAULT_CPU_LIMIT="4"
