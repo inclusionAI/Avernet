@@ -825,7 +825,7 @@ fn provider_request_from_frame(
             tags: provider_tags_from_params(&params),
         },
         from: provider_sender_from_params(&params),
-        message: params.get("message").cloned(),
+        message: provider_message_for_method(&request.method, &params),
         attachments,
         before: params.get("before").and_then(Value::as_u64),
         after: params.get("after").and_then(Value::as_u64),
@@ -876,6 +876,79 @@ fn provider_sender_from_params(params: &Value) -> Option<ProviderWebhookSender> 
         name: name.to_string(),
         actor_id: actor_id.map(str::to_string),
     })
+}
+
+fn provider_message_from_params(params: &Value) -> Option<Value> {
+    let mut message = params.get("message")?.clone();
+    let Some(sender_json) = provider_sender_json(params) else {
+        return Some(message);
+    };
+    prepend_provider_sender(&mut message, &sender_json);
+    Some(message)
+}
+
+fn provider_message_for_method(method: &str, params: &Value) -> Option<Value> {
+    if !matches!(method, "chat.send" | "chat.inject") {
+        return params.get("message").cloned();
+    }
+    provider_message_from_params(params)
+}
+
+fn provider_sender_json(params: &Value) -> Option<String> {
+    let channel = params.get("channel")?;
+    if channel.get("identity_forwarding").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let id = channel
+        .get("user_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let name = channel
+        .get("actor_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    // COSEC: serialize untrusted identity fields as JSON rather than interpolating
+    // them into a JSON-shaped string.
+    Some(serde_json::json!({ "sender": { "id": id, "name": name } }).to_string())
+}
+
+fn prepend_provider_sender(message: &mut Value, sender_json: &str) {
+    if let Some(text) = message.as_str() {
+        *message = Value::String(format!("{sender_json}\n\n{text}"));
+        return;
+    }
+    let Some(object) = message.as_object_mut() else {
+        return;
+    };
+    if let Some(text) = object.get("text").and_then(Value::as_str) {
+        let combined = format!("{sender_json}\n\n{text}");
+        object.insert("text".to_string(), Value::String(combined));
+        return;
+    }
+    if let Some(content) = object.get_mut("content") {
+        if let Some(text) = content.as_str() {
+            *content = Value::String(format!("{sender_json}\n\n{text}"));
+            return;
+        }
+        if let Some(blocks) = content.as_array_mut() {
+            if let Some(text_block) = blocks.iter_mut().find(|block| {
+                block.get("type").and_then(Value::as_str) == Some("text")
+                    && block.get("text").and_then(Value::as_str).is_some()
+            }) {
+                if let Some(text) = text_block.get("text").and_then(Value::as_str) {
+                    let combined = format!("{sender_json}\n\n{text}");
+                    text_block["text"] = Value::String(combined);
+                }
+                return;
+            }
+            blocks.insert(
+                0,
+                serde_json::json!({ "type": "text", "text": sender_json }),
+            );
+        }
+    }
 }
 
 fn provider_session_id(params: &Value, bcs_group_id: &str) -> String {
@@ -2003,6 +2076,89 @@ mod client_policy_tests {
     use super::*;
     use bcs_domain::RedactedToken;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn provider_message_prepends_opted_in_sender_json_without_mutating_frame_params() {
+        let params = serde_json::json!({
+            "channel": {
+                "identity_forwarding": true,
+                "user_id": "410025",
+                "actor_id": "human_410025",
+                "actor_name": "张\"三"
+            },
+            "message": {
+                "role": "user",
+                "content": [{ "type": "text", "text": "hello" }],
+                "timestamp": 1710960000000_u64
+            }
+        });
+
+        let first = provider_message_for_method("chat.send", &params).unwrap();
+        let retry = provider_message_for_method("chat.send", &params).unwrap();
+        assert_eq!(first, retry, "retry must rebuild from the unchanged frame");
+        assert_eq!(
+            first["content"][0]["text"],
+            "{\"sender\":{\"id\":\"410025\",\"name\":\"张\\\"三\"}}\n\nhello"
+        );
+        assert_eq!(params["message"]["content"][0]["text"], "hello");
+    }
+
+    #[test]
+    fn provider_message_limits_sender_prefix_to_chat_methods() {
+        let params = serde_json::json!({
+            "channel": {
+                "identity_forwarding": true,
+                "user_id": "410025",
+                "actor_name": "张三"
+            },
+            "message": {
+                "role": "user",
+                "content": [{ "type": "text", "text": "hello" }],
+                "timestamp": 1710960000000_u64
+            }
+        });
+
+        let send = provider_message_for_method("chat.send", &params).unwrap();
+        let inject = provider_message_for_method("chat.inject", &params).unwrap();
+        assert_eq!(send, inject);
+        assert_ne!(send, params["message"]);
+        assert_eq!(
+            provider_message_for_method("chat.history", &params),
+            params.get("message").cloned()
+        );
+        assert_eq!(
+            provider_message_for_method("task.dispatch", &params),
+            params.get("message").cloned()
+        );
+    }
+
+    #[test]
+    fn provider_message_ignores_legacy_channel_identity_and_supports_content_blocks() {
+        let legacy = serde_json::json!({
+            "channel": { "user_id": "410025", "actor_name": "张三" },
+            "message": { "text": "hello" }
+        });
+        assert_eq!(provider_message_from_params(&legacy), legacy.get("message").cloned());
+
+        let opted_in = serde_json::json!({
+            "channel": {
+                "identity_forwarding": true,
+                "user_id": "410025",
+                "actor_name": "张三"
+            },
+            "message": {
+                "content": [
+                    { "type": "image", "url": "https://example.invalid/image" },
+                    { "type": "text", "text": "hello" }
+                ]
+            }
+        });
+        let message = provider_message_from_params(&opted_in).unwrap();
+        assert_eq!(
+            message["content"][1]["text"],
+            "{\"sender\":{\"id\":\"410025\",\"name\":\"张三\"}}\n\nhello"
+        );
+    }
 
     async fn spawn_http1_server() -> std::net::SocketAddr {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

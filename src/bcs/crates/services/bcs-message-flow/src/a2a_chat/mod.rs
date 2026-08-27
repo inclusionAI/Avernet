@@ -1126,6 +1126,7 @@ fn build_chat_send_frame(
             actor_id: Some(from_bot_id.to_string()),
             actor_name: Some(from_bot_name.to_string()),
             thread_id: None,
+            identity_forwarding: None,
         },
         session_context: GroupContext {
             session_id: session_key.to_string(),

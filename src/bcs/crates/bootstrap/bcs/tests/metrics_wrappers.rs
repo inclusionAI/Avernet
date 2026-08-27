@@ -578,6 +578,7 @@ fn web_send_cmd() -> WebSendCommand {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     }

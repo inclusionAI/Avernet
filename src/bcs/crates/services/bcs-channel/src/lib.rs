@@ -14,10 +14,9 @@ use bcs_channel_api::{ChannelInboundSink, ChannelProvider, ChannelProviderRegist
 use bcs_domain::{
     ActorKind, Attachment, AttachmentType, BindingStatus, BindingTarget, ChannelBinding,
     ChannelType, ConversationSessionMap, Group, GroupChatScope, GroupKind, GroupStrategy,
-    HumanInputNotificationMode,
-    HumanInputRequest, HumanInputRequestStatus, ImParticipantMap, Participant, ParticipantMode,
-    ParticipantRole, Session, SessionKind, SessionScope, SessionStatus, SystemMessageEvent,
-    Visibility, channel_group_id,
+    HumanInputNotificationMode, HumanInputRequest, HumanInputRequestStatus, ImParticipantMap,
+    Participant, ParticipantMode, ParticipantRole, Session, SessionKind, SessionScope,
+    SessionStatus, SystemMessageEvent, Visibility, channel_group_id,
 };
 use bcs_service_api::application::channel::{
     ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
@@ -26,13 +25,11 @@ use bcs_service_api::application::channel::{
 use bcs_service_api::application::collaboration_runtime::{
     AuthenticatedHumanCaller, StartStateMachineRunCommand,
 };
-use bcs_service_api::application::message_flow::WebSendCommand;
+use bcs_service_api::application::message_flow::{ChannelSenderIdentity, WebSendCommand};
 use bcs_service_api::application::principal::{CallerContext, HumanActor};
 use bcs_service_api::core::DmActorSpec;
-use bcs_service_api::port::channel_delivery::{
-    ChannelBindingRef, ChannelOutboundEvent,
-};
 use bcs_service_api::port::ChannelBindingCleanupPort;
+use bcs_service_api::port::channel_delivery::{ChannelBindingRef, ChannelOutboundEvent};
 use bcs_service_api::port::repo::{
     ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputEnqueueDisposition,
     HumanInputRequestRepoPort, ImParticipantRepoPort, NewSessionParams, SessionRepoPort,
@@ -41,14 +38,15 @@ use bcs_service_api::{
     BotRegistryCoreService, ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint,
     CollaborationRuntimeService, GroupCoreService, HumanInputReadyEvent, HumanResponseSource,
     MessageFlowService, RespondHumanNodeCommand, ServiceError, ServiceResult,
-    SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
-    StateMachineTerminalEvent, StateMachineTerminalStatus, SystemMessageService,
+    SessionChannelDeliveryOutcome, SessionChannelOutboundPort, StateMachineTerminalEvent,
+    StateMachineTerminalStatus, SystemMessageService,
 };
 
 pub use visibility::visibility_allows;
 
 const DEFAULT_INBOUND_DEDUP_LIMIT: usize = 4096;
 const CHANNEL_START_STALE_MS: u64 = 30_000;
+const FORWARD_SENDER_IDENTITY_CONFIG: &str = "forward_sender_identity";
 
 /// Channel application service implementation.
 pub struct BcsChannelService {
@@ -222,11 +220,8 @@ impl BcsChannelService {
         msg: &InboundMessage,
         actor_id: &str,
     ) -> Result<String, ChannelUseCaseError> {
-        let group_id = channel_owned_group_id(
-            &binding.channel_type,
-            GroupKind::Dm,
-            &(self.new_id)(),
-        )?;
+        let group_id =
+            channel_owned_group_id(&binding.channel_type, GroupKind::Dm, &(self.new_id)())?;
         let label = msg
             .im_user_nick
             .as_ref()
@@ -259,11 +254,8 @@ impl BcsChannelService {
         binding: &ChannelBinding,
         bot_id: &str,
     ) -> Result<String, ChannelUseCaseError> {
-        let group_id = channel_owned_group_id(
-            &binding.channel_type,
-            GroupKind::Normal,
-            &binding.id,
-        )?;
+        let group_id =
+            channel_owned_group_id(&binding.channel_type, GroupKind::Normal, &binding.id)?;
         if self.groups.get(&group_id).await.is_some() {
             return Ok(group_id);
         }
@@ -625,11 +617,7 @@ impl BcsChannelService {
         actor_id: &str,
     ) -> Result<bool, ChannelUseCaseError> {
         let reply_scope_key = match msg.conversation_type.as_str() {
-            "2" => fixed_group_reply_scope(
-                &binding.id,
-                &msg.im_conversation_id,
-                actor_id,
-            ),
+            "2" => fixed_group_reply_scope(&binding.id, &msg.im_conversation_id, actor_id),
             "1" => direct_reply_scope(&binding.id, &msg.im_user_id, actor_id),
             _ => return Ok(false),
         };
@@ -701,13 +689,17 @@ impl BcsChannelService {
                     )));
                 }
                 if outcome.run.status != bcs_domain::StateMachineRunStatus::Completed {
-                    if let Err(error) = self.deliver_human_input_event(
-                        &request,
-                        ChannelOutboundPurpose::HumanInputAck,
-                        format!("【输入已接收】{}\n\n流程继续执行。", request.node_display_name),
-                        Some(&msg.msg_id),
-                    )
-                    .await
+                    if let Err(error) = self
+                        .deliver_human_input_event(
+                            &request,
+                            ChannelOutboundPurpose::HumanInputAck,
+                            format!(
+                                "【输入已接收】{}\n\n流程继续执行。",
+                                request.node_display_name
+                            ),
+                            Some(&msg.msg_id),
+                        )
+                        .await
                     {
                         warn!(
                             request_id = %request.request_id,
@@ -802,13 +794,13 @@ impl BcsChannelService {
             })
             .await?;
         if !result.delivered {
-            return Err(ChannelUseCaseError::Internal(
-                result.error.unwrap_or_else(|| {
+            return Err(ChannelUseCaseError::Internal(result.error.unwrap_or_else(
+                || {
                     ServiceError::InternalError(
                         "HumanInput channel delivery was not confirmed".to_string(),
                     )
-                }),
-            ));
+                },
+            )));
         }
         Ok(result.provider_message_ref)
     }
@@ -1175,13 +1167,15 @@ impl ChannelService for BcsChannelService {
             let dispatch_session_id = session_id.clone();
             let dispatch_actor_id = actor_id.clone();
             let dispatch_msg_id = msg.msg_id.clone();
+            let caller = CallerContext::Human(HumanActor {
+                actor_id: actor_id.clone(),
+                staff_no: msg.im_user_id.trim().to_string(),
+            });
+            let channel_sender_identity = channel_sender_identity(&binding, &msg, &caller);
             let outcome = self
                 .message_flow
                 .handle_web_send(WebSendCommand {
-                    caller: CallerContext::Human(HumanActor {
-                        actor_id: actor_id.clone(),
-                        staff_no: msg.im_user_id.trim().to_string(),
-                    }),
+                    caller,
                     group_id: dispatch_group_id.clone(),
                     session_id: Some(dispatch_session_id.clone()),
                     from_actor_id: dispatch_actor_id.clone(),
@@ -1192,6 +1186,7 @@ impl ChannelService for BcsChannelService {
                     thinking: None,
                     idempotency_key: Some(dispatch_msg_id.clone()),
                     source_im_message_id: Some(dispatch_msg_id.clone()),
+                    channel_sender_identity,
                     sender_conn_id: None,
                     provider_bypass_headers: Vec::new(),
                 })
@@ -1426,6 +1421,7 @@ impl ChannelService for BcsChannelService {
         provider
             .validate_config(&cmd.config)
             .map_err(provider_error)?;
+        validate_forward_sender_identity_config(&target, &cmd.config)?;
         let binding_id = (self.new_id)();
         if matches!(&target, BindingTarget::Bot { .. }) {
             channel_owned_group_id(&cmd.channel_type, GroupKind::Dm, &binding_id)?;
@@ -1536,6 +1532,7 @@ impl ChannelService for BcsChannelService {
         };
         let provider = self.provider_for(&binding.channel_type)?;
         provider.validate_config(&config).map_err(provider_error)?;
+        validate_forward_sender_identity_config(&binding.target, &config)?;
         self.bindings.set_config(id, config).await?;
         Ok(())
     }
@@ -1552,7 +1549,10 @@ impl ChannelService for BcsChannelService {
 
 fn validate_inbound_content(msg: &InboundMessage) -> Result<(), ChannelInboundError> {
     let attachments = msg.attachments.as_deref().unwrap_or_default();
-    if attachments.iter().any(|attachment| !valid_attachment(attachment)) {
+    if attachments
+        .iter()
+        .any(|attachment| !valid_attachment(attachment))
+    {
         return Err(ChannelInboundError::new(
             ChannelInboundFailureKind::InvalidInbound,
             false,
@@ -1585,16 +1585,13 @@ fn has_temporary_file_attachment(attachments: Option<&[Attachment]>) -> bool {
 
 #[async_trait]
 impl ChannelBindingCleanupPort for BcsChannelService {
-    async fn delete_bindings_for_group(
-        &self,
-        group_id: &str,
-    ) -> ServiceResult<u64> {
+    async fn delete_bindings_for_group(&self, group_id: &str) -> ServiceResult<u64> {
         let _guard = self.binding_admin_lock.lock().await;
         let bindings = self
             .bindings
             .list_by_target(
                 &BindingTarget::Group {
-                group_id: group_id.to_string(),
+                    group_id: group_id.to_string(),
                 },
                 None,
             )
@@ -1607,16 +1604,13 @@ impl ChannelBindingCleanupPort for BcsChannelService {
         Ok(deleted)
     }
 
-    async fn delete_bindings_for_bot(
-        &self,
-        bot_id: &str,
-    ) -> ServiceResult<u64> {
+    async fn delete_bindings_for_bot(&self, bot_id: &str) -> ServiceResult<u64> {
         let _guard = self.binding_admin_lock.lock().await;
         let bindings = self
             .bindings
             .list_by_target(
                 &BindingTarget::Bot {
-                bot_id: bot_id.to_string(),
+                    bot_id: bot_id.to_string(),
                 },
                 None,
             )
@@ -1734,13 +1728,13 @@ impl SessionChannelOutboundPort for BcsChannelService {
                 )));
             }
         };
-        let provider = self
-            .providers
-            .get(channel_type)
-            .ok_or_else(|| ServiceError::InvalidOperation {
-                message: format!("channel provider '{channel_type}' is not available"),
-                request_id: None,
-            })?;
+        let provider =
+            self.providers
+                .get(channel_type)
+                .ok_or_else(|| ServiceError::InvalidOperation {
+                    message: format!("channel provider '{channel_type}' is not available"),
+                    request_id: None,
+                })?;
         let binding_ref = ChannelBindingRef {
             channel_type: binding.channel_type.clone(),
             account_ref: binding.account_ref.clone(),
@@ -1829,9 +1823,7 @@ impl SessionChannelOutboundPort for BcsChannelService {
                             message: error.to_string(),
                             request_id: Some(event.event_id.clone()),
                         })?
-                        .filter(|value| {
-                            !value.is_empty() && value.trim().len() == value.len()
-                        })
+                        .filter(|value| !value.is_empty() && value.trim().len() == value.len())
                         .ok_or_else(|| ServiceError::InvalidOperation {
                             message: format!(
                                 "channel provider '{}' cannot resolve HumanInput assignee {}",
@@ -1843,11 +1835,7 @@ impl SessionChannelOutboundPort for BcsChannelService {
                         im_user_id.clone(),
                         "1".to_string(),
                         Some(im_user_id.clone()),
-                        direct_reply_scope(
-                            &binding.id,
-                            &im_user_id,
-                            &event.assignee_actor_id,
-                        ),
+                        direct_reply_scope(&binding.id, &im_user_id, &event.assignee_actor_id),
                     )
                 }
             };
@@ -1877,12 +1865,13 @@ impl SessionChannelOutboundPort for BcsChannelService {
             HumanInputNotificationMode::DirectAssignee => "请直接回复本会话。".to_string(),
         });
         let text = sections.join("\n\n");
-        let deadline_ms = event
-            .timeout_deadline_ms
-            .ok_or_else(|| ServiceError::InvalidOperation {
-                message: "HumanInput notification requires a deadline".to_string(),
-                request_id: Some(event.event_id.clone()),
-            })?;
+        let deadline_ms =
+            event
+                .timeout_deadline_ms
+                .ok_or_else(|| ServiceError::InvalidOperation {
+                    message: "HumanInput notification requires a deadline".to_string(),
+                    request_id: Some(event.event_id.clone()),
+                })?;
         let request = HumanInputRequest {
             request_id: event.event_id,
             session_id: event.session_id,
@@ -1970,11 +1959,7 @@ impl SessionChannelOutboundPort for BcsChannelService {
                 .collect::<HashSet<_>>();
             for (run_id, node_id) in run_nodes {
                 self.human_input_requests
-                    .close_for_run_node(
-                        &run_id,
-                        &node_id,
-                        HumanInputRequestStatus::Cancelled,
-                    )
+                    .close_for_run_node(&run_id, &node_id, HumanInputRequestStatus::Cancelled)
                     .await?;
             }
         }
@@ -1997,7 +1982,10 @@ impl SessionChannelOutboundPort for BcsChannelService {
         let (purpose, text) = match event.status {
             StateMachineTerminalStatus::Completed => {
                 let mut text = format!("【协同已完成】{}", event.workflow_name);
-                if let Some(output) = event.output.as_deref().filter(|value| !value.trim().is_empty())
+                if let Some(output) = event
+                    .output
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
                 {
                     text.push_str("\n\n");
                     text.push_str(&truncate_chars(output, 2_000));
@@ -2156,6 +2144,63 @@ fn binding_target_kind(target: &BindingTarget) -> &'static str {
     }
 }
 
+fn validate_forward_sender_identity_config(
+    target: &BindingTarget,
+    config: &serde_json::Value,
+) -> Result<(), ChannelUseCaseError> {
+    let enabled = match config.get(FORWARD_SENDER_IDENTITY_CONFIG) {
+        None => false,
+        Some(value) => value.as_bool().ok_or_else(|| {
+            ChannelUseCaseError::InvalidParams(format!(
+                "{FORWARD_SENDER_IDENTITY_CONFIG} must be a boolean"
+            ))
+        })?,
+    };
+    if enabled && !matches!(target, BindingTarget::Bot { .. }) {
+        return Err(ChannelUseCaseError::InvalidParams(format!(
+            "{FORWARD_SENDER_IDENTITY_CONFIG} can only be enabled for a Bot binding"
+        )));
+    }
+    Ok(())
+}
+
+fn channel_sender_identity(
+    binding: &ChannelBinding,
+    msg: &InboundMessage,
+    caller: &CallerContext,
+) -> Option<ChannelSenderIdentity> {
+    // COSEC: external Human attribution is disclosed only after the resolved
+    // Bot binding explicitly opts in; message text never controls this gate.
+    if !matches!(binding.target, BindingTarget::Bot { .. })
+        || binding
+            .config
+            .get(FORWARD_SENDER_IDENTITY_CONFIG)
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+    {
+        return None;
+    }
+    let CallerContext::Human(human) = caller else {
+        return None;
+    };
+    let user_id = human.staff_no.trim();
+    if user_id.is_empty() {
+        return None;
+    }
+    let display_name = msg
+        .im_user_nick
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(user_id);
+    Some(ChannelSenderIdentity {
+        channel_type: msg.channel_type.clone(),
+        user_id: user_id.to_string(),
+        actor_id: human.actor_id.clone(),
+        display_name: display_name.to_string(),
+    })
+}
+
 fn binding_relevant_to_group(binding: &ChannelBinding, group_id: &str, session: &Session) -> bool {
     match &binding.target {
         BindingTarget::Group {
@@ -2287,12 +2332,12 @@ mod tests {
         MemoryImParticipantRepo,
     };
     use bcs_domain::{
-        ActorKind, BindingStatus, BindingTarget, BotCapabilities, BotDynamicStatus,
-        ChannelBinding, ChannelConfig, ChannelType, Group, GroupChatScope, GroupKind, Participant,
-        ParticipantMode, ParticipantRole, RegisteredBot, Session, SessionKind, SessionScope,
-        SessionStatus, Skill, StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun,
-        StateMachineRunStatus, SystemMessageEvent, Visibility, HumanInputNotificationMode,
-        HumanInputRequestStatus,
+        ActorKind, BindingStatus, BindingTarget, BotCapabilities, BotDynamicStatus, ChannelBinding,
+        ChannelConfig, ChannelType, Group, GroupChatScope, GroupKind, HumanInputNotificationMode,
+        HumanInputRequestStatus, Participant, ParticipantMode, ParticipantRole, RegisteredBot,
+        Session, SessionKind, SessionScope, SessionStatus, Skill, StateMachineNodeRun,
+        StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus, SystemMessageEvent,
+        Visibility,
     };
     use bcs_service_api::application::channel::{
         ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
@@ -2317,10 +2362,6 @@ mod tests {
         AgentCredentials, BotDeliveryTarget, BotRegistryCoreService, EnsureHumanResult,
         GroupCoreService, ServiceError, ServiceResult,
     };
-    use bcs_service_api::{
-        ChannelBindingCleanupPort, ChannelOutboundPurpose, CollaborationRuntimeService,
-        SystemMessageService,
-    };
     use bcs_service_api::lifecycle::ServiceLifecycle;
     use bcs_service_api::port::channel_delivery::{
         ChannelBindingRef, ChannelDeliveryPort, ChannelDeliveryResult, ChannelOutboundEvent,
@@ -2331,10 +2372,17 @@ mod tests {
         ImParticipantRepoPort, NewSessionParams, SessionRepoPort,
     };
     use bcs_service_api::{
+        ChannelBindingCleanupPort, ChannelOutboundPurpose, CollaborationRuntimeService,
+        SystemMessageService,
+    };
+    use bcs_service_api::{
         HumanInputReadyEvent, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
     };
 
-    use crate::{BcsChannelService, ResolvedInboundContext, channel_meta, channel_owned_group_id};
+    use crate::{
+        BcsChannelService, FORWARD_SENDER_IDENTITY_CONFIG, ResolvedInboundContext, channel_meta,
+        channel_owned_group_id,
+    };
 
     type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
@@ -2431,10 +2479,7 @@ mod tests {
             unreachable!("inbound binding lookup test only calls find_active_by_account")
         }
 
-        async fn delete_by_target(
-            &self,
-            _target: &BindingTarget,
-        ) -> ServiceResult<u64> {
+        async fn delete_by_target(&self, _target: &BindingTarget) -> ServiceResult<u64> {
             unreachable!("inbound binding lookup test only calls find_active_by_account")
         }
 
@@ -2974,7 +3019,10 @@ mod tests {
                 .len(),
             1
         );
-        assert_eq!(harness.binding_repo.list_by_target(&bot, None).await?.len(), 1);
+        assert_eq!(
+            harness.binding_repo.list_by_target(&bot, None).await?.len(),
+            1
+        );
 
         Ok(())
     }
@@ -3047,7 +3095,11 @@ mod tests {
             1
         );
         assert_eq!(
-            harness.binding_repo.list_by_target(&group, None).await?.len(),
+            harness
+                .binding_repo
+                .list_by_target(&group, None)
+                .await?
+                .len(),
             1
         );
 
@@ -3102,7 +3154,12 @@ mod tests {
             Some("channel_binding_deleted")
         );
         assert_eq!(
-            harness.collaboration_runtime.cancelled_sessions.lock().await.as_slice(),
+            harness
+                .collaboration_runtime
+                .cancelled_sessions
+                .lock()
+                .await
+                .as_slice(),
             &[(session.id, "channel_binding_deleted".to_string())]
         );
 
@@ -3110,7 +3167,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_binding_keeps_cleanup_state_retryable_when_run_cancellation_fails() -> TestResult {
+    async fn delete_binding_keeps_cleanup_state_retryable_when_run_cancellation_fails() -> TestResult
+    {
         let harness = TestHarness::new(manager_group("group_1")).await?;
         harness
             .binding_repo
@@ -3142,7 +3200,11 @@ mod tests {
         *harness.collaboration_runtime.cancel_error.lock().await =
             Some("cancel failed".to_string());
 
-        let error = harness.service.delete_binding("binding_1").await.unwrap_err();
+        let error = harness
+            .service
+            .delete_binding("binding_1")
+            .await
+            .unwrap_err();
 
         assert!(error.to_string().contains("cancel failed"));
         assert_eq!(
@@ -3168,10 +3230,7 @@ mod tests {
     #[tokio::test]
     async fn delete_binding_preserves_session_used_by_another_binding() -> TestResult {
         let harness = TestHarness::new(manager_group("group_1")).await?;
-        for (binding_id, account_ref) in [
-            ("binding_1", "robot_1"),
-            ("binding_2", "robot_2"),
-        ] {
+        for (binding_id, account_ref) in [("binding_1", "robot_1"), ("binding_2", "robot_2")] {
             harness
                 .binding_repo
                 .create(active_binding(
@@ -3266,11 +3325,8 @@ mod tests {
 
     #[tokio::test]
     async fn create_direct_bot_binding_canonicalizes_long_internal_owner_id() -> TestResult {
-        let harness = TestHarness::new_with_generated_id(
-            manager_group("group_1"),
-            "x".repeat(55),
-        )
-        .await?;
+        let harness =
+            TestHarness::new_with_generated_id(manager_group("group_1"), "x".repeat(55)).await?;
 
         let binding = harness
             .service
@@ -3288,11 +3344,7 @@ mod tests {
             })
             .await?;
 
-        let group_id = channel_owned_group_id(
-            &binding.channel_type,
-            GroupKind::Dm,
-            &binding.id,
-        )?;
+        let group_id = channel_owned_group_id(&binding.channel_type, GroupKind::Dm, &binding.id)?;
         assert!(format!("{group_id}:abcdef12").chars().count() <= 64);
         assert_eq!(harness.binding_repo.list().await?.len(), 1);
 
@@ -3596,10 +3648,7 @@ mod tests {
 
         let mappings = harness
             .service
-            .list_conversations_by_session(
-                " group_1:session_1 ",
-                Some(" dingtalk ".to_string()),
-            )
+            .list_conversations_by_session(" group_1:session_1 ", Some(" dingtalk ".to_string()))
             .await?;
 
         assert_eq!(mappings.len(), 1);
@@ -3694,6 +3743,162 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sender_identity_config_is_boolean_and_bot_binding_only() -> TestResult {
+        for value in [serde_json::json!(false), serde_json::json!(true)] {
+            let harness = TestHarness::new(manager_group("group_1")).await?;
+            let mut config = dingtalk_config("robot_1");
+            config[FORWARD_SENDER_IDENTITY_CONFIG] = value;
+            harness
+                .service
+                .create_binding(CreateBindingCommand {
+                    channel_type: channel_type(),
+                    account_ref: "robot_1".to_string(),
+                    target: BindingTarget::Bot {
+                        bot_id: "target_bot".to_string(),
+                    },
+                    group_chat_scope: None,
+                    outbound_visibility: Visibility::FullTranscript,
+                    env: "dev".to_string(),
+                    created_by: Some("creator".to_string()),
+                    config,
+                })
+                .await?;
+        }
+
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        let mut invalid_type = dingtalk_config("robot_1");
+        invalid_type[FORWARD_SENDER_IDENTITY_CONFIG] = serde_json::json!("true");
+        let error = harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Bot {
+                    bot_id: "target_bot".to_string(),
+                },
+                group_chat_scope: None,
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: invalid_type,
+            })
+            .await
+            .expect_err("non-boolean sender identity config must fail");
+        assert!(matches!(error, ChannelUseCaseError::InvalidParams(_)));
+
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        let mut group_config = dingtalk_config("robot_1");
+        group_config[FORWARD_SENDER_IDENTITY_CONFIG] = serde_json::json!(true);
+        let error = harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: group_config,
+            })
+            .await
+            .expect_err("group binding must reject sender identity forwarding");
+        assert!(matches!(error, ChannelUseCaseError::InvalidParams(_)));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sender_identity_update_applies_to_next_ordinary_bot_channel_message() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "binding_bot_identity",
+                "robot_1",
+                BindingTarget::Bot {
+                    bot_id: "target_bot".to_string(),
+                },
+                Visibility::FullTranscript,
+            ))
+            .await?;
+
+        harness
+            .service
+            .handle_inbound(inbound("conv_dm", "410025", Some("张三"), "msg_before"))
+            .await?;
+        assert!(
+            harness.message_flow.web_sends.lock().await[0]
+                .channel_sender_identity
+                .is_none()
+        );
+
+        let mut enabled = dingtalk_config("robot_1");
+        enabled[FORWARD_SENDER_IDENTITY_CONFIG] = serde_json::json!(true);
+        harness
+            .service
+            .update_binding_config("binding_bot_identity", enabled)
+            .await?;
+
+        harness
+            .service
+            .handle_inbound(group_inbound(
+                "conv_group",
+                "410025",
+                Some("张三"),
+                "msg_zhang",
+                true,
+            ))
+            .await?;
+        harness
+            .service
+            .handle_inbound(group_inbound(
+                "conv_group",
+                "410026",
+                Some("李四"),
+                "msg_li",
+                true,
+            ))
+            .await?;
+        harness
+            .service
+            .handle_inbound(group_inbound(
+                "conv_group",
+                "410027",
+                None,
+                "msg_no_nick",
+                true,
+            ))
+            .await?;
+        harness
+            .service
+            .handle_inbound(group_inbound(
+                "conv_group",
+                "410028",
+                Some("   "),
+                "msg_blank_nick",
+                true,
+            ))
+            .await?;
+
+        let sends = harness.message_flow.web_sends.lock().await;
+        let zhang = sends[1].channel_sender_identity.as_ref().unwrap();
+        assert_eq!(zhang.user_id, "410025");
+        assert_eq!(zhang.display_name, "张三");
+        let li = sends[2].channel_sender_identity.as_ref().unwrap();
+        assert_eq!(li.user_id, "410026");
+        assert_eq!(li.display_name, "李四");
+        let no_nick = sends[3].channel_sender_identity.as_ref().unwrap();
+        assert_eq!(no_nick.user_id, "410027");
+        assert_eq!(no_nick.display_name, "410027");
+        let blank_nick = sends[4].channel_sender_identity.as_ref().unwrap();
+        assert_eq!(blank_nick.user_id, "410028");
+        assert_eq!(blank_nick.display_name, "410028");
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn inbound_manager_worker_materializes_human_and_isolates_dm_conversations() -> TestResult
     {
         let harness = TestHarness::new(manager_group("group_1")).await?;
@@ -3760,22 +3965,27 @@ mod tests {
             .await?
             .ok_or_else(|| ServiceError::InternalError("missing conv_b".to_string()))?;
         assert_ne!(conv_a.bcs_session_id, conv_b.bcs_session_id);
-        assert!(conv_a.bcs_session_id.starts_with("group_1:channel_dingtalk_"));
-        assert!(conv_b.bcs_session_id.starts_with("group_1:channel_dingtalk_"));
+        assert!(
+            conv_a
+                .bcs_session_id
+                .starts_with("group_1:channel_dingtalk_")
+        );
+        assert!(
+            conv_b
+                .bcs_session_id
+                .starts_with("group_1:channel_dingtalk_")
+        );
 
         let web_sends = harness.message_flow.web_sends.lock().await;
         assert_eq!(web_sends.len(), 2);
         assert_eq!(web_sends[0].from_actor_id, "human_u1");
-        assert_eq!(web_sends[0].session_id.as_deref(), Some(conv_a.bcs_session_id.as_str()));
+        assert_eq!(
+            web_sends[0].session_id.as_deref(),
+            Some(conv_a.bcs_session_id.as_str())
+        );
         assert_eq!(web_sends[0].idempotency_key.as_deref(), Some("msg_a"));
-        assert_eq!(
-            web_sends[0].source_im_message_id.as_deref(),
-            Some("msg_a")
-        );
-        assert_eq!(
-            web_sends[1].source_im_message_id.as_deref(),
-            Some("msg_b")
-        );
+        assert_eq!(web_sends[0].source_im_message_id.as_deref(), Some("msg_a"));
+        assert_eq!(web_sends[1].source_im_message_id.as_deref(), Some("msg_b"));
 
         let added = harness.session_repo.added_participants.lock().await;
         assert_eq!(added.len(), 2);
@@ -3813,10 +4023,7 @@ mod tests {
         assert_eq!(web_sends.len(), 1);
         assert_eq!(web_sends[0].group_id, "group_chat");
         assert_eq!(web_sends[0].from_actor_id, "human_u1");
-        assert_eq!(
-            web_sends[0].idempotency_key.as_deref(),
-            Some("msg_chat")
-        );
+        assert_eq!(web_sends[0].idempotency_key.as_deref(), Some("msg_chat"));
 
         Ok(())
     }
@@ -5207,8 +5414,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_human_input_resolves_actor_without_mapping_and_queues_same_scope(
-    ) -> TestResult {
+    async fn direct_human_input_resolves_actor_without_mapping_and_queues_same_scope() -> TestResult
+    {
         let harness = TestHarness::new(state_machine_group("group_sm")).await?;
         harness
             .service
@@ -5226,16 +5433,12 @@ mod tests {
             })
             .await?;
 
-        let mut invalid_actor = human_input_ready_event(
-            "direct-invalid",
-            HumanInputNotificationMode::DirectAssignee,
-        );
+        let mut invalid_actor =
+            human_input_ready_event("direct-invalid", HumanInputNotificationMode::DirectAssignee);
         invalid_actor.assignee_actor_id = "bot_u1".to_string();
-        let invalid_result = SessionChannelOutboundPort::publish_human_input_ready(
-            &harness.service,
-            invalid_actor,
-        )
-        .await;
+        let invalid_result =
+            SessionChannelOutboundPort::publish_human_input_ready(&harness.service, invalid_actor)
+                .await;
         assert!(matches!(
             invalid_result,
             Err(ServiceError::InvalidOperation { .. })
@@ -5245,10 +5448,7 @@ mod tests {
             assert_eq!(
                 SessionChannelOutboundPort::publish_human_input_ready(
                     &harness.service,
-                    human_input_ready_event(
-                        event_id,
-                        HumanInputNotificationMode::DirectAssignee,
-                    ),
+                    human_input_ready_event(event_id, HumanInputNotificationMode::DirectAssignee,),
                 )
                 .await?,
                 SessionChannelDeliveryOutcome::Delivered
@@ -5324,10 +5524,7 @@ mod tests {
 
         let result = SessionChannelOutboundPort::publish_human_input_ready(
             &harness.service,
-            human_input_ready_event(
-                "delivery-failed",
-                HumanInputNotificationMode::FixedGroup,
-            ),
+            human_input_ready_event("delivery-failed", HumanInputNotificationMode::FixedGroup),
         )
         .await;
         assert!(matches!(result, Err(ServiceError::InternalError(_))));
@@ -5525,11 +5722,8 @@ mod tests {
             })
             .await?;
 
-        let mut consultant_msg = outbound(
-            "group_chat:00000001",
-            ParticipantRole::Consultant,
-            false,
-        );
+        let mut consultant_msg =
+            outbound("group_chat:00000001", ParticipantRole::Consultant, false);
         consultant_msg.group_id = "group_chat".to_string();
         harness.service.try_outbound(consultant_msg).await?;
         assert!(harness.delivery.events.lock().await.is_empty());
@@ -6919,6 +7113,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sender_identity_forwarding_does_not_change_new_command_routing() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        let mut binding = active_binding(
+            "binding_bot_identity",
+            "robot_1",
+            BindingTarget::Bot {
+                bot_id: "target_bot".to_string(),
+            },
+            Visibility::FullTranscript,
+        );
+        binding.config[FORWARD_SENDER_IDENTITY_CONFIG] = serde_json::json!(true);
+        harness.binding_repo.create(binding).await?;
+
+        let mut command = new_command("conv_1", "410025", "msg_new");
+        command.text = "  /new  ".to_string();
+        harness.service.handle_inbound(command).await?;
+        assert!(harness.message_flow.web_sends.lock().await.is_empty());
+
+        let mut ordinary = new_command("conv_1", "410025", "msg_new_foo");
+        ordinary.text = "/new foo".to_string();
+        harness.service.handle_inbound(ordinary).await?;
+        let sends = harness.message_flow.web_sends.lock().await;
+        assert_eq!(sends.len(), 1);
+        assert_eq!(sends[0].message, "/new foo");
+        assert_eq!(
+            sends[0]
+                .channel_sender_identity
+                .as_ref()
+                .map(|identity| identity.user_id.as_str()),
+            Some("410025")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn new_command_without_session_replies_nothing_to_reset() -> TestResult {
         let harness = TestHarness::new(manager_group("group_1")).await?;
         create_group_binding(&harness, "group_1", GroupChatScope::ConversationShared).await?;
@@ -7175,13 +7404,23 @@ mod tests {
             .await?;
         let session_u1 = harness
             .conversation_repo
-            .get("generated_id", "conv_1", SessionScope::PerSender, Some("u1"))
+            .get(
+                "generated_id",
+                "conv_1",
+                SessionScope::PerSender,
+                Some("u1"),
+            )
             .await?
             .expect("u1 mapping")
             .bcs_session_id;
         let session_u2 = harness
             .conversation_repo
-            .get("generated_id", "conv_1", SessionScope::PerSender, Some("u2"))
+            .get(
+                "generated_id",
+                "conv_1",
+                SessionScope::PerSender,
+                Some("u2"),
+            )
             .await?
             .expect("u2 mapping")
             .bcs_session_id;
@@ -7312,7 +7551,13 @@ mod tests {
         create_group_binding(&harness, "group_sm", GroupChatScope::ConversationShared).await?;
         harness
             .service
-            .handle_inbound(group_inbound("conv_sm", "u1", Some("张三"), "msg_start", true))
+            .handle_inbound(group_inbound(
+                "conv_sm",
+                "u1",
+                Some("张三"),
+                "msg_start",
+                true,
+            ))
             .await?;
         let session_id = harness.collaboration_runtime.starts.lock().await[0]
             .session_id
@@ -7417,7 +7662,13 @@ mod tests {
         create_group_binding(&harness, "group_sm", GroupChatScope::ConversationShared).await?;
         harness
             .service
-            .handle_inbound(group_inbound("conv_sm", "u1", Some("张三"), "msg_start", true))
+            .handle_inbound(group_inbound(
+                "conv_sm",
+                "u1",
+                Some("张三"),
+                "msg_start",
+                true,
+            ))
             .await?;
         let session_id = harness.collaboration_runtime.starts.lock().await[0]
             .session_id
@@ -7578,7 +7829,10 @@ mod tests {
         );
 
         // bot 假死、终态事件不到达：超过兜底阈值后由下一条消息顺带执行。
-        clock.store(42 + crate::commands::PENDING_RESET_STALE_MS + 1, Ordering::SeqCst);
+        clock.store(
+            42 + crate::commands::PENDING_RESET_STALE_MS + 1,
+            Ordering::SeqCst,
+        );
         harness
             .service
             .handle_inbound(inbound("conv_1", "u1", Some("张三"), "msg_2"))
