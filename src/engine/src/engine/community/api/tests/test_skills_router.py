@@ -484,6 +484,9 @@ def test_pool_activation_and_mapping_routes_are_capability_independent(
     assert cleanup.json()["data"]["status"] == "CLEANED"
     assert published.json()["data"]["published"] is True
     assert verified.json()["data"]["valid"] is True
+    # The plugin reported no inline verdict, so the key must not appear —
+    # its presence is what tells the backend this runtime verifies inline.
+    assert "verified" not in published.json()["data"]
     plugin.activate_pool_layout.assert_awaited_once()
     plugin.rollback_pool_layout.assert_awaited_once()
     plugin.cleanup_pool_quarantine.assert_awaited_once()
@@ -813,3 +816,26 @@ def test_pool_routes_map_unsupported_engine_to_501(
     response = client.post(path, json=payload)
 
     assert response.status_code == 501
+
+
+# ── P2: the inline verdict has to reach the HTTP body the backend parses ──
+
+
+@pytest.mark.parametrize("verdict", [True, False])
+def test_publish_response_carries_the_inline_verdict(rich_manager, client, verdict):
+    """Third hop of three. The backend reads exactly data["verified"], so a
+    rename or a schema change here silently drops every device back to the
+    two-call path with nothing failing."""
+    plugin = MagicMock()
+    plugin.publish_pool_mappings = AsyncMock(
+        return_value=PoolMappingPublishResult(
+            published=True, evidence={"total": 1}, verified=verdict
+        ),
+    )
+    rich_manager._active_engine._skills = plugin
+
+    response = client.post(
+        "/api/skills/layout/mappings/publish", json={"mappings": []}
+    )
+
+    assert response.json()["data"]["verified"] is verdict

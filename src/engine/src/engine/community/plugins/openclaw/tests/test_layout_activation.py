@@ -44,7 +44,7 @@ from engine.community.plugins.openclaw.layout_sync import (
     write_baseline_manifest,
 )
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
-from engine.community.plugins.skills_pool import layout_atomic
+from engine.community.plugins.skills_pool import layout_activation, layout_atomic
 from engine.community.plugins.skills_pool.layout_activation import (
     mapping_sources_use_pool,
 )
@@ -2107,20 +2107,76 @@ def test_publish_reports_inline_verification(tmp_path: Path) -> None:
     # And the same check run separately must agree, or the inline verdict is
     # not standing in for anything.
     assert verify_skill_mappings(mappings=mappings, home=home).valid is True
-    assert published.evidence["verification"]["failures"] == []
+    assert published.evidence["verification"] == {
+        "ran": True,
+        "valid": True,
+        "failure_count": 0,
+        "first_failures": [],
+    }
 
 
-def test_a_false_verdict_reaches_the_wire_as_false(tmp_path: Path) -> None:
-    """A false verdict is final for the caller — it must not be lost or nulled.
+def test_a_failing_inline_verification_is_reported_as_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The verdict has to come from the real check and reach the wire as False.
 
-    Driven through the model rather than the filesystem: a publish that lands
-    successfully then immediately verifies its own links cannot be made to
-    disagree without racing itself, but the wire contract for the failing case
-    is what the backend branches on.
+    The backend treats False as final and issues no separate verify, so if the
+    inline call were ever wired such that it could only answer True, the whole
+    fail-closed path would be silently dead. A publish that lands cannot be
+    made to disagree with itself without racing, so the check is stubbed and
+    what is pinned is that its answer is the one reported.
     """
-    result = MappingPublishResult(published=True, evidence={}, verified=False)
+    home, legacy_local, pool_local, _ = _prepared_home(tmp_path)
+    mappings = [
+        SkillMapping(
+            source=str(pool_local / "handmade"),
+            target=str(legacy_local.parent / "handmade"),
+        )
+    ]
+    monkeypatch.setattr(
+        layout_activation,
+        "verify_skill_mappings",
+        lambda **_kwargs: MappingVerificationResult(
+            valid=False,
+            evidence={"failures": [{"target": "t", "reason": "target_mismatch"}]},
+        ),
+    )
 
-    assert result.to_data()["verified"] is False
+    published = publish_pool_mappings(mappings=mappings, home=home)
+
+    assert published.published is True
+    assert published.verified is False
+    assert published.to_data()["verified"] is False
+    assert published.evidence["verification"]["failure_count"] == 1
+
+
+def test_an_unverifiable_publish_reports_no_verdict_rather_than_failing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The links are already written by then, so the publish must still succeed.
+
+    Letting the OSError escape would turn a landed publish into a 500 and have
+    the control plane record a failure for state that is actually correct.
+    """
+    home, legacy_local, pool_local, _ = _prepared_home(tmp_path)
+    mappings = [
+        SkillMapping(
+            source=str(pool_local / "handmade"),
+            target=str(legacy_local.parent / "handmade"),
+        )
+    ]
+
+    def _raise(**_kwargs):
+        raise OSError(errno.ENOENT, "active root vanished")
+
+    monkeypatch.setattr(layout_activation, "verify_skill_mappings", _raise)
+
+    published = publish_pool_mappings(mappings=mappings, home=home)
+
+    assert published.published is True
+    assert published.verified is None  # → caller falls back to a separate verify
+    assert "verified" not in published.to_data()
+    assert published.evidence["verification"] == {"ran": False}
 
 
 def test_a_result_that_did_not_verify_omits_the_key_entirely(tmp_path: Path) -> None:

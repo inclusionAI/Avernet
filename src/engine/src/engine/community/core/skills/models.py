@@ -296,6 +296,18 @@ class PoolMappingSourceLayout(StrEnum):
     LEGACY = "legacy"
 
 
+def inline_verification_verdict(raw: Any) -> bool | None:
+    """Decode a publish response's ``verified`` field.
+
+    Only a real bool is a verdict. A missing key means the runtime predates
+    inline verification, and a non-bool means its payload is malformed —
+    neither may become ``False``, which the client treats as a real,
+    final verification failure and answers by refusing to converge.
+    """
+    verified = raw.get("verified") if isinstance(raw, dict) else None
+    return verified if isinstance(verified, bool) else None
+
+
 @dataclass
 class PoolMappingPublishResult:
     """Pool mapping 全量发布结果。"""

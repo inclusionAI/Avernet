@@ -184,10 +184,12 @@ class SkillsPoolRuntime:
         between the publish and the fallback verify is checked at its old
         address, which normally resolves to nothing and reports unverified.
         It is not guaranteed to — a provider whose conn_info carries a
-        concrete host:port could in principle reach a reassigned address —
-        but the window is one adapter round trip wide, and a re-bind
-        mid-projection triggers the runtime's own re-sync regardless, so this
-        verdict was never the one that decided convergence.
+        concrete host:port could in principle reach a reassigned address. The
+        window is one adapter round trip for an ordinary projection and up to
+        two when a Center projection puts ``/center/ensure`` in front of the
+        publish; a re-bind inside it triggers the runtime's own re-sync
+        regardless, so this verdict was never the one that decided
+        convergence.
 
         *No verify round trip when the runtime already did it.* A publish
         response carrying ``data.verified is True`` means the runtime ran the

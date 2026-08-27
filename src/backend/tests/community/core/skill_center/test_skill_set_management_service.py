@@ -3587,26 +3587,12 @@ class _InlineVerifiedRuntimePool(_RuntimePool):
         )
 
 
-def _projector(pool):
-    repository = _McpInstallations()
-    return BotRuntimeProjector(
-        factory=_RuntimeFactory(),
-        bot_repo=_RuntimeBots(),
-        repository=repository,
-        reader=_reader(_RuntimeSkills(), repository=repository),
-        pool_runtime=pool,
-        pool_layouts=_RuntimeLayouts(),
-        passport=_RuntimePassport(),
-        caller_identity_repo=_RuntimeCallerIdentity(),
-    )
-
-
 @pytest.mark.asyncio
 async def test_inline_verified_runtime_costs_one_device_call() -> None:
     """The saving P2 exists for: no verify leg when the publish already knows."""
     pool = _InlineVerifiedRuntimePool()
 
-    await _projector(pool).project(
+    await _scoped_projector(pool=pool).project(
         bot_id="bot-1", owner_id="true-owner",
         retired_mappings=_Runtime._skill_mappings(),
         scope=ProjectionScope.everything(),
@@ -3621,7 +3607,7 @@ async def test_a_runtime_without_the_signal_still_gets_both_calls() -> None:
     """Older devices report nothing, and must keep the separate verify."""
     pool = _RuntimePool()
 
-    await _projector(pool).project(
+    await _scoped_projector(pool=pool).project(
         bot_id="bot-1", owner_id="true-owner",
         retired_mappings=_Runtime._skill_mappings(),
         scope=ProjectionScope.everything(),
@@ -3637,8 +3623,13 @@ async def test_a_runtime_reporting_failure_still_fails_the_projection() -> None:
     pool = _InlineVerifiedRuntimePool(verified=False)
 
     with pytest.raises(SkillSetRuntimeReconcileError):
-        await _projector(pool).project(
+        await _scoped_projector(pool=pool).project(
             bot_id="bot-1", owner_id="true-owner",
             retired_mappings=_Runtime._skill_mappings(),
             scope=ProjectionScope.everything(),
         )
+
+    # The point of a reported failure is that it is final: no fallback verify,
+    # which would put back the round trip this change removes.
+    assert len(pool.publish_calls) == 1
+    assert pool.verify_calls == []

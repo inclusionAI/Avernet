@@ -84,9 +84,11 @@
         distinguishable from `false`.
   - [x] The openclaw and claude_code adapters carry `verified` from the raw port
         response into `PoolMappingPublishResult`.
-  - [x] Test: a clean publish reports `verified=true`; a publish whose target is
-        then corrupted reports `verified=false`; a result built without the flag
-        omits the key from the wire body.
+  - [x] Test: a clean publish reports `verified=true` over a real filesystem; a
+        publish whose verification answers invalid reports `verified=false`; a
+        verification that cannot run at all leaves the publish successful and
+        the verdict absent; a result without the flag omits the key from the
+        wire body.
   - [x] `src/engine/.../api/tests/test_skills_router.py` still passes.
 - **Depends on:** —
 

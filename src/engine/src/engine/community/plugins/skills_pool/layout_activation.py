@@ -449,17 +449,26 @@ def _finalize_active_root(
                 "mapping": published.evidence,
             },
         )
-    verified = verify_skill_mappings(
-        mappings=mappings,
-        home=layout.pool_root.parents[2],
-        engine=engine,
-    )
-    if not verified.valid:
+    # The publish above verified the filesystem it had just written and nothing
+    # has touched it since, so re-running the check here would walk every
+    # mapping source a second time for an answer already in hand. It only falls
+    # back when the publish could not verify (``verified is None``).
+    if published.verified is None:
+        verified = verify_skill_mappings(
+            mappings=mappings,
+            home=layout.pool_root.parents[2],
+            engine=engine,
+        )
+        verified_valid, verified_evidence = verified.valid, verified.evidence
+    else:
+        verified_valid = published.verified
+        verified_evidence = published.evidence.get("verification", {})
+    if not verified_valid:
         return PoolActivationResult(
             PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
             {
                 "reason": "pool_mapping_verify_failed",
-                "mapping": verified.evidence,
+                "mapping": verified_evidence,
             },
         )
     _write_active_marker(
@@ -2300,6 +2309,21 @@ def rollback_hermes_pool(
     )
 
 
+def _verification_digest(
+    verification: "MappingVerificationResult | None",
+) -> dict[str, object]:
+    """A bounded summary of an inline verification, safe to log verbatim."""
+    if verification is None:
+        return {"ran": False}
+    failures = list(verification.evidence.get("failures") or [])
+    return {
+        "ran": True,
+        "valid": verification.valid,
+        "failure_count": len(failures),
+        "first_failures": failures[:5],
+    }
+
+
 def verify_skill_mappings(
     *,
     mappings: list[SkillMapping],
@@ -2443,18 +2467,25 @@ def publish_pool_mappings(
                 "errno": error.errno,
             },
         )
-    # Verify inline, against the filesystem this call just wrote. It re-runs
-    # the same layout, retirement and mapping plans and lstats the links —
-    # local work on warm cache — where the caller's separate /verify request
-    # costs a full round trip to reach the identical check.
-    verification = verify_skill_mappings(
-        mappings=mappings,
-        retired_mappings=retired_mappings,
-        home=home,
-        engine=engine,
-        source_layout=source_layout,
-        additional_retirement_roots=additional_retirement_roots,
-    )
+    # Verify inline, against the filesystem this call just wrote, so the
+    # caller's separate /verify request — a full round trip to reach the
+    # identical check — can be skipped.
+    #
+    # The publish has already succeeded at this point. A verification that
+    # cannot run (something else moved the active root out from under it) must
+    # therefore not fail the publish: it reports no verdict, which sends the
+    # caller down the separate-verify path it would have taken anyway.
+    try:
+        verification = verify_skill_mappings(
+            mappings=mappings,
+            retired_mappings=retired_mappings,
+            home=home,
+            engine=engine,
+            source_layout=source_layout,
+            additional_retirement_roots=additional_retirement_roots,
+        )
+    except OSError:
+        verification = None
     return MappingPublishResult(
         published=True,
         evidence={
@@ -2467,9 +2498,12 @@ def publish_pool_mappings(
             "retired_absent": [str(path) for path in retirement.absent],
             "retired_replaced": [str(path) for path in retirement.replaced],
             "retired_external_ignored": [str(path) for path in retirement.external],
-            "verification": verification.evidence,
+            # Bounded: the caller logs this response verbatim on a failed
+            # verdict, and a bot with hundreds of mappings would otherwise
+            # write the whole failure list on every retry.
+            "verification": _verification_digest(verification),
         },
-        verified=verification.valid,
+        verified=None if verification is None else verification.valid,
     )
 
 
