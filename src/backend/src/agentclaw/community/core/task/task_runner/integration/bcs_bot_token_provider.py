@@ -1,27 +1,17 @@
-"""BcsBotTokenProvider:driver-bot 的 BCS session_token 取数端口(参考 ocb ``ZdasBotTokenProvider``)。
+"""BcsBotTokenProvider:driver-bot 的 BCS session_token 取数端口(core 只含中性端口 + 缓存包装 + 空实现)。
 
-为什么需要:BCS 建群(``POST /groups``)在带 ``event_subscriptions`` 时走 ``require_human``,拒 Bot token;
-去掉订阅后虽可 HMAC-only 匿名建群,但参考 ocb,把 driver-bot 的 session_token 作为 ``Authorization: Bearer``
-携带,让 BCS ``resolve_group_create_caller`` 把 caller 解析成 driver/originator bot(带归属、统一个 caller 身份)。
+为什么需要:BCS 建群(``POST /groups``)带 ``event_subscriptions`` 时走 ``require_human``,拒 Bot token;
+参考 ocb 把 driver-bot 的 session_token 作为 ``Authorization: Bearer`` 携带,让 BCS 把 caller 解析成
+driver/originator bot(带归属、统一个 caller 身份)。core 不挂厂商数据基建名;具体读法(DB 直读
+``bcs_bots.session_token`` 等)属 corp/数据源具体实现,放在 community/plugins(见 ``DbBcsBotTokenProvider``)。
 
-token 来源:BCS 没有"取 bot token"的 HTTP 接口 —— token 在 bot 经 ``/ws/bot`` 首连时由服务端
-``new_session_token()`` 签发(``provider_core.rs``),写库表 ``bcs_bots.session_token``,只在 connect 帧回给该 bot。
-唯一既存取法 = 直读 ``bcs_bots.session_token`` 库表(ocb 同款,经 ZDAS ``agentclawdb_ds``)。
-
-本模块只提供端口 + TTL 缓存包装 + 空实现;真实 ``SELECT session_token FROM bcs_bots WHERE bot_uuid=%s``
-的 ZDAS resolver 由 corp 覆写注入(prod 经 ``agentclawdb_ds``),本地/singlebox/double 用 ``NullBcsBotTokenProvider``。
+core 只暴露中性 ``BcsBotTokenProvider`` 端口 + ``CachingBcsBotTokenProvider`` 缓存包装 +
+``NullBcsBotTokenProvider``;联调/部署侧经 DI bind ``BcsBotTokenProvider`` 覆写默认提供方(见 task_module)。
 """
 from __future__ import annotations
 
-import logging
 import time
-from typing import Any, Callable, Protocol, runtime_checkable
-
-from sqlalchemy import text
-
-from agentclaw.community.plugin_api.database import DatabasePlugin
-
-logger = logging.getLogger(__name__)
+from typing import Callable, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -34,7 +24,7 @@ class BcsBotTokenProvider(Protocol):
 class NullBcsBotTokenProvider:
     """无 token 实现(本地/singlebox/double/未配置):恒返回 None。
 
-    搭配"去掉 event_subscriptions"建群走 no-sub 分支,无需 token;本实现下 ``caller_bot_token`` 不发,
+    搭配建群不挂订阅/无 token 时走 no-sub 分支,无需 token;本实现下 ``caller_bot_token`` 不发,
     行为同未配置 provider(向后兼容)。
     """
 
@@ -42,7 +32,7 @@ class NullBcsBotTokenProvider:
         return None
 
 
-# 未命中时短缓存(秒):避免对 DB 反复打同一条不存在的 bot。对齐 ocb ZdasBotTokenProvider("查失败也缓存短 TTL")。
+# 未命中时短缓存(秒):避免对 DB 反复打同一条不存在的 bot。对齐 ocb("查失败也缓存短 TTL")。
 _DEFAULT_FAIL_TTL_S: float = 60.0
 
 
@@ -50,7 +40,7 @@ class CachingBcsBotTokenProvider:
     """对 ``resolver`` 包一层进程内 TTL 缓存,命中/未命中分别缓存。
 
     ``resolver`` 是真实查数闭包(``bcs_bot_uuid -> session_token 或 None``);prod 由 corp 覆写注入
-    直读 ``bcs_bots.session_token``(ZDAS ``agentclawdb_ds``),测试/本地注入桩。不把 token 明文写日志。
+    直读 ``bcs_bots.session_token`` 的 resolver(放在 community/plugins),测试/本地注入桩。不把 token 明文写日志。
 
     Args:
         resolver: 真实查数闭包。
@@ -85,54 +75,3 @@ class CachingBcsBotTokenProvider:
         # 未命中也短缓存,避免反复查库打爆 DB。
         self._cache[bcs_bot_uuid] = ("", now + min(self._ttl_s, _DEFAULT_FAIL_TTL_S))
         return None
-
-
-class ZdasBcsBotTokenProvider:
-    """经 ZDAS ``agentclawdb_ds``(本仓 prod ``DatabasePlugin``,即 ``bcs_bots`` 所在库)直读
-    ``bcs_bots.session_token``(对齐 ocb ``ZdasBotTokenProvider``),套 ``CachingBcsBotTokenProvider`` 做 TTL 缓存。
-
-    prod corp ``DatabasePlugin.orm_session()`` 连到 ``agentclawdb_ds``,``bcs_bots`` 在同库 → 可查;
-    本地 SQLite 无 ``bcs_bots`` 表 → 查询抛错被吞 → 返 None(不发 Bearer,本地 BCS 忽略鉴权,无害)。
-
-    Args:
-        database_plugin: ``DatabasePlugin``(DI 注入;corp=真实 ZDAS,本地=SQLite)。``orm_session()`` 出 SQLAlchemy Session。
-        env: 可选环境列过滤(对齐 ocb 的 ``bcs_bots.env``);省略只按 ``bot_uuid`` 查。
-        ttl_s: 命中缓存有效期(秒),默认 300。
-        clock: 可注入单调时钟(默认 ``time.monotonic``),便于测试。
-    """
-
-    def __init__(
-        self,
-        database_plugin: DatabasePlugin,
-        *,
-        env: str | None = None,
-        ttl_s: float = 300.0,
-        clock: Callable[[], float] = time.monotonic,
-    ) -> None:
-        self._db = database_plugin
-        self._env = env
-        self._caching = CachingBcsBotTokenProvider(self._query_token, ttl_s=ttl_s, clock=clock)
-
-    def get_token(self, bcs_bot_uuid: str) -> str | None:
-        return self._caching.get_token(bcs_bot_uuid)
-
-    def _query_token(self, bcs_bot_uuid: str) -> str | None:
-        sql = "SELECT session_token FROM bcs_bots WHERE bot_uuid = :uuid"
-        params: dict[str, str] = {"uuid": bcs_bot_uuid}
-        if self._env:
-            sql += " AND env = :env"
-            params["env"] = self._env
-        sql += " LIMIT 1"
-        try:
-            with self._db.orm_session() as session:
-                row: Any = session.execute(text(sql), params).first()
-        except Exception:  # noqa: BLE001 本地无 bcs_bots 表 / 查询失败 → None(不发 Bearer,降级不阻断建群)
-            logger.warning(
-                "[task][bcs_bot_token] 读 bcs_bots.session_token 失败 bot_uuid=%s(本地无此表属正常)",
-                bcs_bot_uuid, exc_info=True,
-            )
-            return None
-        if row is None:
-            return None
-        token = row[0]
-        return str(token) if token else None
