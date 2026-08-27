@@ -34,6 +34,7 @@ class WorkOrderApproverStatus(StrEnum):
 class WorkOrderBizType(StrEnum):
     SPACE_JOIN = "SPACE_JOIN"
     BOT_COLLABORATOR = "BOT_COLLABORATOR"
+    BOT_FRIEND = "BOT_FRIEND"
 
 
 class NotificationCategory(StrEnum):
@@ -104,6 +105,22 @@ APPROVAL_EVENT_TYPES: frozenset[WorkOrderEventType] = frozenset(
     for event_type, category in EVENT_CATEGORIES.items()
     if category is NotificationCategory.APPROVAL
 )
+FRIEND_APPROVAL_EVENT_TYPES: frozenset[WorkOrderEventType] = frozenset(
+    {
+        WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED,
+        WorkOrderEventType.BOT2BOT_FRIEND_APPLIED,
+    }
+)
+REVIEWED_EVENT_TYPES: dict[WorkOrderEventType, WorkOrderEventType] = {
+    WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED: (
+        WorkOrderEventType.HUMAN2BOT_FRIEND_REVIEWED
+    ),
+    WorkOrderEventType.BOT2BOT_FRIEND_APPLIED: (
+        WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED
+    ),
+}
+
+
 NOTICE_EVENT_TYPES: frozenset[WorkOrderEventType] = frozenset(
     event_type
     for event_type, category in EVENT_CATEGORIES.items()
@@ -240,6 +257,14 @@ class WorkOrderDetail(BaseModel):
     space_name: str
     applicant_name: str
     can_approve: bool
+
+
+class WorkOrderApprovalContext(BaseModel):
+    """Canonical source event and state used before an external callback."""
+
+    work_order: WorkOrderRecord
+    approver: WorkOrderApproverRecord
+    source_event_type: str | None
 
 
 class WorkOrderEventCreatedResult(BaseModel):

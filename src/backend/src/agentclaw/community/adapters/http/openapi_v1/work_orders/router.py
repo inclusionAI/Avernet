@@ -42,7 +42,6 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     WorkOrderQueryType,
     WorkOrderReviewRequest,
     WorkOrderApprovalRequest,
-    WorkOrderDecision,
     WorkOrderReviewResponse,
     WorkOrderLegacyReviewResponse,
 )
@@ -57,7 +56,11 @@ from agentclaw.community.api.work_order_service import (
     WorkOrderNotificationServiceProtocol,
     WorkOrderServiceProtocol,
 )
+from agentclaw.community.core.work_orders.callbacks import (
+    WorkOrderCallbackCredential,
+)
 from agentclaw.community.core.work_orders.models import (
+    WorkOrderDecision as DomainWorkOrderDecision,
     WorkOrderItemType as DomainWorkOrderItemType,
     WorkOrderListItem as DomainListItem,
     WorkOrderQueryType as DomainWorkOrderQueryType,
@@ -77,6 +80,23 @@ PageSizeQuery = Annotated[
 ]
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
+
+_CALLBACK_HEADER_NAMES = {
+    "authorization",
+    "cookie",
+    "x-request-id",
+    "x-trace-id",
+}
+
+
+def _callback_credential(request: Request) -> WorkOrderCallbackCredential:
+    return WorkOrderCallbackCredential(
+        headers={
+            key: value
+            for key, value in request.headers.items()
+            if key.lower() in _CALLBACK_HEADER_NAMES
+        }
+    )
 
 
 def _require_user_delegation(caller: ActingCaller) -> str:
@@ -383,8 +403,9 @@ async def process_work_order_approval(
     result = service.process_approval(
         work_order_id=work_order_id,
         actor_id=actor_id,
-        decision=WorkOrderDecision(body.decision),
+        decision=DomainWorkOrderDecision(body.decision.value),
         review_remark=body.review_remark,
+        callback_credential=_callback_credential(request),
     )
     return envelope(_review_response(result), request)
 
