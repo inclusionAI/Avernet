@@ -55,6 +55,9 @@ class SkillScanService(LifecycleBase):
         inline to preserve existing behavior; cleaning that up is a
         separate task.
         """
+        if not self._config.get("enabled", True):
+            logger.info("SkillScanService is disabled by configuration")
+            return
         self.start()
         git_archive_url = self._config.get("git_archive_url", "")
         if git_archive_url:
@@ -115,16 +118,11 @@ class SkillScanService(LifecycleBase):
 
         Returns:
             bool: True if started successfully or already running, False if
-            disabled by config or no scanner is available.
+            no scanner is available.
         """
         if self._started:
             logger.debug("SkillScanService already started")
             return True
-
-        # Check if enabled
-        if not self._config.get("enabled", True):
-            logger.info("SkillScanService is disabled by configuration")
-            return False
 
         # Obtain a scanner SDK handle from the capability plugin. None ⇒ no
         # scanner available (e.g. community build), so scanning stays disabled.

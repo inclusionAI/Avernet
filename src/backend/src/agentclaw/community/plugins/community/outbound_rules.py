@@ -1,8 +1,10 @@
-"""Community ``OutboundRuleProvider`` — no egress mutation.
+"""Community ``OutboundRuleProvider`` — config-driven egress-header rules.
 
-A real, deployable impl for the open-source build: a community runtime has no
-AntGroup gateways to route to and no Mist secrets to inject, so it applies no
-outbound-header rules (an empty rule the device runtime treats as a no-op).
+A real, deployable impl for the open-source build: outbound-header rules are
+loaded from the ``outbound_rules`` block of ``user_config`` at construction
+time and returned verbatim on every ``build_rule`` call. An empty rule list
+(the default when no ``outbound_rules`` block is configured) means no egress
+mutation — the same behavior as before this was configurable.
 
 Depends on no corp secret/domain machinery. Not a ``MockSeam`` subclass — this
 is a real impl bound directly by ``CommunityOutboundRulesModule``.
@@ -12,12 +14,31 @@ from __future__ import annotations
 
 from typing import Callable
 
-from agentclaw.community.kernel.device_dto import OutBoundOperationRule
+from agentclaw.community.di.config_community import OutboundRulesConfig
+from agentclaw.community.kernel.device_dto import (
+    HeaderOperationRule,
+    OutBoundOperationRule,
+)
 from agentclaw.community.plugin_api.outbound_rules import OutboundRuleProvider
 
 
 class CommunityOutboundRuleProvider(OutboundRuleProvider):
-    """No egress mutation: every rule is empty."""
+    """Config-driven egress-header rules loaded at construction time."""
+
+    def __init__(self, config: OutboundRulesConfig) -> None:
+        self._rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=list(entry.domains),
+                    action=entry.action,
+                    header_name=entry.header_name,
+                    value=entry.value,
+                    placeholder=entry.placeholder,
+                    separator=entry.separator,
+                )
+                for entry in config.header_rules
+            ]
+        )
 
     def build_rule(
         self,
@@ -30,7 +51,7 @@ class CommunityOutboundRuleProvider(OutboundRuleProvider):
         bot_type_resolver: Callable[[str, str], str | None] | None = None,
         extra_properties: dict[str, object] | None = None,
     ) -> OutBoundOperationRule:
-        return OutBoundOperationRule()
+        return self._rule
 
     def build_agentpass_rule(
         self,

@@ -7,19 +7,19 @@
       "version": "1.0.0"
     },
     "baas": {
-      "api_base_url": "http://localhost:8890",
-      "deploy_runtime": "managed",
-      "template_uuid": "",
+      "api_base_url": "${BASS_URL:-}",
+      "deploy_runtime": "ack",
+      "template_uuid": "${BAAS_TEMPLATE_ID:-}",
       "tenant": "community"
     },
     "bcs": {
-      "base_url": "http://127.0.0.1:21000",
+      "base_url": "${BCS_URL:-}",
       "operator_subjects": [],
       "timeout": 10,
       "user_path": "/auth/user"
     },
     "bcsfuse": {
-      "base_url": ""
+      "base_url": "${BCS_FUSE_URL:-}"
     },
     "bot_oss_config": {
       "bucket_name": "agentclaw",
@@ -30,7 +30,7 @@
       "timeout": 30
     },
     "cache": {
-      "redis_url": ""
+      "redis_url": "${REDIS_URL:-}"
     },
     "cors": {
       "allow_origin_regex": [],
@@ -46,7 +46,7 @@
     },
     "database": {
       "backend": "mysql",
-      "create_schema": true,
+      "create_schema": false,
       "url": "${DATABASE_URL}"
     },
     "desktop_bot_periodic_scan": {
@@ -63,7 +63,7 @@
       "dry_run": true
     },
     "ecb": {
-      "base_url": ""
+      "base_url": "${ECB_URL:-}"
     },
     "features": {
       "enable_cache": true,
@@ -71,8 +71,8 @@
       "max_connections": 100
     },
     "gateway": {
-      "base_url": "",
-      "base_url_pre": ""
+      "base_url": "${GATEWAY_URL:-}",
+      "base_url_pre": "${GATEWAY_URL_PRE:-}"
     },
     "git_sync": {
       "bolt_shared_dir_name": "bolt_shared",
@@ -99,12 +99,26 @@
       "skills_repo_url": ""
     },
     "oss_mount_root": "./data/oss",
+    "outbound_rules": {
+      "header_rules": [
+        {
+          "action": "replace",
+          "domains": [
+            "${MODEL_API:-}"
+          ],
+          "header_name": "Authorization",
+          "placeholder": "${API-KEY}",
+          "value": "${MODEL_KEY:-}"
+        }
+      ]
+    },
     "secret": {
-      "env_prefix": "AGENTCLAW_SECRET_"
+      "env_prefix": ""
     },
     "skill_scan": {
       "auth_app_key": "agentclaw",
       "enable_scheduled_scan": false,
+      "enabled": false,
       "max_concurrent_scans": 3,
       "mist_mode": "dev",
       "scan_interval_hours": 1,
@@ -127,14 +141,14 @@
       "preview_url": ""
     },
     "baas": {
-      "api_base_url": "http://localhost:8890",
+      "api_base_url": "${BASS_URL:-}",
       "api_base_url_pre": "http://localhost:8888",
       "default_ttl_minutes": 10080,
       "desktop_template_uuid": "",
       "desktop_ttl_minutes": 0,
       "personal_bot_template_uuid": "",
       "teclaw_template_uuid": "",
-      "template_uuid": "",
+      "template_uuid": "${BAAS_TEMPLATE_ID:-}",
       "tenant": "community"
     },
     "bcn": {
@@ -146,10 +160,10 @@
       "provider_id_prod": ""
     },
     "bcsfuse": {
-      "base_url": "",
+      "base_url": "${BCS_FUSE_URL:-}",
       "base_url_pre": "",
       "raw": {
-        "base_url": ""
+        "base_url": "${BCS_FUSE_URL:-}"
       }
     },
     "bot_chat": {
@@ -172,7 +186,7 @@
       ]
     },
     "deploy_runtime": {
-      "runtime": "managed"
+      "runtime": "ack"
     },
     "desktop_bot_periodic_scan": {
       "apply_owner_whitelist": [],
@@ -194,12 +208,12 @@
       "action_link_pattern": ""
     },
     "ecb": {
-      "base_url": "",
+      "base_url": "${ECB_URL:-}",
       "base_url_pre": ""
     },
     "gateway": {
-      "base_url": "",
-      "base_url_pre": ""
+      "base_url": "${GATEWAY_URL:-}",
+      "base_url_pre": "${GATEWAY_URL_PRE:-}"
     },
     "http_client_pool": {
       "defaults": {
@@ -240,7 +254,7 @@
       "auth_app_secret": "",
       "auth_endpoint": "",
       "enable_scheduled_scan": false,
-      "enabled": true,
+      "enabled": false,
       "env": "prod",
       "git_download_dir": "/home/admin/logs/tmp/sec/code",
       "max_concurrent_scans": 3,

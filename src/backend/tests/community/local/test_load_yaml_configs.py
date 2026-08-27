@@ -133,7 +133,7 @@ class TestCommunityOverlaySelection:
         # bcs 块只在 community overlay 里（不在 base application.yaml）。
         bcs = user_config.get("bcs", {})
         assert bcs.get("user_path") == "/auth/user"
-        assert bcs.get("base_url", "").startswith("http")
+        assert bcs.get("base_url", "") == ""  # ${BCS_URL:-} defaults to empty
         # 证明基座确实被合并进来了：一个只在中性 base 里的块（device_provider）出现。
         assert user_config.get("device_provider") == "local"
         assert cfg.get("app_name") == "agentclaw"
@@ -233,7 +233,7 @@ class TestCommunityOverlaySelection:
         storage = user_config.get("object_storage", {})
         assert storage.get("backend") == "fs"
         assert storage.get("s3", {}).get("region") == "us-east-1"
-        assert user_config.get("secret", {}).get("env_prefix") == "AGENTCLAW_SECRET_"
+        assert user_config.get("secret", {}).get("env_prefix") == ""
 
     def test_base_application_yaml_has_no_data_infra_blocks(self):
         # 这四块必须只在 community overlay，不能泄漏进 corp/test 路径。
