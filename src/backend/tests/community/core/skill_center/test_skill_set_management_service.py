@@ -471,6 +471,29 @@ class _McpCenter:
         return {"accessLevel": "PUBLIC"}
 
 
+def _registry(*, pool_runtime, pool_layouts):
+    """A real registry over the real implementations.
+
+    Deliberately not a fake: a stub registry would assert that the projector
+    calls *something*, which is wiring, not behaviour. These tests care which
+    runtime contract an engine actually gets, so they exercise the same
+    resolution production does.
+    """
+    from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
+        PerDomainRuntimeProjection,
+    )
+    from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
+        EngineRuntimeProjectionRegistry,
+    )
+
+    return EngineRuntimeProjectionRegistry(
+        default=PerDomainRuntimeProjection(
+            pool_runtime=pool_runtime,
+            pool_layouts=pool_layouts,
+        ),
+    )
+
+
 class _RuntimeFactoryService:
     def __init__(self) -> None:
         self.mcp_codes: set[str] | None = None
@@ -1779,8 +1802,7 @@ async def test_runtime_mapping_snapshot_has_no_runtime_side_effects():
             ),
             repository=repository,
         ),
-        pool_runtime=pool,
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -1810,8 +1832,7 @@ async def test_runtime_projection_flushes_installations_first():
         bot_repo=_RuntimeBots(),
         repository=repository,
         reader=_reader(_RuntimeSkills(), repository=repository),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -1843,8 +1864,7 @@ async def test_projection_flush_prefers_the_layout_engine_for_default_sets():
         bot_repo=bots,
         repository=repository,
         reader=_reader(_RuntimeSkills(), repository=repository, bots=bots),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -1873,8 +1893,7 @@ async def test_runtime_projection_fails_before_engine_writes_when_flush_fails():
         bot_repo=_RuntimeBots(),
         repository=repository,
         reader=_reader(_RuntimeSkills(), repository=repository),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -1895,8 +1914,7 @@ async def test_runtime_projection_fails_closed_when_default_mcp_policy_is_unavai
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=passport,
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -1923,8 +1941,7 @@ async def test_runtime_projection_mcp_inputs_agree_when_the_union_overlaps():
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=passport,
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -1950,8 +1967,7 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=passport,
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2027,8 +2043,7 @@ async def test_projection_preserves_caller_identity_for_configured_mcp():
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=passport,
         caller_identity_repo=identity,
     )
@@ -2055,8 +2070,7 @@ async def test_projection_defaults_to_owner_without_a_call_config_row():
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=passport,
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2087,8 +2101,7 @@ async def test_projection_scope_is_the_projected_codes_not_the_config_rows():
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=passport,
         caller_identity_repo=_RuntimeCallerIdentity(
             {
@@ -2133,8 +2146,7 @@ async def test_projection_fails_closed_without_a_bot_primary_key():
         bot_repo=_PkLessRuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=passport,
         caller_identity_repo=identity,
     )
@@ -2211,8 +2223,7 @@ async def test_reconcile_scope_claims_every_projected_code():
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2240,8 +2251,7 @@ async def test_a_declared_claim_delivers_only_that_code():
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2274,8 +2284,7 @@ async def test_a_release_still_supplied_by_policy_is_not_deleted():
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2304,8 +2313,7 @@ async def test_a_release_no_longer_supplied_is_deleted():
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2328,8 +2336,7 @@ async def test_runtime_reconcile_fails_closed_when_effective_cli_scope_cannot_be
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=passport,
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2352,8 +2359,7 @@ async def test_runtime_reconcile_requires_and_uses_mapping_v3_for_center():
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_CenterRuntimeSkills()),
-        pool_runtime=pool,
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2385,8 +2391,7 @@ async def test_coding_template_uses_aicoding_for_center_probe_but_keeps_logical_
         bot_repo=_AicodingImageRuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_CenterRuntimeSkills()),
-        pool_runtime=pool,
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2420,8 +2425,7 @@ async def test_existing_coding_runtime_uses_its_resolved_layout(
         bot_repo=bots,
         repository=_McpInstallations(),
         reader=_reader(skills),
-        pool_runtime=_RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2444,8 +2448,7 @@ async def test_historical_aicoding_cleanup_uses_legacy_runtime_not_pool_mapping(
         bot_repo=_HistoricalAicodingRuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        pool_runtime=pool,
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2471,8 +2474,7 @@ async def test_historical_cleanup_rejects_center_before_runtime_or_mcp_delivery(
         bot_repo=_HistoricalAicodingRuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_CenterRuntimeSkills()),
-        pool_runtime=pool,
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2498,8 +2500,7 @@ async def test_teclaw_v4_rejects_center_without_any_center_runtime_request():
         bot_repo=_TeclawRuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_CenterRuntimeSkills()),
-        pool_runtime=pool,
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2524,8 +2525,7 @@ async def test_teclaw_v4_repo_projection_uses_artifact_runtime_not_pool_mapping(
         bot_repo=_TeclawRuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_TeclawRuntimeSkills()),
-        pool_runtime=pool,
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2557,8 +2557,7 @@ async def test_non_skill_projection_never_writes_skill_mappings():
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        pool_runtime=pool,
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
         passport=_RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2741,8 +2740,7 @@ def _scoped_projector(pool=None, passport=None, factory=None):
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        pool_runtime=pool or _RuntimePool(),
-        pool_layouts=_RuntimeLayouts(),
+        registry=_registry(pool_runtime=pool or _RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=passport or _RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 
 from injector import inject
 
@@ -21,9 +22,6 @@ from agentclaw.community.core.repository.protocols.capability_desired_state impo
 from agentclaw.community.core.repository.protocols.identity import (
     CallerIdentityRepositoryProtocol,
 )
-from agentclaw.community.core.repository.protocols.skills_pool import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
 from agentclaw.community.core.mcp.errors import McpIdentityUnresolvedError
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
@@ -34,6 +32,9 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
     ResolvedCapabilityPlan,
 )
+from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
+    EngineRuntimeProjectionRegistry,
+)
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeDesiredState,
     RuntimeProjection,
@@ -41,18 +42,8 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
 )
 from agentclaw.community.core.skills_pool.mapping_intent import (
     build_logical_skill_mappings,
-    mapping_contract_for,
 )
-from agentclaw.community.core.skills_pool.models import (
-    PoolSkillMapping,
-    SkillMappingSourceLayout,
-)
-from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
-from agentclaw.community.core.skills_pool.types import (
-    BotSkillLayoutScope,
-    runtime_uses_pool_paths,
-)
-from agentclaw.community.core.workspace.skill_layout import runtime_layout_engine_for_bot
+from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import McpScopeItem, PassportPlugin
 
@@ -82,8 +73,7 @@ class BotRuntimeProjector:
         bot_repo: BotRepository,
         repository: CapabilityDesiredStateRepositoryProtocol,
         reader: BotCapabilityStateReaderProtocol,
-        pool_runtime: SkillsPoolRuntimeProtocol,
-        pool_layouts: SkillsPoolLayoutRepositoryProtocol,
+        registry: EngineRuntimeProjectionRegistry,
         passport: PassportPlugin,
         caller_identity_repo: CallerIdentityRepositoryProtocol,
     ) -> None:
@@ -91,8 +81,10 @@ class BotRuntimeProjector:
         self._bot_repo = bot_repo
         self._repository = repository
         self._reader = reader
-        self._pool_runtime = pool_runtime
-        self._pool_layouts = pool_layouts
+        # Which runtime contract a Bot's engine obeys. The Skills Pool
+        # collaborators moved with the per-domain implementation that is their
+        # only user, so this module no longer holds them.
+        self._registry = registry
         self._passport = passport
         self._caller_identity_repo = caller_identity_repo
 
@@ -135,47 +127,24 @@ class BotRuntimeProjector:
             owner_id=owner_id,
             retired_mappings=retired_mappings,
         )
-        # A mutation that changed one half has nothing to say to the other,
-        # and both halves are whole-snapshot writes: re-sending the unchanged
-        # one costs a device round trip (or a Pool publish plus verify) to
-        # restate what is already there. ``ProjectionScope.everything()`` sets
-        # both flags, so a caller with nothing to declare still projects both.
-        #
-        # ``retired_mappings`` overrides the Skill flag rather than trusting
-        # it: those retirements were computed from the actual before/after
-        # snapshots, so they are evidence that Skills moved. Skipping them
-        # would strand a published mapping the desired state no longer holds.
-        if scope.skills or retired_mappings:
-            await self._apply_skill_projection(
-                service=plan.service,
-                bot=plan.bot,
-                engine=plan.engine,
-                bot_id=plan.bot_id,
-                owner_id=plan.owner_id,
-                projection=plan.projection,
-                retired_mappings=retired_mappings,
-            )
-        else:
-            logger.info(
-                "[BotRuntimeProjector] Skill projection skipped, scope declares "
-                "no Skill change: bot_id=%s, engine=%s",
-                plan.bot_id, plan.engine,
-            )
+        # How a runtime consumes a projection — how many calls converging takes,
+        # and whether the scope's halves mean anything to it at all — is the
+        # engine's fact, so the engine's own implementation answers it. Nothing
+        # below this line tests which engine this is.
+        await self._registry.for_engine(plan.engine).apply(
+            plan=plan,
+            scope=scope,
+            retired_mappings=retired_mappings,
+        )
+        # The Passport is not a runtime and not engine-shaped: it is the
+        # platform's authorization record, the same for every engine. Its
+        # trigger is unchanged.
         if scope.mcp:
-            await self._apply_non_skill_projection(
-                service=plan.service,
-                scope=scope,
-                identity_modes=plan.identity_modes,
-                engine=plan.engine,
-                bot_id=plan.bot_id,
-                owner_id=plan.owner_id,
-                projection=plan.projection,
-                effective_cli_items=plan.effective_cli_items,
-            )
+            self._apply_passport_projection(plan=plan)
         else:
             logger.info(
-                "[BotRuntimeProjector] MCP/CLI projection skipped, scope "
-                "declares no MCP change: bot_id=%s, engine=%s",
+                "[BotRuntimeProjector] Passport update skipped, scope declares "
+                "no MCP change: bot_id=%s, engine=%s",
                 plan.bot_id, plan.engine,
             )
 
@@ -186,21 +155,23 @@ class BotRuntimeProjector:
         owner_id: str,
         scope: ProjectionScope,
     ) -> None:
-        """Rebuild MCP/CLI when a cutover task exclusively owns Skill mappings."""
+        """Rebuild MCP/CLI when a cutover task exclusively owns Skill mappings.
+
+        The same four steps as ``project``, with no retirements: declaring the
+        Skill half here would fight the cutover that owns it, and a scope whose
+        ``skills`` flag is false already says exactly that — so no separate
+        entry point into the engine's projection is needed.
+        """
         plan = self._resolve_plan(
             bot_id=bot_id,
             owner_id=owner_id,
         )
-        await self._apply_non_skill_projection(
-            service=plan.service,
+        await self._registry.for_engine(plan.engine).apply(
+            plan=plan,
             scope=scope,
-            identity_modes=plan.identity_modes,
-            engine=plan.engine,
-            bot_id=plan.bot_id,
-            owner_id=plan.owner_id,
-            projection=plan.projection,
-            effective_cli_items=plan.effective_cli_items,
         )
+        if scope.mcp:
+            self._apply_passport_projection(plan=plan)
 
     async def project_for_cleanup(
         self,
@@ -214,6 +185,13 @@ class BotRuntimeProjector:
         Historical engines use their existing full legacy synchronizer for
         Local/Repo removal.  Center requires the Pool v3 contract and is never
         permitted on this compatibility path.
+
+        The Skill half is written here rather than through the engine's
+        projection precisely because it must *not* take the Pool path this
+        engine would normally choose — that is what "compatibility path"
+        means. Only the MCP half is delegated. Note this method has no
+        production caller today: it is reachable only through the Service API
+        protocol, so treat any behaviour change here as unexercised.
         """
         plan = self._resolve_cleanup_plan(bot_id=bot_id, owner_id=owner_id)
         if any(
@@ -225,16 +203,17 @@ class BotRuntimeProjector:
             desired_skills=self._desired_skills(plan.projection)
         ):
             raise SkillSetRuntimeReconcileError()
-        await self._apply_non_skill_projection(
-            service=plan.service,
-            scope=scope,
-            identity_modes=plan.identity_modes,
-            engine=plan.engine,
-            bot_id=plan.bot_id,
-            owner_id=plan.owner_id,
-            projection=plan.projection,
-            effective_cli_items=plan.effective_cli_items,
+        # ``skills=False`` regardless of what the caller declared: the Skill
+        # half was just written by the legacy synchronizer above, and letting
+        # the engine's projection write it again would either duplicate that
+        # or route it onto the Pool path this compatibility path exists to
+        # avoid. Only the MCP half is the engine's here.
+        await self._registry.for_engine(plan.engine).apply(
+            plan=plan,
+            scope=replace(scope, skills=False),
         )
+        if scope.mcp:
+            self._apply_passport_projection(plan=plan)
 
     def _resolve_plan(
         self,
@@ -386,68 +365,6 @@ class BotRuntimeProjector:
             identity_modes=identity_modes,
         )
 
-    async def _apply_skill_projection(
-        self,
-        *,
-        service,
-        bot: dict,
-        engine: str,
-        bot_id: str,
-        owner_id: str,
-        projection: RuntimeProjection,
-        retired_mappings: Sequence[PoolSkillMapping],
-    ) -> None:
-        mappings = list(projection.skill_mappings)
-        retired = list(retired_mappings)
-        if engine == "teclaw" and any(
-            mapping.corpus == "center" for mapping in [*mappings, *retired]
-        ):
-            # Teclaw v4 has no Center request contract. Phase 2 adds its
-            # OSS-backed Center Store; Phase 1 must fail before any runtime,
-            # MCP, Passport, probe, or mapping request is emitted.
-            raise SkillSetRuntimeReconcileError()
-
-        desired_skills = self._desired_skills(projection)
-        if engine == "teclaw":
-            # Teclaw v4 consumes a complete Artifact projection through the
-            # existing DeviceSync dispatcher. It has no Skills Pool mapping
-            # endpoint; Repo/Local and their retirements must stay on v4.
-            if not service.sync_runtime(desired_skills=desired_skills):
-                raise SkillSetRuntimeReconcileError()
-            return
-
-        scope = BotSkillLayoutScope(
-            env=str(bot["env"]),
-            entity_id=str(bot.get("entity_id") or owner_id),
-            bot_id=bot_id,
-        )
-        layout_state = self._pool_layouts.get(scope)
-        pool_owns_runtime = layout_state is not None and runtime_uses_pool_paths(
-            layout_state
-        )
-        if (
-            pool_owns_runtime
-            or any(
-                mapping.corpus in {"repo", "center"}
-                for mapping in [*mappings, *retired]
-            )
-            or retired
-        ):
-            await self._apply_pool_mappings(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                layout_engine=runtime_layout_engine_for_bot(bot),
-                mappings=mappings,
-                retired_mappings=retired,
-                source_layout=(
-                    SkillMappingSourceLayout.POOL
-                    if pool_owns_runtime
-                    else SkillMappingSourceLayout.LEGACY
-                ),
-            )
-        elif not service.sync_runtime(desired_skills=desired_skills):
-            raise SkillSetRuntimeReconcileError()
-
     def _passport_mcp_items(
         self,
         *,
@@ -485,65 +402,43 @@ class BotRuntimeProjector:
         )
         return items
 
-    async def _apply_non_skill_projection(
+    def _apply_passport_projection(
         self,
         *,
-        service,
-        scope: ProjectionScope,
-        identity_modes: Mapping[str, object],
-        engine: str,
-        bot_id: str,
-        owner_id: str,
-        projection: RuntimeProjection,
-        effective_cli_items: list[dict],
+        plan: ResolvedCapabilityPlan,
     ) -> None:
-        codes = set(projection.mcp_server_codes)
-        if scope.claim_all_mcp:
-            # The device-activated listener, and only it. A freshly active
-            # container holds no MCP configuration, so there is nothing to
-            # refresh against — the allow-list alone would whitelist every MCP
-            # with no endpoint or api_key behind it. The caller cannot name
-            # the codes itself: the projected set is only known here, after
-            # the plan resolves. Nothing is released on this path, so it can
-            # only ever add configuration.
-            claimed, released = frozenset(codes), frozenset()
-        else:
-            # A guard, never a source. ``claimed`` cannot grow past what the
-            # mutation declared, so a single-MCP add stays a single device
-            # write. ``- codes`` stops a release from deleting a code the
-            # default policy or a Skill dependency still supplies without any
-            # Set claiming it.
-            claimed = scope.claimed_mcp & codes
-            released = scope.released_mcp - codes
-            if claimed != scope.claimed_mcp or released != scope.released_mcp:
-                logger.info(
-                    "[BotRuntimeProjector] MCP scope guarded against the "
-                    "projected set: bot_id=%s, claimed %s->%s, released %s->%s",
-                    bot_id,
-                    sorted(scope.claimed_mcp), sorted(claimed),
-                    sorted(scope.released_mcp), sorted(released),
-                )
-        # One call, not two: how many device writes an MCP projection takes,
-        # and in what order, is decided by the service that owns device
-        # resolution. See ``SkillSetService.sync_mcp_projection``.
-        if not await service.sync_mcp_projection(
-            claimed=claimed, released=released, declared=codes
-        ):
-            raise SkillSetRuntimeReconcileError()
+        """Declare the Bot's complete MCP/CLI scope to the authorization service.
 
+        Not a runtime write, and deliberately not part of
+        ``EngineRuntimeProjection``: the Passport is the platform's
+        authorization record — which MCPs this Bot may reach and under whose
+        identity — and it is the same record for every engine. A whole-artifact
+        engine needs it no less than a per-domain one: its container is issued
+        a passport-service token as an egress rule (see
+        ``TeclawPublishTaskHandler``), so an un-updated manifest would leave a
+        valid token pointed at a scope that no longer matches the
+        configuration the container was given.
+
+        Kept on the projector in one copy, for the reason
+        ``_passport_mcp_items`` exists: this scope is overwrite-style, so a
+        second copy that drifted would silently reassert
+        ``identity_mode: "owner"`` for every MCP.
+        """
         try:
-            passport_codes = filter_passport_mcp_codes(projection.mcp_server_codes)
+            passport_codes = filter_passport_mcp_codes(
+                plan.projection.mcp_server_codes
+            )
             # Mandatory, not an optimisation — see ``_passport_mcp_items``.
             mcp_items = self._passport_mcp_items(
-                identity_modes=identity_modes,
-                bot_id=bot_id,
-                engine=engine,
+                identity_modes=plan.identity_modes,
+                bot_id=plan.bot_id,
+                engine=plan.engine,
                 codes=passport_codes,
             )
             self._passport.update_passport(
-                bot_id=bot_id,
-                user_id=owner_id,
-                engine_type=engine,
+                bot_id=plan.bot_id,
+                user_id=plan.owner_id,
+                engine_type=plan.engine,
                 resource_scope={
                     # Derived from the items rather than passed separately:
                     # ``unpack_resource_scope`` ignores ``mcp_codes`` once
@@ -551,55 +446,11 @@ class BotRuntimeProjector:
                     # silently diverge and only one would reach the passport service.
                     "mcp_codes": [item["mcp_code"] for item in mcp_items],
                     "mcp_items": mcp_items,
-                    "cli_items": effective_cli_items,
+                    "cli_items": plan.effective_cli_items,
                 },
             )
         except Exception as exc:
             raise SkillSetRuntimeReconcileError() from exc
-
-    async def _apply_pool_mappings(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        layout_engine: str,
-        mappings: list[PoolSkillMapping],
-        retired_mappings: list[PoolSkillMapping],
-        source_layout: SkillMappingSourceLayout,
-    ) -> None:
-        try:
-            contract_mappings = [*mappings, *retired_mappings]
-            supported_versions: object = None
-            if any(mapping.corpus == "center" for mapping in contract_mappings):
-                probe = await self._pool_runtime.probe(
-                    bot_id=bot_id,
-                    user_id=owner_id,
-                    engine=layout_engine,
-                )
-                supported_versions = probe.evidence.get(
-                    "supported_mapping_contract_versions"
-                )
-            contract = mapping_contract_for(contract_mappings, supported_versions)
-            published = await self._pool_runtime.publish_mappings(
-                bot_id=bot_id,
-                user_id=owner_id,
-                mappings=mappings,
-                retired_mappings=retired_mappings,
-                source_layout=source_layout,
-                mapping_contract_version=contract,
-            )
-            verified = published and await self._pool_runtime.verify_mappings(
-                bot_id=bot_id,
-                user_id=owner_id,
-                mappings=mappings,
-                retired_mappings=retired_mappings,
-                source_layout=source_layout,
-                mapping_contract_version=contract,
-            )
-        except Exception as exc:
-            raise SkillSetRuntimeReconcileError() from exc
-        if not verified:
-            raise SkillSetRuntimeReconcileError()
 
     @staticmethod
     def _desired_skills(projection: RuntimeProjection) -> list[dict[str, str | None]]:

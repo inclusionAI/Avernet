@@ -82,11 +82,11 @@ separately.
 
 This is the relocation. Nothing here may change what any engine does.
 
-- [ ] 3.1 Create `runtime_projections/per_domain.py` with
+- [x] 3.1 Create `runtime_projections/per_domain.py` with
       `PerDomainRuntimeProjection`, constructed with
       `SkillsPoolRuntimeProtocol` and `SkillsPoolLayoutRepositoryProtocol`.
 
-- [ ] 3.2 **Move** `_apply_skill_projection` and `_apply_pool_mappings` into
+- [x] 3.2 **Move** `_apply_skill_projection` and `_apply_pool_mappings` into
       it, comments intact — **including the two teclaw arms** at `:417-423`
       and `:426-432`. They look out of place in a class called
       "per-domain", and they are: they get deleted in 4.5, once
@@ -96,12 +96,12 @@ This is the relocation. Nothing here may change what any engine does.
       group promises not to make. The Pool-vs-legacy decision, the `retired`
       handling and the `SkillMappingSourceLayout` choice move **verbatim**.
 
-- [ ] 3.3 **Move** `_apply_non_skill_projection` into it, minus its `try/except`
+- [x] 3.3 **Move** `_apply_non_skill_projection` into it, minus its `try/except`
       Passport tail (`:549-574`). The `claim_all_mcp` branch, the
       claimed/released guard against the projected set, the guard-log and the
       `sync_mcp_projection` call move **verbatim**.
 
-- [ ] 3.4 Give it `apply`, composing the two moved halves with today's scope
+- [x] 3.4 Give it `apply`, composing the two moved halves with today's scope
       gating and today's two skip-logs, in today's order. Give it
       `validate_plan` carrying today's `engine == "teclaw"` Center checks from
       `snapshot_skill_mappings:118` and `_build_plan:332` — again transitional,
@@ -109,7 +109,7 @@ This is the relocation. Nothing here may change what any engine does.
       behaviour-preserving. Its docstring says both halves of that: what the
       method is for, and that the engine test inside it is scaffolding.
 
-- [ ] 3.5 **Extract** `_apply_passport_projection(*, plan, bot_id, owner_id)`
+- [x] 3.5 **Extract** `_apply_passport_projection(*, plan, bot_id, owner_id)`
       and keep it on `BotRuntimeProjector`. This method does **not** exist
       today: the Passport update is currently an unnamed `try/except` block at
       the tail of `_apply_non_skill_projection` (`:549-574`), reached only by
@@ -121,34 +121,34 @@ This is the relocation. Nothing here may change what any engine does.
       drifted copy silently reasserts `identityMode: "owner"`. Highest-risk
       step in the change. Its trigger stays `scope.mcp`, unchanged.
 
-- [ ] 3.6 In `bot_runtime_projector.py`: add `registry:
+- [x] 3.6 In `bot_runtime_projector.py`: add `registry:
       EngineRuntimeProjectionRegistry` to `__init__`, drop `pool_runtime` and
       `pool_layouts` (now only `PerDomainRuntimeProjection` uses them), and
       rewrite `project` as: resolve plan → `registry.for_engine(plan.engine)`
       → `await runtime.apply(...)` → `_apply_passport_projection(...)` under
       `if scope.mcp`. Delete the three moved methods.
 
-- [ ] 3.7 `project_mcp_and_cli`: collapse to the same four lines. Its
+- [x] 3.7 `project_mcp_and_cli`: collapse to the same four lines. Its
       "MCP/CLI only" behaviour is exactly what `apply` does when
       `scope.skills` is false, so it needs no second protocol method. Keep its
       docstring's explanation of *why* the caller wants that.
 
-- [ ] 3.8 `project_for_cleanup`: keep its own Center refusal and its explicit
+- [x] 3.8 `project_for_cleanup`: keep its own Center refusal and its explicit
       `service.sync_runtime(...)` — a deliberate legacy-synchronizer path, not
       the Pool path — then delegate the MCP half through `apply` and call the
       Passport. Add a comment recording that it has no production caller.
 
-- [ ] 3.9 `di/modules/skill_center_module.py`: one `@provider` building
+- [x] 3.9 `di/modules/skill_center_module.py`: one `@provider` building
       `EngineRuntimeProjectionRegistry` over both implementations.
       `PerDomainRuntimeProjection` needs `pool_runtime` / `pool_layouts`, both
       already bound. Leave `binder.bind(BotRuntimeProjector, ...)` alone.
 
-- [ ] 3.10 Tests: add a `_registry()` helper beside the fakes that builds a
+- [x] 3.10 Tests: add a `_registry()` helper beside the fakes that builds a
       **real** registry over both real implementations — a fake registry would
       test the wiring instead of the behaviour — and thread `registry=` into
       every direct `BotRuntimeProjector(...)` construction.
 
-- [ ] 3.11 Green check: `.venv/bin/python -m pytest
+- [x] 3.11 Green check: `.venv/bin/python -m pytest
       tests/community/core/skill_center/ tests/community/contracts/
       tests/community/core/mcp/ tests/community/di/
       tests/community/architecture/ -q`. **Beyond adding `registry=`, no
