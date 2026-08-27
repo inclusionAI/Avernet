@@ -1,19 +1,39 @@
 import asyncio
 
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskSpec,
+    AcceptanceCriteria,
+    Context,
+    Goal,
+    Metadata,
+    RuntimeInfo,
+    Status,
+    TaskNode,
+    TaskSpec,
 )
-from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import OpenApiAuthError
-from agentclaw.community.core.task.task_runner.integration.prompt_formatter import PromptFormatterImpl
-from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import (
+    OpenApiAuthError,
+)
+from agentclaw.community.core.task.task_runner.integration.prompt_formatter import (
+    PromptFormatterImpl,
+)
+from agentclaw.community.core.task.task_runner.integration.task_executor import (
+    TaskExecutor,
+)
 
 
 def _node(assignee="bot9:ent1"):
-    return TaskNode(node_id="c1", task_id="t1", status=Status.RUNNING,
-                    task_spec=TaskSpec(Metadata("t1", "T", "do"), Context("bg"),
-                                       Goal("O", [AcceptanceCriteria("a1", "d")])),
-                    run_info=RuntimeInfo(run_mode="single_bot", assignee=assignee),
-                    node_run_graph=None)  # type: ignore[arg-type]
+    return TaskNode(
+        node_id="c1",
+        task_id="t1",
+        status=Status.RUNNING,
+        task_spec=TaskSpec(
+            Metadata("t1", "T", "do"),
+            Context("bg"),
+            Goal("O", [AcceptanceCriteria("a1", "d")]),
+        ),
+        run_info=RuntimeInfo(run_mode="single_bot", assignee=assignee),
+        node_run_graph=None,
+    )  # type: ignore[arg-type]
 
 
 class _Bot:
@@ -24,11 +44,15 @@ class _Bot:
         self.sent = []
 
     async def ensure_grant(self, bot_id):
+        # 任务认领授权已由前端经 task_grant_service 透传到 secbaas;派发不调 ensure_grant(协议契约保留)。
         if self._gf:
             raise OpenApiAuthError("403")
 
     async def send_message(self, *, bot_id, message, metadata):
-        from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
+        from agentclaw.community.core.task.task_runner.integration.ports import (
+            BotSendResult,
+        )
+
         self.sent.append((bot_id, message, metadata))
         return BotSendResult(run_id=self._rid, session_id=self._sid)
 
@@ -70,7 +94,9 @@ def test_dispatch_single_bot_registers_handle():
     bot = _Bot()
     poller = _Poller()
     fmt = PromptFormatterImpl()
-    exe = TaskExecutor(bot=bot, bcs=None, formatter=fmt, context=_Ctx(), sink=None, poller=poller)
+    exe = TaskExecutor(
+        bot=bot, bcs=None, formatter=fmt, context=_Ctx(), sink=None, poller=poller
+    )
     ok = _run(exe.dispatch([_node()]))
     assert ok == [True]
     assert bot.sent[0][0] == "bot9:ent1"
@@ -78,13 +104,21 @@ def test_dispatch_single_bot_registers_handle():
     assert poller.registered[0].loop_task_id == "t1::c1"
 
 
-def test_dispatch_single_bot_grant_fail_returns_false():
-    bot = _Bot(grant_fail=True)
+def test_dispatch_single_bot_sends_assignee_verbatim():
+    """single_bot 直接按 assignee 原样派发(claim_on JOIN 在派发策略层完成,执行器不做表级授权 JOIN)。"""
+    bot = _Bot()
     poller = _Poller()
-    exe = TaskExecutor(bot=bot, bcs=None, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None, poller=poller)
+    exe = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=poller,
+    )
     ok = _run(exe.dispatch([_node()]))
-    assert ok == [False]
-    assert poller.registered == []
+    assert ok == [True]
+    assert bot.sent[0][0] == "bot9:ent1"  # assignee 原样,不归一
 
 
 def test_prompt_formatter_uses_context_and_node_spec():
@@ -101,8 +135,15 @@ def test_dispatch_single_bot_persists_session_and_run_id_to_extend_props():
     bot = _Bot(run_id="r_1", session_id="s_1")
     poller = _Poller()
     graph = _Graph()
-    exe = TaskExecutor(bot=bot, bcs=None, formatter=PromptFormatterImpl(),
-                       context=_Ctx(), sink=None, poller=poller, graph=graph)
+    exe = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=poller,
+        graph=graph,
+    )
     ok = _run(exe.dispatch([_node()]))
     assert ok == [True]
     assert len(graph.patches) == 1

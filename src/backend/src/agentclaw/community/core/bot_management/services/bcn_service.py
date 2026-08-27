@@ -6,6 +6,8 @@
 - Bot create/start 时的 Provider Bot 注册 (下行, 见 register_provider_bot)
 """
 
+import threading
+import time
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Mapping, Optional
 
 import httpx
@@ -52,6 +54,7 @@ def _build_auth_headers(request_headers: Optional[Mapping[str, str]]) -> Dict[st
 
 class BcnServiceError(Exception):
     """BCN service error."""
+
     pass
 
 
@@ -109,6 +112,11 @@ class BcnService:
     - POST /admin/bots/onboard - Bot 入网/更新信息
     """
 
+    # list_bots_by_task_modes 命中 BCS 出网查询的进程内 TTL 缓存(roster 静态、变更罕见)。
+    # 仅缓存成功结果;异常不缓存(交调用方 fail-open)。BcnService 为 DI 单例,缓存随实例存活。
+    # 跨 worker 不共享(各进程各一份),roster 短窗口内可接受 ≤TTL 的旧值。参考 MarketCache 内存层。
+    TASK_MODE_ROSTER_CACHE_TTL: float = 60.0
+
     def __init__(
         self,
         http_client: HttpClient,
@@ -129,7 +137,31 @@ class BcnService:
         self._http = http_client
         self._config = config if config is not None else BcnConfig()
         self._timeout = timeout
+        self._roster_cache: dict[tuple, tuple] = {}
+        self._roster_cache_lock = threading.Lock()
         logger.info("[BcnService] Initialized")
+
+    def _roster_cache_get(self, key: tuple) -> Optional[List[Dict[str, Any]]]:
+        """读进程内 TTL 缓存;未命中/过期返回 None(后续走真实 HTTP,不缓存错误)。"""
+        now = time.time()
+        with self._roster_cache_lock:
+            entry = self._roster_cache.get(key)
+            if entry is None:
+                return None
+            items, ts = entry
+            if now - ts > self.TASK_MODE_ROSTER_CACHE_TTL:
+                return None
+            return list(items)  # 浅拷贝,上层 append/pop 不污染缓存
+
+    def _roster_cache_set(self, key: tuple, items: List[Dict[str, Any]]) -> None:
+        """写进程内 TTL 缓存(仅成功结果);存浅拷贝以防外部引用被改。"""
+        with self._roster_cache_lock:
+            self._roster_cache[key] = (list(items), time.time())
+
+    def invalidate_task_mode_roster_cache(self) -> None:
+        """清空 task-mode roster 进程内缓存。dream_mode 开关变更后可调用以立即生效。"""
+        with self._roster_cache_lock:
+            self._roster_cache.clear()
 
     def onboard_bot(
         self,
@@ -192,9 +224,7 @@ class BcnService:
             # BCN 接口返回格式：{"bot_uuid": "xxx", "onboarded": true, "name": "xxx"}
             # 或者错误格式：{"error": "xxx"} 或 {"message": "xxx"}
             if "error" in response_data:
-                raise BcnServiceError(
-                    f"BCN API error: {response_data.get('error')}"
-                )
+                raise BcnServiceError(f"BCN API error: {response_data.get('error')}")
 
             bot_uuid = response_data.get("bot_uuid")
             onboarded = response_data.get("onboarded", False)
@@ -438,7 +468,11 @@ class BcnService:
 
             # BCN 接口返回格式：{"success": true, "data": {...}}
             if not response_data.get("success"):
-                error_msg = response_data.get("error") or response_data.get("message") or "Unknown error"
+                error_msg = (
+                    response_data.get("error")
+                    or response_data.get("message")
+                    or "Unknown error"
+                )
                 raise BcnServiceError(f"BCN switch_bot API error: {error_msg}")
 
             data = response_data.get("data", {})
@@ -458,9 +492,7 @@ class BcnService:
                 f"status={status} body={error_body} "
                 f"provider_bot_ref={provider_bot_ref}"
             )
-            raise BcnServiceError(
-                f"BCN switch_bot HTTP error: {status} - {error_body}"
-            )
+            raise BcnServiceError(f"BCN switch_bot HTTP error: {status} - {error_body}")
         except httpx.TimeoutException as e:
             logger.error(
                 f"[BcnService.switch_bot] Timeout: {e} "
@@ -522,9 +554,7 @@ class BcnService:
         )
 
         try:
-            response = self._http.delete(
-                path, headers=headers, timeout=self._timeout
-            )
+            response = self._http.delete(path, headers=headers, timeout=self._timeout)
             response.raise_for_status()
             logger.info(
                 f"[BcnService.delete_provider_bot] OK "
@@ -579,7 +609,9 @@ class BcnService:
         path = f"/providers/{provider_id}/bots/{bot_uuid}/attributes"
         try:
             response = self._http.get(
-                path, headers={"Authorization": f"Bearer {token}"}, timeout=self._timeout
+                path,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=self._timeout,
             )
             response.raise_for_status()
             data = response.json()
@@ -613,6 +645,19 @@ class BcnService:
         非 prod/pre 或凭据空时抛 :class:`BcnServiceError`(BBS 调用方按 fail-open 处理)。
         """
         env = get_current_env()
+        # 进程内 TTL 缓存命中优先(同 env/claim/dream/match 的重复/并发拉收敛为秒级命中);
+        # 命中外网成功后再回填,异常不缓存。
+        cache_key = (env, claim, dream, match)
+        cached = self._roster_cache_get(cache_key)
+        if cached is not None:
+            logger.info(
+                "[BcnService.list_bots_by_task_modes] HIT env=%s claim=%s dream=%s match=%s",
+                env,
+                claim,
+                dream,
+                match,
+            )
+            return cached
         provider_cfg = _get_provider_config(env, self._config)
         if not provider_cfg:
             raise BcnServiceError(
@@ -628,7 +673,10 @@ class BcnService:
             params["task_dream_mode"] = "true" if dream else "false"
         logger.info(
             "[BcnService.list_bots_by_task_modes] GET %s claim=%s dream=%s match=%s",
-            path, claim, dream, match,
+            path,
+            claim,
+            dream,
+            match,
         )
         try:
             response = self._http.get(
@@ -639,7 +687,9 @@ class BcnService:
             )
             response.raise_for_status()
             items = response.json().get("items", [])
-            return items if isinstance(items, list) else []
+            items = items if isinstance(items, list) else []
+            self._roster_cache_set(cache_key, items)
+            return items
         except httpx.HTTPStatusError as e:
             error_body = e.response.text[:500] if e.response else "No response"
             status = e.response.status_code if e.response else "N/A"
@@ -737,9 +787,7 @@ class BcnService:
                 f"[BcnService.check_admission] HTTP error: "
                 f"status={status} body={error_body} bot_uuid={bot_uuid}"
             )
-            raise BcnServiceError(
-                f"BCS admission HTTP error: {status} - {error_body}"
-            )
+            raise BcnServiceError(f"BCS admission HTTP error: {status} - {error_body}")
         except httpx.TimeoutException as e:
             logger.error(
                 f"[BcnService.check_admission] Timeout: {e} bot_uuid={bot_uuid}"

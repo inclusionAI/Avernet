@@ -397,6 +397,8 @@ class BaasConfig:
     default_ttl_minutes: int = 10080
     # Teclaw (pull-based external container) template uuid — deploy supplies it.
     teclaw_template_uuid: str = ""
+    # Eval (sandbox) ARCA template uuid for evaluation environment — deploy supplies it.
+    eval_template_uuid: str = ""
     # Personal bot via BaaS (poolab template) — deploy supplies it.
     personal_bot_template_uuid: str = ""
 

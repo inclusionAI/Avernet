@@ -26,6 +26,7 @@ from agentclaw.community.core.task.repository.serializers import (
     runtime_from_dict,
     task_spec_to_dict,
 )
+from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
@@ -57,6 +58,35 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
     @staticmethod
     def _json(value: Any) -> str | None:
         return json.dumps(value, ensure_ascii=False) if value is not None else None
+
+    @staticmethod
+    def _persistable_extend_props(props: dict[str, Any]) -> dict[str, Any]:
+        """Make run_info.extend_props JSON-serializable for persistence without
+        mutating the live node. ``pending_group_formation`` carries a live
+        GroupFormation from dispatch to _drain; serialize it to a dict here and
+        restore via ``_hydrated_extend_props`` on load (cross-instance round-trip)."""
+        if not props:
+            return props
+        gf = props.get("pending_group_formation")
+        if isinstance(gf, GroupFormation):
+            persisted = dict(props)
+            persisted["pending_group_formation"] = gf.to_dict()
+            return persisted
+        return props
+
+    @staticmethod
+    def _hydrated_extend_props(props: dict[str, Any]) -> dict[str, Any]:
+        """Inverse of ``_persistable_extend_props``: restore a serialized
+        GroupFormation so downstream attribute access (gf.collab_mode / bot_ids /
+        extend_props / form_coop_group) works on a graph loaded from the store."""
+        if not props:
+            return props
+        gf = props.get("pending_group_formation")
+        if isinstance(gf, dict):
+            restored = dict(props)
+            restored["pending_group_formation"] = GroupFormation.from_dict(gf)
+            return restored
+        return props
 
     @staticmethod
     def _graph_status(info: TaskInfoModel) -> Status:
@@ -104,7 +134,7 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
                         json.loads(runtime_row.acceptance_result)
                         if runtime_row and runtime_row.acceptance_result else None
                     ),
-                    "extend_props": (
+                    "extend_props": self._hydrated_extend_props(
                         json.loads(runtime_row.extend_props)
                         if runtime_row and runtime_row.extend_props else {}
                     ),
@@ -306,7 +336,7 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
                 else None
             )
             run_row.session_id = node.run_info.extend_props.get("session_id")
-            run_row.extend_props = self._json(node.run_info.extend_props)
+            run_row.extend_props = self._json(self._persistable_extend_props(node.run_info.extend_props))
             run_row.start_time = node.run_info.start_time
             run_row.end_time = node.run_info.end_time
             run_row.update_time = int(time.time() * 1000)

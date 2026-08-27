@@ -6,6 +6,7 @@ injected into each constructor, which is bound one layer below by the profile's
 infrastructure module (CommunityDatabase / SqliteDB / corp ZdasDB). Mirrors
 ``TaskQueueModule``.
 """
+
 from injector import Binder, Module, singleton
 
 from agentclaw.community.core.repository.implementations.task.task_action_log_repository import (
@@ -44,8 +45,12 @@ class TaskPersistenceModule(Module):
     """Bind the 5 task repository contracts to their unified ORM implementations."""
 
     def configure(self, binder: Binder) -> None:
-        binder.bind(TaskActionLogRepositoryProtocol, to=TaskActionLogRepository, scope=singleton)
-        binder.bind(TaskGraphRepositoryProtocol, to=TaskGraphRepository, scope=singleton)
+        binder.bind(
+            TaskActionLogRepositoryProtocol, to=TaskActionLogRepository, scope=singleton
+        )
+        binder.bind(
+            TaskGraphRepositoryProtocol, to=TaskGraphRepository, scope=singleton
+        )
         binder.bind(TaskInfoRepositoryProtocol, to=TaskInfoRepository, scope=singleton)
         binder.bind(TaskNodeRepositoryProtocol, to=TaskNodeRepository, scope=singleton)
         binder.bind(
