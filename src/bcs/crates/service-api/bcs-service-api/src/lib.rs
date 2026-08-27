@@ -154,7 +154,7 @@ pub use message_flow::{
     PersistentGroupSendOutcome, ProviderEventIngestCommand, ProviderEventSource,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
     TaskDispatchOutcome, TaskMessageCommand, TaskMessageOutcome, TaskRunAliasRegistration,
-    WebSendCommand, WebSendOutcome,
+    ChannelSenderIdentity, WebSendCommand, WebSendOutcome,
 };
 pub use onboard::{
     AdminBotOnboardCommand, BotOnboardCommand, BotOnboardResult, BotOnboardingService,

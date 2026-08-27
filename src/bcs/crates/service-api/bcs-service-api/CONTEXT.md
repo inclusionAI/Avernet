@@ -12,6 +12,10 @@
 - Session-scoped Workbench connection-token use cases, exact-session connect
   reauthorization contracts, and the outbound token signing/verification port.
 - Channel conversation mapping lookup by BCS session id, with optional channel-type filtering.
+- An optional `ChannelSenderIdentity` on Human WebSend commands. The Channel
+  service may populate it only for an opted-in Bot binding after commands and
+  HumanInput replies have been consumed; other application entry points leave
+  it absent.
 - Transport-neutral Session launch commands that receive adapter-normalized
   Human or Bot identity while keeping credential parsing and protocol response
   projection outside the application boundary.

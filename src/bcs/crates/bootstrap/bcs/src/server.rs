@@ -513,6 +513,7 @@ impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher 
                 thinking: None,
                 idempotency_key: Some(idempotency_key),
                 source_im_message_id: None,
+                channel_sender_identity: None,
                 sender_conn_id: None,
                 provider_bypass_headers: Vec::new(),
             })

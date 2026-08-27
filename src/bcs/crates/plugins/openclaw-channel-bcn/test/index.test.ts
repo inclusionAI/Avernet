@@ -329,6 +329,38 @@ describe('openclaw-channel-bcn', () => {
     );
   });
 
+  it('uses opted-in Channel user identity for OpenClaw sender metadata', () => {
+    assert.deepEqual(
+      resolveInboundSender(
+        'hello',
+        {
+          source: 'dingtalk',
+          user_id: '410025',
+          actor_id: 'human_410025',
+          actor_name: '张三',
+          identity_forwarding: true,
+        },
+      ),
+      {
+        fromDisplayName: '张三',
+        senderName: '张三',
+        senderId: '410025',
+        strippedText: 'hello',
+      },
+    );
+
+    assert.equal(
+      resolveInboundSender('hello', {
+        source: 'dingtalk',
+        user_id: '410025',
+        actor_id: 'human_410025',
+        actor_name: '张三',
+        identity_forwarding: false,
+      }).senderId,
+      'human_410025',
+    );
+  });
+
   it('uses legacy from_bot_id as the Bot SenderId', () => {
     assert.deepEqual(
       resolveInboundSender(
