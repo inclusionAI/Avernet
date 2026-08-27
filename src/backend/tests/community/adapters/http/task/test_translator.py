@@ -140,7 +140,18 @@ class TestClawMind:
         assert d["status"] == "succeeded"                # 从底层 flow_runs.status 推(非顶层 node_succeeded)
         assert d["result"]["success"] is True
         assert d["result"]["data"] == {"answer": 42}
-        assert d["execution_graph"] == self._BODY["ext_info"]   # 全量 ext_info → execution_graph
+        # execution_graph 转结构化 TaskExecutionGraph(graph_to_dict 形状),非原始 ext 透传
+        eg = d["execution_graph"]
+        assert eg["run_id"] == 0                           # flow_runs.id="fr1" 非整 → 0
+        assert eg["status"] == "DONE"                       # succeeded → DONE
+        assert eg["output"] == {}                           # 无 result_json
+        assert eg["extend_props"]["flow_id"] == "flow-abc-123"
+        assert len(eg["tasks"]) == 1
+        assert eg["tasks"][0]["node_id"] == "N1"
+        assert eg["tasks"][0]["status"] == "DONE"
+        assert eg["tasks"][0]["task_spec"]["metadata"]["title"] == "N1"  # 无 node_title → 退 node_id
+        assert eg["tasks"][0]["run_info"]["output"] == {"answer": 42}
+        assert eg["relations"] == []                        # N1 无 nodeOutputKeys
         assert d["_raw_callback_body"] == self._BODY            # 原始 body → orig_callback_data
         assert "_ext_info" not in d["result"]                    # 不再重复进 result
 
@@ -172,6 +183,165 @@ class TestClawMind:
         body = {"workflow_id": "w", "flow_id": "f", "status": "succeeded",
                 "ext_info": {"flow_runs": {"status": "succeeded"}}}
         assert translate_claw_mind(body, "result").data.data["workflow_instance_id"] == ""
+
+    # 真实 ClawMind 回投 shape:flow_runs/node_executions 在 ext_info 下,*_json 为 JSON 字符串,
+    # 节点 DAG 由各节点 input_json.params.nodeOutputKeys 表达(report 多父)。
+    _REAL_BODY = {
+        "workflow_id": "tech-research-pipeline-simple-pre-2",
+        "flow_id": "c5d77c99-f299-42d8-98ce-ead330f0dfd6",
+        "status": "node_succeeded",
+        "ext_info": {
+            "flow_runs": {
+                "id": 36018,
+                "flow_id": "c5d77c99-f299-42d8-98ce-ead330f0dfd6",
+                "workflow_id": "tech-research-pipeline-simple-pre-2",
+                "workflow_title": "技术调研工作流（精简离线版）",
+                "status": "succeeded",
+                "params_json": '{"topic":"大模型"}',
+                "input_json": '{"message":null,"params":{"topic":"大模型"},"digest":"x","fileCount":0}',
+                "result_json": '{"status":"succeeded","flowId":"c5d77","workflowId":"tech-research-pipeline-simple-pre-2","phase":"P3","durationMs":237223,"nodeSummary":"succeeded=3","lastNodeOutput":{"nodeId":"report"},"outputs":{"report_path":"runs/x/report.md","conclusions":["结论1"]}}',
+                "node_count": 3,
+                "succeeded_count": 4,   # 脏数据(实为 3 节点),不应原样进快照
+                "failed_count": 0,
+                "total_duration_ms": 237223,
+                "total_token_usage": None,
+                "triggered_by": "facade:tech-research-pipeline-simple-pre-2",
+                "current_phase": None,
+                "started_at": 1787719147,
+                "completed_at": 1787719384,
+                "origin_session_id": "1ccf28e2-1155-4e36-9a97-5c9d2db2c3c4",
+                "credentials_json": '{"TOKEN":"DEVICE-xxxx"}',   # 鉴权密钥,不进快照
+                "identity_key": "f526...c274",                     # 输入摘要,不进快照
+                "plugin_version": "0.9.0",                         # 不进快照
+                "origin_session_key": "agent:main:session:1ccf:user:35983",
+                "origin_bot_id": "20260824_nwlj25w6:35983",
+                "user_id": "35983",
+            },
+            "node_executions": [
+                {"id": 464121, "node_id": "report", "executor_type": "embedded-agent",
+                 "status": "succeeded", "attempt": 1,
+                 "input_json": '{"params":{"topic":"大模型","sessionKey":"s","ownerId":"35983"},"nodeOutputKeys":["scope-decompose","analysis"]}',
+                 "error_text": None, "duration_ms": 118282,
+                 "token_usage_json": '{"input":54521,"output":4024,"cacheRead":20608,"totalTokens":27121,"toolCalls":2}',
+                 "node_title": "调研报告",
+                 "system_context_json": '{"outputContractValidated":true,"outputContractIssues":0}',
+                 "embedded_session_key": "agent:main:embedded:report:c5d77",
+                 "session_key": "agent:main:session:1ccf:user:35983",
+                 "session_id": "1ccf28e2-1155-4e36-9a97-5c9d2db2c3c4",
+                 "started_at": 1787719266, "completed_at": 1787719384},
+                {"id": 464086, "node_id": "analysis", "executor_type": "embedded-agent",
+                 "status": "succeeded", "attempt": 1,
+                 "input_json": '{"params":{"topic":"大模型"},"nodeOutputKeys":["scope-decompose"]}',
+                 "error_text": None, "duration_ms": 82179,
+                 "token_usage_json": '{"input":1761,"output":2728,"cacheRead":16064,"totalTokens":20553}',
+                 "node_title": "综合分析",
+                 "system_context_json": '{"outputContractValidated":true,"outputContractIssues":0}',
+                 "started_at": 1787719184, "completed_at": 1787719266},
+                {"id": 464047, "node_id": "scope-decompose", "executor_type": "embedded-agent",
+                 "status": "succeeded", "attempt": 1,
+                 "input_json": '{"params":{"topic":"大模型"},"nodeOutputKeys":[]}',
+                 "error_text": None, "duration_ms": 33361,
+                 "token_usage_json": '{"input":6255,"output":1117,"cacheRead":10304,"totalTokens":17676}',
+                 "node_title": "调研拆题",
+                 "system_context_json": '{"outputContractValidated":true,"outputContractIssues":0}',
+                 "started_at": 1787719150, "completed_at": 1787719183},
+            ],
+        },
+    }
+
+    def test_execution_graph_is_structured_task_graph_real_payload(self):
+        g = translate_claw_mind(self._REAL_BODY, "result").data.data["execution_graph"]
+        assert g is not None
+        # 图级
+        assert g["run_id"] == 36018
+        assert g["task_id"] == ""
+        assert g["loop_round"] == 0
+        assert g["status"] == "DONE"
+        assert g["output"]["phase"] == "P3"
+        assert g["output"]["nodeSummary"] == "succeeded=3"
+        assert g["extend_props"]["workflow_id"] == "tech-research-pipeline-simple-pre-2"
+        assert g["extend_props"]["workflow_title"] == "技术调研工作流（精简离线版）"
+        assert g["extend_props"]["flow_id"] == "c5d77c99-f299-42d8-98ce-ead330f0dfd6"
+        assert g["extend_props"]["params"] == {"topic": "大模型"}
+        assert g["extend_props"]["total_duration_ms"] == 237223
+        assert g["extend_props"]["triggered_by"] == "facade:tech-research-pipeline-simple-pre-2"
+        assert g["extend_props"]["origin_session_id"] == "1ccf28e2-1155-4e36-9a97-5c9d2db2c3c4"
+        # 密钥/摘要/版本/脏计数不进快照
+        for forbidden in ("credentials_json", "identity_key", "plugin_version",
+                          "succeeded_count", "failed_count", "node_count"):
+            assert forbidden not in g["extend_props"], f"{forbidden} 不应进 execution_graph"
+        # 节点
+        nodes = {n["node_id"]: n for n in g["tasks"]}
+        assert set(nodes) == {"report", "analysis", "scope-decompose"}
+        report = nodes["report"]
+        assert report["task_id"] == ""
+        assert report["status"] == "DONE"
+        assert report["task_spec"]["metadata"]["task_id"] == "report"
+        assert report["task_spec"]["metadata"]["title"] == "调研报告"
+        assert report["task_spec"]["metadata"]["instruction"] == ""
+        assert report["task_spec"]["goal"]["acceptances"] == []
+        assert report["run_info"]["start_time"] == 1787719266000   # 秒 → 毫秒
+        assert report["run_info"]["end_time"] == 1787719384000
+        assert report["run_info"]["run_mode"] is None
+        assert report["run_info"]["output"] == {}                    # 真实 payload 节点无 output_json
+        rep = report["run_info"]["extend_props"]
+        assert rep["executor_type"] == "embedded-agent"
+        assert rep["attempt"] == 1
+        assert rep["token_usage"]["input"] == 54521
+        assert rep["token_usage"]["totalTokens"] == 27121
+        assert rep["duration_ms"] == 118282
+        assert rep["started_at"] == 1787719266                       # 原始秒保留
+        assert rep["input"]["nodeOutputKeys"] == ["scope-decompose", "analysis"]   # input_json 顶层
+        assert rep["input"]["params"]["topic"] == "大模型"
+        assert rep["system_context"] == {"outputContractValidated": True, "outputContractIssues": 0}
+        # 多父 DAG(nodeOutputKeys)→ relations 全保留
+        edges = {(e["src_id"], e["dst_id"]) for e in g["relations"]}
+        assert edges == {("scope-decompose", "analysis"),
+                         ("scope-decompose", "report"),
+                         ("analysis", "report")}
+        assert all(e["type"] == "DEPENDENCY" for e in g["relations"])
+
+    def test_execution_graph_status_mapping(self):
+        cases = {
+            "succeeded": "DONE", "completed": "DONE", "node_succeeded": "DONE", "success": "DONE",
+            "failed": "FAILED", "node_failed": "FAILED",
+            "cancelled": "CANCELLED", "canceled": "CANCELLED", "aborted": "CANCELLED",
+            "running": "RUNNING", "started": "RUNNING", "in_progress": "RUNNING",
+            "": "PENDING", "unknown_xyz": "PENDING",
+        }
+        for src, want in cases.items():
+            body = {"workflow_id": "w", "flow_id": "f", "status": src,
+                    "ext_info": {"flow_runs": {"id": 1, "status": src,
+                                               "result_json": "{}", "params_json": "{}"},
+                                 "node_executions": []}}
+            g = translate_claw_mind(body, "result").data.data["execution_graph"]
+            assert g["status"] == want, f"{src!r} → {g['status']!r}, want {want!r}"
+            assert g["run_id"] == 1
+
+    def test_execution_graph_node_failed_status_and_error(self):
+        body = {"workflow_id": "w", "flow_id": "f", "status": "node_failed",
+                "ext_info": {"flow_runs": {"origin_session_id": "S-1", "status": "failed"},
+                             "node_executions": [{"node_id": "N1", "status": "failed",
+                                                  "error_text": "boom", "node_title": "调研拆题"}]}}
+        g = translate_claw_mind(body, "result").data.data["execution_graph"]
+        assert g["status"] == "FAILED"
+        assert g["tasks"][0]["status"] == "FAILED"
+        assert g["tasks"][0]["task_spec"]["metadata"]["title"] == "调研拆题"
+        assert g["tasks"][0]["run_info"]["extend_props"]["error_text"] == "boom"
+
+    def test_execution_graph_filters_dangling_edges(self):
+        # nodeOutputKeys 引用未执行的节点 → 悬挂边被过滤
+        body = {"workflow_id": "w", "flow_id": "f", "status": "succeeded",
+                "ext_info": {"flow_runs": {"status": "succeeded"},
+                             "node_executions": [{"node_id": "n", "status": "succeeded",
+                                 "input_json": '{"params":{},"nodeOutputKeys":["ghost","n2"]}'}]}}
+        g = translate_claw_mind(body, "result").data.data["execution_graph"]
+        assert g["relations"] == []
+        assert len(g["tasks"]) == 1
+
+    def test_execution_graph_empty_ext_returns_none(self):
+        body = {"workflow_id": "w", "flow_id": "f", "status": "started", "ext_info": {}}
+        assert translate_claw_mind(body, "start").data.data["execution_graph"] is None
 
 
 class TestBCN:

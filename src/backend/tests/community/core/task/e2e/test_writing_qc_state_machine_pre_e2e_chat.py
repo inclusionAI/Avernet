@@ -14,7 +14,7 @@ gated by ``AVERNET_PRE_TASK_E2E=1``;无需起 singlebox,直接打预发:
   [AVERNET_E2E_COOKIE=<cookie文件路径 或 整段Cookie原文>] \\
   [AVERNET_PRE_TASK_E2E_TIMEOUT=2000] \\
   src/backend/.venv/bin/python -m pytest \\
-    src/backend/tests/community/core/task/e2e/test_writing_qc_state_machine_pre_e2e.py -s
+    src/backend/tests/community/core/task/e2e/test_writing_qc_state_machine_pre_e2e_yaml.py -s
 
 # 场景
 
