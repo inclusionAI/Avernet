@@ -38,6 +38,10 @@ from ._session_state import SessionState
 
 logger = get_logger("core-bot-run")
 
+# Best-effort chat.abort 自身超时预算：超时后截断 abort，确保 TimeoutError 及时上抛。
+# 落在 _send_request 默认 30s 超时之内，留充足余量。
+_ABORT_TIMEOUT_SECONDS: float = 3.0
+
 
 def _public_interaction_envelope(
     envelope: JsonObject,
@@ -440,7 +444,17 @@ class AsyncChatClient:
 
                 # 5. 等待主对话事件完成
                 if timeout:
-                    await asyncio.wait_for(state.chat_complete.wait(), timeout=timeout)
+                    try:
+                        await asyncio.wait_for(
+                            state.chat_complete.wait(), timeout=timeout
+                        )
+                    except TimeoutError:
+                        # 主对话超时：best-effort 终止 engine 侧会话，再裸 raise
+                        # 原 TimeoutError（不 raise ... from，保持异常链与类型不变，
+                        # 维护 _baas_service/_claw_service/_executor 的 except TimeoutError
+                        # 契约）。
+                        await self._abort_session(session_key)
+                        raise
                 else:
                     # 无超时等待
                     await state.chat_complete.wait()
@@ -690,6 +704,34 @@ class AsyncChatClient:
                 return
 
     # ── 私有方法 ──────────────────────────────────────────────────────────
+
+    async def _abort_session(self, session_key: str) -> None:
+        """Best-effort 发送 chat.abort 终止 engine 侧会话。
+
+        在 send_message 主对话超时后调用：
+        - 断连时直接跳过（不触发网络调用）；
+        - 自身受 _ABORT_TIMEOUT_SECONDS 硬上限截断，避免延迟 TimeoutError 上抛；
+        - 任何异常（包括 TimeoutError）只记 warning 并吞掉，保证不影响
+          外层裸 raise 的原 TimeoutError 类型与异常链。
+        """
+        if not self.is_connected:
+            return
+        assert self._client is not None
+        try:
+            await asyncio.wait_for(
+                self._client.chat_abort(session_key=session_key),
+                timeout=_ABORT_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            logger.warning(
+                "[abort] chat.abort timed out: session_key=%s", session_key
+            )
+        except Exception as e:  # noqa: BLE001 — best-effort，吞掉所有异常
+            logger.warning(
+                "[abort] chat.abort failed: session_key=%s, error=%s",
+                session_key,
+                e,
+            )
 
     def _get_session(self, session_key: str) -> SessionState | None:
         """获取指定 sessionKey 的状态（支持模糊匹配）。"""

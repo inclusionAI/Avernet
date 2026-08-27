@@ -49,6 +49,7 @@ def mock_bot_ws_instance(mock_bot_ws):
     instance.close = AsyncMock()
     instance.chat_send = AsyncMock()
     instance.chat_inject = AsyncMock()
+    instance.chat_abort = AsyncMock()
     instance.connected = True
     return instance
 
@@ -402,6 +403,166 @@ class TestSendMessage:
         assert content == "new content"
         assert agent_payloads == []
         assert sk not in client._sessions
+
+    @pytest.mark.asyncio
+    async def test_send_message_timeout_triggers_chat_abort(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """超时后应 best-effort 调用 chat.abort，且 sessionKey 与 chat_send 一致。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        # chat_send 不触发 chat_complete → 主对话超时
+        with pytest.raises(TimeoutError):
+            await client.send_message("Hi", session_key="abort-session", timeout=0.01)
+
+        # chat.abort 被调用一次，且 session_key 与 chat_send 一致
+        mock_bot_ws_instance.chat_abort.assert_awaited_once()
+        abort_kwargs = mock_bot_ws_instance.chat_abort.await_args.kwargs
+        send_kwargs = mock_bot_ws_instance.chat_send.await_args.kwargs
+        assert abort_kwargs["session_key"] == send_kwargs["session_key"]
+        assert abort_kwargs["session_key"] == "abort-session"
+
+    @pytest.mark.asyncio
+    async def test_send_message_timeout_abort_failure_still_propagates_timeout(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """chat.abort 抛异常时应被吞掉，仍抛原 TimeoutError（而非 RuntimeError）。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+        mock_bot_ws_instance.chat_abort.side_effect = RuntimeError("abort failed")
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        with pytest.raises(TimeoutError):
+            await client.send_message("Hi", timeout=0.01)
+
+        mock_bot_ws_instance.chat_abort.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_send_message_timeout_abort_self_timeout_still_propagates(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """chat.abort 自身阻塞过久时应被 _ABORT_TIMEOUT_SECONDS 截断，仍抛 TimeoutError。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+        # chat_abort 阻塞远超 _ABORT_TIMEOUT_SECONDS（3.0s）
+        mock_bot_ws_instance.chat_abort.side_effect = asyncio.sleep(100)
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        import time
+
+        start = time.monotonic()
+        with pytest.raises(TimeoutError):
+            await client.send_message("Hi", timeout=0.01)
+        elapsed = time.monotonic() - start
+        # abort 被截断，整体不应超过 _ABORT_TIMEOUT_SECONDS + 少量余量
+        assert elapsed < 5.0
+        mock_bot_ws_instance.chat_abort.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_send_message_timeout_skips_abort_when_disconnected(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """断连时 _abort_session 应跳过 chat.abort，仍抛 TimeoutError。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        # chat_send 成功返回后、主对话等待超时前，将连接标记为断开。
+        # 这样 send_message 顶层 is_connected 检查通过，而 _abort_session
+        # 内部 is_connected=False，应跳过 chat.abort。
+        def _drop_connection(*args, **kwargs):
+            mock_bot_ws_instance.connected = False
+
+        mock_bot_ws_instance.chat_send.side_effect = _drop_connection
+
+        with pytest.raises(TimeoutError):
+            await client.send_message("Hi", timeout=0.01)
+
+        mock_bot_ws_instance.chat_abort.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_send_message_wait_result_false_does_not_abort(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """wait_result=False 不等待、不触发 abort。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        await client.send_message("Hi", wait_result=False, timeout=1.0)
+
+        mock_bot_ws_instance.chat_abort.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_send_message_timeout_none_does_not_abort(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """timeout=None 正常完成时不触发 abort。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        async def fire_chat_complete(*args, **kwargs):
+            sk = kwargs["session_key"]
+            state = client._sessions.get(sk)
+            if state:
+                state.chat_complete.set()
+
+        mock_bot_ws_instance.chat_send.side_effect = fire_chat_complete
+
+        await client.send_message("Hi", timeout=None)
+
+        mock_bot_ws_instance.chat_abort.assert_not_awaited()
 
 
 # ==================== close tests ====================
