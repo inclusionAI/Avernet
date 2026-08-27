@@ -41,10 +41,12 @@ class WorkOrderBizType(_DocumentedEnum):
 
     SPACE_JOIN = "SPACE_JOIN"
     BOT_COLLABORATOR = "BOT_COLLABORATOR"
+    BOT_FRIEND = "BOT_FRIEND"
 
     __descriptions__ = {
         "SPACE_JOIN": "A request to join a Space.",
         "BOT_COLLABORATOR": "A request to jointly edit a Bot.",
+        "BOT_FRIEND": "A Human-to-Bot or Bot-to-Bot friend request.",
     }
 
 
@@ -336,7 +338,9 @@ class WorkOrderListItem(_UtcResponseModel):
     work_order_id: int | None = Field(
         description="Related work-order identifier, when one exists."
     )
-    work_order_no: str = Field(description="Human-readable work-order number.")
+    work_order_no: str | None = Field(
+        description="Human-readable work-order number, when one exists."
+    )
     notification_id: int | None = Field(
         description="Related notification identifier, or null for approval-only items."
     )

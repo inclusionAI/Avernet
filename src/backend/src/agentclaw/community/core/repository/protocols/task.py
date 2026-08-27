@@ -4,6 +4,7 @@ Every member is ``@abstractmethod`` (an implementation that omits one fails at
 construction naming the missing member). Domain imports are ``TYPE_CHECKING``
 -only — see ``core/repository/README.md`` for why that direction is load-bearing.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -142,7 +143,9 @@ class TaskNodeRunInfoRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
-    def get_latest(self, task_id: str, node_id: str) -> Optional["TaskNodeRunInfoRecord"]:
+    def get_latest(
+        self, task_id: str, node_id: str
+    ) -> Optional["TaskNodeRunInfoRecord"]:
         """Return the row with ``max(retry)`` for the node, or ``None``."""
         ...
 
@@ -159,7 +162,9 @@ class TaskNodeRunInfoRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
-    def list_by_assignee(self, assignee: str, *, limit: int = 100) -> list["TaskNodeRunInfoRecord"]:
+    def list_by_assignee(
+        self, assignee: str, *, limit: int = 100
+    ) -> list["TaskNodeRunInfoRecord"]:
         """Rows whose ``assignee`` matches (backs ``idx_assignee``)."""
         ...
 
@@ -243,7 +248,8 @@ class TaskCallbackRepositoryProtocol(Protocol):
 
     @abstractmethod
     def get_latest_by_session(
-        self, main_session_id: str,
+        self,
+        main_session_id: str,
     ) -> Optional["TaskCallbackRecord"]:
         """Latest callback for ``main_session_id`` (``gmt_modified``/``id`` desc); ``None`` if absent.
 
@@ -258,6 +264,7 @@ class TaskCallbackRepositoryProtocol(Protocol):
         ``process_status == "PROCESSED"`` means the event was already applied
         and must be acknowledged without replaying the graph mutation."""
         ...
+
 
 @runtime_checkable
 class TaskGraphRepositoryProtocol(Protocol):

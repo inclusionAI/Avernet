@@ -84,26 +84,33 @@ def _user() -> dict:
     return {"id": USER, "username": "caller@example.com"}
 
 
-def _token(user: dict | None) -> str:
+def _token(user: dict | None, *, audience: str | None = "backend", omit_audience: bool = False) -> str:
     now = int(time.time())
     principals: list[dict] = []
     if user is not None:
         principals.append({"type": "user", "subject": user})
-    return jwt.encode(
-        {
-            "iss": "gateway",
-            "aud": "backend",
-            "iat": now,
-            "exp": now + 60,
-            "principals": principals,
-        },
-        KEY,
-        algorithm="HS256",
-    )
+    claims = {
+        "iss": "gateway",
+        "iat": now,
+        "exp": now + 60,
+        "principals": principals,
+    }
+    if audience is not None and not omit_audience:
+        claims["aud"] = audience
+    return jwt.encode(claims, KEY, algorithm="HS256")
 
 
-def _auth(user: dict | None = None) -> dict[str, str]:
-    return {PRINCIPAL_HEADER: _token(user=user)}
+def _auth(
+    user: dict | None = None,
+    *,
+    audience: str | None = "backend",
+    omit_audience: bool = False,
+) -> dict[str, str]:
+    return {
+        PRINCIPAL_HEADER: _token(
+            user=user, audience=audience, omit_audience=omit_audience
+        )
+    }
 
 
 def _make_app(staff_dept: StaffDeptPlugin | None = None) -> FastAPI:
@@ -197,6 +204,22 @@ def test_unwired_lookup_returns_null_fields_200():
     assert data["dept_no"] is None
     assert data["dept_name"] is None
     assert data["dept_path"] is None
+
+
+@pytest.mark.parametrize(
+    "auth_kwargs", [{"audience": "not-our-audience"}, {"omit_audience": True}]
+)
+def test_ordinary_http_lookup_does_not_validate_audience(
+    auth_kwargs: dict[str, object],
+):
+    """The decoupled ordinary HTTP seam validates the signature, not ``aud``."""
+    client = TestClient(_make_app(), raise_server_exceptions=False)
+    resp = client.get(
+        "/api/v1/org/user",
+        headers=_auth(_user(), **auth_kwargs),
+        params={"user_id": LOOKED_UP},
+    )
+    assert resp.status_code == 200, resp.text
 
 
 def test_wired_reader_returns_lookup_result_200():
