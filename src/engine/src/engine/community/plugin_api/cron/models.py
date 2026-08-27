@@ -19,8 +19,8 @@ class CronJob(BaseModel):
     enabled: bool = True
     schedule: dict[str, Any]
     payload: dict[str, Any]
-    owner_id: Optional[str] = None
-    bot_id: Optional[str] = None
+    owner_id: Optional[str] = Field(default=None, description="创建/拥有该 cron 任务的 owner 标识")
+    bot_id: Optional[str] = Field(default=None, description="与该 cron 任务关联的 bot 标识")
     session_target: str = "isolated"
     state: dict[str, Any] = Field(default_factory=dict)
     notify: Optional[CronNotifyConfig] = None
@@ -54,8 +54,8 @@ class CreateJobRequest(BaseModel):
     name: str
     schedule: dict[str, Any]
     payload: dict[str, Any]
-    owner_id: Optional[str] = None
-    bot_id: Optional[str] = None
+    owner_id: Optional[str] = Field(default=None, description="创建/拥有该 cron 任务的 owner 标识")
+    bot_id: Optional[str] = Field(default=None, description="与该 cron 任务关联的 bot 标识")
     session_target: str = "isolated"
     enabled: bool = True
     notify: Optional[CronNotifyConfig] = None
