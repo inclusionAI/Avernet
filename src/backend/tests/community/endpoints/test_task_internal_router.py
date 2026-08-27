@@ -240,6 +240,35 @@ def list_scoped_by_user_id():
     pass
 
 
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/list",
+    scenario="pagination_requires_page_and_page_size_together",
+    input=CaseInput(query_params={"page": 1}),
+    expect=ExpectError(status=400),
+)
+def list_pagination_requires_both_arguments():
+    """A partial pagination request is rejected instead of silently changing shape."""
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/list",
+    scenario="paginated_ok",
+    seed=_seed_task_service,
+    input=CaseInput(query_params={"page": 1, "page_size": 20}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"total": 1, "items": [{"task_id": "task-endpoint-1"}]},
+        },
+    ),
+)
+def list_paginated():
+    """A complete pagination request returns the Page envelope."""
+
+
 # Legacy callback/report adapter.
 @endpoint_test(
     method="POST",
