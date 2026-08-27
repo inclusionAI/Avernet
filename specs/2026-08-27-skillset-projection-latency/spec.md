@@ -56,17 +56,78 @@ five-second projection.
 
 ### P1 — The device address is resolved from scratch for every device call, and each resolution reads the same binding row four times
 
-**Issue.** `SkillsPoolRuntime._invoke` resolves a fresh `DeviceContext` on every
-call, so `publish` and `verify` each pay full resolution:
+**Issue.** Follow one projection down four levels.
+
+*Level 1 — the projection makes two runtime calls.*
 
 ```python
-# src/backend/src/agentclaw/community/core/skills_pool/runtime.py:409
-async def _invoke(self, *, bot_id: str, user_id: str, path: str, body: dict[str, Any]):
-    context = self._resolver.resolve_for_bot(bot_id, user_id)   # ← every single call
-    return await self._transport.invoke(context.conn_info, "POST", path, body=body, timeout=30.0)
+# src/backend/.../skill_center/services/bot_runtime_projector.py:598 — _apply_pool_mappings
+            published = await self._pool_runtime.publish_mappings(      # call A
+                bot_id=bot_id, user_id=owner_id, mappings=mappings,
+                retired_mappings=retired_mappings, source_layout=source_layout,
+                mapping_contract_version=contract,
+            )
+            verified = published and await self._pool_runtime.verify_mappings(   # call B
+                bot_id=bot_id, user_id=owner_id, mappings=mappings,
+                retired_mappings=retired_mappings, source_layout=source_layout,
+                mapping_contract_version=contract,
+            )
 ```
 
-One resolution is roughly six queries. `DeviceContextResolver.resolve_for_bot`
+*Level 2 — each of those issues its own `_invoke`, and a center-corpus publish
+issues one more before it even starts.*
+
+```python
+# src/backend/.../core/skills_pool/runtime.py:149 — publish_mappings (call A)
+        if not await self._ensure_center_mappings(...):     # ← itself _invokes, see :391
+            return False
+        try:
+            response = await self._invoke(
+                bot_id=bot_id, user_id=user_id,
+                path="/api/skills/layout/mappings/publish", body={...},   # device call
+            )
+```
+
+```python
+# src/backend/.../core/skills_pool/runtime.py:322 — verify_mappings (call B)
+        try:
+            response = await self._invoke(
+                bot_id=bot_id, user_id=user_id,
+                path="/api/skills/layout/mappings/verify", body={...},    # device call
+            )
+```
+
+```python
+# src/backend/.../core/skills_pool/runtime.py:391 — _ensure_center_mappings
+#   (nested inside publish_mappings above; when it fires it goes first)
+        try:
+            response = await self._invoke(
+                bot_id=bot_id, user_id=user_id,
+                path="/api/skills/center/ensure", body={"items": items},  # device call
+            )
+```
+
+*Level 3 — `_invoke` resolves the device from scratch, then does the IO.* There
+is no parameter to pass a context in and no memo; the resolve is unconditional
+and happens once per call, immediately before the network write.
+
+```python
+# src/backend/.../core/skills_pool/runtime.py:409
+    async def _invoke(
+        self, *, bot_id: str, user_id: str, path: str, body: dict[str, Any],
+    ) -> dict[str, Any]:
+        context = self._resolver.resolve_for_bot(bot_id, user_id)   # ← DB work, every call
+        return await self._transport.invoke(                        # ← the IO
+            context.conn_info, "POST", path, body=body, timeout=30.0,
+        )
+```
+
+So one ordinary projection resolves the same `(bot_id, user_id)` **twice**, and a
+center-corpus projection **three times** — matching the trace, which shows the
+four-read resolution block repeated before each of `publish`, `verify`, and
+`filter-servers`.
+
+*Level 4 — what one resolution costs.* Roughly six queries. `DeviceContextResolver.resolve_for_bot`
 loads the binding, then hands it to the builder — which throws the record away
 and starts again from the id:
 
