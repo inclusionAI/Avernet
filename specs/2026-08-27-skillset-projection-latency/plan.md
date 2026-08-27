@@ -68,11 +68,13 @@ protocols and one device-facing response body change, all additively.
 }
 ```
 
-`verified` is a three-state signal read as: `true` → the runtime verified
-inline, skip the separate call; `false` → publication landed but verification
-failed, treat as not converged; **absent** → the runtime does not support inline
-verification, fall back to a separate `/verify` call. Absence must never be read
-as `true`.
+`verified` is a three-state signal: `true` → the runtime verified inline, skip
+the separate call; `false` → publication landed but verification failed, treat
+as not converged and **do not** re-ask (the separate `/verify` runs the
+identical check against the identical filesystem, so falling back there would
+only turn one real failure into two); **absent** → the runtime predates the
+signal, fall back to a separate `/verify` call. Only absence falls back;
+absence must never be read as `true`.
 
 ### P1b + P2 — one combined runtime entry point
 
@@ -82,7 +84,9 @@ as `true`.
 class MappingPublishOutcome:
     published: bool
     verified: bool
-    verified_inline: bool = False   # evidence for logging/metrics, not control flow
+    reported_inline: bool = False   # the publish response carried the verdict,
+                                    # whichever way it went. Logs/metrics only,
+                                    # never control flow.
 ```
 
 ```diff
@@ -233,9 +237,9 @@ async def publish_and_verify_mappings(self, *, bot_id, user_id, mappings,
     published, inline = await self._publish(..., context=context)   # reads data["verified"]
     if not published:
         return MappingPublishOutcome(published=False, verified=False)
-    if inline is True:
-        return MappingPublishOutcome(published=True, verified=True, verified_inline=True)
-    verified = await self._verify(..., context=context)          # absent/false → fall back
+    if inline is not None:          # reported, either way — that is the answer
+        return MappingPublishOutcome(published=True, verified=inline, reported_inline=True)
+    verified = await self.verify_mappings(..., context=context)  # only silence falls back
     return MappingPublishOutcome(published=True, verified=verified)
 ```
 

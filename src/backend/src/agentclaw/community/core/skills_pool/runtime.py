@@ -177,7 +177,13 @@ class SkillsPoolRuntime:
         *One device resolution.* Center-ensure, publish, and the fallback
         verify are up to three adapter calls; resolving per call re-reads the
         same Bot binding for each. The resolved context is a local, so nothing
-        can outlive this call and serve a stale sandbox address.
+        can outlive this call and serve a stale sandbox address to a later
+        request. Within the call it is a snapshot: a device that re-binds
+        between the publish and the fallback verify is verified at its old
+        address and reports unverified, which compensates a projection that
+        may have converged. That is the accepted cost of the single
+        resolution — a re-bind mid-projection has re-synced the runtime
+        anyway, so the pre-restart verdict was never the interesting one.
 
         *No verify round trip when the runtime already did it.* A publish
         response carrying ``data.verified is True`` means the runtime ran the
@@ -208,9 +214,10 @@ class SkillsPoolRuntime:
         if not published:
             return MappingPublishOutcome(published=False, verified=False)
         if inline_verified is not None:
-            logger.info(
-                "[skills_pool.runtime] mapping publish verified inline "
-                "bot_id=%s user_id=%s contract=%s valid=%s",
+            log = logger.info if inline_verified else logger.warning
+            log(
+                "[skills_pool.runtime] mapping publish reported verification "
+                "inline bot_id=%s user_id=%s contract=%s valid=%s",
                 bot_id,
                 user_id,
                 mapping_contract_version,
@@ -219,9 +226,9 @@ class SkillsPoolRuntime:
             return MappingPublishOutcome(
                 published=True,
                 verified=inline_verified,
-                verified_inline=True,
+                reported_inline=True,
             )
-        verified = await self._verify(
+        verified = await self.verify_mappings(
             bot_id=bot_id,
             user_id=user_id,
             mappings=mappings,
@@ -417,25 +424,6 @@ class SkillsPoolRuntime:
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
         mapping_contract_version: str = MAPPING_CONTRACT_VERSION,
-    ) -> bool:
-        return await self._verify(
-            bot_id=bot_id,
-            user_id=user_id,
-            mappings=mappings,
-            retired_mappings=retired_mappings,
-            source_layout=source_layout,
-            mapping_contract_version=mapping_contract_version,
-        )
-
-    async def _verify(
-        self,
-        *,
-        bot_id: str,
-        user_id: str,
-        mappings: list[PoolSkillMapping],
-        retired_mappings: Sequence[PoolSkillMapping],
-        source_layout: SkillMappingSourceLayout,
-        mapping_contract_version: str,
         context: DeviceContext | None = None,
     ) -> bool:
         try:

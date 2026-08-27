@@ -9,6 +9,7 @@ import pytest
 from agentclaw.community.core.skills_pool.models import (
     PoolCutoverStatus,
     PoolSkillMapping,
+    SkillMappingSourceLayout,
 )
 from agentclaw.community.core.skills_pool.quarantine import RuntimeQuarantineCleanupStatus
 from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
@@ -413,7 +414,7 @@ async def test_inline_verification_skips_the_separate_verify_call() -> None:
         bot_id="bot-1", user_id="user-1", mappings=_local_mappings()
     )
 
-    assert (outcome.published, outcome.verified, outcome.verified_inline) == (
+    assert (outcome.published, outcome.verified, outcome.reported_inline) == (
         True,
         True,
         True,
@@ -433,7 +434,7 @@ async def test_inline_verification_failure_is_not_retried_by_the_verify_call() -
 
     assert outcome.published is True
     assert outcome.verified is False
-    assert outcome.verified_inline is True
+    assert outcome.reported_inline is True
     assert not any(path.endswith("/verify") for path in _paths(transport))
 
 
@@ -448,7 +449,7 @@ async def test_absent_signal_falls_back_to_the_separate_verify_call() -> None:
     )
 
     assert outcome.verified is True
-    assert outcome.verified_inline is False
+    assert outcome.reported_inline is False
     assert any(path.endswith("/verify") for path in _paths(transport))
 
 
@@ -490,3 +491,36 @@ async def test_unresolvable_device_reports_an_unpublished_outcome() -> None:
     assert outcome.published is False
     assert outcome.verified is False
     assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_publish_and_verify_send_the_same_mapping_set() -> None:
+    """Verify must check what publish wrote, retirements and layout included.
+
+    Without this, dropping ``retired_mappings`` or ``source_layout`` from the
+    fallback verify call still passes every other test in this file, while
+    production verifies a different set than it published — a retirement that
+    failed to apply would report verified.
+    """
+    resolver = FakeResolver()
+    transport = FakeTransport()
+    mappings = _local_mappings()
+    retired = [PoolSkillMapping(corpus="local", relative_path="b", link_name="b")]
+
+    await _runtime(resolver, transport).publish_and_verify_mappings(
+        bot_id="bot-1",
+        user_id="user-1",
+        mappings=mappings,
+        retired_mappings=retired,
+        source_layout=SkillMappingSourceLayout.LEGACY,
+    )
+
+    bodies = {
+        call["path"].rsplit("/", 1)[-1]: call["body"]
+        for call in transport.calls
+        if call["path"].endswith(("/publish", "/verify"))
+    }
+    assert set(bodies) == {"publish", "verify"}
+    assert bodies["publish"] == bodies["verify"]
+    assert bodies["verify"]["retired_mappings"] == [retired[0].to_dict()]
+    assert bodies["verify"]["source_layout"] == SkillMappingSourceLayout.LEGACY.value
