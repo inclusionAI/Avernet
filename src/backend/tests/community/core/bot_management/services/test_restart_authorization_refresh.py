@@ -220,6 +220,38 @@ def test_aicoding_refresh_swallows_skill_sync_exception() -> None:
 
     factory.create.assert_called_once()
 
+
+def test_apply_restart_extra_configs_marks_confirmed_after_persisting_new_snapshot() -> None:
+    strategy = AicodingProvisioningStrategy("claude_code")
+    extra_configs = {"template_config": {"template_version_id": 2}}
+    template_service = MagicMock()
+    template_service.get_template_config.return_value = {"template_version_id": 1}
+
+    strategy.apply_restart_extra_configs(
+        _ctx(active_engine="claude_code"),
+        extra_configs,
+        template_service=template_service,
+    )
+
+    template_service.update_template.assert_called_once()
+    assert extra_configs["confirmed_template_update"] is True
+
+
+def test_apply_restart_extra_configs_does_not_mark_when_snapshot_not_newer() -> None:
+    strategy = AicodingProvisioningStrategy("claude_code")
+    extra_configs = {"template_config": {"template_version_id": 1}}
+    template_service = MagicMock()
+    template_service.get_template_config.return_value = {"template_version_id": 1}
+
+    strategy.apply_restart_extra_configs(
+        _ctx(active_engine="claude_code"),
+        extra_configs,
+        template_service=template_service,
+    )
+
+    template_service.update_template.assert_not_called()
+    assert "confirmed_template_update" not in extra_configs
+
 def test_default_strategy_always_returns_false() -> None:
     strategy = DefaultProvisioningStrategy("openclaw")
     assert (

@@ -2775,7 +2775,16 @@ async def restart_bot(
                 else None
             )
             if isinstance(candidate, dict):
-                extra_configs = candidate
+                extra_configs = dict(candidate)
+            if (
+                isinstance(request_body, dict)
+                and "confirmed_template_update" in request_body
+            ):
+                if extra_configs is None:
+                    extra_configs = {}
+                extra_configs["confirmed_template_update"] = request_body.get(
+                    "confirmed_template_update"
+                )
         except Exception:
             # Empty/non-JSON request bodies remain valid for legacy callers.
             extra_configs = None

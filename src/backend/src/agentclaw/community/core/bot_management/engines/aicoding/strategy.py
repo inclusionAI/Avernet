@@ -580,6 +580,12 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             template_type=ctx.template_type,
             active_engine=ctx.active_engine,
         )
+        # The persisted newer snapshot is the durable proof that this restart
+        # accepted a template update. Some callers send only
+        # extra_configs.template_config (or put confirmed_template_update at the
+        # body top level), so stamp the engine envelope here for the later
+        # refresh_restart_authorization hook in the same restart flow.
+        extra_configs["confirmed_template_update"] = True
         logger.info(
             "[aicoding.restart] persisted newer template snapshot: "
             "bot_id=%s old_version=%s new_version=%s",
