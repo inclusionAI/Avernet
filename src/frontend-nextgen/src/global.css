@@ -1,0 +1,534 @@
+@import 'tailwindcss';
+
+/* ==========================================================================
+   暗色模式策略：基于 .dark 类切换
+   ========================================================================== */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ==========================================================================
+   设计令牌 — 亮色（默认）
+   来源：DESIGN-SYSTEM.md §2.1 —— shadcn 默认主题
+   ========================================================================== */
+:root {
+  /* shadcn 语义令牌 */
+  --background: 0 0% 100%;
+  --foreground: 240 10% 3.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 10% 3.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 10% 3.9%;
+
+  --primary: 221.7 100% 54.3%; /* D1: 反向锚定 BU 品牌蓝 #165dff */
+  --primary-foreground: 0 0% 98%;
+
+  --secondary: 240 4.8% 95.9%;
+  --secondary-foreground: 240 5.9% 10%;
+
+  --muted: 240 4.8% 95.9%;
+  --muted-foreground: 240 3.8% 46.1%;
+
+  --accent: 240 4.8% 95.9%;
+  --accent-foreground: 240 5.9% 10%;
+
+  --destructive: 0 72.2% 50.6%;
+  --destructive-foreground: 0 0% 98%;
+
+  --success: 142 71% 45%;
+  --warning: 38 92% 50%;
+  --info: 199 89% 48%;
+  --brand: 221.7 100% 54.3%; /* D1/B1: brand 与 primary 同锚 #165dff，单品牌蓝 */
+
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --ring: 221.7 100% 54.3%; /* D1: follow --primary 品牌蓝 */
+
+  /* 圆角系统 §2.4 */
+  --radius: 0.5rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+
+  /* 项目业务色变量（兼容 sprint 分支已有代码） */
+  --color-primary: #165dff;
+  --color-primary-hover: #0e4ee8;
+  --color-primary-active: #0a3fcc;
+  --color-primary-weak: #9dbdff;
+  --color-primary-soft: #edf4ff;
+  --color-success: #00a884;
+  --color-success-soft: #e9f8f4;
+  --color-warning: #c9960a;
+  --color-warning-soft: #fff7db;
+  --color-error: #d44030;
+  --color-error-soft: #fff0ed;
+  --color-info: #0974d0;
+  --color-bg: #f5f6fa;
+  --color-card: #fff;
+  --color-border: #e4e6ec;
+  --color-fg: #1a1c24;
+  --color-muted: #6b7085;
+  --color-panel-muted: #f7f8fb;
+  --color-panel-strong: #eef0f5;
+
+  /* 聊天面板 bot 回复气泡底色(rgb 246,249,255)。 */
+  --color-chat-bubble-bot: rgb(246, 249, 255);
+  --shell-header-height: 56px;
+  --shell-sidebar-width: 220px;
+
+  /* 浮层层级统一由组件 Token 管理，避免业务页面散落 z-index 魔法数。
+     注意：Select/Popover 等锚定浮层会 Portal 到 body，若层级低于 Drawer/Dialog，
+     在抽屉或弹窗内展开时会被容器遮住（看起来像"点击没反应"），故必须高于所有容器层。 */
+  --z-drawer: 500;
+  --z-dialog: 600;
+  --z-critical-dialog: 700;
+  --z-popover: 750;
+  --z-tooltip: 800;
+  --z-toast: 900;
+
+  color-scheme: light;
+}
+
+/* ==========================================================================
+   设计令牌 — 暗色
+   ========================================================================== */
+.dark {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 240 10% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 0 0% 98%;
+
+  --primary: 221.7 100% 62%; /* D2: #165dff 暗色提亮 L≈62 达 AA */
+  --primary-foreground: 0 0% 98%; /* D2: 暗色品牌蓝底配白字 */
+
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+
+  --destructive: 0 72.2% 50.6%;
+  --destructive-foreground: 0 0% 98%;
+
+  --success: 142 71% 45%;
+  --warning: 38 92% 50%;
+  --info: 199 89% 48%;
+  --brand: 221.7 100% 65%; /* D2: 暗色 brand 提亮 */
+
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 221.7 100% 62%; /* D2: follow --primary */
+
+  /* 业务蓝（admin 品牌蓝 / Button primary）暗色覆盖：亮色态值无自动暗色适配，
+     这里补暗色值，使 var(--color-primary) 系在暗色下对比度不掉。
+     见 admin-polish-audit.md §1 决策 A1。 */
+  --color-primary: #4d7bff;
+  --color-primary-hover: #6f97ff;
+  --color-primary-active: #3a64d9;
+  --color-primary-weak: #8fb0ff;
+  --color-primary-soft: #161e3a;
+}
+
+/* ==========================================================================
+   Tailwind v4 主题映射
+   ========================================================================== */
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+  --color-error: hsl(var(--destructive));
+  --color-info: hsl(var(--info));
+  --color-brand: hsl(var(--brand));
+
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+
+  --font-sans: 'Inter', 'HarmonyOS Sans SC', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ==========================================================================
+   全局基础样式
+   ========================================================================== */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+  font-size: 12px;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  color: hsl(var(--foreground));
+  background: hsl(var(--brand) / 0.2);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+.app-scrollbar {
+  scrollbar-color: #cdd2df transparent;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+.app-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.app-scrollbar::-webkit-scrollbar-thumb {
+  background: #cdd2df;
+  border-radius: 999px;
+}
+
+/* ==========================================================================
+   组件交互类 — 来自 DESIGN-SYSTEM.md
+   ========================================================================== */
+@layer components {
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    transition: background-color 150ms, color 150ms;
+    cursor: pointer;
+  }
+  .nav-item:hover {
+    background-color: hsl(var(--accent));
+  }
+  .nav-item.active {
+    background-color: hsl(var(--secondary));
+    color: hsl(var(--secondary-foreground));
+    font-weight: 500;
+  }
+  .nav-item .nav-icon {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+  }
+
+  .tab-item {
+    position: relative;
+    padding: 0.5rem 1rem;
+    font-size: 0.75rem;
+    line-height: 1rem;
+    color: hsl(var(--muted-foreground));
+    transition: color 150ms;
+    cursor: pointer;
+  }
+  .tab-item:hover {
+    color: hsl(var(--foreground));
+  }
+  .tab-item.active {
+    color: hsl(var(--foreground));
+    font-weight: 500;
+  }
+  .tab-item.active::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 2px;
+    background: hsl(var(--primary));
+  }
+
+  .nav-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    height: 2rem;
+    padding: 0 0.75rem;
+    border-radius: 0.375rem;
+    font-size: 0.75rem;
+    transition: background-color 150ms;
+    white-space: nowrap;
+  }
+  .nav-btn:hover {
+    background-color: hsl(var(--accent));
+  }
+  .nav-btn.active {
+    background-color: hsl(var(--secondary));
+    color: hsl(var(--secondary-foreground));
+    font-weight: 500;
+  }
+
+  .approval-card {
+    transition: box-shadow 200ms;
+  }
+
+  .collapsible > .collap-body {
+    display: none;
+  }
+  .collapsible.open > .collap-body {
+    display: block;
+  }
+  .collapsible.open > .collap-head .chev {
+    transform: rotate(180deg);
+  }
+  .chev {
+    transition: transform 200ms;
+  }
+
+  .msg-actions {
+    opacity: 0;
+    transition: opacity 150ms;
+  }
+  .msg-group:hover .msg-actions,
+  .msg-stat:hover .msg-actions {
+    opacity: 1;
+  }
+
+  .pulse-cursor::after {
+    content: '▍';
+    color: hsl(var(--brand));
+    animation: blink 1s step-start infinite;
+    margin-left: 2px;
+  }
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  .swatch {
+    box-shadow: inset 0 0 0 1px hsl(var(--border));
+  }
+
+  .page-content {
+    display: none;
+  }
+  .page-content.active {
+    display: block;
+  }
+}
+
+/* bell wiggle：有待审批/待回复时铃铛轻摇（admin 视觉交互指南 §7.5） */
+@keyframes wiggle {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-12deg);
+  }
+  75% {
+    transform: rotate(12deg);
+  }
+}
+.bell-wiggle {
+  animation: wiggle 1s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+/* ==========================================================================
+   qiankun 主应用根容器：开启 qiankun master 后，框架以 #root-master 包裹主应用
+   挂载点。需与上方 html/body/#root 一致撑满高度，否则子应用（MicroApp）容器会
+   沿着 0 高度的父级塌缩，aix-card 卡片 Tab 不显示。
+   ========================================================================== */
+#root-master {
+  height: 100%;
+}
+
+/* ==========================================================================
+   qiankun 子应用（aix-card）v3/v4 位移属性冲突修正
+   -------------------------------------------------------------------------
+   宿主 tailwind v4 的 -translate-y-1/2 等全局生效（宿主 CSS 不被
+   experimentalStyleIsolation 作用域化，只有子应用 CSS 被 scope），v4 走独立
+   `translate:` 属性；aix-card（tailwind v3，已 scope）的 -translate-x/y-1/2 走
+   `transform:` 属性。两者同时命中 aix-card 元素（modal、.lucide-search 图标等），
+   `translate` 与 `transform` 叠加执行 → 位移翻倍，弹窗偏左上、图标偏上不居中。
+   aix-card v3 自身从不使用 translate/rotate/scale 独立属性（全走 transform），故在
+   aix-card 作用域内把这三个独立属性清零，只留子应用 v3 的 transform 单次变换。
+   不影响 animate-spin 等动画（走 transform）；不影响宿主自身元素（限定在 aix-card 内）。
+   ========================================================================== */
+div[data-qiankun='aix-card'] * {
+  translate: none;
+  rotate: none;
+  scale: none;
+}
+
+/* ==========================================================================
+   Markdown 文档渲染样式（.markdown-body）
+   用于技能文档 README 等 markdown-it 渲染输出的 HTML 容器。
+   使用设计令牌（CSS 变量）适配亮/暗色模式。
+   ========================================================================== */
+.markdown-body {
+  line-height: 1.6;
+}
+.markdown-body > *:first-child {
+  margin-top: 0;
+}
+.markdown-body > *:last-child {
+  margin-bottom: 0;
+}
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  margin-top: 1.2em;
+  margin-bottom: 0.6em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.markdown-body h1 {
+  font-size: 1.5em;
+  border-bottom: 1px solid var(--border, #e2e2e2);
+  padding-bottom: 0.3em;
+}
+.markdown-body h2 {
+  font-size: 1.3em;
+  border-bottom: 1px solid var(--border, #e2e2e2);
+  padding-bottom: 0.3em;
+}
+.markdown-body h3 {
+  font-size: 1.15em;
+}
+.markdown-body h4 {
+  font-size: 1em;
+}
+.markdown-body h5,
+.markdown-body h6 {
+  font-size: 0.9em;
+  color: var(--muted-foreground, #6b6b6b);
+}
+.markdown-body p {
+  margin: 0.5em 0;
+}
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+.markdown-body li {
+  margin: 0.25em 0;
+}
+.markdown-body blockquote {
+  margin: 0.5em 0;
+  padding: 0.25em 1em;
+  border-left: 3px solid var(--border, #e2e2e2);
+  color: var(--muted-foreground, #6b6b6b);
+}
+.markdown-body code {
+  padding: 0.15em 0.35em;
+  border-radius: 0.25rem;
+  background: var(--muted, #f5f5f5);
+  font-size: 0.875em;
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
+}
+.markdown-body pre {
+  margin: 0.5em 0;
+  padding: 0.75em;
+  border-radius: 0.5rem;
+  background: var(--muted, #f5f5f5);
+  overflow-x: auto;
+}
+.markdown-body pre code {
+  padding: 0;
+  background: none;
+  font-size: 0.85em;
+}
+.markdown-body a {
+  color: var(--brand, #3b5bdb);
+  text-decoration: underline;
+}
+.markdown-body a:hover {
+  opacity: 0.8;
+}
+.markdown-body table {
+  margin: 0.5em 0;
+  border-collapse: collapse;
+  width: 100%;
+}
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--border, #e2e2e2);
+  padding: 0.4em 0.6em;
+  text-align: left;
+}
+.markdown-body th {
+  background: var(--muted, #f5f5f5);
+  font-weight: 600;
+}
+.markdown-body img {
+  max-width: 100%;
+}
+
+/* ==========================================================================
+   sonner 错误提示:以设计 token --color-error 接线 error 类型的边框强调色,
+   使设计系统色为颜色真源(底色区分由 Toaster 的 richColors 承担)。
+   规范 docs/design-system/ui-interaction-spec.md §11.5:错误提示与成功提示一眼可辨。
+   ========================================================================== */
+[data-sonner-toast][data-type='error'] {
+  border-color: var(--color-error);
+}
