@@ -228,6 +228,19 @@ class _AssetSkills:
 
 
 class _AssetBots:
+    def get_unique_by_id(self, bot_id: str):
+        if bot_id != "bot":
+            return None
+        return {
+            "bot_id": "bot",
+            "owner_id": "owner",
+            "entity_id": "owner",
+            "entity_type": "staff",
+            "active_engine": "openclaw",
+            "bot_type": "personal",
+            "env": "pre",
+        }
+
     def get_by_id_and_owner(self, bot_id: str, owner_id: str):
         if (bot_id, owner_id) != ("bot", "owner"):
             return None
@@ -325,6 +338,61 @@ async def test_local_content_and_parameters_use_one_skill_id_resolver() -> None:
         parameters={"region": "cn"},
     ) == {"region": "cn"}
     assert parameters.parameters.saved == ("weekly-report", {"region": "cn"})
+
+
+@pytest.mark.asyncio
+async def test_skill_only_readme_reads_local_skill_from_persisted_bot() -> None:
+    service, _parameters, _reader = _asset_service()
+
+    assert "# Report" in await service.get_readme_by_skill(
+        skill_id="42", actor_id="owner"
+    )
+
+
+class _RepoSkill:
+    def get_by_id(self, skill_id: str):
+        if skill_id == "43":
+            return {
+                "id": "43",
+                "name": "market-skill",
+                "git_path": "git://market-skill",
+                "user_id": None,
+                "bolt_id": "default",
+            }
+        return None
+
+
+class _RepoReader:
+    def get_repository_skill_content(self, skill_id: str):
+        assert skill_id == "43"
+        return "# Market skill"
+
+
+class _UnexpectedBotRepository:
+    def __getattr__(self, name):
+        raise AssertionError(f"public Repo README unexpectedly used BotRepository.{name}")
+
+
+class _RepoFactory:
+    def create(self):
+        return _RepoReader()
+
+
+@pytest.mark.asyncio
+async def test_skill_only_readme_reads_public_repo_without_bot_lookup() -> None:
+    service = SkillQueryService(
+        _RepoSkill(),
+        _UnexpectedBotRepository(),
+        object(),
+        object(),
+        _RepoFactory(),
+        object(),
+        lambda: object(),
+    )
+
+    assert await service.get_readme_by_skill(skill_id="43", actor_id="caller") == (
+        "# Market skill"
+    )
 
 
 @pytest.mark.asyncio

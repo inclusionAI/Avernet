@@ -660,6 +660,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/{bot_id}/editor-requests",
     ): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/skills/{skill_code}/publish/status"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/skills/{skill_id}/readme"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/market/skill-center/tags"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/work-orders/events"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/work-orders"): AdmissionMode.USER_GATED,

@@ -220,7 +220,10 @@ from .render_screens import router as render_screens_router
 from .repository_catalog import router as repository_catalog_router
 from .routines import router as routines_router
 from .routines.owner_router import router as routines_owner_router
-from .skills import publish_status_router as skill_publish_status_router
+from .skills import (
+    publish_status_router as skill_publish_status_router,
+    readme_router as skill_readme_router,
+)
 from .skills import router as skills_router
 from .skill_sets import router as skill_sets_router
 from .service_publications import (
@@ -282,6 +285,9 @@ _MIXED_GROUPS = [
 _OPEN_SUBGROUPS = [
     # Skill Workbench status is tenant-identical and app-admissible.
     skill_publish_status_router,
+    # Skill README is addressed by its stable Skill ID; Local Skills resolve
+    # their device Bot internally and public Repo Skills are global.
+    skill_readme_router,
 ]
 
 _SUBGROUPS = [
