@@ -5,6 +5,7 @@
 
 bind = "0.0.0.0"
 port = 21000
+bots_base_dir = "./data/bots"
 
 max_history_per_session = 1000
 store_messages = false
@@ -67,7 +68,7 @@ enabled = false
 type = "mysql"
 
 [database.mysql]
-database = "bcs"
+database = "${BCS_DB_NAME}"
 pool_size = 20
 min_pool_size = 5
 timeout_secs = 30
@@ -210,3 +211,18 @@ schema_version = 1
 name = "bcsPanel"
 type = "file"
 file = "assets/panel/dist/index.umd.js"
+
+[gateway_principal]
+issuer = "gateway"
+audience = "bcs"
+key_id = "bare"
+signing_key_env = "PRINCIPAL_SIGNING_KEY"
+
+[secret]
+provider = "env"
+
+[group_session_ws]
+# EnvSecretAccess resolves this as env BCS_SECRET_BCN_GROUP_SESSION_WS_JWT
+# (prefix "BCS_SECRET_" + name uppercased, '-' -> '_'). Use the logical name,
+# not the env-var name, or the lookup double-prefixes and fails.
+signing_key_secret = "bcn-group-session-ws-jwt"
