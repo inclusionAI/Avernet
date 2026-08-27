@@ -2741,21 +2741,92 @@ async def test_teclaw_failed_delivery_raises_reconcile_error():
     assert passport.calls == []
 
 
+def _local_skill_reader():
+    """A per-domain Bot whose Skill half takes the legacy ``sync_runtime`` branch.
+
+    ``_RuntimeLayouts.get`` answers ``None`` (Pool does not own the runtime) and
+    a ``local://`` asset yields no repo/center mapping, so
+    ``PerDomainRuntimeProjection`` falls through to the legacy sync rather than
+    publishing Pool mappings.
+    """
+    return _reader(
+        _RuntimeSkills(
+            [
+                RegisteredSkillAsset(
+                    skill_id=1,
+                    name="qa",
+                    git_path="local://qa",
+                )
+            ]
+        )
+    )
+
+
+def _projector_for(factory, *, teclaw: bool, reader):
+    bots = _TeclawRuntimeBots() if teclaw else _RuntimeBots()
+    return BotRuntimeProjector(
+        factory=factory,
+        bot_repo=bots,
+        repository=_McpInstallations(),
+        reader=reader,
+        registry=_registry(
+            pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()
+        ),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+
+async def _drive_whole_artifact(factory):
+    runtime = _projector_for(
+        factory, teclaw=True, reader=_reader(_TeclawRuntimeSkills())
+    )
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.a"})),
+    )
+
+
+async def _drive_per_domain_legacy(factory):
+    runtime = _projector_for(factory, teclaw=False, reader=_local_skill_reader())
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope(skills=True),
+    )
+
+
+async def _drive_cleanup(factory):
+    runtime = _projector_for(factory, teclaw=False, reader=_local_skill_reader())
+    await runtime.project_for_cleanup(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope(mcp=True),
+    )
+
+
+@pytest.mark.parametrize(
+    "drive",
+    [_drive_whole_artifact, _drive_per_domain_legacy, _drive_cleanup],
+    ids=["whole-artifact", "per-domain-legacy", "cleanup"],
+)
 @pytest.mark.asyncio
-async def test_teclaw_delivery_does_not_run_on_the_event_loop():
-    """The artifact delivery is dispatched off the coroutine's thread.
+async def test_runtime_delivery_never_runs_on_the_event_loop(drive):
+    """Every ``sync_runtime`` call site dispatches off the coroutine's thread.
 
-    ``sync_runtime`` is synchronous and, on a whole-artifact engine, carries a
-    device resolution with a blocking ws-info HTTP call, a full artifact
-    compose, and the outbound apply request behind it. Callers reach the
-    projector from async HTTP handlers (``DirectActivationService`` is one), so
-    running it inline would let one slow container stall unrelated requests on
-    the same worker — the reason ``SkillSetService.sync_mcp_desired_state``
-    already wraps its device calls.
+    ``sync_runtime`` is synchronous and carries a device resolution with a
+    blocking ws-info HTTP call behind it; on a whole-artifact engine it also
+    composes the full artifact and posts it. Callers reach the projector from
+    async HTTP handlers (``DirectActivationService`` is one), so running it
+    inline lets one slow container stall unrelated requests on the same worker
+    — the reason ``SkillSetService.sync_mcp_desired_state`` already wraps its
+    device calls.
 
-    Asserted by thread identity rather than by patching ``asyncio.to_thread``:
-    what matters is that the blocking work left the loop's thread, not which
-    API moved it.
+    Parametrised over all three call sites rather than testing only the teclaw
+    one: the wrapping is an execution-semantics change at each, and an edit
+    that un-wrapped either of the other two would otherwise pass unnoticed.
+
+    Asserted by thread identity, not by patching ``asyncio.to_thread``: what
+    matters is that the blocking work left the loop's thread, not which API
+    moved it.
     """
     import threading
 
@@ -2770,14 +2841,10 @@ async def test_teclaw_delivery_does_not_run_on_the_event_loop():
         return original(**kwargs)
 
     factory.service.sync_runtime = _recording_sync_runtime
-    runtime = _teclaw_runtime(factory)
 
-    await runtime.project(
-        bot_id="bot-1", owner_id="true-owner",
-        scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.a"})),
-    )
+    await drive(factory)
 
-    assert seen, "delivery never ran"
+    assert seen, "sync_runtime never ran — this case does not exercise the call site"
     assert loop_thread not in seen, (
         "sync_runtime ran on the event loop thread; it must be dispatched "
         "through asyncio.to_thread so a slow device cannot block the worker"
