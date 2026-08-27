@@ -88,3 +88,14 @@ class SystemConfigKey(StrEnum):
     关闭此开关使 eval 生命周期阶段的请求降级走 online 生产路由，
     避免 eval 路由指向不可用的评测容器。
     """
+
+    # ── Expired sandbox whitelist configuration ─────────────────────────────
+
+    EXPIRE_SANDBOX_WHITELIST_BOT_UUIDS = "expire_sandbox.whitelist_bot_uuids"
+    """Whitelist for the expired ACK pod sweep (ExpireSandboxTimer).
+
+    Value: comma- and/or newline-separated list of bot_uuid (plain text).
+    Usage: read at the start of each sweep (env-scoped); a matching bot skips
+    the stop-bot / pod-destroy, exempting long-running demos, canaries, and key
+    accounts that must not be reclaimed by expiry.
+    """

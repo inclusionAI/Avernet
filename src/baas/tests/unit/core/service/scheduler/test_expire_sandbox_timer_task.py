@@ -12,6 +12,7 @@ import pytest
 from secbaas.community.core.service.scheduler._tasks._expire_sandbox_timer_task import (
     ExpireSandboxTimerTask,
     ExpireSandboxTimerTaskConfig,
+    parse_whitelist_bot_uuids,
 )
 
 
@@ -65,6 +66,7 @@ def _task(
     bot_repo=None,
     rel_repo=None,
     lock_service=None,
+    system_config_service=None,
 ):
     if config is None:
         config = ExpireSandboxTimerTaskConfig(enabled=True, arca_provider="aliyun_ack")
@@ -73,6 +75,9 @@ def _task(
         # so normalize it to the eligible provider unless a non-ack variant is
         # explicitly requested.
         config.arca_provider = "aliyun_ack"
+    if system_config_service is None:
+        system_config_service = MagicMock()
+        system_config_service.get_config.return_value = None
     return ExpireSandboxTimerTask(
         config=config,
         lock_service=lock_service or _lock(),
@@ -80,6 +85,7 @@ def _task(
         bot_manage_service=bot_manage or MagicMock(),
         bot_repo=bot_repo or MagicMock(),
         bot_device_rel_repo=rel_repo or MagicMock(),
+        system_config_service=system_config_service,
     )
 
 
@@ -400,3 +406,104 @@ class TestRun:
         task._running = True
         report = await task.run()
         assert report is None
+
+
+class TestWhitelist:
+    def _cfg(self, value):
+        return SimpleNamespace(conf_value=value)
+
+    def _whitelisted_task(self, conf_value):
+        repo = MagicMock()
+        repo.list_expired_paginated.side_effect = _pages([_row(1)])
+        bot_manage = MagicMock()
+        bot_manage.stop_bot = AsyncMock(return_value=MagicMock())
+        rel_repo = MagicMock()
+        rel_repo.get_by_device_uuid.return_value = _bot_rel(7)
+        bot_repo = MagicMock()
+        bot_repo.get_by_id.return_value = _bot_record("BOT-UUID-1")
+        svc = MagicMock()
+        svc.get_config.return_value = self._cfg(conf_value)
+        task = _task(
+            ExpireSandboxTimerTaskConfig(enabled=True),
+            repo=repo,
+            bot_manage=bot_manage,
+            bot_repo=bot_repo,
+            rel_repo=rel_repo,
+            system_config_service=svc,
+        )
+        return task, bot_manage
+
+    @pytest.mark.asyncio
+    async def test_whitelisted_bot_skipped(self):
+        task, bot_manage = self._whitelisted_task("BOT-UUID-1")
+        report = await task.run()
+        assert report.stopped == 0
+        assert report.skipped == 1
+        assert report.skipped_reasons["whitelisted"] == 1
+        bot_manage.stop_bot.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_non_whitelisted_bot_stopped(self):
+        task, bot_manage = self._whitelisted_task("OTHER-UUID")
+        report = await task.run()
+        assert report.stopped == 1
+        assert report.skipped == 0
+        bot_manage.stop_bot.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_missing_config_empty_whitelist(self):
+        task, bot_manage = self._whitelisted_task(None)
+        # overridden to return None (missing row)
+        task._system_config_service.get_config.return_value = None
+        report = await task.run()
+        assert report.stopped == 1
+        bot_manage.stop_bot.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_empty_whitespace_config_empty_whitelist(self):
+        task, bot_manage = self._whitelisted_task("")
+        report = await task.run()
+        assert report.stopped == 1
+        bot_manage.stop_bot.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_malformed_config_empty_whitelist(self):
+        task, bot_manage = self._whitelisted_task(" , \n,,  \r\n ")
+        report = await task.run()
+        assert report.stopped == 1
+        bot_manage.stop_bot.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_multiple_delimiters(self):
+        task, bot_manage = self._whitelisted_task("A1, B2\nC3\r\n D4 ,")
+        # bot is BOT-UUID-1, not in list → stopped
+        report = await task.run()
+        assert report.stopped == 1
+        bot_manage.stop_bot.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_read_error_fails_open(self):
+        task, bot_manage = self._whitelisted_task("BOT-UUID-1")
+        task._system_config_service.get_config.side_effect = RuntimeError("db down")
+        report = await task.run()
+        assert report.stopped == 1
+        bot_manage.stop_bot.assert_awaited_once()
+
+
+class TestParseWhitelist:
+    def test_none(self):
+        assert parse_whitelist_bot_uuids(None) == set()
+
+    def test_empty_string(self):
+        assert parse_whitelist_bot_uuids("") == set()
+
+    def test_comma_and_newline(self):
+        assert parse_whitelist_bot_uuids("a1, b2\nc3\r\n d4 ,") == {
+            "a1",
+            "b2",
+            "c3",
+            "d4",
+        }
+
+    def test_whitespace_only(self):
+        assert parse_whitelist_bot_uuids(" , \n, \r\n ") == set()
