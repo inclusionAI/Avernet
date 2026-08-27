@@ -40,7 +40,7 @@ from agentclaw.community.core.devices.services.device_instance_service import (
     EvalBindingNotFoundError,
     InstanceHealthStatus,
 )
-from agentclaw.community.core.devices.services.device_service import BAAS_DEVICE_PROVIDER, DeviceService, require_matching_record
+from agentclaw.community.core.devices.services.device_service import BAAS_DEVICE_PROVIDER, DeviceService, require_matching_record  # noqa: E501 — file is at the 1000-line cap
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.log import get_logger
 
@@ -179,12 +179,12 @@ class DeviceServiceRouter(DeviceService):
 
         Args:
             binding_id: 设备绑定 ID
-            record: 已取到的 binding 行(须同 id);路由只读 ``device_provider``。
+            record: 已取到的 binding 行;路由只读 ``device_provider`` 一列。
 
         Returns:
             对应的 DeviceService 实例
         """
-        record = require_matching_record(record, binding_id) if record else self._repo.get_by_id(binding_id)
+        record = record if record is not None else self._repo.get_by_id(binding_id)
         if record is None:
             logger.warning(
                 f"[_get_provider_for_binding] Binding {binding_id} not found, using default"
@@ -675,9 +675,10 @@ class DeviceServiceRouter(DeviceService):
         不传则由 BaaS 自动选活跃实例(本地/非 BaaS provider 忽略)。
 
         ``path`` 透传给 provider,仅对"由服务端拼出完整 URL"的链路(BaaS relay)
-        有意义;其余 provider 忽略。``record`` 可选:传已取到的 binding 行则路由和
-        provider 都不再自查(零 DB 读);不传则两边各自查一次(原行为)。
+        有意义;其余 provider 忽略。``record`` 可选:传已取到的 binding 行(须同
+        id)则路由和 provider 都不再自查;不传则两边各自查一次(原行为)。
         """
+        require_matching_record(record, binding_id, caller="router.get_device_connection")
         service = self._get_provider_for_binding(binding_id, record=record)
         return service.get_device_connection(
             binding_id=binding_id, operator=operator, port=port, ttl=ttl,

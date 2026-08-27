@@ -195,15 +195,14 @@ def test_a_record_for_another_binding_is_refused(arca_record):
 
     A mismatched row would route by one binding's provider and run the
     ownership check against another's owner, so it is refused rather than
-    quietly trusted. Not DeviceNotFoundError: the binding exists, the caller
-    is wrong, and the HTTP layer turns "not found" into a 404 that sends
-    clients down a re-provision path.
+    quietly trusted. ValueError, not a device error: two arguments contradict
+    each other, which is neither "device not found" (a 404 that sends clients
+    down a re-provision path) nor "device service failed" (rendered as
+    "retry later", with the message discarded).
     """
-    from agentclaw.community.core.devices.errors import DeviceServiceError
-
     router, _ = _real_arca_stack(arca_record)
 
-    with pytest.raises(DeviceServiceError):
+    with pytest.raises(ValueError):
         router.get_device_connection_v2(
             user_id="u001",
             nick_name="u001",
@@ -216,19 +215,48 @@ def test_the_router_refuses_a_mismatched_record_before_it_routes(arca_record):
     """The routing decision itself reads record.device_provider.
 
     Enforcing only inside the provider would mean the wrong provider had
-    already been chosen by the time anything checked.
+    already been chosen by the time anything checked — so the assertion is
+    that no provider was ever reached, not merely that something raised.
     """
-    from agentclaw.community.core.devices.errors import DeviceServiceError
     from agentclaw.community.core.devices.models import OperatorContext
 
     router, repo = _real_arca_stack(arca_record)
+    provider = MagicMock()
+    router._providers["arca"] = provider
+    router._default_service = provider
     operator = OperatorContext(
         staff_id="u001", staff="u001", nick_name="u001",
         operator_name="u001", tenant_id="default",
     )
 
-    with pytest.raises(DeviceServiceError):
+    with pytest.raises(ValueError):
         router.get_device_connection(
             binding_id=arca_record.id + 1, operator=operator, record=arca_record
         )
+    provider.get_device_connection.assert_not_called()
     assert repo.get_by_id.call_count == 0
+
+
+def test_the_local_provider_refuses_a_mismatched_record(arca_record):
+    """The local provider skips its own lookup when handed a record, so its
+    ownership check would otherwise read another binding's entity_id."""
+    from agentclaw.community.core.devices.services.local_device_service import (
+        LocalDeviceService,
+    )
+
+    service = LocalDeviceService(
+        _counting_repo(arca_record),
+        baas_service=MagicMock(),
+        publish_poller=MagicMock(),
+        bot_query=MagicMock(),
+        bot_sync=MagicMock(),
+        oss_record_repo=MagicMock(),
+        mcp_sync=MagicMock(),
+    )
+
+    with pytest.raises(ValueError):
+        service.get_device_connection(
+            binding_id=arca_record.id + 1,
+            operator=MagicMock(staff_id="u001"),
+            record=arca_record,
+        )

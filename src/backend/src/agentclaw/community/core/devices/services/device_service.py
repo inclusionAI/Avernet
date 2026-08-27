@@ -64,23 +64,25 @@ T = TypeVar("T")
 
 
 def require_matching_record(
-    record: DeviceBindingRecord | None, binding_id: int
-) -> DeviceBindingRecord | None:
+    record: DeviceBindingRecord | None, binding_id: int, *, caller: str
+) -> None:
     """Reject a caller-supplied record that does not describe ``binding_id``.
 
     Passing ``record`` skips the lookup that would otherwise decide which
     binding a call is about, so a row for a different binding would route by
-    one binding's provider and authorize against another binding's owner. That
-    is a caller contract violation, not a missing device, so it raises
-    ``DeviceServiceError`` rather than ``DeviceNotFoundError`` — the latter is
-    what the HTTP layer turns into "device does not exist", which would send a
-    client down a re-provision path over a programming error.
+    one binding's provider and authorize against another binding's owner.
+
+    ``ValueError``, not a device error: this is two arguments contradicting
+    each other, which neither ``DeviceNotFoundError`` (the HTTP layer renders
+    it "device does not exist", sending a client down a re-provision path) nor
+    ``DeviceServiceError`` (rendered "please retry later", message discarded)
+    describes. A pure assertion — it raises or does nothing, never normalises —
+    so no call site can be written to depend on a return value.
     """
     if record is not None and record.id != binding_id:
-        raise DeviceServiceError(
-            f"record {record.id} does not describe binding {binding_id}"
+        raise ValueError(
+            f"[{caller}] record {record.id} does not describe binding {binding_id}"
         )
-    return record
 
 
 class DeviceService:
@@ -1000,7 +1002,7 @@ class DeviceService:
         """
         logger.info(f"[get_device_connection] called with binding_id={binding_id}, port={port}, ttl={ttl}")
 
-        require_matching_record(record, binding_id)
+        require_matching_record(record, binding_id, caller="get_device_connection")
         if record is None:
             record = self._repo.get_by_id(binding_id)
         if record is None:
@@ -1740,7 +1742,7 @@ class DeviceService:
             - token: 原始 token（兼容旧代码）
             - engine_type: 引擎类型
         """
-        require_matching_record(record, binding_id)
+        require_matching_record(record, binding_id, caller="get_device_connection_v2")
         # 1. 获取设备详情，检查 sandbox_id 和 device_provider（单源事实）
         try:
             device_result = (
