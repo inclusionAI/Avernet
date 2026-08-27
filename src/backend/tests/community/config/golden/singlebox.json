@@ -56,6 +56,7 @@
       "desktop_template_uuid": "TEMPLATE-f996ecc77d224ef7bd80757d8d2bcd0d",
       "personal_bot_template_uuid": "TEMPLATE-54942a40aa794eaaae2be166f94890ed",
       "teclaw_template_uuid": "TEMPLATE-3106e731ffb04e0285e27c387e153737",
+      "eval_template_uuid": "TEMPLATE-2e3192faa8994fe8bb8bc7be8671b431",
       "template_uuid": "TEMPLATE-4d0e2849d7004111836333de782b95d8",
       "tenant": "team_claw"
     },
@@ -242,6 +243,7 @@
       "desktop_ttl_minutes": 0,
       "personal_bot_template_uuid": "TEMPLATE-54942a40aa794eaaae2be166f94890ed",
       "teclaw_template_uuid": "TEMPLATE-3106e731ffb04e0285e27c387e153737",
+      "eval_template_uuid": "TEMPLATE-2e3192faa8994fe8bb8bc7be8671b431",
       "template_uuid": "TEMPLATE-4d0e2849d7004111836333de782b95d8",
       "tenant": "team_claw"
     },
