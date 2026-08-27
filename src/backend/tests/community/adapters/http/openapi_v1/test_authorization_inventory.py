@@ -492,6 +492,18 @@ def test_existing_service_level_edit_lock_defences_are_preserved():
     )
 
 
+def test_caller_identity_keeps_legacy_read_and_write_permission_levels():
+    read = AUTHORIZATION[("GET", "/openapi/v1/bots/{bot_id}/caller-context")]
+    write = AUTHORIZATION[
+        ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type")
+    ]
+
+    assert read.level is PermissionLevel.MEMBER
+    assert read.edit_lock is None
+    assert write.level is PermissionLevel.OWNER
+    assert write.edit_lock is EDIT_LOCK
+
+
 def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
     expected = {
         ("POST", "/openapi/v1/bots/{bot_id}/channels"),
@@ -508,6 +520,7 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/retry"),
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"),
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade"),
+        ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"),
         ("POST", "/openapi/v1/bots/{bot_id}/skill-sets"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"),
         ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/activate"),
