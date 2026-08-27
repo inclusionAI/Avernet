@@ -1,0 +1,54 @@
+name: Frontend Nextgen
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+      - 'REL*'
+    paths:
+      - 'src/frontend-nextgen/**'
+      - '.github/workflows/frontend-nextgen.yml'
+  push:
+    branches:
+      - dev
+      - main
+    paths:
+      - 'src/frontend-nextgen/**'
+      - '.github/workflows/frontend-nextgen.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-nextgen-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Open Core frontend checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/frontend-nextgen
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.20.2'
+          cache: npm
+          cache-dependency-path: src/frontend-nextgen/package-lock.json
+          registry-url: https://registry.npmjs.org
+
+      - name: Install locked public dependencies
+        run: npm ci
+
+      - name: Check Open Core boundary
+        run: npm run check:open-core
+
+      - name: Run frontend CI
+        run: npm run ci
