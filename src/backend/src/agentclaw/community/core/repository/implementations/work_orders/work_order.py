@@ -30,6 +30,8 @@ from agentclaw.community.core.work_orders.errors import (
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
+    WorkOrderApprovalContext,
+    WorkOrderApproverRecord,
     WorkOrderBizType,
     WorkOrderDetail,
     WorkOrderItemType,
@@ -44,6 +46,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderDecision,
     WorkOrderApproverStatus,
     WorkOrderEventCreatedResult,
+    reviewed_event_type_for,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderModel,
@@ -125,6 +128,56 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             notification_recipient_user_ids=notification_recipient_user_ids,
             env=env,
         )
+
+    def get_approval_context(
+        self, *, work_order_id: int, reviewer_user_id: str, env: str
+    ) -> WorkOrderApprovalContext:
+        with self._db.orm_session() as db:
+            order = (
+                db.query(self._WorkOrder)
+                .filter(self._WorkOrder.id == work_order_id, self._WorkOrder.env == env)
+                .one_or_none()
+            )
+            if order is None:
+                raise WorkOrderNotFoundError("work order not found")
+            approver = (
+                db.query(self._Approver)
+                .filter(
+                    self._Approver.work_order_id == work_order_id,
+                    self._Approver.approver_user_id == reviewer_user_id,
+                    self._Approver.env == env,
+                )
+                .one_or_none()
+            )
+            if approver is None:
+                raise WorkOrderAccessDeniedError("current user is not an approver")
+            source_event = (
+                db.query(self._Notification.event_type)
+                .filter(
+                    self._Notification.work_order_id == work_order_id,
+                    self._Notification.notification_category
+                    == NotificationCategory.APPROVAL.value,
+                    self._Notification.env == env,
+                )
+                .order_by(self._Notification.id.asc())
+                .first()
+            )
+            source_event_type = source_event[0] if source_event is not None else None
+            return WorkOrderApprovalContext(
+                work_order=order.to_record(),
+                approver=WorkOrderApproverRecord(
+                    id=approver.id,
+                    work_order_id=approver.work_order_id,
+                    approver_user_id=approver.approver_user_id,
+                    status=approver.status,
+                    review_remark=approver.review_remark,
+                    reviewed_at=approver.reviewed_at,
+                    env=approver.env,
+                    gmt_created=approver.gmt_created,
+                    gmt_modified=approver.gmt_modified,
+                ),
+                source_event_type=source_event_type,
+            )
 
     def process_approval(
         self,
@@ -257,12 +310,28 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 },
                 synchronize_session=False,
             )
+            source_event = (
+                db.query(self._Notification.event_type)
+                .filter(
+                    self._Notification.work_order_id == work_order_id,
+                    self._Notification.notification_category
+                    == NotificationCategory.APPROVAL.value,
+                    self._Notification.env == env,
+                )
+                .order_by(self._Notification.id.asc())
+                .first()
+            )
+            source_event_type = source_event[0] if source_event is not None else None
+            reviewed_event_type = reviewed_event_type_for(
+                source_event_type=source_event_type,
+                biz_type=order.biz_type,
+            )
             db.add(
                 self._Notification(
                     work_order_id=work_order_id,
                     recipient_user_id=order.applicant_user_id,
                     notification_category=NotificationCategory.NOTICE.value,
-                    event_type=f"{order.biz_type}_REVIEWED",
+                    event_type=reviewed_event_type,
                     biz_type=order.biz_type,
                     biz_id=order.biz_id,
                     title=(

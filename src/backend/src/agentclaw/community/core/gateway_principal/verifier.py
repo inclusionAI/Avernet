@@ -58,7 +58,7 @@ _LEEWAY_SECONDS = 5
 # Claims that must be present. ``aud``/``iss`` are also value-checked below;
 # requiring them explicitly means a token that simply omits one is rejected
 # rather than skipping the check.
-_REQUIRED_CLAIMS = ("exp", "iat", "aud", "iss")
+_REQUIRED_CLAIMS = ("exp", "iat", "iss")
 
 _PRINCIPAL_ADAPTER: TypeAdapter[GatewayPrincipal] = TypeAdapter(GatewayPrincipal)
 
@@ -134,14 +134,14 @@ class PrincipalVerifierConfig:
     not resolve it — see :func:`verify_principal_token`, which then fails every
     verification closed rather than accepting unsigned identity.
 
-    ``audience`` must equal the gateway's upstream-server name for this
-    component (``servers:`` in the gateway's ``upstreams.yaml``), and ``issuer``
-    its configured ``iss``.
+    ``audience`` is checked when ``verify_audience`` is enabled, and ``issuer``
+    is always checked against its configured ``iss``.
     """
 
     signing_key: str
     audience: str
     issuer: str
+    verify_audience: bool = True
 
     @property
     def key_fingerprint(self) -> str:
@@ -261,7 +261,7 @@ def verify_principal_token(
     """Verify ``token`` and return the caller it carries.
 
     Raises :class:`PrincipalVerificationError` on any failure — bad signature,
-    wrong audience, expired, unparseable payload, contradictory tenants, an
+    expired, unparseable payload, contradictory tenants, an
     identity set naming neither an end user nor an application, or no signing
     key configured at all.
     """
@@ -273,15 +273,18 @@ def verify_principal_token(
         raise PrincipalVerificationError("empty principal token")
 
     try:
-        claims = jwt.decode(
-            token,
-            config.signing_key,
-            algorithms=list(_ALGORITHMS),
-            audience=config.audience,
-            issuer=config.issuer,
-            leeway=_LEEWAY_SECONDS,
-            options={"require": list(_REQUIRED_CLAIMS)},
-        )
+        options = {"require": list(_REQUIRED_CLAIMS)}
+        decode_kwargs = {
+            "algorithms": list(_ALGORITHMS),
+            "issuer": config.issuer,
+            "leeway": _LEEWAY_SECONDS,
+            "options": options,
+        }
+        if config.verify_audience:
+            decode_kwargs["audience"] = config.audience
+        else:
+            options["verify_aud"] = False
+        claims = jwt.decode(token, config.signing_key, **decode_kwargs)
     except jwt.PyJWTError as exc:
         # PyJWT's own message already separates the failure modes ("Signature
         # verification failed" vs "Signature has expired" vs "Invalid
@@ -304,7 +307,8 @@ def verify_principal_token(
         raise PrincipalVerificationError(
             f"principal token rejected: {exc} "
             f"[verifier key fp={config.key_fingerprint}, "
-            f"expects aud={config.audience!r} iss={config.issuer!r}; "
+            f"expects aud={config.audience!r} iss={config.issuer!r} "
+            f"verify_aud={config.verify_audience}; "
             f"{_unverified_token_header(token)}]"
         ) from exc
 
