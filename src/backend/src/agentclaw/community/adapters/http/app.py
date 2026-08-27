@@ -107,6 +107,7 @@ from agentclaw.community.adapters.http.devices.router import router as device_ro
 from agentclaw.community.adapters.http.access.router import access_router as whitelist_router  # noqa: E402
 from agentclaw.community.adapters.http.access.router import user_list_router  # noqa: E402
 from agentclaw.community.adapters.http.access.router import user_router  # noqa: E402
+from agentclaw.community.adapters.http.org.router import router as org_user_router  # noqa: E402
 from agentclaw.community.adapters.http.expert_chat import router as expert_chats_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_chat import router as bot_chat_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_chat.otel_router import router as bot_chat_otel_router  # noqa: E402
@@ -915,6 +916,7 @@ app.include_router(bot_chat_relation_router)  # bot-chat 业务任务关系写�
 app.include_router(whitelist_router)
 app.include_router(user_list_router)
 app.include_router(user_router)
+app.include_router(org_user_router)  # GET /api/v1/org/user?user_id=<work_no>: directory identity, signed-principal auth
 app.include_router(system_config_router)
 app.include_router(common_config_router)
 app.include_router(skills_pool_ops_router)
