@@ -50,7 +50,7 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.converter import (
     display_title,
     json_object,
 )
-from agentclaw.community.adapters.http.work_orders.event_adapter import (
+from agentclaw.community.adapters.http.work_orders.converter import (
     create_work_order_event_data,
 )
 from agentclaw.community.api.work_order_service import (
