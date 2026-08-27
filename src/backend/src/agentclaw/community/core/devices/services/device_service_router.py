@@ -40,10 +40,7 @@ from agentclaw.community.core.devices.services.device_instance_service import (
     EvalBindingNotFoundError,
     InstanceHealthStatus,
 )
-from agentclaw.community.core.devices.services.device_service import (
-    BAAS_DEVICE_PROVIDER,
-    DeviceService,
-)
+from agentclaw.community.core.devices.services.device_service import BAAS_DEVICE_PROVIDER, DeviceService, require_matching_record
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.log import get_logger
 
@@ -187,7 +184,7 @@ class DeviceServiceRouter(DeviceService):
         Returns:
             对应的 DeviceService 实例
         """
-        record = record if record is not None else self._repo.get_by_id(binding_id)
+        record = require_matching_record(record, binding_id) if record else self._repo.get_by_id(binding_id)
         if record is None:
             logger.warning(
                 f"[_get_provider_for_binding] Binding {binding_id} not found, using default"

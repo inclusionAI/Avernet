@@ -222,7 +222,9 @@ class SkillsPoolRuntime:
                 logger.info(
                     "[skills_pool.runtime] mapping publish verified inline, no "
                     "verify round trip bot_id=%s user_id=%s contract=%s",
-                    bot_id, user_id, mapping_contract_version,
+                    bot_id,
+                    user_id,
+                    mapping_contract_version,
                 )
             else:
                 # Final here and only here: this method does not re-ask the
@@ -234,7 +236,10 @@ class SkillsPoolRuntime:
                 logger.warning(
                     "[skills_pool.runtime] mapping publish reported verification "
                     "inline as failed bot_id=%s user_id=%s contract=%s response=%s",
-                    bot_id, user_id, mapping_contract_version, response,
+                    bot_id,
+                    user_id,
+                    mapping_contract_version,
+                    response,
                 )
             return MappingPublishOutcome(
                 published=True,

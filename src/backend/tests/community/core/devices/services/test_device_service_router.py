@@ -1016,3 +1016,47 @@ class TestApplyDeviceTemplateConfigPassthrough:
 
             # Confirm template_config was forwarded to _do_allocate
             assert mock_alloc.call_args.kwargs.get("template_config") == {"image": "img"}
+
+
+class TestGetDeviceConnectionRecordPassthrough:
+    """Regression: the router forwards ``record=`` on *every* call, including
+    when it is ``None``, so an override that does not accept the keyword raises
+    ``TypeError`` on every device connection in that composition.
+
+    The singlebox override was missed when the keyword was added to the base,
+    the router, and the local and baas providers; nothing caught it because the
+    repo lints with ruff rather than a type checker. Enumerating the overrides
+    is what makes the fifth one impossible to forget."""
+
+    def _implementations(self):
+        from agentclaw.community.di.modules.infrastructure.singlebox.devices import (
+            SingleboxBaasDeviceService,
+        )
+        from agentclaw.community.core.devices.services.baas_device_service import (
+            BaasDeviceService,
+        )
+        from agentclaw.community.core.devices.services.device_service import (
+            DeviceService,
+        )
+        from agentclaw.community.core.devices.services.device_service_router import (
+            DeviceServiceRouter,
+        )
+        from agentclaw.community.core.devices.services.local_device_service import (
+            LocalDeviceService,
+        )
+
+        return [
+            DeviceService,
+            DeviceServiceRouter,
+            LocalDeviceService,
+            BaasDeviceService,
+            SingleboxBaasDeviceService,
+        ]
+
+    def test_every_override_accepts_the_record_keyword(self):
+        for cls in self._implementations():
+            params = inspect.signature(cls.get_device_connection).parameters
+            assert "record" in params, f"{cls.__name__} would TypeError on record="
+            assert params["record"].default is None, (
+                f"{cls.__name__} must keep record optional"
+            )

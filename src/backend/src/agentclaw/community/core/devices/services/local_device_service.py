@@ -51,6 +51,7 @@ from agentclaw.community.core.devices.services.baas_publish_poller import BaasPu
 from agentclaw.community.core.devices.services.device_service import (
     LOCAL_DEVICE_PROVIDER,
     DeviceService,
+    require_matching_record,
 )
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE  # noqa: E402
 from agentclaw.community.log import get_logger
@@ -780,6 +781,7 @@ class LocalDeviceService(DeviceService):
         skips the lookup below. Same row, so the checks that follow are
         unchanged.
         """
+        require_matching_record(record, binding_id)
         if record is None:
             record = self._repo.get_by_id(binding_id)
         if record is None:

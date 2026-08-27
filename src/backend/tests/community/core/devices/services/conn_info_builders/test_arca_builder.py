@@ -195,16 +195,40 @@ def test_a_record_for_another_binding_is_refused(arca_record):
 
     A mismatched row would route by one binding's provider and run the
     ownership check against another's owner, so it is refused rather than
-    quietly trusted.
+    quietly trusted. Not DeviceNotFoundError: the binding exists, the caller
+    is wrong, and the HTTP layer turns "not found" into a 404 that sends
+    clients down a re-provision path.
     """
-    from agentclaw.community.core.devices.errors import DeviceNotFoundError
+    from agentclaw.community.core.devices.errors import DeviceServiceError
 
     router, _ = _real_arca_stack(arca_record)
 
-    with pytest.raises(DeviceNotFoundError):
+    with pytest.raises(DeviceServiceError):
         router.get_device_connection_v2(
             user_id="u001",
             nick_name="u001",
             binding_id=arca_record.id + 1,
             record=arca_record,
         )
+
+
+def test_the_router_refuses_a_mismatched_record_before_it_routes(arca_record):
+    """The routing decision itself reads record.device_provider.
+
+    Enforcing only inside the provider would mean the wrong provider had
+    already been chosen by the time anything checked.
+    """
+    from agentclaw.community.core.devices.errors import DeviceServiceError
+    from agentclaw.community.core.devices.models import OperatorContext
+
+    router, repo = _real_arca_stack(arca_record)
+    operator = OperatorContext(
+        staff_id="u001", staff="u001", nick_name="u001",
+        operator_name="u001", tenant_id="default",
+    )
+
+    with pytest.raises(DeviceServiceError):
+        router.get_device_connection(
+            binding_id=arca_record.id + 1, operator=operator, record=arca_record
+        )
+    assert repo.get_by_id.call_count == 0
