@@ -31,6 +31,7 @@ from agentclaw.community.core.devices.errors import (
     DeviceServiceError,
     InvalidDeviceStatusError,
 )
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,
     DeviceBindingInfo,
@@ -764,6 +765,7 @@ class LocalDeviceService(DeviceService):
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
         path: str | None = None,
+        record: DeviceBindingRecord | None = None,
     ) -> DeviceConnectionInfo:
         """Get device connection info.
 
@@ -773,8 +775,13 @@ class LocalDeviceService(DeviceService):
         ``path`` is ignored here: this provider returns a bare routing target
         (and an HTTP base URL), never a finished WebSocket URL, so the caller
         appends the path itself. Accepted to keep the provider signatures equal.
+
+        ``record`` is a binding row the caller already loaded; supplying it
+        skips the lookup below. Same row, so the checks that follow are
+        unchanged.
         """
-        record = self._repo.get_by_id(binding_id)
+        if record is None:
+            record = self._repo.get_by_id(binding_id)
         if record is None:
             raise DeviceNotFoundError(f"binding {binding_id} not found")
 

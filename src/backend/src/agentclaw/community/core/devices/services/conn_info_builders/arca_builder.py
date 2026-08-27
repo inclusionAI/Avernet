@@ -30,6 +30,10 @@ class ArcaConnInfoBuilder:
                 binding_id=binding.id,
                 user_id=user_id,
                 nick_name=user_id,  # nick_name 在 v2 conn_info 算法中未使用,死参,传 user_id 兼容
+                # resolver 刚从 DB 取出这条 binding。不传的话 v2 会按 binding_id
+                # 重新查四次同一行(路由两跳 + provider 两次自查),每次都是一次
+                # 独立 ORM session。传下去让这条链路零额外读。
+                record=binding,
             )
         except Exception as e:
             raise ConnInfoBuildError(

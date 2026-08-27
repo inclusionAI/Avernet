@@ -957,11 +957,16 @@ class DeviceService:
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
         path: str | None = None,
+        record: DeviceBindingRecord | None = None,
     ) -> DeviceConnectionInfo:
         """Get device connection information.
 
         Validates the binding exists and is not FAILED, checks permission,
         then delegates to _compose_device_conn_info for provider-specific logic.
+
+        ``record`` (optional) is the binding row a caller has already loaded.
+        Supplying it skips the lookup below; it is the same row this method
+        would read, so validation and permission checks are unchanged.
 
         ``device_uuid`` (optional) targets a specific instance in the multi-instance
         BaaS provider (see ``BaasDeviceService.get_device_connection``); local /
@@ -975,7 +980,8 @@ class DeviceService:
         """
         logger.info(f"[get_device_connection] called with binding_id={binding_id}, port={port}, ttl={ttl}")
 
-        record = self._repo.get_by_id(binding_id)
+        if record is None:
+            record = self._repo.get_by_id(binding_id)
         if record is None:
             raise DeviceNotFoundError(f"binding {binding_id} not found")
 
@@ -1682,6 +1688,8 @@ class DeviceService:
         nick_name: str,
         binding_id: int,
         operator_tenant_id: str = "default",
+        *,
+        record: DeviceBindingRecord | None = None,
     ) -> dict:
         """获取设备连接信息（支持新旧架构），自动判断代理/直连模式。
 
@@ -1696,6 +1704,10 @@ class DeviceService:
             nick_name: 用户花名（用作 operator.operator_name）
             binding_id: 设备绑定 ID
             operator_tenant_id: 租户 ID（默认 "default"）
+            record: 调用方已经取到的 binding 行。给了就直接用，省掉本方法内部
+                对同一行的重复读——``get_device`` 一次、``get_device_connection``
+                一次，两者又各自经过 router 的 provider 解析再读一次，合计四次
+                独立 ORM session 查同一个主键。不给则维持原有的按 id 自查。
 
         Returns:
             dict 包含:
@@ -1709,7 +1721,9 @@ class DeviceService:
         """
         # 1. 获取设备详情，检查 sandbox_id 和 device_provider（单源事实）
         try:
-            device_result = self.get_device(binding_id=binding_id)
+            device_result = (
+                record if record is not None else self.get_device(binding_id=binding_id)
+            )
             device_props = getattr(device_result, 'device_props', {}) or {}
             sandbox_id = device_props.get('sandbox_id')
             device_provider = device_result.device_provider
@@ -1731,6 +1745,7 @@ class DeviceService:
             result = self.get_device_connection(
                 binding_id=binding_id,
                 operator=operator,
+                record=record,
             )
 
             target = result.target

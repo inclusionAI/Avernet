@@ -27,6 +27,7 @@ from agentclaw.community.core.devices.models import (
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
 )
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_policy import (
     ArcaBotCreateBaasRolloutDecision,
@@ -176,16 +177,21 @@ class DeviceServiceRouter(DeviceService):
             f"default={default_provider_key}"
         )
 
-    def _get_provider_for_binding(self, binding_id: int) -> DeviceService:
+    def _get_provider_for_binding(
+        self, binding_id: int, *, record: DeviceBindingRecord | None = None
+    ) -> DeviceService:
         """根据 binding_id 获取对应的 Provider 服务.
 
         Args:
             binding_id: 设备绑定 ID
+            record: 调用方已取到的 binding 行。路由只需要它的
+                ``device_provider`` 一列,给了就不再为这一列多查一次整行。
 
         Returns:
             对应的 DeviceService 实例
         """
-        record = self._repo.get_by_id(binding_id)
+        if record is None:
+            record = self._repo.get_by_id(binding_id)
         if record is None:
             logger.warning(
                 f"[_get_provider_for_binding] Binding {binding_id} not found, using default"
@@ -667,6 +673,7 @@ class DeviceServiceRouter(DeviceService):
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
         path: str | None = None,
+        record: DeviceBindingRecord | None = None,
     ):
         """获取设备连接信息 - 根据 binding_id 路由.
 
@@ -675,11 +682,15 @@ class DeviceServiceRouter(DeviceService):
 
         ``path`` 透传给 provider,仅对"由服务端拼出完整 URL"的链路(BaaS relay)
         有意义;其余 provider 忽略。
+
+        ``record`` 是调用方已取到的 binding 行,同时喂给路由解析和 provider,
+        这一跳因此零 DB 读;不传则两边各自按 binding_id 自查(原行为)。
         """
-        service = self._get_provider_for_binding(binding_id)
+        service = self._get_provider_for_binding(binding_id, record=record)
         return service.get_device_connection(
             binding_id=binding_id, operator=operator, port=port, ttl=ttl,
             device_uuid=device_uuid, ws_conn_mode=ws_conn_mode, path=path,
+            record=record,
         )
 
     @override

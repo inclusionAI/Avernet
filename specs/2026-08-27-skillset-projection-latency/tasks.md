@@ -12,7 +12,7 @@
 > | P4 | inclusionAI/Avernet#1622 | MCP allow-list and Passport rewritten when unchanged |
 > | P5 | inclusionAI/Avernet#1623 | Skill mappings published when provably unchanged |
 
-## Task 1: Thread the loaded binding record through ARCA connection resolution
+## Task 1 `[x]`: Thread the loaded binding record through ARCA connection resolution
 
 - **Goal:** Stop re-reading a binding row that the caller already holds, so one
   device address resolution costs no extra `get_by_id`.
@@ -23,16 +23,16 @@
   - `src/backend/src/agentclaw/community/core/devices/services/local_device_service.py`
   - `src/backend/src/agentclaw/community/core/devices/services/baas_device_service.py`
 - **Done when:**
-  - [ ] `get_device_connection_v2` accepts keyword-only `record: DeviceBindingRecord | None = None`
+  - [x] `get_device_connection_v2` accepts keyword-only `record: DeviceBindingRecord | None = None`
         and uses it instead of `self.get_device(binding_id=...)` when supplied.
-  - [ ] `get_device_connection` accepts the same keyword on the base, the router,
+  - [x] `get_device_connection` accepts the same keyword on the base, the router,
         and both provider overrides; each defaults to today's read when it is `None`.
-  - [ ] `DeviceServiceRouter._get_provider_for_binding` accepts `record=` and routes
+  - [x] `DeviceServiceRouter._get_provider_for_binding` accepts `record=` and routes
         from it without a database read when supplied.
-  - [ ] `ArcaConnInfoBuilder.build` passes `record=binding`.
-  - [ ] New test asserts one `resolve_for_bot` on an arca bot issues exactly one
+  - [x] `ArcaConnInfoBuilder.build` passes `record=binding`.
+  - [x] New test asserts one `resolve_for_bot` on an arca bot issues exactly one
         binding read (`get_active_by_bot_and_owner`) and zero `get_by_id` calls.
-  - [ ] `tests/community/core/devices/services/test_device_service_router.py` and
+  - [x] `tests/community/core/devices/services/test_device_service_router.py` and
         `test_device_service.py` still pass with no signature-related failures.
 - **Depends on:** —
 

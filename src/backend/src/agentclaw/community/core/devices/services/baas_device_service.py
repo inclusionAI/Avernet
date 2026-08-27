@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Protocol, override
 
 from agentclaw.community.core.bot_management.engines import resolve_provisioning
 from agentclaw.community.core.devices.errors import DeviceServiceError
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,
     DeviceConnectionInfo,
@@ -776,6 +777,7 @@ class BaasDeviceService(DeviceService):
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
         path: str | None = None,
+        record: DeviceBindingRecord | None = None,
     ) -> DeviceConnectionInfo:
         """获取设备连接信息。
 
@@ -791,6 +793,9 @@ class BaasDeviceService(DeviceService):
             path: 目标 in-device 路径（可选，自带前导斜杠）；BaaS 用它拼 ``ws_url``，
                 故 relay 下它决定 URL 指向哪个引擎 socket，不传落到默认
                 ``/api/openclaw/ws``
+            record: 调用方已取到的 binding 行。本实现不读 binding 行——直接拿
+                ``binding_id`` 问 BaaS——所以这里只是接住参数保持 provider 签名
+                一致，不使用。
 
         Returns:
             DeviceConnectionInfo: 设备连接信息
