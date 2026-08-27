@@ -158,7 +158,7 @@ class OpenApiBotSessionInitiator:
           验收标准   ← task.acceptances (为空则提示确认时补充)
           约束       ← task.background
         """
-        lines = ["/task 我为您发现了以下可能有意义的事情，请确认是否执行：\n"]
+        lines = ["/task 用taskloop 这个skill。\n"]
         for i, task in enumerate(tasks, 1):
             lines.append(f"{i}. 【{task.title}】")
             lines.append(f"   目标：{task.objective or task.title}")
@@ -185,7 +185,11 @@ class OpenApiBotSessionInitiator:
         动态解析 frontend URL — 支持运行时 API 注入 (FrontendUrlHolder)。
         """
         base = (FrontendUrlHolder.get() or self._frontend_url).rstrip("/")
-        full_session_key = f"agent:main:{session_id}"
+        full_session_key = (
+            session_id
+            if session_id.startswith("agent:main:")
+            else f"agent:main:{session_id}"
+        )
         bot_value = f"{bot_id}:{owner_id}"
         return (
             f"{base}/workspace"
