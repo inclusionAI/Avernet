@@ -77,6 +77,7 @@ class SkillsPoolRuntime:
             user_id=user_id,
             mappings=mappings,
             mapping_contract_version=mapping_contract_version,
+            context=None,
         ):
             return PoolCutoverResult(
                 committed=False,
@@ -148,13 +149,14 @@ class SkillsPoolRuntime:
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
         mapping_contract_version: str = MAPPING_CONTRACT_VERSION,
     ) -> bool:
-        published, _, _ = await self._publish(
+        published, _ = await self._publish(
             bot_id=bot_id,
             user_id=user_id,
             mappings=mappings,
             retired_mappings=retired_mappings,
             source_layout=source_layout,
             mapping_contract_version=mapping_contract_version,
+            context=None,
         )
         return published
 
@@ -178,14 +180,13 @@ class SkillsPoolRuntime:
         verify are up to three adapter calls; resolving per call re-reads the
         same Bot binding for each. The resolved context is a local, so nothing
         can outlive this call and serve a stale sandbox address to a later
-        request. Within the call it is a snapshot, and a device that re-binds
+        request. Within the call it is a snapshot: a device that re-binds
         between the publish and the fallback verify is checked at its old
-        address: usually that errors and reports unverified, but for a
-        provider whose conn_info carries a concrete resolved address a
-        recycled sandbox could answer about the wrong container. The window
-        is one adapter round trip wide, and a re-bind mid-projection triggers
-        the runtime's own re-sync regardless, so the verdict either way was
-        never the one that decided convergence.
+        address. That fails closed — a re-bind mints a fresh UUID-addressed
+        sandbox, so the old address resolves to nothing and the verify
+        reports unverified rather than answering about someone else's
+        container. The window is one adapter round trip wide, and a re-bind
+        mid-projection triggers the runtime's own re-sync regardless.
 
         *No verify round trip when the runtime already did it.* A publish
         response carrying ``data.verified is True`` means the runtime ran the
@@ -204,7 +205,7 @@ class SkillsPoolRuntime:
             )
             return MappingPublishOutcome(published=False, verified=False)
 
-        published, inline_verified, publish_data = await self._publish(
+        published, inline_verified = await self._publish(
             bot_id=bot_id,
             user_id=user_id,
             mappings=mappings,
@@ -216,27 +217,9 @@ class SkillsPoolRuntime:
         if not published:
             return MappingPublishOutcome(published=False, verified=False)
         if inline_verified is not None:
-            if inline_verified:
-                logger.info(
-                    "[skills_pool.runtime] mapping publish reported verification "
-                    "inline bot_id=%s user_id=%s contract=%s valid=True",
-                    bot_id,
-                    user_id,
-                    mapping_contract_version,
-                )
-            else:
-                # This verdict is final — nothing re-asks the device — so the
-                # evidence naming the failing target has to be logged here or
-                # it is lost. The separate-verify path logs the same way.
-                logger.warning(
-                    "[skills_pool.runtime] mapping publish reported verification "
-                    "inline as failed bot_id=%s user_id=%s contract=%s "
-                    "evidence=%s",
-                    bot_id,
-                    user_id,
-                    mapping_contract_version,
-                    publish_data,
-                )
+            # A failed verdict is already logged with its full response by
+            # ``_publish``; this branch only records that no verify round trip
+            # was needed.
             return MappingPublishOutcome(
                 published=True,
                 verified=inline_verified,
@@ -262,14 +245,9 @@ class SkillsPoolRuntime:
         retired_mappings: Sequence[PoolSkillMapping],
         source_layout: SkillMappingSourceLayout,
         mapping_contract_version: str,
-        context: DeviceContext | None = None,
-    ) -> tuple[bool, bool | None, object]:
-        """``(published, inline verdict or None if unreported, response data)``.
-
-        The response data comes back because an inline verdict is final — no
-        second call re-asks the device — so this is the only chance to log the
-        evidence behind a failed one.
-        """
+        context: DeviceContext | None,
+    ) -> tuple[bool, bool | None]:
+        """``(published, inline verification verdict or None if unreported)``."""
         if not await self._ensure_center_mappings(
             bot_id=bot_id,
             user_id=user_id,
@@ -277,7 +255,7 @@ class SkillsPoolRuntime:
             mapping_contract_version=mapping_contract_version,
             context=context,
         ):
-            return False, None, None
+            return False, None
         try:
             response = await self._invoke(
                 bot_id=bot_id,
@@ -298,7 +276,7 @@ class SkillsPoolRuntime:
                 "[skills_pool.runtime] mapping publish failed bot_id=%s",
                 bot_id,
             )
-            return False, None, None
+            return False, None
         success = response.get("success") is True
         if not success:
             logger.warning(
@@ -319,7 +297,19 @@ class SkillsPoolRuntime:
                 mapping_contract_version,
                 sorted(response.keys()),
             )
-        return success, _inline_verification(response), response.get("data")
+        inline_verified = _inline_verification(response)
+        if inline_verified is False:
+            # Final: nothing re-asks the device after a reported failure, so
+            # the whole response has to be logged here or the reason is lost.
+            logger.warning(
+                "[skills_pool.runtime] mapping publish reported verification "
+                "inline as failed bot_id=%s user_id=%s contract=%s response=%s",
+                bot_id,
+                user_id,
+                mapping_contract_version,
+                response,
+            )
+        return success, inline_verified
 
     async def rollback_to_legacy(
         self,
@@ -529,7 +519,7 @@ class SkillsPoolRuntime:
         user_id: str,
         mappings: Sequence[PoolSkillMapping],
         mapping_contract_version: str,
-        context: DeviceContext | None = None,
+        context: DeviceContext | None,
     ) -> bool:
         center = [mapping for mapping in mappings if mapping.corpus == "center"]
         if not center:

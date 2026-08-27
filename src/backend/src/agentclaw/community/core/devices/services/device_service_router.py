@@ -659,6 +659,7 @@ class DeviceServiceRouter(DeviceService):
         """
         return self._default_service.batch_set_env(binding_ids=binding_ids, env=env)
 
+    @override
     def get_device_connection(
         self,
         *,
@@ -677,9 +678,8 @@ class DeviceServiceRouter(DeviceService):
         不传则由 BaaS 自动选活跃实例(本地/非 BaaS provider 忽略)。
 
         ``path`` 透传给 provider,仅对"由服务端拼出完整 URL"的链路(BaaS relay)
-        有意义;其余 provider 忽略。
-
-        ``record`` 是已取到的 binding 行,喂给路由和 provider,这一跳零 DB 读。
+        有意义;其余 provider 忽略。``record`` 可选:传已取到的 binding 行则路由和
+        provider 都不再自查(零 DB 读);不传则两边各自查一次(原行为)。
         """
         service = self._get_provider_for_binding(binding_id, record=record)
         return service.get_device_connection(

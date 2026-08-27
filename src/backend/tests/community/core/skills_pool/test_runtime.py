@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -436,6 +437,29 @@ async def test_inline_verification_failure_is_not_retried_by_the_verify_call() -
     assert outcome.verified is False
     assert outcome.reported_inline is True
     assert not any(path.endswith("/verify") for path in _paths(transport))
+
+
+@pytest.mark.asyncio
+async def test_inline_verification_failure_logs_the_whole_response(caplog) -> None:
+    """The failed verdict is final, so this warning is the only diagnostic.
+
+    Without it a stuck projection reports unverified with nothing anywhere
+    naming the target that failed — the separate-verify path it replaces logs
+    the full response, and this one has to as well.
+    """
+    resolver = FakeResolver()
+    transport = InlineVerifiedTransport(verified=False)
+
+    with caplog.at_level(logging.WARNING):
+        await _runtime(resolver, transport).publish_and_verify_mappings(
+            bot_id="bot-1", user_id="user-1", mappings=_local_mappings()
+        )
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings, "a failed inline verdict must warn"
+    rendered = warnings[-1].getMessage()
+    assert "inline as failed" in rendered
+    assert "'verified': False" in rendered
 
 
 @pytest.mark.asyncio
