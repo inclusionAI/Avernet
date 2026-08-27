@@ -2260,3 +2260,68 @@ def test_cutover_finalize_trusts_the_publish_verdict(
     # The third, re-checking an untouched tree straight after the publish, is
     # the walk this path stopped doing.
     assert len(calls) == 2
+
+
+def test_cutover_reports_sync_pending_when_the_fallback_verify_cannot_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Post-boundary, an unrunnable verification is retryable, not committed.
+
+    Letting the OSError escape hands it to the callers' own handlers, which
+    decide by looking at ``legacy_local``: a resume then reports COMMITTED
+    with the active marker and the bridges never written, and a fresh cutover
+    reports TRANSIENT_ERROR, which the control plane records as a failure
+    *before* a boundary it has already crossed.
+    """
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+
+    def _raise(**_kwargs):
+        raise OSError(errno.EIO, "verification unavailable")
+
+    monkeypatch.setattr(layout_activation, "verify_skill_mappings", _raise)
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[
+            SkillMapping(
+                source=str(pool_local / "handmade"),
+                target=str(legacy_local.parent / "handmade"),
+            )
+        ],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.POST_CUTOVER_SYNC_PENDING
+    assert result.evidence["reason"] == "pool_mapping_verify_failed"
+    assert result.evidence["error_type"] == "OSError"
+    assert result.evidence["errno"] == errno.EIO
+
+
+def test_the_failure_list_in_the_digest_is_truncated(tmp_path: Path, monkeypatch) -> None:
+    """The bound is the point of the digest — the caller logs it on every retry."""
+    home, legacy_local, pool_local, _ = _prepared_home(tmp_path)
+    failures = [{"target": f"t{i}", "reason": "target_mismatch"} for i in range(9)]
+    monkeypatch.setattr(
+        layout_activation,
+        "verify_skill_mappings",
+        lambda **_kwargs: MappingVerificationResult(
+            valid=False, evidence={"failures": failures}
+        ),
+    )
+
+    published = publish_pool_mappings(
+        mappings=[
+            SkillMapping(
+                source=str(pool_local / "handmade"),
+                target=str(legacy_local.parent / "handmade"),
+            )
+        ],
+        home=home,
+    )
+
+    digest = published.evidence["verification"]
+    assert digest["failure_count"] == 9
+    assert digest["first_failures"] == failures[:5]

@@ -3169,11 +3169,15 @@ async def test_an_inactive_set_still_skips_projection_entirely():
 
 
 def _scoped_projector(pool=None, passport=None, factory=None):
+    # One store for both, as the DI composition root injects one
+    # CapabilityDesiredStateRepository into the projector and the reader:
+    # projector-side flushes have to be visible to reader-side reads.
+    repository = _McpInstallations()
     return BotRuntimeProjector(
         factory=factory or _RuntimeFactory(),
         bot_repo=_RuntimeBots(),
-        repository=_McpInstallations(),
-        reader=_reader(_RuntimeSkills()),
+        repository=repository,
+        reader=_reader(_RuntimeSkills(), repository=repository),
         registry=_registry(pool_runtime=pool or _RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=passport or _RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),

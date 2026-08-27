@@ -235,22 +235,22 @@ class SkillsPoolRuntime:
                 # ``publish_mappings`` path makes no such claim — a separate
                 # verify still follows it — which is why this cannot live in
                 # ``_publish``.
-                # The digest and the reason, not the whole response: the
-                # publish evidence carries a path list per mapping, which on a
-                # large Bot would dwarf the failure detail and repeat on every
-                # retry. The envelope's ``message`` is a constant on this
-                # route, so it says nothing; the reason and the digest vary.
-                data = response.get("data")
-                evidence = data.get("evidence") if isinstance(data, dict) else None
-                evidence = evidence if isinstance(evidence, dict) else {}
+                # The digest alone. Not the whole response: the publish
+                # evidence carries a path list per mapping, which on a large
+                # Bot would dwarf the failure detail and repeat on every
+                # retry. Not the envelope's ``message`` or the evidence
+                # ``reason`` either — the first is a constant on this route
+                # and the second only exists on a failed publish, which
+                # returns before this branch. ``data`` is known to be a dict:
+                # a verdict came out of it.
+                evidence = response["data"].get("evidence") or {}
                 logger.warning(
                     "[skills_pool.runtime] mapping publish reported verification "
                     "inline as failed bot_id=%s user_id=%s contract=%s "
-                    "reason=%s verification=%s",
+                    "verification=%s",
                     bot_id,
                     user_id,
                     mapping_contract_version,
-                    evidence.get("reason"),
                     evidence.get("verification"),
                 )
             return MappingPublishOutcome(
@@ -282,10 +282,11 @@ class SkillsPoolRuntime:
     ) -> tuple[bool, bool | None, dict[str, Any] | None]:
         """``(published, inline verdict or None if unreported, raw response)``.
 
-        The response comes back whole rather than narrowed to ``data``: an
-        inline verdict is final for the caller that acts on it, so that caller
-        needs the runtime's ``message`` and status alongside its evidence, and
-        only it knows whether the verdict is final.
+        The response comes back rather than being logged here, because only
+        the caller knows whether the verdict it carries is final — this body
+        is shared with ``publish_mappings``, which is always followed by a
+        separate verify and so must not warn about a verdict that is about to
+        be re-checked.
         """
         if not await self._ensure_center_mappings(
             bot_id=bot_id,

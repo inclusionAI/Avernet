@@ -372,4 +372,5 @@ __all__ = [
     "SyncBindPathsRequest",
     "SyncSymlinksRequest",
     "SyncSymlinksResult",
+    "inline_verification_verdict",
 ]

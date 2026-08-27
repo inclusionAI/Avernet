@@ -457,9 +457,9 @@ async def test_inline_verification_failure_is_not_retried_by_the_verify_call() -
 async def test_inline_verification_failure_logs_the_diagnosis(caplog) -> None:
     """The failed verdict is final, so this warning is the only diagnostic.
 
-    It logs the runtime's message and the bounded verification digest, not the
-    whole response: the publish evidence carries a path list per mapping, which
-    on a large Bot would bury the failure detail and repeat on every retry.
+    It logs the bounded verification digest, not the whole response: the
+    publish evidence carries a path list per mapping, which on a large Bot
+    would bury the failure detail and repeat on every retry.
     """
     resolver = FakeResolver()
     transport = InlineVerifiedTransport(verified=False)

@@ -455,15 +455,32 @@ def _finalize_active_root(
     # back when the publish could not verify (``verified is None``).
     if published.verified is None:
         # No verdict means the publish's own check could not run. Retrying it
-        # is right — the condition may have been transient — and an OSError
-        # here propagates to the caller's own handler, which classifies it
-        # (TRANSIENT_ERROR, or COMMITTED with cleanup pending) and keeps
-        # error_type/errno at the top level of the evidence.
-        verified = verify_skill_mappings(
-            mappings=mappings,
-            home=layout.pool_root.parents[2],
-            engine=engine,
-        )
+        # is right — the condition may have been transient — but it must not
+        # escape. This runs *after* the cutover boundary: the callers' own
+        # OSError handlers classify an escape by inspecting ``legacy_local``,
+        # which reports COMMITTED for a resume (while the active marker and
+        # the bridges were never written) and TRANSIENT_ERROR for a fresh
+        # cutover, which the control plane records as a *pre*-cutover failure
+        # and retries against an already-retired layout. Neither is true. A
+        # post-boundary verification that cannot run is sync-pending.
+        try:
+            verified = verify_skill_mappings(
+                mappings=mappings,
+                home=layout.pool_root.parents[2],
+                engine=engine,
+            )
+        except OSError as error:
+            return PoolActivationResult(
+                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                {
+                    "reason": "pool_mapping_verify_failed",
+                    # Top level as well as in the digest: the sibling OSError
+                    # handlers put them here, and monitors read them here.
+                    "error_type": type(error).__name__,
+                    "errno": error.errno,
+                    "mapping": _verification_digest(None, error),
+                },
+            )
         verified_valid = verified.valid
         verified_evidence = _verification_digest(verified)
     else:
