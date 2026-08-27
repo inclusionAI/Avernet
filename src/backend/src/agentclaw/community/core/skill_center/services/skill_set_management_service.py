@@ -744,6 +744,11 @@ class SkillSetManagementService:
         contract: an inactive-set membership change has no runtime projection
         to apply. The mutate-project-compensate orchestration itself is the
         shared :class:`MutationProjectionFlow`.
+
+        Both scope arguments stay optional *here* only because each command
+        supplies whichever one it can — every one of the eleven call sites
+        below passes exactly one. The flow enforces that; neither is a
+        "forgot to say" default.
         """
         result = await self._flow.apply(
             bot=bot,

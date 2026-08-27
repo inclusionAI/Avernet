@@ -29,7 +29,7 @@ class BotRuntimeProjectorProtocol(
         bot_id: str,
         owner_id: str,
         retired_mappings: Sequence[PoolSkillMapping] = (),
-        scope: ProjectionScope = ProjectionScope.everything(),
+        scope: ProjectionScope,
     ) -> None: ...
 
     async def project_mcp_and_cli(
@@ -37,7 +37,7 @@ class BotRuntimeProjectorProtocol(
         *,
         bot_id: str,
         owner_id: str,
-        scope: ProjectionScope = ProjectionScope.everything(),
+        scope: ProjectionScope,
     ) -> None: ...
 
     async def project_for_cleanup(
@@ -45,7 +45,7 @@ class BotRuntimeProjectorProtocol(
         *,
         bot_id: str,
         owner_id: str,
-        scope: ProjectionScope = ProjectionScope.everything(),
+        scope: ProjectionScope,
     ) -> None: ...
 
 

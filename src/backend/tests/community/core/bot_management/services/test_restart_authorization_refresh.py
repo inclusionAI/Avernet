@@ -10,8 +10,9 @@ full ``resource_scope`` snapshot (full replacement).
 Because that snapshot replaces the MCP resource list wholesale, it must carry
 each MCP's execution identity: a code-only scope asserts ``owner`` for every
 MCP and silently drops the bot's caller grants. Identity therefore gates the
-refresh — with no identity repository, or an unreadable one, the strategy
-declines and leaves the existing scope alone.
+refresh: an unreadable identity declines the refresh and leaves the existing
+scope alone. The repository itself is a required argument, so "absent" is a
+type error rather than a runtime branch.
 """
 
 from unittest.mock import MagicMock, patch
@@ -294,30 +295,6 @@ def test_active_carries_caller_identity_into_the_passport_scope():
     assert scope["mcp_codes"] == ["mcp-a", "mcp-b"]
 
 
-def test_skip_when_no_identity_repository_is_supplied():
-    """No repository means no identity, and no identity means no push.
-
-    Declining leaves the bot's existing Passport scope standing, which is
-    strictly safer than replacing it with an owner-only snapshot.
-    """
-    template_service = _template_service({"template_key": "architect"})
-    passport_plugin = MagicMock()
-    strategy = AicodingProvisioningStrategy("claude_code")
-
-    with patch(_MCP_CODES_PATH) as mcp_mock, patch(_CLI_ITEMS_PATH) as cli_mock:
-        strategy.refresh_restart_authorization(
-            _ctx(),
-            _bot(),
-            {"confirmed_template_update": True},
-            passport_plugin=passport_plugin,
-            skill_set_factory=MagicMock(name="skill_set_factory"),
-            template_service=template_service,
-        )
-    mcp_mock.assert_not_called()
-    cli_mock.assert_not_called()
-    passport_plugin.update_passport.assert_not_called()
-
-
 def test_skip_when_identity_lookup_fails():
     """An unreadable identity row declines the refresh rather than defaulting."""
     repo = _identity_repo()
@@ -425,5 +402,6 @@ def test_default_strategy_no_op_returns_none():
         passport_plugin=MagicMock(),
         skill_set_factory=MagicMock(),
         template_service=MagicMock(),
+        caller_identity_repo=_identity_repo(),
     )
     assert result is None

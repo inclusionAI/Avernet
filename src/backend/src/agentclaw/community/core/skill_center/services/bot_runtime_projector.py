@@ -127,7 +127,7 @@ class BotRuntimeProjector:
         bot_id: str,
         owner_id: str,
         retired_mappings: Sequence[PoolSkillMapping] = (),
-        scope: ProjectionScope = ProjectionScope.everything(),
+        scope: ProjectionScope,
     ) -> None:
         (
             service,
@@ -144,8 +144,8 @@ class BotRuntimeProjector:
         # A mutation that changed one half has nothing to say to the other,
         # and both halves are whole-snapshot writes: re-sending the unchanged
         # one costs a device round trip (or a Pool publish plus verify) to
-        # restate what is already there. ``reconcile`` sets both flags, so a
-        # caller that declares nothing still projects everything.
+        # restate what is already there. ``ProjectionScope.everything()`` sets
+        # both flags, so a caller with nothing to declare still projects both.
         #
         # ``retired_mappings`` overrides the Skill flag rather than trusting
         # it: those retirements were computed from the actual before/after
@@ -190,7 +190,7 @@ class BotRuntimeProjector:
         *,
         bot_id: str,
         owner_id: str,
-        scope: ProjectionScope = ProjectionScope.everything(),
+        scope: ProjectionScope,
     ) -> None:
         """Rebuild MCP/CLI when a cutover task exclusively owns Skill mappings."""
         (
@@ -220,7 +220,7 @@ class BotRuntimeProjector:
         *,
         bot_id: str,
         owner_id: str,
-        scope: ProjectionScope = ProjectionScope.everything(),
+        scope: ProjectionScope,
     ) -> None:
         """Safely remove legacy state without granting new runtime writes.
 
@@ -513,10 +513,12 @@ class BotRuntimeProjector:
         effective_cli_items: list[dict],
     ) -> None:
         codes = set(projection.mcp_server_codes)
-        if scope.reconcile:
-            # Nothing declared anything — a device-activated restart or a
-            # Skill upload. The device may hold no configuration at all, so
-            # every projected code counts as newly claimed.
+        if scope.claim_all_mcp:
+            # The caller had no delta to name — a device-activated restart or
+            # a Skill upload — so it asked for every projected code to count
+            # as claimed. It cannot have named them itself: the projected set
+            # is only known here, after the plan resolves. Nothing is released
+            # on this path, so a reconcile can only add configuration.
             claimed, released = frozenset(codes), frozenset()
         else:
             # A guard, never a source. ``claimed`` cannot grow past what the

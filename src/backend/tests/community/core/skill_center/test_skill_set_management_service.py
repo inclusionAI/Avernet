@@ -1816,7 +1816,10 @@ async def test_runtime_projection_flushes_installations_first():
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
-    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert repository.flush_calls == [
         {
@@ -1846,7 +1849,10 @@ async def test_projection_flush_prefers_the_layout_engine_for_default_sets():
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
-    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert repository.flush_calls == [
         {
@@ -1874,7 +1880,10 @@ async def test_runtime_projection_fails_before_engine_writes_when_flush_fails():
     )
 
     with pytest.raises(RuntimeError, match="installation persistence unavailable"):
-        await runtime.project(bot_id="bot-1", owner_id="true-owner")
+        await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
 
 @pytest.mark.asyncio
@@ -1893,7 +1902,10 @@ async def test_runtime_projection_fails_closed_when_default_mcp_policy_is_unavai
     )
 
     with pytest.raises(SkillSetRuntimeReconcileError):
-        await runtime.project(bot_id="bot-1", owner_id="true-owner")
+        await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert factory.service.mcp_codes is None
     assert passport.calls == []
@@ -1917,7 +1929,10 @@ async def test_runtime_projection_mcp_inputs_agree_when_the_union_overlaps():
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
-    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert factory.service.mcp_codes == {"mcp.weather", "mcp.template-preset"}
     assert passport.calls[0]["resource_scope"]["mcp_codes"] == [
@@ -1941,7 +1956,10 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
-    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert factory.kwargs == {
         "user_id": "true-owner",
@@ -2015,7 +2033,10 @@ async def test_projection_preserves_caller_identity_for_configured_mcp():
         caller_identity_repo=identity,
     )
 
-    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert _passport_mcp_items(passport) == [
         {"mcp_code": "mcp.template-preset", "identity_mode": "owner"},
@@ -2040,7 +2061,10 @@ async def test_projection_defaults_to_owner_without_a_call_config_row():
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
-    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert _passport_mcp_items(passport) == [
         {"mcp_code": "mcp.template-preset", "identity_mode": "owner"},
@@ -2074,7 +2098,10 @@ async def test_projection_scope_is_the_projected_codes_not_the_config_rows():
         ),
     )
 
-    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     scope = passport.calls[0]["resource_scope"]
     assert [item["mcp_code"] for item in scope["mcp_items"]] == scope["mcp_codes"]
@@ -2113,7 +2140,10 @@ async def test_projection_fails_closed_without_a_bot_primary_key():
     )
 
     with pytest.raises(SkillSetRuntimeReconcileError):
-        await runtime.project(bot_id="bot-1", owner_id="true-owner")
+        await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     # Closed means nothing was written, not merely that it stopped: the
     # device allow-list and the symlink sync both precede the Passport call,
@@ -2187,7 +2217,10 @@ async def test_reconcile_scope_claims_every_projected_code():
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
-    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     (claimed, released), = factory.service.deliveries
     assert claimed == frozenset(factory.service.mcp_codes)
@@ -2302,7 +2335,10 @@ async def test_runtime_reconcile_fails_closed_when_effective_cli_scope_cannot_be
     )
 
     with pytest.raises(SkillSetRuntimeReconcileError):
-        await runtime.project(bot_id="bot-1", owner_id="true-owner")
+        await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert passport.calls == []
 
@@ -2322,7 +2358,10 @@ async def test_runtime_reconcile_requires_and_uses_mapping_v3_for_center():
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
-    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert factory.service.mcp_codes is not None
     assert len(pool.publish_calls) == len(pool.verify_calls) == 1
@@ -2352,7 +2391,10 @@ async def test_coding_template_uses_aicoding_for_center_probe_but_keeps_logical_
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
-    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert factory.kwargs["engine_type"] == "claude_code"
     assert pool.probe_calls == [
@@ -2384,7 +2426,10 @@ async def test_existing_coding_runtime_uses_its_resolved_layout(
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
-    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert factory.kwargs["engine_type"] == expected_engine
     assert factory.service.desired_skills == []
@@ -2405,7 +2450,10 @@ async def test_historical_aicoding_cleanup_uses_legacy_runtime_not_pool_mapping(
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
-    await runtime.project_for_cleanup(bot_id="bot-1", owner_id="true-owner")
+    await runtime.project_for_cleanup(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert factory.kwargs["engine_type"] == "aicoding"
     assert factory.service.desired_skills == []
@@ -2430,7 +2478,10 @@ async def test_historical_cleanup_rejects_center_before_runtime_or_mcp_delivery(
     )
 
     with pytest.raises(SkillSetRuntimeReconcileError):
-        await runtime.project_for_cleanup(bot_id="bot-1", owner_id="true-owner")
+        await runtime.project_for_cleanup(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert factory.service.desired_skills is None
     assert factory.service.mcp_codes is None
@@ -2454,7 +2505,10 @@ async def test_teclaw_v4_rejects_center_without_any_center_runtime_request():
     )
 
     with pytest.raises(SkillSetRuntimeReconcileError):
-        await runtime.project(bot_id="bot-1", owner_id="true-owner")
+        await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert pool.probe_calls == []
     assert pool.publish_calls == []
@@ -2476,7 +2530,10 @@ async def test_teclaw_v4_repo_projection_uses_artifact_runtime_not_pool_mapping(
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
-    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert factory.service.desired_skills == [
         {
@@ -2506,7 +2563,10 @@ async def test_non_skill_projection_never_writes_skill_mappings():
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
-    await runtime.project_mcp_and_cli(bot_id="bot-1", owner_id="true-owner")
+    await runtime.project_mcp_and_cli(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope(mcp=True, claim_all_mcp=True),
+    )
 
     assert factory.service.desired_skills is None
     assert factory.service.mcp_codes is not None
@@ -2756,14 +2816,18 @@ async def test_retired_mappings_project_skills_even_when_the_scope_omits_them():
     assert pool.publish_calls, "a retirement must still reach the runtime"
 
 
-def test_a_reconcile_scope_cannot_leave_a_half_uncovered():
-    """The projector reads the two flags to decide what to write, so a
-    reconcile that left one off would skip a half it was asked to reconcile."""
-    with pytest.raises(ValueError):
-        ProjectionScope(reconcile=True, skills=True)
-    with pytest.raises(ValueError):
-        ProjectionScope(reconcile=True, mcp=True)
-    assert ProjectionScope.everything().reconcile is True
+def test_claiming_every_code_is_independent_of_which_halves_run():
+    """``claim_all_mcp`` answers "which MCPs are claimed", not "which halves".
+
+    An MCP-only reconcile is a real shape — it is what the cutover listener
+    passes to ``project_mcp_and_cli``, where declaring the Skill half would
+    fight the task that owns the mappings.
+    """
+    mcp_only = ProjectionScope(mcp=True, claim_all_mcp=True)
+
+    assert mcp_only.skills is False
+    assert mcp_only.claim_all_mcp is True
+    assert ProjectionScope.everything().claim_all_mcp is True
 
 
 @pytest.mark.asyncio
@@ -2772,7 +2836,10 @@ async def test_a_reconcile_scope_still_projects_both_halves():
     passport, factory = _RuntimePassport(), _RuntimeFactory()
     runtime = _scoped_projector(passport=passport, factory=factory)
 
-    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert factory.service.desired_skills is not None
     assert factory.service.mcp_codes is not None

@@ -328,17 +328,17 @@ class BotService:
         device_status_client: "DeviceStatusClient",
         cron_auto_setup_service_provider: "Callable[[], CronAutoSetupService]",
         drm_reader: DRMReaderPlugin,
+        # Required, not defaulted: the restart authorization refresh
+        # republishes an overwrite-style Passport MCP scope, and a missing
+        # identity source there is a silent privilege change rather than a
+        # degraded mode. The DI provider always supplies it.
+        caller_identity_repo: "CallerIdentityRepositoryProtocol",
         workspace_hosting_config: "cfg.WorkspaceHostingConfig | None" = None,
         policy_service: "PolicyServiceProtocol | None" = None,
         baas_template_resolver: "BaasTemplateResolverProtocol | None" = None,
         baas_service_provider: "Callable[[], BaasService] | None" = None,
         task_queue_service: "TaskQueueService | None" = None,
         common_config_service: "CommonConfigService | None" = None,
-        # Optional so the many test fixtures that build BotService directly keep
-        # working; the DI provider always supplies it. Only the restart
-        # authorization refresh reads it, and that path declines rather than
-        # republishing an MCP scope without execution identity when it is None.
-        caller_identity_repo: "CallerIdentityRepositoryProtocol | None" = None,
     ) -> None:
         self._repository = repository
         self._allocation_config = allocation_config

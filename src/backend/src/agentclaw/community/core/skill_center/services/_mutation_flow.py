@@ -71,16 +71,23 @@ class MutationProjectionFlow:
         a compensation's restore to the Sets the mutation could have touched.
 
         ``scope`` is what this mutation changed, declared by the command that
-        knows it. Omitting both scope arguments means a full reconcile, so an
-        undeclared caller is unchanged.
+        knows it. Exactly one of ``scope`` / ``scope_from_result`` must be
+        given: there is no "forgot to say" default, because the fallback would
+        be a full reconcile — the expensive answer, and never the one a
+        mutation wants. A caller with genuinely nothing to narrow passes
+        ``ProjectionScope.everything()`` and says so out loud.
 
         ``scope_from_result`` covers the commands that cannot name their scope
-        up front: activate and deactivate learn which MCPs they claimed or
-        released only from the mutation result, which the repository fills in
-        under the row lock it already holds. Building the scope from a second,
-        unlocked query instead could disagree with what was actually
-        installed.
+        up front: activate, deactivate, and the Skill commands learn which
+        MCPs they claimed or released only from the mutation result, which the
+        repository fills in under the row lock it already holds. Building the
+        scope from a second, unlocked query instead could disagree with what
+        was actually installed.
         """
+        if (scope is None) == (scope_from_result is None):
+            raise ValueError(
+                "exactly one of scope / scope_from_result is required"
+            )
         if not runtime_required:
             result = mutation()
             return {**result.item, "changed": result.changed, **result.details}
@@ -92,9 +99,10 @@ class MutationProjectionFlow:
             owner_id=owner_id,
         )
         result = mutation()
-        if scope_from_result is not None:
-            scope = scope_from_result(result)
-        effective_scope = scope if scope is not None else ProjectionScope.everything()
+        effective_scope = (
+            scope_from_result(result) if scope_from_result is not None else scope
+        )
+        assert effective_scope is not None  # guaranteed by the check above
         await self._project_or_compensate(
             bot_id=bot_id,
             owner_id=owner_id,
@@ -113,7 +121,7 @@ class MutationProjectionFlow:
         engine_type: str | None,
         mutation: DesiredStateMutation,
         previous_mappings: Sequence[PoolSkillMapping],
-        scope: ProjectionScope = ProjectionScope.everything(),
+        scope: ProjectionScope,
     ) -> None:
         current_mappings: Sequence[PoolSkillMapping] = ()
         try:

@@ -26,30 +26,40 @@ class ProjectionScope:
     default policy or a Skill dependency still supplies.
     """
 
+    #: Project the Skill half — publish mappings, or sync the legacy runtime.
     skills: bool = False
+    #: Project the MCP half — device delivery, the allow-list, and Passport.
     mcp: bool = False
+    #: MCP codes this mutation added to the Bot. Configuration is pushed for
+    #: these and no others, so a one-MCP add stays a one-MCP device write.
     claimed_mcp: frozenset[str] = frozenset()
+    #: MCP codes this mutation took away. Configuration is deleted for these
+    #: and no others.
     released_mcp: frozenset[str] = frozenset()
-    reconcile: bool = False
-
-    def __post_init__(self) -> None:
-        # ``reconcile`` means "no mutation to ask, project the whole thing",
-        # and the projector reads ``skills`` / ``mcp`` to decide which halves
-        # to write. A reconcile that left either flag off would therefore
-        # silently skip a half it was asked to reconcile — the one shape of
-        # this value object that cannot mean what it says.
-        if self.reconcile and not (self.skills and self.mcp):
-            raise ValueError("a reconcile scope must cover both halves")
+    #: Treat *every* projected MCP code as claimed, ignoring ``claimed_mcp``.
+    #:
+    #: Only for callers with no delta to name — a device-activated restart or
+    #: a Skill upload — where the device may hold no configuration at all and
+    #: the projection is the whole truth. They cannot fill ``claimed_mcp``
+    #: because they do not know the projected set until the projector resolves
+    #: it, which is why this is a flag and not a code set.
+    #:
+    #: It says nothing about which halves run: ``skills`` and ``mcp`` decide
+    #: that on their own. An MCP-only reconcile — ``ProjectionScope(mcp=True,
+    #: claim_all_mcp=True)`` — is a real and used shape.
+    #:
+    #: It never deletes: ``released_mcp`` is not consulted when this is set,
+    #: so a reconcile can only ever add configuration to a device.
+    claim_all_mcp: bool = False
 
     @classmethod
     def everything(cls) -> "ProjectionScope":
-        """No mutation to ask, so every projected code counts as claimed.
+        """Both halves, with every projected MCP code counted as claimed.
 
-        Used by the paths with nothing to declare — a device-activated
-        restart, a Skill upload — where the device may hold nothing and the
-        projection is the whole truth.
+        The shape for callers that have no mutation to describe: a
+        device-activated restart, a Skill upload. See ``claim_all_mcp``.
         """
-        return cls(skills=True, mcp=True, reconcile=True)
+        return cls(skills=True, mcp=True, claim_all_mcp=True)
 
     def inverted(self) -> "ProjectionScope":
         """The same scope as a compensating projection would apply it.
@@ -83,12 +93,14 @@ class BotRuntimeProjectorProtocol(Protocol):
         bot_id: str,
         owner_id: str,
         retired_mappings: Sequence[PoolSkillMapping] = (),
-        scope: ProjectionScope = ProjectionScope.everything(),
+        scope: ProjectionScope,
     ) -> None:
         """Apply the projection, limited to what ``scope`` says changed.
 
-        The default is a full reconcile, so a caller that declares nothing
-        keeps the previous whole-set behaviour.
+        ``scope`` is required rather than defaulted: a caller that forgot it
+        would silently get a full reconcile, which is the expensive answer and
+        never the one a mutation wants. Callers with genuinely nothing to
+        declare say so with ``ProjectionScope.everything()``.
         """
         ...
 
@@ -97,7 +109,7 @@ class BotRuntimeProjectorProtocol(Protocol):
         *,
         bot_id: str,
         owner_id: str,
-        scope: ProjectionScope = ProjectionScope.everything(),
+        scope: ProjectionScope,
     ) -> None:
         """Project MCP/CLI while an external authority owns Skill mappings."""
         ...
@@ -107,7 +119,7 @@ class BotRuntimeProjectorProtocol(Protocol):
         *,
         bot_id: str,
         owner_id: str,
-        scope: ProjectionScope = ProjectionScope.everything(),
+        scope: ProjectionScope,
     ) -> None:
         """Remove historical capability state through the legacy runtime path."""
         ...

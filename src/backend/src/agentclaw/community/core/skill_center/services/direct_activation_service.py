@@ -44,6 +44,7 @@ from agentclaw.community.core.skill_center.policies.platform_default_mcp import 
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
+    ProjectionScope,
 )
 from agentclaw.community.core.skill_center.services._mutation_flow import (
     MutationProjectionFlow,
@@ -125,6 +126,13 @@ class DirectActivationService:
                     engine_type=bot_engine_type(bot),
                     default_engine_types=bot_default_engine_types(bot),
                 ),
+                # Direct activation is the pre-SkillSet path and its
+                # repository commands return no MCP codes, so it has no delta
+                # to narrow with — it declares the whole projection, which is
+                # exactly what it did before scopes existed. Narrowing it
+                # needs the same treatment the Set commands got and is not
+                # this PR's to do.
+                scope=ProjectionScope.everything(),
             )
         except SkillSetControlPlaneNotFoundError as exc:
             raise LocalSkillNotFoundError() from exc
@@ -201,6 +209,9 @@ class DirectActivationService:
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
             ),
+            # Declared explicitly to preserve today's behaviour exactly; see
+            # the note on ``_set_skill_active``.
+            scope=ProjectionScope.everything(),
         )
         self._audit(
             bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
@@ -225,6 +236,9 @@ class DirectActivationService:
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
             ),
+            # Declared explicitly to preserve today's behaviour exactly; see
+            # the note on ``_set_skill_active``.
+            scope=ProjectionScope.everything(),
         )
         self._audit(
             bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,

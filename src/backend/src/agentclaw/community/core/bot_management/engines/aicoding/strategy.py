@@ -596,7 +596,7 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         passport_plugin: Any,
         skill_set_factory: Any,
         template_service: Any,
-        caller_identity_repo: Any = None,
+        caller_identity_repo: Any,
     ) -> None:
         """Refresh this bot's Passport authorization scope on restart.
 
@@ -615,9 +615,10 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         The pushed scope carries each MCP's execution identity, not just its
         code: ``resource_scope`` replaces the MCP resource list wholesale, so a
         code-only snapshot would assert Owner for every MCP and drop the Bot's
-        Caller grants on every confirmed template update. Identity therefore
-        gates the refresh — no ``caller_identity_repo``, or an unreadable one,
-        and the refresh is skipped so the existing scope stands unchanged.
+        Caller grants on every confirmed template update. An *unreadable*
+        identity therefore skips the refresh, leaving the existing scope
+        standing rather than replacing it with an owner-only snapshot. An
+        absent repository is not a case this handles: it is required.
         """
         if not (
             isinstance(extra_configs, dict)
@@ -626,16 +627,6 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             logger.info(
                 "[aicoding.restart] skip passport refresh: "
                 "confirmed_template_update is not set for bot_id=%s",
-                ctx.bot_id,
-            )
-            return
-        if caller_identity_repo is None:
-            # Skipping leaves the existing Passport scope in place, which is
-            # strictly safer than republishing it without identity.
-            logger.warning(
-                "[aicoding.restart] skip passport refresh: no caller identity "
-                "repository, refusing to republish MCP scope without execution "
-                "identity for bot_id=%s",
                 ctx.bot_id,
             )
             return

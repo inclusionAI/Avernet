@@ -43,6 +43,7 @@ from agentclaw.community.core.skill_center.factories import (
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
+    ProjectionScope,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import (
     SkillParser,
@@ -532,9 +533,13 @@ class LocalSkillUploadService:
 
     async def _sync_runtime(self, owner_id: str, bot_id: str) -> bool:
         try:
+            # An upload changes the Skill set and can pull in new MCP
+            # dependencies with it, and this path holds no delta describing
+            # either — so it declares the whole projection explicitly.
             await self._runtime_reconciler.project(
                 bot_id=bot_id,
                 owner_id=owner_id,
+                scope=ProjectionScope.everything(),
             )
             return True
         except Exception:

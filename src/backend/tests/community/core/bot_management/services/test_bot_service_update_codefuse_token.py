@@ -17,6 +17,7 @@ def _fake_cmd(auth_code: str) -> str:
 
 def _make_bot_service(repository=None, template_service=None) -> BotService:
     return BotService(
+        caller_identity_repo=MagicMock(),
         drm_reader=MagicMock(),
         repository=repository or Mock(),
         allocation_config=MagicMock(),
