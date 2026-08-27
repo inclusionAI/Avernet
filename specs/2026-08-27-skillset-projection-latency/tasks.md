@@ -36,7 +36,7 @@
         `test_device_service.py` still pass with no signature-related failures.
 - **Depends on:** —
 
-## Task 2: Add `publish_and_verify_mappings` with a single device resolution
+## Task 2 `[x]`: Add `publish_and_verify_mappings` with a single device resolution
 
 - **Goal:** One device address resolution serves center-ensure, publish, and
   verify for a projection, instead of one resolution per call.
@@ -45,17 +45,17 @@
   - `src/backend/src/agentclaw/community/core/skills_pool/models.py`
   - `src/backend/src/agentclaw/community/core/skills_pool/ports.py`
 - **Done when:**
-  - [ ] `MappingPublishOutcome(published, verified, verified_inline)` exists in
+  - [x] `MappingPublishOutcome(published, verified, verified_inline)` exists in
         `models.py` as a frozen dataclass.
-  - [ ] `_invoke` accepts an optional pre-resolved `DeviceContext` and only
+  - [x] `_invoke` accepts an optional pre-resolved `DeviceContext` and only
         resolves when none is given.
-  - [ ] `publish_and_verify_mappings` resolves once and passes that context to
+  - [x] `publish_and_verify_mappings` resolves once and passes that context to
         `_ensure_center_mappings`, the publish call, and the fallback verify.
-  - [ ] `SkillsPoolRuntimeProtocol` declares the new method; existing
+  - [x] `SkillsPoolRuntimeProtocol` declares the new method; existing
         `publish_mappings` / `verify_mappings` signatures are unchanged.
-  - [ ] New test asserts three device calls (center ensure + publish + verify)
+  - [x] New test asserts three device calls (center ensure + publish + verify)
         trigger exactly one `resolve_for_bot`.
-  - [ ] `tests/community/di/test_skills_pool_wiring.py` still resolves the
+  - [x] `tests/community/di/test_skills_pool_wiring.py` still resolves the
         protocol from the injector.
 - **Depends on:** —
 
