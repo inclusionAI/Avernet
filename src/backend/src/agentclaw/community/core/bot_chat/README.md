@@ -58,6 +58,9 @@ List and detail responses may include `bot_id`, `bot_name`, `group_id`, and
 `session_kind`. These are optional display fields; `session_kind` is not a
 filter. A missing/deleted Bot leaves `bot_name` null so clients can fall back
 to `bot_id`. Observation responses preserve raw metadata for detail rendering.
+For detail requests, a user who owns or collaborates on any Bot participating
+in the Trace's BCS Group may read traces from every Bot in that Group; traces
+without a resolvable Group retain the ordinary Bot access check.
 
 Task relations with an explicit `user_id` are isolated to that user; legacy
 relations without identity remain readable for backward compatibility. ORM

@@ -599,15 +599,26 @@ class BotChatService:
         #   a literal "default" across owners.
         # - non-legacy bot: require caller to be owner or collaborator.
         if owner_id:
-            if (
+            is_legacy_default = (
                 row.bot_id is None
                 or self._is_legacy_default_bot_id(row.bot_id, owner_id)
-            ):
-                if row.user_id != owner_id:
-                    raise SessionNotFoundError(f"Trace {trace_id} not found or not accessible")
-            else:
-                if not self._db_repo.has_bot_access(owner_id, row.bot_id):
-                    raise SessionNotFoundError(f"Trace {trace_id} not found or not accessible")
+            )
+            direct_access = (
+                row.user_id == owner_id
+                if is_legacy_default
+                else self._db_repo.has_bot_access(owner_id, row.bot_id)
+            )
+            group_access = (
+                self._db_repo.has_group_trace_access(
+                    owner_id,
+                    getattr(row, "session_id", None),
+                    getattr(row, "session_key", None),
+                )
+                if not direct_access
+                else False
+            )
+            if not direct_access and group_access is not True:
+                raise SessionNotFoundError(f"Trace {trace_id} not found or not accessible")
 
         if is_ocb_row:
             observations = self._db_repo.list_ocb_observations(trace_id)
@@ -640,35 +651,45 @@ class BotChatService:
                     raise LangfuseAPIError(f"Langfuse API returned {resp.status}", status_code=resp.status)
                 trace_data = await resp.json()
 
+            metadata_raw = trace_data.get("metadata") or {}
+            attributes = (metadata_raw.get("attributes") or {}) if isinstance(metadata_raw, dict) else {}
+            session_id = attributes.get("gen_ai.session.id")
+            session_key = (
+                attributes.get("session_id")
+                or attributes.get("gen_ai.conversation.id")
+            )
+
             # Access check for Langfuse traces.
             # - default bot (or missing bot_id): require trace's userId to match caller.
             # - non-default bot: require caller to be owner or collaborator.
             if owner_id:
-                metadata_raw = trace_data.get("metadata") or {}
-                attributes = (metadata_raw.get("attributes") or {}) if isinstance(metadata_raw, dict) else {}
                 trace_bot_id = attributes.get("identity.bot_id")
                 trace_owner_id = _trace_owner_id(trace_data, attributes)
 
-                if (
+                is_legacy_default = (
                     trace_bot_id is None
                     or self._is_legacy_default_bot_id(trace_bot_id, owner_id)
-                ):
-                    if trace_owner_id != owner_id:
-                        raise SessionNotFoundError(f"Trace {trace_id} not found or not accessible")
-                else:
-                    if not self._db_repo.has_bot_access(owner_id, trace_bot_id):
-                        raise SessionNotFoundError(f"Trace {trace_id} not found or not accessible")
+                )
+                direct_access = (
+                    trace_owner_id == owner_id
+                    if is_legacy_default
+                    else self._db_repo.has_bot_access(owner_id, trace_bot_id)
+                )
+                group_access = (
+                    self._db_repo.has_group_trace_access(
+                        owner_id,
+                        session_id,
+                        session_key,
+                    )
+                    if not direct_access
+                    else False
+                )
+                if not direct_access and group_access is not True:
+                    raise SessionNotFoundError(f"Trace {trace_id} not found or not accessible")
 
         observations = await self._fetch_observations_from_langfuse(trace_id)
 
-        metadata_raw = trace_data.get("metadata") or {}
-        attributes = (metadata_raw.get("attributes") or {}) if isinstance(metadata_raw, dict) else {}
         usage = trace_data.get("usage") or {}
-        session_id = attributes.get("gen_ai.session.id")
-        session_key = (
-            attributes.get("session_id")
-            or attributes.get("gen_ai.conversation.id")
-        )
         bot_id = attributes.get("identity.bot_id")
         detail = ConversationDetail(
             id=trace_data.get("id", ""),
