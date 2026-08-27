@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
 from typing import Any, Dict
 
@@ -54,7 +55,19 @@ LEGACY_BOT_TYPE_ENV_MAP = {
 }
 _THETA_KEY_PATH = ("bot_template_config", "ext_config", "thetaKey")
 _ENCRYPTED_VALUE_PREFIX = "enc:v1:"
+_RESTART_RUNTIME_RESYNC_RETRY_DELAYS_SECONDS = (0, 2, 5, 10, 20)
+_RESTART_RUNTIME_NOT_READY_MARKERS = (
+    # BaaS returns this explicit error code while a restarted container has no
+    # active device yet. Avoid matching free-text wrapper messages such as
+    # "get_ws_info failed"; only declared provider signals should drive retry.
+    "NO_ACTIVE_DEVICES",
+)
 logger = get_logger()
+
+
+def _is_restart_runtime_not_ready_error(error: Any) -> bool:
+    text = str(error or "")
+    return any(marker in text for marker in _RESTART_RUNTIME_NOT_READY_MARKERS)
 
 
 def _validate_application_coding_config(
@@ -635,13 +648,51 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                         if not scope_result.get("success"):
                             return scope_result, None
 
-                        detail_result = await mcp_sync.sync_mcp_details(
-                            user_id=effective_entity_id,
-                            entity_id=effective_entity_id,
-                            bot_id=ctx.bot_id,
-                            entity_type=effective_entity_type,
-                            engine_type=effective_engine,
-                        )
+                        detail_result: dict | None = None
+                        for attempt, delay_seconds in enumerate(
+                            _RESTART_RUNTIME_RESYNC_RETRY_DELAYS_SECONDS, start=1
+                        ):
+                            if delay_seconds > 0:
+                                time.sleep(delay_seconds)
+                            try:
+                                detail_result = await mcp_sync.sync_mcp_details(
+                                    user_id=effective_entity_id,
+                                    entity_id=effective_entity_id,
+                                    bot_id=ctx.bot_id,
+                                    entity_type=effective_entity_type,
+                                    engine_type=effective_engine,
+                                )
+                            except Exception as detail_error:
+                                if (
+                                    attempt
+                                    < len(_RESTART_RUNTIME_RESYNC_RETRY_DELAYS_SECONDS)
+                                    and _is_restart_runtime_not_ready_error(detail_error)
+                                ):
+                                    logger.info(
+                                        "[aicoding.restart] MCP detail resync waiting "
+                                        "for runtime: bot_id=%s, engine_type=%s, "
+                                        "attempt=%s, error=%s",
+                                        ctx.bot_id, effective_engine, attempt, detail_error,
+                                    )
+                                    continue
+                                raise
+
+                            if detail_result.get("success"):
+                                break
+                            detail_error = detail_result.get("error")
+                            if (
+                                attempt
+                                < len(_RESTART_RUNTIME_RESYNC_RETRY_DELAYS_SECONDS)
+                                and _is_restart_runtime_not_ready_error(detail_error)
+                            ):
+                                logger.info(
+                                    "[aicoding.restart] MCP detail resync waiting "
+                                    "for runtime: bot_id=%s, engine_type=%s, "
+                                    "attempt=%s, error=%s",
+                                    ctx.bot_id, effective_engine, attempt, detail_error,
+                                )
+                                continue
+                            break
                         return scope_result, detail_result
 
                     scope_result, detail_result = asyncio.run(_do_mcp_sync())
@@ -680,13 +731,43 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                         entity_type=effective_entity_type,
                         engine_type=effective_engine,
                     )
-                    if skill_set_service.sync_runtime():
-                        logger.info(
-                            "[aicoding.restart] skill symlink sync succeeded: "
-                            "bot_id=%s, engine_type=%s",
-                            ctx.bot_id, effective_engine,
-                        )
-                    else:
+                    skill_synced = False
+                    for attempt, delay_seconds in enumerate(
+                        _RESTART_RUNTIME_RESYNC_RETRY_DELAYS_SECONDS, start=1
+                    ):
+                        if delay_seconds > 0:
+                            time.sleep(delay_seconds)
+                        try:
+                            skill_synced = bool(skill_set_service.sync_runtime())
+                        except Exception as runtime_error:
+                            if attempt < len(
+                                _RESTART_RUNTIME_RESYNC_RETRY_DELAYS_SECONDS
+                            ) and _is_restart_runtime_not_ready_error(runtime_error):
+                                logger.info(
+                                    "[aicoding.restart] skill symlink sync waiting "
+                                    "for runtime: bot_id=%s, engine_type=%s, "
+                                    "attempt=%s, error=%s",
+                                    ctx.bot_id, effective_engine, attempt, runtime_error,
+                                )
+                                continue
+                            raise
+
+                        if skill_synced:
+                            logger.info(
+                                "[aicoding.restart] skill symlink sync succeeded: "
+                                "bot_id=%s, engine_type=%s",
+                                ctx.bot_id, effective_engine,
+                            )
+                            break
+                        if attempt < len(_RESTART_RUNTIME_RESYNC_RETRY_DELAYS_SECONDS):
+                            logger.info(
+                                "[aicoding.restart] skill symlink sync waiting "
+                                "for runtime: bot_id=%s, engine_type=%s, attempt=%s",
+                                ctx.bot_id, effective_engine, attempt,
+                            )
+                            continue
+
+                    if not skill_synced:
                         logger.error(
                             "[aicoding.restart] skill symlink sync failed: "
                             "bot_id=%s, engine_type=%s",
