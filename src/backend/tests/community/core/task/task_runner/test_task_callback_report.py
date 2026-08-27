@@ -343,7 +343,16 @@ class TestClawMind:
         assert rec.result_success is True
         assert rec.result == {"success": True, "data": {"answer": 42}}
         assert rec.exec_error is None
-        assert rec.execution_graph == _CLAW_MIND_BODY["ext_info"]  # 全量 ext_info 快照
+        # execution_graph 已转结构化 TaskExecutionGraph(graph_to_dict 形状),非原始 ext_info 透传
+        eg = rec.execution_graph
+        assert eg["run_id"] == 0 and eg["status"] == "DONE"
+        assert eg["extend_props"] == {"flow_id": "flow-abc-123", "origin_session_id": "S-9"}
+        assert len(eg["tasks"]) == 1
+        assert eg["tasks"][0]["node_id"] == "N1"
+        assert eg["tasks"][0]["status"] == "DONE"
+        assert eg["tasks"][0]["task_spec"]["metadata"]["title"] == "N1"   # 无 node_title → 退 node_id
+        assert eg["tasks"][0]["run_info"]["output"] == {"answer": 42}
+        assert eg["relations"] == []
         assert rec.extend_props is None               # claw_mind 无额外扩展
         assert json.loads(rec.orig_callback_data) == _CLAW_MIND_BODY  # 原始 body
 

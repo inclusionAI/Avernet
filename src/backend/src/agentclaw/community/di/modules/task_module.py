@@ -178,6 +178,24 @@ class TaskModule(Module):
             gov = injector.get(EconomyGovernanceConfig)
         except Exception:  # noqa: BLE101 EconomyGovernanceModule 未装(纯内核/轻量测试列) → 取不到
             gov = None
+        # driver-bot session_token 取数(参考 ocb 直读 bcs_bots.session_token):
+        # 1) corp 可经 DI 显式 bind BcsBotTokenProvider 覆写(优先);
+        # 2) 默认 DbBcsBotTokenProvider(DatabasePlugin)(community/plugins),读 bcs_bots.session_token 作 caller 身份 Bearer;
+        # 3) DatabasePlugin 未绑(纯内核/轻量测试)→ NullBcsBotTokenProvider(HMAC 匿名建群,不阻断)。
+        from agentclaw.community.core.task.task_runner.integration.bcs_bot_token_provider import (
+            BcsBotTokenProvider, NullBcsBotTokenProvider,
+        )
+        from agentclaw.community.plugins.community.bcs_bot_token_provider import DbBcsBotTokenProvider
+        try:
+            bot_token_provider = injector.get(BcsBotTokenProvider)  # corp 显式覆写优先
+        except Exception:  # noqa: BLE101 未绑定 → 走默认 DbBcsBotTokenProvider
+            bot_token_provider = None
+        if bot_token_provider is None:
+            try:
+                from agentclaw.community.plugin_api.database import DatabasePlugin
+                bot_token_provider = DbBcsBotTokenProvider(injector.get(DatabasePlugin))
+            except Exception:  # noqa: BLE101 DatabasePlugin 未绑(纯内核/轻量测试)→ Null
+                bot_token_provider = NullBcsBotTokenProvider()
         return TaskService(
             graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
             bcn=bcn, bcs_identity=bcs_identity, task_info_repo=task_info_repo,
@@ -185,6 +203,7 @@ class TaskModule(Module):
             task_node_run_info_repo=task_node_run_info_repo,
             bot_service=bot_service,
             api_base_url=self._resolve_api_base_url(gov.iframe_callback_url if gov else ""),
+            bot_token_provider=bot_token_provider,
         )
 
     @singleton
