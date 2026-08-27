@@ -495,6 +495,24 @@ class _RuntimeFactoryService:
         self.mcp_codes = server_codes
         return True
 
+    async def sync_mcp_projection(
+        self,
+        *,
+        claimed: frozenset[str],
+        released: frozenset[str],
+        declared: set[str],
+    ) -> bool:
+        """The projector's single MCP entry point.
+
+        Composed the same way the real service composes it, rather than
+        recorded as one opaque call: the deliver-before-declare order is the
+        contract these tests assert on, so a double that flattened it could
+        not catch the order being lost.
+        """
+        if not await self.sync_mcp_delivery(claimed=claimed, released=released):
+            return False
+        return await self.sync_mcp_desired_state(server_codes=declared)
+
     def collect_bot_active_mcps(self, **kwargs) -> list[dict]:
         self.collect_calls.append(kwargs)
         # ``hitl`` is a real LOCAL/stdio default: it belongs in the runtime
@@ -2494,6 +2512,144 @@ async def test_non_skill_projection_never_writes_skill_mappings():
     assert factory.service.mcp_codes is not None
     assert pool.publish_calls == []
     assert pool.verify_calls == []
+
+
+# ── Scoped projection: a mutation writes only the half it changed ────
+#
+# Both halves are whole-snapshot writes, so re-sending the unchanged one costs
+# a device round trip (or a Pool publish plus verify) to restate what is
+# already there. The scope the command declares is what decides.
+
+
+def _scoped_projector(pool=None, passport=None, factory=None):
+    return BotRuntimeProjector(
+        factory=factory or _RuntimeFactory(),
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        pool_runtime=pool or _RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=passport or _RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_mcp_only_scope_does_not_touch_the_skill_runtime():
+    """``add_mcp`` / ``remove_mcp`` declare ``mcp=True`` and nothing else.
+
+    Republishing the Skill snapshot for them would restate mappings no
+    mutation touched — the fan-out this change exists to stop, in its other
+    half.
+    """
+    pool, factory = _RuntimePool(), _RuntimeFactory()
+    runtime = _scoped_projector(pool=pool, factory=factory)
+
+    await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.weather"})),
+    )
+
+    assert factory.service.desired_skills is None
+    assert pool.publish_calls == []
+    assert pool.verify_calls == []
+    # ...while the half it did declare still ran in full.
+    assert factory.service.mcp_codes is not None
+
+
+@pytest.mark.asyncio
+async def test_a_skill_only_scope_touches_neither_the_device_mcps_nor_passport():
+    """The MCP allow-list and the Passport manifest are both overwrite-style.
+
+    A mutation that changed no MCP has nothing new to say to either, and
+    saying it anyway is a device write plus an authorization-service call per
+    mutation.
+    """
+    passport, factory = _RuntimePassport(), _RuntimeFactory()
+    runtime = _scoped_projector(passport=passport, factory=factory)
+
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner", scope=ProjectionScope(skills=True)
+    )
+
+    assert factory.service.desired_skills is not None
+    assert factory.service.mcp_codes is None
+    assert factory.service.deliveries == []
+    assert passport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_retired_mappings_project_skills_even_when_the_scope_omits_them():
+    """Retirements are evidence, not a declaration.
+
+    They are computed from the actual before/after snapshots, so they outrank
+    a scope that says Skills did not change — skipping them would strand a
+    published mapping the desired state no longer holds.
+    """
+    pool, factory = _RuntimePool(), _RuntimeFactory()
+    runtime = _scoped_projector(pool=pool, factory=factory)
+
+    await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        retired_mappings=[
+            PoolSkillMapping(corpus="repo", relative_path="gone", link_name="gone")
+        ],
+        scope=ProjectionScope(mcp=True),
+    )
+
+    assert pool.publish_calls, "a retirement must still reach the runtime"
+
+
+@pytest.mark.asyncio
+async def test_a_reconcile_scope_still_projects_both_halves():
+    """The undeclared default is unchanged: everything, as before."""
+    passport, factory = _RuntimePassport(), _RuntimeFactory()
+    runtime = _scoped_projector(passport=passport, factory=factory)
+
+    await runtime.project(bot_id="bot-1", owner_id="true-owner")
+
+    assert factory.service.desired_skills is not None
+    assert factory.service.mcp_codes is not None
+    assert passport.calls
+
+
+@pytest.mark.asyncio
+async def test_the_projector_makes_one_mcp_call_not_two():
+    """Delivery and declaration reach the device through a single entry point.
+
+    How many device writes an MCP projection takes, and in what order, belongs
+    to the service that owns device resolution — not to the projector.
+    """
+    calls: list[dict] = []
+
+    class _RecordingService(_RuntimeFactoryService):
+        async def sync_mcp_delivery(self, **kwargs):
+            raise AssertionError("the projector must not call delivery directly")
+
+        async def sync_mcp_desired_state(self, **kwargs):
+            raise AssertionError("the projector must not call declaration directly")
+
+        async def sync_mcp_projection(self, **kwargs) -> bool:
+            calls.append(kwargs)
+            return True
+
+    class _RecordingFactory(_RuntimeFactory):
+        def __init__(self) -> None:
+            super().__init__()
+            self.service = _RecordingService()
+
+    runtime = _scoped_projector(factory=_RecordingFactory())
+
+    await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.weather"})),
+    )
+
+    assert len(calls) == 1
+    assert set(calls[0]) == {"claimed", "released", "declared"}
 
 
 # ── Default-Set exclusion wire (restored opt-out, spec E.11) ─────────

@@ -65,6 +65,13 @@ class BotRuntimeProjector:
     Callers own command compensation. This module owns desired-state loading,
     runtime contract selection, full mapping publication, MCP delivery, and the
     overwrite-style Passport MCP/CLI manifest.
+
+    Resolving and applying are separated by the ``ProjectionScope``: the plan
+    is always built whole — it is read-only, and every pre-flight failure in it
+    must happen before anything is written — while the scope decides which
+    halves are *written*. Keeping the reads unconditional is what lets a
+    projection abort cleanly, with nothing half-applied for a compensation to
+    unpick.
     """
 
     @inject
@@ -134,25 +141,49 @@ class BotRuntimeProjector:
             owner_id=owner_id,
             retired_mappings=retired_mappings,
         )
-        await self._apply_skill_projection(
-            service=service,
-            bot=bot,
-            engine=engine,
-            bot_id=bot_id,
-            owner_id=owner_id,
-            projection=projection,
-            retired_mappings=retired_mappings,
-        )
-        await self._apply_non_skill_projection(
-            service=service,
-            scope=scope,
-            identity_modes=identity_modes,
-            engine=engine,
-            bot_id=bot_id,
-            owner_id=owner_id,
-            projection=projection,
-            effective_cli_items=effective_cli_items,
-        )
+        # A mutation that changed one half has nothing to say to the other,
+        # and both halves are whole-snapshot writes: re-sending the unchanged
+        # one costs a device round trip (or a Pool publish plus verify) to
+        # restate what is already there. ``reconcile`` sets both flags, so a
+        # caller that declares nothing still projects everything.
+        #
+        # ``retired_mappings`` overrides the Skill flag rather than trusting
+        # it: those retirements were computed from the actual before/after
+        # snapshots, so they are evidence that Skills moved. Skipping them
+        # would strand a published mapping the desired state no longer holds.
+        if scope.skills or retired_mappings:
+            await self._apply_skill_projection(
+                service=service,
+                bot=bot,
+                engine=engine,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                projection=projection,
+                retired_mappings=retired_mappings,
+            )
+        else:
+            logger.info(
+                "[BotRuntimeProjector] Skill projection skipped, scope declares "
+                "no Skill change: bot_id=%s, engine=%s",
+                bot_id, engine,
+            )
+        if scope.mcp:
+            await self._apply_non_skill_projection(
+                service=service,
+                scope=scope,
+                identity_modes=identity_modes,
+                engine=engine,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                projection=projection,
+                effective_cli_items=effective_cli_items,
+            )
+        else:
+            logger.info(
+                "[BotRuntimeProjector] MCP/CLI projection skipped, scope "
+                "declares no MCP change: bot_id=%s, engine=%s",
+                bot_id, engine,
+            )
 
     async def project_mcp_and_cli(
         self,
@@ -503,12 +534,12 @@ class BotRuntimeProjector:
                     sorted(scope.claimed_mcp), sorted(claimed),
                     sorted(scope.released_mcp), sorted(released),
                 )
-        # Configuration lands before the allow-list cites it, and is withdrawn
-        # before the allow-list stops covering it.
-        if not await service.sync_mcp_delivery(claimed=claimed, released=released):
-            raise SkillSetRuntimeReconcileError()
-
-        if not await service.sync_mcp_desired_state(server_codes=codes):
+        # One call, not two: how many device writes an MCP projection takes,
+        # and in what order, is decided by the service that owns device
+        # resolution. See ``SkillSetService.sync_mcp_projection``.
+        if not await service.sync_mcp_projection(
+            claimed=claimed, released=released, declared=codes
+        ):
             raise SkillSetRuntimeReconcileError()
 
         try:

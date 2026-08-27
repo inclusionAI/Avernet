@@ -515,6 +515,34 @@ class SkillSetService:
             self.user_id or self.entity_id, desired_skills
         )
 
+    async def sync_mcp_projection(
+        self,
+        *,
+        claimed: frozenset[str],
+        released: frozenset[str],
+        declared: set[str],
+    ) -> bool:
+        """Apply one MCP projection to this Bot's device.
+
+        The projector's single MCP entry point. It hands over what the
+        mutation changed and what the Bot should end up holding; deciding how
+        many device calls that takes, and in what order, belongs here, because
+        this service — not the projector — owns device resolution.
+
+        The order is the invariant, not an implementation detail:
+        configuration lands before the allow-list cites it, and is withdrawn
+        only after the allow-list stops covering it, so the device never
+        references an MCP it has no configuration for.
+
+        Both halves must run. A change that only releases still has to
+        re-declare the smaller allow-list, and a change that only claims still
+        has to declare the larger one — the declaration is a full replacement,
+        so skipping it would leave the device's view of the set behind.
+        """
+        if not await self.sync_mcp_delivery(claimed=claimed, released=released):
+            return False
+        return await self.sync_mcp_desired_state(server_codes=declared)
+
     async def sync_mcp_delivery(
         self, *, claimed: frozenset[str], released: frozenset[str]
     ) -> bool:
