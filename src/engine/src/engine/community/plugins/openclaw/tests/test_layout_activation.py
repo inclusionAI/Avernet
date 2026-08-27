@@ -2107,13 +2107,21 @@ def test_publish_reports_inline_verification(tmp_path: Path) -> None:
     # And the same check run separately must agree, or the inline verdict is
     # not standing in for anything.
     assert verify_skill_mappings(mappings=mappings, home=home).valid is True
-    digest = published.evidence["verification"]
-    assert digest["ran"] is True
-    assert digest["valid"] is True
-    assert digest["failure_count"] == 0
-    # Coverage counters stay: a valid verdict over nothing is vacuous, and
-    # once the caller skips its own verify this is the only record of it.
-    assert digest["managed_checked"] == 1
+    # Exact equality, not per-key: what this pins is that the digest stays
+    # *bounded*. Adding an unbounded field back — the whole failure list, or
+    # the raw verification evidence — is the regression, and only an equality
+    # assertion sees it. The coverage counters are part of the contract too: a
+    # valid verdict over zero managed entries is vacuous, and once the caller
+    # skips its own verify this is the only record of what was checked.
+    assert published.evidence["verification"] == {
+        "ran": True,
+        "valid": True,
+        "checked": 1,
+        "managed_checked": 1,
+        "retired_checked": 0,
+        "failure_count": 0,
+        "first_failures": [],
+    }
 
 
 def test_a_failing_inline_verification_is_reported_as_false(
@@ -2177,12 +2185,13 @@ def test_an_unverifiable_publish_reports_no_verdict_rather_than_failing(
     assert published.published is True
     assert published.verified is None  # → caller falls back to a separate verify
     assert "verified" not in published.to_data()
-    digest = published.evidence["verification"]
-    assert digest["ran"] is False
     # Not silent: an old runtime and a current one whose check could not run
     # both report nothing, and only this tells them apart.
-    assert digest["error_type"] == "FileNotFoundError"
-    assert digest["errno"] == errno.ENOENT
+    assert published.evidence["verification"] == {
+        "ran": False,
+        "error_type": "FileNotFoundError",
+        "errno": errno.ENOENT,
+    }
 
 
 def test_a_result_that_did_not_verify_omits_the_key_entirely(tmp_path: Path) -> None:

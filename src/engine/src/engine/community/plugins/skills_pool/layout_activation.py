@@ -454,22 +454,18 @@ def _finalize_active_root(
     # mapping source a second time for an answer already in hand. It only falls
     # back when the publish could not verify (``verified is None``).
     if published.verified is None:
-        # No verdict means the publish's own check could not run. Repeating it
-        # here would usually raise the same error, and this caller has no
-        # OSError guard of its own — so it degrades to "sync pending", which
-        # is what a retryable post-cutover state is for.
-        try:
-            verified = verify_skill_mappings(
-                mappings=mappings,
-                home=layout.pool_root.parents[2],
-                engine=engine,
-            )
-        except OSError as error:
-            verified, verify_error = None, error
-        else:
-            verify_error = None
-        verified_valid = bool(verified and verified.valid)
-        verified_evidence = _verification_digest(verified, verify_error)
+        # No verdict means the publish's own check could not run. Retrying it
+        # is right — the condition may have been transient — and an OSError
+        # here propagates to the caller's own handler, which classifies it
+        # (TRANSIENT_ERROR, or COMMITTED with cleanup pending) and keeps
+        # error_type/errno at the top level of the evidence.
+        verified = verify_skill_mappings(
+            mappings=mappings,
+            home=layout.pool_root.parents[2],
+            engine=engine,
+        )
+        verified_valid = verified.valid
+        verified_evidence = _verification_digest(verified)
     else:
         verified_valid = published.verified
         # Same digest shape on both paths, so one reason code does not carry
@@ -2530,9 +2526,8 @@ def publish_pool_mappings(
             "retired_absent": [str(path) for path in retirement.absent],
             "retired_replaced": [str(path) for path in retirement.replaced],
             "retired_external_ignored": [str(path) for path in retirement.external],
-            # Bounded: the caller logs this response verbatim on a failed
-            # verdict, and a bot with hundreds of mappings would otherwise
-            # write the whole failure list on every retry.
+            # Bounded: this digest is what the caller logs on a failed
+            # verdict, and the failure list grows with the mapping set.
             "verification": _verification_digest(verification, verify_error),
         },
         verified=None if verification is None else verification.valid,

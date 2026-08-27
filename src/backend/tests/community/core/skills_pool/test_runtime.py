@@ -344,11 +344,20 @@ class InlineVerifiedTransport(FakeTransport):
             conn_info, method, path, body=body, timeout=timeout
         )
         if path.endswith("/publish"):
+            # The engine's real shape: the digest lives inside evidence,
+            # alongside the per-mapping path lists that make the whole
+            # response too big to log.
             response["data"] = {
                 "published": True,
                 "verified": self.verified,
-                "evidence": {"kept": ["/a/very/long/path"] * 50},
-                "verification": {"ran": True, "valid": False, "failure_count": 3},
+                "evidence": {
+                    "kept": ["/a/very/long/path"] * 50,
+                    "verification": {
+                        "ran": True,
+                        "valid": False,
+                        "failure_count": 3,
+                    },
+                },
             }
         return response
 

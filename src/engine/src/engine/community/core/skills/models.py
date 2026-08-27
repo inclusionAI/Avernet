@@ -299,10 +299,11 @@ class PoolMappingSourceLayout(StrEnum):
 def inline_verification_verdict(raw: dict[str, Any]) -> bool | None:
     """Decode a publish response's ``verified`` field.
 
-    Only a real bool is a verdict. A missing key means the runtime predates
-    inline verification, and a non-bool means its payload is malformed —
-    neither may become ``False``, which the client treats as a real,
-    final verification failure and answers by refusing to converge.
+    Only a real bool is a verdict. A missing key means the runtime did not
+    report one — it predates inline verification, or its own check could not
+    run — and a non-bool means its payload is malformed. Neither may become
+    ``False``, which the client treats as a real, final verification failure
+    and answers by refusing to converge.
     """
     verified = raw.get("verified")
     return verified if isinstance(verified, bool) else None
@@ -357,7 +358,6 @@ __all__ = [
     "PoolLayoutRollbackRequest",
     "PoolMappingPublishResult",
     "PoolMappingSourceLayout",
-    "inline_verification_verdict",
     "PoolMappingVerificationResult",
     "PoolQuarantineCleanupRequest",
     "PoolQuarantineCleanupResult",

@@ -194,9 +194,9 @@ class SkillsPoolRuntime:
         *No verify round trip when the runtime already did it.* A publish
         response carrying ``data.verified is True`` means the runtime ran the
         same verification inline, against the filesystem it had just written.
-        Anything else — ``false``, or the key absent because the runtime
-        predates the signal *or* could not run its own check — is not evidence of convergence, so absence falls back to
-        the separate call and ``false`` is taken at its word.
+        Anything else is not evidence of convergence: ``false`` is taken at
+        its word, and an absent key — the runtime predates the signal, or its
+        own check could not run — falls back to the separate call.
         """
         try:
             context = self._resolver.resolve_for_bot(bot_id, user_id)
@@ -235,20 +235,23 @@ class SkillsPoolRuntime:
                 # ``publish_mappings`` path makes no such claim — a separate
                 # verify still follows it — which is why this cannot live in
                 # ``_publish``.
-                # The digest and the envelope, not the whole response: the
+                # The digest and the reason, not the whole response: the
                 # publish evidence carries a path list per mapping, which on a
                 # large Bot would dwarf the failure detail and repeat on every
-                # retry.
+                # retry. The envelope's ``message`` is a constant on this
+                # route, so it says nothing; the reason and the digest vary.
                 data = response.get("data")
+                evidence = data.get("evidence") if isinstance(data, dict) else None
+                evidence = evidence if isinstance(evidence, dict) else {}
                 logger.warning(
                     "[skills_pool.runtime] mapping publish reported verification "
                     "inline as failed bot_id=%s user_id=%s contract=%s "
-                    "message=%s verification=%s",
+                    "reason=%s verification=%s",
                     bot_id,
                     user_id,
                     mapping_contract_version,
-                    response.get("message"),
-                    (data or {}).get("verification") if isinstance(data, dict) else None,
+                    evidence.get("reason"),
+                    evidence.get("verification"),
                 )
             return MappingPublishOutcome(
                 published=True,
