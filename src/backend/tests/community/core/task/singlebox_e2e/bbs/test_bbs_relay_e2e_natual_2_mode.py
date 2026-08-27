@@ -22,8 +22,8 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 
 
 # 为什么用 storage `search`(同 integration e2e)
 
-派发(``SearchBasedDispatchStrategy``)把 ``[search]`` prompt 投给 owner bot,由 owner 上的 ``search`` skill 决出执行者。
-**不装 search → owner 无 skill 应答 ``[search]`` → 全 MISS → 子任务全 HUNG**。本用例与 integration e2e 一样装
+派发(``SearchBasedDispatchStrategy``)把 ``[task-search]`` prompt 投给 owner bot,由 owner 上的 ``search`` skill 决出执行者。
+**不装 search → owner 无 skill 应答 ``[task-search]`` → 全 MISS → 子任务全 HUNG**。本用例与 integration e2e 一样装
 ``skills/search``,该 skill 的确定式表除 storage 行外已**追加 arch 场景行**(``N_tech_stack``/``N_architects``)——
 HIT/MISS 按 ``demand.node_id`` 查表(catalog 仅按 `bot_name` 解析 `bot_id`,需 jieba 分词命中,后端 venv 已装 jieba)。
 storage 行不动 → integration e2e / natual 不受影响。

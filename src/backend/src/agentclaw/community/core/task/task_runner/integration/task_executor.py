@@ -6,6 +6,7 @@ dispatch(async):上游 start_run caller loop 上 gather+Semaphore await 端口 I
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from typing import Any
@@ -317,8 +318,44 @@ class TaskExecutor:
         if _loop_task_id and self._api_base_url:
             _task_context = ((_task_context or "") +
                              f"\n[task-loop] loop_task_id={_loop_task_id}; backend={self._api_base_url}")
-        if _task_context:
-            req_kwargs["context"] = _task_context
+        _acceptances = [
+            {"id": a.get("id"), "description": a.get("description")}
+            for a in (gf.extend_props.get("acceptances") or [])
+            if isinstance(a, dict) and a.get("id")
+        ]
+        # All group members receive the context, but exactly one Bot owns the
+        # terminal acceptance callback. Resolve it from the group semantics:
+        # manager for manager-worker, BCS driver for state-machine, and the
+        # originator/first driver for free-chat groups.
+        if mode == "manager_worker":
+            _reporter_bot_id = str(
+                gf.extend_props.get("manager_bot_id") or (gf.bot_ids[0] if gf.bot_ids else "")
+            )
+            _reporter_role = "master/manager"
+        elif mode == "state_machine":
+            _reporter_bot_id = str(gf.bot_ids[0] if gf.bot_ids else "")
+            _reporter_role = "master/BCS driver"
+        else:
+            _reporter_bot_id = str(
+                gf.extend_props.get("originator_bot_id") or (gf.bot_ids[0] if gf.bot_ids else "")
+            )
+            _reporter_role = "拉群 Bot/driver"
+        _task_objective = str(gf.extend_props.get("task_objective") or _task_context or "")
+        _task_instruction = str(gf.extend_props.get("task_instruction") or "")
+        if _task_objective or _task_instruction or _loop_task_id:
+            req_kwargs["context"] = (
+                "[task-execute]\n"
+                "execution_mode=coop_group\n"
+                f"reporter_bot_id={_reporter_bot_id}\n"
+                f"reporter_role={_reporter_role}\n"
+                "只有 reporter_bot_id 对应的 Bot（本群唯一 master/driver）可以调用 "
+                "task-loop 的任务验收(acceptance)逻辑，逐条检查当前节点 goal.acceptances，"
+                "汇总完整执行输出，并主动回投验收结果；其它 Bot 只提供产出，不得重复回调。\n"
+                f"目标:{_task_objective}\n"
+                f"指令:{_task_instruction}\n"
+                f"验收标准:{json.dumps(_acceptances, ensure_ascii=False)}\n"
+                f"任务上下文:{_task_context or ''}"
+            )
         req = BcsCreateGroupRequest(**req_kwargs)
         logger.info(
             "[task][task_executor] form_coop_group create_group request collab=%s driver_bot=%s participants=%s group_strategy=%s has_definition=%s has_bindings=%s",

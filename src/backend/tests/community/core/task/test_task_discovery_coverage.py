@@ -20,6 +20,9 @@ from unittest.mock import MagicMock, patch
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
 )
+from agentclaw.community.core.task.task_discovery.discovered_task_models import (
+    DiscoveredTaskModel,
+)
 from agentclaw.community.core.task.task_discovery.lock_models import (
     TaskDiscoveryLockRecord,
 )
@@ -433,3 +436,21 @@ class TestRescheduleEndpoint:
         result = asyncio.run(reschedule_cron(cron="0 12 * * *", timezone="UTC", scheduler=scheduler))
         assert result["success"] is True
         assert result["next_run_time"] is None
+
+
+def test_discovered_task_model_invalid_acceptances_falls_back_to_empty_list():
+    """ORM-backed discovery reads must tolerate corrupt legacy acceptance JSON."""
+    row = DiscoveredTaskModel(
+        task_id="invalid-acceptances",
+        bot_id="bot-1",
+        owner_id="owner-1",
+        dt="2026-08-27",
+        title="Corrupt acceptance payload",
+        acceptances="not-json",
+    )
+
+    task = row.to_domain()
+
+    assert task.acceptances == []
+    assert task.instruction == ""
+    assert task.priority == "medium"

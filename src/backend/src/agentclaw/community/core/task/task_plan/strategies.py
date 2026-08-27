@@ -201,7 +201,7 @@ def _compose_planning_prompt(graph: TaskExecutionGraph, target: TaskNode) -> str
         '{"tasks": [], "has_gap": false, "gap_detail": "done"}\n'
         '```'
     )
-    return (f"[planning] 请基于以下任务状态计算 gap,产下一步可执行子任务;gap 已闭返回 has_gap=false。\n"
+    return (f"[task-planning] 请基于以下任务状态计算 gap,产下一步可执行子任务;gap 已闭返回 has_gap=false。\n"
             f"目标节点 node_id={target.node_id}\n"
             f"已完成的子节点及其产出见快照 done_children;gap = 目标 - 已完成产出,据此产**尚未完成**的下一批子任务。\n"
             f"任务态快照\n{_json.dumps(snapshot, ensure_ascii=False)}\n\n{return_fmt}\n\n{NO_WEB_SEARCH_CONSTRAINT}")

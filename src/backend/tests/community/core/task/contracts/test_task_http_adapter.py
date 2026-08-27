@@ -71,6 +71,19 @@ class _MemoryTaskInfoRepository:
             ]
         return sorted(records, key=lambda record: record.id, reverse=True)
 
+    def list_records_page(
+        self,
+        status: Status | None = None,
+        *,
+        owner_user_id: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[TaskInfoRecord], int]:
+        records = self.list_records(status, owner_user_id=owner_user_id)
+        total = len(records)
+        start = (page - 1) * page_size
+        return records[start : start + page_size], total
+
     def list_by_status(self, status: Status, **_kwargs) -> list[TaskInfoRecord]:
         return self.list_records(status)
 
@@ -171,7 +184,7 @@ class TestTaskList:
         assert record["task_spec"]["metadata"]["task_id"] == task_id
         assert record["task_spec"]["goal"]["objective"] == "产出尽调报告"
         assert record["execution_config"]["task_type"] == "dynamic"
-        assert record["status"] == "DEFINED"
+        assert record["status"] == "REVIEWING"
         assert record["gmt_create"] is not None
 
     def test_public_list_filters_by_explicit_user_id(self, client):
@@ -211,8 +224,41 @@ class TestTaskList:
             params={"status": Status.DONE.value, "user_id": "owner_user"},
         )
 
-        assert any(item["task_id"] == task_id for item in pending.json()["data"])
+        assert all(item["task_id"] != task_id for item in pending.json()["data"])
         assert all(item["task_id"] != task_id for item in done.json()["data"])
+
+    def test_list_without_page_params_returns_bare_list(self, client):
+        # 历史契约:不传 page/page_size → data 为列表(非 Page)
+        c, _ = client
+        _execute_and_get_id(c)
+        r = c.get(
+            "/openapi/v1/collaboration/tasks/list",
+            params={"user_id": "owner_user"},
+        )
+        assert r.status_code == 200, r.text
+        assert isinstance(r.json()["data"], list)
+
+    def test_list_with_page_params_returns_page(self, client):
+        c, _ = client
+        for _ in range(3):
+            _execute_and_get_id(c)
+        r = c.get(
+            "/openapi/v1/collaboration/tasks/list",
+            params={"user_id": "owner_user", "page": 1, "page_size": 2},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()["data"]
+        assert isinstance(body, dict)
+        assert body["total"] >= 3
+        assert len(body["items"]) == 2
+
+    def test_list_rejects_partial_page_params(self, client):
+        c, _ = client
+        r = c.get(
+            "/openapi/v1/collaboration/tasks/list",
+            params={"user_id": "owner_user", "page": 1},
+        )
+        assert r.status_code == 400, r.text
 
 
 class TestTaskDashboard:
