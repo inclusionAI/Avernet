@@ -48,7 +48,7 @@
     "tailwind-merge": "^3.6.0",
     "zustand": "^5.0.11",
     "antd": "6.6.1",
-    "markdown-it": "12.3.2",
+    "markdown-it": "14.2.0",
     "chardet": "0.7.0"
   },
   "devDependencies": {
