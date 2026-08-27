@@ -37,22 +37,28 @@ def _resp_summary(resp) -> str:
         return "<unreadable>"
 
 
-class OpenApiError(Exception): ...
+class OpenApiError(Exception):
+    pass
 
 
-class OpenApiAuthError(OpenApiError): ...  # 401/403 grant 失败不可重试
+class OpenApiAuthError(OpenApiError):
+    pass  # 401/403 grant 失败不可重试
 
 
-class OpenApiBadRequestError(OpenApiError): ...  # 4xx 不重试
+class OpenApiBadRequestError(OpenApiError):
+    pass  # 4xx 不重试
 
 
-class OpenApiRateLimitError(OpenApiError): ...  # 429 可重试
+class OpenApiRateLimitError(OpenApiError):
+    pass  # 429 可重试
 
 
-class OpenApiServerError(OpenApiError): ...  # 5xx 可重试
+class OpenApiServerError(OpenApiError):
+    pass  # 5xx 可重试
 
 
-class OpenApiTimeoutError(OpenApiError): ...
+class OpenApiTimeoutError(OpenApiError):
+    pass
 
 
 def parse_bot_id(bot_id: str) -> tuple[str, str]:
