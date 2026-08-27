@@ -279,8 +279,13 @@ class TaskExecutor:
         for spec in raw_bindings.values():
             referenced_ids.extend(spec["bot_ids"])
         referenced_ids = list(dict.fromkeys(referenced_ids))
-        if any(bot_id not in bot_ids for bot_id in referenced_ids):
-            unknown = [bot_id for bot_id in referenced_ids if bot_id not in bot_ids]
+        # owner_bot_id 切分补全丢 ``:owner`` 后 ``bot_ids[0]`` 为纯 bot_id,而 participants /
+        # participant_bindings 透传全 ``bot:owner`` 串 —— 校验须按纯 bot_id(``:owner`` 剥离)归一化比对,
+        # 否则 owner 同时被 ``bot_ids``(纯)与 ``participant_bindings``(全串)引用时被假性判"不在
+        # GroupFormation.bot_ids"(regression:预发 e2e owner=20260825_bohtfhe6:35983 兼 binding writer)。
+        _allowed = {bot_id.partition(":")[0] for bot_id in bot_ids}
+        unknown = [bot_id for bot_id in referenced_ids if bot_id.partition(":")[0] not in _allowed]
+        if unknown:
             raise BotIdentityResolutionError(
                 f"group bindings reference bots outside GroupFormation.bot_ids: {unknown}"
             )
