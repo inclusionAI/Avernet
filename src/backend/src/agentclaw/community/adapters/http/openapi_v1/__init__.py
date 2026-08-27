@@ -285,8 +285,13 @@ _MIXED_GROUPS = [
 _OPEN_SUBGROUPS = [
     # Skill Workbench status is tenant-identical and app-admissible.
     skill_publish_status_router,
-    # Skill README is addressed by its stable Skill ID; Local Skills resolve
-    # their device Bot internally and public Repo Skills are global.
+]
+
+# Skill README is user-scoped: public Repo Skills are globally addressable, but
+# Local Skills must be authorized against the Bot resolved from the Skill row.
+# Keep it on the user-scoped response surface so the published contract carries
+# the standard 403 response as well as the principal requirement.
+_USER_SCOPED_SUBGROUPS = [
     skill_readme_router,
 ]
 
@@ -485,7 +490,7 @@ def build_public_router() -> APIRouter:
         public.include_router(
             router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
         )
-    for router in _SUBGROUPS:
+    for router in _SUBGROUPS + _USER_SCOPED_SUBGROUPS:
         public.include_router(
             router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
         )
