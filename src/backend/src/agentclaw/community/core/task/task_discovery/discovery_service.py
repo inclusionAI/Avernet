@@ -374,6 +374,8 @@ class DiscoveryService:
                 "channel": "tc_card",
                 "card_template_id": os.environ.get(
                     "TASK_DISCOVERY_CARD_TEMPLATE_ID", ""
+                ) or os.environ.get(
+                    "SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID", ""
                 ),
                 "card_biz_id": f"discover_things_{task.task_id}",
                 "card_data": json.dumps(
