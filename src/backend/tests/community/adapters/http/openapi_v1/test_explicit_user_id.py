@@ -291,10 +291,14 @@ _NO_USER_DIMENSION = {
     # measures a dependency the path does not have.
     ("get", f"{PUBLIC_API_PREFIX}/bots/loadtest/hello"),
     # Task public surface: execute submits (owner in body), dashboard reads by
-    # task_id — neither scopes to a caller-supplied user_id. list does, so it
-    # is NOT here.
+    # task_id — neither scopes to a caller-supplied user_id. grant/revoke
+    # identify the operator from the verified principal (Cookie/Referer relayed
+    # to secbaas, the api-key held server-side), not a caller-supplied user_id.
+    # list does take a caller-supplied user_id filter, so it is NOT here.
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/execute"),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/dashboard"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/grant"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/revoke"),
 }
 
 # Read-only operations that accept a user_id as a caller-selected filter rather
@@ -398,7 +402,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: publish-to-users route moved from /bots/{bot_id}/public-bcs to the external
 #: /collaboration/bots/{bot_uuid}/public, so one path-addressed {bot_id}
 #: operation became a {bot_uuid}-named one: path -1, none +1.
-_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 62}
+_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 64}  # +2: tasks grant/revoke carry the bot in the request body (bcs_bot_id), never a bot_id parameter
 
 
 def _schema() -> dict:

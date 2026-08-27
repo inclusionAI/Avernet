@@ -8,6 +8,7 @@ get_run:GET /openapi/v1/messages/{id}→ {status,result,error}(status 大小写�
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from typing import Any
@@ -93,9 +94,42 @@ class OpenApiBotAdapter(
         # admin allowed-bots 端点只认 Human Cookie,corp 无 cookie 时 Bearer-only 打它会被 BaaS 判 500;
         # prod 假定 bot 已 OOB 预授权 → 默认跳过。需自查/grant 的(测试/联调)显式传 ensure_grant=True。
         self._ensure_grant = ensure_grant
+        # 自建 client(http_client 未注入)需 pin 到首个 loop 复用;跨 loop 用一次性 client 隔离连接池。
+        # 注入的 client 由调用方管理 loop 绑定,_owns_client=False 时不 pin/不重建。
+        self._owns_client: bool = http_client is None
+        self._client_loop: asyncio.AbstractEventLoop | None = None
 
     async def _aclose(self) -> None:
         await self._client.aclose()
+
+    @contextlib.asynccontextmanager
+    async def _client_for_current_loop(self):
+        """取得「与当前 running loop 兼容」的 client(自查/写共享同一 adapter 的多 loop 场景)。
+
+        httpx.AsyncClient 首次使用即绑定其所在 event loop,跨 loop 复用会抛 ``RuntimeError: bound to a
+        different event loop``。生产里 harness/scheduler/recovery 经 ``asyncio.run``、HTTP 经
+        ``new_event_loop`` 共同驱动同一 adapter,故:首个 loop pin 持久 client(保留连接池、同 loop 复用);
+        其它 loop 发一次性 client,退出即 aclose(不污染 pinned)。注入的 client 由调用方管 loop 绑定,
+        原样返回同一 client,永不重建。
+        """
+        if not self._owns_client:
+            yield self._client
+            return
+        loop = asyncio.get_running_loop()
+        if self._client_loop is None:
+            self._client_loop = loop
+        if self._client_loop is loop:
+            yield self._client
+            return
+        temp = httpx.AsyncClient(
+            base_url=self._client.base_url,
+            headers=self._headers(),
+            timeout=self._client.timeout,
+        )
+        try:
+            yield temp
+        finally:
+            await temp.aclose()
 
     def _headers(self) -> dict[str, str]:
         """请求头:Bearer + 可选 Cookie/Referer。

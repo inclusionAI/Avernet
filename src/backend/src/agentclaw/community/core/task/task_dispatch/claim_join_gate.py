@@ -21,7 +21,7 @@ from typing import Protocol, runtime_checkable
 
 from injector import inject
 
-from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
+from agentclaw.community.plugin_api.system_config import SystemConfigServiceProtocol
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 

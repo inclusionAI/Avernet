@@ -170,8 +170,8 @@ async def grant_task_claim(
 ) -> Envelope[TaskGrantResultDTO]:
     """grant 公共 api-key 给某 Bot(前端 public openapi → task 无状态中继 → secbaas admin)。
 
-    透传浏览器 Cookie/Referer;api-key 由服务端持有,不暴露前端。``bcs_bot_id``=real:entity(/mine bot.id)。
-    secbaas 401/403(未登录/非 Bot owner/非管理员)→ ``@envelope_errors`` 映射;4xx/5xx 可重试;幂等。"""
+    透传浏览器 Cookie/Referer;api-key 由服务端持有,不暴露前端。bcs_bot_id=real:entity(/mine bot.id)。
+    secbaas 401/403(未登录/非 Bot owner/非管理员)→ envelope_errors 映射;4xx/5xx 可重试;幂等。"""
     result = await service.grant(
         bcs_bot_id=body.bcs_bot_id,
         cookie=request.headers.get("cookie", ""),

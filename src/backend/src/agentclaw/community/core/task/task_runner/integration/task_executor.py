@@ -400,26 +400,30 @@ class TaskExecutor:
             req_kwargs["caller_bot_token"] = self._bot_token_provider.get_token(
                 req_kwargs.get("driver_bot") or ""
             )
-        # BCN 事件回调订阅(创建协作群入参 event_subscriptions):BCS 把协作事件 CloudEvent 推到本后端
-        # task 模块回调路径。sink.url = api_base_url + 回调路径(api_base_url 去尾斜杠)。
-        # event_filters 按 collab_mode 分流:state_machine 订阅 state_machine.*;manager_worker/chat
-        # 无状态机 run,去 state_machine.*、保留 group/session/task/message(§4 生命周期事件)。
-        _api_base = gf.extend_props.get("api_base_url")
-        if _api_base:
-            _event_filters = (
-                ["group.*", "session.*", "task.*", "state_machine.*", "message.created"]
-                if mode == "state_machine"
-                else ["group.*", "session.*", "task.*", "message.created"]
-            )
+        # BCN 事件回调订阅(创建协作群入参 event_subscriptions):仅 manager_worker 群内联挂 §4 订阅
+        # (BCS 把协作事件 CloudEvent 推到本后端 task 模块 /callback/report,激活既有
+        # apply_manager_worker_event → execution_graph audit 快照 + converge_by_session)。
+        # 鉴权用既有 caller_bot_token(Bearer)+HMAC,无 cookie(见 spec §4.3)。
+        # state_machine/chat 群不内联订阅:event_subscriptions 触发 BCS require_human,拒 Bot/HMAC-only
+        # 令牌 → 401/403;终结态收敛交 result poller。即便 extend_props 带 api_base_url 也不挂。
+        # sink.url 取本 TaskExecutor 构造注入的 api_base_url(不读 extend_props,不写死)。
+        if mode == "manager_worker" and self._api_base_url:
+            _api_base = str(self._api_base_url).rstrip("/")
             req_kwargs["event_subscriptions"] = [
                 {
-                    "name": "group-webhook",
-                    "event_filters": _event_filters,
-                    "payload": {"mode": "metadata_only"},
+                    "name": "avernet-manager-worker",
+                    "event_filters": [
+                        "group.created",
+                        "session.created",
+                        "task.assigned",
+                        "task.completed",
+                        "session.completed",
+                    ],
+                    "payload": {"mode": "full"},
                     "sink": {
                         "type": "webhook",
-                        "url": str(_api_base).rstrip("/") + _BCN_EVENT_CALLBACK_PATH,
-                        "request_timeout_ms": 2000,
+                        "url": _api_base + _BCN_EVENT_CALLBACK_PATH,
+                        "request_timeout_ms": 10000,
                     },
                 }
             ]

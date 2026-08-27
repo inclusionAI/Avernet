@@ -120,6 +120,16 @@ _ALLOWLIST: dict[str, str] = {
         "~1722 lines — unified ORM skill repository (covers all skill CRUD).",
     "core/bot_public/services/bot_public_service.py":
         "~1166 lines — bot-public / friend-bot discovery + approval service.",
+
+    # ── task cluster (grew past the cap in the task-claim / secbaas grant PR) ───
+    "core/task/task_center/engine.py":
+        "~1504 lines — task center engine (run/dispatch/aggregation). Grew past the "
+        "cap with the task-claim + stateless secbaas relay work; split run/dispatch "
+        "and group-formation into sub-modules in a follow-up refactor.",
+    "adapters/http/task/router.py":
+        "~1027 lines — internal task router (execute/dashboard/list + callback + the "
+        "new grant/revoke/claim-join-filter surface). Borderline; split the claim-grant "
+        "sub-router into its own module in a follow-up.",
 }
 
 
