@@ -34,7 +34,7 @@ _BCN_INTERNAL_ARTIFACT = (
 )
 _SHIPPED_CONFIG = Path(__file__).resolve().parents[4] / "configs" / "application.yaml"
 _METHODS = {"get", "post", "put", "delete", "patch"}
-_RULES = RouteSecurity.from_table({"/**": {"user": "required"}})
+_RULES = RouteSecurity.from_table({"/**": {"user": "optional", "app": "optional"}})
 _SHIPPED_RULES = RouteSecurity.from_yaml(_SHIPPED_CONFIG)
 
 
