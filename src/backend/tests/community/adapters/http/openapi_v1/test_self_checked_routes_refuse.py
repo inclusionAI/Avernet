@@ -107,6 +107,16 @@ class _NoGrants:
         return []
 
 
+class _GrantLookupFails:
+    """The grant service itself fails while looking up the authorization."""
+
+    def find(self, **_kwargs):
+        raise RuntimeError("grant store unavailable")
+
+    def list_for_app(self, **_kwargs):
+        return []
+
+
 class _NoBot:
     """The harness surface resolves the owner from the repository record."""
 
@@ -216,11 +226,11 @@ def services():
     return _Services()
 
 
-@pytest.fixture
-def client(services):
+def _make_client(services, grant_service):
     class _M(Module):
         def configure(self, binder):
-            binder.bind(BotAppGrantServiceProtocol, to=_NoGrants())
+            if grant_service is not None:
+                binder.bind(BotAppGrantServiceProtocol, to=grant_service)
             binder.bind(BotRepository, to=_NoBot())
             binder.bind(CollaboratorServiceProtocol, to=_NoCollaborators())
             binder.bind(CronRelayServiceProtocol, to=services)
@@ -238,6 +248,21 @@ def client(services):
     attach_injector(app, Injector([_M()]))
     mount_public_error_handlers(app)
     return user_scoped_client(app, USER)
+
+
+@pytest.fixture
+def client(services):
+    return _make_client(services, _NoGrants())
+
+
+@pytest.fixture
+def client_without_grant_service(services):
+    return _make_client(services, None)
+
+
+@pytest.fixture
+def client_with_failing_grant_lookup(services):
+    return _make_client(services, _GrantLookupFails())
 
 
 def _concrete(path: str) -> str:
@@ -259,6 +284,36 @@ def _concrete(path: str) -> str:
     if "{bot_id}" not in path:
         query += f"&bot_id={BOT}"
     return f"{filled}{query}"
+
+
+def test_harness_refuses_application_when_grant_service_is_unbound(
+    client_without_grant_service, services
+) -> None:
+    """ ``require_harness_bot_access`` fails closed when no grant reader is wired."""
+    response = client_without_grant_service.request(
+        "POST",
+        _concrete("/openapi/v1/bots/{bot_id}/harness/diagnose"),
+        json={"entity_type": "staff", "entity_id": USER},
+    )
+    assert response.status_code == 404, response.text
+    assert not services.acted, (
+        "refusing an application with no grant reader must not reach the operation"
+    )
+
+
+def test_harness_refuses_application_when_grant_lookup_raises(
+    client_with_failing_grant_lookup, services
+) -> None:
+    """An unexpected grant-store failure is mapped to the same masked 404."""
+    response = client_with_failing_grant_lookup.request(
+        "POST",
+        _concrete("/openapi/v1/bots/{bot_id}/harness/diagnose"),
+        json={"entity_type": "staff", "entity_id": USER},
+    )
+    assert response.status_code == 404, response.text
+    assert not services.acted, (
+        "refusing an application when grant lookup raises must not reach the operation"
+    )
 
 
 #: All three sets, because they are the same risk with different lifetimes:
