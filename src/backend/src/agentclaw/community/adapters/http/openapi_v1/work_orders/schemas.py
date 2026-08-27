@@ -336,7 +336,9 @@ class WorkOrderListItem(_UtcResponseModel):
     work_order_id: int | None = Field(
         description="Related work-order identifier, when one exists."
     )
-    work_order_no: str = Field(description="Human-readable work-order number.")
+    work_order_no: str | None = Field(
+        description="Human-readable work-order number, when one exists."
+    )
     notification_id: int | None = Field(
         description="Related notification identifier, or null for approval-only items."
     )

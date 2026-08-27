@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
-from agentclaw.community.adapters.http.org_user.dependencies import (
-    require_gateway_user,
-)
+from agentclaw.community.adapters.http.org.dependencies import require_user_caller
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
@@ -35,7 +33,7 @@ router = APIRouter(prefix="/api/v1/work-orders", tags=["work-orders"])
 async def create_work_order_event_http(
     body: CreateWorkOrderEventRequest,
     request: Request,
-    caller: VerifiedCaller = Depends(require_gateway_user),
+    caller: VerifiedCaller = Depends(require_user_caller),
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderEventCreated]:
     """Create an approval or notice event for the authenticated user."""

@@ -284,6 +284,30 @@ def test_create_work_order_event_rejects_non_object_json(
     work_order_service.create_work_order_event.assert_not_called()
 
 
+def test_list_work_orders_allows_notice_without_work_order(client, work_order_service):
+    work_order_service.list_items.return_value = (
+        1,
+        [
+            WorkOrderListItem(
+                work_order=None,
+                notification=_notification().model_copy(
+                    update={"work_order_id": None}
+                ),
+                can_approve=False,
+            )
+        ],
+    )
+
+    response = client.get("/openapi/v1/bots/work-orders")
+
+    assert response.status_code == 200
+    item = response.json()["data"]["items"][0]
+    assert item["item_type"] == "NOTICE"
+    assert item["work_order_id"] is None
+    assert item["work_order_no"] is None
+    assert item["notification_id"] == 21
+
+
 def test_list_work_orders_maps_plain_and_notification_items(client, work_order_service):
     work_order_service.list_items.return_value = (
         2,

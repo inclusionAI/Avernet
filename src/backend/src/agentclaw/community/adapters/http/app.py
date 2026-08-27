@@ -107,6 +107,7 @@ from agentclaw.community.adapters.http.devices.router import router as device_ro
 from agentclaw.community.adapters.http.access.router import access_router as whitelist_router  # noqa: E402
 from agentclaw.community.adapters.http.access.router import user_list_router  # noqa: E402
 from agentclaw.community.adapters.http.access.router import user_router  # noqa: E402
+from agentclaw.community.adapters.http.org.router import router as org_user_router  # noqa: E402
 from agentclaw.community.adapters.http.expert_chat import router as expert_chats_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_chat import router as bot_chat_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_chat.otel_router import router as bot_chat_otel_router  # noqa: E402
@@ -126,7 +127,6 @@ from agentclaw.community.adapters.http.quality.router import router as quality_r
 # configuration declares the collaboration domain.
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router  # noqa: E402
 from agentclaw.community.adapters.http.work_orders.router import router as work_orders_http_router  # noqa: E402
-from agentclaw.community.adapters.http.org_user.router import router as org_user_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_render_screen.router import router as render_screen_router  # noqa: E402
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
 from agentclaw.community.adapters.http.antcode.router import router as antcode_router  # noqa: E402
@@ -914,6 +914,7 @@ app.include_router(bot_chat_relation_router)  # bot-chat 业务任务关系写�
 app.include_router(whitelist_router)
 app.include_router(user_list_router)
 app.include_router(user_router)
+app.include_router(org_user_router)  # GET /api/v1/org/user?user_id=<work_no>: directory identity, signed-principal auth
 app.include_router(system_config_router)
 app.include_router(common_config_router)
 app.include_router(skills_pool_ops_router)
@@ -924,7 +925,6 @@ app.include_router(task_internal_router)
 app.include_router(task_callback_router)
 app.include_router(task_router)
 app.include_router(work_orders_http_router)
-app.include_router(org_user_router)
 try:
     app.include_router(render_screen_router)
     logger.info("[RenderScreen] Router registered successfully: prefix=%s", render_screen_router.prefix)
