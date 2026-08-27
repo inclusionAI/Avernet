@@ -4,8 +4,16 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from agentclaw.community.core.mcp.errors import McpIdentityUnresolvedError
 from agentclaw.community.core.mcp.services.local_mcp_registry import LocalMCPRegistry
+from agentclaw.community.core.repository.protocols.identity import (
+    CallerIdentityRepositoryProtocol,
+)
+from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import CliItem, McpScopeItem
+
+
+logger = get_logger()
 
 
 def merge_passport_cli_items(
@@ -76,6 +84,51 @@ def _normalized_identity_mode(raw: object) -> str:
     if normalized_mode not in {"owner", "caller"}:
         raise ValueError("identity mode must be owner or caller")
     return normalized_mode
+
+
+def resolve_mcp_identity_modes(
+    identity_repo: CallerIdentityRepositoryProtocol,
+    *,
+    bot_pk: object,
+    engine_type: str,
+    bot_id: str,
+) -> Mapping[str, object]:
+    """Read each MCP's stored execution identity for one Bot, or fail.
+
+    The single definition of "fail closed on identity", shared by every
+    caller that assembles an overwrite-style Passport MCP scope: the runtime
+    projector, the CLI-removal endpoint, and the aicoding restart refresh.
+    Each of those replaces the whole MCP resource list, so any of them that
+    guessed a default would silently demote every Caller MCP on the Bot —
+    see :class:`McpIdentityUnresolvedError`.
+
+    A missing ``bot_pk`` fails rather than defaulting. Every persisted Bot
+    carries one (``BotModel.to_dict``), so its absence means the record is
+    not what the caller assumes, and that is exactly when a guess is least
+    safe.
+    """
+    if bot_pk is None:
+        logger.error(
+            "[passport_scope] Bot record has no primary key, refusing to "
+            "assume MCP execution identity: bot_id=%s, engine_type=%s",
+            bot_id, engine_type,
+        )
+        raise McpIdentityUnresolvedError(
+            f"bot {bot_id} has no primary key; MCP execution identity is unknown"
+        )
+    try:
+        return identity_repo.list_draft_call_types(int(bot_pk), engine_type)
+    except Exception as exc:
+        # Name the Bot and engine: the callers' own errors carry neither, and
+        # a stale row here blocks every mutation that touches MCP scope.
+        logger.exception(
+            "[passport_scope] MCP execution identity unreadable: "
+            "bot_id=%s, engine_type=%s",
+            bot_id, engine_type,
+        )
+        raise McpIdentityUnresolvedError(
+            f"cannot read MCP execution identity for bot {bot_id}"
+        ) from exc
 
 
 def passport_mcp_items_from_codes(

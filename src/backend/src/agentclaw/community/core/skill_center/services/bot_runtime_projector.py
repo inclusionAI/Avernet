@@ -9,6 +9,7 @@ from injector import inject
 from agentclaw.community.core.mcp.services.passport_scope import (
     filter_passport_mcp_codes,
     passport_mcp_items_from_codes,
+    resolve_mcp_identity_modes,
 )
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
@@ -23,6 +24,7 @@ from agentclaw.community.core.repository.protocols.identity import (
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
 )
+from agentclaw.community.core.mcp.errors import McpIdentityUnresolvedError
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     SkillSetRuntimeReconcileError,
@@ -251,38 +253,25 @@ class BotRuntimeProjector:
     def _resolve_mcp_identity_modes(
         self, *, bot: dict, bot_id: str, engine: str
     ) -> Mapping[str, object]:
-        """Read each MCP's execution identity for this Bot.
+        """Read each MCP's execution identity, or refuse to project.
 
         Part of plan resolution rather than delivery: the Passport manifest is
         overwrite-style, so a projection that cannot establish identity must
         not have written anything yet when it gives up.
 
-        A missing primary key fails the projection rather than defaulting.
-        Every persisted Bot carries one (``BotModel.to_dict``), so its absence
-        means the record is not what this path assumes — and on a privilege
-        boundary, guessing Owner is precisely the silent demotion this whole
-        change exists to prevent.
+        The read itself — and its refusal to default to Owner — lives in
+        ``resolve_mcp_identity_modes``, shared with the two non-projector
+        callers that assemble the same overwrite-style scope. Only the
+        translation to this module's error type is local.
         """
-        bot_pk = bot.get("id")
-        if bot_pk is None:
-            logger.error(
-                "[BotRuntimeProjector] Bot record has no primary key, refusing "
-                "to project MCP identity: bot_id=%s, engine=%s",
-                bot_id, engine,
-            )
-            raise SkillSetRuntimeReconcileError()
         try:
-            return self._caller_identity_repo.list_draft_call_types(
-                int(bot_pk), engine
+            return resolve_mcp_identity_modes(
+                self._caller_identity_repo,
+                bot_pk=bot.get("id"),
+                engine_type=engine,
+                bot_id=bot_id,
             )
-        except Exception as exc:
-            # Name the Bot and engine: the generic reconcile error carries
-            # neither, and a stale row here blocks every SkillSet mutation.
-            logger.exception(
-                "[BotRuntimeProjector] MCP execution identity unreadable: "
-                "bot_id=%s, engine=%s",
-                bot_id, engine,
-            )
+        except McpIdentityUnresolvedError as exc:
             raise SkillSetRuntimeReconcileError() from exc
 
     def _build_plan(

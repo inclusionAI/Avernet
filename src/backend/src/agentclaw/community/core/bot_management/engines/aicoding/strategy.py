@@ -596,6 +596,7 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         passport_plugin: Any,
         skill_set_factory: Any,
         template_service: Any,
+        caller_identity_repo: Any = None,
     ) -> None:
         """Refresh this bot's Passport authorization scope on restart.
 
@@ -610,6 +611,13 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         Opt-in: only runs when ``extra_configs['confirmed_template_update']`` is
         truthy — a plain restart must never silently rewrite the Passport
         authorization scope. Anything falsy (missing key, None, false) no-ops.
+
+        The pushed scope carries each MCP's execution identity, not just its
+        code: ``resource_scope`` replaces the MCP resource list wholesale, so a
+        code-only snapshot would assert Owner for every MCP and drop the Bot's
+        Caller grants on every confirmed template update. Identity therefore
+        gates the refresh — no ``caller_identity_repo``, or an unreadable one,
+        and the refresh is skipped so the existing scope stands unchanged.
         """
         if not (
             isinstance(extra_configs, dict)
@@ -621,13 +629,28 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                 ctx.bot_id,
             )
             return
+        if caller_identity_repo is None:
+            # Skipping leaves the existing Passport scope in place, which is
+            # strictly safer than republishing it without identity.
+            logger.warning(
+                "[aicoding.restart] skip passport refresh: no caller identity "
+                "repository, refusing to republish MCP scope without execution "
+                "identity for bot_id=%s",
+                ctx.bot_id,
+            )
+            return
         # Imported lazily: create_flow imports this module's registry, so a
         # module-level import would cycle.
         from agentclaw.community.core.bot_management.create_flow import (
             _get_bot_mcp_codes,
         )
+        from agentclaw.community.core.mcp.errors import McpIdentityUnresolvedError
         from agentclaw.community.core.mcp.services._defaults import (
             get_default_cli_items,
+        )
+        from agentclaw.community.core.mcp.services.passport_scope import (
+            passport_mcp_items_from_codes,
+            resolve_mcp_identity_modes,
         )
 
         stored_config: Dict[str, Any] = (
@@ -654,6 +677,26 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             else None,
         )
 
+        try:
+            identity_modes = resolve_mcp_identity_modes(
+                caller_identity_repo,
+                bot_pk=bot.get("id"),
+                engine_type=engine_type,
+                bot_id=ctx.bot_id,
+            )
+            mcp_items = passport_mcp_items_from_codes(
+                mcp_codes, identity_modes=identity_modes
+            )
+        except (McpIdentityUnresolvedError, ValueError):
+            logger.warning(
+                "[aicoding.restart] skip passport refresh: MCP execution "
+                "identity unresolved for bot_id=%s; leaving the existing "
+                "scope in place",
+                ctx.bot_id,
+                exc_info=True,
+            )
+            return
+
         passport_plugin.update_passport(
             bot_id=ctx.bot_id,
             user_id=owner_id,
@@ -661,15 +704,24 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             bot_desc=bot.get("bot_desc"),
             engine_type=engine_type,
             resource_scope={
-                "mcp_codes": mcp_codes,
+                # Derived from the items: ``unpack_resource_scope`` ignores
+                # ``mcp_codes`` once ``mcp_items`` is present, so two
+                # independent lists could only ever drift apart.
+                "mcp_codes": [item["mcp_code"] for item in mcp_items],
+                "mcp_items": mcp_items,
                 "cli_items": cli_items,
             },
         )
+        caller_count = sum(
+            1 for item in mcp_items if item.get("identity_mode") == "caller"
+        )
         logger.info(
             "[aicoding.restart] refreshed passport authorization scope: "
-            "bot_id=%s mcp_codes=%s cli_items=%s",
+            "bot_id=%s mcp_codes=%s caller=%s owner=%s cli_items=%s",
             ctx.bot_id,
             mcp_codes,
+            caller_count,
+            len(mcp_items) - caller_count,
             cli_items,
         )
 

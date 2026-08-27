@@ -69,6 +69,9 @@ from agentclaw.community.core.bot_management.services.default_image_policy_liste
 )
 from agentclaw.community.core.bot_collaborator.models import CollaboratorRole
 from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.identity import (
+    CallerIdentityRepositoryProtocol,
+)
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, _get_engine_types
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
@@ -331,6 +334,11 @@ class BotService:
         baas_service_provider: "Callable[[], BaasService] | None" = None,
         task_queue_service: "TaskQueueService | None" = None,
         common_config_service: "CommonConfigService | None" = None,
+        # Optional so the many test fixtures that build BotService directly keep
+        # working; the DI provider always supplies it. Only the restart
+        # authorization refresh reads it, and that path declines rather than
+        # republishing an MCP scope without execution identity when it is None.
+        caller_identity_repo: "CallerIdentityRepositoryProtocol | None" = None,
     ) -> None:
         self._repository = repository
         self._allocation_config = allocation_config
@@ -345,6 +353,7 @@ class BotService:
         self._bcn_service = bcn_service
         self._bot_publish_repo = bot_publish_repo
         self._passport_plugin = passport_plugin
+        self._caller_identity_repo = caller_identity_repo
         self._oss_record_repo = oss_record_repo
         self._drm_reader = drm_reader
         # Cycle-breakers: BotPublishService.__init__ depends on BotService,
@@ -4311,6 +4320,7 @@ class BotService:
                 passport_plugin=self._passport_plugin,
                 skill_set_factory=self._skill_set_factory,
                 template_service=self._template_service,
+                caller_identity_repo=self._caller_identity_repo,
             )
         except Exception as exc:
             # Optional engine extensions must never block the existing restart path.
