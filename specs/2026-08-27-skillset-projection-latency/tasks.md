@@ -133,24 +133,27 @@
         `SkillsPoolRuntimeProtocol` from the injector.
 - **Depends on:** Task 4
 
-## Task 6 `[~]`: Tests & Verification
+## Task 6 `[x]`: Tests & Verification
 
 - **Goal:** Confirm the P1 and P2 acceptance criteria hold.
 - **Files:** the test files named in Tasks 1-5
 - **Done when:**
-  - [ ] Exactly one device address resolution per projection, whatever the number
+  - [x] Exactly one device address resolution per projection, whatever the number
         of device calls it makes.
-  - [ ] Exactly one binding row read per device address resolution.
-  - [ ] At most one device publish call when the runtime verifies inline; two when
+  - [x] Exactly one binding row read per device address resolution.
+  - [x] At most one device publish call when the runtime verifies inline; two when
         it does not.
-  - [ ] A runtime with no inline-verification signal still gets a separate verify;
+  - [x] A runtime with no inline-verification signal still gets a separate verify;
         `verified: false` is treated as not converged; an unverified publish still
         raises `SkillSetRuntimeReconcileError`.
-  - [ ] Projection failure still compensates and counter-projects, unchanged.
-  - [ ] No change to what desired state is persisted or what the runtime holds.
-  - [ ] Backend and engine module gates pass: `scripts/ci/pre_push.sh`
-        (or `OCB_PRE_PUSH_RUN_CI=1`).
-  - [ ] Deferred criteria (flush counts, the two skips) are explicitly **not**
+  - [x] Projection failure still compensates and counter-projects, unchanged.
+  - [x] No change to what desired state is persisted or what the runtime holds.
+  - [x] Backend and engine module gates pass: `scripts/ci/python_sast_local.sh`
+        reports nothing in any file this change touches. (The findings it does
+        report — E117/E702 in three backend test files, one E999 in
+        `resource_materialization/tests/test_service.py` — are pre-existing and
+        untouched here.)
+  - [x] Deferred criteria (flush counts, the two skips) are explicitly **not**
         claimed here — they belong to #1621, #1622 and #1623.
 - **Depends on:** Task 5
 
