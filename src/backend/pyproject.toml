@@ -79,6 +79,14 @@ dependencies = [
   # before querying the public Bot name/owner-name LIKE catalogue. This must be
   # installed in every runtime profile, not only in test tooling.
   "jieba>=0.42",
+  # aiomysql: the async DBAPI behind `mysql+aiomysql://` — needed when the
+  # DatabasePlugin opens an async SQLAlchemy engine for MySQL. Pure Python,
+  # same as PyMySQL.
+  "aiomysql>=0.2.0",
+  # greenlet: SQLAlchemy's async engine uses greenlets for context-local
+  # state; aiomysql pulls it in transitively but pinning it explicitly avoids
+  # a "No module named 'greenlet'" at runtime if the transitive dep is absent.
+  "greenlet>=3.0.0",
 ]
 
 # Community test tooling — so the extracted community repo can run its own CI.
