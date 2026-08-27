@@ -1,9 +1,13 @@
 """Plugin API for the team-scoped Skill Center integration.
 
-This boundary is intentionally independent from ``SkillCenterClient``, whose
-legacy callers and untyped wire contract remain unchanged. Gateway request
-objects contain no endpoint, credential, tenant, or environment settings:
-deployment adapters obtain those from their composition-root configuration.
+This consumer-owned Plugin API lives with the Avernet domains that call it;
+the real HTTP implementation, private configuration, and credentials live in
+OCB and are selected only by its composition root. Community code never imports
+``agentclaw.corp``. The boundary is intentionally independent from
+``SkillCenterClient``, whose legacy callers and untyped wire contract remain
+unchanged. Gateway request objects contain no endpoint, credential, tenant, or
+environment settings: deployment adapters obtain those from their
+composition-root configuration.
 """
 
 from __future__ import annotations
