@@ -35,6 +35,7 @@ from agentclaw.community.adapters.http.openapi_v1.deprecated import (
 from agentclaw.community.adapters.http.openapi_v1.admission import (
     ADMISSION,
     ADMITTING_MODES,
+    HARNESS_SCOPED_OPERATIONS,
     SKILL_SCOPED_OPERATIONS,
     AdmissionMode,
 )
@@ -181,17 +182,21 @@ def test_every_grant_checked_operation_declares_its_modes_dependency(mode):
     valid grant on a shared bot. Neither is a smaller mistake than a missing
     check.
 
-    Two named sets are excluded, for the same underlying reason and with
+    Three named sets are excluded, for the same underlying reason and with
     different lifetimes. ``SKILL_SCOPED_OPERATIONS`` — the four current
     ``{skill_id}`` operations — resolve the bot's owner from the skill record,
     so there is nothing for a dependency to look a grant up against until the
-    handler has read it. The retiring addresses in ``SELF_CHECKED_ROUTES`` are
-    the same problem in the old contract's shape: their bot is in a request body
-    or behind a skill id, and mounting them under a dependency would refuse an
-    application outright rather than defer, turning a working legacy call into a
-    404. Both check it themselves, first, before acting; the second set is empty
-    the day the deprecated package goes. ``test_only_the_named_operations_
-    check_their_own_grant`` is what stops either from growing quietly.
+    handler has read it. ``HARNESS_SCOPED_OPERATIONS`` keep the existing
+    harness wire contract (bot id on the path, user id in the query) by
+    resolving the bot owner from the repository record and checking the grant
+    inside ``require_harness_bot_access``. The retiring addresses in
+    ``SELF_CHECKED_ROUTES`` are the same problem in the old contract's shape:
+    their bot is in a request body or behind a skill id, and mounting them
+    under a dependency would refuse an application outright rather than defer,
+    turning a working legacy call into a 404. All check it themselves, first,
+    before acting; the third set is empty the day the deprecated package goes.
+    ``test_only_the_named_operations_check_their_own_grant`` is what stops any
+    of them from growing quietly.
     """
     dependency = _GRANT_DEPENDENCY_BY_MODE[mode]
     expected = {
@@ -200,6 +205,7 @@ def test_every_grant_checked_operation_declares_its_modes_dependency(mode):
         if table_mode is mode
         and key not in SELF_CHECKED_ROUTES
         and key not in SKILL_SCOPED_OPERATIONS
+        and key not in HARNESS_SCOPED_OPERATIONS
     }
     actual = {
         key
@@ -253,7 +259,7 @@ def test_only_the_named_operations_check_their_own_grant():
         and not _depends_on(_dependant_of(ctx), require_granted_addressed_bot)
         and key not in LEGACY_ROUTES
     }
-    named = SKILL_SCOPED_OPERATIONS
+    named = SKILL_SCOPED_OPERATIONS | HARNESS_SCOPED_OPERATIONS
     assert self_checking == named, (
         "the set of operations checking their grant in a handler has changed. "
         "Adding one is an edit to admission.SKILL_SCOPED_OPERATIONS and "
@@ -269,7 +275,7 @@ def test_the_self_checking_operations_are_still_grant_checked():
     """Self-checking is about *where* the check runs, never *whether*."""
     wrong_mode = sorted(
         f"{m} {p}"
-        for m, p in SKILL_SCOPED_OPERATIONS
+        for m, p in SKILL_SCOPED_OPERATIONS | HARNESS_SCOPED_OPERATIONS
         if ADMISSION.get((m, p)) not in _GRANT_CHECKED_MODES
     )
     assert not wrong_mode, wrong_mode
