@@ -162,10 +162,11 @@ invariant every future caller has to rediscover.
    `aicoding`, `hermes`): the scope split, the claimed/released guard, and
    the delivery/declaration ordering stay exactly as they are.
 4. The Passport update keeps its current trigger and payload on every engine.
-5. The rule is decided **once**, at the point where its justification becomes
-   true — immediately after the plan resolves — rather than being re-derived
-   in each half. Past that decision, the per-domain code carries no
-   whole-artifact awareness at all.
+5. Each engine's runtime contract is **implemented by that engine**, behind a
+   protocol the projector resolves from a registry. `BotRuntimeProjector`
+   stops testing engine identity anywhere: no `engine == "teclaw"` string
+   survives in it, and adding an engine whose runtime differs becomes a new
+   implementation plus a registry entry, not an edit to shared code.
 
 ## Non-goals
 
@@ -174,9 +175,13 @@ invariant every future caller has to rediscover.
 - Changing `ProjectionScope`'s shape, or how callers populate it. Callers keep
   declaring what their mutation changed; only the projector's reading of that
   declaration becomes engine-aware.
-- Teclaw Center-corpus (`center://`) delivery. It is still rejected up front
-  in `_build_plan`, and the second refusal that guards the delivery itself
-  moves intact to the new whole-artifact path. Phase 2 concern.
+- Teclaw Center-corpus (`center://`) delivery. Still refused, at the same two
+  moments as today — plan resolution and delivery — but the refusal now lives
+  in the teclaw implementation's `validate_plan` rather than in three
+  scattered engine-string checks. Phase 2 concern.
+- Per-engine variation beyond what exists. The registry ships exactly two
+  implementations, which is what the code already has; it is not an invitation
+  to split per-engine behaviour that is currently shared.
 - Skills Pool mapping publication. Teclaw never takes that path —
   `CurrentRuntimeLayoutProbeService.probe_bot` returns
   `engine_has_no_filesystem_pool_layout` for teclaw
@@ -206,22 +211,13 @@ invariant every future caller has to rediscover.
    order and arguments of every runtime and Passport call are byte-identical
    to current behaviour, including the claimed/released guard against the
    projected set and the skip-logging when a half is not declared.
-6. **One decision point, and no teclaw awareness downstream of it.** The
-   whole-artifact case is decided immediately after `_resolve_plan` in
-   `project`, and after that decision the per-domain helpers contain no
-   `teclaw` branch — `_apply_skill_projection` becomes purely per-domain
-   (Pool vs legacy). The Center-corpus refusal that lived there moves with
-   the delivery rather than being duplicated.
+6. **No engine identity test survives in the projector.** All four current
+   `engine == "teclaw"` checks — `snapshot_skill_mappings:118` and
+   `_build_plan:332` (the Center-corpus contract, at plan-resolution time) and
+   `_apply_skill_projection:417,426` (delivery) — are gone, replaced by calls
+   through the engine's own implementation of the projection protocol. A
+   grep for `teclaw` in `bot_runtime_projector.py` returns nothing.
 
-   `project` is the only entry point this applies to, because it is the only
-   one a teclaw Bot reaches. `project_for_cleanup` has **no production
-   caller** — only the two protocol declarations and the implementation.
-   `project_mcp_and_cli` has exactly one, the desktop-transition branch of
-   `SkillSymlinkListener`, which `_resolve_desktop_layout_authority` gates on
-   `bot_type == "desktop"`; teclaw is additionally never Pool-capable
-   (`runtime_layout_probe.py:83`). Both keep a comment recording that they are
-   per-domain-only paths and why, so the next reader does not re-derive it —
-   but neither gets speculative whole-artifact code.
 7. **Failure still fails closed.** A teclaw delivery that returns
    `{"success": False}` — compose error, missing `bind_id`, HTTP status or
    request error, all of which `TeclawDeviceSyncService` converts into a

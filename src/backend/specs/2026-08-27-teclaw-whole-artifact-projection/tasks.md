@@ -1,254 +1,291 @@
 # Tasks — One Whole-Artifact Delivery per Projection for Teclaw Bots
 
-Three groups, ordered so the suite is green after each one.
-
-Group 1 adds the vocabulary and changes nothing observable. Group 2 is the
-behaviour change, written test-first so the regression guard for per-domain
-engines exists before the branch that could break it. Group 3 is the sweep
-that proves nothing else moved.
+Five groups. The ordering carries the safety argument for a change that
+relocates the per-domain path: **Group 3 moves code with no behaviour change,
+and Group 4 changes teclaw only afterwards.** Reviewing them as separate
+commits is what makes "per-domain is untouched" checkable, now that it is no
+longer visible in a diff.
 
 Paths are relative to `src/backend/src/agentclaw/community/` unless prefixed
 with `tests/`, which is relative to `src/backend/`.
 
-**Environment.** Use `.venv/bin/python -m pytest` from `src/backend`. Do not
-run `uv run` or `uv sync --frozen` — `uv.lock` pins `mirrors.aliyun.com`,
-which this sandbox answers `403` to. `uv.lock` must not appear in any commit;
-check `git status` before each one.
+**Environment.** Use `.venv/bin/python -m pytest` from `src/backend`. Never
+`uv run` or `uv sync --frozen` — `uv.lock` pins `mirrors.aliyun.com`, which
+this sandbox answers `403` to. `uv.lock` must not appear in any commit; check
+`git status` before each one.
+
+**Commit per group.** Groups 1-4 each end in a commit on
+`REL20260828_teclaw_whole_artifact_projection`; Group 5 validates and pushes.
+That is what lets a reviewer read the relocation and the behaviour change
+separately.
 
 ---
 
-## Group 1 — Name the property (no behaviour change)
+## Group 1 — The plan becomes a value (no behaviour change)
 
 - [ ] 1.1 In `core/skill_center/runtime_projection_contract.py`, add
-      `_WHOLE_ARTIFACT_ENGINES = frozenset({"teclaw"})` and
-      `runtime_delivers_whole_artifact(engine: str) -> bool` above
-      `ProjectionScope`. Docstring names
-      `core/devices/services/teclaw_device_sync.py` as the authority and says
-      why the predicate exists (one call carries both halves, so a second
-      restates the first). Add the function to `__all__`.
+      `ResolvedCapabilityPlan` — a `@dataclass(frozen=True, slots=True)` with
+      `bot_id`, `owner_id`, `service`, `bot`, `engine`, `projection`,
+      `effective_cli_items`, `identity_modes`. Type `service` loosely to avoid
+      importing `SkillSetService` (cycle); say so in a comment. Export it.
 
-- [ ] 1.2 Extend the `ProjectionScope` class docstring with one paragraph:
-      its guarantees — "a single-MCP add stays a single device write", and
-      `claim_all_mcp`'s "a freshly active container holds no MCP
-      configuration" premise — describe engines whose halves have separate
-      runtime endpoints; on a whole-artifact engine the projector reads the
-      scope through `runtime_delivers_whole_artifact`. Do **not** change any
-      field, default, `everything()`, or `inverted()`.
+- [ ] 1.2 In `bot_runtime_projector.py`, make `_build_plan`, `_resolve_plan`
+      and `_resolve_cleanup_plan` return `ResolvedCapabilityPlan`, and update
+      the three unpack sites (`project`, `project_mcp_and_cli`,
+      `project_for_cleanup`) to attribute access. `bot_id` / `owner_id` are
+      already arguments to plan resolution — put them on the plan rather than
+      threading them separately.
 
-- [ ] 1.3 Confirm no boundary change is needed: the new symbol is consumed
-      only inside `core/skill_center`, so `core/skill_center/README.md`'s
-      Context Boundary `provides`/`consumes` lists stay as they are. Verify by
-      running `tests/community/architecture/ -q` — this is the Rule-22 gate,
-      and it must pass before Group 2 starts.
+- [ ] 1.3 Green check: `.venv/bin/python -m pytest
+      tests/community/core/skill_center/ tests/community/contracts/ -q`.
+      Group 1 is a pure refactor — **every test must pass unedited**. If one
+      needs a change, the tuple was carrying meaning the dataclass lost.
 
-- [ ] 1.4 Green check: `.venv/bin/python -m pytest
-      tests/community/core/skill_center/ tests/community/architecture/ -q`.
-      Expect no test to change behaviour — Group 1 adds an unused function.
+- [ ] 1.4 Commit: `refactor(backend): give the capability plan a name`.
 
 ---
 
-## Group 2 — One delivery on a whole-artifact runtime
+## Group 2 — The protocol and registry (no behaviour change)
 
-### 2a. Test scaffolding first
+- [ ] 2.1 In `runtime_projection_contract.py`, add the `EngineRuntimeProjection`
+      Protocol (`@runtime_checkable`) with `validate_plan(*, skill_assets,
+      retired_mappings=())` and `async apply(*, plan, scope,
+      retired_mappings)`. Docstrings state the contract: `validate_plan` runs
+      during plan resolution before anything is written; `apply` raises
+      `SkillSetRuntimeReconcileError` if the runtime did not converge, and
+      owns how many runtime calls that takes. Export it.
 
-- [ ] 2.1 In `tests/community/core/skill_center/test_skill_set_management_service.py`,
-      extend `_RuntimeFactoryService` (`:474`) so call **counts** are
-      observable, following the existing `deliveries` list idiom rather than
-      adding integer counters:
-      - `self.runtime_syncs: list[list[dict]] = []`, appended in
-        `sync_runtime` (`:484`) — keep the existing `self.desired_skills`
-        assignment so no current assertion changes.
-      - `self.mcp_projections: list[tuple[frozenset[str], frozenset[str], set[str]]] = []`,
-        appended at the top of `sync_mcp_projection` (`:498`) **before** it
-        delegates to `sync_mcp_delivery` / `sync_mcp_desired_state`, so the
-        deliver-before-declare composition at `:512-514` — which existing
-        tests assert on — is preserved verbatim.
-      Leave the unrelated `sync_mcp_projection` stub at `:2865` alone.
+- [ ] 2.2 Extend the `ProjectionScope` docstring: the guarantees it documents
+      are `PerDomainRuntimeProjection`'s, and an implementation may read the
+      scope differently — pointing at `EngineRuntimeProjection`. Change no
+      field, default, `everything()` or `inverted()`.
 
-- [ ] 2.2 Confirm the scaffolding is inert:
-      `.venv/bin/python -m pytest
-      tests/community/core/skill_center/test_skill_set_management_service.py -q`
-      must still report **77 passed**.
+- [ ] 2.3 Create `core/skill_center/services/runtime_projections/__init__.py`
+      and `registry.py` with `EngineRuntimeProjectionRegistry`: a
+      `{engine: EngineRuntimeProjection}` map plus a **default**.
+      `for_engine(engine)` returns the map entry or the default. Per-domain is
+      the default so a new ordinary engine needs no registration — only one
+      whose runtime genuinely differs does. Log at INFO, once per resolution,
+      which implementation was chosen.
 
-### 2b. The regression guard, before the change that could trip it
+- [ ] 2.4 Green check: nothing consumes these yet, so
+      `tests/community/core/skill_center/ tests/community/architecture/ -q`
+      must be unchanged. The architecture run is the Rule-22 gate — if it
+      objects to the new package, fix `core/skill_center/README.md`'s Context
+      Boundary now rather than at the end.
 
-- [ ] 2.3 Add `test_per_domain_engine_keeps_the_scope_split` beside the teclaw
-      projector tests (after `:2519`). An **openclaw** Bot (`_RuntimeBots`)
-      with `ProjectionScope(mcp=True, claimed_mcp=frozenset({"x"}))`:
-      assert `runtime_syncs == []` and `len(mcp_projections) == 1`, and that
-      the recorded `claimed` is still guarded down to the projected set. This
-      is acceptance criterion 5 and the highest-value test in the change —
-      it must pass **before** and after Group 2c.
+- [ ] 2.5 Commit: `refactor(backend): add the engine runtime projection seam`.
 
-### 2c. Implementation — the branch, then the cleanup behind it
+---
 
-Order matters: 2.6 extracts before 2.7 consumes, and 2.9 deletes the teclaw
-arms only after 2.8 has given them a new home. Run 2.10 after each of
-2.6-2.9 rather than only at the end.
+## Group 3 — Move the per-domain path behind the seam (no behaviour change)
 
-- [ ] 2.4 `bot_runtime_projector.py`: import
-      `runtime_delivers_whole_artifact` alongside the existing
-      `ProjectionScope` import.
+This is the relocation. Nothing here may change what any engine does.
 
-- [ ] 2.5 Extend the `BotRuntimeProjector` class docstring's "Resolving and
-      applying are separated by the `ProjectionScope`" paragraph with the
-      whole-artifact case, in the register of the surrounding prose. Doing the
-      prose first makes the following edits read against a stated invariant.
+- [ ] 3.1 Create `runtime_projections/per_domain.py` with
+      `PerDomainRuntimeProjection`, constructed with
+      `SkillsPoolRuntimeProtocol` and `SkillsPoolLayoutRepositoryProtocol`.
 
-- [ ] 2.6 **Extract** `_apply_passport_projection(*, identity_modes, engine,
-      bot_id, owner_id, projection, effective_cli_items)` from the `try/except`
-      tail of `_apply_non_skill_projection` (`:549-574`) and call it from
-      there. Synchronous — nothing in the block awaits. **Move the body with
-      no edits**: it is the identity-coloured `resource_scope` fix from
-      `specs/2026-08-26-mcp-sync-and-passport-regressions` problem 1, and a
-      drifted copy silently reasserts `identityMode: "owner"`.
+- [ ] 3.2 **Move** `_apply_skill_projection` and `_apply_pool_mappings` into
+      it, comments intact — **including the two teclaw arms** at `:417-423`
+      and `:426-432`. They look out of place in a class called
+      "per-domain", and they are: they get deleted in 4.5, once
+      `WholeArtifactRuntimeProjection` exists to receive teclaw. Deleting them
+      here instead would silently route teclaw onto the Pool/legacy path for
+      the length of this group, which is exactly the behaviour change this
+      group promises not to make. The Pool-vs-legacy decision, the `retired`
+      handling and the `SkillMappingSourceLayout` choice move **verbatim**.
 
-- [ ] 2.7 Add `_apply_whole_artifact_projection(*, service, bot_id, owner_id,
-      projection, retired_mappings, scope, identity_modes,
-      effective_cli_items)`: the Center refusal (moved from
-      `_apply_skill_projection:417-423`, comment included), then the
-      nothing-declared no-op guard `scope.skills or scope.mcp or
-      retired_mappings`, then one `service.sync_runtime(...)`, then
-      `_apply_passport_projection(...)` under `if scope.mcp`. Its docstring
-      states the invariant: the plan is resolved, so one delivery carries both
-      halves.
+- [ ] 3.3 **Move** `_apply_non_skill_projection` into it, minus its `try/except`
+      Passport tail (`:549-574`). The `claim_all_mcp` branch, the
+      claimed/released guard against the projected set, the guard-log and the
+      `sync_mcp_projection` call move **verbatim**.
 
-- [ ] 2.8 In `project` (`:124`), **insert** immediately after `_resolve_plan`
-      and above the existing comment block:
-      ```python
-      if runtime_delivers_whole_artifact(engine):
-          await self._apply_whole_artifact_projection(...)
-          return
-      ```
-      with a comment on why this is the right line — `_resolve_plan` is what
-      flushed Installation, so desired state is final and the composer needs
-      nothing else. **Do not touch the two scope-driven halves below it**:
-      this task must show up in `git diff` as a pure insertion, with no
-      modified line in the per-domain path.
+- [ ] 3.4 Give it `apply`, composing the two moved halves with today's scope
+      gating and today's two skip-logs, in today's order. Give it
+      `validate_plan` carrying today's `engine == "teclaw"` Center checks from
+      `snapshot_skill_mappings:118` and `_build_plan:332` — again transitional,
+      deleted in 4.5 — so that wiring 4.5's call sites in this group would be
+      behaviour-preserving. Its docstring says both halves of that: what the
+      method is for, and that the engine test inside it is scaffolding.
 
-- [ ] 2.9 `_apply_skill_projection`: delete both teclaw arms (`:417-423`,
-      `:426-432`) and drop the now-unused `engine` parameter; update its one
-      call site in `project`. The method is now purely per-domain (Pool vs
-      legacy). Dropping the parameter is deliberate — it turns a
-      reintroduced teclaw branch into a `NameError` rather than a silent
-      regression.
+- [ ] 3.5 **Extract** `_apply_passport_projection(*, plan, bot_id, owner_id)`
+      from the Passport tail and keep it on `BotRuntimeProjector`. **Move the
+      body with no edits**: it is the identity-coloured `resource_scope` fix
+      from `specs/2026-08-26-mcp-sync-and-passport-regressions` problem 1, and
+      a drifted copy silently reasserts `identityMode: "owner"`. Highest-risk
+      step in the change.
 
-- [ ] 2.10 `project_mcp_and_cli` (`:188`) and `project_for_cleanup` (`:218`):
-      one comment each recording that they are per-domain-only paths, with the
-      evidence (`project_for_cleanup` has no production caller;
-      `project_mcp_and_cli`'s only caller is desktop-gated and teclaw is never
-      Pool-capable). **No code change** in either.
+- [ ] 3.6 In `bot_runtime_projector.py`: add `registry:
+      EngineRuntimeProjectionRegistry` to `__init__`, drop `pool_runtime` and
+      `pool_layouts` (now only `PerDomainRuntimeProjection` uses them), and
+      rewrite `project` as: resolve plan → `registry.for_engine(plan.engine)`
+      → `await runtime.apply(...)` → `_apply_passport_projection(...)` under
+      `if scope.mcp`. Delete the three moved methods.
 
-- [ ] 2.11 After each of 2.6-2.9:
-      `.venv/bin/python -m pytest
-      tests/community/core/skill_center/test_skill_set_management_service.py -q`.
-      2.6 and 2.10 must stay at the Group-1 count; 2.7-2.9 may only change
-      teclaw results.
+- [ ] 3.7 `project_mcp_and_cli`: collapse to the same four lines. Its
+      "MCP/CLI only" behaviour is exactly what `apply` does when
+      `scope.skills` is false, so it needs no second protocol method. Keep its
+      docstring's explanation of *why* the caller wants that.
 
-### 2d. Behaviour tests
+- [ ] 3.8 `project_for_cleanup`: keep its own Center refusal and its explicit
+      `service.sync_runtime(...)` — a deliberate legacy-synchronizer path, not
+      the Pool path — then delegate the MCP half through `apply` and call the
+      Passport. Add a comment recording that it has no production caller.
 
-- [ ] 2.12 `test_teclaw_projects_the_whole_artifact_once_per_scope_shape` —
-      parametrised over `ProjectionScope(skills=True)`,
-      `ProjectionScope(mcp=True, claimed_mcp=frozenset({"x"}))`,
-      `ProjectionScope(mcp=True, released_mcp=frozenset({"x"}))`,
-      `ProjectionScope(skills=True, mcp=True, claimed_mcp=frozenset({"x"}))`
-      and `ProjectionScope.everything()`. For each:
-      `len(runtime_syncs) == 1` and `mcp_projections == []`.
-      (criteria 1, 2, 3)
+- [ ] 3.9 `di/modules/skill_center_module.py`: one `@provider` building
+      `EngineRuntimeProjectionRegistry` over both implementations.
+      `PerDomainRuntimeProjection` needs `pool_runtime` / `pool_layouts`, both
+      already bound. Leave `binder.bind(BotRuntimeProjector, ...)` alone.
 
-- [ ] 2.13 `test_teclaw_mcp_only_scope_still_delivers_the_skill_bearing_artifact`
-      — `skills=False, mcp=True`: exactly one delivery, and the
-      `desired_skills` it carried equal the projection's assets rather than
-      being empty. Pins the behaviour most likely to be optimised back out.
-      (criterion 2)
+- [ ] 3.10 Tests: add a `_registry()` helper beside the fakes that builds a
+      **real** registry over both real implementations — a fake registry would
+      test the wiring instead of the behaviour — and thread `registry=` into
+      every direct `BotRuntimeProjector(...)` construction.
 
-- [ ] 2.14 `test_teclaw_still_updates_the_passport_with_identity_coloured_items`
-      — one `update_passport` call whose `resource_scope` carries `mcp_codes`,
-      `mcp_items` with resolved `identity_mode`, and `cli_items`; and an
-      `mcp=False` scope makes no Passport call at all. Guards the 2.6
-      extraction. (criterion 4)
+- [ ] 3.11 Green check: `.venv/bin/python -m pytest
+      tests/community/core/skill_center/ tests/community/contracts/
+      tests/community/core/mcp/ tests/community/di/
+      tests/community/architecture/ -q`. **Beyond adding `registry=`, no
+      existing assertion may change.** If one does, the move was not a move —
+      fix the code, not the test.
 
-- [ ] 2.15 `test_teclaw_empty_scope_delivers_nothing` — `ProjectionScope()`:
-      `runtime_syncs == []`, `mcp_projections == []`, no Passport call.
-      (criterion 8)
+- [ ] 3.12 Commit: `refactor(backend): move per-domain projection behind the
+      engine seam`. State in the body that behaviour is unchanged for every
+      engine, teclaw included.
 
-- [ ] 2.16 `test_teclaw_failed_delivery_raises_reconcile_error` — a fake whose
-      `sync_runtime` returns `False`: expect `SkillSetRuntimeReconcileError`
-      and no Passport call, so `MutationProjectionFlow` still compensates.
-      (criterion 7)
+---
 
-- [ ] 2.17 Confirm these pass **unedited**:
+## Group 4 — Teclaw delivers once
+
+- [ ] 4.1 Add the regression guard **first**:
+      `test_per_domain_engine_keeps_the_scope_split` — an openclaw Bot with
+      `ProjectionScope(mcp=True, claimed_mcp=frozenset({"x"}))`:
+      `runtime_syncs == []`, `len(mcp_projections) == 1`, and `claimed` still
+      guarded down to the projected set. It must pass before 4.3 and after.
+      (criterion 5)
+
+- [ ] 4.2 Extend `_RuntimeFactoryService` (`:474`) so call counts are
+      observable, following its existing `deliveries` list idiom rather than
+      integer counters: `runtime_syncs` appended in `sync_runtime` (`:484`),
+      and `mcp_projections` appended at the top of `sync_mcp_projection`
+      (`:498`) **before** it delegates, preserving the deliver-before-declare
+      composition at `:512-514`. Leave `desired_skills`, `mcp_codes`,
+      `deliveries`, `collect_calls` and the unrelated stub at `:2865` alone.
+      Re-run: still green, unedited.
+
+- [ ] 4.3 Create `runtime_projections/whole_artifact.py` with
+      `WholeArtifactRuntimeProjection` — no injected collaborators.
+      `validate_plan` refuses `center://` assets and `center` retirements (the
+      union of today's `:118`, `:332` and `:417` checks, which were three
+      spellings of one rule). `apply`: skip-log and return when the scope
+      declares nothing (`scope.skills or scope.mcp or retired_mappings`);
+      re-assert `validate_plan` from the plan's own assets as defence in
+      depth; then one `plan.service.sync_runtime(...)`, raising if falsy. Its
+      docstring states the invariant: the plan is resolved, so one delivery
+      carries both halves.
+
+- [ ] 4.4 Register `{"teclaw": WholeArtifactRuntimeProjection()}` in the DI
+      provider from 3.9. From here teclaw routes to the new implementation, so
+      the transitional teclaw code in `per_domain.py` is dead.
+
+- [ ] 4.5 Delete the now-dead teclaw arms and Center checks from
+      `per_domain.py` (the ones 3.2/3.4 carried over), and point
+      `snapshot_skill_mappings` and `_build_plan` at
+      `registry.for_engine(engine).validate_plan(...)`. Both already have
+      `engine` and `skill_assets` in hand. Do 4.4 before this: reversed, teclaw
+      would take the Pool/legacy path in between.
+
+- [ ] 4.6 Verify the end state — `teclaw` appears in exactly two places under
+      `core/skill_center/`: `whole_artifact.py` (where it is the subject) and
+      the registry entry (where it is the key). Neither
+      `bot_runtime_projector.py` nor `per_domain.py` may contain it.
+      (criterion 6)
+
+- [ ] 4.7 Behaviour tests:
+      - `test_teclaw_projects_the_whole_artifact_once_per_scope_shape` —
+        parametrised over `skills=True`; `mcp=True, claimed_mcp={"x"}`;
+        `mcp=True, released_mcp={"x"}`; both halves; and `everything()`. Each:
+        `len(runtime_syncs) == 1`, `mcp_projections == []`. (criteria 1, 2, 3)
+      - `test_teclaw_mcp_only_scope_still_delivers_the_skill_bearing_artifact`
+        — `skills=False, mcp=True`: one delivery carrying the projection's
+        `desired_skills`, not empty. (criterion 2)
+      - `test_teclaw_still_updates_the_passport_with_identity_coloured_items`
+        — one `update_passport` with `mcp_codes`, `mcp_items` carrying
+        `identity_mode`, `cli_items`; `mcp=False` makes no Passport call.
+        Guards 3.5. (criterion 4)
+      - `test_teclaw_empty_scope_delivers_nothing` — both lists empty, no
+        Passport call. (criterion 8)
+      - `test_teclaw_failed_delivery_raises_reconcile_error` — `sync_runtime`
+        returns `False`: `SkillSetRuntimeReconcileError`, no Passport call.
+        (criterion 7)
+      - `test_registry_defaults_unknown_engines_to_the_per_domain_projection`
+        — an engine absent from the registry resolves to per-domain. Pins what
+        keeps `claude_code` / `aicoding` / `hermes` working unregistered.
+      - `test_projector_and_per_domain_contain_no_engine_identity_test` —
+        assert `"teclaw"` appears in neither `bot_runtime_projector.py` nor
+        `per_domain.py`. Blunt, but it is criterion 6 stated exactly; put the
+        reason in the assertion message.
+
+- [ ] 4.8 Confirm unedited (beyond 3.10's `registry=`):
       `test_teclaw_v4_rejects_center_without_any_center_runtime_request:2493`
-      (the direct test that the Center refusal survived its move in 2.7/2.9),
-      `test_teclaw_v4_repo_projection_uses_artifact_runtime_not_pool_mapping:2519`,
-      and `test_non_skill_projection_never_writes_skill_mappings:2552` (direct
-      cover that the 2.6 extraction changed nothing for openclaw). If any
-      needs an edit, the implementation moved something it should not have —
-      fix the implementation, not the test.
+      — the direct test that the Center refusal survived consolidation into
+      `validate_plan`;
+      `test_teclaw_v4_repo_projection_uses_artifact_runtime_not_pool_mapping:2519`;
+      `test_non_skill_projection_never_writes_skill_mappings:2552`.
 
-      No test is added for `project_mcp_and_cli` / `project_for_cleanup` on a
-      teclaw Bot: neither is reachable, and pinning behaviour of an
-      unreachable path would assert the wrong contract.
+- [ ] 4.9 Commit: `feat(backend): deliver one whole artifact per teclaw
+      projection`.
 
 ---
 
-## Group 3 — Prove nothing else moved
+## Group 5 — Prove nothing else moved
 
-- [ ] 3.1 Full relevant suite:
+- [ ] 5.1 Full relevant suite:
       ```
       .venv/bin/python -m pytest \
         tests/community/core/skill_center/ \
         tests/community/contracts/test_bot_runtime_projector.py \
         tests/community/core/devices/test_teclaw_device_sync.py \
         tests/community/core/mcp/ \
+        tests/community/di/ \
         tests/community/architecture/ -q
       ```
-      `test_bot_runtime_projector.py` must pass with no edit — if it fails,
-      `deliver_mcp_to_runtime` leaked into the Service API protocol and must
-      be made private again.
 
-- [ ] 3.2 Broader regression sweep: `.venv/bin/python -m pytest
-      tests/community -q -x`. Record the pass count. Investigate any failure
-      rather than assuming it is pre-existing — re-run it at
-      `git stash`-clean HEAD to classify.
+- [ ] 5.2 Broader sweep: `.venv/bin/python -m pytest tests/community -q`.
+      Record the pass count. Classify any failure against clean HEAD rather
+      than assuming it is pre-existing.
 
-- [ ] 3.3 Lint/SAST gate: `scripts/ci/python_sast_local.sh` from the repo
-      root (the gate `scripts/ci/pre_push.sh` runs in lint-only mode).
+- [ ] 5.3 Lint/SAST: `scripts/ci/python_sast_local.sh` from the repo root.
 
-- [ ] 3.4 `git status` — confirm `uv.lock` is **not** modified and no
-      `.venv` artefact is staged. Then review the full diff adversarially:
-      every changed line either adds the predicate, routes a decision through
-      it, or tests it.
+- [ ] 5.4 `git status` — `uv.lock` unmodified, no `.venv` artefact staged.
+      Then read the whole diff adversarially: every line either defines the
+      seam, moves code across it unchanged, implements an engine, or tests it.
 
-- [ ] 3.5 Commit to `REL20260828` and push with `git push -u origin
-      REL20260828`. Open a **draft** PR using
-      `.github/pull_request_template.md`'s sections (Problem / Solution /
-      Validation / Compatibility and risk / Spec), title
-      `refactor(backend): deliver one whole artifact per teclaw projection`.
-      Link this spec directory under **Spec**. Under **Validation**, state
-      the pass counts and that `uv sync --frozen` could not run in the
-      sandbox, with the reason.
+- [ ] 5.5 Push and update PR #1616's body to the registry design — the
+      Solution and Compatibility sections currently describe the early-branch
+      version. Then mark it ready for review.
 
 ---
 
 ## Open questions
 
-None blocking. Two decisions taken unilaterally, both recorded in `plan.md`
-with their rejected alternatives:
+None blocking. Decisions confirmed with the author this session:
 
-1. The teclaw arms are **moved out of** `_apply_skill_projection` into the new
-   `_apply_whole_artifact_projection` rather than called into, so that past
-   the branch no per-domain code knows teclaw exists. Dropping the freed
-   `engine` parameter is part of that: it makes a reintroduced branch fail
-   loudly.
-2. Only `project` gets the branch. `project_for_cleanup` has no production
-   caller, and `project_mcp_and_cli`'s single caller is desktop-gated while
-   teclaw is never Pool-capable — so both are unreachable for teclaw, and its
-   premise ("a cutover owns the Skill mappings") is incoherent for an engine
-   that cannot deliver MCP without redelivering Skills. Both get a comment,
-   not speculative code.
+1. **Registry keyed on `engine`, not device `provider`.** `resolve_for_bot`
+   costs a binding query plus a blocking ws-info HTTP that `sync_runtime`
+   then repeats, and it raises `DeviceNotBoundError` for an unbound Bot,
+   changing `project()`'s failure surface. `engine` is free and is already
+   the module's vocabulary.
+2. **Protocol covers `apply` + `validate_plan`.** Delivery alone would leave
+   the two plan-time Center checks as engine strings; both together take the
+   projector to zero.
+3. **The Passport stays outside the protocol** — engine-agnostic, and keeping
+   it unsplit protects the `identityMode` fix.
+4. **One PR**, sequenced so Groups 1-3 are behaviour-neutral and Group 4 is
+   the only behaviour change.
 
-Two adjacent defects are deliberately **not** fixed here and are written up
-under `spec.md` → *Out of scope, reported*: Skill-declared MCP dependencies
-never reaching a teclaw artifact, and the `strict_policy_context` divergence
-between the projector and the composer. Both survive this change unchanged.
+Two adjacent defects are deliberately **not** fixed here, written up in
+`spec.md` → *Out of scope, reported*: Skill-declared MCP dependencies never
+reaching a teclaw artifact, and the `strict_policy_context` divergence between
+the projector and the composer. Both survive this change unchanged.
