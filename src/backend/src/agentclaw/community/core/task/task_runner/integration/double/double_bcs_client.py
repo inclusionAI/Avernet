@@ -33,6 +33,10 @@ class _DoubleBcsClient:
         dref = {"id": f"d_{gid[:4]}", "version": 1} if req.group_strategy == "state_machine" else None
         return BcsCreateGroupResult(group_id=gid, definition_ref=dref)
 
+    def task_callback_url(self) -> str:
+        # Double 不接真 BCS,无 corp 注入;返空让 TaskExecutor 走 api_base_url 兜底。
+        return ""
+
     async def create_session(self, group_id: str, *, bootstrap_prompt: str | None = None,
                              idempotency_key: str | None = None) -> str:
         return f"s_{uuid.uuid4().hex[:6]}"
