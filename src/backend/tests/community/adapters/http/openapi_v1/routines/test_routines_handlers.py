@@ -132,6 +132,42 @@ def test_map_routine_invalid_ms_returns_empty_string():
     assert r.gmt_modified == ""
 
 
+def test_map_routine_carries_bot_metadata():
+    """The aggregate listing decorates every adapter item with bot/owner/stage.
+
+    ``cron_runtime_targets.py`` decorates ``bot_id``/``bot_name``/``owner_id``
+    on every item and ``runtime_stage`` on a service bot's — the owner-level
+    listing needs all of them mapped, and the per-bot route answers
+    ``bot_name`` from the same dict for free.
+    """
+    adapter = _adapter_dict(
+        bot_name="TicketBot",
+        owner_id="209800",
+        runtime_stage="online",
+    )
+    r = _map_routine(adapter)
+    assert r.bot_name == "TicketBot"
+    assert r.owner_id == "209800"
+    assert r.runtime_stage == "online"
+
+
+def test_map_routine_bot_metadata_defaults_to_none():
+    """Absent or empty decoration maps to None, never to an empty string.
+
+    The three metadata fields are optional additions; a producer that reports
+    none (e.g. a draft-stage item has no ``runtime_stage``) must surface as
+    null, which is what the schema documents.
+    """
+    r = _map_routine({})
+    assert r.bot_name is None
+    assert r.owner_id is None
+    assert r.runtime_stage is None
+    r_blank = _map_routine({"bot_name": "", "owner_id": "", "runtime_stage": ""})
+    assert r_blank.bot_name is None
+    assert r_blank.owner_id is None
+    assert r_blank.runtime_stage is None
+
+
 # ── list_routines handler wiring (Phase 1 Task 2) ──────────────────────
 #
 # Direct handler invocation (退路 B per task spec): bypasses FastAPI's
