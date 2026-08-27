@@ -53,6 +53,55 @@ class ResolvedCapabilityPlan:
     identity_modes: Mapping[str, object]
 
 
+@runtime_checkable
+class EngineRuntimeProjection(Protocol):
+    """How one engine's runtime consumes a capability projection.
+
+    The projector resolves one of these per Bot and delegates; it does not
+    itself know what any engine is. Two things vary between engines and both
+    live here: what desired state a runtime can carry at all, and how many
+    runtime calls converging on it takes.
+
+    That second question is genuinely the engine's. A runtime with separate
+    Skill and MCP endpoints saves a round trip by writing only the half a
+    mutation touched. A whole-artifact runtime recomposes its entire
+    configuration from the database on every call and discards the arguments,
+    so a second call restates in full what the first already delivered. The
+    same ``ProjectionScope`` means different things to the two, and neither
+    reading is more correct — which is why the caller must not pick one.
+    """
+
+    def validate_plan(
+        self,
+        *,
+        skill_assets: Sequence[Any],
+        retired_mappings: Sequence[PoolSkillMapping] = (),
+    ) -> None:
+        """Refuse desired state this runtime has no contract for.
+
+        Called during plan resolution — before any runtime, MCP, Passport or
+        probe request is emitted — so a refusal costs nothing to unwind.
+        Raises ``SkillSetRuntimeReconcileError``; returns ``None`` when the
+        plan is carryable.
+        """
+        ...
+
+    async def apply(
+        self,
+        *,
+        plan: ResolvedCapabilityPlan,
+        scope: ProjectionScope,
+        retired_mappings: Sequence[PoolSkillMapping] = (),
+    ) -> None:
+        """Converge this Bot's runtime on ``plan``.
+
+        Raises ``SkillSetRuntimeReconcileError`` if it did not converge, so
+        the caller can compensate. How many runtime calls that took, and in
+        what order, is decided here and is not observable to the caller.
+        """
+        ...
+
+
 @dataclass(frozen=True)
 class ProjectionScope:
     """What one mutation changed, as the mutation itself knows it.
@@ -68,6 +117,18 @@ class ProjectionScope:
     scope can only ever shrink there. That keeps a single-MCP mutation a
     single device write, and stops a release from deleting a code the
     default policy or a Skill dependency still supplies.
+
+    What this scope *causes* is the reading engine's decision, not a promise
+    made here. The guarantees described on these fields — "a single-MCP add
+    stays a single device write", ``claim_all_mcp``'s empty-container
+    premise, the deliver-before-declare ordering — are
+    ``PerDomainRuntimeProjection``'s, and hold where the halves have separate
+    runtime endpoints. A whole-artifact engine carries both halves in one
+    document composed from the database, so for it the scope selects nothing
+    about content and only how many identical copies would be sent; its
+    implementation reads the scope accordingly. See
+    ``EngineRuntimeProjection``. A mutation still declares what it changed
+    the same way for every engine — only the reading differs.
     """
 
     #: Project the Skill half — publish mappings, or sync the legacy runtime.
@@ -185,6 +246,7 @@ class BotRuntimeProjectorProtocol(Protocol):
 
 __all__ = [
     "BotRuntimeProjectorProtocol",
+    "EngineRuntimeProjection",
     "ProjectionScope",
     "ResolvedCapabilityPlan",
 ]

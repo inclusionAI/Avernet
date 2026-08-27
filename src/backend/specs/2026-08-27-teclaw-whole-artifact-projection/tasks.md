@@ -47,7 +47,7 @@ separately.
 
 ## Group 2 — The protocol and registry (no behaviour change)
 
-- [ ] 2.1 In `runtime_projection_contract.py`, add the `EngineRuntimeProjection`
+- [x] 2.1 In `runtime_projection_contract.py`, add the `EngineRuntimeProjection`
       Protocol (`@runtime_checkable`) with `validate_plan(*, skill_assets,
       retired_mappings=())` and `async apply(*, plan, scope,
       retired_mappings)`. Docstrings state the contract: `validate_plan` runs
@@ -55,12 +55,12 @@ separately.
       `SkillSetRuntimeReconcileError` if the runtime did not converge, and
       owns how many runtime calls that takes. Export it.
 
-- [ ] 2.2 Extend the `ProjectionScope` docstring: the guarantees it documents
+- [x] 2.2 Extend the `ProjectionScope` docstring: the guarantees it documents
       are `PerDomainRuntimeProjection`'s, and an implementation may read the
       scope differently — pointing at `EngineRuntimeProjection`. Change no
       field, default, `everything()` or `inverted()`.
 
-- [ ] 2.3 Create `core/skill_center/services/runtime_projections/__init__.py`
+- [x] 2.3 Create `core/skill_center/services/runtime_projections/__init__.py`
       and `registry.py` with `EngineRuntimeProjectionRegistry`: a
       `{engine: EngineRuntimeProjection}` map plus a **default**.
       `for_engine(engine)` returns the map entry or the default. Per-domain is
@@ -68,7 +68,7 @@ separately.
       whose runtime genuinely differs does. Log at INFO, once per resolution,
       which implementation was chosen.
 
-- [ ] 2.4 Green check: nothing consumes these yet, so
+- [x] 2.4 Green check: nothing consumes these yet, so
       `tests/community/core/skill_center/ tests/community/architecture/ -q`
       must be unchanged. The architecture run is the Rule-22 gate — if it
       objects to the new package, fix `core/skill_center/README.md`'s Context
