@@ -1437,6 +1437,32 @@ class TestBotChatServiceGetSession:
             await service.get_session(trace_id="trace-1", owner_id="user1")
 
     @pytest.mark.asyncio
+    async def test_get_session_db_default_bot_group_participant_can_read_trace(self, service):
+        """Group access also applies to legacy/default traces from another user."""
+        row = self._row(
+            user_id="other-user",
+            bot_id="default",
+            session_id="agent:main:bcs:group:session-1",
+            session_key="agent:main:bcs:group:session-1",
+        )
+        detail = self._detail("trace-1")
+        service._db_repo = MagicMock()
+        service._db_repo.get_ocb_trace.return_value = None
+        service._db_repo.get_trace.return_value = row
+        service._db_repo.has_group_trace_access.return_value = True
+        service._db_repo.list_legacy_observations.return_value = []
+        service._db_repo._row_to_detail.return_value = detail
+
+        result = await service.get_session(trace_id="trace-1", owner_id="group-bot-owner")
+
+        assert result is detail
+        service._db_repo.has_group_trace_access.assert_called_once_with(
+            "group-bot-owner",
+            "agent:main:bcs:group:session-1",
+            "agent:main:bcs:group:session-1",
+        )
+
+    @pytest.mark.asyncio
     async def test_get_session_db_default_bot_owner_match(self, service):
         """Default-bot traces are accessible when user_id matches owner_id."""
         row = self._row(user_id="user1", bot_id="default")
@@ -1487,6 +1513,51 @@ class TestBotChatServiceGetSession:
             await service.get_session(trace_id="trace-1", owner_id="user1")
 
         service._db_repo.has_bot_access.assert_called_once_with("user1", "bot-a")
+
+    @pytest.mark.asyncio
+    async def test_get_session_db_group_participant_can_read_other_bot_trace(self, service):
+        """Group membership grants detail access across participating bots."""
+        row = self._row(
+            bot_id="bot-b",
+            user_id="bot-b-owner",
+            session_id="agent:main:bcs:group:session-1",
+            session_key="agent:main:bcs:group:session-1",
+        )
+        detail = self._detail("trace-1")
+        service._db_repo = MagicMock()
+        service._db_repo.get_ocb_trace.return_value = None
+        service._db_repo.get_trace.return_value = row
+        service._db_repo.has_bot_access.return_value = False
+        service._db_repo.has_group_trace_access.return_value = True
+        service._db_repo.list_legacy_observations.return_value = []
+        service._db_repo._row_to_detail.return_value = detail
+
+        result = await service.get_session(trace_id="trace-1", owner_id="group-bot-owner")
+
+        assert result is detail
+        service._db_repo.has_group_trace_access.assert_called_once_with(
+            "group-bot-owner",
+            "agent:main:bcs:group:session-1",
+            "agent:main:bcs:group:session-1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_session_db_non_group_unrelated_user_still_denied(self, service):
+        """A trace without a participating group remains bot-access controlled."""
+        service._db_repo = MagicMock()
+        service._db_repo.get_ocb_trace.return_value = None
+        service._db_repo.get_trace.return_value = self._row(
+            bot_id="bot-a", user_id="other-user", session_id="private-session", session_key="private-session"
+        )
+        service._db_repo.has_bot_access.return_value = False
+        service._db_repo.has_group_trace_access.return_value = False
+
+        with pytest.raises(SessionNotFoundError):
+            await service.get_session(trace_id="trace-1", owner_id="user1")
+
+        service._db_repo.has_group_trace_access.assert_called_once_with(
+            "user1", "private-session", "private-session"
+        )
 
     @pytest.mark.asyncio
     async def test_get_session_db_non_default_bot_owner_allowed(self, service):

@@ -4,6 +4,7 @@ use bcs_service_api::application::v1::{
     FriendConnectionRequestStatus, ListFriendConnectionRequests, ListFriendConnections,
     RejectFriendConnectionRequest,
 };
+use bcs_service_api::application::RequestAuthHeaders;
 use serde::Deserialize;
 
 fn default_page() -> u32 { 1 }
@@ -20,12 +21,17 @@ pub struct CreateFriendConnectionRequestBody {
 }
 
 impl CreateFriendConnectionRequestBody {
-    pub fn into_command(self, caller: AuthenticatedCaller) -> CreateFriendConnectionRequest {
+    pub fn into_command(
+        self,
+        caller: AuthenticatedCaller,
+        request_auth: Option<RequestAuthHeaders>,
+    ) -> CreateFriendConnectionRequest {
         CreateFriendConnectionRequest {
             caller,
             from_actor: self.from_actor,
             to_actor: self.to_actor,
             message: self.message,
+            request_auth,
         }
     }
 }
