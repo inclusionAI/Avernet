@@ -34,7 +34,7 @@ class CommunityNotifyModule(Module):
         )
 
         # 从 YAML ``user_config.task_discovery_dingtalk`` 块加载凭证到 holder，
-        # 让 notify_sender._resolve 在 env 变量之前优先检查 YAML。
+        # 让 notify_sender._resolve 在 env变量之前优先检查 YAML。
         cfg = _block("task_discovery_dingtalk")
         if cfg:
             DingTalkYamlHolder.set(cfg)
@@ -50,13 +50,22 @@ class CommunityNotifyModule(Module):
             else:
                 frontend_url = cfg.get("frontend_url", "")
             logger.info(
-                "[community.notify] env=%s → frontend_url=%s", env, frontend_url,
+                "[community.notify] env=%s → frontend_url=%s, "
+                "dingtalk YAML keys loaded: %s",
+                env,
+                frontend_url,
+                sorted(k for k, v in cfg.items() if v),
             )
             if frontend_url:
                 from agentclaw.community.core.task.task_discovery.session_initiator import (
                     FrontendUrlHolder,
                 )
                 FrontendUrlHolder.set(frontend_url)
+        else:
+            logger.warning(
+                "[community.notify] task_discovery_dingtalk YAML block NOT found — "
+                "dingtalk credentials will rely on env vars or API holder only",
+            )
 
         inner = CommunityNotifySender()
         logger.info(

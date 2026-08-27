@@ -153,11 +153,15 @@ class DingTalkNotifySender(NotifySenderPlugin):
         try:
             self._send_dingtalk_card(message)
         except Exception as exc:  # 永不抛异常 —— 钉钉失败不影响通知主流程
+            extra_keys = sorted(message.extra.keys()) if message.extra else []
             log.warning(
                 "[DingTalkNotifySender] dingtalk card failed "
-                "(recipient=%s): %s",
+                "(recipient=%s, title=%r, extra keys=%s): %s",
                 message.recipient,
+                message.title[:80],
+                extra_keys,
                 exc,
+                exc_info=True,
             )
         return msg_id
 
@@ -172,20 +176,58 @@ class DingTalkNotifySender(NotifySenderPlugin):
             return val
         return _env(env_name, env_fallback)
 
+    #: 凭证 key → (env_name, env_fallback) 映射，用于 _configured 诊断日志
+    _CRED_KEYS: list[tuple[str, str, str]] = [
+        ("ak_id", "TASK_DISCOVERY_DINGTALK_AK_ID", "SINGLEBOX_DINGTALK_AK_ID"),
+        ("ak_secret", "TASK_DISCOVERY_DINGTALK_AK_SECRET", "SINGLEBOX_DINGTALK_AK_SECRET"),
+        ("robot_code", "TASK_DISCOVERY_DINGTALK_ROBOT_CODE", "SINGLEBOX_DINGTALK_ROBOT_CODE"),
+        ("card_template_id", "TASK_DISCOVERY_CARD_TEMPLATE_ID", "SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID"),
+    ]
+
+    @classmethod
+    def _resolve_source(cls, key: str) -> str:
+        """Return the source name that resolved the credential (api/yaml/env/empty)."""
+        val = DingTalkCredentialHolder.get(key)
+        if val:
+            return "api"
+        val = DingTalkYamlHolder.get(key)
+        if val:
+            return "yaml"
+        return "env" if _env(*cls._CRED_KEYS_MAP[key]) else "empty"
+
+    _CRED_KEYS_MAP: dict[str, tuple[str, str]] = {k: (e1, e2) for k, e1, e2 in _CRED_KEYS}
+
     @classmethod
     def _configured(cls) -> bool:
         return all(
-            [
-                cls._resolve("ak_id", "TASK_DISCOVERY_DINGTALK_AK_ID", "SINGLEBOX_DINGTALK_AK_ID"),
-                cls._resolve("ak_secret", "TASK_DISCOVERY_DINGTALK_AK_SECRET", "SINGLEBOX_DINGTALK_AK_SECRET"),
-                cls._resolve("robot_code", "TASK_DISCOVERY_DINGTALK_ROBOT_CODE", "SINGLEBOX_DINGTALK_ROBOT_CODE"),
-                cls._resolve("card_template_id", "TASK_DISCOVERY_CARD_TEMPLATE_ID", "SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID"),
-            ]
+            cls._resolve(k, e1, e2)
+            for k, e1, e2 in cls._CRED_KEYS
         )
 
     def _send_dingtalk_card(self, message: NotifyMessage) -> None:
         if not self._configured():
-            return  # 未配置凭证 → 跳过，仅 inner 通道（ CommunityNotifySender 日志）
+            # 诊断：逐个检出哪个凭证缺失及其来源
+            missing: list[str] = []
+            for key, env_name, env_fallback in self._CRED_KEYS:
+                src = self._resolve_source(key)
+                if src == "empty":
+                    missing.append(
+                        f"{key} (api={bool(DingTalkCredentialHolder.get(key))}, "
+                        f"yaml={bool(DingTalkYamlHolder.get(key))}, "
+                        f"env={env_name}/{env_fallback})"
+                    )
+            log.warning(
+                "[DingTalkNotifySender] dingtalk card SKIPPED — "
+                "credentials not configured. Missing: %s. "
+                "Sources checked: API holder=%s, YAML holder=%s, env vars. "
+                "Recipient=%s, task title=%r",
+                ", ".join(missing) if missing else "(none?)",
+                bool(DingTalkCredentialHolder._creds),
+                bool(DingTalkYamlHolder._creds),
+                message.recipient,
+                message.title[:80],
+            )
+            return
         ak_id = self._resolve("ak_id", "TASK_DISCOVERY_DINGTALK_AK_ID", "SINGLEBOX_DINGTALK_AK_ID")
         ak_secret = self._resolve("ak_secret", "TASK_DISCOVERY_DINGTALK_AK_SECRET", "SINGLEBOX_DINGTALK_AK_SECRET")
         robot_code = self._resolve("robot_code", "TASK_DISCOVERY_DINGTALK_ROBOT_CODE", "SINGLEBOX_DINGTALK_ROBOT_CODE")
@@ -199,9 +241,33 @@ class DingTalkNotifySender(NotifySenderPlugin):
         # card_data 由 _send_notification 填好（已含 click/session_url/workitem_*…）
         card_data = extra.get("card_data")
         if not card_data:
+            log.warning(
+                "[DingTalkNotifySender] dingtalk card SKIPPED — "
+                "card_data missing from message.extra "
+                "(recipient=%s, title=%r, extra keys=%s)",
+                message.recipient,
+                message.title[:80],
+                sorted(extra.keys()) if extra else "[]",
+            )
             return
 
         # 惰性导入 corp 钉钉 SDK
+        log.info(
+            "[DingTalkNotifySender] sending card (recipient=%s, template=%s, "
+            "robot=%s, card_biz_id=%s, account_id=%s, "
+            "card_data_len=%d, credential_sources: ak_id=%s, ak_secret=%s, "
+            "robot_code=%s, template_id=%s)",
+            account_id,
+            template_id,
+            robot_code,
+            card_biz_id,
+            account_id,
+            len(card_data),
+            self._resolve_source("ak_id"),
+            self._resolve_source("ak_secret"),
+            self._resolve_source("robot_code"),
+            self._resolve_source("card_template_id"),
+        )
         from alibabacloud_tea_openapi import models as open_api_models  # type: ignore[import-not-found]
         from alibabacloud_tea_util import models as util_models  # type: ignore[import-not-found]
         from alipay_antdingopensdk_client import (  # type: ignore[import-not-found]
@@ -232,12 +298,27 @@ class DingTalkNotifySender(NotifySenderPlugin):
         )
         biz = resp.body
         resp_map = biz.to_map() if hasattr(biz, "to_map") else {"raw": str(biz)}
-        log.info(
-            "[DingTalkNotifySender] card sent (recipient=%s, template=%s, "
-            "robot=%s, card_biz_id=%s) -> %s",
-            account_id,
-            template_id,
-            robot_code,
-            card_biz_id,
-            json.dumps(resp_map, ensure_ascii=False),
-        )
+        # 检查钉钉返回码（ret_code 非 0 表示业务失败）
+        ret_code = resp_map.get("retCode") or resp_map.get("ret_code")
+        if ret_code and str(ret_code) != "0":
+            log.warning(
+                "[DingTalkNotifySender] card sent but BUSINESS FAILURE "
+                "(ret_code=%s, recipient=%s, template=%s, robot=%s, "
+                "card_biz_id=%s) -> %s",
+                ret_code,
+                account_id,
+                template_id,
+                robot_code,
+                card_biz_id,
+                json.dumps(resp_map, ensure_ascii=False),
+            )
+        else:
+            log.info(
+                "[DingTalkNotifySender] card sent OK (recipient=%s, template=%s, "
+                "robot=%s, card_biz_id=%s) -> %s",
+                account_id,
+                template_id,
+                robot_code,
+                card_biz_id,
+                json.dumps(resp_map, ensure_ascii=False),
+            )
