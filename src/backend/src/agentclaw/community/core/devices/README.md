@@ -42,6 +42,7 @@ internal_dependencies:
   - agentclaw.corp.di    # corp-only device services (ARCA) — relocate to corp/ in B11 T3.4
   - agentclaw.community.kernel.lifecycle    # BaaS publish task lifecycle registers task_queue handlers
   - agentclaw.community.kernel.device_dto    # neutral CommandResult / ResourceSpecification / OutBound DTOs (B6)
+  - agentclaw.community.kernel.bot_config    # BotConfigArtifact — the whole-artifact payload teclaw_device_sync delivers
   - agentclaw.community.log
   - agentclaw.community.core.devices.services.device_filesystem    # DeviceFileSystem — return type of the core device-fs dispatcher (B6)
   - agentclaw.community.plugin_api.http_client    # HttpClient used by BaaS transports
