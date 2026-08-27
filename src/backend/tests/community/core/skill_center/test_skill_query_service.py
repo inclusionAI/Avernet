@@ -542,3 +542,164 @@ def test_a_bridged_skill_is_active_in_detail_before_any_listing_ran(tmp_path):
     )
 
     assert record["active"] is True
+
+
+class _ReadmeSkillRepository:
+    def __init__(self, skills: dict[str, dict]):
+        self.skills = skills
+
+    def get_by_id(self, skill_id: str):
+        return self.skills.get(skill_id)
+
+
+class _ReadmeBotRepository:
+    def __init__(self, bot: dict | None):
+        self.bot = bot
+
+    def get_unique_by_id(self, _bot_id: str):
+        return self.bot
+
+
+class _ReadmeStorage:
+    def __init__(self, *contents):
+        self.contents = iter(contents)
+
+    async def read_file(self, _filename: str):
+        return next(self.contents)
+
+
+class _ReadmeFactory:
+    def __init__(self, repository_content=None, *storage_contents):
+        self.repository_content = repository_content
+        self.storage_contents = storage_contents
+
+    def create(self):
+        return SimpleNamespace(
+            get_repository_skill_content=lambda _skill_id: self.repository_content
+        )
+
+    def local_skill_package_storage_for_locator(self, **_kwargs):
+        return _ReadmeStorage(*self.storage_contents)
+
+
+class _ReadmeResolver:
+    def resolve_for_bot(self, *_args):
+        return SimpleNamespace(provider="local")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "skill_id, skills",
+    [
+        ("not-a-number", {}),
+        ("1", {}),
+        ("1", {"1": {"git_path": "center://unsupported"}}),
+        ("1", {"1": {"git_path": "local://x", "bolt_id": ""}}),
+        ("1", {"1": {"git_path": "local://x", "bolt_id": "missing"}}),
+    ],
+)
+async def test_skill_only_readme_masks_unresolvable_skill_rows(skill_id, skills):
+    service = SkillQueryService(
+        _ReadmeSkillRepository(skills),
+        _ReadmeBotRepository(None),
+        _Collaborators(),
+        object(),
+        _ReadmeFactory(),
+        object(),
+        _ReadmeResolver,
+    )
+
+    with pytest.raises(LocalSkillNotFoundError):
+        await service.get_readme_by_skill(skill_id=skill_id, actor_id="actor")
+
+
+@pytest.mark.asyncio
+async def test_skill_only_readme_masks_missing_bot_owner_and_denied_collaborator():
+    skill = {"git_path": "local://x", "bolt_id": "bot"}
+    service = SkillQueryService(
+        _ReadmeSkillRepository({"1": skill}),
+        _ReadmeBotRepository({"entity_id": "e", "owner_id": "", "active_engine": "x"}),
+        _Collaborators(),
+        object(),
+        _ReadmeFactory(),
+        object(),
+        _ReadmeResolver,
+    )
+    with pytest.raises(LocalSkillNotFoundError):
+        await service.get_readme_by_skill(skill_id="1", actor_id="actor")
+
+    service = SkillQueryService(
+        _ReadmeSkillRepository({"1": skill}),
+        _ReadmeBotRepository({"entity_id": "e", "owner_id": "owner", "active_engine": "x"}),
+        _Collaborators(allowed=False),
+        object(),
+        _ReadmeFactory(),
+        object(),
+        _ReadmeResolver,
+    )
+    with pytest.raises(LocalSkillNotFoundError):
+        await service.get_readme_by_skill(skill_id="1", actor_id="actor")
+
+
+@pytest.mark.asyncio
+async def test_skill_only_readme_masks_missing_public_repo_content():
+    service = SkillQueryService(
+        _ReadmeSkillRepository({"1": {"git_path": "git://market"}}),
+        _ReadmeBotRepository(None),
+        _Collaborators(),
+        object(),
+        _ReadmeFactory(None),
+        object(),
+        _ReadmeResolver,
+    )
+    with pytest.raises(LocalSkillNotFoundError):
+        await service.get_readme_by_skill(skill_id="1", actor_id="actor")
+
+
+@pytest.mark.asyncio
+async def test_skill_only_readme_returns_string_content():
+    service = SkillQueryService(
+        _ReadmeSkillRepository({"1": {"git_path": "local://x", "bolt_id": "bot"}}),
+        _ReadmeBotRepository(
+            {"entity_id": "e", "owner_id": "owner", "active_engine": "x"}
+        ),
+        _Collaborators(),
+        object(),
+        _ReadmeFactory(None, "# direct"),
+        object(),
+        _ReadmeResolver,
+    )
+    assert await service.get_readme_by_skill(skill_id="1", actor_id="owner") == "# direct"
+
+
+@pytest.mark.asyncio
+async def test_skill_only_readme_tries_readme_fallback_and_decodes_bytes():
+    service = SkillQueryService(
+        _ReadmeSkillRepository({"1": {"git_path": "local://x", "bolt_id": "bot"}}),
+        _ReadmeBotRepository(
+            {"entity_id": "e", "owner_id": "owner", "active_engine": "x"}
+        ),
+        _Collaborators(),
+        object(),
+        _ReadmeFactory(None, None, b"# fallback"),
+        object(),
+        _ReadmeResolver,
+    )
+    assert await service.get_readme_by_skill(skill_id="1", actor_id="owner") == "# fallback"
+
+
+@pytest.mark.asyncio
+async def test_skill_only_readme_masks_empty_local_files():
+    service = SkillQueryService(
+        _ReadmeSkillRepository({"1": {"git_path": "local://x", "bolt_id": "bot"}}),
+        _ReadmeBotRepository(
+            {"entity_id": "e", "owner_id": "owner", "active_engine": "x"}
+        ),
+        _Collaborators(),
+        object(),
+        _ReadmeFactory(None, "", None),
+        object(),
+        _ReadmeResolver,
+    )
+    with pytest.raises(LocalSkillNotFoundError):
+        await service.get_readme_by_skill(skill_id="1", actor_id="owner")
