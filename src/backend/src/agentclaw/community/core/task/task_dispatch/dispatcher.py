@@ -76,6 +76,9 @@ class TaskDispatcher:
                     node.run_info.extend_props["pending_group_formation"] = result.group_formation
                 else:  # MISS
                     node.run_info.extend_props["miss_events"] = [result.miss_reason or "no_bot"]
+                # JOIN 丢掉的候选透出到节点 unauthorized_bots(dashboard 暴露,引导 owner grant)
+                if getattr(result, "unauthorized_bots", None):
+                    node.run_info.extend_props["unauthorized_bots"] = result.unauthorized_bots
                 logger.info("[task][dispatch] node=%s outcome=%s run_mode=%s assignee=%s",
                             node.node_id, result.outcome, node.run_info.run_mode,
                             node.run_info.assignee or "<group pending/miss>")
