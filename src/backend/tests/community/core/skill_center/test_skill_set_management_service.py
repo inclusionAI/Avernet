@@ -2741,6 +2741,50 @@ async def test_teclaw_failed_delivery_raises_reconcile_error():
     assert passport.calls == []
 
 
+@pytest.mark.asyncio
+async def test_teclaw_delivery_does_not_run_on_the_event_loop():
+    """The artifact delivery is dispatched off the coroutine's thread.
+
+    ``sync_runtime`` is synchronous and, on a whole-artifact engine, carries a
+    device resolution with a blocking ws-info HTTP call, a full artifact
+    compose, and the outbound apply request behind it. Callers reach the
+    projector from async HTTP handlers (``DirectActivationService`` is one), so
+    running it inline would let one slow container stall unrelated requests on
+    the same worker — the reason ``SkillSetService.sync_mcp_desired_state``
+    already wraps its device calls.
+
+    Asserted by thread identity rather than by patching ``asyncio.to_thread``:
+    what matters is that the blocking work left the loop's thread, not which
+    API moved it.
+    """
+    import threading
+
+    loop_thread = threading.get_ident()
+    seen: list[int] = []
+
+    factory = _RuntimeFactory()
+    original = factory.service.sync_runtime
+
+    def _recording_sync_runtime(**kwargs):
+        seen.append(threading.get_ident())
+        return original(**kwargs)
+
+    factory.service.sync_runtime = _recording_sync_runtime
+    runtime = _teclaw_runtime(factory)
+
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.a"})),
+    )
+
+    assert seen, "delivery never ran"
+    assert loop_thread not in seen, (
+        "sync_runtime ran on the event loop thread; it must be dispatched "
+        "through asyncio.to_thread so a slow device cannot block the worker"
+    )
+
+
+
 def test_registry_defaults_unknown_engines_to_the_per_domain_projection():
     """An unregistered engine gets the per-domain contract.
 

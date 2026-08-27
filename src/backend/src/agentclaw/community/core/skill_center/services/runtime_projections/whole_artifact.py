@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 
 from agentclaw.community.core.skill_center.errors import (
@@ -98,8 +99,17 @@ class WholeArtifactRuntimeProjection:
             len(plan.projection.skill_assets),
             len(plan.projection.mcp_server_codes),
         )
-        if not plan.service.sync_runtime(
-            desired_skills=self._desired_skills(plan.projection)
+        # Off the event loop: ``sync_runtime`` is synchronous and, on a
+        # whole-artifact engine, expensive — device resolution (including a
+        # blocking ws-info HTTP call), a full artifact compose, and the
+        # outbound apply request. Callers reach here from async HTTP handlers
+        # such as ``DirectActivationService.activate_mcp``, so leaving it in
+        # the coroutine would let one slow container stall unrelated requests
+        # on the same worker. Same rule, and the same reason, as
+        # ``SkillSetService.sync_mcp_desired_state``.
+        if not await asyncio.to_thread(
+            plan.service.sync_runtime,
+            desired_skills=self._desired_skills(plan.projection),
         ):
             raise SkillSetRuntimeReconcileError()
 

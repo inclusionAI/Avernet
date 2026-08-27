@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
@@ -201,8 +202,9 @@ class BotRuntimeProjector:
             for mapping in plan.projection.skill_mappings
         ):
             raise SkillSetRuntimeReconcileError()
-        if not plan.service.sync_runtime(
-            desired_skills=self._desired_skills(plan.projection)
+        if not await asyncio.to_thread(
+            plan.service.sync_runtime,
+            desired_skills=self._desired_skills(plan.projection),
         ):
             raise SkillSetRuntimeReconcileError()
         # ``skills=False`` regardless of what the caller declared: the Skill
