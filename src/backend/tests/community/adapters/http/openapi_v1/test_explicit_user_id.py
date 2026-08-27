@@ -398,7 +398,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: publish-to-users route moved from /bots/{bot_id}/public-bcs to the external
 #: /collaboration/bots/{bot_uuid}/public, so one path-addressed {bot_id}
 #: operation became a {bot_uuid}-named one: path -1, none +1.
-_BOT_ID_PLACEMENT = {"path": 141, "query": 1, "none": 62}
+_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 62}
 
 
 def _schema() -> dict:
@@ -489,7 +489,8 @@ def test_the_pinned_number_of_operations_take_it():
     version reads/actions and edit-lock operations all act for an explicit user.
     The five bot-first Editors operations bring the total to 119, and the four
     render-screen operations bring the total to 123, and the read-only Node
-    inventory brings the current total to 124.
+    inventory brings the current total to 124. Caller identity context and MCP
+    call-type configuration add two more Bot-addressed, user-scoped operations.
     """
     taking = [
         1
@@ -519,7 +520,8 @@ def test_the_pinned_number_of_operations_take_it():
     # moved to _USER_ID_FILTER_ONLY (asserted by its own test) and left this
     # count: 182 → 181. execute/dashboard take no user_id at all — see
     # _NO_USER_DIMENSION.
-    assert len(taking) == 181
+    # Caller identity context and call-type update add two operations.
+    assert len(taking) == 183
 
 
 def test_the_exempt_operations_take_none():

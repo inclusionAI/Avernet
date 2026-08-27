@@ -139,6 +139,17 @@ from agentclaw.community.core.cron.errors import (
     CronApiTimeoutError,
     CronRelayError,
 )
+from agentclaw.community.core.caller_identity.contracts import (
+    CallerCallTypeInvalidError,
+    CallerIdentityAmbiguousError,
+    CallerIdentityIrreversibleError,
+    CallerIdentityNotFoundError,
+    CallerIdentityPermissionError,
+    CallerIdentityReadOnlyError,
+    CallerLockEpochError,
+    CallerMcpNotFoundError,
+    CallerMcpSyncError,
+)
 from agentclaw.community.core.engine_runtime.errors import (
     EngineBotTypeNotSupportedError,
     EngineHistoryDepthExceededError,
@@ -323,6 +334,15 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     CallerIdentityForbiddenError: (403, "Forbidden"),
     CallerIdentityConflictError: (409, "Caller identity target is ambiguous"),
     CallerIdentityOpenApiError: (502, "Caller identity operation failed"),
+    CallerIdentityPermissionError: (404, "Not found"),
+    CallerIdentityNotFoundError: (404, "Not found"),
+    CallerIdentityAmbiguousError: (409, "Caller identity target is ambiguous"),
+    CallerIdentityIrreversibleError: (409, "Caller identity cannot be reverted"),
+    CallerIdentityReadOnlyError: (409, "Caller identity configuration is read-only"),
+    CallerLockEpochError: (423, "Edit lock required"),
+    CallerMcpNotFoundError: (404, "Not found"),
+    CallerMcpSyncError: (502, "Caller identity synchronization failed"),
+    CallerCallTypeInvalidError: (500, "Internal error"),
     MissingPrincipalError: (401, "Unauthorized"),
     # Byte-identical to the line above, deliberately. "You sent no principal" and
     # "your principal did not verify" must be indistinguishable, or the response
