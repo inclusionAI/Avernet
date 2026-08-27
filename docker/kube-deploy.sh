@@ -12,11 +12,12 @@
 #       [--apply]                 # apply with kubectl (default: dry-run print)
 #
 # Supported services (default port, probe path):
-#   baas       — SecBaaS platform service   (8888,  /health)
+#   baas       — SecBaaS platform service   (8080,  /health)
 #   gateway    — API gateway                (8888,  /health)
 #   proxy      — Sandbox proxy              (8888,  /health)
 #   bcs        — BCS coordination service   (21000, /health)
 #   backend    — Backend service            (8888,  /api/health)
+#   bcsfuse    — BCS Fuse open-source service (8765,  /health)
 #
 # Each default is the port that service actually listens on out of the box, and
 # the path it actually serves. Override the port with PORT=... in the
@@ -85,6 +86,7 @@ declare -A DEFAULT_PORT=(
     [proxy]=8888
     [bcs]=21000
     [backend]=8888
+    [bcsfuse]=8765
 )
 
 # The HTTP path each service answers health probes on. The backend mounts its
@@ -97,6 +99,7 @@ declare -A DEFAULT_PROBE_PATH=(
     [proxy]=/health
     [bcs]=/health
     [backend]=/api/health
+    [bcsfuse]=/health
 )
 
 # The env var (if any) through which a service lets the environment override the
@@ -112,6 +115,7 @@ declare -A PORT_ENV_VAR=(
     [proxy]=SANDBOXPROXY_PORT
     [bcs]=""
     [backend]=BACKEND_PORT
+    [bcsfuse]=BCSFUSE_PORT
 )
 
 # All services default to a 4 CPU / 8Gi spec.
@@ -179,7 +183,7 @@ done
 # --- Validate ---
 
 if [[ -z "$SERVICE" ]]; then
-    echo "error: --service is required (baas|gateway|proxy|bcs|backend)" >&2
+    echo "error: --service is required (baas|gateway|proxy|bcs|bcsfuse|backend)" >&2
     exit 2
 fi
 if [[ -z "$IMAGE" ]]; then
@@ -188,7 +192,7 @@ if [[ -z "$IMAGE" ]]; then
 fi
 if [[ -z "${DEFAULT_PORT[$SERVICE]:-}" ]]; then
     echo "error: unknown service '$SERVICE'" >&2
-    echo "  supported: baas, gateway, proxy, bcs, backend" >&2
+    echo "  supported: baas, gateway, proxy, bcs, bcsfuse, backend" >&2
     exit 2
 fi
 

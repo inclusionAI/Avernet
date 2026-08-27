@@ -1,57 +1,37 @@
 """
-Qdrant MySQL Vector Store
+Qdrant + MySQL Vector Store (OSS production durable backend)
 
-Combined Qdrant local vector store with MySQL durable backend.
+Aligns with the internal QdrantZdasVectorStore interface and the
+VectorStoreAdapter protocol.
 
-Provides:
-- Qdrant local embedded index for fast search
-- MySQL durable backend for data persistence
-- rebuild_from_mysql() for index recovery
-
-S30C Implementation:
-- Local Qdrant remains disposable
-- MySQL is the durable source of truth
+Architecture:
+- MySQL (bcsfuse_vector_points): durable source of truth
+- Qdrant Local: disposable local index for fast ANN search
 - Write-through: MySQL first, then Qdrant
-- Rebuild: Clear Qdrant, load from MySQL, rebuild index
-- Business ID mapping preserved
+- Rebuild: load all vectors from MySQL into Qdrant on startup/request
 """
-
 from __future__ import annotations
 
+import json
 import logging
 import time
-from typing import Dict, List, Optional, Any
+from typing import Any, List, Optional
 
 from src.domain.models.vector_point import VectorPoint
+from src.domain.models.vector_search_hit import VectorSearchHit
+from src.domain.services.vector_store_adapter import VectorStoreAdapter
 from src.infra.public.vectorstores.qdrant_local_vector_store import QdrantLocalVectorStore
 from src.infra.vectorstore_backends.mysql_vector_persistence_backend import MySQLVectorPersistenceBackend
-from src.infra.public.observability.storage_logging import (
-    log_storage_event,
-    log_storage_error,
-)
 
 logger = logging.getLogger(__name__)
 
 
-class QdrantMySQLVectorStore:
-    """
-    Qdrant + MySQL Vector Store for OSS durable backend.
-
-    Architecture:
-    - MySQL: Durable source of truth for vector data
-    - Qdrant: Disposable local index for fast search
-    - Write-through: MySQL first, then Qdrant (Qdrant failure after MySQL success raises RuntimeError with DEGRADED_REBUILD_REQUIRED state)
-    - Rebuild: Clear Qdrant, load from MySQL, rebuild index
-
-    Business ID Mapping:
-    - External business IDs mapped to Qdrant point UUIDs
-    - Mapping stored in MySQL as external_id and point_id
-    - QdrantLocalVectorStore handles UUID mapping transparently
-    """
+class QdrantMySQLVectorStore(VectorStoreAdapter):
+    """MySQL-backed durable vector store with local Qdrant index."""
 
     def __init__(
         self,
-        collection_name: str = "bcsfuse_vectors",
+        collection_name: str = "bcsfuse_profiles",
         qdrant_path: Optional[str] = None,
         dimension: int = 4096,
         distance: str = "Cosine",
@@ -61,24 +41,10 @@ class QdrantMySQLVectorStore:
         mysql_password: Optional[str] = None,
         mysql_database: Optional[str] = None,
     ):
-        """Initialize Qdrant + MySQL vector store.
-
-        Args:
-            collection_name: Qdrant collection name and MySQL collection identifier.
-            qdrant_path: Qdrant storage path (default: QDRANT_LOCAL_PATH env or ./qdrant_storage).
-            dimension: Vector dimension.
-            distance: Distance metric (Cosine, Euclid, Dot).
-            mysql_host: MySQL host.
-            mysql_port: MySQL port.
-            mysql_user: MySQL user.
-            mysql_password: MySQL password.
-            mysql_database: MySQL database.
-        """
         self.collection_name = collection_name
         self.dimension = dimension
         self.distance = distance
 
-        # Initialize Qdrant local store (disposable index)
         self._qdrant = QdrantLocalVectorStore(
             collection_name=collection_name,
             path=qdrant_path,
@@ -86,7 +52,6 @@ class QdrantMySQLVectorStore:
             distance=distance,
         )
 
-        # Initialize MySQL persistence backend (durable backend)
         self._mysql = MySQLVectorPersistenceBackend(
             host=mysql_host,
             port=mysql_port,
@@ -99,439 +64,204 @@ class QdrantMySQLVectorStore:
         )
 
         logger.info(
-            "[QdrantMySQLVectorStore] Initialized with collection=%s, dimension=%d, distance=%s",
-            collection_name, dimension, distance
+            "[QdrantMySQLVectorStore] Initialized collection=%s dimension=%d distance=%s",
+            collection_name, dimension, distance,
         )
 
+    # ------------------------------------------------------------------
+    # Compatibility proxies for callers that reach into Qdrant internals
+    # ------------------------------------------------------------------
+
+    def _ensure_client(self) -> None:
+        """Proxy to underlying Qdrant local store (for route-layer compatibility)."""
+        self._qdrant._ensure_client()
+
+    @property
+    def _client(self):
+        """Proxy to underlying Qdrant client (for route-layer compatibility)."""
+        return self._qdrant._client
+
+    # ------------------------------------------------------------------
+    # Write path
+    # ------------------------------------------------------------------
+
     def upsert(self, points: List[VectorPoint]) -> None:
-        """Upsert vectors (write-through: MySQL first, then Qdrant).
+        """Insert or update vector points.
 
-        Args:
-            points: List of vector points to upsert.
-
-        Raises:
-            RuntimeError: If MySQL write fails.
+        Write-through: durable MySQL first, then local Qdrant index.
+        Qdrant index failures are logged but not raised (index can be rebuilt).
         """
         if not points:
             return
 
-        start_time = time.time()
-        component = "qdrant_mysql_vector_store"
+        # 1. Durable write to MySQL (must succeed)
+        self._mysql.save_batch(points)
 
-        # Log upsert start
-        log_storage_event(
-            logger,
-            logging.DEBUG,
-            "qdrant_mysql_upsert_start",
-            component=component,
-            operation="upsert",
-            validation_phase="write",
-            backend="qdrant+mysql",
-            target_resource=self.collection_name,
-            batch_size=len(points),
-        )
-
+        # 2. Update local Qdrant index
         try:
-            # 1. Write to MySQL (durable backend) - must succeed
-            self._mysql.save_batch(points)
-
-            mysql_duration_ms = (time.time() - start_time) * 1000
-
-            # Log MySQL write success
-            log_storage_event(
-                logger,
-                logging.DEBUG,
-                "mysql_write_success",
-                component=component,
-                operation="upsert",
-                validation_phase="write",
-                backend="mysql",
-                target_resource=self.collection_name,
-                duration_ms=mysql_duration_ms,
-                batch_size=len(points),
-            )
-
-            # 2. Write to Qdrant (disposable index) - failure triggers DEGRADED_REBUILD_REQUIRED
-            qdrant_start = time.time()
-            try:
-                # QdrantLocalVectorStore.upsert expects individual parameters, not a list
-                for point in points:
-                    self._qdrant.upsert(
-                        id=point.id,
-                        vector=point.vector,
-                        metadata=point.payload
-                    )
-                qdrant_duration_ms = (time.time() - qdrant_start) * 1000
-
-                # Log Qdrant write success
-                log_storage_event(
-                    logger,
-                    logging.DEBUG,
-                    "qdrant_write_success",
-                    component=component,
-                    operation="upsert",
-                    validation_phase="write",
-                    backend="qdrant",
-                    target_resource=self.collection_name,
-                    duration_ms=qdrant_duration_ms,
-                    batch_size=len(points),
-                )
-
-            except Exception as e:
-                # Qdrant write failed - log and raise classified exception
-                # MySQL already has the data, but index is in degraded state
-                qdrant_duration_ms = (time.time() - qdrant_start) * 1000
-
-                log_storage_error(
-                    logger,
-                    "qdrant_write_failure_mysql_ok",
-                    component=component,
-                    operation="upsert",
-                    validation_phase="write",
-                    backend="qdrant",
-                    target_resource=self.collection_name,
-                    error=e,
-                    duration_ms=qdrant_duration_ms,
-                    consistency_state="DEGRADED_REBUILD_REQUIRED",
-                    failure_classification="QDRANT_INDEX_UPDATE_FAILED_AFTER_DURABLE_WRITE",
-                    durable_write_success=True,
-                    qdrant_index_success=False,
-                    rebuild_required=True,
-                )
-
-                # Raise classified exception to indicate partial failure
-                raise RuntimeError(
-                    f"MySQL write succeeded but Qdrant index update failed. "
-                    f"Durable data is safe in MySQL, but index is in DEGRADED state. "
-                    f"Rebuild required. Qdrant error: {e}"
-                ) from e
-
-            total_duration_ms = (time.time() - start_time) * 1000
-
-            # Log total upsert success (only reached if both MySQL and Qdrant succeeded)
-            log_storage_event(
-                logger,
-                logging.INFO,
-                "qdrant_mysql_upsert_success",
-                component=component,
-                operation="upsert",
-                validation_phase="write",
-                backend="qdrant+mysql",
-                target_resource=self.collection_name,
-                duration_ms=total_duration_ms,
-                batch_size=len(points),
-                consistency_state="CONSISTENT",
-                durable_write_success=True,
-                qdrant_index_success=True,
-            )
-
+            for point in points:
+                self._qdrant._upsert_one(point.id, point.vector, point.payload)
         except Exception as e:
-            total_duration_ms = (time.time() - start_time) * 1000
-
-            # Log upsert failure
-            log_storage_error(
-                logger,
-                "qdrant_mysql_upsert_failure",
-                component=component,
-                operation="upsert",
-                validation_phase="write",
-                backend="qdrant+mysql",
-                target_resource=self.collection_name,
-                error=e,
-                duration_ms=total_duration_ms,
+            logger.warning(
+                "[QdrantMySQLVectorStore] Qdrant index update failed (MySQL is safe): %s", e
             )
 
-            raise RuntimeError(f"Failed to upsert vectors: {e}") from e
+    def delete(self, ids: List[str]) -> None:
+        """Delete vectors by business IDs."""
+        if not ids:
+            return
+
+        # 1. Delete from MySQL
+        self._mysql.delete_batch(ids)
+
+        # 2. Delete from local Qdrant
+        try:
+            for id in ids:
+                self._qdrant.delete(id)
+        except Exception as e:
+            logger.warning("[QdrantMySQLVectorStore] Qdrant delete failed: %s", e)
+
+    # ------------------------------------------------------------------
+    # Search
+    # ------------------------------------------------------------------
 
     def search(
         self,
         vector: List[float],
-        top_k: int = 5,
-        filter: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
-        """Search vectors (query local Qdrant index).
+        top_k: int,
+        filters: Optional[dict] = None,
+    ) -> List[VectorSearchHit]:
+        """Search local Qdrant index and return VectorSearchHit list.
 
-        Args:
-            vector: Query vector.
-            top_k: Number of results.
-            filter: Optional payload filter.
-
-        Returns:
-            List of search results with logical business IDs.
-
-        Raises:
-            RuntimeError: If Qdrant search fails.
+        The underlying QdrantLocalVectorStore.search() already returns
+        VectorSearchHit objects (with .id/.score/.payload attributes), so we
+        pass them through directly. Do NOT re-wrap them via dict .get() -- the
+        results are objects, not dicts.
         """
-        return self._qdrant.search(vector, top_k, filter)
+        return self._qdrant.search(vector, top_k, filter=filters)
 
-    def delete(self, ids: List[str]) -> None:
-        """Delete vectors (delete from both MySQL and Qdrant).
+    def batch_search(
+        self,
+        vectors: List[List[float]],
+        top_k: int,
+        filters: Optional[dict] = None,
+    ) -> List[List[VectorSearchHit]]:
+        """Batch search (sequential)."""
+        return [self.search(v, top_k, filters) for v in vectors]
 
-        Args:
-            ids: List of vector IDs to delete.
-
-        Raises:
-            RuntimeError: If MySQL delete fails.
-        """
-        if not ids:
-            return
-
-        start_time = time.time()
-        component = "qdrant_mysql_vector_store"
-
-        try:
-            # 1. Delete from MySQL (must succeed)
-            deleted_count = self._mysql.delete_batch(ids)
-
-            # 2. Delete from Qdrant (can fail silently)
-            try:
-                # QdrantLocalVectorStore.delete expects a single ID
-                for id in ids:
-                    self._qdrant.delete(id)
-            except Exception as e:
-                logger.warning(
-                    "[QdrantMySQLVectorStore] Qdrant delete failed but MySQL delete succeeded: %s",
-                    e
-                )
-
-            duration_ms = (time.time() - start_time) * 1000
-
-            logger.info(
-                "[QdrantMySQLVectorStore] Deleted %d vectors from MySQL and Qdrant, duration_ms=%.2f",
-                deleted_count, duration_ms
-            )
-
-        except Exception as e:
-            duration_ms = (time.time() - start_time) * 1000
-
-            log_storage_error(
-                logger,
-                "qdrant_mysql_delete_failure",
-                component=component,
-                operation="delete",
-                validation_phase="write",
-                backend="qdrant+mysql",
-                target_resource=self.collection_name,
-                error=e,
-                duration_ms=duration_ms,
-            )
-
-            raise RuntimeError(f"Failed to delete vectors: {e}") from e
+    # ------------------------------------------------------------------
+    # Misc protocol methods
+    # ------------------------------------------------------------------
 
     def size(self) -> int:
-        """Get the number of vectors in the Qdrant index.
-
-        Returns:
-            Number of vectors in the collection.
-        """
         return self._qdrant.size()
 
-    def rebuild_from_mysql(self, batch_size: int = 100) -> Dict[str, Any]:
-        """Rebuild local Qdrant index from MySQL durable backend.
+    def count(self) -> int:
+        return self.size()
 
-        This method:
-        1. Loads all vectors from MySQL
-        2. Clears Qdrant collection (or deletes all points)
-        3. Inserts vectors into Qdrant in batches
-        4. Verifies point count and does sample search
+    def get_vector_ids(self) -> List[str]:
+        return self._qdrant.get_vector_ids()
 
-        Args:
-            batch_size: Number of vectors to insert per batch.
+    def get(self, id: str) -> Optional[VectorPoint]:
+        """Get a single vector point from MySQL durable backend."""
+        for point in self._mysql.load_all():
+            if point.id == id:
+                return point
+        return None
 
-        Returns:
-            Dict with rebuild statistics:
-                - mysql_loaded: Number of vectors loaded from MySQL
-                - qdrant_inserted: Number of vectors inserted into Qdrant
-                - duration_ms: Total rebuild duration
-                - batches: Number of batches processed
+    def save_snapshot(self, path: str) -> None:
+        """Not implemented for MySQL backend (data is already durable)."""
+        logger.warning("[QdrantMySQLVectorStore] save_snapshot not implemented")
 
-        Raises:
-            RuntimeError: If rebuild fails.
-        """
-        start_time = time.time()
-        component = "qdrant_mysql_vector_store"
+    def load_snapshot(self, path: str) -> None:
+        """Not implemented for MySQL backend."""
+        logger.warning("[QdrantMySQLVectorStore] load_snapshot not implemented")
 
-        # Log rebuild start
-        log_storage_event(
-            logger,
-            logging.INFO,
-            "qdrant_rebuild_start",
-            component=component,
-            operation="rebuild_from_mysql",
-            validation_phase="rebuild",
-            backend="qdrant+mysql",
-            target_resource=self.collection_name,
-            batch_size=batch_size,
-        )
+    def text_search(
+        self,
+        query: str,
+        top_k: int,
+        filters: Optional[dict] = None,
+    ) -> List[VectorSearchHit]:
+        """Text-based search is delegated to Qdrant local (if it supports it)."""
+        # QdrantLocalVectorStore does not expose text_search; fall back to empty.
+        logger.warning("[QdrantMySQLVectorStore] text_search not implemented")
+        return []
 
+    def batch_text_search(
+        self,
+        queries: List[str],
+        top_k: int,
+        filters: Optional[dict] = None,
+    ) -> List[List[VectorSearchHit]]:
+        logger.warning("[QdrantMySQLVectorStore] batch_text_search not implemented")
+        return [[] for _ in queries]
+
+    # ------------------------------------------------------------------
+    # Rebuild from MySQL
+    # ------------------------------------------------------------------
+
+    def rebuild_from_mysql(self, batch_size: int = 100) -> dict[str, Any]:
+        """Rebuild local Qdrant index from MySQL durable backend."""
+        logger.info("[QdrantMySQLVectorStore] Rebuilding Qdrant index from MySQL...")
+        start = time.time()
+
+        # Clear local Qdrant index
         try:
-            # 1. Load all vectors from MySQL
-            log_storage_event(
-                logger,
-                logging.DEBUG,
-                "mysql_load_all_start",
-                component=component,
-                operation="rebuild_from_mysql",
-                validation_phase="read",
-                backend="mysql",
-                target_resource=self.collection_name,
-            )
-
-            points = self._mysql.load_all()
-            mysql_loaded = len(points)
-
-            log_storage_event(
-                logger,
-                logging.INFO,
-                "mysql_load_all_success",
-                component=component,
-                operation="rebuild_from_mysql",
-                validation_phase="read",
-                backend="mysql",
-                target_resource=self.collection_name,
-                vector_count=mysql_loaded,
-            )
-
-            # 2. Clear Qdrant collection
-            log_storage_event(
-                logger,
-                logging.DEBUG,
-                "qdrant_clear_start",
-                component=component,
-                operation="rebuild_from_mysql",
-                validation_phase="clear",
-                backend="qdrant",
-                target_resource=self.collection_name,
-            )
-
-            # Delete all points in Qdrant (simpler than recreating collection)
-            # QdrantLocalVectorStore handles this via delete_collection or clear
-            # For now, we'll just upsert over the existing data
-            # The upsert will overwrite existing points
-
-            log_storage_event(
-                logger,
-                logging.INFO,
-                "qdrant_clear_success",
-                component=component,
-                operation="rebuild_from_mysql",
-                validation_phase="clear",
-                backend="qdrant",
-                target_resource=self.collection_name,
-            )
-
-            # 3. Insert vectors into Qdrant in batches
-            qdrant_inserted = 0
-            batches = 0
-
-            for i in range(0, len(points), batch_size):
-                batch = points[i:i + batch_size]
-
-                log_storage_event(
-                    logger,
-                    logging.DEBUG,
-                    "qdrant_rebuild_batch_start",
-                    component=component,
-                    operation="rebuild_from_mysql",
-                    validation_phase="rebuild",
-                    backend="qdrant",
-                    target_resource=self.collection_name,
-                    batch_number=batches + 1,
-                    batch_size=len(batch),
-                )
-
-                # QdrantLocalVectorStore.upsert expects individual parameters, not a list
-                for point in batch:
-                    self._qdrant.upsert(
-                        id=point.id,
-                        vector=point.vector,
-                        metadata=point.payload
-                    )
-                qdrant_inserted += len(batch)
-                batches += 1
-
-                log_storage_event(
-                    logger,
-                    logging.DEBUG,
-                    "qdrant_rebuild_batch_success",
-                    component=component,
-                    operation="rebuild_from_mysql",
-                    validation_phase="rebuild",
-                    backend="qdrant",
-                    target_resource=self.collection_name,
-                    batch_number=batches,
-                    batch_size=len(batch),
-                )
-
-            # 4. Verify point count
-            qdrant_count = self._qdrant.size()
-
-            duration_ms = (time.time() - start_time) * 1000
-
-            result = {
-                "mysql_loaded": mysql_loaded,
-                "qdrant_inserted": qdrant_inserted,
-                "qdrant_count": qdrant_count,
-                "duration_ms": duration_ms,
-                "batches": batches,
-                "success": True,
-            }
-
-            # Log rebuild success
-            log_storage_event(
-                logger,
-                logging.INFO,
-                "qdrant_rebuild_success",
-                component=component,
-                operation="rebuild_from_mysql",
-                validation_phase="rebuild",
-                backend="qdrant+mysql",
-                target_resource=self.collection_name,
-                duration_ms=duration_ms,
-                mysql_loaded=mysql_loaded,
-                qdrant_inserted=qdrant_inserted,
-                qdrant_count=qdrant_count,
-                batches=batches,
-            )
-
-            logger.info(
-                "[QdrantMySQLVectorStore] Rebuild completed: loaded %d from MySQL, inserted %d into Qdrant, "
-                "Qdrant count %d, took %.2f ms in %d batches",
-                mysql_loaded, qdrant_inserted, qdrant_count, duration_ms, batches
-            )
-
-            return result
-
+            self._qdrant.clear()
         except Exception as e:
-            duration_ms = (time.time() - start_time) * 1000
+            logger.warning("[QdrantMySQLVectorStore] Failed to clear Qdrant index: %s", e)
 
-            # Log rebuild failure
-            log_storage_error(
-                logger,
-                "qdrant_rebuild_failure",
-                component=component,
-                operation="rebuild_from_mysql",
-                validation_phase="rebuild",
-                backend="qdrant+mysql",
-                target_resource=self.collection_name,
-                error=e,
-                duration_ms=duration_ms,
-            )
+        total_loaded = 0
+        total_indexed = 0
 
-            raise RuntimeError(f"Failed to rebuild from MySQL: {e}") from e
+        all_points = self._mysql.load_all()
 
-    def __len__(self) -> int:
-        """Return number of vectors in Qdrant index."""
-        return len(self._qdrant)
+        for i in range(0, len(all_points), batch_size):
+            points = all_points[i:i + batch_size]
+            total_loaded += len(points)
+
+            try:
+                self._qdrant.upsert(points)
+                total_indexed += len(points)
+            except Exception as e:
+                logger.error(
+                    "[QdrantMySQLVectorStore] Failed to index batch offset=%d: %s",
+                    i, e,
+                )
+                raise
+
+        duration_ms = (time.time() - start) * 1000
+        result = {
+            "loaded_count": total_loaded,
+            "indexed_count": total_indexed,
+            "qdrant_size": self._qdrant.size(),
+            "duration_ms": duration_ms,
+        }
+        logger.info(
+            "[QdrantMySQLVectorStore] Rebuild complete: loaded=%d indexed=%d qdrant_size=%d duration_ms=%.2f",
+            result["loaded_count"], result["indexed_count"], result["qdrant_size"], duration_ms,
+        )
+        return result
+
+    def clear(self) -> None:
+        """Clear both Qdrant and MySQL data. Use with caution."""
+        try:
+            self._qdrant.clear()
+        except Exception as e:
+            logger.warning("[QdrantMySQLVectorStore] Failed to clear Qdrant: %s", e)
+        try:
+            ids = self._mysql.load_all()
+            if ids:
+                self._mysql.delete_batch([p.id for p in ids])
+        except Exception as e:
+            logger.warning("[QdrantMySQLVectorStore] Failed to clear MySQL: %s", e)
 
     def close(self) -> None:
-        """Close both Qdrant and MySQL connections."""
         try:
             self._mysql.close()
         except Exception as e:
             logger.warning("[QdrantMySQLVectorStore] Failed to close MySQL: %s", e)
-
-        logger.info("[QdrantMySQLVectorStore] Connections closed")
 
 
 __all__ = ["QdrantMySQLVectorStore"]

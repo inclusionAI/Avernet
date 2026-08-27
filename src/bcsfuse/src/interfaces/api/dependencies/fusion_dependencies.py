@@ -646,36 +646,73 @@ def _build_vector_index_for_worker(worker_id: str) -> bool:
             logger.warning("[INDEX-BUILD] Profile source 不可用，跳过索引构建")
             return False
 
+        # 加载 worker，以 active_profile_key 作为期望的 profile_key
+        expected_profile_key = None
+        try:
+            from src.interfaces.api.dependencies.worker_dependencies import _get_registry_store
+            registry_store = _get_registry_store()
+            if registry_store:
+                worker = registry_store.get_by_id(worker_id)
+                if worker and worker.active_profile_key:
+                    expected_profile_key = worker.active_profile_key
+        except Exception as e_worker:
+            logger.warning(f"[INDEX-BUILD] 加载 worker 失败，跳过 active_profile_key 感知: {e_worker}")
+
         # 扫描指定 worker 的 profile
         # 使用 staff_id 精确匹配，而非 profile_key.startswith(worker_id)
         # 原因：worker_id 可能包含 ":"（如 "bot_id:owner_id"），
         # startswith 会误匹配前缀相同的其他 worker（如 "default:334018" 匹配 "default:3340183"）
         scan_result = profile_src.scan()
+
+        def _profile_belongs_to_worker(profile):
+            return getattr(profile, 'staff_id', None) == worker_id or getattr(profile, 'worker_id', None) == worker_id
+
+        worker_profiles = [p for p in scan_result.profiles if _profile_belongs_to_worker(p)]
+
+        # 优先选择匹配 active_profile_key 的 profile，否则取第一个
         target_profile = None
-        for profile in scan_result.profiles:
-            if getattr(profile, 'staff_id', None) == worker_id or getattr(profile, 'worker_id', None) == worker_id:
-                target_profile = profile
-                break
+        if expected_profile_key:
+            for profile in worker_profiles:
+                if profile.profile_key == expected_profile_key:
+                    target_profile = profile
+                    logger.info(f"[INDEX-BUILD] 命中 active_profile_key 对应 profile: {profile.profile_key}")
+                    break
+
+        if not target_profile and worker_profiles:
+            target_profile = worker_profiles[0]
+            logger.info(f"[INDEX-BUILD] fallback 到第一个 profile: {target_profile.profile_key}")
 
         if not target_profile:
             logger.warning(f"[INDEX-BUILD] 未找到 worker 的 profile: {worker_id}")
             return False
 
-        logger.info(f"[INDEX-BUILD] 找到 profile: {target_profile.profile_key}")
+        logger.info(f"[INDEX-BUILD] 选中 profile: {target_profile.profile_key}")
 
         # 使用单例 ProfileEmbedding Store - 避免重复创建 Qdrant 客户端导致锁冲突
         profile_store = _get_profile_embedding_store()
 
-        # 清理同 worker 其他 profile_key 的残留向量（避免 filter 字段缺失的脏数据）
-        if profile_store and hasattr(profile_store, 'delete_by_profile_key'):
-            for profile in scan_result.profiles:
-                if (getattr(profile, 'staff_id', None) == worker_id or getattr(profile, 'worker_id', None) == worker_id) and profile.profile_key != target_profile.profile_key:
-                    try:
-                        deleted = profile_store.delete_by_profile_key(profile.profile_key)
-                        if deleted > 0:
-                            logger.info(f"[INDEX-BUILD] 清理旧 profile 残留向量: {profile.profile_key}, deleted={deleted}")
-                    except Exception as e_del:
-                        logger.warning(f"[INDEX-BUILD] 清理旧 profile 向量失败: {profile.profile_key}, error={e_del}")
+        # 清理同 worker 其他 profile_key 的残留向量
+        # 策略：从向量存储里读出该 worker 的所有向量 ID，删除不属于 target_profile_key 的
+        if profile_store and hasattr(profile_store, '_vector_store') and hasattr(profile_store._vector_store, 'get_vector_ids') and hasattr(profile_store._vector_store, 'delete'):
+            try:
+                all_ids = profile_store._vector_store.get_vector_ids()
+                prefix = f"{worker_id}:"
+                # vector_id format: {profile_key}:{fragment_type}[:index]
+                # profile_key = {staff_id}:{profile_id} (may contain ':')
+                def _extract_profile_key(vid):
+                    if ':' not in vid:
+                        return vid
+                    return vid.rsplit(':', 1)[0]
+
+                stale_ids = [
+                    vid for vid in all_ids
+                    if vid.startswith(prefix) and _extract_profile_key(vid) != target_profile.profile_key
+                ]
+                if stale_ids:
+                    profile_store._vector_store.delete(stale_ids)
+                    logger.info(f"[INDEX-BUILD] 清理 {len(stale_ids)} 条同 worker 其他 profile 残留向量: worker={worker_id}, target={target_profile.profile_key}")
+            except Exception as e_clear:
+                logger.warning(f"[INDEX-BUILD] 清理残留向量失败: {e_clear}")
 
         if not profile_store:
             logger.warning("[INDEX-BUILD] Profile embedding store 不可用，跳过索引构建")
