@@ -27,7 +27,6 @@ import asyncio
 import logging
 import threading
 from dataclasses import dataclass
-
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.domain.errors import NodeNotFoundError, TaskStateError
 from agentclaw.community.core.task.domain.models import (
@@ -44,11 +43,9 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
 
-
 logger = logging.getLogger("task.engine")
 
 _DEFAULT_MAX_HARNESS = 3  # 执行报错 harness 重投上限(达上限→HUNG)
-
 
 @dataclass(frozen=True)
 class CoopGroupStart:
