@@ -38,8 +38,20 @@ class CommunityNotifyModule(Module):
         cfg = _block("task_discovery_dingtalk")
         if cfg:
             DingTalkYamlHolder.set(cfg)
-            # frontend_url 用于 session_url 生成（钉钉卡片点击跳转的前端地址）
-            frontend_url = cfg.get("frontend_url", "")
+            # 按 env 选择 session_url 前缀（frontend_url / frontend_url_pre /
+            # frontend_url_prod），注入 FrontendUrlHolder 供 session_initiator 使用。
+            from agentclaw.community.utils.env_utils import get_current_env
+
+            env = get_current_env()
+            if env == "pre":
+                frontend_url = cfg.get("frontend_url_pre", "") or cfg.get("frontend_url", "")
+            elif env == "prod":
+                frontend_url = cfg.get("frontend_url_prod", "") or cfg.get("frontend_url", "")
+            else:
+                frontend_url = cfg.get("frontend_url", "")
+            logger.info(
+                "[community.notify] env=%s → frontend_url=%s", env, frontend_url,
+            )
             if frontend_url:
                 from agentclaw.community.core.task.task_discovery.session_initiator import (
                     FrontendUrlHolder,
