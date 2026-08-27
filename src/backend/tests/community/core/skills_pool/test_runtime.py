@@ -344,7 +344,12 @@ class InlineVerifiedTransport(FakeTransport):
             conn_info, method, path, body=body, timeout=timeout
         )
         if path.endswith("/publish"):
-            response["data"] = {"published": True, "verified": self.verified}
+            response["data"] = {
+                "published": True,
+                "verified": self.verified,
+                "evidence": {"kept": ["/a/very/long/path"] * 50},
+                "verification": {"ran": True, "valid": False, "failure_count": 3},
+            }
         return response
 
 
@@ -440,12 +445,12 @@ async def test_inline_verification_failure_is_not_retried_by_the_verify_call() -
 
 
 @pytest.mark.asyncio
-async def test_inline_verification_failure_logs_the_whole_response(caplog) -> None:
+async def test_inline_verification_failure_logs_the_diagnosis(caplog) -> None:
     """The failed verdict is final, so this warning is the only diagnostic.
 
-    Without it a stuck projection reports unverified with nothing anywhere
-    naming the target that failed — the separate-verify path it replaces logs
-    the full response, and this one has to as well.
+    It logs the runtime's message and the bounded verification digest, not the
+    whole response: the publish evidence carries a path list per mapping, which
+    on a large Bot would bury the failure detail and repeat on every retry.
     """
     resolver = FakeResolver()
     transport = InlineVerifiedTransport(verified=False)
@@ -459,7 +464,9 @@ async def test_inline_verification_failure_logs_the_whole_response(caplog) -> No
     assert warnings, "a failed inline verdict must warn"
     rendered = warnings[-1].getMessage()
     assert "inline as failed" in rendered
-    assert "'verified': False" in rendered
+    assert "failure_count" in rendered
+    # The bulky half stays out.
+    assert "'kept'" not in rendered
 
 
 @pytest.mark.asyncio

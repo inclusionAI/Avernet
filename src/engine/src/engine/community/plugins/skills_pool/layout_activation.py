@@ -454,14 +454,26 @@ def _finalize_active_root(
     # mapping source a second time for an answer already in hand. It only falls
     # back when the publish could not verify (``verified is None``).
     if published.verified is None:
-        verified = verify_skill_mappings(
-            mappings=mappings,
-            home=layout.pool_root.parents[2],
-            engine=engine,
-        )
-        verified_valid, verified_evidence = verified.valid, verified.evidence
+        # No verdict means the publish's own check could not run. Repeating it
+        # here would usually raise the same error, and this caller has no
+        # OSError guard of its own — so it degrades to "sync pending", which
+        # is what a retryable post-cutover state is for.
+        try:
+            verified = verify_skill_mappings(
+                mappings=mappings,
+                home=layout.pool_root.parents[2],
+                engine=engine,
+            )
+        except OSError as error:
+            verified, verify_error = None, error
+        else:
+            verify_error = None
+        verified_valid = bool(verified and verified.valid)
+        verified_evidence = _verification_digest(verified, verify_error)
     else:
         verified_valid = published.verified
+        # Same digest shape on both paths, so one reason code does not carry
+        # two incompatible payloads.
         verified_evidence = published.evidence.get("verification", {})
     if not verified_valid:
         return PoolActivationResult(
@@ -2310,15 +2322,32 @@ def rollback_hermes_pool(
 
 
 def _verification_digest(
-    verification: "MappingVerificationResult | None",
+    verification: MappingVerificationResult | None,
+    error: OSError | None = None,
 ) -> dict[str, object]:
-    """A bounded summary of an inline verification, safe to log verbatim."""
+    """A bounded summary of an inline verification, safe to log verbatim.
+
+    Bounded because the client logs it on a failed verdict and the failure
+    list grows with the mapping set. The coverage counters are kept: a
+    ``valid`` verdict over zero managed entries is vacuous, and once the
+    client skips its own verify this is the only record of what was checked.
+    """
     if verification is None:
-        return {"ran": False}
+        digest: dict[str, object] = {"ran": False}
+        if error is not None:
+            # Silence here would look identical to an old runtime, and every
+            # device would quietly fall back to the two-call path with nothing
+            # to explain why.
+            digest["error_type"] = type(error).__name__
+            digest["errno"] = error.errno
+        return digest
     failures = list(verification.evidence.get("failures") or [])
     return {
         "ran": True,
         "valid": verification.valid,
+        "checked": verification.evidence.get("checked"),
+        "managed_checked": verification.evidence.get("managed_checked"),
+        "retired_checked": verification.evidence.get("retired_checked"),
         "failure_count": len(failures),
         "first_failures": failures[:5],
     }
@@ -2471,10 +2500,13 @@ def publish_pool_mappings(
     # caller's separate /verify request — a full round trip to reach the
     # identical check — can be skipped.
     #
-    # The publish has already succeeded at this point. A verification that
-    # cannot run (something else moved the active root out from under it) must
-    # therefore not fail the publish: it reports no verdict, which sends the
-    # caller down the separate-verify path it would have taken anyway.
+    # The publish has already succeeded at this point, so a verification that
+    # cannot run must not fail it: it reports no verdict, which sends the
+    # caller down the separate-verify path it would have taken anyway. This
+    # covers only errors raised *by the verify* — an active root that was
+    # already gone fails earlier, in ``_mapping_plan``, exactly as it did
+    # before there was an inline verify at all.
+    verify_error: OSError | None = None
     try:
         verification = verify_skill_mappings(
             mappings=mappings,
@@ -2484,8 +2516,8 @@ def publish_pool_mappings(
             source_layout=source_layout,
             additional_retirement_roots=additional_retirement_roots,
         )
-    except OSError:
-        verification = None
+    except OSError as error:
+        verification, verify_error = None, error
     return MappingPublishResult(
         published=True,
         evidence={
@@ -2501,7 +2533,7 @@ def publish_pool_mappings(
             # Bounded: the caller logs this response verbatim on a failed
             # verdict, and a bot with hundreds of mappings would otherwise
             # write the whole failure list on every retry.
-            "verification": _verification_digest(verification),
+            "verification": _verification_digest(verification, verify_error),
         },
         verified=None if verification is None else verification.valid,
     )

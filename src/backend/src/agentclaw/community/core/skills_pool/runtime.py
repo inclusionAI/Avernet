@@ -194,8 +194,8 @@ class SkillsPoolRuntime:
         *No verify round trip when the runtime already did it.* A publish
         response carrying ``data.verified is True`` means the runtime ran the
         same verification inline, against the filesystem it had just written.
-        Anything else — ``false``, or the key absent on a runtime that predates
-        the signal — is not evidence of convergence, so absence falls back to
+        Anything else — ``false``, or the key absent because the runtime
+        predates the signal *or* could not run its own check — is not evidence of convergence, so absence falls back to
         the separate call and ``false`` is taken at its word.
         """
         try:
@@ -235,13 +235,20 @@ class SkillsPoolRuntime:
                 # ``publish_mappings`` path makes no such claim — a separate
                 # verify still follows it — which is why this cannot live in
                 # ``_publish``.
+                # The digest and the envelope, not the whole response: the
+                # publish evidence carries a path list per mapping, which on a
+                # large Bot would dwarf the failure detail and repeat on every
+                # retry.
+                data = response.get("data")
                 logger.warning(
                     "[skills_pool.runtime] mapping publish reported verification "
-                    "inline as failed bot_id=%s user_id=%s contract=%s response=%s",
+                    "inline as failed bot_id=%s user_id=%s contract=%s "
+                    "message=%s verification=%s",
                     bot_id,
                     user_id,
                     mapping_contract_version,
-                    response,
+                    response.get("message"),
+                    (data or {}).get("verification") if isinstance(data, dict) else None,
                 )
             return MappingPublishOutcome(
                 published=True,
@@ -602,10 +609,12 @@ class SkillsPoolRuntime:
 def _inline_verification(response: dict[str, Any]) -> bool | None:
     """The publish response's own verification verdict, or ``None``.
 
-    ``None`` means the runtime said nothing — it predates the signal — and is
-    deliberately distinct from ``False``. Reading a missing key as "verified"
-    would let an old runtime silently skip verification altogether, so absence
-    must route to the separate verify call instead.
+    ``None`` means the runtime said nothing, and is deliberately distinct from
+    ``False``. Two things produce it: a runtime that predates the signal, and a
+    current one whose own verification could not run (its publish evidence
+    carries ``verification.ran = false`` and the errno). Both must route to the
+    separate verify call — reading a missing key as "verified" would skip
+    verification altogether.
     """
     data = response.get("data")
     if not isinstance(data, dict):

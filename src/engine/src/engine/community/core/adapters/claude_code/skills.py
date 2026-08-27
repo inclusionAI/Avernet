@@ -49,7 +49,6 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeStatus,
     PoolLayoutRollbackRequest,
     PoolMappingPublishResult,
-    inline_verification_verdict,
     PoolMappingSourceLayout,
     PoolMappingVerificationResult,
     PoolQuarantineCleanupRequest,
@@ -65,6 +64,7 @@ from engine.community.core.skills.models import (
     SyncBindPathsRequest,
     SyncSymlinksRequest,
     SyncSymlinksResult,
+    inline_verification_verdict,
 )
 from engine.community.core.skills.protocol import SkillsService
 from engine.community.plugin_api.claude_code.skills import ClaudeCodeSkillsPort

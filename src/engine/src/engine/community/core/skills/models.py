@@ -296,7 +296,7 @@ class PoolMappingSourceLayout(StrEnum):
     LEGACY = "legacy"
 
 
-def inline_verification_verdict(raw: Any) -> bool | None:
+def inline_verification_verdict(raw: dict[str, Any]) -> bool | None:
     """Decode a publish response's ``verified`` field.
 
     Only a real bool is a verdict. A missing key means the runtime predates
@@ -304,7 +304,7 @@ def inline_verification_verdict(raw: Any) -> bool | None:
     neither may become ``False``, which the client treats as a real,
     final verification failure and answers by refusing to converge.
     """
-    verified = raw.get("verified") if isinstance(raw, dict) else None
+    verified = raw.get("verified")
     return verified if isinstance(verified, bool) else None
 
 
@@ -357,6 +357,7 @@ __all__ = [
     "PoolLayoutRollbackRequest",
     "PoolMappingPublishResult",
     "PoolMappingSourceLayout",
+    "inline_verification_verdict",
     "PoolMappingVerificationResult",
     "PoolQuarantineCleanupRequest",
     "PoolQuarantineCleanupResult",

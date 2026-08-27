@@ -2107,12 +2107,13 @@ def test_publish_reports_inline_verification(tmp_path: Path) -> None:
     # And the same check run separately must agree, or the inline verdict is
     # not standing in for anything.
     assert verify_skill_mappings(mappings=mappings, home=home).valid is True
-    assert published.evidence["verification"] == {
-        "ran": True,
-        "valid": True,
-        "failure_count": 0,
-        "first_failures": [],
-    }
+    digest = published.evidence["verification"]
+    assert digest["ran"] is True
+    assert digest["valid"] is True
+    assert digest["failure_count"] == 0
+    # Coverage counters stay: a valid verdict over nothing is vacuous, and
+    # once the caller skips its own verify this is the only record of it.
+    assert digest["managed_checked"] == 1
 
 
 def test_a_failing_inline_verification_is_reported_as_false(
@@ -2176,7 +2177,12 @@ def test_an_unverifiable_publish_reports_no_verdict_rather_than_failing(
     assert published.published is True
     assert published.verified is None  # → caller falls back to a separate verify
     assert "verified" not in published.to_data()
-    assert published.evidence["verification"] == {"ran": False}
+    digest = published.evidence["verification"]
+    assert digest["ran"] is False
+    # Not silent: an old runtime and a current one whose check could not run
+    # both report nothing, and only this tells them apart.
+    assert digest["error_type"] == "FileNotFoundError"
+    assert digest["errno"] == errno.ENOENT
 
 
 def test_a_result_that_did_not_verify_omits_the_key_entirely(tmp_path: Path) -> None:
@@ -2205,3 +2211,43 @@ def test_a_failed_publish_reports_no_verification_verdict(tmp_path: Path) -> Non
     assert result.published is False
     assert result.verified is None
     assert "verified" not in result.to_data()
+
+
+def test_cutover_finalize_trusts_the_publish_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The publish already verified the filesystem nothing has touched since.
+
+    Re-running the check here walks every mapping source a second time for an
+    answer already in hand — on the cutover critical path.
+    """
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    calls: list[str] = []
+    real_verify = layout_activation.verify_skill_mappings
+
+    def _counting_verify(**kwargs):
+        calls.append("verify")
+        return real_verify(**kwargs)
+
+    monkeypatch.setattr(layout_activation, "verify_skill_mappings", _counting_verify)
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[
+            SkillMapping(
+                source=str(pool_local / "handmade"),
+                target=str(legacy_local.parent / "handmade"),
+            )
+        ],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.COMMITTED
+    # Two: the publish's own inline pass, and the final verification after the
+    # marker write — which is legitimate, the filesystem changed in between.
+    # The third, re-checking an untouched tree straight after the publish, is
+    # the walk this path stopped doing.
+    assert len(calls) == 2

@@ -3168,12 +3168,15 @@ async def test_an_inactive_set_still_skips_projection_entirely():
 # already there. The scope the command declares is what decides.
 
 
-def _scoped_projector(pool=None, passport=None, factory=None):
+def _scoped_projector(pool=None, passport=None, factory=None, repository=None):
+    # ``repository`` shared with the reader when given, so projector-side
+    # flushes and reader-side reads land on one store.
+    repository = repository if repository is not None else _McpInstallations()
     return BotRuntimeProjector(
         factory=factory or _RuntimeFactory(),
         bot_repo=_RuntimeBots(),
-        repository=_McpInstallations(),
-        reader=_reader(_RuntimeSkills()),
+        repository=repository,
+        reader=_reader(_RuntimeSkills(), repository=repository),
         registry=_registry(pool_runtime=pool or _RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=passport or _RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
