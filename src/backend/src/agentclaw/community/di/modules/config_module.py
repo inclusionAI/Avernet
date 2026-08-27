@@ -571,6 +571,9 @@ class ConfigModule(Module):
             teclaw_template_uuid=block.get(
                 "teclaw_template_uuid", defaults.teclaw_template_uuid
             ),
+            eval_template_uuid=block.get(
+                "eval_template_uuid", defaults.eval_template_uuid
+            ),
             personal_bot_template_uuid=block.get(
                 "personal_bot_template_uuid", defaults.personal_bot_template_uuid
             ),

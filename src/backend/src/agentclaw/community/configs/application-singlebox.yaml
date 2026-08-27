@@ -143,6 +143,7 @@ user_config:
     # Relocated from di/config.py neutral defaults (C1).
     desktop_template_uuid: "TEMPLATE-f996ecc77d224ef7bd80757d8d2bcd0d"
     teclaw_template_uuid: "TEMPLATE-3106e731ffb04e0285e27c387e153737"
+    eval_template_uuid: "TEMPLATE-2e3192faa8994fe8bb8bc7be8671b431"
     personal_bot_template_uuid: "TEMPLATE-54942a40aa794eaaae2be166f94890ed"
 
   # BCN host — singlebox points at the local BCS (relocated from the hardcoded
