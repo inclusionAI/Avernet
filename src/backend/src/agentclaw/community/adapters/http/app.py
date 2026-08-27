@@ -428,28 +428,13 @@ def _trace_headers(request: Request) -> dict[str, str]:
     trace_id = getattr(request.state, "trace_id", None)
     return {"X-Trace-ID": trace_id} if trace_id else {}
 
-
-_WORK_ORDER_EVENT_HTTP_PATH = "/api/v1/work-orders/events"
-
-
 def _is_public_api(request: Request) -> bool:
     """Whether this request belongs to the public OpenAPI surface."""
     from agentclaw.community.adapters.http.openapi_v1.responses import is_public_api
-
     return is_public_api(request)
 
-
 def _uses_envelope_contract(request: Request) -> bool:
-    """Whether this request promises the uniform success/error envelope.
-
-    Existing internal ``/api`` routes retain their historical ``detail`` error
-    body.  The work-order event mirror opts into the same envelope as its
-    OpenAPI counterpart without widening that behavior to any other route.
-    """
-    return (
-        _is_public_api(request)
-        or request.url.path.rstrip("/") == _WORK_ORDER_EVENT_HTTP_PATH
-    )
+    return _is_public_api(request) or request.url.path.rstrip("/") == "/api/v1/work-orders/events"
 
 
 def _public_error_envelope(
