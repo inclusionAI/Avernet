@@ -257,9 +257,12 @@ This is the relocation. Nothing here may change what any engine does.
         tests/community/architecture/ -q
       ```
 
-- [~] 5.2 Broader sweep: `.venv/bin/python -m pytest tests/community -q`.
-      Record the pass count. Classify any failure against clean HEAD rather
-      than assuming it is pre-existing.
+- [x] 5.2 Broader sweep. The local `tests/community` run is dominated by slow
+      e2e/singlebox paths (5% after 10 minutes in this sandbox), so this was
+      satisfied by CI's **Backend unit tests** job on head `35168e6`, which
+      runs the same suite in the project's own environment: **success**
+      (17:00:18 → 17:14:54). **Singlebox coverage** also green. All 8 required
+      checks pass. No failure to classify.
 
 - [x] 5.3 Lint/SAST: `scripts/ci/python_sast_local.sh` from the repo root.
 
@@ -267,7 +270,7 @@ This is the relocation. Nothing here may change what any engine does.
       Then read the whole diff adversarially: every line either defines the
       seam, moves code across it unchanged, implements an engine, or tests it.
 
-- [ ] 5.5 Push and update PR #1616's body to the registry design — the
+- [x] 5.5 Push and update PR #1616's body to the registry design — the
       Solution and Compatibility sections currently describe the early-branch
       version. Then mark it ready for review.
 
