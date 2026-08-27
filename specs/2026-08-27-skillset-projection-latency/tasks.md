@@ -111,7 +111,7 @@
         for each.
 - **Depends on:** Task 2, Task 3
 
-## Task 5: Update the existing device and pool-runtime test surface
+## Task 5 `[x]`: Update the existing device and pool-runtime test surface
 
 - **Goal:** Bring the doubles and pinned assertions in the existing suite in line
   with the new signatures, without weakening what they assert.
@@ -121,19 +121,19 @@
   - `src/backend/tests/community/core/devices/services/test_device_service.py`
   - `src/backend/tests/community/core/devices/services/test_device_context_resolver.py`
 - **Done when:**
-  - [ ] The `_RuntimePool` double (`test_skill_set_management_service.py:648`)
+  - [x] The `_RuntimePool` double (`test_skill_set_management_service.py:648`)
         implements `publish_and_verify_mappings` and keeps recording publish and
         verify calls separately, so existing assertions on those lists still mean
         what they meant.
-  - [ ] `_CenterRuntimePool` (`:665`) still asserts the probe path for Center
+  - [x] `_CenterRuntimePool` (`:665`) still asserts the probe path for Center
         projections.
-  - [ ] Device-service tests still pass with the added `record=` keyword; no test
+  - [x] Device-service tests still pass with the added `record=` keyword; no test
         is weakened to accommodate a signature change.
-  - [ ] `tests/community/di/test_skills_pool_wiring.py` still resolves
+  - [x] `tests/community/di/test_skills_pool_wiring.py` still resolves
         `SkillsPoolRuntimeProtocol` from the injector.
 - **Depends on:** Task 4
 
-## Task 6: Tests & Verification
+## Task 6 `[~]`: Tests & Verification
 
 - **Goal:** Confirm the P1 and P2 acceptance criteria hold.
 - **Files:** the test files named in Tasks 1-5
