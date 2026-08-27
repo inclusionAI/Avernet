@@ -22,6 +22,9 @@ ENV npm_config_python=/usr/bin/python3
 # Allow optional npm registry mirror (e.g. China CI builds).
 ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
 ENV npm_config_registry=${NPM_CONFIG_REGISTRY}
+# Allow optional Node headers mirror for node-gyp native builds.
+ARG NODEJS_DIST_URL=https://nodejs.org/dist
+ENV npm_config_disturl=${NODEJS_DIST_URL}
 
 WORKDIR /build
 
@@ -42,6 +45,9 @@ FROM node:22-bookworm-slim
 # Allow optional npm registry mirror (must match builder stage).
 ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
 ENV npm_config_registry=${NPM_CONFIG_REGISTRY}
+# Allow optional Node headers mirror for node-gyp native builds.
+ARG NODEJS_DIST_URL=https://nodejs.org/dist
+ENV npm_config_disturl=${NODEJS_DIST_URL}
 
 ENV NODE_ENV=production \
     EVOLVETRACE_ENV=prod \
