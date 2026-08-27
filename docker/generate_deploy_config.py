@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
 """
-Generate bcsfuse deployment configs from .env.local, masking only secrets.
+Generate bcsfuse deployment configs from .env.local or a supplied env file.
 
 Usage:
-  python docker/generate_deploy_config.py /path/to/output/dir
+  # Generate example configs with masked secrets (default, reads .env.local)
+  python docker/generate_deploy_config.py /path/to/output/dir [image_tag]
+
+  # Generate real deployment configs from a filled env file
+  python docker/generate_deploy_config.py --env /path/to/bcsfuse.env --no-mask \
+      /path/to/output/dir [image_tag]
 
 It creates:
   - bcsfuse.env
   - bcsfuse-deployment.yaml
-
-Sensitive fields (passwords / tokens) are left as REPLACE_WITH_REAL_* placeholders.
 """
 from __future__ import annotations
 
+import argparse
 import pathlib
 import re
 import sys
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
-ENV_FILE = PROJECT_ROOT / ".env.local"
+DEFAULT_ENV_FILE = PROJECT_ROOT / ".env.local"
+EXAMPLE_ENV_FILE = PROJECT_ROOT / "docker" / "bcsfuse.env.example"
 
 # Variables we care about, grouped by sensitivity.
 SENSITIVE_KEYS = {
@@ -228,35 +233,42 @@ spec:
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        print(f"Usage: python {pathlib.Path(__file__).name} <output_dir> [image_tag]", file=sys.stderr)
-        return 1
+    parser = argparse.ArgumentParser(description="Generate bcsfuse deployment configs.")
+    parser.add_argument("output_dir", help="Directory to write bcsfuse.env and bcsfuse-deployment.yaml")
+    parser.add_argument("image_tag", nargs="?", default="avernet-registry.cn-beijing.cr.aliyuncs.com/avernet/bcsfuse:CHANGE_ME", help="Container image reference")
+    parser.add_argument("--env", dest="env_file", help="Env file to read (default: .env.local)")
+    parser.add_argument("--no-mask", action="store_true", help="Do not mask secrets in generated files")
+    args = parser.parse_args()
 
-    out_dir = pathlib.Path(sys.argv[1]).expanduser().resolve()
+    out_dir = pathlib.Path(args.output_dir).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    image_tag = sys.argv[2] if len(sys.argv) >= 3 else "avernet-registry.cn-beijing.cr.aliyuncs.com/avernet/bcsfuse:CHANGE_ME"
+    env_file = pathlib.Path(args.env_file).expanduser().resolve() if args.env_file else DEFAULT_ENV_FILE
 
-    if not ENV_FILE.exists():
-        print(f"ERROR: {ENV_FILE} not found", file=sys.stderr)
+    if not env_file.exists():
+        print(f"ERROR: env file not found: {env_file}", file=sys.stderr)
         return 1
 
-    values = parse_env_file(ENV_FILE)
+    values = parse_env_file(env_file)
     missing = REQUIRED_KEYS - values.keys()
     if missing:
-        print(f"ERROR: missing keys in .env.local: {sorted(missing)}", file=sys.stderr)
+        print(f"ERROR: missing keys in {env_file}: {sorted(missing)}", file=sys.stderr)
         return 1
 
-    values = mask_secrets(values)
+    if not args.no_mask:
+        values = mask_secrets(values)
 
     env_path = write_env_file(out_dir, values)
-    yaml_path = write_deployment_yaml(out_dir, values, image_tag)
+    yaml_path = write_deployment_yaml(out_dir, values, args.image_tag)
 
     print(f"Generated:\n  {env_path}\n  {yaml_path}")
-    print(f"\nNext steps:")
-    print(f"  1. Edit {env_path} and fill in REPLACE_WITH_* values.")
-    print(f"  2. Update image tag in {yaml_path} if needed.")
-    print(f"  3. Copy these files to your deploy host and run: kubectl apply -f {yaml_path.name}")
+    if args.no_mask:
+        print(f"\nNext step:\n  kubectl apply -f {yaml_path.name}")
+    else:
+        print(f"\nNext steps:")
+        print(f"  1. Edit {env_path} and fill in REPLACE_WITH_* values.")
+        print(f"  2. Update image tag in {yaml_path} if needed.")
+        print(f"  3. Copy these files to your deploy host and run: kubectl apply -f {yaml_path.name}")
     return 0
 
 
