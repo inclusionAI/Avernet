@@ -119,7 +119,6 @@ internal_dependencies:
   - agentclaw.community.kernel.device_dto            # OutBoundOperationRule — typed in baas_service.py Protocol (B6)
   - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py
-  - agentclaw.community.plugin_api.system_config    # SystemConfigServiceProtocol — moved here; api re-exports so core can depend on the contract without importing api
   - agentclaw.community.core.task.task_runner.integration.ports  # OpenApiBotPort — typed in task_grant_service.py (stateless secbaas grant/revoke relay)
   - agentclaw.community.log                          # get_logger used by task_grant_service.py grant/revoke relay logging
 ```

@@ -7,7 +7,7 @@
 - 开启(``True``)→ 派发对 LLM 决出的 assignee 做「搜推候选 ∩ claim_on 名单」JOIN:未在名单的候选
   记 ``unauthorized_bots`` 降 MISS / 部分降级,引导 owner 前端开启「任务认领」grant 公共 api-key。
 
-存储:复用 ``SystemConfigServiceProtocol`` KV(category=``task``,key=``claim_join_filter_enabled``)
+存储:复用 ``_SystemConfigStore`` KV(category=``task``,key=``claim_join_filter_enabled``)
 ——集群级、跨副本共享、持久化(重启后 HA 仍按库值,默认关闭)。读热点加 ~15s TTL 缓存(写穿失效),
 默认关闭 + 读取异常 fail-open(=False),确保任何情况下不回归现有派发行为。env 经 ``get_current_env()``
 归一(prod/pre/dev)。
@@ -17,13 +17,33 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from injector import inject
-
-from agentclaw.community.plugin_api.system_config import SystemConfigServiceProtocol
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
+
+
+@runtime_checkable
+class _SystemConfigStore(Protocol):
+    """claim_on JOIN 开关实际调用的「系统配置 KV」契约(category+key+env 维度读写)。
+
+    仅暴露本开关用到的 ``get_config``/``set_config`` 两法(接口隔离,不抱完整系统配置大契约);生产由 task_module 注入 ``SystemConfigService``
+    实例(结构满足本 Protocol);未注入(纯内核/测试)→ None → 恒关 fail-open。本合约定义在
+    core 内,故 claim_join_gate 不引 ``api/`` 层(满足 core→api 分层门禁)。"""
+
+    def get_config(self, *, category: str, config_key: str, env: str) -> Any: ...
+
+    def set_config(
+        self,
+        *,
+        category: str,
+        config_key: str,
+        config_value: Any,
+        env: str,
+        description: str | None = None,
+        operator: str | None = None,
+    ) -> int: ...
 
 logger = get_logger()
 
@@ -65,13 +85,13 @@ def _coerce_bool(value) -> bool:
 
 
 class TaskClaimJoinGate(TaskClaimJoinGateProtocol):
-    """claim_on JOIN 开关实现:复用 corp 装配的 ``SystemConfigServiceProtocol`` KV。
+    """claim_on JOIN 开关实现:复用 corp 装配的 ``_SystemConfigStore`` KV。
 
     ``config`` 未装配(community/singlebox/纯测试)→ 恒返回 False(fail-open,不回归)。
     """
 
     @inject
-    def __init__(self, config: SystemConfigServiceProtocol | None = None) -> None:
+    def __init__(self, config: _SystemConfigStore | None = None) -> None:
         self._config = config
         self._lock = threading.Lock()
         self._cache: bool | None = None
@@ -114,7 +134,7 @@ class TaskClaimJoinGate(TaskClaimJoinGateProtocol):
         if self._config is None:
             # 未装配配置子系统:不开关(不落库),恒表示关闭 → 调用方仅可读;写视为失败但 fail-open。
             logger.warning(
-                "[task][claim-join] SystemConfigServiceProtocol 未装配,set_enabled 忽略(恒关闭)"
+                "[task][claim-join] _SystemConfigStore 未装配,set_enabled 忽略(恒关闭)"
             )
             return False
         self._config.set_config(
