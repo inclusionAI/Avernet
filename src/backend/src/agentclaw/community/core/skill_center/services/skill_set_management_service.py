@@ -43,43 +43,13 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 )
 from agentclaw.community.core.skill_center.services._mutation_flow import (
     MutationProjectionFlow,
+    skill_claim_scope,
+    skill_release_scope,
 )
 from agentclaw.community.core.workspace.skill_layout import (
     runtime_layout_engine_for_bot,
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
-
-
-def _skill_claim_scope(result: DesiredStateMutation) -> ProjectionScope:
-    """A Skill mutation that adds the Skill, and with it its MCP dependencies.
-
-    ``mcp`` follows the dependencies rather than being hard-coded: a Skill with
-    none leaves the MCP set untouched, so projecting that half would re-declare
-    an unchanged allow-list and re-push an unchanged Passport manifest.
-
-    The codes are candidates. The projector intersects them with the set it
-    actually resolved, so a dependency that does not survive projection is
-    never delivered.
-    """
-    return ProjectionScope(
-        skills=True,
-        mcp=bool(result.mcp_codes),
-        claimed_mcp=result.mcp_codes,
-    )
-
-
-def _skill_release_scope(result: DesiredStateMutation) -> ProjectionScope:
-    """The mirror of ``_skill_claim_scope`` for a Skill leaving the Bot.
-
-    Also candidates: another Skill or the default policy may still supply the
-    same code, and the projector subtracts the projected set before deleting
-    any device configuration.
-    """
-    return ProjectionScope(
-        skills=True,
-        mcp=bool(result.mcp_codes),
-        released_mcp=result.mcp_codes,
-    )
 
 
 class SkillSetManagementService:
@@ -350,7 +320,7 @@ class SkillSetManagementService:
                 bot_id=bot_id,
                 actor_id=user_id,
                 action="default_set_unexclude_skill",
-                scope_from_result=_skill_claim_scope,
+                scope_from_result=skill_claim_scope,
                 mutation=lambda: self._repository.unexclude_default_skill(
                     bot_id=bot_id,
                     owner_id=str(bot["owner_id"]),
@@ -366,7 +336,7 @@ class SkillSetManagementService:
             actor_id=user_id,
             action="skill_set_add_skill",
             runtime_required=bool(target.get("is_active")),
-            scope_from_result=_skill_claim_scope,
+            scope_from_result=skill_claim_scope,
             mutation=lambda: self._repository.add_skill(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -397,7 +367,7 @@ class SkillSetManagementService:
                 bot_id=bot_id,
                 actor_id=user_id,
                 action="default_set_exclude_skill",
-                scope_from_result=_skill_release_scope,
+                scope_from_result=skill_release_scope,
                 mutation=lambda: self._repository.exclude_default_skill(
                     bot_id=bot_id,
                     owner_id=str(bot["owner_id"]),
@@ -413,7 +383,7 @@ class SkillSetManagementService:
             actor_id=user_id,
             action="skill_set_remove_skill",
             runtime_required=bool(target.get("is_active")),
-            scope_from_result=_skill_release_scope,
+            scope_from_result=skill_release_scope,
             mutation=lambda: self._repository.remove_skill(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),

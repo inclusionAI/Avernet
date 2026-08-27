@@ -33,6 +33,38 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 
 
+def skill_claim_scope(result: DesiredStateMutation) -> ProjectionScope:
+    """A Skill mutation that adds the Skill, and with it its MCP dependencies.
+
+    ``mcp`` follows the dependencies rather than being hard-coded: a Skill with
+    none leaves the MCP set untouched, so projecting that half would re-declare
+    an unchanged allow-list and re-push an unchanged Passport manifest.
+
+    The codes are candidates. The projector intersects them with the set it
+    actually resolved, so a dependency that does not survive projection is
+    never delivered.
+    """
+    return ProjectionScope(
+        skills=True,
+        mcp=bool(result.mcp_codes),
+        claimed_mcp=result.mcp_codes,
+    )
+
+
+def skill_release_scope(result: DesiredStateMutation) -> ProjectionScope:
+    """The mirror of ``skill_claim_scope`` for a Skill leaving the Bot.
+
+    Also candidates: another Skill or the default policy may still supply the
+    same code, and the projector subtracts the projected set before deleting
+    any device configuration.
+    """
+    return ProjectionScope(
+        skills=True,
+        mcp=bool(result.mcp_codes),
+        released_mcp=result.mcp_codes,
+    )
+
+
 class MutationProjectionFlow:
     """Apply one desired-state mutation and synchronously project the runtime.
 
