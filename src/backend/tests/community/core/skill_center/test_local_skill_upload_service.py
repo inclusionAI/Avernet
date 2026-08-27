@@ -6,7 +6,6 @@ import asyncio
 import io
 import zipfile
 from types import SimpleNamespace
-from types import MethodType
 
 import pytest
 from agentclaw.community.core.skill_center.errors import (
@@ -53,19 +52,6 @@ def _zip(entries: dict[str, bytes], *, attrs: dict[str, int] | None = None) -> b
                 info.external_attr = attrs[path]
             archive.writestr(info, content)
     return payload.getvalue()
-
-
-def _legacy_upload_plan(package: bytes) -> tuple[str, str, list[tuple[str, bytes]]]:
-    """Parse a ZIP through the retiring BFF upload semantics."""
-    legacy = SimpleNamespace(RESERVED_SKILL_NAMES=SkillService.RESERVED_SKILL_NAMES)
-    legacy._validate_upload_path = SkillService._validate_upload_path
-    legacy._is_ignored_upload_path = SkillService._is_ignored_upload_path
-    legacy._prepare_upload_plan = MethodType(SkillService._prepare_upload_plan, legacy)
-    uploaded_files = SkillService._extract_zip_files(legacy, package)
-    name, metadata, files = legacy._prepare_upload_plan(uploaded_files)
-    return name, metadata["description"], [
-        (item["relative_path"], item["content"]) for item in files
-    ]
 
 
 class _Repo:
@@ -823,37 +809,6 @@ def test_zip_accepts_root_skill_with_subdirectories_and_matching_wrapper():
         )
     )
     assert name == "wrapped" and [path for path, _ in files] == ["SKILL.md", "a.txt"]
-
-
-@pytest.mark.parametrize(
-    ("entries", "expected_name"),
-    [
-        (
-            {
-                "rd-prd-review/SKILL.md": _skill_md("rd-prd-review"),
-                "rd-prd-review/.DS_Store": b"finder metadata",
-                "__MACOSX/._rd-prd-review": b"appledouble",
-                "__MACOSX/rd-prd-review/._SKILL.md": b"appledouble",
-            },
-            "rd-prd-review",
-        ),
-        ({"rd-cr-java/SKILL.md": _skill_md("rd-cr-java")}, "rd-cr-java"),
-        (
-            {
-                "rd-development/SKILL.md": _skill_md("rd-development"),
-                "rd-development/references/implementer-prompt.md": b"prompt",
-            },
-            "rd-development",
-        ),
-    ],
-)
-def test_openapi_zip_normalization_matches_legacy_bff_upload_parser(
-    entries, expected_name
-):
-    package = _zip(entries)
-
-    assert LocalSkillUploadService._unpack(package) == _legacy_upload_plan(package)
-    assert LocalSkillUploadService._unpack(package)[0] == expected_name
 
 
 @pytest.mark.parametrize(

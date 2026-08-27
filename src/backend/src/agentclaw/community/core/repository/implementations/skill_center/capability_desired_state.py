@@ -49,10 +49,6 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
     CapabilityDesiredState,
     DesiredStateMutation,
 )
-from agentclaw.community.core.skill_center.orm import (
-    DefaultSkillsetMcpExclusion,
-    DefaultSkillsetSkillExclusion,
-)
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -417,6 +413,7 @@ class CapabilityDesiredStateRepository(
                 default_engine_types=default_engine_types,
                 locked=True,
             )
+            self._ordinary(row)
             old = self._snapshot(
                 session, bot_id, owner_id, engine_type=engine_type
             )
@@ -542,7 +539,7 @@ class CapabilityDesiredStateRepository(
         state: CapabilityDesiredState,
         engine_type: str | None = None,
     ) -> None:
-        """Atomically restore every Bot-owned SkillSet desired-state fact."""
+        """Atomically restore Membership, set-state and Installation facts."""
         with self._db.transactional_orm_session() as session:
             query = self._scope(session.query(SkillSet), SkillSet).filter(
                 SkillSet.bolt_id == bot_id,

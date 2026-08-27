@@ -189,7 +189,7 @@ class TestDeleteSkillsetCli:
     """DELETE /api/skillsets/{id}/clis/{resource_code} — 删除默认能力集 CLI。"""
 
     def test_delete_cli_updates_passport_with_remaining_latest_clis(self, gw_client, app_with_testing_modules):
-        _mock_factory, mock_passport, _control = _bind_skillset_deps(app_with_testing_modules)
+        _mock_factory, mock_passport = _bind_skillset_deps(app_with_testing_modules)
 
         resp = gw_client.delete("/api/skillsets/1/clis/cli.delete", params={
             "entity_id": "448524",
@@ -207,44 +207,4 @@ class TestDeleteSkillsetCli:
                 "mcp_codes": ["test-mcp"],
                 "cli_items": [{"cli_code": "cli.keep", "cli_name": "Keep CLI", "cli_desc": "kept"}],
             },
-        )
-
-
-class TestDeleteDefaultMembers:
-    """Default resource removal stays on the shared control-plane seam."""
-
-    def test_delete_default_skill_calls_control_plane_with_owner_scope(
-        self, gw_client, app_with_testing_modules
-    ):
-        _factory, _passport, control = _bind_skillset_deps(app_with_testing_modules)
-        response = gw_client.delete(
-            "/api/skillsets/1/skills/10",
-            params={
-                "user_id": "448524", "entity_id": "448524",
-                "bot_id": "bot_test_001", "engine_type": "openclaw",
-            },
-        )
-
-        assert_success(response.json(), "DELETE default Skill")
-        control.remove_skill.assert_awaited_once_with(
-            bot_id="bot_test_001", owner_id="448524", user_id="448524",
-            set_id="1", skill_id="10",
-        )
-
-    def test_delete_default_mcp_calls_control_plane_with_owner_scope(
-        self, gw_client, app_with_testing_modules
-    ):
-        _factory, _passport, control = _bind_skillset_deps(app_with_testing_modules)
-        response = gw_client.delete(
-            "/api/skillsets/1/mcps/mcp.dynamic-default",
-            params={
-                "entity_id": "448524", "entity_type": "staff",
-                "bot_id": "bot_test_001", "engine_type": "openclaw",
-            },
-        )
-
-        assert_success(response.json(), "DELETE default MCP")
-        control.remove_mcp.assert_awaited_once_with(
-            bot_id="bot_test_001", owner_id="448524", user_id="448524",
-            set_id="1", server_code="mcp.dynamic-default",
         )

@@ -43,7 +43,6 @@ from agentclaw.community.core.skill_center.services.skill_set_management_service
     SkillSetManagementService,
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
-from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
@@ -464,17 +463,6 @@ def remove_member_happy():
 
 
 @_case(
-    "DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}",
-    "excludes_default_skill",
-    ExpectSuccess(status=200, json_contains={"data": {"changed": True}}),
-    seed=_seed_default,
-    extra=(_assert_default_skill_excluded, _assert_reconciled),
-)
-def remove_default_member_happy():
-    pass
-
-
-@_case(
     "DELETE",
     "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}",
     "missing_set",
@@ -635,21 +623,6 @@ def add_mcp_error():
 
 @_case("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}", "removes_mcp", ExpectSuccess(status=200, json_contains={"data": {"changed": True}}), seed=_seed_mcp_member)
 def remove_mcp_happy():
-    pass
-
-
-@_case(
-    "DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}",
-    "excludes_dynamic_default_mcp",
-    ExpectSuccess(status=200, json_contains={"data": {"changed": True}}),
-    seed=_seed_default,
-    extra=(_assert_default_mcp_excluded, _assert_reconciled),
-    path_params={
-        "bot_id": _BOT_ID, "set_id": "1",
-        "server_code": "mcp.dynamic-default",
-    },
-)
-def remove_default_mcp_happy():
     pass
 
 
