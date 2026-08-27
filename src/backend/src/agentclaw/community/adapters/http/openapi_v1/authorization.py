@@ -381,6 +381,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/all"): NoCheck("a collection, not one addressed bot"),
     ("GET", "/openapi/v1/bots/authorized"):
         NoCheck("a collection, not one addressed bot"),
+    ("GET", "/openapi/v1/bots/routines/all"):
+        NoCheck("a collection, not one addressed bot"),
     ("GET", "/openapi/v1/bots/catalog/discover"): NoCheck("tenant-identical catalogue"),
     ("GET", "/openapi/v1/bots/catalog/search"): NoCheck("tenant-identical catalogue"),
     ("GET", "/openapi/v1/bots/ceiling"):
