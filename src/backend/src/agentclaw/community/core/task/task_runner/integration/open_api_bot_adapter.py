@@ -9,7 +9,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator
 
 import httpx
 
@@ -76,13 +77,53 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
     def __init__(self, keys: ApiKeyProvider, *, http_client: httpx.AsyncClient | None = None,
                  ensure_grant: bool = False) -> None:
         self._k = keys
+        self._owns_client = http_client is None
         self._client = http_client or httpx.AsyncClient(base_url=keys.base_url)
+        # httpx AsyncClient/connection pool 在跨 asyncio 事件循环上不安全:task 模块有 FastAPI loop +
+        # harness/poller/scheduler 多个 loop(见 BcsHttpAdapter 同款问题)。把自建 client pin 到首个 loop,
+        # 其它 loop 调用时在 _client_for_current_loop 内用一次性 client(在其创建的 loop 上 aclose,无泄漏)。
+        # 注入的 client(测试/MockTransport)由调用方管理 loop 绑定,不重建。
+        self._client_loop: asyncio.AbstractEventLoop | None = None
         # ensure_grant=False(默认):OOB 预授权模式,跳过 allowed-bots GET/grant,直进 send_message。
         # admin allowed-bots 端点只认 Human Cookie,corp 无 cookie 时 Bearer-only 打它会被 BaaS 判 500;
         # prod 假定 bot 已 OOB 预授权 → 默认跳过。需自查/grant 的(测试/联调)显式传 ensure_grant=True。
         self._ensure_grant = ensure_grant
 
+    @asynccontextmanager
+    async def _client_for_current_loop(self) -> AsyncIterator[httpx.AsyncClient]:
+        """Yield an AsyncClient that belongs to the current event loop.
+
+        httpx.AsyncClient 的连接池(httpcore/anyio 的 asyncio 原语)在首次使用时绑定到当前 loop,跨 loop
+        复用会抛 ``RuntimeError: ... is bound to a different event loop``。本适配器被编排核在多个 loop 上驱动
+        (FastAPI loop + harness/poller/scheduler loop,见 BcsHttpAdapter 同款):把自建 client pin 到首个 loop,
+        其它 loop 调用时用一次性 client 并在它创建的 loop 上 aclose(安全、无泄漏)。注入的 client 由调用方管理。
+        """
+        current_loop = asyncio.get_running_loop()
+        if not self._owns_client:
+            yield self._client
+            return
+        if self._client_loop is None:
+            self._client_loop = current_loop
+            yield self._client
+            return
+        if self._client_loop is current_loop:
+            yield self._client
+            return
+        logger.warning(
+            "[task][openapi_bot] event loop changed; using isolated client previous_loop=%s current_loop=%s",
+            id(self._client_loop), id(current_loop),
+        )
+        client = httpx.AsyncClient(base_url=self._k.base_url)
+        try:
+            yield client
+        finally:
+            await client.aclose()
+
     async def _aclose(self) -> None:
+        # 仅在自建 client pin 的 loop(== 当前 running loop)上 close;跨 loop 时由 _client_for_current_loop
+        # 用一次性 client 自行 close,此处的持久 client 留待其归属 loop 关闭。注入的 client 由调用方管理生命周期。
+        if self._owns_client and self._client_loop is not asyncio.get_running_loop():
+            return
         await self._client.aclose()
 
     def _headers(self) -> dict[str, str]:
@@ -107,8 +148,9 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
         prefix = self._k.api_key_prefix or self._k.api_key[:_DEFAULT_KEY_PREFIX_LEN]
         logger.info("[task][openapi_bot] >>> ensure_grant GET /api/v1/api-keys/%s/allowed-bots bot_id=%s base_url=%s",
                     prefix, bot_id, self._k.base_url)
-        r = await self._client.get(f"/api/v1/api-keys/{prefix}/allowed-bots",
-                                   headers=self._headers())
+        async with self._client_for_current_loop() as client:
+            r = await client.get(f"/api/v1/api-keys/{prefix}/allowed-bots",
+                                 headers=self._headers())
         logger.info("[task][openapi_bot] <<< ensure_grant GET allowed-bots status=%s body=%s",
                     r.status_code, _resp_summary(r))
         _map_status(r)
@@ -118,9 +160,10 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
             return
         logger.info("[task][openapi_bot] >>> ensure_grant POST grant bot_id=%s (cookie_set=%s referer_set=%s)",
                     bot_id, bool(self._k.cookie), bool(self._k.referer))
-        g = await self._client.post(f"/api/v1/api-keys/{prefix}/allowed-bots/grant",
-                                    json={"bot_id": bot_id},
-                                    headers={"Cookie": self._k.cookie, "Referer": self._k.referer})
+        async with self._client_for_current_loop() as client:
+            g = await client.post(f"/api/v1/api-keys/{prefix}/allowed-bots/grant",
+                                  json={"bot_id": bot_id},
+                                  headers={"Cookie": self._k.cookie, "Referer": self._k.referer})
         logger.info("[task][openapi_bot] <<< ensure_grant POST grant status=%s body=%s",
                     g.status_code, _resp_summary(g))
         if g.status_code in (401, 403):
@@ -130,9 +173,10 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
     async def send_message(self, *, bot_id: str, message: str, metadata: dict[str, Any]) -> BotSendResult:
         logger.info("[task][openapi_bot] >>> send_message POST /openapi/v1/messages bot_id=%s base_url=%s msg_len=%s",
                     bot_id, self._k.base_url, len(message or ""))
-        r = await self._client.post("/openapi/v1/messages",
-                                    json={"bot_id": bot_id, "message": message},
-                                    headers=self._headers())
+        async with self._client_for_current_loop() as client:
+            r = await client.post("/openapi/v1/messages",
+                                  json={"bot_id": bot_id, "message": message},
+                                  headers=self._headers())
         logger.info("[task][openapi_bot] <<< send_message status=%s body=%s",
                     r.status_code, _resp_summary(r))
         _map_status(r)
@@ -152,8 +196,9 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
 
     async def get_run(self, run_id: str) -> dict[str, Any]:
         logger.info("[task][openapi_bot] >>> get_run GET /openapi/v1/messages/%s base_url=%s", run_id, self._k.base_url)
-        r = await self._client.get(f"/openapi/v1/messages/{run_id}",
-                                   headers=self._headers())
+        async with self._client_for_current_loop() as client:
+            r = await client.get(f"/openapi/v1/messages/{run_id}",
+                                 headers=self._headers())
         logger.info("[task][openapi_bot] <<< get_run status=%s body=%s", r.status_code, _resp_summary(r))
         _map_status(r)
         payload = r.json()

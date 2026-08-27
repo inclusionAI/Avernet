@@ -264,3 +264,55 @@ def test_ensure_grant_skipped_by_default():
     a = OpenApiBotAdapter(_Key(), http_client=client)  # 默认 ensure_grant=False
     _run(a.ensure_grant("bot9:ent1"))
     assert "allowed-bots" not in seen.get("path", ""), f"默认应跳过 ensure_grant,却发了 {seen.get('path')!r}"
+
+
+
+
+def test_owned_client_pinned_reused_same_loop_isolated_across_loops():
+    """跨事件循环复用同一 httpx.AsyncClient 会抛 `RuntimeError: ... bound to a different event loop`
+    (生产:harness/scheduler/recovery 经 asyncio.run,HTTP 经 new_event_loop,共同驱动同一 adapter)。
+    _client_for_current_loop 把自建 client pin 到首个 loop(同 loop 复用,保留连接池),其它 loop 用一次性
+    client(对齐 BcsHttpAdapter 同款修复)。
+    """
+    import asyncio
+
+    a = OpenApiBotAdapter(_Key())  # 未注入 client → 自建,_owns_client=True(生产路径)
+
+    async def take():
+        async with a._client_for_current_loop() as c:
+            return c
+
+    # 首个持久 loop:pin,多次取复用同一持久 client(保留连接池)
+    loop_a = asyncio.new_event_loop()
+    c_a1 = c_a2 = None
+    try:
+        c_a1 = loop_a.run_until_complete(take())
+        c_a2 = loop_a.run_until_complete(take())
+    finally:
+        loop_a.close()
+    assert c_a1 is c_a2, "同一(首个)loop 内应复用 pinned 持久 client"
+
+    # 另一 loop(与首个不同):一次性独立 client,不得与首个 loop 的 client 共享
+    loop_b = asyncio.new_event_loop()
+    c_b = None
+    try:
+        c_b = loop_b.run_until_complete(take())
+    finally:
+        loop_b.close()
+    assert c_b is not c_a1, "跨 loop 不得共享连接池(否则抛 different event loop)"
+    assert a._client_loop is not None
+
+
+def test_injected_client_kept_across_loops():
+    """注入的 client(测试 MockTransport)由调用方管理 loop 绑定;_client_for_current_loop 原样返回同一
+    client,跨 loop 不变、永不重建。"""
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, json={"data": {}}))
+    injected = httpx.AsyncClient(transport=transport, base_url="http://b:8890")
+    a = OpenApiBotAdapter(_Key(), http_client=injected, ensure_grant=True)
+
+    async def take():
+        async with a._client_for_current_loop() as c:
+            return c
+
+    assert _run(take()) is injected
+    assert _run(take()) is injected  # 跨 loop 仍是注入的同一 client
