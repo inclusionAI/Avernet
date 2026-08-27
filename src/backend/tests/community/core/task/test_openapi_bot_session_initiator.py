@@ -296,23 +296,29 @@ class TestBuildSessionUrl:
 # ---------------------------------------------------------------------------
 
 class TestUpdateSessionTitle:
-    """Verify _update_session_title guards against double agent:main: prefix.
+    """Verify _update_session_title guards against double agent:main: prefix
+    and calls engine directly (not the OpenAPI v1 public surface).
 
     BaaS may return session_id already containing the ``agent:main:`` prefix.
-    _build_session_url was fixed in PR #1615, but _update_session_title
-    was missed — this test class ensures the same guard is applied.
+    Also, the title update now resolves engine target and calls the engine's
+    ``POST /api/sessions/{session_id}/update`` directly, bypassing the
+    OpenAPI v1 admission layer (which requires Bearer/Cookie auth → 401 for
+    internal service calls).
     """
 
     @staticmethod
-    def _capture_patch_url(session_id: str, *, bot_id: str = "bot-1",
-                           owner_id: str = "owner-1") -> str | None:
-        """Run _update_session_title with mocked httpx, return the captured URL."""
+    def _capture_update_url(session_id: str, *, bot_id: str = "bot-1",
+                            owner_id: str = "owner-1") -> str | None:
+        """Run _update_session_title with mocked engine target + httpx,
+        return the captured POST URL."""
         from unittest.mock import MagicMock, patch
 
         initiator = OpenApiBotSessionInitiator(
             openapi_bot=_make_openapi_bot(),
             backend_url="http://localhost:8888",
         )
+        # Mock _resolve_engine_target to return a fake engine address
+        initiator._resolve_engine_target = AsyncMock(return_value="localhost:20010")
 
         captured: list[str] = []
 
@@ -327,11 +333,11 @@ class TestUpdateSessionTitle:
             cli.__aenter__ = AsyncMock(return_value=cli)
             cli.__aexit__ = AsyncMock(return_value=None)
 
-            async def _patch(url, **kw):
+            async def _post(url, **kw):
                 captured.append(url)
                 return _MockResp()
 
-            cli.patch = _patch
+            cli.post = _post
             mock_cls.return_value = cli
             _run(initiator._update_session_title(
                 session_id, "[DreamMode-任务发现] Title", bot_id, owner_id,
@@ -341,14 +347,23 @@ class TestUpdateSessionTitle:
 
     def test_no_double_prefix_when_session_id_has_agent_main(self):
         """session_id already has agent:main: → no double prefix in URL."""
-        url = self._capture_patch_url("agent:main:session:abc:owner-1")
+        url = self._capture_update_url("agent:main:session:abc:owner-1")
         assert url is not None
-        assert "agent%3Amain%3Aagent%3Amain%3A" not in url
-        assert "agent%3Amain%3Asession%3Aabc%3Aowner-1" in url
+        assert "agent:main:agent:main:" not in url
+        assert "agent:main:session:abc:owner-1" in url
 
     def test_prefix_added_when_session_id_lacks_agent_main(self):
         """session_id without agent:main: → prefix is correctly prepended."""
-        url = self._capture_patch_url("session:abc:owner-1")
+        url = self._capture_update_url("session:abc:owner-1")
         assert url is not None
-        assert "agent%3Amain%3Asession%3Aabc%3Aowner-1" in url
-        assert "agent%3Amain%3Aagent%3Amain%3A" not in url
+        assert "agent:main:session:abc:owner-1" in url
+        assert "agent:main:agent:main:" not in url
+
+    def test_calls_engine_directly_not_openapi_v1(self):
+        """Title update goes to engine's /api/sessions/{id}/update,
+        NOT the backend's /openapi/v1/ surface (which requires auth)."""
+        url = self._capture_update_url("session:abc:owner-1")
+        assert url is not None
+        assert "/api/sessions/" in url
+        assert "/update" in url
+        assert "/openapi/v1/" not in url

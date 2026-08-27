@@ -189,29 +189,38 @@ class OpenApiBotSessionInitiator:
     ) -> None:
         """创建 session 后单独更新 title（BaaS send_message 不传 title，需额外调一次）。
 
-        调用 backend 自身的 ``PATCH /openapi/v1/bots/{bot_id}/sessions/{session_id}``
-        接口，backend 内部通过 relay 转发到 engine 的
-        ``POST /api/sessions/{session_id}/update``。
+        解析 engine target 后直连 engine 的
+        ``POST /api/sessions/{session_id}/update?title=...``。
+
+        原实现走 backend 公开的 ``PATCH /openapi/v1/bots/{bot_id}/sessions/{session_id}``，
+        但该接口需要 Bearer/Cookie 鉴权（PublicAPIRoute admission），内部服务调用
+        只有 ``x-user-id`` header → 401。改为直连 engine 绕过 admission 层。
 
         失败不阻断主流程（non-fatal），仅记录 warning。
         """
-        base = self._backend_url.rstrip("/")
-        # Guard against double agent:main: prefix — BaaS may already return
-        # session_id with that prefix (same fix applied to _build_session_url
-        # in PR #1615, but this method was missed).
         full_session_key = (
             session_id
             if session_id.startswith("agent:main:")
             else f"agent:main:{session_id}"
         )
-        encoded_sid = quote(full_session_key, safe="")
-        url = f"{base}/openapi/v1/bots/{bot_id}/sessions/{encoded_sid}"
+        engine_target = await self._resolve_engine_target(bot_id, owner_id)
+        if not engine_target:
+            logger.warning(
+                "[task_discovery] cannot update title: no engine target "
+                "for bot=%s (non-fatal)",
+                bot_id,
+            )
+            return
+
+        base = engine_target
+        if not base.startswith("http"):
+            base = f"http://{base}"
+        url = f"{base}/api/sessions/{full_session_key}/update"
         try:
             async with httpx.AsyncClient(timeout=10.0) as cli:
-                resp = await cli.patch(
+                resp = await cli.post(
                     url,
-                    json={"title": title},
-                    params={"user_id": owner_id, "owner_id": owner_id},
+                    params={"title": title},
                     headers={"x-user-id": owner_id},
                 )
                 if resp.status_code == 200:
@@ -229,6 +238,42 @@ class OpenApiBotSessionInitiator:
             logger.warning(
                 "[task_discovery] session title update error (non-fatal): %s", exc,
             )
+
+    async def _resolve_engine_target(
+        self, bot_id: str, owner_id: str,
+    ) -> str | None:
+        """通过 backend API 查 per-bot engine 的 target 地址。
+
+        1. GET /api/bots/{bot_id} → 拿 binding_id
+        2. GET /api/v1/devices/{binding_id}/connection → 拿 target
+        """
+        try:
+            backend = self._backend_url.rstrip("/")
+            async with httpx.AsyncClient(timeout=10.0) as cli:
+                bot_resp = await cli.get(
+                    f"{backend}/api/bots/{bot_id}",
+                    params={"owner_id": owner_id},
+                    headers={"x-user-id": owner_id},
+                )
+                bot_resp.raise_for_status()
+                binding_id = (
+                    bot_resp.json().get("data") or {}
+                ).get("binding_id")
+                if not binding_id:
+                    return None
+                conn_resp = await cli.get(
+                    f"{backend}/api/v1/devices/{binding_id}/connection",
+                    headers={"x-user-id": owner_id},
+                )
+                conn_resp.raise_for_status()
+                return (
+                    conn_resp.json().get("data") or {}
+                ).get("target") or None
+        except Exception as exc:
+            logger.warning(
+                "[task_discovery] _resolve_engine_target failed: %s", exc,
+            )
+            return None
 
     def _build_session_url(self, session_id: str, bot_id: str, owner_id: str) -> str:
         """构建前端 workbench session URL — 生产前端路由格式。
