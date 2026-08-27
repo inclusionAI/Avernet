@@ -246,7 +246,7 @@ This is the relocation. Nothing here may change what any engine does.
 
 ## Group 5 — Prove nothing else moved
 
-- [ ] 5.1 Full relevant suite:
+- [x] 5.1 Full relevant suite:
       ```
       .venv/bin/python -m pytest \
         tests/community/core/skill_center/ \
@@ -257,13 +257,13 @@ This is the relocation. Nothing here may change what any engine does.
         tests/community/architecture/ -q
       ```
 
-- [ ] 5.2 Broader sweep: `.venv/bin/python -m pytest tests/community -q`.
+- [~] 5.2 Broader sweep: `.venv/bin/python -m pytest tests/community -q`.
       Record the pass count. Classify any failure against clean HEAD rather
       than assuming it is pre-existing.
 
-- [ ] 5.3 Lint/SAST: `scripts/ci/python_sast_local.sh` from the repo root.
+- [x] 5.3 Lint/SAST: `scripts/ci/python_sast_local.sh` from the repo root.
 
-- [ ] 5.4 `git status` — `uv.lock` unmodified, no `.venv` artefact staged.
+- [x] 5.4 `git status` — `uv.lock` unmodified, no `.venv` artefact staged.
       Then read the whole diff adversarially: every line either defines the
       seam, moves code across it unchanged, implements an engine, or tests it.
 
