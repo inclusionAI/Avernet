@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -2110,3 +2110,190 @@ class TestRestartBaasPendingAndQueue:
         )
         task_queue_service.enqueue.assert_called_once()
         assert "publish_id" not in task_queue_service.enqueue.call_args.args[1]
+
+
+# ===========================================================================
+# restart authorization refresh wiring.
+# BotService only carries the resolved strategy/ctx to the point where the
+# restart target device is ready; AICoding decides opt-in and performs MCP +
+# skill symlink refresh inside refresh_restart_authorization.
+# ===========================================================================
+class TestRestartAuthorizationResyncWiring:
+    def test_restart_passes_strategy_to_async_allocation_after_extra_config_apply(self):
+        repo = FakeRestartLockRepo()
+        device_service = MagicMock()
+        svc = _make_service(repo, device_provider=device_service)
+        bot = _make_bot(
+            status="ACTIVE",
+            active_engine="claude_code",
+            template_type="normalCC",
+            entity_id="staff_user001",
+        )
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "stop_bot", return_value=True) as stop, \
+                patch.object(svc, "start_bot", return_value=bot) as start:
+            result = svc.restart_bot(
+                bot_id="bot001",
+                user_id="user001",
+                extra_configs={"confirmed_template_update": True},
+            )
+
+        assert result == bot
+        stop.assert_called_once()
+        start.assert_called_once()
+        # No restart-specific DeviceService API is involved; the existing
+        # strategy hook owns the opt-in decision and MCP/skill refresh.
+        assert "restart_authorization_strategy" not in start.call_args.kwargs
+        assert "restart_authorization_ctx" not in start.call_args.kwargs
+        assert start.call_args.kwargs["extra_configs"] == {
+            "confirmed_template_update": True
+        }
+
+    def test_plain_restart_passes_no_extra_configs(self):
+        repo = FakeRestartLockRepo()
+        device_service = MagicMock()
+        svc = _make_service(repo, device_provider=device_service)
+        bot = _make_bot(
+            status="ACTIVE", active_engine="claude_code", template_type="normalCC"
+        )
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "stop_bot", return_value=True), \
+                patch.object(svc, "start_bot", return_value=bot) as start:
+            svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert "restart_authorization_strategy" not in start.call_args.kwargs
+        assert "restart_authorization_ctx" not in start.call_args.kwargs
+        assert start.call_args.kwargs["extra_configs"] is None
+
+    def test_default_engine_restart_does_not_pass_strategy_objects(self):
+        repo = FakeRestartLockRepo()
+        device_service = MagicMock()
+        svc = _make_service(repo, device_provider=device_service)
+        bot = _make_bot(status="ACTIVE", active_engine="moltis")
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "stop_bot", return_value=True), \
+                patch.object(svc, "start_bot", return_value=bot) as start:
+            svc.restart_bot(
+                bot_id="bot001",
+                user_id="user001",
+                extra_configs={"confirmed_template_update": True},
+            )
+
+        assert "restart_authorization_strategy" not in start.call_args.kwargs
+        assert "restart_authorization_ctx" not in start.call_args.kwargs
+
+    def test_async_replacement_refreshes_after_device_apply(self):
+        repo = FakeRestartLockRepo()
+        device_service = MagicMock()
+        device_service.mcp_sync = object()
+        device_service.apply_device.return_value = SimpleNamespace(
+            id=42,
+            device_id="dev-42",
+            device_provider="arca",
+            status=DeviceBindingStatus.ACTIVE.value,
+        )
+        svc = _make_service(repo, device_provider=device_service)
+        bot = _make_bot(
+            owner_id="owner001",
+            status="PENDING",
+            active_engine="claude_code",
+            template_type="normalCC",
+        )
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._repository.update_by_owner.return_value = {**bot, "binding_id": 42}
+        svc._skill_set_factory.create.return_value.get_symlink_mappings.return_value = []
+        svc._template_service.get_template_config.return_value = {}
+        refresh_strategy = MagicMock()
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service.threading.Thread",
+            _SyncThread,
+        ), patch(
+            "agentclaw.community.core.bot_management.engines.resolve_provisioning",
+            return_value=(object(), refresh_strategy),
+        ), patch.object(svc, "_is_new_bot_use_nas", return_value=False), \
+                patch.object(svc, "_build_engine_extra_envs", return_value={}), \
+                patch.object(svc, "_query_admin_worknos", return_value=[]), \
+                patch.object(svc, "_attach_template_uid_context", return_value={}):
+            svc._allocate_device_async(
+                bot_id="bot001",
+                user_id="user001",
+                nick_name="nick",
+                entity_id="staff_user001",
+                entity_type="staff",
+                engine_types=["claude_code"],
+                active_engine="claude_code",
+                owner_id="owner001",
+                restart_lock_key=("test", "staff_user001", "bot001", "token"),
+                extra_configs={"confirmed_template_update": True},
+            )
+
+        refresh_strategy.refresh_restart_authorization.assert_called_once_with(
+            ANY,
+            bot,
+            {"confirmed_template_update": True},
+            mcp_sync=device_service.mcp_sync,
+            skill_set_factory=svc._skill_set_factory,
+        )
+        assert repo.release_calls == 1
+
+    def test_baas_in_place_restart_refreshes_after_restart(self):
+        repo = FakeRestartLockRepo()
+        device_service = MagicMock()
+        device_service.mcp_sync = object()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="baas",
+            device_id="BOT-uuid-9",
+            status=DeviceBindingStatus.ACTIVE,
+        )
+        svc = _make_service(
+            repo,
+            device_provider=device_service,
+            baas_service_provider=lambda: MagicMock(),
+        )
+        bot = _make_bot(
+            status="ACTIVE",
+            binding_id=42,
+            active_engine="claude_code",
+            template_type="normalCC",
+        )
+        svc._repository.get_by_id_and_owner.return_value = bot
+        refresh_strategy = MagicMock()
+
+        with patch.object(svc, "_restart_bot_baas", return_value=bot), patch(
+            "agentclaw.community.core.bot_management.engines.resolve_provisioning",
+            return_value=(object(), refresh_strategy),
+        ):
+            result = svc.restart_bot(
+                bot_id="bot001",
+                user_id="user001",
+                extra_configs={"confirmed_template_update": True},
+            )
+
+        assert result == bot
+        refresh_strategy.refresh_restart_authorization.assert_called_once_with(
+            ANY,
+            bot,
+            {"confirmed_template_update": True},
+            mcp_sync=device_service.mcp_sync,
+            skill_set_factory=svc._skill_set_factory,
+        )
+
+
+def test_device_service_exposes_existing_mcp_sync_collaborator():
+    from agentclaw.community.core.devices.services.device_service import DeviceService
+
+    mcp_sync = object()
+    service = DeviceService(
+        MagicMock(),
+        bot_query=MagicMock(),
+        bot_sync=MagicMock(),
+        oss_record_repo=MagicMock(),
+        mcp_sync=mcp_sync,
+    )
+
+    assert service.mcp_sync is mcp_sync

@@ -132,6 +132,11 @@ class DeviceService:
         self._task_queue_service = task_queue_service
         logger.info("[DeviceService] Initialized")
 
+    @property
+    def mcp_sync(self) -> "McpSyncProtocol":
+        """Expose the MCP sync service for callers that must drive it directly."""
+        return self._mcp_sync
+
     # =========================================================================
     # Helper methods (from former BaseDeviceService)
     # =========================================================================
