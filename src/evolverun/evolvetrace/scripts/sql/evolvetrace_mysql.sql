@@ -6,7 +6,7 @@
 
 -- Table: schema_version
 CREATE TABLE IF NOT EXISTS schema_version (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `version` INT NOT NULL  COMMENT '版本号',
   `description` TEXT  COMMENT '版本描述',
   `gmt_create` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP  COMMENT '创建时间',
@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 
 -- Table: flow_events
 CREATE TABLE IF NOT EXISTS flow_events (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `event_id` VARCHAR(255) NOT NULL  COMMENT '事件唯一标识',
   `flow_id` VARCHAR(255) NOT NULL  COMMENT '流程实例ID',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
@@ -34,7 +34,7 @@ KEY `idx_flow_events_time` (`time`)
 
 -- Table: flow_metrics
 CREATE TABLE IF NOT EXISTS flow_metrics (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `flow_id` VARCHAR(255) NOT NULL  COMMENT '流程实例ID',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
   `node_id` VARCHAR(255) NOT NULL  COMMENT '节点ID',
@@ -51,7 +51,7 @@ KEY `idx_flow_metrics_time` (`time`)
 
 -- Table: triggered_alerts
 CREATE TABLE IF NOT EXISTS triggered_alerts (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `flow_id` VARCHAR(255) NOT NULL  COMMENT '流程实例ID',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
   `node_id` VARCHAR(255) DEFAULT NULL  COMMENT '节点ID',
@@ -69,7 +69,7 @@ KEY `idx_triggered_alerts_time` (`time`)
 
 -- Table: node_executions
 CREATE TABLE IF NOT EXISTS node_executions (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `flow_id` VARCHAR(255) NOT NULL  COMMENT '流程实例ID',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
   `node_id` VARCHAR(255) NOT NULL  COMMENT '节点ID',
@@ -103,7 +103,7 @@ KEY `idx_node_exec_created` (`gmt_create`)
 
 -- Table: flow_runs
 CREATE TABLE IF NOT EXISTS flow_runs (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `flow_id` VARCHAR(255) NOT NULL  COMMENT '流程实例ID',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
   `workflow_title` VARCHAR(255) DEFAULT NULL  COMMENT '工作流标题',
@@ -140,7 +140,7 @@ KEY `idx_flow_runs_status_started` (`status`, `started_at`)
 
 -- Table: scheduled_triggers
 CREATE TABLE IF NOT EXISTS scheduled_triggers (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `trigger_id` VARCHAR(255) NOT NULL  COMMENT '触发器ID',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
   `pack_id` VARCHAR(255) NOT NULL  COMMENT '包ID',
@@ -160,7 +160,7 @@ UNIQUE KEY `uk_sched_triggers_trigger_id` (`trigger_id`)
 
 -- Table: webhook_triggers
 CREATE TABLE IF NOT EXISTS webhook_triggers (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `trigger_id` VARCHAR(255) NOT NULL  COMMENT '触发器ID',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
   `pack_id` VARCHAR(255) DEFAULT NULL  COMMENT '包ID',
@@ -177,7 +177,7 @@ UNIQUE KEY `uk_webhook_triggers_trigger_id` (`trigger_id`)
 
 -- Table: webhook_events
 CREATE TABLE IF NOT EXISTS webhook_events (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `event_id` VARCHAR(255) NOT NULL  COMMENT '事件ID',
   `trigger_id` VARCHAR(255) NOT NULL  COMMENT '触发器ID',
   `flow_id` VARCHAR(255) DEFAULT NULL  COMMENT '流程实例ID',
@@ -201,7 +201,7 @@ KEY `idx_webhook_events_dedup` (`event_id`, `gmt_create`)
 
 -- Table: workflow_specs
 CREATE TABLE IF NOT EXISTS workflow_specs (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
   `pack_id` VARCHAR(255) DEFAULT NULL  COMMENT '包ID',
   `spec_json` TEXT NOT NULL  COMMENT '工作流规格JSON',
@@ -215,7 +215,7 @@ KEY `idx_wfs_workflow_version` (`workflow_id`, `version`)
 
 -- Table: knowledge_bases
 CREATE TABLE IF NOT EXISTS knowledge_bases (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `kb_id` VARCHAR(255) NOT NULL  COMMENT '知识库唯一标识(业务ID,用于YAML引用)',
   `name` VARCHAR(255) NOT NULL  COMMENT '知识库名称(显示用)',
   `description` TEXT  COMMENT '知识库描述',
@@ -239,7 +239,7 @@ KEY `idx_knowledge_bases_created` (`gmt_create`)
 
 -- Table: validation_templates
 CREATE TABLE IF NOT EXISTS validation_templates (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `template_id` VARCHAR(255) NOT NULL  COMMENT '模板唯一标识(业务ID,用于YAML引用)',
   `name` VARCHAR(255) NOT NULL  COMMENT '模板名称(显示用)',
   `description` TEXT  COMMENT '模板描述',
@@ -256,7 +256,7 @@ UNIQUE KEY `uk_validation_templates_template_id` (`template_id`)
 
 -- Table: facade_bindings
 CREATE TABLE IF NOT EXISTS facade_bindings (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `command` VARCHAR(255) NOT NULL  COMMENT 'Slash命令(如/marketing-dispatch)',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
   `pack_id` VARCHAR(255) DEFAULT NULL  COMMENT '包ID',
@@ -269,7 +269,7 @@ KEY `idx_facade_bindings_workflow` (`workflow_id`)
 
 -- Table: approval_cards
 CREATE TABLE IF NOT EXISTS approval_cards (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `flow_id` VARCHAR(255) NOT NULL  COMMENT '流程实例ID',
   `node_id` VARCHAR(255) NOT NULL  COMMENT '审批节点ID',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
@@ -296,7 +296,7 @@ KEY `idx_approval_cards_created` (`created_at`)
 
 -- Table: node_step_traces
 CREATE TABLE IF NOT EXISTS node_step_traces (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `flow_id` VARCHAR(255) NOT NULL  COMMENT '流程实例ID',
   `node_id` VARCHAR(255) NOT NULL  COMMENT '节点ID',
   `attempt` INT NOT NULL DEFAULT 1  COMMENT '执行次数',
@@ -326,7 +326,7 @@ KEY `idx_nst_created` (`gmt_create`)
 
 -- Table: flow_control_slots
 CREATE TABLE IF NOT EXISTS flow_control_slots (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `instance_id` VARCHAR(255) NOT NULL  COMMENT '实例标识(OWNER_ID_BOT_ID，如103892_20260402_mn',
   `scope_key` VARCHAR(255) NOT NULL  COMMENT '作用域键(如global、workflow:risk-review、execut',
   `flow_id` VARCHAR(255) NOT NULL  COMMENT '流程实例ID',
@@ -343,7 +343,7 @@ KEY `idx_fc_slots_instance_scope` (`instance_id`, `scope_key`)
 
 -- Table: flow_control_queue
 CREATE TABLE IF NOT EXISTS flow_control_queue (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `instance_id` VARCHAR(255) NOT NULL  COMMENT '实例标识(OWNER_ID_BOT_ID，如103892_20260402_mn',
   `scope_key` VARCHAR(255) NOT NULL  COMMENT '作用域键(如global、workflow:risk-review、execut',
   `flow_id` VARCHAR(255) NOT NULL  COMMENT '流程实例ID',
@@ -361,7 +361,7 @@ KEY `idx_fc_queue_status` (`status`)
 
 -- Table: cm_bench_domains
 CREATE TABLE IF NOT EXISTS cm_bench_domains (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `domain_id` VARCHAR(255) NOT NULL  COMMENT 'Domain标识',
   `name` VARCHAR(255) NOT NULL  COMMENT 'Domain名称',
   `description` TEXT  COMMENT '描述',
@@ -375,7 +375,7 @@ UNIQUE KEY `uk_cm_bench_domains_owner_domain` (`owner_user_id`, `domain_id`)
 
 -- Table: cm_bench_templates
 CREATE TABLE IF NOT EXISTS cm_bench_templates (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `domain_id` VARCHAR(255) NOT NULL  COMMENT '所属Domain',
   `template_name` VARCHAR(255) NOT NULL  COMMENT '模板名称（domain内唯一）',
   `display_name` VARCHAR(255) DEFAULT NULL  COMMENT '展示名称',
@@ -400,7 +400,7 @@ KEY `idx_cm_bench_templates_domain_name` (`domain_id`, `template_name`)
 
 -- Table: cm_bench_template_versions
 CREATE TABLE IF NOT EXISTS cm_bench_template_versions (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `domain_id` VARCHAR(255) NOT NULL  COMMENT '所属Domain',
   `template_name` VARCHAR(255) NOT NULL  COMMENT '模板名称',
   `version` INT NOT NULL  COMMENT '版本号',
@@ -421,7 +421,7 @@ KEY `idx_cm_bench_template_versions_domain_name_status` (`domain_id`, `template_
 
 -- Table: cm_bench_runs
 CREATE TABLE IF NOT EXISTS cm_bench_runs (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `bench_run_id` VARCHAR(255) NOT NULL  COMMENT 'Run稳定ID',
   `domain_id` VARCHAR(255) NOT NULL  COMMENT '所属Domain',
   `template_name` VARCHAR(255) NOT NULL  COMMENT '模板名称',
@@ -454,7 +454,7 @@ KEY `idx_cm_bench_runs_clawmind_flow` (`clawmind_flow_id`)
 
 -- Table: cm_bench_task_results
 CREATE TABLE IF NOT EXISTS cm_bench_task_results (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `result_id` VARCHAR(255) NOT NULL  COMMENT '结果ID',
   `bench_run_id` VARCHAR(255) NOT NULL  COMMENT 'Run ID',
   `task_id` VARCHAR(255) NOT NULL  COMMENT '任务ID',
@@ -479,7 +479,7 @@ KEY `idx_cm_bench_task_results_task` (`task_id`)
 
 -- Table: cm_bench_artifacts
 CREATE TABLE IF NOT EXISTS cm_bench_artifacts (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `artifact_id` VARCHAR(255) NOT NULL  COMMENT 'Artifact稳定ID',
   `bench_run_id` VARCHAR(255) NOT NULL  COMMENT 'Run ID',
   `result_id` VARCHAR(255) DEFAULT NULL  COMMENT '任务结果ID',
@@ -507,7 +507,7 @@ KEY `idx_cm_bench_artifacts_owner_run` (`owner_user_id`, `bench_run_id`)
 
 -- Table: dev_workflow_templates
 CREATE TABLE IF NOT EXISTS dev_workflow_templates (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `template_id` VARCHAR(255) NOT NULL  COMMENT '模板唯一标识',
   `name` VARCHAR(255) NOT NULL  COMMENT '模板名称',
   `description` TEXT  COMMENT '模板描述',
@@ -522,7 +522,7 @@ KEY `idx_dev_wf_templates_built_in` (`is_built_in`)
 
 -- Table: dev_workflows
 CREATE TABLE IF NOT EXISTS dev_workflows (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流实例唯一ID',
   `title` VARCHAR(255) NOT NULL  COMMENT '工作流标题',
   `template_id` VARCHAR(255) NOT NULL  COMMENT '关联模板ID',
@@ -551,7 +551,7 @@ KEY `idx_dev_workflows_owner` (`owner_user_id`)
 
 -- Table: dev_workflow_phases
 CREATE TABLE IF NOT EXISTS dev_workflow_phases (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '所属工作流ID',
   `phase_id` VARCHAR(255) NOT NULL  COMMENT '阶段ID',
   `phase_name` VARCHAR(255) NOT NULL  COMMENT '阶段名称',
@@ -585,7 +585,7 @@ KEY `idx_dev_wf_phases_status` (`workflow_id`, `status`)
 
 -- Table: dev_phase_conversations
 CREATE TABLE IF NOT EXISTS dev_phase_conversations (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
   `phase_id` VARCHAR(255) NOT NULL  COMMENT '阶段ID',
   `baas_message_id` VARCHAR(255) DEFAULT NULL  COMMENT 'BaaS消息唯一ID(幂等去重键)',
@@ -606,7 +606,7 @@ KEY `idx_dev_phase_conv_session` (`session_id`)
 
 -- Table: dev_approvals
 CREATE TABLE IF NOT EXISTS dev_approvals (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `approval_id` VARCHAR(255) NOT NULL  COMMENT '审批单唯一ID(格式 apr-{uuid})',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
   `phase_id` VARCHAR(255) NOT NULL  COMMENT '阶段ID',
@@ -631,7 +631,7 @@ KEY `idx_dev_approvals_created_by` (`created_by`)
 
 -- Table: dev_approval_reviewers
 CREATE TABLE IF NOT EXISTS dev_approval_reviewers (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `approval_id` VARCHAR(255) NOT NULL  COMMENT '审批单ID(关联dev_approvals.approval_id)',
   `reviewer_id` VARCHAR(255) NOT NULL  COMMENT '审批人ID',
   `reviewer_name` VARCHAR(255) DEFAULT NULL  COMMENT '审批人显示名称',
@@ -647,7 +647,7 @@ KEY `idx_dev_approval_rev_reviewer` (`reviewer_id`)
 
 -- Table: dev_discussions
 CREATE TABLE IF NOT EXISTS dev_discussions (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `discussion_id` VARCHAR(255) NOT NULL  COMMENT '讨论唯一ID(格式 disc-{uuid})',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
   `phase_id` VARCHAR(255) NOT NULL  COMMENT '阶段ID',
@@ -670,7 +670,7 @@ KEY `idx_dev_discussions_status` (`status`)
 
 -- Table: dev_discussion_replies
 CREATE TABLE IF NOT EXISTS dev_discussion_replies (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `discussion_id` VARCHAR(255) NOT NULL  COMMENT '讨论ID(关联dev_discussions.discussion_id)',
   `author_id` VARCHAR(255) NOT NULL  COMMENT '回复者ID',
   `author_name` VARCHAR(255) DEFAULT NULL  COMMENT '回复者显示名称',
@@ -685,7 +685,7 @@ KEY `idx_dev_disc_rep_parent` (`parent_reply_id`)
 
 -- Table: dev_git_ops
 CREATE TABLE IF NOT EXISTS dev_git_ops (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
   `phase_id` VARCHAR(255) NOT NULL  COMMENT '阶段ID',
   `operation` VARCHAR(255) NOT NULL  COMMENT 'Git操作类型 clone|pull|checkout|commit|push',
@@ -707,7 +707,7 @@ KEY `idx_dev_git_ops_commit` (`commit_sha`)
 
 -- Table: dev_artifacts
 CREATE TABLE IF NOT EXISTS dev_artifacts (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
   `phase_id` VARCHAR(255) NOT NULL  COMMENT '阶段ID',
   `artifact_type` VARCHAR(255) NOT NULL  COMMENT '产物类型 prd|architecture|tech_doc|api_spec|',
@@ -730,7 +730,7 @@ UNIQUE KEY `uk_dev_artifacts_wf_phase_type_ver` (`workflow_id`, `phase_id`, `art
 
 -- Table: dev_project_constraints
 CREATE TABLE IF NOT EXISTS dev_project_constraints (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `workflow_id` VARCHAR(255) NOT NULL  COMMENT '工作流ID',
   `version` INT NOT NULL DEFAULT 1  COMMENT '版本号(同一workflow自动递增)',
   `constraints_json` TEXT NOT NULL  COMMENT '约束内容JSON(技术栈/规范/限制等)',
@@ -744,7 +744,7 @@ UNIQUE KEY `uk_dev_proj_constraints_wf_ver` (`workflow_id`, `version`)
 
 -- Table: insight_failure_task
 CREATE TABLE IF NOT EXISTS insight_failure_task (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `source_dt` CHAR NOT NULL  COMMENT '业务日期yyyyMMdd',
   `owner_user_id` VARCHAR(255) NOT NULL  COMMENT 'Bot归属用户ID',
   `bot_id` VARCHAR(255) NOT NULL  COMMENT 'Bot ID',
@@ -774,7 +774,7 @@ KEY `idx_insight_failure_session_task` (`owner_user_id`, `session_id`, `task_ind
 
 -- Table: insight_improvement_item
 CREATE TABLE IF NOT EXISTS insight_improvement_item (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `owner_user_id` VARCHAR(255) NOT NULL  COMMENT '改进项处理用户',
   `bot_owner_user_id` VARCHAR(255) NOT NULL  COMMENT '目标Bot归属用户ID',
   `bot_id` VARCHAR(255) NOT NULL  COMMENT '目标Bot ID',
@@ -804,7 +804,7 @@ KEY `idx_insight_improvement_owner_bot` (`owner_user_id`, `bot_id`, `status`, `g
 
 -- Table: insight_improvement_evidence
 CREATE TABLE IF NOT EXISTS insight_improvement_evidence (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `improvement_id` BIGINT NOT NULL  COMMENT '关联insight_improvement_item.id',
   `session_id` VARCHAR(255) NOT NULL  COMMENT 'Session ID',
   `task_index` INT NOT NULL DEFAULT 0  COMMENT 'Session内Task序号',
@@ -823,7 +823,7 @@ KEY `idx_insight_evidence_improvement_order` (`improvement_id`, `ordinal`)
 
 -- Table: insight_improvement_evolve_link
 CREATE TABLE IF NOT EXISTS insight_improvement_evolve_link (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `improvement_id` BIGINT NOT NULL  COMMENT '关联insight_improvement_item.id',
   `evolve_task_id` VARCHAR(255) NOT NULL  COMMENT 'ce_tasks.task_id',
   `request_id` VARCHAR(255) NOT NULL  COMMENT '发起诊断请求幂等键',
@@ -835,7 +835,7 @@ KEY `idx_insight_evolve_task_id` (`evolve_task_id`)
 
 -- Table: insight_metric_daily
 CREATE TABLE IF NOT EXISTS insight_metric_daily (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `source_dt` CHAR NOT NULL  COMMENT '业务日期yyyyMMdd',
   `owner_user_id` VARCHAR(255) NOT NULL  COMMENT 'Bot归属用户ID',
   `bot_id` VARCHAR(255) NOT NULL  COMMENT 'Bot ID',
@@ -858,7 +858,7 @@ KEY `idx_insight_metric_owner_bot_dt` (`owner_user_id`, `bot_id`, `source_dt`, `
 
 -- Table: ce_task_sources
 CREATE TABLE IF NOT EXISTS ce_task_sources (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `task_id` VARCHAR(255) NOT NULL  COMMENT 'Evolve Task ID',
   `source_type` VARCHAR(255) NOT NULL  COMMENT '输入来源类型',
   `source_id` VARCHAR(255) NOT NULL  COMMENT '来源对象ID',
@@ -878,7 +878,7 @@ KEY `idx_ce_task_sources_status` (`status`, `gmt_create`)
 
 -- Table: ce_repair_tool_calls
 CREATE TABLE IF NOT EXISTS ce_repair_tool_calls (
-  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
   `call_id` VARCHAR(255) NOT NULL  COMMENT '工具调用ID',
   `task_id` VARCHAR(255) NOT NULL  COMMENT 'CE Task ID',
   `step_id` VARCHAR(255) NOT NULL  COMMENT 'CE Step ID',
@@ -902,3 +902,21 @@ UNIQUE KEY `idx_ce_repair_tool_calls_call_id` (`call_id`),
 UNIQUE KEY `idx_ce_repair_tool_calls_step_client` (`step_id`, `client_request_id`)
 ) DEFAULT CHARSET = utf8mb4;
 
+
+-- Table: bot_workflow_permissions
+-- Required by BotWorkflowPermissionRepository.
+CREATE TABLE IF NOT EXISTS bot_workflow_permissions (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+  `bot_id` VARCHAR(255) DEFAULT NULL COMMENT 'Bot ID',
+  `bot_owner_id` VARCHAR(255) NOT NULL COMMENT 'Bot归属用户ID',
+  `workflow_id` VARCHAR(255) NOT NULL COMMENT '工作流ID',
+  `env` VARCHAR(255) NOT NULL COMMENT '环境标识',
+  `can_view` INT NOT NULL DEFAULT 0 COMMENT '是否可查看',
+  `can_execute` INT NOT NULL DEFAULT 0 COMMENT '是否可执行',
+  `can_edit` INT NOT NULL DEFAULT 0 COMMENT '是否可编辑',
+  `gmt_create` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `gmt_modified` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+KEY `idx_bot_wf_perm_workflow` (`workflow_id`),
+KEY `idx_bot_wf_perm_owner` (`bot_owner_id`, `workflow_id`),
+KEY `idx_bot_wf_perm_bot` (`bot_id`, `bot_owner_id`, `workflow_id`)
+) DEFAULT CHARSET = utf8mb4;

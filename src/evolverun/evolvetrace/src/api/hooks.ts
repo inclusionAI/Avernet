@@ -20,13 +20,9 @@ import type {
   WorkflowSpec,
 } from '../types'
 
-const BASE = '/api'
+import { fetchJson } from './client'
 
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init)
-  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text().catch(() => 'unknown')}`)
-  return res.json() as Promise<T>
-}
+const BASE = '/api'
 
 // ── Workflow list ──
 
@@ -293,5 +289,80 @@ export function useTCLogTrace(
       return fetchJson<TCLogTraceDetail>(`${BASE}/tclog/traces/${encodeURIComponent(traceId!)}?${sp.toString()}`)
     },
     enabled: !!traceId,
+  })
+}
+
+// --- Stubs for editor panels migrated from clawweb ---
+
+export function useKnowledgeBases(_enabledOnly = false) {
+  return { data: [] as any[], isLoading: false, error: null }
+}
+
+export function useValidationTemplates(_enabledOnly = false) {
+  return { data: [] as any[], isLoading: false, error: null }
+}
+
+export function useDryRun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (_params: unknown) => {
+      throw new Error('Dry run is not implemented in evolvetrace standalone')
+    },
+  })
+}
+
+
+// --- Editor hooks (migrated from clawweb) ---
+
+export function useDbWorkflow(workflowId: string) {
+  return useQuery({
+    queryKey: ['db-workflow', workflowId],
+    queryFn: () => fetchJson<WorkflowSpec>(`${BASE}/workflows/${encodeURIComponent(workflowId)}`),
+    enabled: !!workflowId,
+  })
+}
+
+export function useSaveWorkflowToDb() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workflowId,
+      spec,
+      packId,
+      facade,
+      originalWorkflowId,
+      botOwnerId,
+      botId,
+    }: {
+      workflowId: string
+      spec: WorkflowSpec
+      packId?: string
+      facade?: { command?: string; remark?: string }
+      originalWorkflowId?: string
+      botOwnerId?: string
+      botId?: string
+    }) =>
+      fetchJson<WorkflowSpec>(`${BASE}/workflows/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workflowId,
+          spec,
+          packId,
+          facade,
+          originalWorkflowId,
+          botOwnerId,
+          botId,
+        }),
+      }),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['db-workflows'] })
+      void queryClient.invalidateQueries({ queryKey: ['facade-bindings'] })
+      void queryClient.invalidateQueries({ queryKey: ['db-workflow', variables.workflowId] })
+      void queryClient.invalidateQueries({ queryKey: ['workflow-types'] })
+      if (variables.originalWorkflowId && variables.originalWorkflowId !== variables.workflowId) {
+        void queryClient.invalidateQueries({ queryKey: ['db-workflow', variables.originalWorkflowId] })
+      }
+    },
   })
 }
