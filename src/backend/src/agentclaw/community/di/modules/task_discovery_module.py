@@ -163,7 +163,14 @@ class TaskDiscoveryModule(Module):
           当 ``OpenApiBotPort`` 未绑定或返回 None (fail-closed) → 回退 CronRelaySessionInitiator。
 
         对齐 ``task_module.py`` 的 ``injector.get(OpenApiBotPort)`` + try/except 降级模式。
+
+        另外从 YAML ``task_discovery_dingtalk`` 块读取 env-aware frontend_url（pre/prod/other）
+        并注入 ``FrontendUrlHolder``。原逻辑只在 ``CommunityNotifyModule`` 里执行（community/
+        singlebox），corp 环境不加载该模块导致 holder 不被 set → session_url 退回 localhost。
         """
+        # ── 从 YAML 读取 env-aware frontend_url 并注入 FrontendUrlHolder ──
+        self._inject_frontend_url_from_yaml()
+
         if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
             # corp/pre/prod: 尝试从 DI 注入 OpenApiBotPort (corp overlay 绑定)
             try:
@@ -195,6 +202,48 @@ class TaskDiscoveryModule(Module):
             frontend_url=_resolve_frontend_url(),
             backend_url=_resolve_backend_url(),
         )
+
+    @staticmethod
+    def _inject_frontend_url_from_yaml() -> None:
+        """从 YAML ``task_discovery_dingtalk`` 块读取 env-aware frontend_url，
+        如果 ``FrontendUrlHolder`` 尚未被注入则写入。
+
+        优先级（对齐 CommunityNotifyModule 逻辑）:
+          - pre   → frontend_url_pre → frontend_url
+          - prod  → frontend_url_prod → frontend_url
+          - other → frontend_url
+
+        此方法确保 corp/pre/prod 环境（不加载 CommunityNotifyModule）也能从
+        YAML 配置正确注入 FrontendUrlHolder，而不是退回 localhost:8000。
+        """
+        from agentclaw.community.core.task.task_discovery.session_initiator import (
+            FrontendUrlHolder,
+        )
+        from agentclaw.community.di.modules.config_module import _block
+        from agentclaw.community.utils.env_utils import get_current_env
+
+        if FrontendUrlHolder.get():
+            # 运行时 API 已注入 → 跳过
+            return
+
+        cfg = _block("task_discovery_dingtalk")
+        if not cfg:
+            return
+
+        env = get_current_env()
+        if env == "pre":
+            url = cfg.get("frontend_url_pre", "") or cfg.get("frontend_url", "")
+        elif env == "prod":
+            url = cfg.get("frontend_url_prod", "") or cfg.get("frontend_url", "")
+        else:
+            url = cfg.get("frontend_url", "")
+        if url:
+            FrontendUrlHolder.set(url)
+            logger.info(
+                "[task_discovery] FrontendUrlHolder set from YAML "
+                "(env=%s, url=%s)",
+                env, url,
+            )
 
     @singleton
     @provider

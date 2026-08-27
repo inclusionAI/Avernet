@@ -289,3 +289,66 @@ class TestBuildSessionUrl:
         url = initiator._build_session_url("s3", "b3", "o3")
         assert "host:8000/workspace" in url
         assert "host:8000//workspace" not in url
+
+
+# ---------------------------------------------------------------------------
+# _update_session_title — double agent:main: prefix guard
+# ---------------------------------------------------------------------------
+
+class TestUpdateSessionTitle:
+    """Verify _update_session_title guards against double agent:main: prefix.
+
+    BaaS may return session_id already containing the ``agent:main:`` prefix.
+    _build_session_url was fixed in PR #1615, but _update_session_title
+    was missed — this test class ensures the same guard is applied.
+    """
+
+    @staticmethod
+    def _capture_patch_url(session_id: str, *, bot_id: str = "bot-1",
+                           owner_id: str = "owner-1") -> str | None:
+        """Run _update_session_title with mocked httpx, return the captured URL."""
+        from unittest.mock import MagicMock, patch
+
+        initiator = OpenApiBotSessionInitiator(
+            openapi_bot=_make_openapi_bot(),
+            backend_url="http://localhost:8888",
+        )
+
+        captured: list[str] = []
+
+        class _MockResp:
+            status_code = 200
+            text = "{}"
+
+        with patch(
+            "agentclaw.community.core.task.task_discovery.openapi_bot_session_initiator.httpx.AsyncClient"
+        ) as mock_cls:
+            cli = MagicMock()
+            cli.__aenter__ = AsyncMock(return_value=cli)
+            cli.__aexit__ = AsyncMock(return_value=None)
+
+            async def _patch(url, **kw):
+                captured.append(url)
+                return _MockResp()
+
+            cli.patch = _patch
+            mock_cls.return_value = cli
+            _run(initiator._update_session_title(
+                session_id, "[DreamMode-任务发现] Title", bot_id, owner_id,
+            ))
+
+        return captured[0] if captured else None
+
+    def test_no_double_prefix_when_session_id_has_agent_main(self):
+        """session_id already has agent:main: → no double prefix in URL."""
+        url = self._capture_patch_url("agent:main:session:abc:owner-1")
+        assert url is not None
+        assert "agent%3Amain%3Aagent%3Amain%3A" not in url
+        assert "agent%3Amain%3Asession%3Aabc%3Aowner-1" in url
+
+    def test_prefix_added_when_session_id_lacks_agent_main(self):
+        """session_id without agent:main: → prefix is correctly prepended."""
+        url = self._capture_patch_url("session:abc:owner-1")
+        assert url is not None
+        assert "agent%3Amain%3Asession%3Aabc%3Aowner-1" in url
+        assert "agent%3Amain%3Aagent%3Amain%3A" not in url

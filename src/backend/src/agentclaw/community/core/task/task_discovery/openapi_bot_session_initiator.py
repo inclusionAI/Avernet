@@ -196,7 +196,15 @@ class OpenApiBotSessionInitiator:
         失败不阻断主流程（non-fatal），仅记录 warning。
         """
         base = self._backend_url.rstrip("/")
-        encoded_sid = quote(f"agent:main:{session_id}", safe="")
+        # Guard against double agent:main: prefix — BaaS may already return
+        # session_id with that prefix (same fix applied to _build_session_url
+        # in PR #1615, but this method was missed).
+        full_session_key = (
+            session_id
+            if session_id.startswith("agent:main:")
+            else f"agent:main:{session_id}"
+        )
+        encoded_sid = quote(full_session_key, safe="")
         url = f"{base}/openapi/v1/bots/{bot_id}/sessions/{encoded_sid}"
         try:
             async with httpx.AsyncClient(timeout=10.0) as cli:
