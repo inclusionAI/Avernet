@@ -9,11 +9,16 @@
 # --- Build stage: install deps, build Vite frontend, compile TS server ---
 FROM node:20-bookworm AS builder
 
+# Allow optional npm registry mirror (e.g. China CI builds).
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
+ENV npm_config_registry=${NPM_CONFIG_REGISTRY}
+
 WORKDIR /build
 
 # Copy package metadata first for layer caching.
 COPY src/evolverun/evolvetrace/package.json src/evolverun/evolvetrace/package-lock.json ./
-RUN npm ci
+RUN npm config set registry "${npm_config_registry}" \
+    && npm ci --no-audit --no-fund
 
 # Copy source and build both frontend and server.
 COPY src/evolverun/evolvetrace/ ./
@@ -21,6 +26,10 @@ RUN npm run build && npm run build:server
 
 # --- Runtime stage ---
 FROM node:20-bookworm-slim
+
+# Allow optional npm registry mirror (must match builder stage).
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
+ENV npm_config_registry=${NPM_CONFIG_REGISTRY}
 
 ENV NODE_ENV=production \
     EVOLVETRACE_ENV=prod \
@@ -41,7 +50,9 @@ COPY --from=builder --chown=appuser:appuser /build/package.json ./package.json
 COPY --from=builder --chown=appuser:appuser /build/package-lock.json ./package-lock.json
 
 # Install production dependencies only (mysql2 etc.).
-RUN npm ci --omit=dev && rm -rf ~/.npm
+RUN npm config set registry "${npm_config_registry}" \
+    && npm ci --omit=dev --no-audit --no-fund \
+    && rm -rf ~/.npm
 
 USER appuser
 
