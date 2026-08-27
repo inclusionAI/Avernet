@@ -45,14 +45,17 @@
   - `src/backend/src/agentclaw/community/core/skills_pool/models.py`
   - `src/backend/src/agentclaw/community/core/skills_pool/ports.py`
 - **Done when:**
-  - [x] `MappingPublishOutcome(published, verified, verified_inline)` exists in
-        `models.py` as a frozen dataclass.
+  - [x] `MappingPublishOutcome(published, verified, reported_inline)` exists in
+        `models.py` as a frozen dataclass. (`reported_inline`, not
+        `verified_inline`: a runtime can report inline *and* report failure.)
   - [x] `_invoke` accepts an optional pre-resolved `DeviceContext` and only
         resolves when none is given.
   - [x] `publish_and_verify_mappings` resolves once and passes that context to
         `_ensure_center_mappings`, the publish call, and the fallback verify.
   - [x] `SkillsPoolRuntimeProtocol` declares the new method; existing
-        `publish_mappings` / `verify_mappings` signatures are unchanged.
+        `publish_mappings` / `verify_mappings` signatures are unchanged —
+        the context-carrying halves stay private, so no second implementation
+        of the port has to grow a devices-layer parameter.
   - [x] New test asserts three device calls (center ensure + publish + verify)
         trigger exactly one `resolve_for_bot`.
   - [x] `tests/community/di/test_skills_pool_wiring.py` still resolves the

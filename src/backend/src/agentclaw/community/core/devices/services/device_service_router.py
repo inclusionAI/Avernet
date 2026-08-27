@@ -177,21 +177,17 @@ class DeviceServiceRouter(DeviceService):
             f"default={default_provider_key}"
         )
 
-    def _get_provider_for_binding(
-        self, binding_id: int, *, record: DeviceBindingRecord | None = None
-    ) -> DeviceService:
+    def _get_provider_for_binding(self, binding_id: int, *, record: DeviceBindingRecord | None = None) -> DeviceService:
         """根据 binding_id 获取对应的 Provider 服务.
 
         Args:
             binding_id: 设备绑定 ID
-            record: 调用方已取到的 binding 行。路由只需要它的
-                ``device_provider`` 一列,给了就不再为这一列多查一次整行。
+            record: 已取到的 binding 行;路由只读 ``device_provider`` 一列,给了就不再查整行。
 
         Returns:
             对应的 DeviceService 实例
         """
-        if record is None:
-            record = self._repo.get_by_id(binding_id)
+        record = record if record is not None else self._repo.get_by_id(binding_id)
         if record is None:
             logger.warning(
                 f"[_get_provider_for_binding] Binding {binding_id} not found, using default"
@@ -683,8 +679,7 @@ class DeviceServiceRouter(DeviceService):
         ``path`` 透传给 provider,仅对"由服务端拼出完整 URL"的链路(BaaS relay)
         有意义;其余 provider 忽略。
 
-        ``record`` 是调用方已取到的 binding 行,同时喂给路由解析和 provider,
-        这一跳因此零 DB 读;不传则两边各自按 binding_id 自查(原行为)。
+        ``record`` 是已取到的 binding 行,喂给路由和 provider,这一跳零 DB 读。
         """
         service = self._get_provider_for_binding(binding_id, record=record)
         return service.get_device_connection(

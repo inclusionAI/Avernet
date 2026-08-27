@@ -247,8 +247,9 @@ inline and reports it in its response — for example `data.verified: true` — 
 the backend can accept the publish as verified and skip the second call:
 
 ```python
-published = await self._pool_runtime.publish_mappings(...)   # returns a result object, not a bool
-verified = published.verified_inline or await self._pool_runtime.verify_mappings(...)
+outcome = await self._pool_runtime.publish_and_verify_mappings(...)
+if not outcome.verified:                       # never `or outcome.reported_inline`:
+    raise SkillSetRuntimeReconcileError()      # a runtime can report inline *and* fail
 ```
 
 **Compatibility is the whole design here.** Device runtimes are deployed
