@@ -292,9 +292,13 @@ class OpenClawSkillsAdapter(SkillsService):
         if mapping_contract_version is not None:
             payload["mapping_contract_version"] = mapping_contract_version
         raw = await self._port.publish_pool_mappings(payload)
+        verified = raw.get("verified")
         return PoolMappingPublishResult(
             published=raw.get("published") is True,
             evidence=dict(raw.get("evidence") or {}),
+            # Absent stays absent: only a real bool crosses, so a port that
+            # does not verify inline keeps reporting nothing rather than False.
+            verified=verified if isinstance(verified, bool) else None,
         )
 
     async def verify_pool_mappings(

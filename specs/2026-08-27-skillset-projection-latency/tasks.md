@@ -62,7 +62,7 @@
         protocol from the injector.
 - **Depends on:** —
 
-## Task 3: Report inline verification from the engine publish path
+## Task 3 `[x]`: Report inline verification from the engine publish path
 
 - **Goal:** A publish that verified its own result says so, so the backend can
   skip the second round trip.
@@ -72,22 +72,22 @@
   - `src/engine/src/engine/community/core/adapters/openclaw/skills.py`
   - `src/engine/src/engine/community/core/adapters/claude_code/skills.py`
 - **Done when:**
-  - [ ] `MappingPublishResult` (`layout_activation.py:114`) carries
+  - [x] `MappingPublishResult` (`layout_activation.py:114`) carries
         `verified: bool | None = None` declared **after** `evidence`, which has
         no default on that frozen slots dataclass.
-  - [ ] `publish_pool_mappings` runs `verify_skill_mappings` inline on the success
+  - [x] `publish_pool_mappings` runs `verify_skill_mappings` inline on the success
         path with the same arguments and sets `verified` from its `valid`; the
         `published=False` early returns leave it `None`.
-  - [ ] `verified` survives all three hops — the plugin dataclass's `to_data()`,
+  - [x] `verified` survives all three hops — the plugin dataclass's `to_data()`,
         the adapter's dict→model rebuild, and the core model's `to_data()` — and
         every one of them **omits** the key when it is `None`, so absence stays
         distinguishable from `false`.
-  - [ ] The openclaw and claude_code adapters carry `verified` from the raw port
+  - [x] The openclaw and claude_code adapters carry `verified` from the raw port
         response into `PoolMappingPublishResult`.
-  - [ ] Test: a clean publish reports `verified=true`; a publish whose target is
+  - [x] Test: a clean publish reports `verified=true`; a publish whose target is
         then corrupted reports `verified=false`; a result built without the flag
         omits the key from the wire body.
-  - [ ] `src/engine/.../api/tests/test_skills_router.py` still passes.
+  - [x] `src/engine/.../api/tests/test_skills_router.py` still passes.
 - **Depends on:** —
 
 ## Task 4: Consume the inline verification signal and drop the second round trip

@@ -44,6 +44,10 @@ class _FakeSkillsPort:
         self.calls["clean_symlinks"] = params
         return self._results["clean_symlinks"]
 
+    async def publish_pool_mappings(self, params):
+        self.calls["publish_pool_mappings"] = params
+        return self._results["publish_pool_mappings"]
+
 
 async def test_ensure_center_skills_serializes_and_builds_result():
     port = _FakeSkillsPort(ensure_center_skills={
@@ -127,3 +131,29 @@ async def test_per_skill_ops_raise_capability_not_supported(call):
     adapter = OpenClawSkillsAdapter(_FakeSkillsPort())
     with pytest.raises(CapabilityNotSupportedError):
         await call(adapter)
+
+
+# ── P2: the inline-verification verdict has to survive the adapter hop ──
+
+
+@pytest.mark.parametrize(
+    "raw_verified, expected",
+    [
+        (True, True),
+        (False, False),
+        # Absent and non-bool both mean "this runtime did not report a verdict".
+        # Neither may become False, which the backend reads as a real failure.
+        (None, None),
+        ("true", None),
+    ],
+)
+async def test_publish_carries_the_inline_verdict(raw_verified, expected):
+    raw = {"published": True, "evidence": {}}
+    if raw_verified is not None:
+        raw["verified"] = raw_verified
+    adapter = OpenClawSkillsAdapter(_FakeSkillsPort(publish_pool_mappings=raw))
+
+    result = await adapter.publish_pool_mappings([])
+
+    assert result.published is True
+    assert result.verified is expected

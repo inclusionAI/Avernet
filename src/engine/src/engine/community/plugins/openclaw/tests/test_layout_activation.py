@@ -2084,3 +2084,68 @@ def test_logical_dot_mapping_is_rejected_before_active_tree_mutation(
 
     assert not active_target.exists()
     assert not active_target.is_symlink()
+
+
+# ── P2: a publish reports its own verification, so the caller can skip /verify ──
+
+
+def test_publish_reports_inline_verification(tmp_path: Path) -> None:
+    home, legacy_local, pool_local, _ = _prepared_home(tmp_path)
+    mappings = [
+        SkillMapping(
+            source=str(pool_local / "handmade"),
+            target=str(legacy_local.parent / "handmade"),
+        )
+    ]
+
+    published = publish_pool_mappings(mappings=mappings, home=home)
+
+    assert published.published is True
+    assert published.verified is True
+    # The caller reads the verdict off the wire, so it has to survive to_data.
+    assert published.to_data()["verified"] is True
+    # And the same check run separately must agree, or the inline verdict is
+    # not standing in for anything.
+    assert verify_skill_mappings(mappings=mappings, home=home).valid is True
+    assert published.evidence["verification"]["failures"] == []
+
+
+def test_a_false_verdict_reaches_the_wire_as_false(tmp_path: Path) -> None:
+    """A false verdict is final for the caller — it must not be lost or nulled.
+
+    Driven through the model rather than the filesystem: a publish that lands
+    successfully then immediately verifies its own links cannot be made to
+    disagree without racing itself, but the wire contract for the failing case
+    is what the backend branches on.
+    """
+    result = MappingPublishResult(published=True, evidence={}, verified=False)
+
+    assert result.to_data()["verified"] is False
+
+
+def test_a_result_that_did_not_verify_omits_the_key_entirely(tmp_path: Path) -> None:
+    """Absence is the signal that this runtime does not verify inline.
+
+    A ``null`` would read as "checked, result unknown" and let a client skip
+    the separate verify it still needs, so the key must not appear at all.
+    """
+    assert MappingPublishResult(published=False, evidence={}).to_data() == {
+        "published": False,
+        "evidence": {},
+    }
+    assert "verified" not in MappingPublishResult(published=True, evidence={}).to_data()
+
+
+def test_a_failed_publish_reports_no_verification_verdict(tmp_path: Path) -> None:
+    home, legacy_local, pool_local, _ = _prepared_home(tmp_path)
+    target = legacy_local.parent / "occupied"
+    target.mkdir()  # a real directory, not a link the publish may replace
+
+    result = publish_pool_mappings(
+        mappings=[SkillMapping(source=str(pool_local / "handmade"), target=str(target))],
+        home=home,
+    )
+
+    assert result.published is False
+    assert result.verified is None
+    assert "verified" not in result.to_data()

@@ -302,9 +302,20 @@ class PoolMappingPublishResult:
 
     published: bool
     evidence: dict[str, Any] = field(default_factory=dict)
+    #: 该次发布是否顺带自校验，以及结果。``None`` = 没查（旧运行时的固定形状），
+    #: 与 ``False``（查了，不一致）不同：客户端只有在收到 ``True`` 时才能省掉
+    #: 单独的 /verify 调用。
+    verified: bool | None = None
 
     def to_data(self) -> dict[str, Any]:
-        return {"published": self.published, "evidence": self.evidence}
+        data: dict[str, Any] = {
+            "published": self.published,
+            "evidence": self.evidence,
+        }
+        if self.verified is not None:
+            # 不传 null：字段"在不在"本身就是"这个运行时会不会自校验"的信号。
+            data["verified"] = self.verified
+        return data
 
 
 @dataclass

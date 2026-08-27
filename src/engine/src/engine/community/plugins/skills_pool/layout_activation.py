@@ -116,9 +116,24 @@ class MappingVerificationResult:
 class MappingPublishResult:
     published: bool
     evidence: dict[str, object]
+    #: Whether this publish verified its own result, and how it went.
+    #: ``None`` means it did not check — the shape every failed publish
+    #: returns, and the shape a runtime that predates inline verification
+    #: always returned. Declared last because ``evidence`` has no default.
+    verified: bool | None = None
 
     def to_data(self) -> dict[str, object]:
-        return {"published": self.published, "evidence": self.evidence}
+        data: dict[str, object] = {
+            "published": self.published,
+            "evidence": self.evidence,
+        }
+        if self.verified is not None:
+            # Omitted rather than sent as null: the key's *presence* is what
+            # tells a client this runtime verifies inline at all, so a null
+            # would read as "checked, result unknown" and let the client skip
+            # the verify call it still needs.
+            data["verified"] = self.verified
+        return data
 
 
 def mapping_sources_use_pool(
@@ -2428,6 +2443,18 @@ def publish_pool_mappings(
                 "errno": error.errno,
             },
         )
+    # Verify inline, against the filesystem this call just wrote. It re-runs
+    # the same layout, retirement and mapping plans and lstats the links —
+    # local work on warm cache — where the caller's separate /verify request
+    # costs a full round trip to reach the identical check.
+    verification = verify_skill_mappings(
+        mappings=mappings,
+        retired_mappings=retired_mappings,
+        home=home,
+        engine=engine,
+        source_layout=source_layout,
+        additional_retirement_roots=additional_retirement_roots,
+    )
     return MappingPublishResult(
         published=True,
         evidence={
@@ -2440,7 +2467,9 @@ def publish_pool_mappings(
             "retired_absent": [str(path) for path in retirement.absent],
             "retired_replaced": [str(path) for path in retirement.replaced],
             "retired_external_ignored": [str(path) for path in retirement.external],
+            "verification": verification.evidence,
         },
+        verified=verification.valid,
     )
 
 
