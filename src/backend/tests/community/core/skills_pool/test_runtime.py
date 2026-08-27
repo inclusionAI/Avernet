@@ -463,6 +463,50 @@ async def test_inline_verification_failure_logs_the_whole_response(caplog) -> No
 
 
 @pytest.mark.asyncio
+async def test_publish_mappings_alone_never_claims_the_verdict_is_final(
+    caplog,
+) -> None:
+    """A separate verify still follows this path, so the verdict is not final.
+
+    The warning belongs to publish_and_verify_mappings, which does not re-ask
+    the device. Emitting it from the shared publish body would alert on every
+    projection whose separate verify then succeeds.
+    """
+    resolver = FakeResolver()
+    transport = InlineVerifiedTransport(verified=False)
+
+    with caplog.at_level(logging.WARNING):
+        published = await _runtime(resolver, transport).publish_mappings(
+            bot_id="bot-1", user_id="user-1", mappings=_local_mappings()
+        )
+
+    assert published is True
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+@pytest.mark.asyncio
+async def test_failed_publish_warns_once_not_twice(caplog) -> None:
+    """A publish that never happened did not "report" a verification verdict."""
+
+    class FailedWithVerdict(FakeTransport):
+        async def invoke(self, conn_info, method, path, *, body, timeout):
+            await super().invoke(conn_info, method, path, body=body, timeout=timeout)
+            return {"success": False, "data": {"verified": False}}
+
+    resolver = FakeResolver()
+
+    with caplog.at_level(logging.WARNING):
+        outcome = await _runtime(
+            resolver, FailedWithVerdict()
+        ).publish_and_verify_mappings(
+            bot_id="bot-1", user_id="user-1", mappings=_local_mappings()
+        )
+
+    assert outcome.published is False
+    assert len([r for r in caplog.records if r.levelno >= logging.WARNING]) == 1
+
+
+@pytest.mark.asyncio
 async def test_absent_signal_falls_back_to_the_separate_verify_call() -> None:
     """An older runtime says nothing; absence must never read as verified."""
     resolver = FakeResolver()

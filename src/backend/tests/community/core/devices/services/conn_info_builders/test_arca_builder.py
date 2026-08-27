@@ -188,3 +188,23 @@ def test_resolution_without_a_record_still_reads_the_row(arca_record):
     )
 
     assert repo.get_by_id.call_count == 4
+
+
+def test_a_record_for_another_binding_is_refused(arca_record):
+    """The record short-circuits the lookup that defines which binding this is.
+
+    A mismatched row would route by one binding's provider and run the
+    ownership check against another's owner, so it is refused rather than
+    quietly trusted.
+    """
+    from agentclaw.community.core.devices.errors import DeviceNotFoundError
+
+    router, _ = _real_arca_stack(arca_record)
+
+    with pytest.raises(DeviceNotFoundError):
+        router.get_device_connection_v2(
+            user_id="u001",
+            nick_name="u001",
+            binding_id=arca_record.id + 1,
+            record=arca_record,
+        )

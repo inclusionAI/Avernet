@@ -182,7 +182,7 @@ class DeviceServiceRouter(DeviceService):
 
         Args:
             binding_id: 设备绑定 ID
-            record: 已取到的 binding 行;路由只读 ``device_provider`` 一列,给了就不再查整行。
+            record: 已取到的 binding 行(须同 id);路由只读 ``device_provider``。
 
         Returns:
             对应的 DeviceService 实例

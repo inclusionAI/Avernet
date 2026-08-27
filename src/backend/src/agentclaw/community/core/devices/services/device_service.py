@@ -980,6 +980,11 @@ class DeviceService:
         """
         logger.info(f"[get_device_connection] called with binding_id={binding_id}, port={port}, ttl={ttl}")
 
+        if record is not None and record.id != binding_id:
+            raise DeviceNotFoundError(
+                f"[get_device_connection] record {record.id} does not describe "
+                f"binding {binding_id}"
+            )
         if record is None:
             record = self._repo.get_by_id(binding_id)
         if record is None:
@@ -1719,6 +1724,11 @@ class DeviceService:
             - token: 原始 token（兼容旧代码）
             - engine_type: 引擎类型
         """
+        if record is not None and record.id != binding_id:
+            raise DeviceNotFoundError(
+                f"[get_device_connection_v2] record {record.id} does not describe "
+                f"binding {binding_id}"
+            )
         # 1. 获取设备详情，检查 sandbox_id 和 device_provider（单源事实）
         try:
             device_result = (
