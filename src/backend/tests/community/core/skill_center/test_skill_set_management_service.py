@@ -2879,6 +2879,69 @@ def test_engine_projections_declare_the_protocol_as_a_base():
         )
 
 
+def test_the_capability_plan_names_a_boundary_not_a_service():
+    """``ResolvedCapabilityPlan.service`` must stay a declared boundary.
+
+    The seam is only replaceable if the contract names what a projection may
+    *do*, not who happens to do it today. Importing ``SkillSetService`` here
+    would make every implementation and every contract-only reader depend on
+    that class, so substituting the runtime service would mean editing the
+    contract — which is the coupling the registry exists to remove.
+
+    Both halves matter, so both are asserted: the contract must not reach for
+    the concrete service, *and* the concrete service must still satisfy the
+    narrowed boundary. Checking only the first would let the boundary drift
+    away from the class the composition root actually pairs it with, and the
+    mismatch would not surface until a projection ran.
+    """
+    import inspect
+    from pathlib import Path
+
+    from agentclaw.community.core.skill_center import (
+        runtime_projection_contract,
+    )
+    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+        CapabilityRuntimeBoundary,
+    )
+    from agentclaw.community.core.skill_center.services.skill_set_service import (
+        SkillSetService,
+    )
+
+    source = Path(runtime_projection_contract.__file__).read_text(encoding="utf-8")
+    # Matched on the module path, not on ``import SkillSetService``: the form
+    # this replaced was a parenthesised multi-line import, which that narrower
+    # string would have walked straight past.
+    assert "skill_set_service" not in source, (
+        "runtime_projection_contract must not import SkillSetService. Type "
+        "ResolvedCapabilityPlan.service against CapabilityRuntimeBoundary and "
+        "let the composition root pair the boundary with an implementation."
+    )
+
+    def shape(func) -> tuple:
+        # ``eval_str`` resolves the contract's annotations, which are strings
+        # because that module has ``from __future__ import annotations`` and
+        # the service does not. Without it the two sides would differ on
+        # nothing but quoting.
+        signature = inspect.signature(func, eval_str=True)
+        return (
+            inspect.iscoroutinefunction(func),
+            signature.return_annotation,
+            tuple(
+                (name, parameter.kind, parameter.annotation, parameter.default)
+                for name, parameter in signature.parameters.items()
+            ),
+        )
+
+    assert issubclass(SkillSetService, CapabilityRuntimeBoundary)
+    for name in ("sync_runtime", "sync_mcp_projection"):
+        assert shape(getattr(SkillSetService, name)) == shape(
+            getattr(CapabilityRuntimeBoundary, name)
+        ), (
+            f"SkillSetService.{name} no longer matches the boundary it is "
+            "wired to. Update CapabilityRuntimeBoundary alongside it."
+        )
+
+
 
 def test_registry_defaults_unknown_engines_to_the_per_domain_projection():
     """An unregistered engine gets the per-domain contract.

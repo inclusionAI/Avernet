@@ -163,6 +163,28 @@ with no `Plugin` base, no `@plugin_impl`, no impl-registry entry, and no
 plugin conformance test — the machinery `DeviceSync` itself also avoids
 ("the Core `DeviceSync` deliberately does NOT inherit `Plugin`").
 
+### What the plan carries the runtime as
+
+`ResolvedCapabilityPlan.service` is typed against `CapabilityRuntimeBoundary`
+— a protocol declaring exactly the two calls a projection may make,
+`sync_runtime` and `sync_mcp_projection` — rather than against
+`SkillSetService` itself.
+
+Naming the concrete class would have made the seam only half-replaceable:
+every implementation and every contract-only reader would depend on that
+class, so substituting the runtime service would mean editing the contract.
+The registry exists to remove exactly that coupling on the engine axis;
+carrying it back in on the service axis would be a strange trade. Pairing the
+boundary with an implementation is the composition root's job, and
+`SkillSetService` satisfies the protocol structurally with nothing to declare.
+
+The narrow protocol is also what the alternative readings both wanted: it is
+an explicit type (unlike the `Any` this replaced) and it is not an
+implementation. `test_the_capability_plan_names_a_boundary_not_a_service`
+holds both ends — the contract must not reach for the concrete module, and
+the concrete service must still match the boundary's shape, so the two cannot
+drift apart unnoticed.
+
 ## Changes
 
 ### 1. `core/skill_center/runtime_projection_contract.py`
@@ -175,7 +197,7 @@ plugin conformance test — the machinery `DeviceSync` itself also avoids
 class ResolvedCapabilityPlan:
     bot_id: str
     owner_id: str
-    service: object          # SkillSetService; untyped to avoid a cycle
+    service: CapabilityRuntimeBoundary   # sync_runtime + sync_mcp_projection
     bot: dict
     engine: str
     projection: RuntimeProjection

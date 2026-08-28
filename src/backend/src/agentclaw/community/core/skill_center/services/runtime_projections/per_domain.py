@@ -20,6 +20,7 @@ from agentclaw.community.core.repository.protocols.skills_pool import (
 from agentclaw.community.core.skills_pool.mapping_intent import mapping_contract_for
 from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
+    RegisteredSkillAsset,
     SkillMappingSourceLayout,
 )
 from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
@@ -57,7 +58,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
     def validate_plan(
         self,
         *,
-        skill_assets: Sequence[object],
+        skill_assets: Sequence[RegisteredSkillAsset],
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None:
         """Accept every plan: these engines have the full Center contract.

@@ -10,10 +10,41 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
     RegisteredSkillAsset,
     RuntimeProjection,
 )
-from agentclaw.community.core.skill_center.services.skill_set_service import (
-    SkillSetService,
-)
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
+
+
+@runtime_checkable
+class CapabilityRuntimeBoundary(Protocol):
+    """The runtime writes a capability projection is allowed to make.
+
+    Declared here rather than imported so the contract names a boundary
+    instead of an implementation: an ``EngineRuntimeProjection`` may write
+    the Skill half, the MCP half, or both, and nothing else. ``SkillSetService``
+    satisfies this structurally; the composition root is what pairs the two,
+    and substituting a different runtime service is a change there, not here.
+
+    Both signatures mirror that service exactly, deliberately — this narrows
+    the visible surface, it does not restate or re-specify it. What each call
+    guarantees is documented on ``SkillSetService``.
+    """
+
+    def sync_runtime(self, *, desired_skills: list[dict] | None = None) -> bool:
+        """Apply one complete resolver-owned Skill snapshot to the runtime.
+
+        Synchronous and blocking — device resolution sits behind it — so
+        callers dispatch it with ``asyncio.to_thread``.
+        """
+        ...
+
+    async def sync_mcp_projection(
+        self,
+        *,
+        claimed: frozenset[str],
+        released: frozenset[str],
+        declared: set[str],
+    ) -> bool:
+        """Apply one MCP projection: deliver, withdraw, and declare the set."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,9 +65,9 @@ class ResolvedCapabilityPlan:
     #: The Bot this plan is for, and the owner whose desired state it reads.
     bot_id: str
     owner_id: str
-    #: The Bot's ``SkillSetService`` — the runtime boundary an implementation
-    #: writes through.
-    service: SkillSetService
+    #: The runtime boundary an implementation writes through. Narrowed to the
+    #: two calls a projection may make; see ``CapabilityRuntimeBoundary``.
+    service: CapabilityRuntimeBoundary
     #: The ``ac_bots`` row. Carries ``env`` / ``entity_id`` / ``active_engine``
     #: that a filesystem-layout decision needs.
     bot: dict
@@ -245,6 +276,7 @@ class BotRuntimeProjectorProtocol(Protocol):
 
 __all__ = [
     "BotRuntimeProjectorProtocol",
+    "CapabilityRuntimeBoundary",
     "EngineRuntimeProjection",
     "ProjectionScope",
     "ResolvedCapabilityPlan",

@@ -14,7 +14,10 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ResolvedCapabilityPlan,
 )
 from agentclaw.community.core.skill_center.runtime_resolver import RuntimeProjection
-from agentclaw.community.core.skills_pool.models import PoolSkillMapping
+from agentclaw.community.core.skills_pool.models import (
+    PoolSkillMapping,
+    RegisteredSkillAsset,
+)
 from agentclaw.community.log import get_logger
 
 
@@ -46,7 +49,7 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
     def validate_plan(
         self,
         *,
-        skill_assets: Sequence[object],
+        skill_assets: Sequence[RegisteredSkillAsset],
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None:
         """Refuse Center-corpus desired state: v4 has no request contract for it.
@@ -57,8 +60,7 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
         at delivery.
         """
         if any(
-            getattr(asset, "git_path", "").startswith("center://")
-            for asset in skill_assets
+            asset.git_path.startswith("center://") for asset in skill_assets
         ) or any(mapping.corpus == "center" for mapping in retired_mappings):
             raise SkillSetRuntimeReconcileError()
 

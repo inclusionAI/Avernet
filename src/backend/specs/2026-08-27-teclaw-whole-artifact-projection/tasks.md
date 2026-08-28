@@ -28,6 +28,11 @@ separately.
       `bot_id`, `owner_id`, `service`, `bot`, `engine`, `projection`,
       `effective_cli_items`, `identity_modes`. Type `service` loosely to avoid
       importing `SkillSetService` (cycle); say so in a comment. Export it.
+      **Superseded during review.** There is no such cycle — `skill_set_service`
+      does not import this module. `service` is typed against
+      `CapabilityRuntimeBoundary`, a protocol declaring the two calls a
+      projection may make, so the contract names a boundary rather than an
+      implementation. See plan.md, "What the plan carries the runtime as".
 
 - [x] 1.2 In `bot_runtime_projector.py`, make `_build_plan`, `_resolve_plan`
       and `_resolve_cleanup_plan` return `ResolvedCapabilityPlan`, and update
