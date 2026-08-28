@@ -415,7 +415,7 @@ class _RuntimeFactory:
     def create(self, **kwargs):
         return self
 
-    def project_skills(self, *, desired_skills=None):
+    async def project_skills(self, *, desired_skills=None):
         return True
 
     async def project(self, **_kwargs):
@@ -513,7 +513,7 @@ class _ReplacementRuntime:
     def create(self, **_kwargs):
         return self
 
-    def project_skills(self, *, desired_skills=None):
+    async def project_skills(self, *, desired_skills=None):
         self.calls += 1
         return next(self.results)
 

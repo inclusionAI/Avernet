@@ -744,7 +744,11 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                         entity_type=effective_entity_type,
                         engine_type=effective_engine,
                     )
-                    skill_synced = bool(skill_set_service.project_skills())
+                    # ``project_skills`` is async so that both halves of the
+                    # capability boundary are awaited the same way; this is a
+                    # worker thread with no running loop, so it bridges the
+                    # same way ``_do_mcp_sync`` above does.
+                    skill_synced = bool(asyncio.run(skill_set_service.project_skills()))
                     if skill_synced:
                         logger.info(
                             "[aicoding.restart] skill symlink sync succeeded: "

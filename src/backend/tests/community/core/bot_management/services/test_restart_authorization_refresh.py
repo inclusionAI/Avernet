@@ -101,7 +101,7 @@ def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
     mcp_sync.sync_mcp_details = AsyncMock(return_value={"success": True})
     factory = MagicMock()
     skill_set_service = MagicMock()
-    skill_set_service.project_skills.return_value = True
+    skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
 
     with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
@@ -135,7 +135,7 @@ def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
         entity_type="staff",
         engine_type="aicoding",
     )
-    skill_set_service.project_skills.assert_called_once_with()
+    skill_set_service.project_skills.assert_awaited_once_with()
 
 
 def test_aicoding_refresh_is_best_effort_and_keeps_skill_sync_on_mcp_error() -> None:
@@ -144,7 +144,7 @@ def test_aicoding_refresh_is_best_effort_and_keeps_skill_sync_on_mcp_error() -> 
     mcp_sync.refresh_mcp_scope = AsyncMock(side_effect=RuntimeError("scope down"))
     factory = MagicMock()
     skill_set_service = MagicMock()
-    skill_set_service.project_skills.return_value = True
+    skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
 
     with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
@@ -156,7 +156,7 @@ def test_aicoding_refresh_is_best_effort_and_keeps_skill_sync_on_mcp_error() -> 
             skill_set_factory=factory,
         ) is True
     factory.create.assert_called_once()
-    skill_set_service.project_skills.assert_called_once_with()
+    skill_set_service.project_skills.assert_awaited_once_with()
 
 
 
@@ -169,7 +169,7 @@ def test_aicoding_refresh_logs_scope_failure_and_still_syncs_skills() -> None:
     mcp_sync.sync_mcp_details = AsyncMock()
     factory = MagicMock()
     skill_set_service = MagicMock()
-    skill_set_service.project_skills.return_value = True
+    skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
 
     with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
@@ -182,7 +182,7 @@ def test_aicoding_refresh_logs_scope_failure_and_still_syncs_skills() -> None:
         ) is True
 
     mcp_sync.sync_mcp_details.assert_not_called()
-    skill_set_service.project_skills.assert_called_once_with()
+    skill_set_service.project_skills.assert_awaited_once_with()
 
 
 def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
@@ -194,7 +194,7 @@ def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
     )
     factory = MagicMock()
     skill_set_service = MagicMock()
-    skill_set_service.project_skills.return_value = False
+    skill_set_service.project_skills = AsyncMock(return_value=False)
     factory.create.return_value = skill_set_service
 
     with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
@@ -207,7 +207,7 @@ def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
         ) is True
 
     mcp_sync.sync_mcp_details.assert_awaited_once()
-    skill_set_service.project_skills.assert_called_once_with()
+    skill_set_service.project_skills.assert_awaited_once_with()
 
 
 def test_aicoding_refresh_does_not_retry_mcp_detail_when_runtime_not_ready() -> None:
@@ -222,7 +222,7 @@ def test_aicoding_refresh_does_not_retry_mcp_detail_when_runtime_not_ready() -> 
     )
     factory = MagicMock()
     skill_set_service = MagicMock()
-    skill_set_service.project_skills.return_value = True
+    skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
 
     with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
@@ -235,7 +235,7 @@ def test_aicoding_refresh_does_not_retry_mcp_detail_when_runtime_not_ready() -> 
         ) is True
 
     mcp_sync.sync_mcp_details.assert_awaited_once()
-    skill_set_service.project_skills.assert_called_once_with()
+    skill_set_service.project_skills.assert_awaited_once_with()
 
 
 def test_aicoding_refresh_does_not_retry_mcp_detail_exception() -> None:
@@ -265,7 +265,7 @@ def test_aicoding_refresh_does_not_retry_skill_symlink_when_false() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     factory = MagicMock()
     skill_set_service = MagicMock()
-    skill_set_service.project_skills.side_effect = [False, True]
+    skill_set_service.project_skills = AsyncMock(side_effect=[False, True])
     factory.create.return_value = skill_set_service
 
     with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
@@ -277,17 +277,16 @@ def test_aicoding_refresh_does_not_retry_skill_symlink_when_false() -> None:
             skill_set_factory=factory,
         ) is True
 
-    skill_set_service.project_skills.assert_called_once_with()
+    skill_set_service.project_skills.assert_awaited_once_with()
 
 
 def test_aicoding_refresh_does_not_retry_skill_symlink_exception() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     factory = MagicMock()
     skill_set_service = MagicMock()
-    skill_set_service.project_skills.side_effect = [
-        RuntimeError("BaaS API error: NO_ACTIVE_DEVICES"),
-        True,
-    ]
+    skill_set_service.project_skills = AsyncMock(
+        side_effect=[RuntimeError("BaaS API error: NO_ACTIVE_DEVICES"), True]
+    )
     factory.create.return_value = skill_set_service
 
     with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
@@ -299,7 +298,7 @@ def test_aicoding_refresh_does_not_retry_skill_symlink_exception() -> None:
             skill_set_factory=factory,
         ) is True
 
-    skill_set_service.project_skills.assert_called_once_with()
+    skill_set_service.project_skills.assert_awaited_once_with()
 
 
 def test_aicoding_refresh_swallows_non_transient_runtime_exceptions() -> None:
@@ -309,7 +308,7 @@ def test_aicoding_refresh_swallows_non_transient_runtime_exceptions() -> None:
     mcp_sync.sync_mcp_details = AsyncMock(side_effect=RuntimeError("detail down"))
     factory = MagicMock()
     skill_set_service = MagicMock()
-    skill_set_service.project_skills.side_effect = RuntimeError("skill down")
+    skill_set_service.project_skills = AsyncMock(side_effect=RuntimeError("skill down"))
     factory.create.return_value = skill_set_service
 
     with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
@@ -322,7 +321,7 @@ def test_aicoding_refresh_swallows_non_transient_runtime_exceptions() -> None:
         ) is True
 
     mcp_sync.sync_mcp_details.assert_awaited_once()
-    skill_set_service.project_skills.assert_called_once_with()
+    skill_set_service.project_skills.assert_awaited_once_with()
 
 
 def test_aicoding_refresh_swallows_skill_sync_exception() -> None:

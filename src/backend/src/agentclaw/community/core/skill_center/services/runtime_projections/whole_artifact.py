@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Sequence
 
 from agentclaw.community.core.skill_center.errors import (
@@ -110,21 +109,19 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
         # this projection rides in that same document, which is why there is
         # no second call here.
         #
-        # Off the event loop because all of that is synchronous and expensive:
-        # device resolution (including a blocking ws-info HTTP call), the
-        # compose, and the outbound apply request. Callers reach here from
-        # async HTTP handlers such as ``DirectActivationService.activate_mcp``,
-        # so leaving it in the coroutine would let one slow container stall
-        # unrelated requests on the same worker. Same rule, and the same
-        # reason, as ``SkillSetService.sync_mcp_desired_state``.
+        # All of that is blocking, but staying off the event loop is
+        # ``project_skills``'s own responsibility — it dispatches to a thread
+        # internally — so this is a plain await. Callers reach here from async
+        # HTTP handlers such as ``DirectActivationService.activate_mcp``, and
+        # that guarantee living in the service is what stops one slow
+        # container from stalling unrelated requests on the same worker.
         #
         # The snapshot is still passed even though the composer re-reads
         # desired state itself. It is not redundant work: ``project_skills``
         # falls back to ``get_active_skills`` when this is ``None``, which
         # re-runs the flush-and-read that ``_resolve_plan`` just did. Handing
         # over the resolved assets is what avoids that second pass.
-        if not await asyncio.to_thread(
-            plan.service.project_skills,
+        if not await plan.service.project_skills(
             desired_skills=self._desired_skills(plan.projection),
         ):
             raise SkillSetRuntimeReconcileError()

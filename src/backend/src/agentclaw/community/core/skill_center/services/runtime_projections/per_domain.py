@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Sequence
 
 from agentclaw.community.core.skill_center.errors import (
@@ -148,11 +147,10 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                     else SkillMappingSourceLayout.LEGACY
                 ),
             )
-        # Off the event loop, for the reason given in
-        # ``SkillSetService.sync_mcp_desired_state``: this is a synchronous
-        # device call carrying a blocking ws-info HTTP resolution behind it.
-        elif not await asyncio.to_thread(
-            plan.service.project_skills,
+        # A plain await: the blocking device call behind ``project_skills``
+        # is dispatched off the event loop by that method itself, so this
+        # legacy path gets the guarantee without restating it.
+        elif not await plan.service.project_skills(
             desired_skills=self._desired_skills(plan.projection),
         ):
             raise SkillSetRuntimeReconcileError()

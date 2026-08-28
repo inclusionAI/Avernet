@@ -29,11 +29,15 @@ class CapabilityRuntimeBoundary(Protocol):
     guarantees is documented on ``SkillSetService``.
     """
 
-    def project_skills(self, *, desired_skills: list[dict] | None = None) -> bool:
+    async def project_skills(
+        self, *, desired_skills: list[dict] | None = None
+    ) -> bool:
         """Apply one complete resolver-owned Skill snapshot to the runtime.
 
-        Synchronous and blocking — device resolution sits behind it — so
-        callers dispatch it with ``asyncio.to_thread``.
+        Blocking work sits behind this — device resolution, and on a
+        whole-artifact engine an artifact compose and the outbound apply
+        request — but keeping off the event loop is the implementation's
+        responsibility, not the caller's. Await it like ``project_mcps``.
         """
         ...
 

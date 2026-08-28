@@ -509,7 +509,7 @@ class _RuntimeFactoryService:
             tuple[frozenset[str], frozenset[str], set[str]]
         ] = []
 
-    def project_skills(self, *, desired_skills: list[dict]) -> bool:
+    async def project_skills(self, *, desired_skills: list[dict]) -> bool:
         self.desired_skills = desired_skills
         self.runtime_syncs.append(desired_skills)
         return True
@@ -2711,7 +2711,10 @@ async def test_teclaw_failed_delivery_raises_reconcile_error():
     """
     passport = _RuntimePassport()
     factory = _RuntimeFactory()
-    factory.service.project_skills = lambda **_: False
+    async def _refuse(**_):
+        return False
+
+    factory.service.project_skills = _refuse
     runtime = _teclaw_runtime(factory, passport=passport)
 
     with pytest.raises(SkillSetRuntimeReconcileError):
@@ -2723,80 +2726,28 @@ async def test_teclaw_failed_delivery_raises_reconcile_error():
     assert passport.calls == []
 
 
-def _local_skill_reader():
-    """A per-domain Bot whose Skill half takes the legacy ``project_skills`` branch.
-
-    ``_RuntimeLayouts.get`` answers ``None`` (Pool does not own the runtime) and
-    a ``local://`` asset yields no repo/center mapping, so
-    ``PerDomainRuntimeProjection`` falls through to the legacy sync rather than
-    publishing Pool mappings.
-    """
-    return _reader(
-        _RuntimeSkills(
-            [
-                RegisteredSkillAsset(
-                    skill_id=1,
-                    name="qa",
-                    git_path="local://qa",
-                )
-            ]
-        )
-    )
-
-
-def _projector_for(factory, *, teclaw: bool, reader):
-    bots = _TeclawRuntimeBots() if teclaw else _RuntimeBots()
-    return BotRuntimeProjector(
-        factory=factory,
-        bot_repo=bots,
-        repository=_McpInstallations(),
-        reader=reader,
-        registry=_registry(
-            pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()
-        ),
-        passport=_RuntimePassport(),
-        caller_identity_repo=_RuntimeCallerIdentity(),
-    )
-
-
-async def _drive_whole_artifact(factory):
-    runtime = _projector_for(
-        factory, teclaw=True, reader=_reader(_TeclawRuntimeSkills())
-    )
-    await runtime.project(
-        bot_id="bot-1", owner_id="true-owner",
-        scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.a"})),
-    )
-
-
-async def _drive_per_domain_legacy(factory):
-    runtime = _projector_for(factory, teclaw=False, reader=_local_skill_reader())
-    await runtime.project(
-        bot_id="bot-1", owner_id="true-owner",
-        scope=ProjectionScope(skills=True),
-    )
-
-
-@pytest.mark.parametrize(
-    "drive",
-    [_drive_whole_artifact, _drive_per_domain_legacy],
-    ids=["whole-artifact", "per-domain-legacy"],
-)
 @pytest.mark.asyncio
-async def test_runtime_delivery_never_runs_on_the_event_loop(drive):
-    """Every ``project_skills`` call site dispatches off the coroutine's thread.
+async def test_runtime_delivery_never_runs_on_the_event_loop():
+    """``project_skills`` dispatches its blocking work off the loop's thread.
 
-    ``project_skills`` is synchronous and carries a device resolution with a
-    blocking ws-info HTTP call behind it; on a whole-artifact engine it also
-    composes the full artifact and posts it. Callers reach the projector from
-    async HTTP handlers (``DirectActivationService`` is one), so running it
-    inline lets one slow container stall unrelated requests on the same worker
-    — the reason ``SkillSetService.sync_mcp_desired_state`` already wraps its
-    device calls.
+    Behind it sits a device resolution with a blocking ws-info HTTP call, and
+    on a whole-artifact engine a full artifact compose and the outbound apply
+    request. Callers reach it from async HTTP handlers
+    (``DirectActivationService`` is one), so running it inline lets one slow
+    container stall unrelated requests on the same worker — the reason
+    ``sync_mcp_desired_state`` already wraps its device calls.
 
-    Parametrised over all three call sites rather than testing only the teclaw
-    one: the wrapping is an execution-semantics change at each, and an edit
-    that un-wrapped either of the other two would otherwise pass unnoticed.
+    Asserted against ``SkillSetService`` itself rather than at the projection
+    call sites, because that is where the guarantee now lives. It used to be
+    the caller's job, parametrised over each call site so an edit that
+    un-wrapped one would be caught; making ``project_skills`` async moved the
+    ``to_thread`` inside it, so a call site can no longer get this wrong —
+    awaiting is the only way to invoke it. One test at the real boundary
+    replaces three at its callers.
+
+    Driven through the unbound method over a stub ``self``: the body touches
+    only these three attributes, and constructing a whole ``SkillSetService``
+    would test its collaborators rather than this dispatch.
 
     Asserted by thread identity, not by patching ``asyncio.to_thread``: what
     matters is that the blocking work left the loop's thread, not which API
@@ -2804,24 +2755,30 @@ async def test_runtime_delivery_never_runs_on_the_event_loop(drive):
     """
     import threading
 
+    from agentclaw.community.core.skill_center.services.skill_set_service import (
+        SkillSetService,
+    )
+
     loop_thread = threading.get_ident()
     seen: list[int] = []
 
-    factory = _RuntimeFactory()
-    original = factory.service.project_skills
+    class _StubService:
+        user_id = "owner-1"
+        entity_id = "owner-1"
 
-    def _recording_project_skills(**kwargs):
-        seen.append(threading.get_ident())
-        return original(**kwargs)
+        def _sync_symlinks_to_device_if_needed(self, user_id, desired_skills):
+            seen.append(threading.get_ident())
+            return True
 
-    factory.service.project_skills = _recording_project_skills
+    assert await SkillSetService.project_skills(
+        _StubService(), desired_skills=[{"id": "1"}]
+    )
 
-    await drive(factory)
-
-    assert seen, "project_skills never ran — this case does not exercise the call site"
+    assert seen, "the blocking call never ran — this test proves nothing"
     assert loop_thread not in seen, (
-        "project_skills ran on the event loop thread; it must be dispatched "
-        "through asyncio.to_thread so a slow device cannot block the worker"
+        "project_skills ran its blocking work on the event loop thread; it "
+        "must dispatch through asyncio.to_thread so a slow device cannot "
+        "block the worker"
     )
 
 
