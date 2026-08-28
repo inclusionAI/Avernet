@@ -23,6 +23,7 @@ from agentclaw.community.core.repository.protocols.task import (
     TaskNodeRepositoryProtocol,
     TaskNodeRunInfoRepositoryProtocol,
 )
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult,
     NodeOpResult,
@@ -243,7 +244,9 @@ class TaskService:
         message = f"/{wf_id} " + " ".join(args) if wf_id else " ".join(args)
         try:
             bot_result = await self._engine.trigger_single_bot_workflow(
-                task_id=task_id, bot_id=request.owner_bot_id, message=message
+                task_id=task_id,
+                bot_id=compose_bot_identity(request.owner_bot_id, request.owner_user_id),
+                message=message,
             )
         except Exception as exc:
             return TaskOpResult(

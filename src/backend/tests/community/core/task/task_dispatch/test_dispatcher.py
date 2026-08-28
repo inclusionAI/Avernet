@@ -182,3 +182,38 @@ class TestSearchBasedDispatchStrategy:
         assert result.outcome == SearchOutcome.MISS
         assert result.miss_reason == "no_candidates"
         assert strategy._bot.calls == []
+
+
+def test_search_strategy_composes_owner_identity_for_openapi_call():
+    class _Discover:
+        def search_by_keyword(self, **kwargs):
+            return {"items": [{"bot_id": "candidate"}]}
+
+    class _Bot:
+        def __init__(self):
+            self.calls = []
+
+        async def send_and_wait_async(self, **kwargs):
+            self.calls.append(kwargs)
+            return {
+                "status": "COMPLETED",
+                "result": {
+                    "content": (
+                        '{"outcome":"MISS","miss_reason":"not matched"}'
+                    )
+                },
+            }
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.PENDING,
+        extend_props={"owner_bot_id": "default:old-owner", "owner_user_id": "146836"},
+    )
+    bot = _Bot()
+    result = _run(SearchBasedDispatchStrategy(bot, _Discover()).apply(_node("c1"), graph))
+
+    assert result.outcome == SearchOutcome.MISS
+    assert bot.calls[0]["bot_id"] == "default:146836"
