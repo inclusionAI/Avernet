@@ -44,11 +44,6 @@ import unittest
 
 import httpx
 
-# 复刻同一份 yaml 协同模板(单一信源):与 singlebox 参考测同源,免转抄/免漂移。
-from tests.community.core.task.singlebox_e2e.yaml.test_writing_qc_state_machine_e2e import (
-    WRITING_QC_YAML,
-)
-
 _LIVE = os.environ.get("AVERNET_PRE_TASK_E2E", "").strip() in {"1", "true"}
 _BACKEND = os.environ.get("AVERNET_PRE_BACKEND_URL", "").strip().rstrip("/")
 _USER_ID = os.environ.get("AVERNET_E2E_USER_ID", "").strip()
@@ -110,7 +105,7 @@ def _execute_body(writer_id: str, editor_id: str) -> dict:
         "owner_bot_id": writer_id,
         "execution_config": {
             "task_type": "yaml",
-            "kind": "manager_worker",
+            "group_kind": "manager_worker",
             "participant_bot_ids": [editor_id],
             "participant_bindings": {
                 "writer": [writer_id],
