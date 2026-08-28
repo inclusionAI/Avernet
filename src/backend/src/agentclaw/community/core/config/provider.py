@@ -92,6 +92,20 @@ def set_config_provider(provider: ConfigProvider) -> None:
     _cached = None
 
 
+def has_config_provider() -> bool:
+    """Whether a config source is registered (or already loaded) at all.
+
+    Distinguishes "there is nothing to read" — no composition root has run, as
+    in local mode or an ad-hoc test — from "reading failed", which
+    :func:`load_config` signals by raising. A caller that treats a *missing*
+    config as an acceptable default must not extend that tolerance to a
+    *broken* one: silently defaulting a value that a failed overlay was meant
+    to supply is how a deployment boots as somebody else. Ask this first, then
+    call :func:`load_config` and let its failure propagate.
+    """
+    return _provider is not None or _cached is not None
+
+
 def load_config() -> AppConfig:
     """Return the active provider's :class:`AppConfig`, cached after first load.
 

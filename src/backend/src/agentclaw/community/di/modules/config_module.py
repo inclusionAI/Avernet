@@ -67,19 +67,29 @@ def _block(name: str) -> dict[str, Any]:
 def _app_name() -> str | None:
     """The **top-level** ``app_name``, or ``None`` when there is no config.
 
-    Same defensiveness as :func:`_user_config` — local mode and ad-hoc tests
-    often have no sofa config at all — but the two outcomes are kept apart on
-    purpose: ``None`` means "nothing to read", while ``""`` means an app config
-    that names itself nothing. Only the consumer knows which of those is a
-    misconfiguration worth refusing (see :meth:`ConfigModule.task_queue`).
-    """
-    try:
-        from agentclaw.community.core.config import sofa
+    Three outcomes, deliberately kept apart, because only the consumer knows
+    which are acceptable (see :meth:`ConfigModule.task_queue`):
 
-        return str(getattr(sofa.sofa_config, "app_name", "") or "")
-    except Exception as exc:  # pragma: no cover — defensive
-        logger.warning("ConfigModule: sofa app_name unavailable (%s)", exc)
+    - ``None`` — no config source is registered at all. Local mode, an ad-hoc
+      test, any import outside a boot. There is nothing to have got wrong, so a
+      caller may fall back to its default.
+    - ``""`` — a config that names the app nothing. Present and wrong.
+    - anything else — the configured name.
+
+    A *read failure* is deliberately **not** one of them. Unlike
+    :func:`_user_config`, this does not swallow a raising provider: a missing or
+    malformed overlay would then look identical to "no config", and a caller
+    that defaults on ``None`` would quietly adopt somebody else's app name — the
+    exact corruption ``app`` scoping exists to prevent. ``load_config`` already
+    fails loudly; let it.
+    """
+    from agentclaw.community.core.config import provider as config_provider
+
+    if not config_provider.has_config_provider():
         return None
+    from agentclaw.community.core.config import sofa
+
+    return str(getattr(sofa.sofa_config, "app_name", "") or "")
 
 
 # The closed set of HttpClient bindings an ``overrides`` entry may name. Taken
@@ -865,10 +875,14 @@ class ConfigModule(Module):
         deployment's identity; giving it a second, independently settable name
         would only create a way for the two to disagree.
 
-        No config at all (local mode, ad-hoc tests) ⇒ ``TaskQueueConfig``'s
-        default, which is the column default on the deployed table, so a
-        deployment that never set ``app_name`` keeps owning exactly the rows it
-        already owned.
+        No config *source* at all (local mode, ad-hoc tests) ⇒
+        ``TaskQueueConfig``'s default, which is the column default on the
+        deployed table, so a deployment that never set ``app_name`` keeps owning
+        exactly the rows it already owned. A config source that exists but
+        cannot be read is a different thing entirely and is never defaulted —
+        ``_app_name`` lets that failure propagate, because a broken overlay
+        defaulting to the shipped name is how a deployment boots as somebody
+        else and claims their queue rows.
 
         A *present* but unusable value **raises** rather than falling back, and
         the fallback is the reason: the default is the *other* deployment's name
