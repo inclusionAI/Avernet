@@ -156,6 +156,10 @@ Codex 评审后修复(详见 PR 评论):
 - 也避免长 retention 表下 GROUP BY 扫 30/90 天终态行。
 
 ## 12. 待后续补齐(follow-ups)
+- **后端写/读失败传播(C4/C9/C6,跟踪于 #1627,独立后续 PR)**:评审确认的三项修复方案:
+  - **C4**(`append_streaming_content` 静默 `Ok(true)` on overlay 写失败):Option 2——overlay 写失败时回退**直接写 MySQL** 正文(`UPDATE … WHERE 非终态`),`Ok(true)` 不变;审计完整性保住,无引擎/端口改动,DB 写成本仅在 Redis 故障期。
+  - **C9**(`ChatRunStore.get` 把 `Backend` 错误吞成 `None`→`BotNotFound`):scoped 读路径修复——新增可传播的 `get_run_record -> Result<Option, Backend>`,仅在 `get_run`/`wait_run`/provider 回调 ingest 处使用,`Backend`→500/可重试而非 404/拒绝;内部 mutator 仍用不抛错的 `get`。全引擎 `get→Result` 重构留更长期。
+  - **C6**(`put_context` 不可抛错 + 丢弃 Redis 写失败→run 已"注册"未存储):Option B——`RedisBotRunContextStore` 改为**内存主 + Redis 镜像**(写:内存先成功故 `put_context` 仍不可抛错,无需 trait/调用方改动; + best-effort Redis 镜像。读:内存→回退 Redis→命中则回填内存。终端认领/transport 留 Redis `NX` 作跨重启持久记录)。理由:sticky-session 下单写者无跨副本分歧,内存主+Redis 镜像提供所需**重启安全**(replica 重启内存被抹→从 Redis 镜像恢复),为连接/业务分离(gateway 承接 SSE/WS,BCS replica 重启不中断连接)做准备。**已知降级**:重启-恰逢-Redis-故障的双失效窗口内,未镜像的 run 上下文丢失→迟到回调无法路由→该 run 超时(部分正文仍在 ChatRun MySQL 审计,ChatRun CAS 防双终态,benign)。Option A(Redis 权威+可抛错 trait)为备选:更简单单源,但每事件多一次 Redis 读 + trait/5 调用方改动。
 - **A2aChat ↔ BotRun 终态协同**:直聊终态化(`mark_completed/failed/cancelled`)成功后,在 `A2aChat`(mod.rs)best-effort 调用 `bot_run_context.mark_terminal(run_id)`,使 BotRun 登记簿与 ChatRun 终态对齐(当前直聊路径未主动终态化 BotRun,沿用既有行为——靠 deadline/cleanup)。低风险增量改动,建议在独立小改动里落地。
 - **Drain 路径写失败传播的显式化**:引擎 mutator 在 `Backend` 错误时已记 `error!` 并返回 `false`(不假装成功);`create` 路径错误已映射为 `ServiceError::InternalError`(不发 202)。可选:在 `record_run_event`/drain 把 `Backend` 显式映射为 `emit_run_lifecycle(Failed, InternalError)`。
 - **bootstrap 集成测试(重启/跨副本/审计/配置切换)**:本机磁盘受限(20G,`-p bcs` 测试构建超限),未能运行 `bcs` 测试二进制;建议在 CI(无磁盘约束)新增 `crates/bootstrap/bcs/tests/run_governance_restart.rs` 覆盖验收用例:重启可查、两引擎共享 repo 的跨副本一致、终态幂等 CAS、cancel 幂等、注入 DbPlugin 失败→5xx、TTL 不误删、审计 SQL 可查、SSE reader 死→超时、memory/persistent 切换。
