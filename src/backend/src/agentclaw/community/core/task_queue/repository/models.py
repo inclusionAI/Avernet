@@ -152,8 +152,9 @@ class TaskQueueModel(Base):
     # this table, and without this column both fleets claim each other's tasks —
     # each running a ``task_type`` its registry never heard of. Every query that
     # selects work (claim, the dedup lookups, list_by_status) filters on it, and
-    # the value comes from deployment config (``TaskQueueConfig.app``), never
-    # from a per-call argument, exactly like ``env``.
+    # the value comes from deployment config (``TaskQueueConfig.app``, read off
+    # the top-level ``app_name``), never from a per-call argument, exactly like
+    # ``env``.
     #
     # ``server_default`` mirrors the deployed DDL so an INSERT that predates this
     # column still lands on the owning app rather than failing NOT NULL. It is a
@@ -239,7 +240,8 @@ class TaskQueueModel(Base):
         # Leaving it out of the ORM would hide that case from SQLite entirely and
         # let it surface first in production, which is precisely the divergence
         # the collation notes above exist to avoid. ``enqueue`` recognises the
-        # rejection and names the index; see ``_find_foreign_app_key_holder``.
+        # rejection as a dedup conflict, finds no holder of its own, and ends up
+        # raising once its retries are spent.
         #
         # It is redundant once every app writes its own ``app``, and dropping it
         # is the last step of this migration — drop it there and here in the same

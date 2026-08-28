@@ -627,7 +627,7 @@ class DormantNotifyConfig:
 class TaskQueueConfig:
     """Which application owns this deployment's ``ac_task_queue`` rows.
 
-    Sourced from the ``task_queue`` block of ``user_config``.
+    Sourced from the **top-level** ``app_name`` — the deployment's own identity.
 
     One table is shared by more than one independent backend, so a row carries
     an ``app`` naming its owner: enqueue stamps it, and every query that selects

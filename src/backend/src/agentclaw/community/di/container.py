@@ -168,7 +168,7 @@ def build_injector(
     # config is valid, which is the only case that reaches production.
     _app_injector.get(HttpClientPoolConfig)
 
-    # Same reasoning for the task-queue owner: `task_queue.app` rejects a name
+    # Same reasoning for the task-queue owner: `task_queue` rejects an `app_name`
     # the column cannot hold faithfully by raising, and a raise that only
     # surfaced inside `discover_lifecycle_participants` would silently drop the
     # TaskWorker binding — an app that boots clean and never runs a queued task.

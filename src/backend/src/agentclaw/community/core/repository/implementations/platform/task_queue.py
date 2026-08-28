@@ -91,9 +91,10 @@ logger = get_logger()
 #:
 #: There are two because the deployed table still carries the pre-``app`` index
 #: alongside the one that scopes dedup by ``app``. Either can reject an INSERT,
-#: and a rejection by the older one is not a duplicate *for this app* — see
-#: :meth:`TaskQueueRepository.enqueue`. The names are not substrings of one
-#: another, so matching them is unambiguous.
+#: so both have to be recognised; the names are not substrings of one another,
+#: so matching them is unambiguous. Dropping the legacy index is the last step of
+#: the app migration (see ``models.py`` and README "Provisioning"), and its
+#: spelling comes out of this tuple then.
 _ACTIVE_IDEM_INDEXES = (
     "uk_env_app_task_type_active_idempotency_key",
     "uk_env_task_type_active_idempotency_key",
@@ -258,9 +259,8 @@ def _is_active_idem_conflict(exc: IntegrityError) -> bool:
 
       ``active_idempotency_key`` appears in both indexes and in no other
       constraint, so the column form identifies the violation without having to
-      tell the two apart — which is right, because the branch that does care
-      (a rejection by the pre-``app`` index) is decided by looking up the holder,
-      not by parsing the message.
+      tell the two apart — which is all :meth:`enqueue` needs, since it resolves
+      the holder by querying for it rather than by parsing the message.
 
     A pure function over the exception so it is unit-testable against both
     message forms without a MySQL instance.
@@ -458,45 +458,6 @@ class TaskQueueRepository(
             )
             return row[0] if row else None
 
-    def _find_foreign_app_key_holder(
-        self, *, env: str, app: str, task_type: str, idempotency_key: str
-    ) -> Optional[tuple[int, str]]:
-        """``(id, app)`` of a row belonging to a **different** app that holds
-        ``idempotency_key`` in this ``(env, task_type)``, or ``None``.
-
-        Reachable only while the pre-``app`` dedup index is still on the table
-        (see ``models.py``): that index is unique on ``(env, task_type,
-        active_idempotency_key)`` regardless of app, so it rejects an INSERT for
-        a key another deployment happens to be using — even though, in this
-        app's scope, the key is free.
-
-        It is checked because the two live cases it separates want opposite
-        responses, and both look identical from :meth:`enqueue`'s side ("the
-        index rejected us, and no holder is visible in our scope"):
-
-        - **The key was released mid-race** — retrying is correct and normally
-          succeeds.
-        - **Another app holds it** — retrying can never succeed while that row
-          is live, and no amount of budget changes that.
-
-        Without the distinction the second case burns every attempt and reports
-        sustained churn, which points at the wrong thing entirely: the fix is to
-        drop the legacy index (the last step of the app migration), not to look
-        for a hot key. The message says so and names the row.
-        """
-        with self._db.orm_session() as db:
-            row = (
-                db.query(self.Model.id, self.Model.app)
-                .filter(
-                    self.Model.env == env,
-                    self.Model.app != app,
-                    self.Model.task_type == task_type,
-                    self.Model.active_idempotency_key == idempotency_key,
-                )
-                .first()
-            )
-            return (row[0], row[1]) if row else None
-
     def enqueue(
         self,
         *,
@@ -558,8 +519,9 @@ class TaskQueueRepository(
                         idempotency_key,
                     )
                     return EnqueueResult(existing, False)
-                # No live holder of ours, yet an index rejected us. Three very
-                # different situations, and retrying is right for only one.
+                # No live holder of ours, yet an index rejected us. Two very
+                # different situations, and retrying is right for only one of
+                # them.
                 stranded_id = self._find_stranded_key_holder(
                     env=env,
                     app=app,
@@ -577,27 +539,6 @@ class TaskQueueRepository(
                         "without clearing active_idempotency_key; clear that "
                         "column on the row to free the key"
                     )
-                # Still no holder in our scope: the rejection can only have
-                # come from the legacy index, which does not look at app.
-                foreign = self._find_foreign_app_key_holder(
-                    env=env,
-                    app=app,
-                    task_type=task_type,
-                    idempotency_key=idempotency_key,
-                )
-                if foreign is not None:
-                    foreign_id, foreign_app = foreign
-                    raise RuntimeError(
-                        f"[task_queue.enqueue] key={idempotency_key!r} "
-                        f"type={task_type} env={env} app={app} is free for this "
-                        f"app but held by task id={foreign_id} of app="
-                        f"{foreign_app!r}. The pre-app unique index "
-                        "uk_env_task_type_active_idempotency_key is still on the "
-                        "table and ignores app, so it rejects the insert. "
-                        "Retrying cannot help while that task is live; drop that "
-                        "index (the last step of the app migration) so dedup is "
-                        "scoped per app"
-                    )
                 # Otherwise the holder reached a terminal state between our
                 # INSERT and this lookup, releasing the key — it is free again,
                 # so retry.
@@ -605,16 +546,20 @@ class TaskQueueRepository(
             self._log_enqueued(record, delay_seconds, deadline_seconds, created=True)
             return EnqueueResult(record, True)
 
-        # Every attempt lost the insert *and* found the key free again straight
-        # after — i.e. a fresh holder claimed and released it inside each
-        # window. That is contention, not corruption (the permanent case raises
-        # above), so reaching here means the key is being churned faster than
-        # this loop can win rather than that anything is wrong.
+        # Every attempt lost the insert and found no holder of ours. Usually
+        # contention rather than corruption (the permanent case raises above):
+        # a fresh holder claimed and released the key inside each window, so it
+        # is being churned faster than this loop can win. The other way to reach
+        # here is the legacy unique index, which ignores app and so rejects a key
+        # a *different* deployment holds — named in the message because retrying
+        # can never clear that one.
         raise RuntimeError(
             "[task_queue.enqueue] could not insert or resolve a holder for "
             f"key={idempotency_key!r} type={task_type} env={env} app={app} after "
-            f"{_KEYED_INSERT_ATTEMPTS} attempts; the key was taken and released "
-            "by other callers on every attempt"
+            f"{_KEYED_INSERT_ATTEMPTS} attempts; either the key was taken and "
+            "released by other callers on every attempt, or another app holds it "
+            "and the pre-app index uk_env_task_type_active_idempotency_key (which "
+            "ignores app) is still on the table"
         )
 
     @staticmethod

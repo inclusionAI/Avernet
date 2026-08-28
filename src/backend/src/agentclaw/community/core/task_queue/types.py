@@ -25,12 +25,12 @@ from typing import NamedTuple, Optional, Union
 #: its own work, so the two defaults are pinned together by a test.
 DEFAULT_APP = "agentclaw"
 
-#: Stored width of the ``app`` column. Enforced where the value enters (the
-#: config provider) rather than only in the schema, because the engines disagree
-#: about overflow exactly as they do for the dedup key: SQLite ignores the bound,
-#: a strict MySQL/OceanBase raises, and a non-strict one **silently truncates** —
-#: filing every row under a name the claim filter then never matches, so the work
-#: is enqueued and never runs.
+#: Stored width of the ``app`` column. Enforced where the value enters — the
+#: config provider, which reads the deployment's ``app_name`` — rather than only
+#: in the schema, because the engines disagree about overflow exactly as they do
+#: for the dedup key: SQLite ignores the bound, a strict MySQL/OceanBase raises,
+#: and a non-strict one **silently truncates** — filing every row under a name
+#: the claim filter then never matches, so the work is enqueued and never runs.
 MAX_APP_LEN = 32
 
 

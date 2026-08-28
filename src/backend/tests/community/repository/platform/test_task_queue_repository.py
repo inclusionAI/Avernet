@@ -446,12 +446,13 @@ def test_same_key_under_different_app_is_rejected_while_the_legacy_index_lives(r
     task_type, key)`` and ignores app, so the second app's INSERT is rejected
     even though the key is free in its own scope.
 
-    The failure is loud and names the index to drop rather than joining the
-    other app's task (which this deployment could never claim) or reporting
-    contention (which points at the wrong fix)."""
+    What matters is that it fails rather than silently doing the wrong thing:
+    the other app's live task is never handed back (see the test below), and no
+    row is inserted. Dropping that index is the last step of the migration and
+    makes this case disappear."""
     first = _enqueue_result(repo, app=APP, idempotency_key="k1")
 
-    with pytest.raises(RuntimeError, match="uk_env_task_type_active_idempotency_key"):
+    with pytest.raises(RuntimeError):
         _enqueue_result(repo, app=OTHER_APP, idempotency_key="k1")
 
     assert len(_all_rows(repo)) == 1  # nothing inserted for the second app

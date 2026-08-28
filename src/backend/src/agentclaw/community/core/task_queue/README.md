@@ -31,25 +31,29 @@ deadline retirement inside that scan, the enqueue dedup lookups, and
 `list_by_status`. Without it both fleets claim each other's rows and fail them
 for a `task_type` their registry never saw.
 
-The value comes from deployment config, never from a caller:
+The value is the deployment's own identity — the top-level `app_name` — never a
+caller's argument:
 
 ```yaml
-user_config:
-  task_queue:
-    app: "agentclaw"
+app_name: "agentclaw"
 ```
 
-`TaskQueueService` stamps it on enqueue and `TaskWorker` claims with it, both
-reading the one `TaskQueueConfig`, so the two sides cannot disagree within a
-process. Two *deployments* must not share a name — that is back to fighting over
-the same rows — and a deployment has to be given its name before it starts
-enqueueing, since the name is what its own claims will look for.
+`ConfigModule.task_queue` reads it into `TaskQueueConfig`; `TaskQueueService`
+stamps it on enqueue and `TaskWorker` claims with it, both from that one object,
+so the two sides cannot disagree within a process. Reusing `app_name` rather than
+a queue-specific key is deliberate: the owner *is* the deployment, and a second
+independently settable name would only create a way for the two to drift. Two
+deployments must not share a name — that is back to fighting over the same rows —
+and a deployment has to be given its name before it starts enqueueing, since the
+name is what its own claims will look for.
 
-An `app` the column cannot hold faithfully (empty, whitespace-padded, or over 32
+A name the column cannot hold faithfully (empty, whitespace-padded, or over 32
 characters) **fails the boot** rather than falling back to the default. The
 fallback is exactly the accident worth preventing: the default is the *other*
 deployment's name as often as not. `container.py` resolves `TaskQueueConfig`
-eagerly for that reason, the same way it resolves `HttpClientPoolConfig`.
+eagerly for that reason, the same way it resolves `HttpClientPoolConfig`. With no
+config at all (local mode, ad-hoc tests) there is nothing to read and the default
+stands.
 
 `get_by_id` is deliberately *not* scoped: an id is unique across apps, it is how
 an insert is read back, and "what happened to task 71544?" is asked precisely
@@ -297,10 +301,10 @@ columns up automatically. What has to exist:
 `(env, task_type, active_idempotency_key)` regardless of app, so while it exists
 two deployments cannot use the same key for the same `task_type` in the same
 `env` — the second one's INSERT is rejected even though the key is free in its
-own scope. `enqueue` recognises that case and raises naming the index, rather
-than joining a row this deployment could never claim or reporting contention.
-Drop it once every app writes its own `app`, and delete its declaration from
-`models.py` in the same change.
+own scope. `enqueue` never joins that row — it belongs to another app and this
+deployment could not claim it — so the enqueue fails loudly once its retries are
+spent. Drop the index once every app writes its own `app`, and delete its
+declaration from `models.py` in the same change.
 
 On SQLite none of the collation clauses apply: it compares `TEXT` as `BINARY`
 natively, which is already the semantics the key contract needs.
@@ -312,9 +316,9 @@ already holds, and the index can be created alongside the columns.
 
 `app` needs no backfill either: it is `NOT NULL DEFAULT 'agentclaw'`, so every
 existing row takes the default, which is exactly the deployment that wrote them.
-The order matters in the other direction, though — a deployment that is *not*
-the default must be given its `task_queue.app` before it starts enqueueing, or
-it will file rows under the default name and never claim them back.
+The order matters in the other direction, though — a deployment whose `app_name`
+is *not* the default must carry it before it starts enqueueing, or it will file
+rows under the default name and never claim them back.
 
 **PostgreSQL is not a supported store for this component.** `CommunityDatabase`
 will connect to it, but `_now_plus` branches on SQLite and treats every other

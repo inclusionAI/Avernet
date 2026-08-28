@@ -79,9 +79,6 @@
       "scan_interval_hours": 1,
       "storage_dir": "./data/skills_scan"
     },
-    "task_queue": {
-      "app": "agentclaw"
-    },
     "task_queue_worker": {
       "enabled": true
     },

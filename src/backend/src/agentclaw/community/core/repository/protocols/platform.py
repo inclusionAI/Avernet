@@ -61,14 +61,13 @@ class TaskQueueRepositoryProtocol(Protocol):
         insert losing and the holder being looked up, the key is free again and
         the insert is simply retried. Losing that race repeatedly is bad luck
         rather than an error, and the retry budget is sized so it is not
-        mistaken for one. Three cases *do* raise ``RuntimeError`` — each means
-        the enqueue could not be honoured, so none can be reported as a
+        mistaken for one. Two cases *do* raise ``RuntimeError`` — both mean the
+        enqueue could not be honoured, so neither can be reported as a
         duplicate: a key held by a **terminal** row that never released it
-        (an inconsistent row; the message names it), a key held by a live row of
-        a **different app** (only possible while the pre-``app`` unique index is
-        still on the table, which ignores app; the message names the index to
-        drop), and the key being taken and released by other callers on every
-        attempt (sustained churn).
+        (an inconsistent row; the message names it), and the key being taken and
+        released by other callers on every attempt (sustained churn). While the
+        pre-``app`` unique index is still on the table it can also reject a key
+        another *app* holds, which surfaces as the second of those.
 
         A terminal transition (``SUCCEEDED`` / ``FAILED`` / ``TIMED_OUT``)
         **releases** the key, so the same key may legitimately be re-enqueued
