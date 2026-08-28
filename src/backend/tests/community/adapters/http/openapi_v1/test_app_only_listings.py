@@ -670,6 +670,12 @@ _UNGRANTED_APP_CASES = {
         "request": lambda client: client.get("/openapi/v1/bots/skills/repository/1"),
         "assert_starved": lambda response: response.status_code == 404,
     },
+    ("GET", "/openapi/v1/bots/skills/{skill_id}/readme"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/skills/1/readme"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
     ("POST", "/openapi/v1/bots/skills/repository/sync"): {
         "request": lambda client: client.post(
             "/openapi/v1/bots/skills/repository/sync"

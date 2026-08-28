@@ -437,6 +437,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("the shared skill repository, owned by no bot"),
     ("GET", "/openapi/v1/bots/skills/{skill_code}/publish/status"):
         NoCheck("Skill Center publish status, keyed by skill code not by bot"),
+    ("GET", "/openapi/v1/bots/skills/{skill_id}/readme"):
+        NoCheck("Skill README access is adjudicated by the Skill query service"),
     ("GET", "/openapi/v1/bots/spaces"):
         NoCheck("Space membership, adjudicated by the Space service"),
     ("POST", "/openapi/v1/bots/spaces/create"):
