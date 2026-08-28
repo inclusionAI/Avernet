@@ -230,11 +230,13 @@ def test_execute_yaml_forwards_participant_bindings_to_group():
     }
     result = asyncio.new_event_loop().run_until_complete(svc.execute(_request(
         TaskType.YAML, yaml="def: x", participant_bot_ids=["b2", "b3"],
-        participant_bindings=bindings)))
+        participant_bindings=bindings,
+        panel_component_name="customPanel.CustomRunView")))
     assert result.success is True
     ep = captured["extend_props"]
     assert ep.get("definition_yaml") == "def: x"
     assert ep.get("participant_bindings") == bindings
+    assert ep.get("panel_component_name") == "customPanel.CustomRunView"
     # 任务描述(目标)从 task_spec.goal.objective 透传进 extend_props(→ BCS 建群 context → <GroupContext> 目标)
     assert ep.get("task_context") == "o"
 

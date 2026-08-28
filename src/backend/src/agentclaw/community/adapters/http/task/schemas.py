@@ -106,6 +106,10 @@ class ExecutionConfigDTO(BaseModel):
     )
     yaml: str | dict[str, Any] | None = Field(None, description="yaml 内联或引用")
     workflow_id: str | None = Field(None, description="workflow id")
+    panel_component_name: str | None = Field(
+        None,
+        description="state_machine 协作群 opening_message 使用的业务面板组件名",
+    )
 
 
 class TemplateRunRequestDTO(BaseModel):

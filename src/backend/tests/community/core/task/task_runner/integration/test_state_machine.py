@@ -364,12 +364,13 @@ def test_form_coop_group_opening_message_params_is_object():
         members_info=[{"bot_id": "drv", "role": "manager"}],
         extend_props={"collaboration_definition_yaml": "kind: collab",
                       "task_id": "sm_task_1",
-                      "api_base_url": "https://cb.example.com/"},
+                      "api_base_url": "https://cb.example.com/",
+                      "panel_component_name": "customPanel.CustomRunView"},
     )))
     om = bcs.created_req.opening_message
     assert om is not None, "state_machine + task_id 应构造 opening_message"
     assert om["type"] == "panel"
-    assert om["component"] == "partnerPanel.CollaborationRunView"
+    assert om["component"] == "customPanel.CustomRunView"
     # 契约核心:params 必须是 JSON object(dict),不是字符串(否则真实 BCS 422)
     assert isinstance(om["params"], dict), f"opening_message.params 必须是 object,实际 {type(om['params'])!r}"
     assert om["params"]["taskId"] == "sm_task_1"

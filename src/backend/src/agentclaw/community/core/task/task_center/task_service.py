@@ -369,6 +369,8 @@ class TaskService:
                 # 经 execution_config 透传 → TaskExecutor.form_coop_group 注入 BCS create_group
                 # (state_machine participant_bindings)。群 master 复用底层 driver_bot(bot_ids[0]=owner)。
                 "participant_bindings": ec.get("participant_bindings"),
+                # state_machine 面板组件由 execute.execution_config 指定，透传给 BCS。
+                "panel_component_name": ec.get("panel_component_name"),
                 # 任务描述(目标)→ BCS 建群 context → <GroupContext> `目标` 行。
                 "task_context": _task_context or None,
                 "task_objective": task_info.task_spec.goal.objective,
