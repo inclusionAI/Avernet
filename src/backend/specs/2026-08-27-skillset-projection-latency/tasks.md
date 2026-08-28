@@ -98,7 +98,9 @@
   verified inline, and two when it did not.
 - **Files:**
   - `src/backend/src/agentclaw/community/core/skills_pool/runtime.py`
-  - `src/backend/src/agentclaw/community/core/skill_center/services/bot_runtime_projector.py`
+  - `src/backend/src/agentclaw/community/core/skill_center/services/runtime_projections/per_domain.py`
+    (`_apply_pool_mappings` moved here from `bot_runtime_projector.py` on the
+    base, in `b51f5c3`, while this change was in review)
 - **Done when:**
   - [x] `publish_and_verify_mappings` reads `data["verified"]` from the publish
         response; only literal `True` skips the fallback verify.

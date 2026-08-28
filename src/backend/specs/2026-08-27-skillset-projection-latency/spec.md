@@ -75,6 +75,19 @@ their own issues; their analysis stays below because those issues work from it.
 > it. P5's finding is unaffected: `skills=True` is still hard-coded on both
 > commands.
 
+> **The projector's per-domain half moved file.** `b51f5c3` ("deliver one whole
+> artifact per teclaw projection") landed on the base while this change was in
+> review and split `BotRuntimeProjector` behind an engine registry. Everything
+> quoted below from `bot_runtime_projector.py` at `_apply_skill_projection`,
+> `_apply_non_skill_projection` and `_apply_pool_mappings` now lives verbatim
+> in
+> `core/skill_center/services/runtime_projections/per_domain.py`
+> (`PerDomainRuntimeProjection`); `_build_plan` and the Passport projection
+> stayed on the projector. Line numbers in this document are from before that
+> move. P1's fix landed in the new home; nothing in the analysis changes,
+> because the per-domain halves moved without edit — but read the quotes
+> against `per_domain.py`, not the projector.
+
 Acceptance criteria below are tagged **[now]** or **[deferred]** accordingly.
 
 ---
