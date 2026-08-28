@@ -63,6 +63,18 @@ their own issues; their analysis stays below because those issues work from it.
 | P4 | inclusionAI/Avernet#1622 | Changes observable device-facing behavior and has a live question about drift repair. |
 | P5 | inclusionAI/Avernet#1623 | Same — changes behavior, and `/skillset/sync` against a Default Set becomes a no-op. |
 
+> **P4's premise moved under it.** `70061fa` ("preserve MCP config on set
+> deactivation") landed on the base while this change was in review and
+> replaced deactivate's `scope_from_result=… released_mcp=result.mcp_codes`
+> with a plain `scope=ProjectionScope(skills=True, mcp=True)`. Deactivate
+> therefore no longer releases any MCP code, so P4's guard — skip when
+> `claimed` and `released` are both empty — would now fire on **every**
+> deactivate rather than only those whose codes were still supplied
+> elsewhere. That is a materially larger behavior change than #1622
+> describes; re-read the analysis against the current code before acting on
+> it. P5's finding is unaffected: `skills=True` is still hard-coded on both
+> commands.
+
 Acceptance criteria below are tagged **[now]** or **[deferred]** accordingly.
 
 ---
@@ -379,9 +391,12 @@ and always declares the full set to a freshly started container.
 whether any Skill actually moved:
 
 ```python
-# src/backend/.../skill_set_management_service.py:603 (deactivate; :581 activate is the mirror)
+# src/backend/.../skill_set_management_service.py — deactivate, after 70061fa
+scope=ProjectionScope(skills=True, mcp=True),
+
+# …and activate, which still names its claimed codes
 scope_from_result=lambda result: ProjectionScope(
-    skills=True, mcp=True, released_mcp=result.mcp_codes
+    skills=True, mcp=True, claimed_mcp=result.mcp_codes
 ),
 ```
 
