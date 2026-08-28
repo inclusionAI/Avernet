@@ -289,6 +289,18 @@ class ExecutionEngine:
         cfg = self._graph._execution_config(task_id)
         return int(cfg.get("MAX_PLAN_ROUND", 10))
 
+    def _task_type(self, task_id: str) -> str:
+        """Return the immutable execution type recorded on the task graph."""
+        try:
+            raw = self._graph._execution_config(task_id).get("task_type", "dynamic")
+        except Exception:  # noqa: BLE001 - missing/legacy graph defaults to dynamic
+            return "dynamic"
+        return str(getattr(raw, "value", raw) or "dynamic").strip().lower()
+
+    def _is_external_managed_task(self, task_id: str) -> bool:
+        """Whether a third party owns execution and next-node transitions."""
+        return self._task_type(task_id) in {"workflow", "yaml"}
+
     def _is_graph_terminal(self, task_id: str) -> bool:
         """图级终态(DONE/HUNG)判定。终态后自动驱动(plan/dispatch/harness/回投推进)一律冻结:
         MAX_LOOP 达上限→图 HUNG 后,后续 on_pass/on_miss/on_harness 不再推进(避免 loop_round 失控飙升
@@ -418,6 +430,9 @@ class ExecutionEngine:
     # ===== on_execute =====
     async def on_execute(self, task_id: str) -> None:
         """execute 事件:initialize_graph 后,条件 a(根 PENDING)→ plan(None 自发现根)→add→dispatch→start_run。"""
+        if self._is_external_managed_task(task_id):
+            logger.info("[task][on_execute] task=%s external-managed, skip Avernet orchestration", task_id)
+            return
         if self._is_graph_terminal(task_id):
             logger.info(
                 "[task][on_execute] task=%s 图已终态(%s),冻结驱动",
@@ -472,6 +487,9 @@ class ExecutionEngine:
         and terminal graphs freeze immediately. Idempotent: ``_prepare_into``
         skips nodes already ``dispatching`` and the status machine guards repeats.
         """
+        if self._is_external_managed_task(task_id):
+            logger.info("[task][redrive] task=%s external-managed, skip Avernet redrive", task_id)
+            return
         if self._is_graph_terminal(task_id):
             logger.info("[task][redrive] task=%s 图已终态,冻结重投", task_id)
             return
@@ -566,6 +584,28 @@ class ExecutionEngine:
                     status_from=result.prev_status,
                     status_to=result.new_status,
                 )
+            if self._is_external_managed_task(patch.task_id):
+                # Third-party execution owns transitions. Mirror a terminal
+                # root status to the graph for dashboard visibility, but never
+                # enter Avernet planner/dispatcher/retry orchestration.
+                if (
+                    patch.node_id == patch.task_id
+                    and result.new_status in {
+                        Status.DONE,
+                        Status.FAILED,
+                        Status.HUNG,
+                        Status.CANCELLED,
+                    }
+                ):
+                    self._graph.update_task_graph_info(
+                        patch.task_id,
+                        TaskGraphPatch(status=result.new_status),
+                    )
+                logger.info(
+                    "[task][on_report] task=%s external-managed, graph update only",
+                    patch.task_id,
+                )
+                return result
             if patch.exec_error is not None:
                 side: list[tuple] = []
                 await self._on_harness_collect(
@@ -610,6 +650,9 @@ class ExecutionEngine:
 
         无 owner bot 时(单测)``plan(root)`` 返 ``has_gap=True``(no_planning_port)→ ``gap_no_progress`` → 父
         HUNG;故收口需 owner planner(live 有),单测只验 mechanics(scoped DONE + claim 释放)。"""
+        if self._is_external_managed_task(patch.task_id):
+            logger.info("[task][on_bbs_report] task=%s external-managed, graph update only", patch.task_id)
+            return self._graph.update_task_node_info(patch)
         side: list[tuple] = []
         with self._lock_for(patch.task_id):
             graph = self._graph.query_task_dashboard(patch.task_id)
@@ -917,6 +960,9 @@ class ExecutionEngine:
         depth>=MAX → HUNG 升 BBS(拆不动,无 bot);depth<MAX → mark_planning + plan(target=miss 叶)拆细:
         有子→add(父置 PLANNING)+dispatch;空+has_gap=F→gap 闭不推进(罕见);空+has_gap=T→HUNG 升 BBS。
         MISS 不进 harness(无 bot 无可重试执行体)。"""
+        if self._is_external_managed_task(patch.task_id):
+            logger.info("[task][on_miss] task=%s external-managed, skip dynamic planning", patch.task_id)
+            return
         if self._is_graph_terminal(patch.task_id):
             logger.info(
                 "[task][on_miss] task=%s 图已终态,冻结 MISS 推进", patch.task_id
@@ -986,6 +1032,9 @@ class ExecutionEngine:
     # ===== on_harness(harness 旁路入口:超时/崩溃/FAILED 巡检;复用 _on_harness_collect)=====
     async def on_harness(self, patch: TaskNodePatch) -> None:
         """Harness 旁路入口:exec_error 语义(超时/崩溃/FAILED 巡检)→ 复用 _on_harness_collect 重新派发重试/上限 HUNG。"""
+        if self._is_external_managed_task(patch.task_id):
+            logger.info("[task][on_harness] task=%s external-managed, skip Avernet retry", patch.task_id)
+            return
         if self._is_graph_terminal(patch.task_id):
             logger.info(
                 "[task][on_harness] task=%s 图已终态,冻结 harness 推进", patch.task_id
@@ -1197,6 +1246,9 @@ class ExecutionEngine:
         (搜推异常/派发失败,harness owns 重试+HUNG 上限,正常 cycle 不重复搜推防 bot 调用风暴);
         ③ run_mode=="bbs" 节点(FR-EXT-06:bbs 由 bot 经 bbs/attach 自驱,框架不自动派发/翻态)。
         reset 节点(FAILED/RUNNING→PENDING 复位,无 dispatching)不在跳过之列→重新派发执行。"""
+        if self._is_external_managed_task(task_id):
+            logger.info("[task][prepare] task=%s external-managed, skip dynamic dispatch", task_id)
+            return
         all_pending = self._graph.query_task_nodes(
             task_id, TaskNodeQueryCriteria(status=Status.PENDING)
         )
