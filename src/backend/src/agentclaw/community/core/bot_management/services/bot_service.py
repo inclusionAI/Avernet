@@ -1942,6 +1942,7 @@ class BotService:
                             extra_configs,
                             mcp_sync=self._mcp_sync,
                             skill_set_factory=self._skill_set_factory,
+                            template_service=self._template_service,
                         )
                     except Exception as exc:
                         logger.warning(
@@ -4506,34 +4507,6 @@ class BotService:
                 updated_bot = self._restart_bot_baas(
                     bot_id=bot_id, user_id=user_id, binding_id=binding_id, bot=bot,
                 )
-                try:
-                    from agentclaw.community.core.bot_management.engines import (
-                        resolve_provisioning,
-                    )
-
-                    refresh_ctx, refresh_strategy = resolve_provisioning(
-                        bot_id=bot_id,
-                        owner_id=str(bot.get("owner_id") or user_id),
-                        bot_type=str(bot.get("bot_type") or ""),
-                        active_engine=bot.get("active_engine"),
-                        template_type=bot.get("template_type"),
-                        template_config=None,
-                    )
-                    refresh_strategy.refresh_restart_authorization(
-                        refresh_ctx,
-                        bot,
-                        extra_configs,
-                        mcp_sync=self._mcp_sync,
-                        skill_set_factory=self._skill_set_factory,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "[bot_service.restart_bot] restart authorization refresh failed; "
-                        "continue restart: bot_id=%s error=%s",
-                        bot_id,
-                        exc,
-                        exc_info=True,
-                    )
                 logger.info(f"[bot_service.restart_bot] Bot {bot_id} in-place restart via BaaS, binding preserved")
                 return updated_bot
             release_ok = True
