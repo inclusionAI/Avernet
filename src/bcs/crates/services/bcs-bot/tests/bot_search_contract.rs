@@ -3,13 +3,13 @@
 
 use std::sync::Arc;
 
-use bcs_bot::{Bot, BotCore};
+use bcs_bot::{Bot, BotControlPlaneCore, BotCore};
 use bcs_config::resolve_env_str;
-use bcs_bot_store::PersistentBotRepo;
+use bcs_bot_store::{PersistentBotRepo, MemoryProviderStore};
 use bcs_cache_local::InMemoryCachePlugin;
-use bcs_db_api::{DbPlugin, DbStatement, DbValue as Value};
+use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement, DbValue as Value};
 use bcs_db_local::LocalSqliteDbPlugin;
-use bcs_service_api::{BotCapabilities, BotQueryService, BotRegistryCoreService, BotRepoPort, SearchBotsCommand};
+use bcs_service_api::{BotCapabilities, BotControlPlaneCoreService, BotQueryService, BotRegistryCoreService, BotRepoPort, SearchBotsCommand};
 use tempfile::TempDir;
 
 fn capabilities(name: &str, visibility: &str) -> BotCapabilities {
@@ -35,8 +35,14 @@ async fn sqlite_db() -> Arc<dyn DbPlugin> {
             actor_kind TEXT NOT NULL DEFAULT 'bot',
             is_deleted INTEGER NOT NULL DEFAULT 0,
             agent_code TEXT DEFAULT NULL,
+            task_claim_mode INTEGER NOT NULL DEFAULT 0,
+            task_dream_mode INTEGER NOT NULL DEFAULT 0,
+            user_visibility TEXT NOT NULL DEFAULT 'protected',
+            friend_ext JSON,
+            friend_check_in_strategy TEXT NOT NULL DEFAULT 'APPROVAL',
             env TEXT NOT NULL,
             gmt_create TEXT DEFAULT CURRENT_TIMESTAMP,
+            gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP,
             registered_at TEXT,
             updated_at TEXT,
             PRIMARY KEY (bot_uuid, env)
@@ -49,8 +55,12 @@ async fn sqlite_db() -> Arc<dyn DbPlugin> {
 
 async fn build_bot() -> (Bot, Arc<BotCore>, TempDir) {
     let data_dir = tempfile::tempdir().expect("temp data dir");
-    let core = Arc::new(BotCore::with_base_dir(data_dir.path().to_path_buf()));
-    let bot = Bot::new(core.clone() as Arc<dyn BotRegistryCoreService>);
+    let repo = Arc::new(bcs_bot_store::MemoryBotRepo::with_base_dir(data_dir.path().to_path_buf()));
+    let core = Arc::new(BotCore::with_repo(repo.clone()));
+    let providers = Arc::new(MemoryProviderStore::new());
+    let control_plane = Arc::new(BotControlPlaneCore::new(repo.clone(), providers.clone(), providers));
+    let bot = Bot::new(core.clone() as Arc<dyn BotRegistryCoreService>)
+        .with_control_plane(control_plane as Arc<dyn BotControlPlaneCoreService>);
     (bot, core, data_dir)
 }
 
@@ -96,9 +106,12 @@ async fn insert_bot_row(
 async fn search_bots_tc_bot_filter_keeps_only_owner_suffixed_bots() {
     let db = sqlite_db().await;
     let cache = Arc::new(InMemoryCachePlugin::new());
-    let repo = Arc::new(PersistentBotRepo::with_plugins(cache, db.clone()));
+    let repo = Arc::new(PersistentBotRepo::with_plugins_flavor(cache, db.clone(), DbSqlFlavor::Sqlite));
     let core = Arc::new(BotCore::with_repo(repo.clone()));
-    let bot = Bot::new(core.clone() as Arc<dyn BotRegistryCoreService>);
+    let providers = Arc::new(MemoryProviderStore::new());
+    let control_plane = Arc::new(BotControlPlaneCore::new(repo.clone(), providers.clone(), providers));
+    let bot = Bot::new(core.clone() as Arc<dyn BotRegistryCoreService>)
+        .with_control_plane(control_plane as Arc<dyn BotControlPlaneCoreService>);
 
     insert_bot_row(&db, "ws-native-bot", "Native", "public", None).await;
     insert_bot_row(&db, "tc-prefix:85020", "TC Assistant", "public", Some("85020")).await;
@@ -166,9 +179,12 @@ async fn search_bots_visibility_filter_accepts_multiple_values() {
 async fn search_bots_excludes_soft_deleted_persistent_rows_even_if_memory_has_bot() {
     let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    let repo = Arc::new(PersistentBotRepo::with_plugins(cache, db));
+    let repo = Arc::new(PersistentBotRepo::with_plugins_flavor(cache, db, DbSqlFlavor::Sqlite));
     let core = Arc::new(BotCore::with_repo(repo.clone()));
-    let bot = Bot::new(core.clone() as Arc<dyn BotRegistryCoreService>);
+    let providers = Arc::new(MemoryProviderStore::new());
+    let control_plane = Arc::new(BotControlPlaneCore::new(repo.clone(), providers.clone(), providers));
+    let bot = Bot::new(core.clone() as Arc<dyn BotRegistryCoreService>)
+        .with_control_plane(control_plane as Arc<dyn BotControlPlaneCoreService>);
 
     repo.register_with_owner_and_token(
         "soft-delete-bot".to_string(),

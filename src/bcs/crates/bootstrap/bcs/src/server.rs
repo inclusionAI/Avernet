@@ -1820,7 +1820,7 @@ impl Default for BcsServerState {
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>,
                 user_directory.clone(),
                 outbound_url_guard.clone(),
-                provider_control_plane,
+                provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
             );
         let (organization_core, organization_management) = memory_organization_services(
@@ -2218,6 +2218,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             .collaboration_templates(collaboration_templates)
             .actor_directory(actor_directory)
             .bot_query(bot_use_cases.clone())
+            
             .bot_management(bot_use_cases.clone())
             .bot_runtime(bot_use_cases.clone())
             .bot_discovery(bot_use_cases)
@@ -2533,6 +2534,8 @@ fn build_use_case_bundle(
     friend: Arc<dyn bcs_service_api::FriendCoreService>,
     friend_request: Arc<dyn bcs_service_api::FriendRequestCoreService>,
     relation: Arc<dyn bcs_service_api::RelationCoreService>,
+    provider_control_plane: Arc<dyn BotControlPlaneCoreService>,
+    edge_grants: Option<Arc<dyn bcs_service_api::port::repo::EdgeGrantRepoPort>>,
     fuse_client: Option<Arc<FuseClient>>,
     fusion: Arc<dyn bcs_service_api::FusionCoreService>,
     bot_delivery: Arc<dyn BotDeliveryPort>,
@@ -2559,9 +2562,13 @@ fn build_use_case_bundle(
 
     let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend.clone())
         .with_bot_core(bot_core.clone())
+        .with_control_plane(provider_control_plane.clone())
         .with_organization(organization_core.clone())
         .with_relation(relation.clone())
         .with_connection_control(bot_connection_control.clone());
+    if let Some(edge_grants) = edge_grants {
+        bot_use_cases = bot_use_cases.with_edge_grants(edge_grants);
+    }
     if let Some(user_directory) = user_directory {
         bot_use_cases = bot_use_cases.with_user_directory(user_directory);
     }
@@ -3358,7 +3365,7 @@ impl BcsServer {
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>,
                 user_directory.clone(),
                 provider_webhook_url_guard,
-                provider_control_plane,
+                provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
             );
         let (organization_core, organization_management) = memory_organization_services(
@@ -3508,6 +3515,8 @@ impl BcsServer {
             friend_store.clone(),
             friend_request_store.clone(),
             relation_store.clone(),
+            provider_control_plane.clone(),
+            None,
             fuse_client.clone(),
             fusion.clone(),
             bot_delivery.clone(),
@@ -3727,6 +3736,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             .human_actors(use_cases.human_actors)
             .bot_onboarding(use_cases.bot_onboarding)
             .bot_query(use_cases.bot_query)
+            
             .bot_management(use_cases.bot_management)
             .bot_runtime(use_cases.bot_runtime)
             .bot_discovery(use_cases.bot_discovery)
@@ -3985,7 +3995,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                 relation_svc.clone(),
                 user_directory.clone(),
                 outbound_url_guard.clone(),
-                provider_control_plane,
+                provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
             );
         let (organization_core, organization_management) = db_organization_services(
@@ -4289,6 +4299,8 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             friend_svc.clone(),
             friend_request_svc.clone(),
             relation_svc.clone(),
+            provider_control_plane.clone(),
+            Some(edge_grant_store.clone()),
             fuse_client.clone(),
             fusion.clone(),
             bot_delivery.clone(),
@@ -4535,6 +4547,7 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             .human_actors(use_cases.human_actors)
             .bot_onboarding(use_cases.bot_onboarding)
             .bot_query(use_cases.bot_query)
+            
             .bot_management(use_cases.bot_management)
             .bot_runtime(use_cases.bot_runtime)
             .bot_discovery(use_cases.bot_discovery)
@@ -5250,7 +5263,7 @@ mod tests {
                 relation,
                 None,
                 OutboundUrlGuard::allowing_private_networks_for_tests(),
-                provider_control_plane,
+                provider_control_plane.clone(),
                 cleanup.clone(),
             );
 

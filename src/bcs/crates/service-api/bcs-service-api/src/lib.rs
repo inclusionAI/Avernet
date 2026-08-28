@@ -108,6 +108,8 @@ pub use bot_runtime_use_cases::{
     BotRuntimeConnectCommand, BotRuntimeConnectOutcome, BotRuntimeConnectionService,
     BotRuntimeDisconnectCommand, BotRuntimeStatusCommand, BotRuntimeStatusOutcome,
 };
+pub use types::{BotSearchCandidateQuery, BotSearchFriendshipFilter};
+
 pub use bot_use_cases::{
     BotConnectCommand, BotDetailCommand, BotDetailResult, BotDiscoveryCommand, BotDiscoveryEntry,
     BotDiscoveryProviderInfo, BotDiscoveryResult, BotDiscoveryService, BotLeaveCommand,

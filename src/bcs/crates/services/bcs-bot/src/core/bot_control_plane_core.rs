@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_service_api::{
-    ActorKind, BotCandidateReadQuery, BotControlPlaneCandidate, BotControlPlaneCoreService,
+    ActorKind, BotCandidateReadQuery, BotControlPlaneCandidate, BotControlPlaneCoreService, BotSearchCandidateQuery,
     BotControlPlaneOwnedQuery, BotControlPlanePatch, BotControlPlaneProvider,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotControlPlaneView, BotTaskModesQuery,
     ProviderBotBindingRepoPort, ProviderRepoPort, ServiceResult,
@@ -116,6 +116,31 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
         let (records, total) = self
             .control_plane
             .list_control_plane_candidates(query)
+            .await?;
+        let is_friend = records
+            .iter()
+            .map(|record| record.is_friend)
+            .collect::<Vec<_>>();
+        let views = self
+            .hydrate(records.into_iter().map(|record| record.bot).collect())
+            .await?;
+        Ok((
+            views
+                .into_iter()
+                .zip(is_friend)
+                .map(|(bot, is_friend)| BotControlPlaneCandidate { bot, is_friend })
+                .collect(),
+            total,
+        ))
+    }
+
+    async fn search_candidates(
+        &self,
+        query: BotSearchCandidateQuery,
+    ) -> ServiceResult<(Vec<BotControlPlaneCandidate>, u64)> {
+        let (records, total) = self
+            .control_plane
+            .search_control_plane_candidates(query)
             .await?;
         let is_friend = records
             .iter()
