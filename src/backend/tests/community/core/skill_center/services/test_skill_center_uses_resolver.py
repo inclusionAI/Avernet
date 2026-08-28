@@ -13,6 +13,7 @@ Task 2.1 of `docs/superpowers/plans/2026-06-15-device-sync-supplier-for-bot-clea
 """
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 from agentclaw.community.core.devices.services.device_context import DeviceContext
@@ -76,7 +77,7 @@ class TestSkillSetServiceUsesResolver:
         dispatcher.dispatch.assert_called_once_with(ctx)
         sync_plugin.sync_symlinks.assert_called_once_with([])
 
-    def test_sync_runtime_keeps_owner_scope_when_paths_use_bot_entity(self):
+    def test_project_skills_keeps_owner_scope_when_paths_use_bot_entity(self):
         from agentclaw.community.core.skill_center.services.skill_set_service import (
             SkillSetService,
         )
@@ -112,7 +113,10 @@ class TestSkillSetServiceUsesResolver:
 
         svc.get_symlink_mappings = MagicMock(return_value=[])
 
-        assert svc.sync_runtime() is True
+        # ``project_skills`` is async so both halves of the capability
+        # boundary are awaited alike; this test is synchronous, so it bridges
+        # the same way the aicoding restart worker does.
+        assert asyncio.run(svc.project_skills()) is True
         svc.get_symlink_mappings.assert_called_once_with(
             user_id="owner-1", bolt_id="bot-1"
         )

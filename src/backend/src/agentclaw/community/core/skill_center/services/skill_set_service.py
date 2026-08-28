@@ -514,13 +514,30 @@ class SkillSetService:
             logger.warning(f"[_sync_symlinks_to_device_if_needed] Failed to sync symlinks: {e}", exc_info=True)
             return False
 
-    def sync_runtime(self, *, desired_skills: list[dict] | None = None) -> bool:
-        """Apply one complete resolver-owned skill snapshot to the runtime."""
-        return self._sync_symlinks_to_device_if_needed(
-            self.user_id or self.entity_id, desired_skills
+    async def project_skills(
+        self, *, desired_skills: list[dict] | None = None
+    ) -> bool:
+        """Apply one complete resolver-owned skill snapshot to the runtime.
+
+        Async to match ``project_mcps``: the two halves of the capability
+        boundary are one contract and should not differ in calling convention
+        just because their internals do.
+
+        The blocking work is dispatched here rather than by callers.
+        ``_sync_symlinks_to_device_if_needed`` is synchronous and carries
+        device resolution (including a blocking ws-info HTTP call), and on a
+        whole-artifact engine a full artifact compose and the outbound apply
+        request behind it. Owning the ``to_thread`` here makes staying off the
+        event loop a property of this method, which no caller can forget —
+        the same reason ``sync_mcp_desired_state`` wraps its own device calls.
+        """
+        return await asyncio.to_thread(
+            self._sync_symlinks_to_device_if_needed,
+            self.user_id or self.entity_id,
+            desired_skills,
         )
 
-    async def sync_mcp_projection(
+    async def project_mcps(
         self,
         *,
         claimed: frozenset[str],
