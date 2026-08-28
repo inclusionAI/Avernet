@@ -50,6 +50,7 @@ class AliyunAckSandbox(ArcaSandbox):
         pod_name: str | None = None,
         deployment_name: str | None = None,
         container_name: str | None = None,
+        resource_names: dict[str, str] | None = None,
         image: str | None = None,
         ttl_in_minutes: float | int | None = None,
     ) -> None:
@@ -60,6 +61,7 @@ class AliyunAckSandbox(ArcaSandbox):
         self._pod_name = pod_name or sandbox_id
         self._deployment_name = deployment_name or ""
         self._container_name = container_name
+        self._resource_names = resource_names or {}
         self._image = image
         self._ttl_in_minutes = ttl_in_minutes
 
@@ -188,28 +190,38 @@ class AliyunAckSandbox(ArcaSandbox):
             self._sandbox_id,
             self._deployment_name,
         )
-        uid = self._deployment_name.removeprefix("avernet-agent-")
         core_api = CoreV1Api(self._client)
-        for name, delete_fn in (
+        apps_api = AppsV1Api(self._client)
+        delete_ops = [
             (
-                self._deployment_name,
-                lambda: AppsV1Api(self._client).delete_namespaced_deployment(
-                    name=self._deployment_name, namespace=self._namespace
+                self._resource_names.get("Deployment", self._deployment_name),
+                lambda: apps_api.delete_namespaced_deployment(
+                    name=self._resource_names.get("Deployment", self._deployment_name),
+                    namespace=self._namespace,
                 ),
             ),
-            (
-                f"envoy-header-rules-{uid}",
-                lambda: core_api.delete_namespaced_config_map(
-                    name=f"envoy-header-rules-{uid}", namespace=self._namespace
-                ),
-            ),
-            (
-                f"avernet-agent-netpol-{uid}",
-                lambda: core_api.delete_namespaced_network_policy(
-                    name=f"avernet-agent-netpol-{uid}", namespace=self._namespace
-                ),
-            ),
-        ):
+        ]
+        cm_name = self._resource_names.get("ConfigMap")
+        if cm_name:
+            delete_ops.append(
+                (
+                    cm_name,
+                    lambda: core_api.delete_namespaced_config_map(
+                        name=cm_name, namespace=self._namespace
+                    ),
+                )
+            )
+        np_name = self._resource_names.get("NetworkPolicy")
+        if np_name:
+            delete_ops.append(
+                (
+                    np_name,
+                    lambda: core_api.delete_namespaced_network_policy(
+                        name=np_name, namespace=self._namespace
+                    ),
+                )
+            )
+        for name, delete_fn in delete_ops:
             try:
                 delete_fn()
             except ApiException as e:

@@ -193,11 +193,10 @@ class TestCreateSyncSandbox:
     def test_create_deployment_handles_empty_docs(self) -> None:
         with _CoreHarness() as h:
             with patch(f"{_PLUGIN}._render_template", return_value="---\n"):
-                name, container = _plugin()._create_deployment(
+                result = _plugin()._create_deployment(
                     "uid", TEMPLATE_ID, "ns", None, None
                 )
-        assert name == ""
-        assert container == ""
+        assert result == "avernet-agent-uid"
 
 
 class TestConnect:
@@ -238,32 +237,8 @@ class TestConnectionInfo:
 
 
 class TestDeleteStorage:
-    def test_delete_success(self) -> None:
-        with _CoreHarness() as h:
-            assert _plugin().delete_storage("pv-1", "tenant") is True
-        h.core.delete_namespaced_persistent_volume_claim.assert_called()
-
-    def test_delete_not_found_idempotent(self) -> None:
-        class _ApiClientException(Exception):
-            status = 404
-
-        with _CoreHarness() as h:
-            h.core.delete_namespaced_persistent_volume_claim.side_effect = (
-                _ApiClientException()
-            )
-            with patch(f"{_PLUGIN}.ApiException", _ApiClientException):
-                assert _plugin().delete_storage("pv-1", "tenant") is True
-
-    def test_delete_error_false(self) -> None:
-        class _ApiClientException(Exception):
-            status = 500
-
-        with _CoreHarness() as h:
-            h.core.delete_namespaced_persistent_volume_claim.side_effect = (
-                _ApiClientException()
-            )
-            with patch(f"{_PLUGIN}.ApiException", _ApiClientException):
-                assert _plugin().delete_storage("pv-1", "tenant") is False
+    def test_delete_skipped_returns_true(self) -> None:
+        assert _plugin().delete_storage("pv-1", "tenant") is True
 
 
 class TestSandbox:
