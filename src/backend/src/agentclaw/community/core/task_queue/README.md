@@ -22,6 +22,45 @@ a handler that reschedules itself until done, bounded by a wall-clock deadline.
 - `services/worker.py` — `TaskWorker`, the Lifecycle that polls, claims, runs handlers, and applies outcomes.
 - `examples.py` — `NoopTaskHandler` + `PollUntilTerminalExampleHandler` (not wired in prod).
 
+## App scoping
+
+The `ac_task_queue` table is shared with a second, independently deployed
+backend. Every row therefore carries an `app` naming its owner, and every
+statement that *selects work* matches it — the claim scan and its CAS, the
+deadline retirement inside that scan, the enqueue dedup lookups, and
+`list_by_status`. Without it both fleets claim each other's rows and fail them
+for a `task_type` their registry never saw.
+
+The value comes from deployment config, never from a caller:
+
+```yaml
+user_config:
+  task_queue:
+    app: "agentclaw"
+```
+
+`TaskQueueService` stamps it on enqueue and `TaskWorker` claims with it, both
+reading the one `TaskQueueConfig`, so the two sides cannot disagree within a
+process. Two *deployments* must not share a name — that is back to fighting over
+the same rows — and a deployment has to be given its name before it starts
+enqueueing, since the name is what its own claims will look for.
+
+An `app` the column cannot hold faithfully (empty, whitespace-padded, or over 32
+characters) **fails the boot** rather than falling back to the default. The
+fallback is exactly the accident worth preventing: the default is the *other*
+deployment's name as often as not. `container.py` resolves `TaskQueueConfig`
+eagerly for that reason, the same way it resolves `HttpClientPoolConfig`.
+
+`get_by_id` is deliberately *not* scoped: an id is unique across apps, it is how
+an insert is read back, and "what happened to task 71544?" is asked precisely
+when the owner is what you are trying to establish. `TaskRecord.app` carries the
+owner for a caller that needs to check it.
+
+The column keeps the table's default collation, like `env` and unlike the key
+columns — it matches the deployed DDL, which declares none. On MySQL/OceanBase
+that means two app names differing only by case are one app, so give deployments
+names that differ by more than that.
+
 ## How idempotency works
 
 Two independent guarantees, answering two different questions.
@@ -36,8 +75,8 @@ exactly one. A crashed worker's task is reclaimed after its lease expires. No
 ### Enqueue time — "should this row exist at all?"
 
 **Opt-in.** Pass an `idempotency_key` to `enqueue(...)` and at most one **live**
-task will exist for that key within its `(env, task_type)`. A duplicate enqueue
-inserts nothing and returns the existing task:
+task will exist for that key within its `(env, app, task_type)`. A duplicate
+enqueue inserts nothing and returns the existing task:
 
 ```python
 record, created = task_queue_service.enqueue(
@@ -95,7 +134,7 @@ rejects, it never trims.
 
 **Mechanism.** A second column, `active_idempotency_key`, mirrors the key while
 the task is live and is nulled by every terminal transition; the unique index is
-over `(env, task_type, active_idempotency_key)`. MySQL/OceanBase have no partial
+over `(env, app, task_type, active_idempotency_key)`. MySQL/OceanBase have no partial
 indexes, so nulling a plain column is the portable way to say "unique among live
 rows only". The opt-out works because **both engines treat NULLs as distinct in
 a unique index** — that is a *relied-upon* property, not an incidental one, and
@@ -220,16 +259,26 @@ the ORM model — column types, nullability, collations, and the index are all
 declared there with the reasoning inline.
 
 **The schema change must be applied before deploying the release that contains
-it** — not merely before the first call site passes a key. The ORM maps both new
-columns unconditionally, so every `SELECT` projects them and every `INSERT`
-writes them even for an un-keyed enqueue; against a table without them the whole
-queue fails with "unknown column".
+it** — for `app` as much as for the key columns, and not merely before the first
+call site passes a key. The ORM maps every one of them unconditionally, so each
+`SELECT` projects them and each `INSERT` writes them even for an un-keyed
+enqueue; against a table without them the whole queue fails with "unknown
+column".
 
 That applies to **any** deployment that has provisioned `ac_task_queue`, not just
 prod. `CommunityDatabase` is a pure connection provider and never runs
 `create_all`, so a community schema is operator-provisioned and does not pick the
 columns up automatically. What has to exist:
 
+- `app` — `varchar(32) NOT NULL DEFAULT 'agentclaw'`, no collation clause (it
+  takes the table default, like `env`). The default is what an INSERT naming no
+  app lands on; it must equal `TaskQueueConfig`'s default, and a test pins the
+  two together.
+- `UNIQUE (env, app, task_type, active_idempotency_key)` and the two app-scoped
+  scan indexes `idx_env_app_status_run_at` / `idx_env_app_lease_expires_at` —
+  every claim and reclaim query now carries an `app` term, so the indexes have to
+  lead with it. The unique index is **`GLOBAL` on OceanBase** for the same reason
+  as its predecessor below.
 - `idempotency_key` and `active_idempotency_key` — nullable, matching the width
   in `models.py`, both pinning `utf8mb4_bin` on MySQL/OceanBase.
 - `task_type` also pinning `utf8mb4_bin` there — it is the index's other scope
@@ -243,13 +292,29 @@ columns up automatically. What has to exist:
 - `env` deliberately left on the table default — see the index comment in
   `models.py` for why widening it is a much larger change.
 
+**The legacy dedup index is still on the table and is the last step to remove.**
+`uk_env_task_type_active_idempotency_key` predates `app` and is unique on
+`(env, task_type, active_idempotency_key)` regardless of app, so while it exists
+two deployments cannot use the same key for the same `task_type` in the same
+`env` — the second one's INSERT is rejected even though the key is free in its
+own scope. `enqueue` recognises that case and raises naming the index, rather
+than joining a row this deployment could never claim or reporting contention.
+Drop it once every app writes its own `app`, and delete its declaration from
+`models.py` in the same change.
+
 On SQLite none of the collation clauses apply: it compares `TEXT` as `BINARY`
 natively, which is already the semantics the key contract needs.
 
-**No backfill.** Both columns are new and nullable, every existing row takes
+**No backfill.** Both key columns are new and nullable, every existing row takes
 `NULL`, and all supported engines treat `NULL`s as distinct in a unique index —
 so no two existing rows can collide however many duplicate enqueues the table
 already holds, and the index can be created alongside the columns.
+
+`app` needs no backfill either: it is `NOT NULL DEFAULT 'agentclaw'`, so every
+existing row takes the default, which is exactly the deployment that wrote them.
+The order matters in the other direction, though — a deployment that is *not*
+the default must be given its `task_queue.app` before it starts enqueueing, or
+it will file rows under the default name and never claim them back.
 
 **PostgreSQL is not a supported store for this component.** `CommunityDatabase`
 will connect to it, but `_now_plus` branches on SQLite and treats every other
@@ -275,6 +340,7 @@ provides:
   - "TaskQueueRepositoryProtocol"
 consumes:
   - "DatabasePlugin (via the repository impl in plugins/)"
+  - "TaskQueueConfig"
   - "TaskQueueWorkerConfig"
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.platform    # repository contracts consumed by this module

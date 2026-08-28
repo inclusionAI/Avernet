@@ -25,6 +25,7 @@ from typing import Any
 
 from injector import Module, inject, provider, singleton
 
+from agentclaw.community.core.task_queue.types import MAX_APP_LEN
 from agentclaw.community.di import config as cfg
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.plugin_api.http_client import (
@@ -834,6 +835,66 @@ class ConfigModule(Module):
                 "action_link_pattern", defaults.action_link_pattern
             ),
         )
+
+    @singleton
+    @provider
+    def task_queue(self) -> cfg.TaskQueueConfig:
+        """Which application owns this deployment's ``ac_task_queue`` rows.
+
+        YAML shape under ``user_config.task_queue``::
+
+            task_queue:
+              app: "agentclaw"          # owner stamped on enqueue and matched
+                                        #   by every query that selects work
+
+        Omitted ⇒ ``TaskQueueConfig``'s default, which is the column default on
+        the deployed table, so a deployment that never heard of this block keeps
+        owning exactly the rows it already owned.
+
+        An unusable value **raises** rather than falling back, and the fallback
+        is the reason: the default is the *other* deployment's app name as often
+        as not, so quietly substituting it is how one backend starts claiming and
+        failing another's tasks — the failure this block exists to prevent. Three
+        rejections, each a value the ``app`` column cannot carry faithfully:
+
+        - empty or whitespace-only — names no application at all;
+        - leading or trailing whitespace — MySQL/OceanBase compare with a PAD
+          SPACE collation, so ``"claw "`` and ``"claw"`` are one app there and
+          two on SQLite, which is a divergence no test on SQLite can see;
+        - longer than the stored width — a non-strict server truncates, and the
+          rows are then filed under a name the claim filter never matches, so
+          the work is enqueued and simply never runs.
+
+        ``container.py`` resolves ``TaskQueueConfig`` eagerly at build time (as
+        it does ``HttpClientPoolConfig``) so this raise stops the boot on every
+        profile instead of being swallowed by lifecycle discovery — which would
+        leave the app running with no worker and no explanation.
+        """
+        block = _block("task_queue")
+        defaults = cfg.TaskQueueConfig()
+        raw = block.get("app", defaults.app)
+        app = "" if raw is None else str(raw)
+        if not app.strip():
+            raise ValueError(
+                "task_queue.app must name the application that owns this "
+                "deployment's ac_task_queue rows; it is empty"
+            )
+        if app != app.strip():
+            raise ValueError(
+                f"task_queue.app must not have leading or trailing whitespace "
+                f"({app!r}); MySQL/OceanBase compare with a PAD SPACE collation, "
+                "so such a name would be a different app on SQLite than in "
+                "production"
+            )
+        if len(app) > MAX_APP_LEN:
+            raise ValueError(
+                f"task_queue.app exceeds {MAX_APP_LEN} chars ({len(app)}); it is "
+                f"stored in a VARCHAR({MAX_APP_LEN}), and a non-strict "
+                "MySQL/OceanBase would truncate it — this deployment would then "
+                "enqueue rows under the truncated name and claim under the full "
+                "one, so none of its own work would ever run"
+            )
+        return cfg.TaskQueueConfig(app=app)
 
     @singleton
     @provider

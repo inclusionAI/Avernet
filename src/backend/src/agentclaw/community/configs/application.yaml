@@ -168,6 +168,19 @@ user_config:
     apply_owner_whitelist: []
     global_dry_run: false
 
+  # Which application owns this deployment's rows in the shared ac_task_queue
+  # table. Another, independently deployed backend now runs against the same
+  # table; every row carries its owner, enqueue stamps this value, and every
+  # query that selects work matches it — so neither fleet claims the other's
+  # tasks and fails them for a task_type its registry never saw. Each deployment
+  # needs its own value — two deployments sharing one name are back to fighting
+  # over the same rows — and a deployment must be given its name before it starts
+  # enqueueing, since the name is what its own claims will look for. An empty,
+  # padded, or over-32-character value fails the boot rather than falling back
+  # (see ConfigModule.task_queue).
+  task_queue:
+    app: "agentclaw"
+
   # In-process durable task-queue worker (one per pod). Enabled by default so the
   # publish flow's stage advances (build/release/progress-poll) run as persisted,
   # crash-safe tasks. The test profile overrides this to false so unit tests don't

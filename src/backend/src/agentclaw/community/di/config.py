@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentclaw.community.core.task_queue.types import DEFAULT_APP
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 
 
@@ -620,6 +621,30 @@ class DormantNotifyConfig:
     """
 
     action_link_pattern: str = ""
+
+
+@dataclass(frozen=True)
+class TaskQueueConfig:
+    """Which application owns this deployment's ``ac_task_queue`` rows.
+
+    Sourced from the ``task_queue`` block of ``user_config``.
+
+    One table is shared by more than one independent backend, so a row carries
+    an ``app`` naming its owner: enqueue stamps it, and every query that selects
+    work matches it. Without that, each fleet claims the other's tasks and fails
+    them for an unregistered ``task_type``.
+
+    It is deliberately *not* part of ``TaskQueueWorkerConfig``: the same value
+    has to be used by the enqueue path, which has nothing to do with worker
+    policy, and turning the worker off must not stop enqueued rows from being
+    stamped with their owner.
+
+    ``app`` is validated where it is read (see ``ConfigModule.task_queue``) —
+    it is a scope column, and a value the column cannot hold faithfully would
+    file rows under a name the claim filter never matches.
+    """
+
+    app: str = DEFAULT_APP
 
 
 @dataclass(frozen=True)

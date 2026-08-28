@@ -21,10 +21,20 @@ already ``RUNNING`` with a live lease → ``affected == 0``). No ``SELECT ... FO
 UPDATE``. The same CAS shape guards ``complete`` / ``reschedule`` / ``fail`` on
 ``claimed_by == worker_id AND status == RUNNING``.
 
+**App scoping.** The table is shared with a second, independently deployed
+backend, so every row names its owning ``app`` and every statement that *selects
+work* matches it: the claim scan and its CAS, the deadline retirement inside that
+scan, the enqueue dedup lookups, and ``list_by_status``. Callers pass ``app``
+alongside ``env`` and take both from deployment config, never from a per-call
+argument. Without it each fleet claims the other's rows and fails them for a
+``task_type`` its registry never saw. ``get_by_id`` is deliberately unscoped —
+it is a primary-key read used for diagnosis and for reading back an insert this
+process just made.
+
 **Enqueue-time idempotency** is opt-in and *active-only*: at most one **live**
-task per ``idempotency_key`` within an ``(env, task_type)``. A ``None`` key opts
-out entirely and can never collide (engines treat NULLs as distinct in a unique
-index) — so un-keyed callers behave exactly as they always have.
+task per ``idempotency_key`` within an ``(env, app, task_type)``. A ``None`` key
+opts out entirely and can never collide (engines treat NULLs as distinct in a
+unique index) — so un-keyed callers behave exactly as they always have.
 
 The scope is active-only rather than all-time because several call sites
 legitimately re-enqueue the same logical key after the previous task went
@@ -75,10 +85,19 @@ from agentclaw.community.core.repository.protocols.platform import TaskQueueRepo
 
 logger = get_logger()
 
-#: The unique index backing active-only enqueue dedup. Named here because the
-#: two engines report a violation of it differently and both spellings must be
+#: The unique indexes backing active-only enqueue dedup. Named here because the
+#: two engines report a violation differently and both spellings must be
 #: recognised — see :func:`_is_active_idem_conflict`.
-_ACTIVE_IDEM_INDEX = "uk_env_task_type_active_idempotency_key"
+#:
+#: There are two because the deployed table still carries the pre-``app`` index
+#: alongside the one that scopes dedup by ``app``. Either can reject an INSERT,
+#: and a rejection by the older one is not a duplicate *for this app* — see
+#: :meth:`TaskQueueRepository.enqueue`. The names are not substrings of one
+#: another, so matching them is unambiguous.
+_ACTIVE_IDEM_INDEXES = (
+    "uk_env_app_task_type_active_idempotency_key",
+    "uk_env_task_type_active_idempotency_key",
+)
 
 #: How many times :meth:`TaskQueueRepository.enqueue` will try to insert a keyed
 #: task. A further attempt is only ever reached when the conflicting row went
@@ -226,8 +245,10 @@ def _is_active_idem_conflict(exc: IntegrityError) -> bool:
     The two engines name the violation differently, so both spellings are
     matched:
 
-    - MySQL / OceanBase report the **index**::
+    - MySQL / OceanBase report the **index** — either of the two the table
+      carries::
 
+          Duplicate entry 'dev-agentclaw-demo-k1' for key 'uk_env_app_task_type_active_idempotency_key'
           Duplicate entry 'dev-demo-k1' for key 'uk_env_task_type_active_idempotency_key'
 
     - SQLite reports the **columns**::
@@ -235,11 +256,17 @@ def _is_active_idem_conflict(exc: IntegrityError) -> bool:
           UNIQUE constraint failed: ac_task_queue.env, ac_task_queue.task_type,
           ac_task_queue.active_idempotency_key
 
+      ``active_idempotency_key`` appears in both indexes and in no other
+      constraint, so the column form identifies the violation without having to
+      tell the two apart — which is right, because the branch that does care
+      (a rejection by the pre-``app`` index) is decided by looking up the holder,
+      not by parsing the message.
+
     A pure function over the exception so it is unit-testable against both
     message forms without a MySQL instance.
     """
     message = str(getattr(exc, "orig", None) or exc)
-    if _ACTIVE_IDEM_INDEX in message:
+    if any(index in message for index in _ACTIVE_IDEM_INDEXES):
         return True
     # SQLite names the columns instead of the index. active_idempotency_key
     # appears in no other constraint on this table, so it alone identifies it.
@@ -276,13 +303,20 @@ class TaskQueueRepository(
         # mysql / oceanbase
         return func.date_add(func.now(), text(f"INTERVAL {n} SECOND"))
 
-    def _eligible(self, env: str):
-        """Eligibility predicate: due, env-scoped, and either PENDING or a
-        RUNNING row whose lease has expired (abandoned by a crashed worker).
-        All compared against the DB clock."""
+    def _eligible(self, env: str, app: str):
+        """Eligibility predicate: due, scoped to this ``(env, app)``, and either
+        PENDING or a RUNNING row whose lease has expired (abandoned by a crashed
+        worker). All compared against the DB clock.
+
+        The ``app`` term is what keeps two backends sharing this table off each
+        other's rows. It is part of the predicate rather than a pre-filter
+        because the predicate is reused verbatim as the claim CAS's WHERE: a row
+        that stopped being ours between the candidate read and the UPDATE must
+        fail the CAS, not be taken anyway."""
         now = func.now()
         return and_(
             self.Model.env == env,
+            self.Model.app == app,
             self.Model.run_at <= now,
             or_(
                 self.Model.status == TaskStatus.PENDING.value,
@@ -310,10 +344,15 @@ class TaskQueueRepository(
         delay_seconds: int,
         deadline_seconds: int,
         env: str,
+        app: str,
         idempotency_key: Optional[str],
     ) -> TaskRecord:
         """INSERT one PENDING row and return it. Raises ``IntegrityError`` when
-        a keyed insert loses to a live holder of the same key."""
+        a keyed insert loses to a live holder of the same key.
+
+        ``app`` is written explicitly rather than left to the column default:
+        the default names one particular deployment, and any other one would
+        insert rows it could never claim."""
         with self._db.orm_session() as db:
             row = self.Model(
                 task_type=task_type,
@@ -323,6 +362,7 @@ class TaskQueueRepository(
                 deadline_at=self._now_plus(db, deadline_seconds),
                 attempts=0,
                 env=env,
+                app=app,
                 idempotency_key=idempotency_key,
                 # Mirrors the key while the task is live; nulled on terminal.
                 active_idempotency_key=idempotency_key,
@@ -335,9 +375,14 @@ class TaskQueueRepository(
         return record
 
     def _find_active_by_key(
-        self, *, env: str, task_type: str, idempotency_key: str
+        self, *, env: str, app: str, task_type: str, idempotency_key: str
     ) -> Optional[TaskRecord]:
-        """The **live** holder of ``idempotency_key``, or ``None``.
+        """The **live** holder of ``idempotency_key`` in this app, or ``None``.
+
+        Scoped to ``app`` because that is the scope the caller is promised, and
+        because handing back another app's task would be worse than raising:
+        the caller would get ``created=False`` for work that this fleet can
+        never claim, so the work would simply never run.
 
         Filtering on ``active_idempotency_key`` alone *should* be enough:
         terminal transitions null it, so terminal rows drop out by
@@ -364,6 +409,7 @@ class TaskQueueRepository(
                 db.query(self.Model)
                 .filter(
                     self.Model.env == env,
+                    self.Model.app == app,
                     self.Model.task_type == task_type,
                     self.Model.active_idempotency_key == idempotency_key,
                     self.Model.status.notin_([s.value for s in TERMINAL_STATUSES]),
@@ -373,9 +419,10 @@ class TaskQueueRepository(
             return row.to_record() if row else None
 
     def _find_stranded_key_holder(
-        self, *, env: str, task_type: str, idempotency_key: str
+        self, *, env: str, app: str, task_type: str, idempotency_key: str
     ) -> Optional[int]:
-        """Id of a **terminal** row still holding ``idempotency_key``, or ``None``.
+        """Id of a **terminal** row of this app still holding ``idempotency_key``,
+        or ``None``.
 
         This should always be ``None``: every terminal transition releases the
         key in the same ``UPDATE`` as the status change, so a terminal row
@@ -402,6 +449,7 @@ class TaskQueueRepository(
                 db.query(self.Model.id)
                 .filter(
                     self.Model.env == env,
+                    self.Model.app == app,
                     self.Model.task_type == task_type,
                     self.Model.active_idempotency_key == idempotency_key,
                     self.Model.status.in_([s.value for s in TERMINAL_STATUSES]),
@@ -409,6 +457,45 @@ class TaskQueueRepository(
                 .first()
             )
             return row[0] if row else None
+
+    def _find_foreign_app_key_holder(
+        self, *, env: str, app: str, task_type: str, idempotency_key: str
+    ) -> Optional[tuple[int, str]]:
+        """``(id, app)`` of a row belonging to a **different** app that holds
+        ``idempotency_key`` in this ``(env, task_type)``, or ``None``.
+
+        Reachable only while the pre-``app`` dedup index is still on the table
+        (see ``models.py``): that index is unique on ``(env, task_type,
+        active_idempotency_key)`` regardless of app, so it rejects an INSERT for
+        a key another deployment happens to be using — even though, in this
+        app's scope, the key is free.
+
+        It is checked because the two live cases it separates want opposite
+        responses, and both look identical from :meth:`enqueue`'s side ("the
+        index rejected us, and no holder is visible in our scope"):
+
+        - **The key was released mid-race** — retrying is correct and normally
+          succeeds.
+        - **Another app holds it** — retrying can never succeed while that row
+          is live, and no amount of budget changes that.
+
+        Without the distinction the second case burns every attempt and reports
+        sustained churn, which points at the wrong thing entirely: the fix is to
+        drop the legacy index (the last step of the app migration), not to look
+        for a hot key. The message says so and names the row.
+        """
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self.Model.id, self.Model.app)
+                .filter(
+                    self.Model.env == env,
+                    self.Model.app != app,
+                    self.Model.task_type == task_type,
+                    self.Model.active_idempotency_key == idempotency_key,
+                )
+                .first()
+            )
+            return (row[0], row[1]) if row else None
 
     def enqueue(
         self,
@@ -418,6 +505,7 @@ class TaskQueueRepository(
         delay_seconds: int,
         deadline_seconds: int,
         env: str,
+        app: str,
         idempotency_key: Optional[str] = None,
     ) -> EnqueueResult:
         # Validate before any work: neither a key the column cannot hold
@@ -435,6 +523,7 @@ class TaskQueueRepository(
             delay_seconds=delay_seconds,
             deadline_seconds=deadline_seconds,
             env=env,
+            app=app,
             idempotency_key=idempotency_key,
         )
 
@@ -456,7 +545,10 @@ class TaskQueueRepository(
                 if not _is_active_idem_conflict(exc):
                     raise  # unrelated constraint — never read as a duplicate
                 existing = self._find_active_by_key(
-                    env=env, task_type=task_type, idempotency_key=idempotency_key
+                    env=env,
+                    app=app,
+                    task_type=task_type,
+                    idempotency_key=idempotency_key,
                 )
                 if existing is not None:
                     logger.info(
@@ -466,21 +558,45 @@ class TaskQueueRepository(
                         idempotency_key,
                     )
                     return EnqueueResult(existing, False)
-                # No live holder, yet the index rejected us. Two very different
-                # situations, and retrying is right for only one of them.
+                # No live holder of ours, yet an index rejected us. Three very
+                # different situations, and retrying is right for only one.
                 stranded_id = self._find_stranded_key_holder(
-                    env=env, task_type=task_type, idempotency_key=idempotency_key
+                    env=env,
+                    app=app,
+                    task_type=task_type,
+                    idempotency_key=idempotency_key,
                 )
                 if stranded_id is not None:
                     raise RuntimeError(
                         f"[task_queue.enqueue] key={idempotency_key!r} "
-                        f"type={task_type} env={env} is held by task id="
-                        f"{stranded_id}, which is terminal but never released "
+                        f"type={task_type} env={env} app={app} is held by task "
+                        f"id={stranded_id}, which is terminal but never released "
                         "it. Retrying cannot help — the key is occupied "
                         "forever. Most likely a worker running code from "
                         "before enqueue idempotency wrote the terminal status "
                         "without clearing active_idempotency_key; clear that "
                         "column on the row to free the key"
+                    )
+                # Still no holder in our scope: the rejection can only have
+                # come from the legacy index, which does not look at app.
+                foreign = self._find_foreign_app_key_holder(
+                    env=env,
+                    app=app,
+                    task_type=task_type,
+                    idempotency_key=idempotency_key,
+                )
+                if foreign is not None:
+                    foreign_id, foreign_app = foreign
+                    raise RuntimeError(
+                        f"[task_queue.enqueue] key={idempotency_key!r} "
+                        f"type={task_type} env={env} app={app} is free for this "
+                        f"app but held by task id={foreign_id} of app="
+                        f"{foreign_app!r}. The pre-app unique index "
+                        "uk_env_task_type_active_idempotency_key is still on the "
+                        "table and ignores app, so it rejects the insert. "
+                        "Retrying cannot help while that task is live; drop that "
+                        "index (the last step of the app migration) so dedup is "
+                        "scoped per app"
                     )
                 # Otherwise the holder reached a terminal state between our
                 # INSERT and this lookup, releasing the key — it is free again,
@@ -496,7 +612,7 @@ class TaskQueueRepository(
         # this loop can win rather than that anything is wrong.
         raise RuntimeError(
             "[task_queue.enqueue] could not insert or resolve a holder for "
-            f"key={idempotency_key!r} type={task_type} env={env} after "
+            f"key={idempotency_key!r} type={task_type} env={env} app={app} after "
             f"{_KEYED_INSERT_ATTEMPTS} attempts; the key was taken and released "
             "by other callers on every attempt"
         )
@@ -506,9 +622,10 @@ class TaskQueueRepository(
         record: TaskRecord, delay_seconds: int, deadline_seconds: int, *, created: bool
     ) -> None:
         logger.info(
-            "[task_queue.enqueue] type=%s id=%s delay=%ss deadline=%ss key=%s created=%s",
+            "[task_queue.enqueue] type=%s id=%s app=%s delay=%ss deadline=%ss key=%s created=%s",
             record.task_type,
             record.id,
+            record.app,
             delay_seconds,
             deadline_seconds,
             record.idempotency_key,
@@ -522,6 +639,7 @@ class TaskQueueRepository(
         *,
         worker_id: str,
         env: str,
+        app: str,
         limit: int,
         lease_seconds: int,
     ) -> List[TaskRecord]:
@@ -534,7 +652,7 @@ class TaskQueueRepository(
             candidate_ids = [
                 row_id
                 for (row_id,) in db.query(self.Model.id)
-                .filter(self._eligible(env))
+                .filter(self._eligible(env, app))
                 .order_by(self.Model.run_at.asc())
                 .limit(limit)
                 .all()
@@ -548,7 +666,7 @@ class TaskQueueRepository(
                     db.query(self.Model)
                     .filter(
                         self.Model.id == task_id,
-                        self._eligible(env),
+                        self._eligible(env, app),
                         self.Model.deadline_at > func.now(),
                     )
                     .update(
@@ -579,7 +697,7 @@ class TaskQueueRepository(
                 #     it, this matches nothing — harmless.)
                 db.query(self.Model).filter(
                     self.Model.id == task_id,
-                    self._eligible(env),
+                    self._eligible(env, app),
                     self.Model.deadline_at <= func.now(),
                 ).update(
                     {
@@ -594,8 +712,9 @@ class TaskQueueRepository(
                 )
         if won:
             logger.info(
-                "[task_queue.claim] worker=%s claimed %d/%d candidates",
+                "[task_queue.claim] worker=%s app=%s claimed %d/%d candidates",
                 worker_id,
+                app,
                 len(won),
                 len(candidate_ids),
             )
@@ -709,6 +828,12 @@ class TaskQueueRepository(
     # ── diagnosis / tests ───────────────────────────────────────────────
 
     def get_by_id(self, task_id: int) -> Optional[TaskRecord]:
+        # Deliberately not app-scoped: an id is already unique across apps, and
+        # this is both the read-back of an insert this process just made and the
+        # diagnostic entry point for "what happened to task 71544?" — which is
+        # asked precisely when the row's owner is what you are trying to find
+        # out. ``TaskRecord.app`` carries it, so a caller that needs the scope
+        # can still check it.
         with self._db.orm_session() as db:
             row = (
                 db.query(self.Model)
@@ -717,13 +842,16 @@ class TaskQueueRepository(
             )
             return row.to_record() if row else None
 
-    def list_by_status(self, *, status: TaskStatus, env: str) -> List[TaskRecord]:
+    def list_by_status(
+        self, *, status: TaskStatus, env: str, app: str
+    ) -> List[TaskRecord]:
         with self._db.orm_session() as db:
             rows = (
                 db.query(self.Model)
                 .filter(
                     self.Model.status == status.value,
                     self.Model.env == env,
+                    self.Model.app == app,
                 )
                 .order_by(self.Model.run_at.asc())
                 .all()

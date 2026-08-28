@@ -31,6 +31,7 @@ class TaskQueueRepositoryProtocol(Protocol):
         delay_seconds: int,
         deadline_seconds: int,
         env: str,
+        app: str,
         idempotency_key: Optional[str] = None,
     ) -> EnqueueResult:
         """Persist a ``PENDING`` task and return ``(record, created)``.
@@ -39,24 +40,35 @@ class TaskQueueRepositoryProtocol(Protocol):
         ``now() + deadline_seconds``, both computed DB-side. ``payload`` is
         JSON-serialized on write.
 
+        ``app`` names the deployment that owns the row. The table is shared with
+        an independently deployed backend, and only that app's own worker will
+        ever claim it, so this must be the same value that deployment's
+        :meth:`claim_batch` passes — it comes from deployment config, like
+        ``env``, and is not a per-call choice.
+
         **Without a key** (the default) every enqueue creates a distinct row —
         insert-time dedup is opt-in, so un-keyed callers are unaffected by it.
 
         **With a key** dedup is *active-only*: at most one **live** task per
-        ``idempotency_key`` within an ``(env, task_type)``. If a live task
+        ``idempotency_key`` within an ``(env, app, task_type)``. If a live task
         already holds the key, no row is inserted and that task is returned with
         ``created=False``; otherwise a new row is created with ``created=True``.
-        Never raises for a plain duplicate.
+        Never raises for a plain duplicate. The returned task is always one of
+        this app's own — another app's row is never handed back, since the
+        caller could not claim it and its work would silently never run.
 
         Nor for the race around one: if the holder goes terminal between the
         insert losing and the holder being looked up, the key is free again and
         the insert is simply retried. Losing that race repeatedly is bad luck
         rather than an error, and the retry budget is sized so it is not
-        mistaken for one. Two cases *do* raise ``RuntimeError`` — both mean the
-        enqueue could not be honoured, so neither can be reported as a
+        mistaken for one. Three cases *do* raise ``RuntimeError`` — each means
+        the enqueue could not be honoured, so none can be reported as a
         duplicate: a key held by a **terminal** row that never released it
-        (an inconsistent row; the message names it), and the key being taken and
-        released by other callers on every attempt (sustained churn).
+        (an inconsistent row; the message names it), a key held by a live row of
+        a **different app** (only possible while the pre-``app`` unique index is
+        still on the table, which ignores app; the message names the index to
+        drop), and the key being taken and released by other callers on every
+        attempt (sustained churn).
 
         A terminal transition (``SUCCEEDED`` / ``FAILED`` / ``TIMED_OUT``)
         **releases** the key, so the same key may legitimately be re-enqueued
@@ -116,13 +128,19 @@ class TaskQueueRepositoryProtocol(Protocol):
         *,
         worker_id: str,
         env: str,
+        app: str,
         limit: int,
         lease_seconds: int,
     ) -> List[TaskRecord]:
         """Atomically claim up to ``limit`` due tasks for ``worker_id``.
 
-        Eligible = ``env`` matches, ``run_at <= now()``, and the row is either
-        ``PENDING`` or a ``RUNNING`` row whose ``lease_expires_at <= now()``.
+        Eligible = ``env`` and ``app`` match, ``run_at <= now()``, and the row is
+        either ``PENDING`` or a ``RUNNING`` row whose ``lease_expires_at <=
+        now()``.
+
+        ``app`` is what keeps two backends sharing this table apart: a row
+        belonging to another app is never claimed, never retired ``TIMED_OUT``,
+        and never returned, whatever its state.
         A claimed row is flipped to ``RUNNING`` with ``claimed_by = worker_id``,
         ``lease_expires_at = now() + lease_seconds`` and ``attempts += 1``.
 
@@ -185,12 +203,18 @@ class TaskQueueRepositoryProtocol(Protocol):
     # ── diagnosis / tests ───────────────────────────────────────────────
     @abstractmethod
     def get_by_id(self, task_id: int) -> Optional[TaskRecord]:
-        """Return the task by id, or ``None``."""
+        """Return the task by id, or ``None``.
+
+        Not app-scoped — an id is unique across apps, and the owner is on the
+        returned :class:`TaskRecord` for a caller that needs to check it."""
         ...
 
     @abstractmethod
-    def list_by_status(self, *, status: TaskStatus, env: str) -> List[TaskRecord]:
-        """Return all tasks in ``status`` for ``env`` (diagnosis / tests)."""
+    def list_by_status(
+        self, *, status: TaskStatus, env: str, app: str
+    ) -> List[TaskRecord]:
+        """Return all tasks in ``status`` for this ``(env, app)`` (diagnosis /
+        tests)."""
         ...
 
 
