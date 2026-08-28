@@ -10,6 +10,7 @@ All side effects are best-effort/fire-and-forget.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,6 +28,7 @@ from agentclaw.community.core.bot_management.engines.provisioning import (
 from agentclaw.community.core.bot_management.engines.aicoding.restart_authorization_listener import (
     AicodingRestartAuthorizationBaasPublishListener,
 )
+from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
 from agentclaw.community.core.events.types import BaasPublishCompletedEvent
 
 _AICODING_THREADING = "agentclaw.community.core.bot_management.engines.aicoding.strategy.threading"
@@ -511,3 +513,31 @@ def test_baas_restart_publish_listener_ignores_non_restart_or_stale_binding() ->
         )
     )
     bot_repo.get_by_id_and_owner.assert_called_once_with("bot-1", "owner-1")
+
+
+def test_baas_restart_publish_listener_startup_is_idempotent() -> None:
+    reset_event_bus()
+    try:
+        listener = AicodingRestartAuthorizationBaasPublishListener(
+            bot_repo=MagicMock(), template_service=MagicMock()
+        )
+        handler = MagicMock()
+        listener.handle = handler
+
+        asyncio.run(listener.startup())
+        asyncio.run(listener.startup())
+
+        bus = get_event_bus()
+        assert bus.is_subscribed(BaasPublishCompletedEvent, handler)
+        bus.publish(
+            BaasPublishCompletedEvent(
+                binding_id=42,
+                bot_id="bot-1",
+                owner_id="owner-1",
+                publish_id=1001,
+                publish_kind="restart",
+            )
+        )
+        handler.assert_called_once()
+    finally:
+        reset_event_bus()

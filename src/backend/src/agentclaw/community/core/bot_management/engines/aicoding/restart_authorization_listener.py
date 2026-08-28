@@ -43,8 +43,7 @@ class AicodingRestartAuthorizationBaasPublishListener(LifecycleBase):
 
     async def startup(self) -> None:
         bus = get_event_bus()
-        existing = bus._handlers.get(BaasPublishCompletedEvent, [])  # type: ignore[attr-defined]
-        if self.handle in existing:
+        if bus.is_subscribed(BaasPublishCompletedEvent, self.handle):
             logger.info(
                 "[aicoding.restart_authorization_listener] already subscribed to "
                 "BaasPublishCompletedEvent"
