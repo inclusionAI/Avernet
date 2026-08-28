@@ -18,6 +18,7 @@ from datetime import datetime
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
