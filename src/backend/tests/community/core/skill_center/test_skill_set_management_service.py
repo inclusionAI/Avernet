@@ -2810,11 +2810,11 @@ async def test_runtime_delivery_never_runs_on_the_event_loop(drive):
     factory = _RuntimeFactory()
     original = factory.service.project_skills
 
-    def _recording_sync_runtime(**kwargs):
+    def _recording_project_skills(**kwargs):
         seen.append(threading.get_ident())
         return original(**kwargs)
 
-    factory.service.project_skills = _recording_sync_runtime
+    factory.service.project_skills = _recording_project_skills
 
     await drive(factory)
 

@@ -76,7 +76,7 @@ class TestSkillSetServiceUsesResolver:
         dispatcher.dispatch.assert_called_once_with(ctx)
         sync_plugin.sync_symlinks.assert_called_once_with([])
 
-    def test_sync_runtime_keeps_owner_scope_when_paths_use_bot_entity(self):
+    def test_project_skills_keeps_owner_scope_when_paths_use_bot_entity(self):
         from agentclaw.community.core.skill_center.services.skill_set_service import (
             SkillSetService,
         )
