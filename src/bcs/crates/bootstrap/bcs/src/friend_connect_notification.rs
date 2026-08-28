@@ -54,12 +54,21 @@ impl HttpFriendConnectNotificationPort {
         })
     }
 
-    fn build_request(
+    fn request_parts(
         &self,
         command: &FriendConnectNotificationCommand,
-        payload: &FriendWorkOrderEventRequest,
-    ) -> Result<reqwest::RequestBuilder, ServiceError> {
+    ) -> Result<(reqwest::Url, FriendWorkOrderEventRequest), ServiceError> {
         let url = self.work_order_url()?;
+        let payload = FriendWorkOrderEventRequest::from_command(command);
+        Ok((url, payload))
+    }
+
+    fn build_request_with_payload(
+        &self,
+        command: &FriendConnectNotificationCommand,
+        url: reqwest::Url,
+        payload: &FriendWorkOrderEventRequest,
+    ) -> reqwest::RequestBuilder {
         let mut request = self.client.post(url);
         // The backend internal endpoint authenticates BCS via the forwarded
         // gateway principal (`x-avernet-principal`) and derives the acting
@@ -75,7 +84,17 @@ impl HttpFriendConnectNotificationPort {
                 }
             }
         }
-        Ok(request.json(payload))
+        request.json(payload)
+    }
+
+    #[cfg(test)]
+    fn build_request(
+        &self,
+        command: &FriendConnectNotificationCommand,
+        payload: &FriendWorkOrderEventRequest,
+    ) -> Result<reqwest::RequestBuilder, ServiceError> {
+        let url = self.work_order_url()?;
+        Ok(self.build_request_with_payload(command, url, payload))
     }
 }
 
@@ -93,7 +112,7 @@ struct FriendWorkOrderEventRequest {
     recipient_user_ids: Vec<String>,
     title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<String>,
+    content: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     apply_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -177,6 +196,34 @@ fn content_for(command: &FriendConnectNotificationCommand) -> String {
     }
 }
 
+fn friend_work_order_payload_for_log(payload: &FriendWorkOrderEventRequest) -> String {
+    serde_json::to_string(payload).unwrap_or_else(|error| {
+        format!("<failed to serialize friend work-order request payload: {error}>")
+    })
+}
+
+fn friend_work_order_non_success_error(
+    status: reqwest::StatusCode,
+    body: &str,
+    url: &reqwest::Url,
+    payload: &FriendWorkOrderEventRequest,
+    command: &FriendConnectNotificationCommand,
+) -> ServiceError {
+    warn!(
+        kind = %notification_kind_label(command.kind),
+        request_ids = ?command.request_ids,
+        target_bot_id = %command.target_bot_id,
+        status = %status,
+        url = %url,
+        response_body = %body,
+        request_payload = %friend_work_order_payload_for_log(payload),
+        "friend-connect notification failed"
+    );
+    ServiceError::InternalError(format!(
+        "friend work-order create request returned {status}: {body}"
+    ))
+}
+
 impl FriendWorkOrderEventRequest {
     fn from_command(command: &FriendConnectNotificationCommand) -> Self {
         let event_type = event_type_for(command.kind, &command.applicant_actor_id);
@@ -215,7 +262,7 @@ impl FriendWorkOrderEventRequest {
             approver_user_ids,
             recipient_user_ids,
             title: title_for(command.kind).to_string(),
-            content: Some(content_for(command)),
+            content: Some(serde_json::json!({ "text": content_for(command) })),
             apply_reason: command.message.clone(),
             biz_data: Some(biz_data),
         }
@@ -241,12 +288,10 @@ impl FriendConnectNotificationPort for HttpFriendConnectNotificationPort {
             recipient_count = command.recipient_user_ids.len(),
             "sending friend-connect notification"
         );
-        let payload = FriendWorkOrderEventRequest::from_command(&command);
-        let request_body = serde_json::to_string(&payload).unwrap_or_else(|error| {
-            format!(r#"{{"serialization_error":"{error}"}}"#)
-        });
+        let (url, payload) = self.request_parts(&command)?;
+        let request_payload = friend_work_order_payload_for_log(&payload);
         let response = self
-            .build_request(&command, &payload)?
+            .build_request_with_payload(&command, url.clone(), &payload)
             .send()
             .await
             .map_err(|error| {
@@ -254,7 +299,8 @@ impl FriendConnectNotificationPort for HttpFriendConnectNotificationPort {
                     kind = %notification_kind_label(command.kind),
                     request_ids = ?command.request_ids,
                     target_bot_id = %command.target_bot_id,
-                    request_body = %request_body,
+                    url = %url,
+                    request_payload = %request_payload,
                     error = %error,
                     "friend-connect notification request failed"
                 );
@@ -274,18 +320,13 @@ impl FriendConnectNotificationPort for HttpFriendConnectNotificationPort {
         }
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        warn!(
-            kind = %notification_kind_label(command.kind),
-            request_ids = ?command.request_ids,
-            target_bot_id = %command.target_bot_id,
-            request_body = %request_body,
-            status = %status,
-            response_body = %body,
-            "friend-connect notification failed"
-        );
-        Err(ServiceError::InternalError(format!(
-            "friend work-order create request returned {status}: {body}"
-        )))
+        Err(friend_work_order_non_success_error(
+            status,
+            &body,
+            &url,
+            &payload,
+            &command,
+        ))
     }
 }
 
@@ -379,6 +420,55 @@ mod tests {
     }
 
     #[test]
+    fn non_success_error_logs_request_payload_with_json_content_and_approvers() {
+        let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::ApprovalRequested,
+            env: "dev".to_string(),
+            request_ids: vec!["1".to_string()],
+            applicant_actor_id: "human_1001".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["user_2001".to_string()],
+            message: Some("please add me".to_string()),
+            request_auth: None,
+        });
+        let url = reqwest::Url::parse(
+            "https://backend.example.com/api/v1/work-orders/events",
+        )
+        .expect("url");
+
+        let command = FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::ApprovalRequested,
+            env: "dev".to_string(),
+            request_ids: vec!["1".to_string()],
+            applicant_actor_id: "human_1001".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["user_2001".to_string()],
+            message: Some("please add me".to_string()),
+            request_auth: None,
+        };
+        let error = friend_work_order_non_success_error(
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid request",
+            &url,
+            &payload,
+            &command,
+        );
+        assert!(matches!(error, ServiceError::InternalError(message) if message.contains("422 Unprocessable Entity")));
+
+        let logged_payload: serde_json::Value = serde_json::from_str(
+            &friend_work_order_payload_for_log(&payload),
+        )
+        .expect("request payload log is json");
+        assert_eq!(
+            logged_payload["content"],
+            serde_json::json!({
+                "text": "human_1001 申请添加 Bot bot_2001 为好友，请在好友申请列表中处理。"
+            })
+        );
+        assert_eq!(logged_payload["approver_user_ids"], serde_json::json!(["user_2001"]));
+    }
+
+    #[test]
     fn builds_pending_friend_request_payload() {
         let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::ApprovalRequested,
@@ -401,8 +491,10 @@ mod tests {
         assert!(payload.recipient_user_ids.is_empty());
         assert_eq!(payload.title, "好友添加申请待审批");
         assert_eq!(
-            payload.content.as_deref(),
-            Some("human_1001 申请添加 Bot bot_2001 为好友，请在好友申请列表中处理。")
+            payload.content,
+            Some(serde_json::json!({
+                "text": "human_1001 申请添加 Bot bot_2001 为好友，请在好友申请列表中处理。"
+            }))
         );
         assert_eq!(
             payload.biz_data,
@@ -413,6 +505,34 @@ mod tests {
                 "notification_kind": "approval_requested",
                 "message": "please add me"
             }))
+        );
+    }
+
+    #[test]
+    fn serializes_content_as_json_object_and_keeps_approvers() {
+        let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::ApprovalRequested,
+            env: "dev".to_string(),
+            request_ids: vec!["1".to_string()],
+            applicant_actor_id: "human_1001".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["user_2001".to_string()],
+            message: Some("please add me".to_string()),
+            request_auth: None,
+        });
+
+        let serialized = serde_json::to_value(&payload).expect("serialize payload");
+        assert!(serialized["content"].is_object(), "content must be a JSON object for backend schema");
+        assert_eq!(
+            serialized["content"],
+            serde_json::json!({
+                "text": "human_1001 申请添加 Bot bot_2001 为好友，请在好友申请列表中处理。"
+            })
+        );
+        assert_eq!(
+            serialized["approver_user_ids"],
+            serde_json::json!(["user_2001"]),
+            "approval notifications must pass target owner ids as approvers"
         );
     }
 
@@ -458,8 +578,10 @@ mod tests {
         assert_eq!(payload.title, "好友添加申请待审批");
         assert_eq!(payload.apply_reason.as_deref(), Some("bot-to-bot"));
         assert_eq!(
-            payload.content.as_deref(),
-            Some("bot_1001 申请添加 Bot bot_2001 为好友，请在好友申请列表中处理。")
+            payload.content,
+            Some(serde_json::json!({
+                "text": "bot_1001 申请添加 Bot bot_2001 为好友，请在好友申请列表中处理。"
+            }))
         );
     }
 
@@ -484,8 +606,10 @@ mod tests {
         assert_eq!(payload.title, "好友添加申请已处理");
         assert_eq!(payload.apply_reason.as_deref(), Some("handled"));
         assert_eq!(
-            payload.content.as_deref(),
-            Some("human_1001 与 Bot bot_2001 的好友申请已处理。")
+            payload.content,
+            Some(serde_json::json!({
+                "text": "human_1001 与 Bot bot_2001 的好友申请已处理。"
+            }))
         );
     }
 
