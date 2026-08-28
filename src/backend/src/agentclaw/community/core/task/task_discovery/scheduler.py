@@ -57,6 +57,7 @@ class TaskDiscoveryScheduler(LifecycleBase):
 
     async def startup(self) -> None:
         """Lifecycle hook — 启动 cron 定时调度。"""
+        logger.debug("[task_discovery] → TaskDiscoveryScheduler.startup()")
         if os.environ.get("TASK_DISCOVERY_AUTO_START", "true").lower() != "true":
             logger.info(
                 "[task_discovery] auto-schedule disabled "
@@ -82,6 +83,7 @@ class TaskDiscoveryScheduler(LifecycleBase):
 
     async def shutdown(self) -> None:
         """Lifecycle hook — 停止定时调度。"""
+        logger.debug("[task_discovery] → TaskDiscoveryScheduler.shutdown()")
         if self._scheduler is not None:
             self._scheduler.shutdown(wait=False)
             self._scheduler = None
@@ -93,6 +95,7 @@ class TaskDiscoveryScheduler(LifecycleBase):
         scheduler 线程没有运行中的事件循环，所以用 ``asyncio.run()``
         创建临时事件循环执行 ``discover_all_bots()``。
         """
+        logger.debug("[task_discovery] → TaskDiscoveryScheduler._run_discovery()")
         try:
             asyncio.run(self._service.discover_all_bots())
         except Exception as exc:
@@ -107,6 +110,7 @@ class TaskDiscoveryScheduler(LifecycleBase):
         当前实现：全局调度器 — 开启任一 bot 的 DreamMode 即运行。
         未来可扩展为 per-bot 调度。
         """
+        logger.debug("[task_discovery] → TaskDiscoveryScheduler.enable_for_bot(bot_id=%s, owner_id=%s)", bot_id, owner_id)
         if self._scheduler is None:
             cron_expr = os.environ.get("TASK_DISCOVERY_CRON", _DEFAULT_CRON)
             tz = os.environ.get("TASK_DISCOVERY_TIMEZONE", _DEFAULT_TIMEZONE)
@@ -134,6 +138,7 @@ class TaskDiscoveryScheduler(LifecycleBase):
         当前实现：全局停止。
         未来可扩展为 per-bot 调度（仅当所有 bot 都关闭时才停止）。
         """
+        logger.debug("[task_discovery] → TaskDiscoveryScheduler.disable_for_bot(bot_id=%s, owner_id=%s)", bot_id, owner_id)
         if self._scheduler is not None:
             self._scheduler.shutdown(wait=False)
             self._scheduler = None
@@ -151,6 +156,7 @@ class TaskDiscoveryScheduler(LifecycleBase):
         Returns:
             True 如果 reschedule 成功；False 如果调度器未运行。
         """
+        logger.debug("[task_discovery] → TaskDiscoveryScheduler.reschedule(cron_expr=%s)", cron_expr)
         if self._scheduler is None or not self._scheduler.running:
             logger.warning("[task_discovery] reschedule called but scheduler not running")
             return False
@@ -172,6 +178,7 @@ class TaskDiscoveryScheduler(LifecycleBase):
             cron: TASK_DISCOVERY_CRON 配置值
             timezone: TASK_DISCOVERY_TIMEZONE 配置值
         """
+        logger.debug("[task_discovery] → TaskDiscoveryScheduler.get_status()")
         cron_expr = os.environ.get("TASK_DISCOVERY_CRON", _DEFAULT_CRON)
         tz = os.environ.get("TASK_DISCOVERY_TIMEZONE", _DEFAULT_TIMEZONE)
         auto_start = os.environ.get("TASK_DISCOVERY_AUTO_START", "true")

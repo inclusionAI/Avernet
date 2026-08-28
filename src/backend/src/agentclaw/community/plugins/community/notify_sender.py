@@ -123,9 +123,10 @@ class DingTalkNotifySender(NotifySenderPlugin):
     """钉钉交互卡片通道 —— 装饰一个 ``inner`` 通道再额外投递一张钉钉交互卡片。
 
     设计要点：
-      - 这是 ``NotifySenderPlugin`` 的一个通道实现。``DiscoveryService`` 仍只依赖
-        ``notify_sender``，由 DI 在钉钉凭证就绪时绑定本类（凭证缺失则回退到纯
-        ``CommunityNotifySender``）—— 不把钉钉 SDK 漏进 ``DiscoveryService``。
+      - 这是 ``NotifySenderPlugin`` 的一个通道实现。``DiscoveryService`` 依赖
+        ``NotifyMessagesProvider`` 端口(DI alias 到本实例),由 DI 在钉钉凭证就绪时
+        绑定本类（凭证缺失则回退到纯 ``CommunityNotifySender``）—— 不把钉钉 SDK
+        漏进 ``DiscoveryService``。
       - 复用 e2e 既有的钉钉凭证 env（``TASK_DISCOVERY_DINGTALK_*``，回退
         ``SINGLEBOX_DINGTALK_*``）；``card_template_id`` 复用
         ``TASK_DISCOVERY_CARD_TEMPLATE_ID``（回退 ``SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID``）。
@@ -148,6 +149,7 @@ class DingTalkNotifySender(NotifySenderPlugin):
         *,
         channel: str = "markdown",
     ) -> str | None:
+        log.debug("[task_discovery] → DingTalkNotifySender.send(title=%r, recipient=%s, channel=%s)", message.title[:80], message.recipient, channel)
         # 先照常走 inner 通道（日志/兜底），再额外投递钉钉卡片。两者同时进行。
         msg_id = self._inner.send(message, channel=channel)
         try:
@@ -168,6 +170,7 @@ class DingTalkNotifySender(NotifySenderPlugin):
     @staticmethod
     def _resolve(key: str, env_name: str, env_fallback: str) -> str:
         """优先级：API holder > YAML holder > env。"""
+        log.debug("[task_discovery] → DingTalkNotifySender._resolve(key=%s)", key)
         val = DingTalkCredentialHolder.get(key)
         if val:
             return val
@@ -205,6 +208,7 @@ class DingTalkNotifySender(NotifySenderPlugin):
         )
 
     def _send_dingtalk_card(self, message: NotifyMessage) -> None:
+        log.debug("[task_discovery] → DingTalkNotifySender._send_dingtalk_card()")
         if not self._configured():
             # 诊断：逐个检出哪个凭证缺失及其来源
             missing: list[str] = []

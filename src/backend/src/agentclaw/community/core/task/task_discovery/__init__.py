@@ -5,7 +5,7 @@
 2. 按 (bot_id, owner_id, dt) 读取待确认任务 (mock 数据)
 3. 通过 CronRelayService.forward_request 创建 engine session
 4. WebSocket chat.send 注入发现提示消息（bot 主动呈现发现任务）
-5. session 创建后通过 NotifySenderPlugin 投递通知（发现摘要 + session 链接）
+5. session 创建后通过 NotifyMessagesProvider 投递通知（发现摘要 + session 链接）
 6. 用户在 session 中确认后，由执行框架处理
 
 engine 侧零改动 — 复用现有 WebSocket 端点 + chat.send 处理器。

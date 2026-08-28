@@ -34,9 +34,11 @@ from agentclaw.community.core.task.task_discovery.protocols import BotServicePro
 from agentclaw.community.core.task.task_discovery.session_creator import (
     HttpSessionCreator,
 )
+from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
+    NotifyMessagesProvider,
+)
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
 
 logger = get_logger()
 
@@ -63,7 +65,7 @@ class TaskDiscoveryLifecycle(LifecycleBase):
     def __init__(
         self,
         bot_service: BotServiceProtocol,
-        notify_sender: NotifySenderPlugin,
+        notify_sender: NotifyMessagesProvider,
     ) -> None:
         self._bot_service: BotServiceProtocol = bot_service
         self._notify_sender = notify_sender
@@ -71,6 +73,7 @@ class TaskDiscoveryLifecycle(LifecycleBase):
 
     async def startup(self) -> None:
         """Lifecycle hook — 调度每日定时任务发现。"""
+        logger.debug("[task_discovery] → TaskDiscoveryLifecycle.startup()")
         if os.environ.get("TASK_DISCOVERY_AUTO_START", "true").lower() != "true":
             logger.info(
                 "[task_discovery] auto-schedule disabled "
@@ -90,6 +93,7 @@ class TaskDiscoveryLifecycle(LifecycleBase):
 
     async def shutdown(self) -> None:
         """Lifecycle hook — 取消定时调度。"""
+        logger.debug("[task_discovery] → TaskDiscoveryLifecycle.shutdown()")
         if self._task is not None and not self._task.done():
             self._task.cancel()
             try:
@@ -100,6 +104,7 @@ class TaskDiscoveryLifecycle(LifecycleBase):
 
     async def _run_daily_schedule(self, hour: int, minute: int) -> None:
         """每日定时调度 — 计算到下一个目标时间点，sleep 后执行，循环。"""
+        logger.debug("[task_discovery] → TaskDiscoveryLifecycle._run_daily_schedule(hour=%s, minute=%s)", hour, minute)
         while True:
             delay = self._seconds_until(hour, minute)
             logger.info(
@@ -122,6 +127,7 @@ class TaskDiscoveryLifecycle(LifecycleBase):
 
     async def _discover_once(self) -> None:
         """执行一次任务发现 — 遍历所有用户的 bot。"""
+        logger.debug("[task_discovery] → TaskDiscoveryLifecycle._discover_once()")
         bots = self._list_all_bots()
         if not bots:
             logger.info("[task_discovery] no bots found, skipping discovery")

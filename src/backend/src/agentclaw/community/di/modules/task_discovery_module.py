@@ -38,6 +38,13 @@ from agentclaw.community.core.repository.protocols.task import (
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
 )
+from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
+    FrontendUrlProvider,
+    NullFrontendUrlProvider,
+)
+from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
+    NotifyMessagesProvider,
+)
 from agentclaw.community.core.task.task_discovery.openapi_bot_session_initiator import (
     OpenApiBotSessionInitiator,
 )
@@ -63,7 +70,6 @@ from agentclaw.community.core.task.task_runner.integration.ports import (
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
 
 logger = get_logger()
 
@@ -133,12 +139,18 @@ class TaskDiscoveryModule(Module):
         self,
         reader: TaskReader,
         session_initiator: SessionInitiator,
-        notify_sender: NotifySenderPlugin,
+        notify_sender: NotifyMessagesProvider,
         bot_service: _TaskDiscoveryBotServiceProtocol,
         discovery_lock_repo: TaskDiscoveryLockRepositoryProtocol,
         work_order_service: _TaskDiscoveryWorkOrderServiceProtocol,
+        injector: Injector,
     ) -> DiscoveryService:
-        """构建 DiscoveryService（注入 reader + initiator + notify + bot_service + lock + work_order）。"""
+        """构建 DiscoveryService（注入 reader + initiator + notify + bot_service + lock + work_order + frontend_url_provider）。"""
+        logger.debug("[task_discovery] → TaskDiscoveryModule._provide_discovery_service()")
+        try:
+            fe_provider: FrontendUrlProvider = injector.get(FrontendUrlProvider)
+        except Exception:  # noqa: BLE101 未绑定 → Null(构造参数兜底)
+            fe_provider = NullFrontendUrlProvider()
         return DiscoveryService(
             reader=reader,
             session_initiator=session_initiator,
@@ -146,6 +158,7 @@ class TaskDiscoveryModule(Module):
             bot_service=bot_service,
             discovery_lock_repo=discovery_lock_repo,
             work_order_service=work_order_service,
+            frontend_url_provider=fe_provider,
         )
 
     @singleton
@@ -164,33 +177,20 @@ class TaskDiscoveryModule(Module):
 
         对齐 ``task_module.py`` 的 ``injector.get(OpenApiBotPort)`` + try/except 降级模式。
 
-        另外从 YAML ``task_discovery_dingtalk`` 块读取 env-aware frontend_url（pre/prod/other）
-        并注入 ``FrontendUrlHolder``。原逻辑只在 ``CommunityNotifyModule`` 里执行（community/
-        singlebox），corp 环境不加载该模块导致 holder 不被 set → session_url 退回 localhost。
+        ``FrontendUrlProvider`` 由 DI 注入(corp 列 ``CorpFrontendUrlProvider``,
+        community/singlebox 列未绑定 → fallback ``NullFrontendUrlProvider``)。
         """
-        # ── 从 YAML 读取 env-aware frontend_url 并注入 FrontendUrlHolder ──
-        self._inject_frontend_url_from_yaml()
+        logger.debug("[task_discovery] → TaskDiscoveryModule._provide_session_initiator()")
+        try:
+            fe_provider: FrontendUrlProvider = injector.get(FrontendUrlProvider)
+        except Exception:  # noqa: BLE101 未绑定 → Null(构造参数兜底)
+            fe_provider = NullFrontendUrlProvider()
 
         if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
             # corp/pre/prod: 尝试从 DI 注入 OpenApiBotPort (corp overlay 绑定)
             try:
                 openapi_bot = injector.get(OpenApiBotPort)
                 if openapi_bot is not None:
-                    # FrontendUrlProvider 同为 corp 绑定
-                    # (CorpTaskIntegrationModule.get_frontend_url_provider —
-                    # env-aware 静态值 + 运行时 holder 优先);解析失败降级
-                    # Null (回落构造 frontend_url 参数)。
-                    try:
-                        from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
-                            FrontendUrlProvider,
-                            NullFrontendUrlProvider,
-                        )
-
-                        fe_provider: FrontendUrlProvider = (
-                            injector.get(FrontendUrlProvider)
-                        )
-                    except Exception:  # noqa: BLE101 未绑定 → Null(构造参数兜底)
-                        fe_provider = NullFrontendUrlProvider()
                     logger.info(
                         "[task_discovery] SessionInitiator → OpenApiBotSessionInitiator "
                         "(corp path, openapi_bot=%s, frontend_url_provider=%s)",
@@ -218,49 +218,8 @@ class TaskDiscoveryModule(Module):
             cron_relay=cron_relay,
             frontend_url=_resolve_frontend_url(),
             backend_url=_resolve_backend_url(),
+            frontend_url_provider=fe_provider,
         )
-
-    @staticmethod
-    def _inject_frontend_url_from_yaml() -> None:
-        """从 YAML ``task_discovery_dingtalk`` 块读取 env-aware frontend_url，
-        如果 ``FrontendUrlHolder`` 尚未被注入则写入。
-
-        优先级（对齐 CommunityNotifyModule 逻辑）:
-          - pre   → frontend_url_pre → frontend_url
-          - prod  → frontend_url_prod → frontend_url
-          - other → frontend_url
-
-        此方法确保 corp/pre/prod 环境（不加载 CommunityNotifyModule）也能从
-        YAML 配置正确注入 FrontendUrlHolder，而不是退回 localhost:8000。
-        """
-        from agentclaw.community.core.task.task_discovery.session_initiator import (
-            FrontendUrlHolder,
-        )
-        from agentclaw.community.di.modules.config_module import _block
-        from agentclaw.community.utils.env_utils import get_current_env
-
-        if FrontendUrlHolder.get():
-            # 运行时 API 已注入 → 跳过
-            return
-
-        cfg = _block("task_discovery_dingtalk")
-        if not cfg:
-            return
-
-        env = get_current_env()
-        if env == "pre":
-            url = cfg.get("frontend_url_pre", "") or cfg.get("frontend_url", "")
-        elif env == "prod":
-            url = cfg.get("frontend_url_prod", "") or cfg.get("frontend_url", "")
-        else:
-            url = cfg.get("frontend_url", "")
-        if url:
-            FrontendUrlHolder.set(url)
-            logger.info(
-                "[task_discovery] FrontendUrlHolder set from YAML "
-                "(env=%s, url=%s)",
-                env, url,
-            )
 
     @singleton
     @provider
