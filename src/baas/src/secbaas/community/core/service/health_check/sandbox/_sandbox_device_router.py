@@ -12,6 +12,14 @@ from uuid import uuid4
 from secbaas.community.api.health_check.sandbox import (
     SandboxDeviceRouter as SandboxDeviceRouterProtocol,
 )
+
+# 兼容别名：digest 三件套已抽离到 core/utils/_renewal_digest.py 中立模块，
+# 此处 re-export 是为第三方 import 与 Phase 3 过渡（删除 legacy router 类）保留。
+from secbaas.community.core.utils._renewal_digest import (  # isort: skip
+    RENEWAL_DIGEST_LOGGER as arca_renew_digest_logger,  # noqa: N811, F401
+    log_renew_digest as _log_renew_digest,
+    ttl_for_digest as _ttl_for_digest,  # noqa: F401
+)
 from secbaas.community.logger import get_logger
 
 if TYPE_CHECKING:
@@ -19,9 +27,6 @@ if TYPE_CHECKING:
     from secbaas.community.core.service.paas import PaasServiceFacade
 
 logger = get_logger("core-service")
-
-# 专用 digest 日志器：独立命名便于 monitor/采集按 logger 名过滤
-arca_renew_digest_logger = get_logger("arca-renew-digest")
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -166,50 +171,6 @@ def _log_threshold_reached_warning(
         f"reached warning threshold ({fail_count} >= {WARNING_THRESHOLD}), "
         f"device will be escalated to STOPPED status"
     )
-
-
-def _log_renew_digest(
-    *,
-    run_uuid: str,
-    table_id: int,
-    table_type: str,
-    arca_device_id: str,
-    result: str,
-    ttl_before: str | None,
-    ttl_after: str | None,
-) -> None:
-    """续期结果 digest（monitor 用，逗号分隔字段，便于采集/告警）。
-
-    首字段为 run_uuid 用于区分不同轮次/请求；不含 error 详情（可能很长/带换行，
-    会破坏 monitor 格式），错误详情由各分支已有的 warning 日志记录。
-    best-effort，日志失败不影响续期流程。
-
-    ttl 时间去掉空格（``2026-05-27 21:15:05`` -> ``2026-05-27-21:15:05``），
-    缺失/空值置为 ``-``，避免破坏逗号分隔格式。
-    """
-    try:
-        before = _ttl_for_digest(ttl_before)
-        after = _ttl_for_digest(ttl_after)
-        arca_renew_digest_logger.info(
-            "ttl_renew_digest,%s,%s,%s,%s,%s,%s,%s,%s",
-            run_uuid,
-            "renew",
-            table_id,
-            table_type,
-            arca_device_id,
-            result,
-            before,
-            after,
-        )
-    except Exception as e:  # pragma: no cover - defensive
-        logger.warning("[ttl_renew_digest] log failed (non-fatal): %s", e)
-
-
-def _ttl_for_digest(ttl: str | None) -> str:
-    """把 TTL 时间规整为 monitor 友好格式：去空格、缺省置 ``-``。"""
-    if not ttl:
-        return "-"
-    return ttl.replace(" ", "-")
 
 
 # ---------------------------------------------------------------------------
