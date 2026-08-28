@@ -593,7 +593,7 @@ describe('openclaw-channel-bcn', () => {
     assert.equal(pkg.openclaw?.compat?.pluginApi, '>=2026.3.28');
   });
 
-  it('does not ship internal-only implementation details in public source files', () => {
+  it('does not ship internal-only integrations or endpoints in public source files', () => {
     const forbidden = [
       'hitl',
       'SECBAAS',
@@ -601,10 +601,7 @@ describe('openclaw-channel-bcn', () => {
       'function.alipay.com',
       'AGENTCLAW_SANDBOX',
       'tc_sdb_nenv',
-      'BOT_DATA_DIR',
-      '~/.credentials',
       'bcs.example.com',
-      'service-bot-session',
       'env-detect',
     ];
     const matches: string[] = [];

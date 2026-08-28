@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { BcsWsClient } from '../src/bcs-ws-client.js';
+import { resolveServiceBotCredentialsBotId } from '../src/service-bot-session.js';
 import type { ResolvedBcsAccount, SessionInfo } from '../src/types.js';
 
 async function startBcsStub(responseBotUuid?: string) {
@@ -235,6 +236,45 @@ describe('BcsWsClient security behavior', () => {
     try {
       await client.connect(null);
       assert.equal(bcs.connectParams?.bot_id, 'default:mock-user');
+      assert.equal(bcs.connectParams?.token, undefined);
+    } finally {
+      await client.disconnect();
+      await bcs.close();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('prefers a credentials resolver identity over configured bot id and stale session', async () => {
+    const bcs = await startBcsStub();
+    const dataDir = await mkdtemp(join(tmpdir(), 'bcn-credentials-bot-id-'));
+    const credentialsPath = join(dataDir, '.credentials');
+    const account: ResolvedBcsAccount = {
+      accountId: 'default',
+      enabled: true,
+      bcsUrl: `ws://127.0.0.1:${bcs.port}/ws/bot`,
+      botId: 'configured:owner',
+      connectBotId: 'configured:owner',
+      botName: 'Developer',
+      capabilities: { summary: 'test bot', domains: [], skills: [], scopes: [] },
+      heartbeatIntervalMs: 60_000,
+      reconnectIntervalMs: 5_000,
+      connectionTimeoutMs: 10_000,
+    };
+    const staleSession: SessionInfo = {
+      bot_uuid: 'stale:owner',
+      token: 'stale-token',
+      bcs_url: account.bcsUrl,
+    };
+    await writeFile(credentialsPath, 'BOT_ID=credentials\nOWNER_ID=owner', 'utf-8');
+    const client = new BcsWsClient({
+      account,
+      dataDir,
+      resolveConnectBotId: () => resolveServiceBotCredentialsBotId(credentialsPath),
+    });
+
+    try {
+      await client.connect(staleSession);
+      assert.equal(bcs.connectParams?.bot_id, 'credentials:owner');
       assert.equal(bcs.connectParams?.token, undefined);
     } finally {
       await client.disconnect();
