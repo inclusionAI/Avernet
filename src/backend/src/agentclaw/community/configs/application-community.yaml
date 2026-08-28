@@ -100,7 +100,7 @@ user_config:
   # tenant/template are neutral placeholders — set per deployment.
   baas:
     api_base_url: "${BASS_URL:-}"
-    tenant: "community"
+    tenant: "${BAAS_TENANT:-}"
     template_uuid: "${BAAS_TEMPLATE_ID:-}"
     # ACK/ECI deployment — run the open-source engine image on managed
     # Kubernetes via AckDeployConfigComposer, not the managed bot image.
