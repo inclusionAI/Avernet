@@ -1,0 +1,20 @@
+[package]
+name = "bcs-app-register"
+description = "Versioned bot registration application facade for the BCN V1 API"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+bcs-domain = { workspace = true }
+bcs-service-api = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

@@ -275,6 +275,17 @@ user_config:
       app: optional
       bot: optional
 
+    # Bot registration. The token-issuance GET is Human-Principal only: the
+    # caller IS the person receiving the token (bcs additionally 403s
+    # non-Human principals). The anonymous POST's only credential is the
+    # six-hour register token bcs itself issued and verifies — carried as a
+    # query parameter, no header identities exist on that flow. The
+    # method-qualified entries outrank the optional collaboration/** rule;
+    # every other method keeps it.
+    "GET /openapi/v1/collaboration/register/token":
+      user: required
+    "POST /openapi/v1/collaboration/register": {}
+
 
     # New-version publish-to-users: POST /openapi/v1/collaboration/bots/{bot_uuid}/public
     # is served by the backend (it owns the antprocess approval + bcs_pub callback),

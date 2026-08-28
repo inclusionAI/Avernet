@@ -8,7 +8,7 @@ use bcs_service_api::RequestAuthHeaders;
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptFriendConnectionRequest, AcceptInvitation, AddGroupParticipant,
     AddSessionParticipant, ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity,
-    CancelFriendConnectionRequest, CompleteSession, CreateBotFriendRequest,
+    BotRegistration, CancelFriendConnectionRequest, CompleteSession, CreateBotFriendRequest,
     CreateFriendConnectionRequest, CreateGroup, CreateGroupInvitation, CreateSession,
     CreateSessionInvitation, CreateSessionOutcome, DeleteFriendConnection,
     DeleteGroup, DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant,
@@ -18,9 +18,10 @@ use bcs_service_api::application::v1::{
     FriendConnectionRequestStatus, FriendConnectionRequestView, FriendConnectionService,
     FriendConnectionView,
     FriendRequest, FriendRequestDirection, FriendRequestStatus, GetGroup, GetSession, GroupDetail,
-    GroupService, GroupSummary, Invitation, InvitationAcceptResult, InvitationService, ListGroups,
-    ListBotFriendRequests, ListBotFriendships, ListFriendConnectionRequests,
-    ListFriendConnections, ListSessionMessages, ListSessions, Page, RejectFriendConnectionRequest,
+    GroupService, GroupSummary, Invitation, InvitationAcceptResult, InvitationService,
+    IssueRegisterToken, ListGroups, ListBotFriendRequests, ListBotFriendships,
+    ListFriendConnectionRequests, ListFriendConnections, ListSessionMessages, ListSessions, Page,
+    RegisterBot, RegisterService, RegisterTokenView, RejectFriendConnectionRequest,
     RejectFriendRequest, DeleteBotFriendship, SessionCompletionResult, SessionDetail,
     SessionMessageService, SessionParticipant, SessionService, SessionSummary, UpdateGroup,
     UpdateGroupParticipant, UpdateSession, UpdateSessionParticipant,
@@ -251,6 +252,25 @@ impl InvitationService for NoopInvitationService {
         _command: AcceptInvitation,
     ) -> Result<InvitationAcceptResult, ApplicationError> {
         Err(ApplicationError::internal("invitation not configured"))
+    }
+}
+
+struct NoopRegisterService;
+
+#[async_trait]
+impl RegisterService for NoopRegisterService {
+    async fn issue_register_token(
+        &self,
+        _command: IssueRegisterToken,
+    ) -> Result<RegisterTokenView, ApplicationError> {
+        Err(ApplicationError::internal("register service is a noop in this test"))
+    }
+
+    async fn register_bot(
+        &self,
+        _command: RegisterBot,
+    ) -> Result<BotRegistration, ApplicationError> {
+        Err(ApplicationError::internal("register service is a noop in this test"))
     }
 }
 
@@ -552,6 +572,7 @@ fn test_router(service: Arc<FakeFriendshipService>) -> axum::Router {
         Arc::new(NoopSessionService),
         Arc::new(NoopSessionMessageService),
         Arc::new(NoopInvitationService),
+        Arc::new(NoopRegisterService),
         service,
         Arc::new(HeaderVerifier {
             caller: caller(),
@@ -840,6 +861,7 @@ fn openapi_test_router(service: Arc<FakeFriendConnectionService>) -> axum::Route
         Arc::new(NoopSessionService),
         Arc::new(NoopSessionMessageService),
         Arc::new(NoopInvitationService),
+        Arc::new(NoopRegisterService),
         Arc::new(FakeFriendshipService::default()),
         Arc::new(HeaderVerifier {
             caller: caller(),
@@ -1116,6 +1138,7 @@ async fn openapi_friend_connection_routes_fail_closed_when_service_missing_or_pa
         Arc::new(NoopSessionService),
         Arc::new(NoopSessionMessageService),
         Arc::new(NoopInvitationService),
+        Arc::new(NoopRegisterService),
         Arc::new(FakeFriendshipService::default()),
         Arc::new(HeaderVerifier { caller: caller() }),
     ));

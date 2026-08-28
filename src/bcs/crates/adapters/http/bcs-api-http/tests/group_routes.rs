@@ -6,10 +6,11 @@ use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::{
-    AcceptFriendRequest, AcceptInvitation, CreateBotFriendRequest, CreateGroupInvitation,
-    CreateSessionInvitation, DeleteBotFriendship, FriendRequest, Friendship, FriendshipService,
-    Invitation, InvitationAcceptResult, InvitationService, ListBotFriendRequests,
-    ListBotFriendships, RejectFriendRequest,
+    AcceptFriendRequest, AcceptInvitation, BotRegistration, CreateBotFriendRequest,
+    CreateGroupInvitation, CreateSessionInvitation, DeleteBotFriendship, FriendRequest,
+    Friendship, FriendshipService, Invitation, InvitationAcceptResult, InvitationService,
+    IssueRegisterToken, ListBotFriendRequests, ListBotFriendships, RegisterBot, RegisterService,
+    RegisterTokenView, RejectFriendRequest,
 };
 use bcs_service_api::application::v1::{
     AddGroupParticipant, ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity,
@@ -330,6 +331,25 @@ impl FriendshipService for NoopFriendshipService {
     }
 }
 
+struct NoopRegisterService;
+
+#[async_trait]
+impl RegisterService for NoopRegisterService {
+    async fn issue_register_token(
+        &self,
+        _command: IssueRegisterToken,
+    ) -> Result<RegisterTokenView, ApplicationError> {
+        Err(ApplicationError::internal("register service is a noop in this test"))
+    }
+
+    async fn register_bot(
+        &self,
+        _command: RegisterBot,
+    ) -> Result<BotRegistration, ApplicationError> {
+        Err(ApplicationError::internal("register service is a noop in this test"))
+    }
+}
+
 fn caller() -> AuthenticatedCaller {
     AuthenticatedCaller {
         tenant: Some("tenant-a".into()),
@@ -384,6 +404,7 @@ fn test_router(service: Arc<FakeGroupService>) -> axum::Router {
         Arc::new(NoopSessionService),
         Arc::new(NoopSessionMessageService),
         Arc::new(NoopInvitationService),
+        Arc::new(NoopRegisterService),
         Arc::new(NoopFriendshipService),
         Arc::new(HeaderVerifier { caller: caller() }),
     ))

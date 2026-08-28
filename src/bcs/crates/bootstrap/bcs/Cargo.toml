@@ -138,6 +138,7 @@ bcs-app-bot = { workspace = true }
 bcs-app-group = { workspace = true }
 bcs-app-session = { workspace = true }
 bcs-app-invitation = { workspace = true }
+bcs-app-register = { workspace = true }
 bcs-app-collaboration-template = { workspace = true }
 bcs-app-collaboration-definition = { workspace = true }
 bcs-provider-http = { workspace = true }
