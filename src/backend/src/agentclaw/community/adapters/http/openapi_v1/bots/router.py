@@ -102,11 +102,17 @@ from agentclaw.community.api.bot_inventory_service import (
 from agentclaw.community.api.bot_dormant_service import (
     BotDormantActivateServiceProtocol,
 )
+from agentclaw.community.core.bot_inventory.errors import (
+    BotInventoryPermissionError,
+)
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
 )
 from agentclaw.community.core.bot_inventory.policies.combo_policy import (
     assert_service_upgrade,
+)
+from agentclaw.community.core.bot_management.template_public_view import (
+    project_template_config_for_public,
 )
 from agentclaw.community.core.bot_inventory.types import (
     BotInventoryItem as CoreItem,
@@ -181,9 +187,18 @@ def _require_service_capable_engine(bot_type: str, engine: str) -> None:
         )
 
 
-def _to_bot(d: dict[str, Any]) -> Bot:
-    """Adapt an internal bot ``to_dict()`` record to the public ``Bot`` schema."""
+def _to_bot(d: dict[str, Any], *, space: dict[str, Any] | None = None) -> Bot:
+    """Adapt an internal bot ``to_dict()`` record to the public ``Bot`` schema.
+
+    ``template_config`` on the row is the stored engine snapshot (it may carry
+    secrets), so it passes through the core allowlist projection here — gated
+    on a truthy ``template_type`` so the detail path (whose attach is not
+    template-gated) honors the same "null without a template" contract the
+    listings publish. ``space`` is the owner-view summary the listing
+    endpoints resolve and pass in; other callers leave it null.
+    """
     engine = d.get("active_engine") or ""
+    has_template = d.get("template_type") not in (None, "")
     return Bot(
         bot_id=d["bot_id"],
         bot_name=d.get("bot_name") or "",
@@ -193,7 +208,53 @@ def _to_bot(d: dict[str, Any]) -> Bot:
         bot_type=d.get("bot_type") or "",
         status=d.get("status") or "",
         owner_entity_id=d.get("owner_id") or "",
+        template_type=str(d["template_type"]) if has_template else None,
+        template_config=(
+            project_template_config_for_public(d.get("template_config"))
+            if has_template
+            else None
+        ),
+        space=space,
     )
+
+
+def _to_public_space(ref: Any) -> dict[str, Any] | None:
+    """Flatten a ``BusinessSpaceRef`` for pydantic coercion into ``BusinessSpace``."""
+    if ref is None:
+        return None
+    return {"space_id": ref.space_id, "name": ref.name, "kind": ref.kind}
+
+
+def _resolve_row_spaces(
+    space_context: BusinessSpaceContextProtocol,
+    rows: list[dict[str, Any]],
+    *,
+    owner_id: str,
+) -> dict[str, dict[str, Any] | None]:
+    """Owner-view space summary per distinct ``ac_bots.space_id``.
+
+    Memoized on the raw space_id column: one ``bot_space`` resolution per
+    distinct space per page. This is plain memo caching — the semantics
+    (synthetic ``personal:<user>`` fallback, member-gated None) stay in the
+    core ``BusinessSpaceContextProtocol``. A space the resolver refuses
+    (missing membership row on a legacy record and the like) degrades to
+    ``space: null`` for that row, mirroring how ``_list_cloud_rows`` skips a
+    row the space module rejects: one bad record must not take the whole
+    listing page down.
+    """
+    resolved: dict[str, dict[str, Any] | None] = {}
+    for row in rows:
+        raw = str(row.get("space_id") or "")
+        if raw in resolved:
+            continue
+        try:
+            ref = space_context.bot_space(
+                bot=row, owner_id=owner_id, current_space=None
+            )
+        except BotInventoryPermissionError:
+            ref = None
+        resolved[raw] = _to_public_space(ref)
+    return resolved
 
 
 def _to_bot_metadata(d: dict[str, Any]) -> BotMetadata:
@@ -251,6 +312,8 @@ def _to_inventory_item(item: CoreItem) -> BotInventoryItem:
         internal_status=item.internal_status,
         owner_entity_id=item.owner_entity_id,
         space=space,
+        template_type=item.template_type,
+        template_config=dict(item.template_config) if item.template_config else None,
         avatar_url=item.avatar_url,
         machine_id=item.machine_id,
         mount_path=item.mount_path,
@@ -505,6 +568,9 @@ async def list_bots(
         ),
     ] = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    space_context: BusinessSpaceContextProtocol = Injected(
+        BusinessSpaceContextProtocol
+    ),
 ) -> Envelope[Page[Bot]]:
     """List the caller's bots, narrowed to the caller's authorized scope.
 
@@ -517,8 +583,9 @@ async def list_bots(
     bots, including bots the user does not own, is the authorized-bots listing.
 
     The keyword, engine, and status filters are applied before pagination.
-    For richer inventory fields such as deployment mode and business space,
-    use GET /openapi/v1/bots/all.
+    Each row carries the owner-view space of its space assignment and the
+    projected template snapshot. For richer inventory fields such as
+    deployment mode, use GET /openapi/v1/bots/all.
     """
     granted = caller.granted_bot_ids(owned_by_delegator=True)
     if granted is not None and not granted:
@@ -532,7 +599,17 @@ async def list_bots(
         page_size=page_params.page_size,
         bot_ids=sorted(granted) if granted is not None else None,
     )
-    items = [_to_bot(b) for b in result["items"]]
+    rows = result["items"]
+    # Off the event loop: the resolution issues synchronous space-service
+    # reads, one per distinct space on the page — a page over many spaces
+    # must not stall every other request the handler is interleaved with.
+    row_spaces = await asyncio.to_thread(
+        _resolve_row_spaces, space_context, rows, owner_id=owner_id
+    )
+    items = [
+        _to_bot(b, space=row_spaces.get(str(b.get("space_id") or "")))
+        for b in rows
+    ]
     return page(result["total"], items, request)
 
 
