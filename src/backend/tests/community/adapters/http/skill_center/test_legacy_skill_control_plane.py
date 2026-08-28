@@ -10,11 +10,17 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     AddSkillsRequest,
     DeactivateSkillSetRequest,
     SearchRequest,
+    UpdateSkillSetRequest,
 )
 from agentclaw.community.adapters.http.skill_center.skillsets import (
     add_skills_to_set,
+    delete_skill_set,
     get_default_skill_set,
+    get_skill_set,
     get_skill_set_mcps,
+    get_skill_set_skills,
+    remove_skill_from_set,
+    update_skill_set,
 )
 from agentclaw.community.adapters.http.skill_center.skills import (
     deactivate_skill_set,
@@ -145,7 +151,7 @@ async def test_legacy_mcp_read_recovers_non_default_bot_from_exact_set_id() -> N
         {
             "set_id": "set-1",
             "actor_id": "owner",
-            "owner_id_hint": None,
+            "owner_id_hint": "owner",
         },
     )
 
@@ -365,6 +371,115 @@ async def test_legacy_skill_set_batch_uses_body_owner_for_collaborator() -> None
     assert response.success is True
     assert response.data["success"] == [{"skill_id": "7", "name": "7"}]
     assert response.data["failed"] == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_exact_set_routes_keep_the_target_owner_for_collaborators() -> None:
+    class _ControlPlane:
+        def __init__(self) -> None:
+            self.operations: list[tuple[str, dict]] = []
+
+        def resolve_legacy_set_scope(self, **_kwargs):
+            raise AssertionError("an explicit bot_id must stay strictly scoped")
+
+        def get_set(self, **kwargs):
+            self.operations.append(("get_set", kwargs))
+            return {
+                "id": "set-1",
+                "name": "tools",
+                "description": None,
+                "is_default": False,
+                "is_builtin": False,
+                "user_id": "owner",
+                "gmt_created": "",
+                "gmt_modified": "",
+            }
+
+        def update_set(self, **kwargs):
+            self.operations.append(("update_set", kwargs))
+            return {
+                "id": "set-1",
+                "name": "tools",
+                "description": kwargs["description"],
+                "is_default": False,
+                "is_builtin": False,
+                "user_id": "owner",
+                "gmt_created": "",
+                "gmt_modified": "",
+            }
+
+        def delete_set(self, **kwargs):
+            self.operations.append(("delete_set", kwargs))
+
+        def list_skills(self, **kwargs):
+            self.operations.append(("list_skills", kwargs))
+            return []
+
+        async def remove_skill(self, **kwargs):
+            self.operations.append(("remove_skill", kwargs))
+            return {"changed": True}
+
+        def list_mcps(self, **kwargs):
+            self.operations.append(("list_mcps", kwargs))
+            return []
+
+    control_plane = _ControlPlane()
+    common = {
+        "entity_type": None,
+        "engine_type": None,
+        "ctx": SimpleNamespace(user_id="collaborator", bot_id="default"),
+        "bot_repo": _Bots(),
+        "control_plane": control_plane,
+    }
+
+    await get_skill_set(
+        "set-1", user_id="owner", entity_id=None, bot_id="bot", **common
+    )
+    await update_skill_set(
+        "set-1",
+        UpdateSkillSetRequest(
+            description="updated", user_id="owner", bot_id="bot"
+        ),
+        entity_id=None,
+        bot_id=None,
+        **common,
+    )
+    await inspect.unwrap(delete_skill_set)(
+        "set-1", user_id="owner", entity_id=None, bot_id="bot", **common
+    )
+    await get_skill_set_skills(
+        "set-1", user_id="owner", entity_id=None, bot_id="bot", **common
+    )
+    await inspect.unwrap(remove_skill_from_set)(
+        "set-1",
+        "7",
+        user_id="owner",
+        entity_id=None,
+        bot_id="bot",
+        **common,
+    )
+    await get_skill_set_mcps(
+        "set-1",
+        user_id="owner",
+        entity_id=None,
+        bot_id="bot",
+        skill_set_service_factory=object(),
+        **common,
+    )
+
+    assert [operation for operation, _kwargs in control_plane.operations] == [
+        "get_set",
+        "update_set",
+        "delete_set",
+        "list_skills",
+        "remove_skill",
+        "get_set",
+        "list_mcps",
+    ]
+    for _operation, kwargs in control_plane.operations:
+        assert kwargs["bot_id"] == "bot"
+        assert kwargs["owner_id"] == "owner"
+        assert kwargs["user_id"] == "collaborator"
 
 
 @pytest.mark.asyncio
