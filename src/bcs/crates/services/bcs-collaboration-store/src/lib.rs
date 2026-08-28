@@ -18,16 +18,18 @@ use bcs_service_api::port::repo::StateMachineEventfulTransition;
 use bcs_service_api::{
     CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,
     CollaborationTemplateEntry, CollaborationTemplateRepoPort, GroupRuntimeBindingRepoPort,
-    MarkHumanNodeRunningCommand, ServiceError, ServiceResult, StateMachineDefinitionRepoPort,
+    CreateStateMachineRerun, CreateStateMachineRerunOutcome, MarkHumanNodeRunningCommand,
+    ServiceError, ServiceResult, SessionRepoPort, StateMachineDefinitionRepoPort,
     StateMachineRunRepoPort,
 };
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 
 const CURRENT_GROUP_VERSION_SENTINEL: i32 = 2_147_483_647;
-const SM_RUN_SELECT_COLS: &str = "run_id, definition_id, definition_version, group_id, \
-    group_version, session_id, created_by, status, input_json, output_text, error_message, \
-    created_at_ms, updated_at_ms, completed_at_ms";
+const SM_RUN_SELECT_COLS: &str = "run_id, root_run_id, rerun_of, definition_id, \
+    definition_version, group_id, group_version, session_id, session_activation_count, \
+    created_by, status, input_json, output_text, error_message, created_at_ms, updated_at_ms, \
+    completed_at_ms";
 const SM_NODE_SELECT_COLS: &str = "run_id, node_id, status, attempt, node_timeout_ms, \
     timeout_deadline_ms, max_attempts, assignee_bot_id, outcome, responded_by, \
     delivery_request_id, bot_delivery_run_id, artifact_text, error_message, \
@@ -57,10 +59,11 @@ struct DefinitionSourceRecord {
     content_hash: String,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct MemoryCollaborationStore {
     inner: Arc<RwLock<StoreInner>>,
     event_store: Option<Arc<MemoryEventStore>>,
+    session_repo: Option<Arc<dyn SessionRepoPort>>,
 }
 
 impl MemoryCollaborationStore {
@@ -70,6 +73,11 @@ impl MemoryCollaborationStore {
 
     pub fn with_event_store(mut self, event_store: Arc<MemoryEventStore>) -> Self {
         self.event_store = Some(event_store);
+        self
+    }
+
+    pub fn with_session_repo(mut self, session_repo: Arc<dyn SessionRepoPort>) -> Self {
+        self.session_repo = Some(session_repo);
         self
     }
 }
@@ -368,6 +376,105 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
                 .insert((run_id.clone(), node.node_id.clone()), node);
         }
         Ok(true)
+    }
+
+    async fn create_rerun_if_session_idle(
+        &self,
+        command: CreateStateMachineRerun,
+    ) -> ServiceResult<CreateStateMachineRerunOutcome> {
+        let mut inner = self.inner.write().await;
+        if let Some(existing) = inner
+            .runs
+            .values()
+            .find(|run| run.rerun_of.as_deref() == Some(command.source_run_id.as_str()))
+            .cloned()
+        {
+            return Ok(CreateStateMachineRerunOutcome::Existing(existing));
+        }
+        let Some(source) = inner.runs.get(&command.source_run_id) else {
+            return Ok(CreateStateMachineRerunOutcome::Conflict);
+        };
+        if source.status != StateMachineRunStatus::Failed
+            || source.session_id != command.run.session_id
+            || inner.runs.values().any(|run| {
+                run.session_id == command.run.session_id
+                    && matches!(
+                        run.status,
+                        StateMachineRunStatus::Pending | StateMachineRunStatus::Running
+                    )
+            })
+        {
+            return Ok(CreateStateMachineRerunOutcome::Conflict);
+        }
+        let Some(snapshot) = inner
+            .run_snapshots
+            .get(&command.source_run_id)
+            .cloned()
+        else {
+            return Err(ServiceError::InvalidOperation {
+                message: "source state-machine Run has no immutable snapshot".to_string(),
+                request_id: None,
+            });
+        };
+        let resolved_bindings = inner
+            .run_resolved_participant_bindings
+            .get(&command.source_run_id)
+            .cloned();
+        if command.reactivate_service_session {
+            let session_repo = self.session_repo.as_ref().ok_or_else(|| {
+                ServiceError::InvalidOperation {
+                    message: "Memory state-machine rerun requires a Session Repo".to_string(),
+                    request_id: None,
+                }
+            })?;
+            let Some(expected_activation_count) = command
+                .run
+                .session_activation_count
+                .and_then(|activation_count| activation_count.checked_sub(1))
+            else {
+                return Ok(CreateStateMachineRerunOutcome::Conflict);
+            };
+            let Some(session) = session_repo
+                .reactivate_if_completed_activation(
+                    &command.run.session_id,
+                    expected_activation_count,
+                    Some(command.run.input.clone()),
+                )
+                .await?
+            else {
+                return Ok(CreateStateMachineRerunOutcome::Conflict);
+            };
+            debug_assert_eq!(
+                Some(session.activation_count),
+                command.run.session_activation_count
+            );
+        }
+        let run_id = command.run.run_id.clone();
+        inner.run_snapshots.insert(run_id.clone(), snapshot);
+        if let Some(resolved_bindings) = resolved_bindings {
+            inner
+                .run_resolved_participant_bindings
+                .insert(run_id.clone(), resolved_bindings);
+        }
+        inner.runs.insert(run_id.clone(), command.run);
+        for node in command.nodes {
+            inner
+                .nodes
+                .insert((run_id.clone(), node.node_id.clone()), node);
+        }
+        Ok(CreateStateMachineRerunOutcome::Created)
+    }
+
+    async fn get_direct_rerun(
+        &self,
+        source_run_id: &str,
+    ) -> ServiceResult<Option<StateMachineRun>> {
+        let inner = self.inner.read().await;
+        Ok(inner
+            .runs
+            .values()
+            .find(|run| run.rerun_of.as_deref() == Some(source_run_id))
+            .cloned())
     }
 
     async fn get_run(&self, run_id: &str) -> ServiceResult<Option<StateMachineRun>> {
@@ -1964,11 +2071,11 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         nodes: Vec<StateMachineNodeRun>,
     ) -> ServiceResult<()> {
         let run_sql = "INSERT INTO bcs_state_machine_runs \
-                       (env, run_id, definition_id, definition_version, group_id, \
-                        group_version, session_id, created_by, status, input_json, \
+                       (env, run_id, root_run_id, rerun_of, definition_id, definition_version, group_id, \
+                        group_version, session_id, session_activation_count, created_by, status, input_json, \
                         output_text, error_message, created_at_ms, updated_at_ms, \
                         completed_at_ms, record_status) \
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')";
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')";
         let mut steps = vec![DbTransactionStep::Execute(DbStatement::with_params(
             run_sql,
             run_insert_params(&self.env, &run),
@@ -2001,11 +2108,11 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
              WHERE env = ? AND session_id = ?{lock_suffix}"
         );
         let run_sql = "INSERT INTO bcs_state_machine_runs \
-                       (env, run_id, definition_id, definition_version, group_id, \
-                        group_version, session_id, created_by, status, input_json, \
+                       (env, run_id, root_run_id, rerun_of, definition_id, definition_version, group_id, \
+                        group_version, session_id, session_activation_count, created_by, status, input_json, \
                         output_text, error_message, created_at_ms, updated_at_ms, \
                         completed_at_ms, record_status) \
-                       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active' \
+                       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active' \
                        FROM bcs_group_sessions session_lock \
                        WHERE session_lock.env = ? AND session_lock.session_id = ? \
                          AND NOT EXISTS ( \
@@ -2046,6 +2153,198 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             Some(DbTransactionStepResult::Executed(result)) if result.affected_rows > 0
         );
         Ok(created)
+    }
+
+    async fn create_rerun_if_session_idle(
+        &self,
+        command: CreateStateMachineRerun,
+    ) -> ServiceResult<CreateStateMachineRerunOutcome> {
+        if let Some(existing) = self.get_direct_rerun(&command.source_run_id).await? {
+            return Ok(CreateStateMachineRerunOutcome::Existing(existing));
+        }
+        let service_activation = i32::from(command.reactivate_service_session);
+        let expected_activation = match command.run.session_activation_count {
+            Some(activation) if command.reactivate_service_session && activation > 1 => {
+                activation - 1
+            }
+            Some(_) if command.reactivate_service_session => {
+                return Ok(CreateStateMachineRerunOutcome::Conflict);
+            }
+            _ => 0,
+        };
+        let lock_suffix = match self.flavor {
+            DbSqlFlavor::Mysql => " FOR UPDATE",
+            DbSqlFlavor::Sqlite => "",
+        };
+        let lock_sql = format!(
+            "SELECT session_id FROM bcs_group_sessions \
+             WHERE env = ? AND session_id = ?{lock_suffix}"
+        );
+        let run_sql = "INSERT INTO bcs_state_machine_runs \
+                       (env, run_id, root_run_id, rerun_of, definition_id, definition_version, \
+                        group_id, group_version, session_id, session_activation_count, created_by, \
+                        status, input_json, output_text, error_message, created_at_ms, updated_at_ms, \
+                        completed_at_ms, record_status) \
+                       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active' \
+                       FROM bcs_state_machine_runs source_run \
+                       INNER JOIN bcs_group_sessions session_state \
+                         ON session_state.env = source_run.env \
+                        AND session_state.session_id = source_run.session_id \
+                       WHERE source_run.env = ? AND source_run.run_id = ? \
+                         AND source_run.session_id = ? \
+                         AND source_run.status = 'failed' \
+                         AND source_run.record_status = 'active' \
+                         AND session_state.group_id = source_run.group_id \
+                         AND ( \
+                           (? = 0 AND session_state.session_kind = 'chat' \
+                            AND session_state.status = 'running') \
+                           OR \
+                           (? = 1 AND session_state.session_kind = 'service_invocation' \
+                            AND session_state.status = 'completed' \
+                            AND session_state.activation_count = ? \
+                            AND session_state.callback_status IN \
+                              ('succeeded', 'partial_failed', 'failed', 'not_applicable')) \
+                         ) \
+                         AND NOT EXISTS ( \
+                           SELECT 1 FROM bcs_state_machine_runs direct_child \
+                           WHERE direct_child.env = source_run.env \
+                             AND direct_child.rerun_of = source_run.run_id \
+                             AND direct_child.record_status = 'active') \
+                         AND NOT EXISTS ( \
+                           SELECT 1 FROM bcs_state_machine_runs active_run \
+                           WHERE active_run.env = source_run.env \
+                             AND active_run.session_id = source_run.session_id \
+                             AND active_run.status IN ('pending', 'running') \
+                             AND active_run.record_status = 'active') \
+                         AND EXISTS ( \
+                           SELECT 1 FROM bcs_state_machine_definition_snapshots source_snapshot \
+                           WHERE source_snapshot.env = source_run.env \
+                             AND source_snapshot.run_id = source_run.run_id) \
+                       LIMIT 1";
+        let mut run_params = run_insert_params(&self.env, &command.run);
+        run_params.extend([
+            DbValue::from(self.env.as_str()),
+            DbValue::from(command.source_run_id.as_str()),
+            DbValue::from(command.run.session_id.as_str()),
+            DbValue::from(service_activation),
+            DbValue::from(service_activation),
+            DbValue::from(expected_activation),
+        ]);
+        let reactivate_sql = format!(
+            "UPDATE bcs_group_sessions \
+             SET status = 'running', output = NULL, error_message = NULL, \
+                 callback_status = 'pending', input = ?, callback_lease_owner = NULL, \
+                 callback_lease_token = 0, callback_lease_until_ms = NULL, \
+                 activation_count = activation_count + 1, completed_at = NULL, {} \
+             WHERE ? = 1 AND env = ? AND session_id = ? \
+               AND session_kind = 'service_invocation' AND status = 'completed' \
+               AND activation_count = ? \
+               AND callback_status IN ('succeeded', 'partial_failed', 'failed', 'not_applicable') \
+               AND EXISTS (SELECT 1 FROM bcs_state_machine_runs \
+                           WHERE env = ? AND run_id = ? AND record_status = 'active')",
+            self.flavor.set_modified_now(),
+        );
+        let snapshot_sql = "INSERT INTO bcs_state_machine_definition_snapshots \
+                            (env, run_id, group_id, session_id, group_version, definition_id, \
+                             definition_version, definition_content_hash, snapshot_blob_id, \
+                             snapshot_json, resolved_participant_bindings_json, source_format) \
+                            SELECT source_snapshot.env, ?, source_snapshot.group_id, \
+                                   source_snapshot.session_id, source_snapshot.group_version, \
+                                   source_snapshot.definition_id, source_snapshot.definition_version, \
+                                   source_snapshot.definition_content_hash, source_snapshot.snapshot_blob_id, \
+                                   source_snapshot.snapshot_json, \
+                                   source_snapshot.resolved_participant_bindings_json, \
+                                   source_snapshot.source_format \
+                            FROM bcs_state_machine_definition_snapshots source_snapshot \
+                            WHERE source_snapshot.env = ? AND source_snapshot.run_id = ? \
+                              AND EXISTS (SELECT 1 FROM bcs_state_machine_runs \
+                                          WHERE env = ? AND run_id = ? \
+                                            AND record_status = 'active')";
+        let mut steps = vec![
+            DbTransactionStep::Query(DbStatement::with_params(
+                lock_sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(command.run.session_id.as_str()),
+                ],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_params(run_sql, run_params)),
+            DbTransactionStep::Execute(DbStatement::with_params(
+                reactivate_sql,
+                vec![
+                    DbValue::from(command.run.input.to_string()),
+                    DbValue::from(service_activation),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(command.run.session_id.as_str()),
+                    DbValue::from(expected_activation),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(command.run.run_id.as_str()),
+                ],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_params(
+                snapshot_sql,
+                vec![
+                    DbValue::from(command.run.run_id.as_str()),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(command.source_run_id.as_str()),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(command.run.run_id.as_str()),
+                ],
+            )),
+        ];
+        steps.extend(build_guarded_node_runs_inserts(
+            &self.env,
+            &command.run.run_id,
+            &command.nodes,
+        ));
+        let results = match self.db.transaction(steps).await {
+            Ok(results) => results,
+            Err(error) => {
+                if let Some(existing) = self.get_direct_rerun(&command.source_run_id).await? {
+                    return Ok(CreateStateMachineRerunOutcome::Existing(existing));
+                }
+                return Err(ServiceError::InternalError(format!(
+                    "state machine rerun create: {error}"
+                )));
+            }
+        };
+        if matches!(
+            results.get(1),
+            Some(DbTransactionStepResult::Executed(result)) if result.affected_rows > 0
+        ) {
+            return Ok(CreateStateMachineRerunOutcome::Created);
+        }
+        if let Some(existing) = self.get_direct_rerun(&command.source_run_id).await? {
+            return Ok(CreateStateMachineRerunOutcome::Existing(existing));
+        }
+        Ok(CreateStateMachineRerunOutcome::Conflict)
+    }
+
+    async fn get_direct_rerun(
+        &self,
+        source_run_id: &str,
+    ) -> ServiceResult<Option<StateMachineRun>> {
+        let sql = format!(
+            "SELECT {SM_RUN_SELECT_COLS} FROM bcs_state_machine_runs \
+             WHERE env = ? AND rerun_of = ? AND record_status = 'active' LIMIT 1"
+        );
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(source_run_id),
+                ],
+            ))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine direct rerun get: {error}"))
+            })?;
+        rows.into_iter()
+            .next()
+            .map(row_to_state_machine_run)
+            .transpose()
     }
 
     async fn get_run(&self, run_id: &str) -> ServiceResult<Option<StateMachineRun>> {
@@ -2970,11 +3269,16 @@ fn run_insert_params(env: &str, run: &StateMachineRun) -> Vec<DbValue> {
     vec![
         DbValue::from(env),
         DbValue::from(run.run_id.as_str()),
+        DbValue::from(run.root_run_id.as_deref()),
+        DbValue::from(run.rerun_of.as_deref()),
         DbValue::from(run.definition_id.as_str()),
         DbValue::from(run.definition_version),
         DbValue::from(run.group_id.as_str()),
         DbValue::from(run.group_version),
         DbValue::from(run.session_id.as_str()),
+        run.session_activation_count
+            .map(DbValue::from)
+            .unwrap_or(DbValue::Null),
         DbValue::from(run.created_by.as_deref()),
         DbValue::from(run_status_to_str(run.status)),
         DbValue::from(run.input.to_string()),
@@ -3070,11 +3374,14 @@ fn row_to_state_machine_run(row: DbRow) -> ServiceResult<StateMachineRun> {
         .map_err(|error| ServiceError::InternalError(format!("run status: {error}")))?;
     Ok(StateMachineRun {
         run_id: db_string(&row, "run_id")?,
+        root_run_id: db_optional_string(&row, "root_run_id")?,
+        rerun_of: db_optional_string(&row, "rerun_of")?,
         definition_id: db_string(&row, "definition_id")?,
         definition_version: db_i32(&row, "definition_version")?,
         group_id: db_string(&row, "group_id")?,
         group_version: db_i32(&row, "group_version")?,
         session_id: db_string(&row, "session_id")?,
+        session_activation_count: db_optional_i32(&row, "session_activation_count")?,
         created_by: db_optional_string(&row, "created_by")?,
         status: parse_run_status(&status_raw)?,
         input: db_json(&row, "input_json")?.unwrap_or(serde_json::Value::Null),
@@ -3545,6 +3852,19 @@ mod tests {
             "CREATE TABLE bcs_group_sessions (
                 env TEXT NOT NULL,
                 session_id TEXT NOT NULL,
+                group_id TEXT NOT NULL DEFAULT 'group',
+                session_kind TEXT NOT NULL DEFAULT 'chat',
+                status TEXT NOT NULL DEFAULT 'running',
+                input TEXT DEFAULT NULL,
+                output TEXT DEFAULT NULL,
+                error_message TEXT DEFAULT NULL,
+                activation_count INTEGER NOT NULL DEFAULT 1,
+                callback_status TEXT DEFAULT 'not_applicable',
+                callback_lease_owner TEXT DEFAULT NULL,
+                callback_lease_token INTEGER DEFAULT NULL,
+                callback_lease_until_ms INTEGER DEFAULT NULL,
+                completed_at INTEGER DEFAULT NULL,
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(env, session_id)
             )",
         ))
@@ -3556,11 +3876,14 @@ mod tests {
                 gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 env TEXT NOT NULL,
                 run_id TEXT NOT NULL,
+                root_run_id TEXT DEFAULT NULL,
+                rerun_of TEXT DEFAULT NULL,
                 definition_id TEXT NOT NULL,
                 definition_version INTEGER NOT NULL,
                 group_id TEXT NOT NULL,
                 group_version INTEGER NOT NULL,
                 session_id TEXT NOT NULL,
+                session_activation_count INTEGER DEFAULT NULL,
                 created_by TEXT DEFAULT NULL,
                 status TEXT NOT NULL,
                 input_json TEXT DEFAULT NULL,
@@ -3570,6 +3893,25 @@ mod tests {
                 updated_at_ms INTEGER NOT NULL,
                 completed_at_ms INTEGER DEFAULT NULL,
                 record_status TEXT NOT NULL DEFAULT 'active',
+                UNIQUE(env, run_id),
+                UNIQUE(env, rerun_of)
+            )",
+        ))
+        .await?;
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_state_machine_definition_snapshots (
+                env TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                group_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                group_version INTEGER NOT NULL,
+                definition_id TEXT NOT NULL,
+                definition_version INTEGER NOT NULL,
+                definition_content_hash TEXT NOT NULL,
+                snapshot_blob_id TEXT DEFAULT NULL,
+                snapshot_json TEXT DEFAULT NULL,
+                resolved_participant_bindings_json TEXT DEFAULT NULL,
+                source_format TEXT NOT NULL DEFAULT 'yaml',
                 UNIQUE(env, run_id)
             )",
         ))
@@ -3619,11 +3961,14 @@ mod tests {
         .await?;
         let run = StateMachineRun {
             run_id: "run-sqlite-cas".to_string(),
+            root_run_id: Some("run-sqlite-cas".to_string()),
+            rerun_of: None,
             definition_id: "definition".to_string(),
             definition_version: 1,
             group_id: "group".to_string(),
             group_version: 1,
             session_id: "session".to_string(),
+            session_activation_count: None,
             created_by: None,
             status: StateMachineRunStatus::Running,
             input: serde_json::Value::Null,
@@ -3661,11 +4006,14 @@ mod tests {
                 .create_run_if_session_idle(
                     StateMachineRun {
                         run_id: "run-sqlite-concurrent".to_string(),
+                        root_run_id: Some("run-sqlite-concurrent".to_string()),
+                        rerun_of: None,
                         definition_id: "definition".to_string(),
                         definition_version: 1,
                         group_id: "group".to_string(),
                         group_version: 1,
                         session_id: "session".to_string(),
+                        session_activation_count: None,
                         created_by: None,
                         status: StateMachineRunStatus::Running,
                         input: serde_json::Value::Null,
@@ -3711,6 +4059,148 @@ mod tests {
         assert_eq!(node.status, StateMachineNodeStatus::Running);
         assert_eq!(node.artifact_text.as_deref(), Some("candidate"));
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_store_reactivates_session_creates_one_rerun_and_copies_snapshot_atomically()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (db, store) = sqlite_state_machine_store().await?;
+        db.execute(DbStatement::with_params(
+            "INSERT INTO bcs_group_sessions \
+             (env, session_id, group_id, session_kind, status, activation_count, callback_status) \
+             VALUES (?, ?, ?, 'service_invocation', 'completed', 1, 'succeeded')",
+            vec![
+                DbValue::from("dev"),
+                DbValue::from("session-rerun"),
+                DbValue::from("group"),
+            ],
+        ))
+        .await?;
+        let definition: CollaborationDefinition = serde_yaml::from_str(
+            r#"
+api_version: bcs.collaboration/v1
+id: definition
+version: 1
+name: Rerun Definition
+runtime:
+  kind: chat
+"#,
+        )?;
+        let mut source = StateMachineRun {
+            run_id: "run-source".to_string(),
+            root_run_id: Some("run-source".to_string()),
+            rerun_of: None,
+            definition_id: "definition".to_string(),
+            definition_version: 1,
+            group_id: "group".to_string(),
+            group_version: 1,
+            session_id: "session-rerun".to_string(),
+            session_activation_count: Some(1),
+            created_by: None,
+            status: StateMachineRunStatus::Failed,
+            input: serde_json::json!({"question": "retry"}),
+            output: None,
+            error: Some("failed".to_string()),
+            created_at: 1,
+            updated_at: 2,
+            completed_at: Some(2),
+        };
+        let mut completed_source = source.clone();
+        completed_source.run_id = "run-completed-source".to_string();
+        completed_source.root_run_id = Some(completed_source.run_id.clone());
+        completed_source.status = StateMachineRunStatus::Completed;
+        completed_source.error = None;
+        store
+            .create_run(completed_source.clone(), Vec::new())
+            .await?;
+        store
+            .save_run_snapshot(&completed_source, 1, &definition, None)
+            .await?;
+        let mut rejected_child = completed_source.clone();
+        rejected_child.run_id = "run-completed-child".to_string();
+        rejected_child.rerun_of = Some(completed_source.run_id.clone());
+        rejected_child.session_activation_count = Some(2);
+        rejected_child.status = StateMachineRunStatus::Pending;
+        rejected_child.completed_at = None;
+        assert!(matches!(
+            store
+                .create_rerun_if_session_idle(CreateStateMachineRerun {
+                    source_run_id: completed_source.run_id,
+                    run: rejected_child,
+                    nodes: Vec::new(),
+                    reactivate_service_session: true,
+                })
+                .await?,
+            CreateStateMachineRerunOutcome::Conflict
+        ));
+
+        store.create_run(source.clone(), Vec::new()).await?;
+        store
+            .save_run_snapshot(&source, 1, &definition, None)
+            .await?;
+
+        let mut child = source.clone();
+        child.run_id = "run-child".to_string();
+        child.rerun_of = Some(source.run_id.clone());
+        child.session_activation_count = Some(2);
+        child.status = StateMachineRunStatus::Pending;
+        child.error = None;
+        child.created_at = 3;
+        child.updated_at = 3;
+        child.completed_at = None;
+        let command = CreateStateMachineRerun {
+            source_run_id: source.run_id.clone(),
+            run: child.clone(),
+            nodes: Vec::new(),
+            reactivate_service_session: true,
+        };
+        assert!(matches!(
+            store.create_rerun_if_session_idle(command.clone()).await?,
+            CreateStateMachineRerunOutcome::Created
+        ));
+        assert!(store.get_run_snapshot(&child.run_id).await?.is_some());
+        let session_rows = db
+            .query(DbStatement::with_params(
+                "SELECT status, activation_count, callback_status \
+                 FROM bcs_group_sessions WHERE env = ? AND session_id = ?",
+                vec![DbValue::from("dev"), DbValue::from("session-rerun")],
+            ))
+            .await?;
+        let session_row = session_rows.first().expect("reactivated session row");
+        assert_eq!(db_string(session_row, "status")?, "running");
+        assert_eq!(db_i32(session_row, "activation_count")?, 2);
+        assert_eq!(db_string(session_row, "callback_status")?, "pending");
+        assert!(matches!(
+            store.create_rerun_if_session_idle(command).await?,
+            CreateStateMachineRerunOutcome::Existing(existing)
+                if existing.run_id == child.run_id
+        ));
+
+        source.run_id = "run-other-source".to_string();
+        source.root_run_id = Some(source.run_id.clone());
+        source.created_at = 4;
+        source.updated_at = 4;
+        store.create_run(source.clone(), Vec::new()).await?;
+        store
+            .save_run_snapshot(&source, 1, &definition, None)
+            .await?;
+        let mut other_child = child;
+        other_child.run_id = "run-other-child".to_string();
+        other_child.root_run_id = Some(source.run_id.clone());
+        other_child.rerun_of = Some(source.run_id.clone());
+        other_child.session_activation_count = Some(3);
+        assert!(matches!(
+            store
+                .create_rerun_if_session_idle(CreateStateMachineRerun {
+                    source_run_id: source.run_id,
+                    run: other_child,
+                    nodes: Vec::new(),
+                    reactivate_service_session: true,
+                })
+                .await?,
+            CreateStateMachineRerunOutcome::Conflict
+        ));
         Ok(())
     }
 
@@ -3891,11 +4381,14 @@ runtime:
         let store = MemoryCollaborationStore::new();
         let run = StateMachineRun {
             run_id: "run-timeout".to_string(),
+            root_run_id: Some("run-timeout".to_string()),
+            rerun_of: None,
             definition_id: "def".to_string(),
             definition_version: 1,
             group_id: "group".to_string(),
             group_version: 1,
             session_id: "session".to_string(),
+            session_activation_count: None,
             created_by: None,
             status: StateMachineRunStatus::Running,
             input: serde_json::Value::Null,

@@ -759,6 +759,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -875,6 +876,7 @@ dependencies = [
  "bcs-domain",
  "bcs-event-store",
  "bcs-service-api",
+ "bcs-session-store",
  "hex",
  "serde_json",
  "serde_yaml",

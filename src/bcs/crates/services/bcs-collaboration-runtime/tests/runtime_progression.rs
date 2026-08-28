@@ -34,7 +34,7 @@ use bcs_service_api::{
     HumanResponseSource, HumanRunAccessCommand, JudgeDecision, JudgeEvaluatorPort, JudgeRequest,
     ListPendingHumanNodesCommand,
     PatchGroupCollaborationDefinitionCommand, RespondHumanNodeCommand, RespondHumanNodeOutcome,
-    ServiceError, ServiceResult, ServiceSpec, SessionChannelDeliveryOutcome,
+    RerunStateMachineCommand, ServiceError, ServiceResult, ServiceSpec, SessionChannelDeliveryOutcome,
     SessionChannelOutboundPort, SessionManagementService,
     SessionStateMachinePermissionCommand, StartSessionStateMachineRunCommand,
     StartStateMachineRunCommand, StateMachineDefinitionRepoPort, StateMachineNodeSubStatus,
@@ -539,10 +539,24 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
         .expect("read chat session")
         .expect("chat session exists");
     assert_eq!(preserved_session.status, SessionStatus::Running);
+
+    let error = runtime
+        .rerun_state_machine_run(RerunStateMachineCommand {
+            source_run_id: started.view.run.run_id.clone(),
+            authenticated_human: None,
+        })
+        .await
+        .expect_err("completed one-shot run must not be rerunnable");
+    assert!(matches!(
+        error,
+        CollaborationRuntimeError::Conflict(message)
+            if message.contains("must be failed before rerun")
+    ));
+    assert_eq!(delivery.commands.lock().await.len(), 1);
 }
 
 #[tokio::test]
-async fn one_shot_result_publication_failure_marks_run_failed_instead_of_completed() {
+async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun() {
     let group_store = Arc::new(GroupStore::new());
     let group = test_group();
     group_store
@@ -645,6 +659,75 @@ async fn one_shot_result_publication_failure_marks_run_failed_instead_of_complet
             .status,
         SessionStatus::Running
     );
+
+    let rerun = runtime
+        .rerun_state_machine_run(RerunStateMachineCommand {
+            source_run_id: started.view.run.run_id.clone(),
+            authenticated_human: None,
+        })
+        .await
+        .expect("rerun failed one-shot run");
+    assert!(rerun.created);
+    assert_ne!(rerun.view.run.run_id, started.view.run.run_id);
+    assert_eq!(
+        rerun.view.run.root_run_id.as_deref(),
+        Some(started.view.run.run_id.as_str())
+    );
+    assert_eq!(
+        rerun.view.run.rerun_of.as_deref(),
+        Some(started.view.run.run_id.as_str())
+    );
+    assert_eq!(rerun.view.run.input, started.view.run.input);
+    assert_eq!(rerun.view.nodes.len(), 1);
+    assert_eq!(rerun.view.nodes[0].attempt, 0);
+    assert_eq!(rerun.view.nodes[0].status, StateMachineNodeStatus::Running);
+    assert_eq!(
+        delivery
+            .commands
+            .lock()
+            .await
+            .last()
+            .map(|command| command.target_bot_id()),
+        Some("worker-bot")
+    );
+    let history = runtime
+        .get_state_machine_session_history(&session.id, 20, None)
+        .await
+        .expect("history after rerun")
+        .expect("state-machine history after rerun");
+    let panel_run_ids = history
+        .messages
+        .iter()
+        .filter_map(|message| {
+            message
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.pointer("/state_machine/event"))
+                .and_then(Value::as_str)
+                .filter(|event| *event == "panel")
+                .and_then(|_| {
+                    message
+                        .metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.pointer("/state_machine/run_id"))
+                        .and_then(Value::as_str)
+                })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(panel_run_ids.len(), 2);
+    assert!(panel_run_ids.contains(&started.view.run.run_id.as_str()));
+    assert!(panel_run_ids.contains(&rerun.view.run.run_id.as_str()));
+
+    let repeated = runtime
+        .rerun_state_machine_run(RerunStateMachineCommand {
+            source_run_id: started.view.run.run_id.clone(),
+            authenticated_human: None,
+        })
+        .await
+        .expect("repeat failed rerun request");
+    assert!(!repeated.created);
+    assert_eq!(repeated.view.run.run_id, rerun.view.run.run_id);
+    assert_eq!(delivery.commands.lock().await.len(), 2);
 }
 
 #[tokio::test]

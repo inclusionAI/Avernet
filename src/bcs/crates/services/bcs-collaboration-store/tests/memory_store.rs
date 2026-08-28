@@ -4,12 +4,17 @@ use bcs_domain::{
     StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
 };
 use bcs_event_store::MemoryEventStore;
+use bcs_session_store::MemorySessionRepo;
 use bcs_service_api::port::NewEvent;
 use bcs_service_api::port::repo::{
-    AppendEventRecord, EventRepoPort, StateMachineEventfulTransition,
+    AppendEventRecord, EventRepoPort, NewSessionParams, SessionRepoPort,
+    StateMachineEventfulTransition,
 };
 use bcs_service_api::types::{EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject};
-use bcs_service_api::{StateMachineDefinitionRepoPort, StateMachineRunRepoPort};
+use bcs_service_api::{
+    CreateStateMachineRerun, CreateStateMachineRerunOutcome,
+    SessionKind, SessionStatus, StateMachineDefinitionRepoPort, StateMachineRunRepoPort,
+};
 use serde_json::json;
 
 #[tokio::test]
@@ -158,6 +163,205 @@ async fn session_idle_create_atomically_allows_only_one_active_run() {
             .await
             .expect("create run after completion")
     );
+}
+
+#[tokio::test]
+async fn rerun_create_is_source_idempotent_and_rejects_another_active_session_run() {
+    let store = MemoryCollaborationStore::new();
+    let definition = test_definition("Say hello.");
+    let mut source = test_run("sm-run-source", "group-1:abcdef12", 1);
+    source.status = StateMachineRunStatus::Failed;
+    source.error = Some("source failed".to_string());
+    source.completed_at = Some(2);
+    store
+        .create_run(source.clone(), Vec::new())
+        .await
+        .expect("create source run");
+    store
+        .save_run_snapshot(&source, 1, &definition, None)
+        .await
+        .expect("save source snapshot");
+
+    let mut child = test_run("sm-run-child", "group-1:abcdef12", 3);
+    child.root_run_id = Some(source.run_id.clone());
+    child.rerun_of = Some(source.run_id.clone());
+    child.status = StateMachineRunStatus::Pending;
+    let command = CreateStateMachineRerun {
+        source_run_id: source.run_id.clone(),
+        run: child.clone(),
+        nodes: Vec::new(),
+        reactivate_service_session: false,
+    };
+
+    assert!(matches!(
+        store
+            .create_rerun_if_session_idle(command.clone())
+            .await
+            .expect("create rerun"),
+        CreateStateMachineRerunOutcome::Created
+    ));
+    match store
+        .create_rerun_if_session_idle(command)
+        .await
+        .expect("repeat rerun")
+    {
+        CreateStateMachineRerunOutcome::Existing(existing) => {
+            assert_eq!(existing.run_id, child.run_id);
+            assert_eq!(existing.rerun_of.as_deref(), Some(source.run_id.as_str()));
+        }
+        other => panic!("expected existing direct child, got {other:?}"),
+    }
+
+    let mut other_source = test_run("sm-run-other-source", "group-1:abcdef12", 4);
+    other_source.status = StateMachineRunStatus::Failed;
+    other_source.error = Some("other source failed".to_string());
+    other_source.completed_at = Some(5);
+    store
+        .create_run(other_source.clone(), Vec::new())
+        .await
+        .expect("create other terminal source");
+    store
+        .save_run_snapshot(&other_source, 1, &definition, None)
+        .await
+        .expect("save other source snapshot");
+    let mut other_child = test_run("sm-run-other-child", "group-1:abcdef12", 6);
+    other_child.root_run_id = Some(other_source.run_id.clone());
+    other_child.rerun_of = Some(other_source.run_id.clone());
+    other_child.status = StateMachineRunStatus::Pending;
+    assert!(matches!(
+        store
+            .create_rerun_if_session_idle(CreateStateMachineRerun {
+                source_run_id: other_source.run_id,
+                run: other_child,
+                nodes: Vec::new(),
+                reactivate_service_session: false,
+            })
+            .await
+            .expect("reject concurrent session rerun"),
+        CreateStateMachineRerunOutcome::Conflict
+    ));
+}
+
+#[tokio::test]
+async fn rerun_create_rejects_completed_and_aborted_sources() {
+    for (suffix, status) in [
+        ("completed", StateMachineRunStatus::Completed),
+        ("aborted", StateMachineRunStatus::Aborted),
+    ] {
+        let store = MemoryCollaborationStore::new();
+        let definition = test_definition("Say hello.");
+        let session_id = format!("group-1:{suffix}");
+        let mut source = test_run(&format!("sm-run-{suffix}"), &session_id, 1);
+        source.status = status;
+        source.completed_at = Some(2);
+        store
+            .create_run(source.clone(), Vec::new())
+            .await
+            .expect("create non-rerunnable source");
+        store
+            .save_run_snapshot(&source, 1, &definition, None)
+            .await
+            .expect("save source snapshot");
+
+        let mut child = test_run(&format!("sm-run-{suffix}-child"), &session_id, 3);
+        child.root_run_id = Some(source.run_id.clone());
+        child.rerun_of = Some(source.run_id.clone());
+        child.status = StateMachineRunStatus::Pending;
+        assert!(matches!(
+            store
+                .create_rerun_if_session_idle(CreateStateMachineRerun {
+                    source_run_id: source.run_id,
+                    run: child,
+                    nodes: Vec::new(),
+                    reactivate_service_session: false,
+                })
+                .await
+                .expect("reject non-failed source"),
+            CreateStateMachineRerunOutcome::Conflict
+        ));
+    }
+}
+
+#[tokio::test]
+async fn stale_service_rerun_does_not_reactivate_session_without_a_child_run() {
+    let session_repo = std::sync::Arc::new(MemorySessionRepo::new());
+    let session = session_repo
+        .create(
+            "group-1",
+            NewSessionParams {
+                id: Some("group-1:abcdef12".to_string()),
+                session_kind: SessionKind::ServiceInvocation,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create service Session");
+    session_repo
+        .complete_if_running(&session.id, None, None)
+        .await
+        .expect("complete first activation");
+    session_repo
+        .update_callback_status(&session.id, "not_applicable")
+        .await
+        .expect("complete first callback");
+
+    let store = MemoryCollaborationStore::new().with_session_repo(session_repo.clone());
+    let definition = test_definition("Say hello.");
+    let mut source = test_run("sm-run-stale-source", &session.id, 1);
+    source.status = StateMachineRunStatus::Failed;
+    source.session_activation_count = Some(1);
+    source.completed_at = Some(2);
+    store
+        .create_run(source.clone(), Vec::new())
+        .await
+        .expect("create source Run");
+    store
+        .save_run_snapshot(&source, 1, &definition, None)
+        .await
+        .expect("save source snapshot");
+
+    session_repo
+        .reactivate(&session.id, None)
+        .await
+        .expect("advance concurrent activation");
+    session_repo
+        .complete_if_running(&session.id, None, None)
+        .await
+        .expect("complete concurrent activation");
+    session_repo
+        .update_callback_status(&session.id, "not_applicable")
+        .await
+        .expect("complete concurrent callback");
+
+    let mut child = test_run("sm-run-stale-child", &session.id, 3);
+    child.status = StateMachineRunStatus::Pending;
+    child.root_run_id = Some(source.run_id.clone());
+    child.rerun_of = Some(source.run_id.clone());
+    child.session_activation_count = Some(2);
+    assert!(matches!(
+        store
+            .create_rerun_if_session_idle(CreateStateMachineRerun {
+                source_run_id: source.run_id,
+                run: child.clone(),
+                nodes: Vec::new(),
+                reactivate_service_session: true,
+            })
+            .await
+            .expect("reject stale activation"),
+        CreateStateMachineRerunOutcome::Conflict
+    ));
+
+    let preserved = session_repo
+        .get(&session.id)
+        .await
+        .expect("preserve Session");
+    assert_eq!(preserved.status, SessionStatus::Completed);
+    assert_eq!(preserved.activation_count, 2);
+    assert!(store
+        .get_run(&child.run_id)
+        .await
+        .expect("query child")
+        .is_none());
 }
 
 #[tokio::test]
@@ -357,11 +561,14 @@ fn public_event(
 fn test_run(run_id: &str, session_id: &str, created_at: u64) -> StateMachineRun {
     StateMachineRun {
         run_id: run_id.to_string(),
+        root_run_id: Some(run_id.to_string()),
+        rerun_of: None,
         definition_id: "sm_memory_definition".to_string(),
         definition_version: 1,
         group_id: "group-1".to_string(),
         group_version: 1,
         session_id: session_id.to_string(),
+        session_activation_count: None,
         created_by: Some("tester".to_string()),
         status: StateMachineRunStatus::Running,
         input: json!({"question": "hello"}),

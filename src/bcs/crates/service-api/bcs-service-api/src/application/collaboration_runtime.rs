@@ -405,6 +405,18 @@ pub struct StartStateMachineRunOutcome {
 }
 
 #[derive(Debug, Clone)]
+pub struct RerunStateMachineCommand {
+    pub source_run_id: String,
+    pub authenticated_human: Option<AuthenticatedHumanCaller>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RerunStateMachineOutcome {
+    pub view: StateMachineRunView,
+    pub created: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct CancelStateMachineRunCommand {
     pub run_id: String,
     pub reason: Option<String>,
@@ -467,6 +479,16 @@ pub trait CollaborationRuntimeService: Send + Sync {
         &self,
         run_id: &str,
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError>;
+
+    async fn rerun_state_machine_run(
+        &self,
+        command: RerunStateMachineCommand,
+    ) -> Result<RerunStateMachineOutcome, CollaborationRuntimeError> {
+        let _ = command;
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "state machine rerun is not implemented".to_string(),
+        ))
+    }
 
     async fn get_state_machine_run_by_session_id(
         &self,

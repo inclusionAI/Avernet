@@ -324,6 +324,9 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         output TEXT DEFAULT NULL,
         error_message TEXT DEFAULT NULL,
         callback_status TEXT DEFAULT NULL,
+        callback_lease_owner TEXT DEFAULT NULL,
+        callback_lease_token INTEGER DEFAULT NULL,
+        callback_lease_until_ms INTEGER DEFAULT NULL,
         activation_count INTEGER NOT NULL DEFAULT 1,
         caller_principal TEXT DEFAULT NULL,
         created_by TEXT DEFAULT NULL,
@@ -338,6 +341,7 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_sessions_group_kind_status ON bcs_group_sessions(env, group_id, session_kind, status)",
     "CREATE INDEX IF NOT EXISTS idx_sessions_caller_principal ON bcs_group_sessions(env, caller_principal)",
     "CREATE INDEX IF NOT EXISTS idx_sessions_callback_status ON bcs_group_sessions(env, callback_status)",
+    "CREATE INDEX IF NOT EXISTS idx_session_callback_recovery ON bcs_group_sessions(env, session_kind, status, callback_status, callback_lease_token, callback_lease_until_ms, session_id)",
     // ── session_participants ──────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_session_participants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -494,11 +498,14 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         env TEXT NOT NULL,
         run_id TEXT NOT NULL,
+        root_run_id TEXT DEFAULT NULL,
+        rerun_of TEXT DEFAULT NULL,
         definition_id TEXT NOT NULL,
         definition_version INTEGER NOT NULL,
         group_id TEXT NOT NULL,
         group_version INTEGER NOT NULL,
         session_id TEXT NOT NULL,
+        session_activation_count INTEGER DEFAULT NULL,
         created_by TEXT DEFAULT NULL,
         status TEXT NOT NULL,
         input_json TEXT DEFAULT NULL,
@@ -510,6 +517,8 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         record_status TEXT NOT NULL DEFAULT 'active'
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_sm_run_id ON bcs_state_machine_runs(env, run_id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uk_sm_run_rerun_of ON bcs_state_machine_runs(env, rerun_of)",
+    "CREATE INDEX IF NOT EXISTS idx_sm_runs_root ON bcs_state_machine_runs(env, root_run_id, created_at_ms)",
     "CREATE INDEX IF NOT EXISTS idx_sm_runs_session ON bcs_state_machine_runs(env, session_id)",
     "CREATE INDEX IF NOT EXISTS idx_sm_runs_created_by ON bcs_state_machine_runs(env, created_by, created_at_ms)",
     "CREATE INDEX IF NOT EXISTS idx_sm_runs_group_status ON bcs_state_machine_runs(env, group_id, status, created_at_ms)",
@@ -950,6 +959,14 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 16,
         name: "expand_session_ids",
     },
+    SqliteMigration {
+        version: 17,
+        name: "session_callback_lease",
+    },
+    SqliteMigration {
+        version: 18,
+        name: "state_machine_rerun_lineage",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -1321,8 +1338,70 @@ async fn apply_sqlite_migration_body(
         // SQLite stores session identifiers as unbounded TEXT, so version 16
         // records dialect parity with the MySQL/OceanBase VARCHAR expansion.
         16 => Ok(()),
+        17 => add_sqlite_session_callback_lease_schema(db).await,
+        18 => add_sqlite_state_machine_rerun_lineage_schema(db).await,
         _ => Ok(()),
     }
+}
+
+async fn add_sqlite_state_machine_rerun_lineage_schema(db: &dyn DbPlugin) -> DbResult<()> {
+    if !table_exists(db, "bcs_state_machine_runs").await? {
+        return Ok(());
+    }
+    let columns = sqlite_table_columns(db, "bcs_state_machine_runs").await?;
+    for (name, definition) in [
+        ("root_run_id", "TEXT DEFAULT NULL"),
+        ("rerun_of", "TEXT DEFAULT NULL"),
+        ("session_activation_count", "INTEGER DEFAULT NULL"),
+    ] {
+        if !columns.iter().any(|column| column == name) {
+            db.execute(DbStatement::new(format!(
+                "ALTER TABLE bcs_state_machine_runs ADD COLUMN {name} {definition}"
+            )))
+            .await?;
+        }
+    }
+    db.execute(DbStatement::new(
+        "UPDATE bcs_state_machine_runs SET root_run_id = run_id WHERE root_run_id IS NULL",
+    ))
+    .await?;
+    db.execute(DbStatement::new(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uk_sm_run_rerun_of \
+         ON bcs_state_machine_runs(env, rerun_of)",
+    ))
+    .await?;
+    db.execute(DbStatement::new(
+        "CREATE INDEX IF NOT EXISTS idx_sm_runs_root \
+         ON bcs_state_machine_runs(env, root_run_id, created_at_ms)",
+    ))
+    .await?;
+    Ok(())
+}
+
+async fn add_sqlite_session_callback_lease_schema(db: &dyn DbPlugin) -> DbResult<()> {
+    if !table_exists(db, "bcs_group_sessions").await? {
+        return Ok(());
+    }
+    let columns = sqlite_table_columns(db, "bcs_group_sessions").await?;
+    for (name, definition) in [
+        ("callback_lease_owner", "TEXT DEFAULT NULL"),
+        ("callback_lease_token", "INTEGER DEFAULT NULL"),
+        ("callback_lease_until_ms", "INTEGER DEFAULT NULL"),
+    ] {
+        if !columns.iter().any(|column| column == name) {
+            db.execute(DbStatement::new(format!(
+                "ALTER TABLE bcs_group_sessions ADD COLUMN {name} {definition}"
+            )))
+            .await?;
+        }
+    }
+    db.execute(DbStatement::new(
+        "CREATE INDEX IF NOT EXISTS idx_session_callback_recovery \
+         ON bcs_group_sessions(env, session_kind, status, callback_status, \
+         callback_lease_token, callback_lease_until_ms, session_id)",
+    ))
+    .await?;
+    Ok(())
 }
 
 async fn migrate_sqlite_eventing_plaintext_endpoint(db: &dyn DbPlugin) -> DbResult<()> {
@@ -1639,6 +1718,16 @@ mod tests {
             .collect()
     }
 
+    async fn index_exists(db: &dyn DbPlugin, index: &str) -> DbResult<bool> {
+        let rows = db
+            .query(DbStatement::with_params(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?",
+                vec![DbValue::from(index)],
+            ))
+            .await?;
+        Ok(!rows.is_empty())
+    }
+
     async fn migration_rows(db: &dyn DbPlugin) -> DbResult<Vec<(i64, String, String)>> {
         let rows = db
             .query(DbStatement::new(
@@ -1688,6 +1777,23 @@ mod tests {
                 .any(|column| column == "provider_message_ref")
         );
         assert!(request_columns.iter().any(|column| column == "created_at"));
+        let session_columns = column_names(&db, "bcs_group_sessions").await?;
+        assert!(
+            session_columns
+                .iter()
+                .any(|column| column == "callback_lease_owner")
+        );
+        assert!(
+            session_columns
+                .iter()
+                .any(|column| column == "callback_lease_token")
+        );
+        assert!(
+            session_columns
+                .iter()
+                .any(|column| column == "callback_lease_until_ms")
+        );
+        assert!(index_exists(&db, "idx_session_callback_recovery").await?);
         assert_eq!(
             migration_rows(&db).await?,
             vec![
@@ -1754,6 +1860,16 @@ mod tests {
                     16,
                     "expand_session_ids".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    17,
+                    "session_callback_lease".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    18,
+                    "state_machine_rerun_lineage".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1766,7 +1882,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 16);
+        assert_eq!(report.pending_versions.len(), 18);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1819,7 +1935,99 @@ assert_eq!(report.pending_versions[10].version, 11);
         );
         assert_eq!(report.pending_versions[15].version, 16);
         assert_eq!(report.pending_versions[15].name, "expand_session_ids");
+        assert_eq!(report.pending_versions[16].version, 17);
+        assert_eq!(report.pending_versions[16].name, "session_callback_lease");
+        assert_eq!(report.pending_versions[17].version, 18);
+        assert_eq!(
+            report.pending_versions[17].name,
+            "state_machine_rerun_lineage"
+        );
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_callback_lease_migration_repairs_legacy_session_table() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_group_sessions (
+                session_id TEXT NOT NULL,
+                env TEXT NOT NULL DEFAULT 'prod',
+                session_kind TEXT NOT NULL DEFAULT 'chat',
+                status TEXT NOT NULL DEFAULT 'running',
+                callback_status TEXT DEFAULT NULL
+            )",
+        ))
+        .await?;
+
+        add_sqlite_session_callback_lease_schema(&db).await?;
+        add_sqlite_session_callback_lease_schema(&db).await?;
+
+        let columns = column_names(&db, "bcs_group_sessions").await?;
+        for expected in [
+            "callback_lease_owner",
+            "callback_lease_token",
+            "callback_lease_until_ms",
+        ] {
+            assert!(columns.iter().any(|column| column == expected));
+        }
+        assert!(index_exists(&db, "idx_session_callback_recovery").await?);
+        Ok(())
+    }
+
+    #[test]
+    fn mysql_callback_lease_migration_adds_recovery_index() {
+        let migration = include_str!("../../../../migrations/mysql/016_session_callback_lease.sql");
+        assert!(migration.contains("ADD INDEX `idx_session_callback_recovery`"));
+        for column in [
+            "`env`",
+            "`session_kind`",
+            "`status`",
+            "`callback_status`",
+            "`callback_lease_token`",
+            "`callback_lease_until_ms`",
+            "`session_id`",
+        ] {
+            assert!(migration.contains(column), "missing index column {column}");
+        }
+    }
+
+    #[tokio::test]
+    async fn sqlite_rerun_lineage_migration_repairs_legacy_run_table() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_state_machine_runs (
+                env TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                created_at_ms INTEGER NOT NULL
+            )",
+        ))
+        .await?;
+
+        add_sqlite_state_machine_rerun_lineage_schema(&db).await?;
+        add_sqlite_state_machine_rerun_lineage_schema(&db).await?;
+
+        let columns = column_names(&db, "bcs_state_machine_runs").await?;
+        for expected in ["root_run_id", "rerun_of", "session_activation_count"] {
+            assert!(columns.iter().any(|column| column == expected));
+        }
+        assert!(index_exists(&db, "uk_sm_run_rerun_of").await?);
+        assert!(index_exists(&db, "idx_sm_runs_root").await?);
+        Ok(())
+    }
+
+    #[test]
+    fn mysql_rerun_lineage_migration_adds_unique_direct_child_constraint() {
+        let migration =
+            include_str!("../../../../migrations/mysql/017_state_machine_rerun_lineage.sql");
+        for column in ["`root_run_id`", "`rerun_of`", "`session_activation_count`"] {
+            assert!(migration.contains(column), "missing rerun column {column}");
+        }
+        assert!(
+            migration.contains("ADD UNIQUE INDEX `uk_sm_run_rerun_of` (`env`, `rerun_of`)")
+        );
+        assert!(migration.contains(
+            "ADD INDEX `idx_sm_runs_root` (`env`, `root_run_id`, `created_at_ms`)"
+        ));
     }
 
     #[tokio::test]
@@ -1894,6 +2102,16 @@ assert_eq!(report.pending_versions[10].version, 11);
                 (
                     16,
                     "expand_session_ids".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    17,
+                    "session_callback_lease".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    18,
+                    "state_machine_rerun_lineage".to_string(),
                     "sqlite".to_string()
                 )
             ]

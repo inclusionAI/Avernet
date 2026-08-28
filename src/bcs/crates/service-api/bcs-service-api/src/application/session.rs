@@ -55,6 +55,29 @@ pub struct CreateOrReactivateOutcome {
     pub created: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct ClaimSessionCallbackCommand {
+    pub session_id: String,
+    pub expected_activation_count: i32,
+    pub lease_owner: String,
+    pub now_ms: u64,
+    pub lease_until_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClaimSessionCallbackOutcome {
+    pub lease_token: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompleteSessionCallbackCommand {
+    pub session_id: String,
+    pub expected_activation_count: i32,
+    pub lease_owner: String,
+    pub lease_token: i64,
+    pub terminal_status: String,
+}
+
 #[async_trait]
 pub trait SessionManagementService: Send + Sync {
     async fn create_or_reactivate(
@@ -94,12 +117,44 @@ pub trait SessionManagementService: Send + Sync {
         limit: u64,
     ) -> Result<Vec<Session>, SessionUseCaseError>;
 
+    /// List callback recovery candidates using Session-id keyset pagination.
+    /// Only FO-era activations with an idle or expired callback lease are
+    /// returned by production repositories.
+    async fn list_recoverable_callbacks(
+        &self,
+        _now_ms: u64,
+        _after_session_id: Option<&str>,
+        _limit: u64,
+    ) -> Result<Vec<Session>, SessionUseCaseError> {
+        Ok(Vec::new())
+    }
+
     /// 更新 session 的 callback_status（供 callback dispatcher 调用）。
     async fn update_callback_status(
         &self,
         session_id: &str,
         status: &str,
     ) -> Result<(), SessionUseCaseError>;
+
+    async fn claim_callback(
+        &self,
+        _command: ClaimSessionCallbackCommand,
+    ) -> Result<Option<ClaimSessionCallbackOutcome>, SessionUseCaseError> {
+        Err(SessionUseCaseError::Internal(ServiceError::InvalidOperation {
+            message: "Session callback claim is not configured".to_string(),
+            request_id: None,
+        }))
+    }
+
+    async fn complete_callback(
+        &self,
+        _command: CompleteSessionCallbackCommand,
+    ) -> Result<bool, SessionUseCaseError> {
+        Err(SessionUseCaseError::Internal(ServiceError::InvalidOperation {
+            message: "Session callback completion is not configured".to_string(),
+            request_id: None,
+        }))
+    }
 
     /// CAS 终结：仅当 status=Running 时落 Completed 并触发 callback；
     /// 已 Completed 返回 `Ok(None)`。

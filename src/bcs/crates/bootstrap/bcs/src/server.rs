@@ -2049,8 +2049,11 @@ impl Default for BcsServerState {
             config.async_chat_run_retention_ms,
         );
         interaction_terminal_observer.set_service(interactions.clone());
-        let collaboration_store =
-            Arc::new(MemoryCollaborationStore::new().with_event_store(event_repo.clone()));
+        let collaboration_store = Arc::new(
+            MemoryCollaborationStore::new()
+                .with_event_store(event_repo.clone())
+                .with_session_repo(session_repo.clone()),
+        );
         let judge_evaluator: Arc<dyn JudgeEvaluatorPort> = Arc::new(NoopJudgeEvaluator::default());
         let (session_channel_outbound_slot, session_channel_outbound) =
             deferred_session_channel_outbound();
@@ -3561,8 +3564,11 @@ impl BcsServer {
             crate::eventing_wiring::event_recorder(&config, event_repo.clone()),
         );
 
-        let collaboration_store =
-            Arc::new(MemoryCollaborationStore::new().with_event_store(event_repo.clone()));
+        let collaboration_store = Arc::new(
+            MemoryCollaborationStore::new()
+                .with_event_store(event_repo.clone())
+                .with_session_repo(session_repo.clone()),
+        );
         let extensions = BcsServerExtensions::default();
         let judge_evaluator: Arc<dyn JudgeEvaluatorPort> =
             create_judge_evaluator(&config, &extensions).unwrap_or_else(|error| {
@@ -4842,6 +4848,17 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
         )
     }
 
+    fn spawn_callback_recovery_scanner(&self) -> tokio::task::JoinHandle<()> {
+        crate::callback_recovery_scanner::spawn(
+            self.state.leader_election.clone(),
+            self.state.services.session_management.clone(),
+            self.state.services.group.clone(),
+            crate::callback_recovery_scanner::DEFAULT_SCAN_INTERVAL,
+            crate::callback_recovery_scanner::DEFAULT_BATCH_SIZE,
+            self.state.outbound_url_guard.clone(),
+        )
+    }
+
     /// Run the server with graceful shutdown support.
     pub async fn run(self) -> Result<()> {
         let addr: SocketAddr = format!("{}:{}", self.config.bind, self.config.port)
@@ -4850,6 +4867,7 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
 
         self.initialize_lifecycle().await?;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
+        let _callback_recovery_handle = self.spawn_callback_recovery_scanner();
 
         // Spawn async chat-run TTL cleanup loop.
         {
@@ -4969,6 +4987,7 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
 
         self.initialize_lifecycle().await?;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
+        let _callback_recovery_handle = self.spawn_callback_recovery_scanner();
 
         let app = self.build_router().await?;
 

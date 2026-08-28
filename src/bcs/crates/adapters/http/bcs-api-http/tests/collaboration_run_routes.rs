@@ -11,9 +11,10 @@ use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::*;
 use bcs_service_api::{
-    AuthenticatedHumanCaller, CollaborationRuntimeError, CollaborationRuntimeService,
+    CollaborationRuntimeError, CollaborationRuntimeService,
     ListPendingHumanNodesCommand, PendingHumanNodeView, StateMachineNodeRunView,
-    StateMachineRunAccessCommand, StateMachineRunGraphView, StateMachineRunView,
+    RerunStateMachineCommand, RerunStateMachineOutcome, StateMachineRunAccessCommand,
+    StateMachineRunGraphView, StateMachineRunView,
 };
 use bcs_service_api::{HumanResponseSource, RespondHumanNodeCommand, RespondHumanNodeOutcome};
 use serde_json::{Value, json};
@@ -64,6 +65,8 @@ struct FakeRuntimeService {
     last_respond: Mutex<Option<RespondHumanNodeCommand>>,
     next_cancel: Mutex<Option<StateMachineRunView>>,
     last_cancel_reason: Mutex<Option<String>>,
+    next_rerun: Mutex<Option<RerunStateMachineOutcome>>,
+    last_rerun: Mutex<Option<RerunStateMachineCommand>>,
 }
 
 #[async_trait]
@@ -88,6 +91,22 @@ impl CollaborationRuntimeService for FakeRuntimeService {
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
         *self.last_access.lock().expect("access lock") = Some(cmd.clone());
         Ok(self.next_run.lock().expect("run lock").clone())
+    }
+
+    async fn rerun_state_machine_run(
+        &self,
+        cmd: RerunStateMachineCommand,
+    ) -> Result<RerunStateMachineOutcome, CollaborationRuntimeError> {
+        *self.last_rerun.lock().expect("rerun lock") = Some(cmd);
+        self.next_rerun
+            .lock()
+            .expect("rerun lock")
+            .clone()
+            .ok_or_else(|| {
+                CollaborationRuntimeError::Internal(bcs_service_api::ServiceError::InternalError(
+                    "no canned rerun".to_string(),
+                ))
+            })
     }
 
     async fn get_state_machine_run_graph_with_access(
@@ -275,6 +294,108 @@ async fn get_run_returns_enveloped_view_and_records_access() {
     let human = recorded.authenticated_human.expect("human mapped");
     assert_eq!(human.actor_id, "human_staff-1");
     assert_eq!(human.display_name.as_deref(), Some("Staff One"));
+}
+
+#[tokio::test]
+async fn rerun_returns_created_child_without_a_request_body_and_records_source_access() {
+    let mut child = sample_run();
+    child.run.run_id = "run-2".to_string();
+    child.run.root_run_id = Some(RUN_ID.to_string());
+    child.run.rerun_of = Some(RUN_ID.to_string());
+    let service = Arc::new(FakeRuntimeService {
+        next_rerun: Mutex::new(Some(RerunStateMachineOutcome {
+            view: child,
+            created: true,
+        })),
+        ..Default::default()
+    });
+    let app = test_router(service.clone());
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/collaboration/state-machine-runs/run-1/reruns")
+        .header("x-test-auth", "yes")
+        .header("x-request-id", "req-rerun")
+        .body(Body::empty())
+        .expect("request");
+    let response = app.oneshot(request).await.expect("response");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["run"]["run_id"], "run-2");
+    assert_eq!(body["data"]["run"]["rerun_of"], RUN_ID);
+    assert_eq!(body["data"]["idempotent_replay"], false);
+    let recorded = service
+        .last_rerun
+        .lock()
+        .expect("rerun lock")
+        .clone()
+        .expect("rerun command");
+    assert_eq!(recorded.source_run_id, RUN_ID);
+    assert_eq!(
+        recorded
+            .authenticated_human
+            .expect("human mapped")
+            .actor_id,
+        "human_staff-1"
+    );
+}
+
+#[tokio::test]
+async fn rerun_returns_ok_when_source_already_has_a_direct_child() {
+    let mut child = sample_run();
+    child.run.run_id = "run-2".to_string();
+    child.run.root_run_id = Some(RUN_ID.to_string());
+    child.run.rerun_of = Some(RUN_ID.to_string());
+    let service = Arc::new(FakeRuntimeService {
+        next_rerun: Mutex::new(Some(RerunStateMachineOutcome {
+            view: child,
+            created: false,
+        })),
+        ..Default::default()
+    });
+    let app = test_router(service);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/collaboration/state-machine-runs/run-1/reruns")
+                .header("x-test-auth", "yes")
+                .header("x-request-id", "req-rerun-replay")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["run"]["run_id"], "run-2");
+    assert_eq!(body["data"]["idempotent_replay"], true);
+}
+
+#[tokio::test]
+async fn rerun_rejects_request_body_instead_of_ignoring_unsupported_fields() {
+    let service = Arc::new(FakeRuntimeService::default());
+    let app = test_router(service.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/collaboration/state-machine-runs/run-1/reruns")
+                .header("x-test-auth", "yes")
+                .header("x-request-id", "req-rerun-invalid-body")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"input":{"override":true}}"#))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(service.last_rerun.lock().expect("rerun lock").is_none());
 }
 
 #[tokio::test]
