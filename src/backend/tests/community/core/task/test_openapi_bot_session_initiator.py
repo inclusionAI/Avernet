@@ -16,9 +16,6 @@ from agentclaw.community.core.task.task_discovery.models import (
 from agentclaw.community.core.task.task_discovery.openapi_bot_session_initiator import (
     OpenApiBotSessionInitiator,
 )
-from agentclaw.community.core.task.task_discovery.session_initiator import (
-    FrontendUrlHolder,
-)
 from agentclaw.community.core.task.task_runner.integration.ports import (
     BotSendResult,
 )
@@ -73,14 +70,6 @@ def _make_openapi_bot(
             run_id="run-123", session_id="sess-456"
         )
     return bot
-
-
-@pytest.fixture(autouse=True)
-def _clear_frontend_url_holder():
-    """Reset FrontendUrlHolder between tests so it doesn't leak."""
-    FrontendUrlHolder._url = ""
-    yield
-    FrontendUrlHolder._url = ""
 
 
 def _run(coro):

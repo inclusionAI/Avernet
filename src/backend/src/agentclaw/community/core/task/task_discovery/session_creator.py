@@ -16,6 +16,9 @@ from typing import Any, Protocol
 
 import httpx
 
+from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
+    FrontendUrlProvider,
+)
 from agentclaw.community.core.task.task_discovery.models import (
     DiscoveredTask,
     DiscoverySession,
@@ -60,16 +63,18 @@ class HttpSessionCreator:
         *,
         backend_url: str = "http://localhost:8888",
         frontend_url: str = "http://localhost:8000",
+        frontend_url_provider: FrontendUrlProvider | None = None,
     ):
         """初始化。
 
         Args:
             backend_url: Backend API 地址（用于查 bot connection）。
             frontend_url: 前端 workbench 地址（用于构建 session_url）。
-                运行时可通过 FrontendUrlHolder (API 注入) 覆盖。
+            frontend_url_provider: 前端 URL 取数端口(DI 注入),优先于构造参数。
         """
         self._backend_url = backend_url
         self._frontend_url = frontend_url
+        self._frontend_url_provider = frontend_url_provider
 
     async def _resolve_engine_target(
         self, bot_id: str, owner_id: str, user_id: str,
@@ -142,6 +147,7 @@ class HttpSessionCreator:
         Raises:
             httpx.HTTPError: 请求失败时抛出。
         """
+        logger.debug("[task_discovery] → HttpSessionCreator.create_session(task_id=%s, bot_id=%s, user_id=%s)", task.task_id, bot_id, user_id)
         target = await self._resolve_engine_target(bot_id, owner_id, user_id)
 
         body: dict[str, Any] = {
@@ -194,14 +200,15 @@ class HttpSessionCreator:
         格式: ``{frontend_url}/assistant?botId={bot_id}&sessionId={session_key}``
         其中 session_key 为 ``agent:main:{raw_session_id}`` URL-encoded。
 
-        动态解析 frontend URL — 支持运行时 API 注入（FrontendUrlHolder）。
+        动态解析 frontend URL — 优先 ``FrontendUrlProvider`` (DI 注入),
+        未注入/返回空时回落构造参数 ``self._frontend_url``。
         """
         from urllib.parse import quote
 
-        from agentclaw.community.core.task.task_discovery.session_initiator import (
-            FrontendUrlHolder,
+        provided = (
+            self._frontend_url_provider.get() if self._frontend_url_provider else ""
         )
-        base = (FrontendUrlHolder.get() or self._frontend_url).rstrip("/")
+        base = (provided or self._frontend_url).rstrip("/")
         full_session_key = f"agent:main:{session_id}"
         encoded_sid = quote(full_session_key, safe="")
         return f"{base}/assistant?botId={agent_id}&sessionId={encoded_sid}"

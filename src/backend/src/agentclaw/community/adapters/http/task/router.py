@@ -678,6 +678,7 @@ async def set_dingtalk_config(
     随后的 cron fire 即用这些凭证投递卡片，card_data 内的 session_url 也用注入的 frontend_url。
     凭证仅存于进程内存，重启后失效。
     """
+    logger.debug("[task_discovery] → set_dingtalk_config(body_keys=%s)", sorted(body.keys()))
     from agentclaw.community.plugins.community.notify_sender import (
         DingTalkCredentialHolder,
     )
@@ -698,12 +699,10 @@ async def set_dingtalk_config(
     injected = ["dingtalk credentials"]
 
     if frontend_url:
-        from agentclaw.community.core.task.task_discovery.session_initiator import (
-            FrontendUrlHolder,
+        logger.info(
+            "[task_discovery] frontend_url provided via API (no-op, use DI FrontendUrlProvider instead): %s",
+            frontend_url,
         )
-
-        FrontendUrlHolder.set(frontend_url)
-        injected.append(f"frontend_url={frontend_url}")
 
     logger.info(
         "[task_discovery] injected via API: %s (robot=%s, template=%s)",
