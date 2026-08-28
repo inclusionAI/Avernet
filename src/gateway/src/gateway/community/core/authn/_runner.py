@@ -50,8 +50,8 @@ async def authenticate(
             if presence is Presence.REQUIRED:
                 logger.warning("required identity %s has no credential", identity.value)
                 raise AuthError(f"unauthenticated: no credential for {identity.value}")
-            logger.debug("optional identity %s absent", identity.value)
+            logger.info("optional identity %s absent", identity.value)
             continue  # OPTIONAL + exhausted → absent from the result set
-        logger.debug("identity %s resolved", identity.value)
+        logger.info("identity %s resolved", identity.value)
         resolved[identity] = principal
     return resolved
