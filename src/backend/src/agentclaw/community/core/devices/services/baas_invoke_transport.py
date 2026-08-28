@@ -163,6 +163,10 @@ class BaasInvokeTransport:
                 path=path,
                 tenant=self._tenant,
                 device_uuid=self._device_uuid,
+                # A retry means the caller was just rejected on this entry; the
+                # service-level TTL cache must hand back a fresh resolution,
+                # not the same stale token it still considers fresh.
+                force_refresh=stale is not None,
             )
             self._http_info_cache[path] = (
                 time.monotonic() + _HTTP_INFO_TTL_SECONDS,

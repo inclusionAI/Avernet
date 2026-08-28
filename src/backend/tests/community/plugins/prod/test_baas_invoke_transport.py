@@ -377,6 +377,7 @@ def test_http_info_resolution_carries_the_instance_identity():
         path="/api/file/read",
         tenant="team_claw",
         device_uuid="DEV-xyz",
+        force_refresh=False,
     )
 
 
@@ -398,6 +399,11 @@ def test_rejected_token_refreshes_http_info_and_retries_once():
 
     assert resp.status_code == 200
     assert svc.get_http_info.call_count == 2
+    # The retry resolution must bypass the service-level 30s TTL cache so a
+    # token that went stale inside the TTL is replaced, not replayed.
+    assert [
+        c.kwargs.get("force_refresh") for c in svc.get_http_info.call_args_list
+    ] == [False, True]
     assert [c.kwargs["http_info"] for c in svc.invoke_http.call_args_list] == [
         stale, fresh,
     ]
