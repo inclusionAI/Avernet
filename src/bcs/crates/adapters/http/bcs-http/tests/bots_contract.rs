@@ -1274,7 +1274,7 @@ async fn search_bots_route_rejects_invalid_visibility() {
 }
 
 #[tokio::test]
-async fn search_bots_route_forces_public_scope_without_bearer() {
+async fn search_bots_route_defaults_to_public_and_protected_without_bearer() {
     let query = Arc::new(RecordingBotQueryService {
         search_result: Ok(BotSearchResult {
             items: vec![query_entry("bot-alpha"), query_entry("bot-beta")],
@@ -1286,12 +1286,11 @@ async fn search_bots_route_forces_public_scope_without_bearer() {
     // No user-identity port ⇒ anonymous caller.
     let app = build_router(HttpAppState::new(services));
 
-    // Client tries visibility=protected, but without a Bearer it is intersected
-    // with the anonymous public-only scope, producing an empty visibility set.
+    // Without an explicit visibility filter, search defaults to public + protected.
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/bots/search?visibility=protected&offset=0&limit=20")
+                .uri("/bots/search?offset=0&limit=20")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1308,7 +1307,10 @@ async fn search_bots_route_forces_public_scope_without_bearer() {
 
     let commands = query.search_commands.lock().await;
     assert_eq!(commands.len(), 1);
-    assert!(commands[0].visibility.as_ref().unwrap().is_empty());
+    assert_eq!(
+        commands[0].visibility.as_ref().unwrap(),
+        &vec!["public".to_string(), "protected".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -1326,8 +1328,8 @@ async fn search_bots_route_omits_is_friend_without_explicit_viewer() {
         ChainUserIdentityPort::new(chain),
     )));
 
-    // No visibility param with authenticated caller still controls visibility,
-    // but friendship is only calculated when explicit viewer params are present.
+    // No visibility param means the route uses the default public + protected scope,
+    // while friendship is only calculated when explicit viewer params are present.
     let response = app
         .oneshot(
             Request::builder()
@@ -1347,7 +1349,10 @@ async fn search_bots_route_omits_is_friend_without_explicit_viewer() {
 
     let commands = query.search_commands.lock().await;
     assert_eq!(commands.len(), 1);
-    assert!(commands[0].visibility.is_none());
+    assert_eq!(
+        commands[0].visibility.as_ref().unwrap(),
+        &vec!["public".to_string(), "protected".to_string()]
+    );
     assert!(commands[0].viewer_actor_id.is_none());
     assert_eq!(commands[0].requester_actor_id.as_deref(), Some("human_alice"));
 }

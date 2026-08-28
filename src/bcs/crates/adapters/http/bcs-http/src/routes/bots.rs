@@ -527,11 +527,9 @@ pub async fn search_bots(
         ));
     }
 
-    let effective_visibility = match (&caller_id, visibility) {
-        (None, None) => Some(vec!["public".to_string()]),
-        (None, Some(values)) => Some(values.into_iter().filter(|v| v == "public").collect()),
-        (Some(_), values) => values,
-    };
+    let effective_visibility = visibility.or_else(|| {
+        Some(vec!["public".to_string(), "protected".to_string()])
+    });
 
     let result = state
         .services
