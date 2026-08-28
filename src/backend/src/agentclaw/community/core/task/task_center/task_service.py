@@ -311,7 +311,13 @@ class TaskService:
                 run_id=run_id,
             )
         session_id = bot_result.session_id if bot_result is not None else None
-        run_extend = {"session_id": session_id}
+        # Keep the graph identity semantically split.  ``assignee`` remains the
+        # product bot id, while the owner is persisted alongside it so dashboard
+        # reads never resolve a duplicate bot name under another user.
+        run_extend = {
+            "session_id": session_id,
+            "assignee_owner_id": request.owner_user_id,
+        }
         self._graph.update_task_node_info(
             TaskNodePatch(
                 task_id=task_id,
@@ -623,30 +629,63 @@ class TaskService:
         return graph
 
     def _attach_assignee_bot_info(self, graph: TaskExecutionGraph) -> None:
-        """single_bot / bbs 节点:按 assignee(纯 bot_id)查 ``BotServiceProtocol.get_bot_by_id``,
-        把 ``owner_id`` / ``bot_name`` 折进节点 ``run_info.extend_props``(assignee_owner_id / assignee_name;
-        只读投影,供前端展示 bot 归属+名)。coop_group(assignee 是 group_id 非机器人)、未配
-        ``bot_service``、未命中或异常 → 不写、不阻断 dashboard。同 bot_id 缓存(一次查询)。"""
+        """Attach exact Bot/owner display metadata to single-bot nodes.
+
+        New execution rows carry ``assignee_owner_id`` separately.  When it is
+        available, resolve the ``(bot_id, owner_id)`` pair instead of the
+        ambiguous bot id alone.  Composite legacy assignees are split in place.
+        Old rows without owner metadata retain the historical best-effort lookup
+        for compatibility, but new workflow rows never take that path.
+        """
         if self._bot_service is None:
             return
-        cache: dict[str, dict | None] = {}
+        pair_cache: dict[tuple[str, str], dict | None] = {}
+        bot_cache: dict[str, dict | None] = {}
+        pair_lookup = getattr(self._bot_service, "list_bots_by_owner_bot_pairs", None)
         for node in graph.tasks:
             if node.run_info.run_mode not in ("single_bot", "bbs"):
                 continue
-            bot_id = (node.run_info.assignee or "").strip()
-            if not bot_id:
+            assignee = (node.run_info.assignee or "").strip()
+            if not assignee:
                 continue
-            if bot_id not in cache:
-                try:
-                    cache[bot_id] = self._bot_service.get_bot_by_id(bot_id)
-                except Exception as exc:  # noqa: BLE001 查 bot 失败不阻断只读 dashboard
-                    logger.warning(
-                        "[task][dashboard] get_bot_by_id 失败 bot_id=%s: %s",
-                        bot_id,
-                        exc,
-                    )
-                    cache[bot_id] = None
-            info = cache.get(bot_id)
+            bot_id, composite_owner_id = self._split_owner_bot_id(assignee, "")
+            owner_id = str(
+                node.run_info.extend_props.get("assignee_owner_id")
+                or composite_owner_id
+                or ""
+            ).strip()
+            info: dict | None = None
+            if owner_id and callable(pair_lookup):
+                key = (bot_id, owner_id)
+                if key not in pair_cache:
+                    try:
+                        result = pair_lookup(pairs=[key], page=1, page_size=1) or {}
+                        items = result.get("items") or []
+                        pair_cache[key] = items[0] if items else None
+                    except Exception as exc:  # noqa: BLE001 display-only enrichment
+                        logger.warning(
+                            "[task][dashboard] exact bot lookup failed bot_id=%s owner_id=%s: %s",
+                            bot_id,
+                            owner_id,
+                            exc,
+                        )
+                        pair_cache[key] = None
+                info = pair_cache[key]
+            elif not owner_id:
+                # Compatibility for old graph rows that predate split identity
+                # fields.  New rows always persist the owner and use the exact
+                # pair branch above.
+                if bot_id not in bot_cache:
+                    try:
+                        bot_cache[bot_id] = self._bot_service.get_bot_by_id(bot_id)
+                    except Exception as exc:  # noqa: BLE001 display-only enrichment
+                        logger.warning(
+                            "[task][dashboard] get_bot_by_id failed bot_id=%s: %s",
+                            bot_id,
+                            exc,
+                        )
+                        bot_cache[bot_id] = None
+                info = bot_cache[bot_id]
             if isinstance(info, dict):
                 node.run_info.extend_props["assignee_owner_id"] = info.get("owner_id")
                 node.run_info.extend_props["assignee_name"] = info.get("bot_name")

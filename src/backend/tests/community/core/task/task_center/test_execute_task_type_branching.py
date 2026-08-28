@@ -102,9 +102,15 @@ def test_execute_workflow_persists_session_id():
     assert ("workflow", "t1", "b1:u1", "/wf 1 2") in eng.calls
     # session_id surfaces in the persisted run_info extend_props AND the dashboard
     # (root node's in-memory run_info.extend_props, serialized by graph_to_dto).
-    assert run.extend_props == {"session_id": "wf-session-1"}
+    assert run.extend_props == {
+        "session_id": "wf-session-1",
+        "assignee_owner_id": "u1",
+    }
     dash = svc.get_task_dashboard("t1")
-    assert dash.tasks[0].run_info.extend_props == {"session_id": "wf-session-1"}
+    assert dash.tasks[0].run_info.extend_props == {
+        "session_id": "wf-session-1",
+        "assignee_owner_id": "u1",
+    }
 
 
 @pytest.mark.parametrize("owner_bot_id", ["b1", "b1:u1"])
