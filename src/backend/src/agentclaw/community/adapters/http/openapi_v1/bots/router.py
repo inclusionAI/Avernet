@@ -251,6 +251,8 @@ def _to_inventory_item(item: CoreItem) -> BotInventoryItem:
         internal_status=item.internal_status,
         owner_entity_id=item.owner_entity_id,
         space=space,
+        template_type=item.template_type,
+        template_config=dict(item.template_config) if item.template_config else None,
         avatar_url=item.avatar_url,
         machine_id=item.machine_id,
         mount_path=item.mount_path,
