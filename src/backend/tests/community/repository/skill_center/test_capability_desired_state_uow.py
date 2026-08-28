@@ -531,6 +531,14 @@ def test_active_skill_set_mutates_mcp_membership_and_installation_atomically():
         icon="https://example.test/weather.png",
     )
     assert added.changed is True
+    assert added.mcp_codes == frozenset({"mcp.weather"})
+    unchanged_add = repository.add_mcp(
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id),
+        server_code="mcp.weather", name="Weather MCP",
+        description="Weather tools", icon="https://example.test/weather.png",
+    )
+    assert unchanged_add.changed is False
+    assert unchanged_add.mcp_codes == frozenset()
     with db.orm_session() as session:
         membership = session.query(SkillSetMCPServer).one()
         assert (membership.name, membership.description, membership.icon) == (
@@ -544,6 +552,13 @@ def test_active_skill_set_mutates_mcp_membership_and_installation_atomically():
         bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather"
     )
     assert removed.changed is True
+    assert removed.mcp_codes == frozenset({"mcp.weather"})
+    unchanged_remove = repository.remove_mcp(
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id),
+        server_code="mcp.weather",
+    )
+    assert unchanged_remove.changed is False
+    assert unchanged_remove.mcp_codes == frozenset()
     with db.orm_session() as session:
         assert session.query(SkillSetMCPServer).count() == 0
         assert session.query(BotMCPInstallation).count() == 0
@@ -623,6 +638,32 @@ def test_direct_mcp_installation_isolated_by_owner_for_shared_bot_id():
         assert [(row.owner_id, row.bot_id, row.server_code) for row in rows] == [
             ("owner-b", "default", "mcp.weather")
         ]
+
+
+def test_direct_mcp_mutations_name_only_the_code_they_changed():
+    repository = CapabilityDesiredStateRepository(_Database())
+
+    installed = repository.install_mcp(
+        bot_id="bot", owner_id="owner", server_code="mcp.weather",
+        platform_default_codes=frozenset(),
+    )
+    unchanged_install = repository.install_mcp(
+        bot_id="bot", owner_id="owner", server_code="mcp.weather",
+        platform_default_codes=frozenset(),
+    )
+    uninstalled = repository.uninstall_mcp(
+        bot_id="bot", owner_id="owner", server_code="mcp.weather",
+        platform_default_codes=frozenset(),
+    )
+    unchanged_uninstall = repository.uninstall_mcp(
+        bot_id="bot", owner_id="owner", server_code="mcp.weather",
+        platform_default_codes=frozenset(),
+    )
+
+    assert installed.mcp_codes == frozenset({"mcp.weather"})
+    assert unchanged_install.mcp_codes == frozenset()
+    assert uninstalled.mcp_codes == frozenset({"mcp.weather"})
+    assert unchanged_uninstall.mcp_codes == frozenset()
 
 
 def test_skill_set_control_plane_sql_only_adds_owner_scoped_mcp_installation():
@@ -2340,20 +2381,24 @@ def test_mcp_exclusion_mirrors_the_skill_pair():
         set_id=str(default.id), server_code="mcp.member", **_DEFAULT_SCOPE
     )
     assert excluded.changed is True
+    assert excluded.mcp_codes == frozenset({"mcp.member"})
     with db.orm_session() as session:
         assert session.query(DefaultSkillsetMcpExclusion).count() == 1
         assert session.query(BotMCPInstallation).count() == 0
     assert repository.excluded_default_mcp_codes(
         bot_id="bot", owner_id="owner", set_id=str(default.id)
     ) == {"mcp.member"}
-    assert not repository.exclude_default_mcp(
+    unchanged_exclusion = repository.exclude_default_mcp(
         set_id=str(default.id), server_code="mcp.member", **_DEFAULT_SCOPE
-    ).changed
+    )
+    assert unchanged_exclusion.changed is False
+    assert unchanged_exclusion.mcp_codes == frozenset()
 
     restored = repository.unexclude_default_mcp(
         set_id=str(default.id), server_code="mcp.member", **_DEFAULT_SCOPE
     )
     assert restored.changed is True
+    assert restored.mcp_codes == frozenset({"mcp.member"})
     with db.orm_session() as session:
         assert session.query(DefaultSkillsetMcpExclusion).count() == 0
         assert [
@@ -2564,6 +2609,12 @@ def test_excluding_a_platform_default_mcp_retires_a_legacy_direct_row():
         assert {
             row.server_code for row in session.query(BotMCPInstallation).all()
         } == {"mcp.member"}
+
+    restored = repository.unexclude_default_mcp(
+        set_id=str(default.id), server_code="mcp.platform", **_DEFAULT_SCOPE
+    )
+    assert restored.changed is True
+    assert restored.mcp_codes == frozenset({"mcp.platform"})
 
 
 def test_restore_desired_state_preserves_mcp_membership_metadata():
