@@ -768,6 +768,36 @@ class TestStep3RenewalDecision:
         assert "timeout" in failure_lines[0].message
 
     @pytest.mark.asyncio
+    async def test_get_device_info_failure_logs_debug_traceback(self, caplog):
+        """WR-01: get_device_info failure keeps a DEBUG exc_info traceback."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        mock_facade.get_device_info = AsyncMock(side_effect=Exception("timeout"))
+        mock_facade.extend_ttl = AsyncMock()
+        mock_repo.update_after_failure = MagicMock()
+
+        caplog.set_level(logging.DEBUG, logger="core-scheduler")
+        record = _renewal_record()
+        result = await scheduler._renew_one(record)
+
+        assert result == "failed"
+
+        matching = [r for r in caplog.records if "get_device_info failed" in r.message]
+        warning_records = [r for r in matching if r.levelno == logging.WARNING]
+        debug_records = [r for r in matching if r.levelno == logging.DEBUG]
+        assert len(warning_records) == 1
+        assert len(debug_records) == 1
+
+        warning = warning_records[0]
+        assert "timeout" in warning.message
+        assert warning.exc_info is None
+
+        debug = debug_records[0]
+        assert "timeout" in debug.message
+        assert debug.exc_info is not None
+        assert debug.exc_info[0] is Exception
+
+    @pytest.mark.asyncio
     async def test_ttl_timestamp_none_enters_failure(self):
         """Test 21: ttl_timestamp is None → failure handling."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
@@ -826,6 +856,40 @@ class TestStep3RenewalDecision:
         assert failure_lines[0].levelno == logging.WARNING
         assert "Arca API error" in failure_lines[0].message
         assert "ttl_minutes=" in failure_lines[0].message
+
+    @pytest.mark.asyncio
+    async def test_extend_ttl_failure_logs_debug_traceback(self, caplog):
+        """WR-01: extend_ttl failure keeps a DEBUG exc_info traceback."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(10))
+        )
+        mock_facade.extend_ttl = AsyncMock(side_effect=Exception("Arca API error"))
+        mock_repo.update_after_failure = MagicMock()
+
+        caplog.set_level(logging.DEBUG, logger="core-scheduler")
+        record = _renewal_record()
+        result = await scheduler._renew_one(record)
+
+        assert result == "failed"
+
+        matching = [r for r in caplog.records if "extend_ttl failed" in r.message]
+        warning_records = [r for r in matching if r.levelno == logging.WARNING]
+        debug_records = [r for r in matching if r.levelno == logging.DEBUG]
+        assert len(warning_records) == 1
+        assert len(debug_records) == 1
+
+        warning = warning_records[0]
+        assert "Arca API error" in warning.message
+        assert "ttl_minutes=" in warning.message
+        assert warning.exc_info is None
+
+        debug = debug_records[0]
+        assert "extend_ttl failed" in debug.message
+        assert "ttl_minutes=" in debug.message
+        assert debug.exc_info is not None
+        assert debug.exc_info[0] is Exception
 
     @pytest.mark.asyncio
     async def test_extend_ttl_returns_false_enters_failure(self):

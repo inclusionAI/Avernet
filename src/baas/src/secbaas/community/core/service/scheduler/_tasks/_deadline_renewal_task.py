@@ -552,6 +552,12 @@ class DeadlineRenewalScheduler:
                 sandbox_id,
                 e,
             )
+            log.debug(
+                "[DeadlineRenewalScheduler] get_device_info failed sandbox_id=%s: %s",
+                sandbox_id,
+                e,
+                exc_info=True,
+            )
             outcome = await self._handle_failure(record)
             self._emit_renew_digest(record, outcome, run_uuid=run_uuid)
             return outcome
@@ -677,6 +683,14 @@ class DeadlineRenewalScheduler:
                 sandbox_id,
                 ttl_minutes,
                 e,
+            )
+            log.debug(
+                "[DeadlineRenewalScheduler] extend_ttl failed sandbox_id=%s "
+                "ttl_minutes=%d: %s",
+                sandbox_id,
+                ttl_minutes,
+                e,
+                exc_info=True,
             )
             outcome = await self._handle_failure(record)
             self._emit_renew_digest(
