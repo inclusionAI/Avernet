@@ -1700,6 +1700,48 @@ class TestRenewalDigestLogging:
         assert fields[8] == "-"
 
     @pytest.mark.asyncio
+    async def test_pathological_ttl_digest_format_failure_uses_placeholder(self, caplog):
+        """ME-01: a numeric-but-pathological ttl_timestamp (huge negative
+        epoch overflowing the datetime range) flows through failure
+        accounting exactly once; the digest TTL formatter's failure
+        degrades to the legacy "-" placeholders instead of raising out of
+        _renew_one."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        pathological_ms = -(10**19)
+        # Setup guard: the chosen value really does raise when formatted
+        # (the concrete exception class varies by platform).
+        with pytest.raises((OverflowError, OSError, ValueError)):
+            format_ttl_expiration_time(float(pathological_ms))
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=pathological_ms)
+        )
+        mock_facade.extend_ttl = AsyncMock()
+        mock_repo.update_after_failure = MagicMock()
+
+        caplog.set_level(logging.INFO, logger="arca-renew-digest")
+        result = await scheduler._renew_one(_renewal_record())
+
+        # (a) The pathological TTL never propagates an exception.
+        assert result == "failed"
+        # (b) No double accounting: failure handling ran exactly once — the
+        # guarded digest formatting did not re-route the record through
+        # _process_one's failure fallback.
+        mock_facade.extend_ttl.assert_not_awaited()
+        mock_repo.update_after_failure.assert_called_once()
+        # (c) The digest row exists with legacy "-" TTL placeholders.
+        lines = self._digest_lines(caplog)
+        assert len(lines) == 1
+        fields = lines[0].split(",")
+        assert fields[6] == "failed"
+        assert fields[7] == "-"
+        assert fields[8] == "-"
+        # The formatter failure is warned on core-scheduler, never emitted
+        # into the digest stream.
+        assert any("digest ttl format failed" in r.message for r in caplog.records)
+
+    @pytest.mark.asyncio
     async def test_stopped_outcome_maps_to_failure_digest_result(self, caplog):
         """Threshold STOPPED maps the digest result to "failure" (not
         "stopped") — monitor vocabulary stays two-valued success/failure."""

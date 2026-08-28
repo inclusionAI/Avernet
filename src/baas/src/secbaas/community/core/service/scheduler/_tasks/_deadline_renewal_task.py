@@ -39,6 +39,22 @@ _DIGEST_TABLE_TYPE = {"baas_device": "baas", "ac_entity_device_binding": "ac_bin
 _DIGEST_RESULT = {"stopped": "failure"}
 
 
+def _digest_ttl(ms: int | None) -> str | None:
+    """Format an epoch-ms TTL for the digest stream, never raising.
+
+    Digest emission is best-effort by contract: a value that cannot be
+    formatted (numeric garbage from a device API passthrough) degrades to
+    the legacy "-" placeholder instead of interrupting the renewal flow.
+    """
+    if ms is None:
+        return None
+    try:
+        return format_ttl_expiration_time(float(ms))
+    except (TypeError, ValueError, OSError, OverflowError):
+        log.warning("[DeadlineRenewalScheduler] digest ttl format failed for %r", ms)
+        return None
+
+
 class DeadlineRenewalScheduler:
     """Deadline-driven ARCA container TTL renewal scheduler.
 
@@ -479,16 +495,8 @@ class DeadlineRenewalScheduler:
         Best-effort by design: log_renew_digest swallows its own logging
         failures, so digest emission can never affect the renewal flow.
         """
-        before = (
-            format_ttl_expiration_time(float(ttl_before_ms))
-            if ttl_before_ms is not None
-            else None
-        )
-        after = (
-            format_ttl_expiration_time(float(ttl_after_ms))
-            if ttl_after_ms is not None
-            else None
-        )
+        before = _digest_ttl(ttl_before_ms)
+        after = _digest_ttl(ttl_after_ms)
         log_renew_digest(
             run_uuid=run_uuid or str(uuid4()),
             table_id=record.get("source_id", 0),
