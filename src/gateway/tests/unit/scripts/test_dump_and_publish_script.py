@@ -43,9 +43,7 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
     # anonymous registration) — contract PR: register token and bot
     # registration on the collaboration surface.
     assert sum(len(path_item) for path_item in document["paths"].values()) == 59
-    assert (
-        "get" in document["paths"]["/openapi/v1/collaboration/register/token"]
-    )
+    assert "get" in document["paths"]["/openapi/v1/collaboration/register/token"]
     assert "post" in document["paths"]["/openapi/v1/collaboration/register"]
     assert (
         "post"
