@@ -841,6 +841,7 @@ async def _dispatch(
                         _session_id,
                         exc,
                     )
+        logger.info("[task_callback] finish_process_callback")
         return envelope({"ok": True}, request)
     # 羽雀/框架节点级回投:先按 schema_cls(TaskCallbackRequest 富 schema)校验 → translate → report_result/start_run;
     # 不符合则兜底 TaskCallbackDataDTO(loop_task_id+result,report_callback 旧契约)→ callback_from_dto → report_result。
