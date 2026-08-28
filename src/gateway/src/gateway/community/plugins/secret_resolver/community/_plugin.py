@@ -28,7 +28,7 @@ class CommunitySecretResolver(SecretResolver):
     """Resolve a named secret from environment variables."""
 
     def get_secret(self, secret_name: str) -> _EnvSecret | None:
-        norm = secret_name.upper().replace("-", "_")
+        norm = secret_name.replace("-", "_")
         value = os.environ.get(norm)
         if value is None:
             # Absent — the credential's value is unset, so the secret does not

@@ -43,6 +43,7 @@ logger = get_logger("authn-dev-header")
 
 #: The switch shared with ``bootstrap/_authn.py``; only the literal "1" enables.
 AUTH_MOCK_ENV = "GATEWAY_AUTH_MOCK"
+AUTH_MOCK_USER = "GATEWAY_MOCK_USER"
 
 #: The header carrying the asserted user id. Requiring an explicit header keeps
 #: every mock-authenticated request deliberate — an anonymous request still
@@ -53,6 +54,9 @@ DEV_USER_HEADER = "x-dev-user"
 def auth_mock_enabled() -> bool:
     """Whether the operator switched the dev auth mock on for this process."""
     return os.getenv(AUTH_MOCK_ENV, "").strip() == "1"
+
+def auth_mock_user() -> str:
+    return os.getenv(AUTH_MOCK_USER, "").strip()
 
 
 class DevHeaderUserStrategy:
@@ -69,7 +73,9 @@ class DevHeaderUserStrategy:
             return None  # gate 2: declared-but-not-enabled stays inert
         user_id = creds.headers.get(self._token_header, "").strip()
         if not user_id:
-            return None  # header absent → not applicable; runner fail-closes
+            user_id = auth_mock_user()
+        if not user_id:
+            return None  # neither header nor env var → not applicable; runner fail-closes
         logger.debug("dev auth header accepted: user=%s", user_id)
         subject = AuthenticatedUser(
             id=user_id,
