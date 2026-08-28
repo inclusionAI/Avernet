@@ -84,6 +84,7 @@ def client(bot_service, desktop_service):
                 access_service=access,
                 business_space=space,
                 lifecycle_view=BotLifecycleView(NoopServiceLifecyclePort()),
+                edit_lock_view=MagicMock(states_for_bots=MagicMock(return_value={})),
             )
             binder.bind(BotInventoryBotPort, to=bot_service)
             binder.bind(DesktopBotInventoryPort, to=desktop_service)
@@ -117,6 +118,16 @@ def test_inventory_openapi_declares_upgrade_action(client):
     schema = client.app.openapi()["components"]["schemas"]["BotInventoryItem"]
 
     assert "upgrade" in schema["properties"]["actions"]["items"]["enum"]
+
+
+def test_inventory_openapi_reuses_edit_lock_contract(client):
+    schemas = client.app.openapi()["components"]["schemas"]
+
+    edit_lock = schemas["BotInventoryItem"]["properties"]["edit_lock"]
+    assert {item.get("$ref") for item in edit_lock["anyOf"]} == {
+        "#/components/schemas/EditLock",
+        None,
+    }
 
 
 def test_list_inventory_filters_non_service_bots(client):

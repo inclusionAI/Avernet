@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any, Mapping
 
 from agentclaw.community.core.bot_inventory.errors import (
@@ -14,6 +15,7 @@ from agentclaw.community.core.bot_inventory.protocols import (
     BotInventoryBotPort,
     BusinessSpaceContextProtocol,
     DesktopBotInventoryPort,
+    ServiceEditLockPort,
 )
 from agentclaw.community.core.bot_inventory.services.lifecycle_view import (
     BotLifecycleView,
@@ -27,6 +29,10 @@ from agentclaw.community.core.bot_inventory.types import (
     ServiceLifecycleCard,
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.log import get_logger
+
+
+logger = get_logger()
 
 
 class BotInventoryService:
@@ -38,12 +44,14 @@ class BotInventoryService:
         access_service: BotInventoryAccessPort,
         business_space: BusinessSpaceContextProtocol,
         lifecycle_view: BotLifecycleView,
+        edit_lock_view: ServiceEditLockPort,
     ) -> None:
         self._bot = bot_service
         self._desktop = desktop_service
         self._access = access_service
         self._business_space = business_space
         self._lifecycle = lifecycle_view
+        self._edit_locks = edit_lock_view
 
     def list_items(
         self,
@@ -59,6 +67,9 @@ class BotInventoryService:
         page_size: int,
     ) -> tuple[list[BotInventoryItem], int]:
         cards: list[BotInventoryItem] = []
+        service_rows_by_pair: dict[tuple[str, str], Mapping[str, Any]] = {}
+        service_levels_by_pair: dict[tuple[str, str], PermissionLevel] = {}
+        service_draft_pairs: set[tuple[str, str]] = set()
         if deploy_mode in (None, DeployMode.CLOUD):
             cloud_rows = self._list_cloud_rows(
                 owner_id=owner_id,
@@ -94,15 +105,23 @@ class BotInventoryService:
             service_cards = self._lifecycle.service_cards(bots=service_rows)
             for row in service_rows:
                 bot_id = str(row.get("bot_id") or "")
+                bot_owner_id = str(row.get("owner_id") or owner_id)
+                pair = (bot_id, bot_owner_id)
+                level = levels.get(int(row.get("id") or 0), PermissionLevel.NONE)
+                service_rows_by_pair[pair] = row
+                service_levels_by_pair[pair] = level
+                lifecycle_cards = service_cards.get(bot_id, ())
+                if any(card.has_draft for card in lifecycle_cards):
+                    service_draft_pairs.add(pair)
                 cards.extend(
                     self._to_service_item(
                         row,
                         owner_id,
                         lifecycle_card,
                         space,
-                        levels.get(int(row.get("id") or 0), PermissionLevel.NONE),
+                        level,
                     )
-                    for lifecycle_card in service_cards.get(bot_id, ())
+                    for lifecycle_card in lifecycle_cards
                 )
         if (
             is_service is not True
@@ -128,7 +147,61 @@ class BotInventoryService:
         )
         total = len(cards)
         start = (page - 1) * page_size
-        return cards[start : start + page_size], total
+        page_cards = cards[start : start + page_size]
+        page_cards = self._attach_edit_locks(
+            cards=page_cards,
+            service_rows_by_pair=service_rows_by_pair,
+            service_levels_by_pair=service_levels_by_pair,
+            service_draft_pairs=service_draft_pairs,
+        )
+        return page_cards, total
+
+    def _attach_edit_locks(
+        self,
+        *,
+        cards: list[BotInventoryItem],
+        service_rows_by_pair: Mapping[tuple[str, str], Mapping[str, Any]],
+        service_levels_by_pair: Mapping[tuple[str, str], PermissionLevel],
+        service_draft_pairs: set[tuple[str, str]],
+    ) -> list[BotInventoryItem]:
+        pairs = sorted(
+            {
+                (card.bot_id, card.owner_entity_id)
+                for card in cards
+                if card.kind == BotInventoryKind.SERVICE
+                and service_levels_by_pair.get(
+                    (card.bot_id, card.owner_entity_id), PermissionLevel.NONE
+                )
+                >= PermissionLevel.MEMBER
+            }
+        )
+        if not pairs:
+            return cards
+        try:
+            states = self._edit_locks.states_for_bots(
+                bots=[service_rows_by_pair[pair] for pair in pairs]
+            )
+        except Exception:
+            # Lock information enriches the inventory but must not make the
+            # whole Bot list unavailable if its optional read path is degraded.
+            logger.warning(
+                "[bot_inventory] failed to batch-load edit locks",
+                exc_info=True,
+            )
+            return cards
+
+        enriched: list[BotInventoryItem] = []
+        for card in cards:
+            pair = (card.bot_id, card.owner_entity_id)
+            state = states.get(pair)
+            if state is not None:
+                state = replace(
+                    state,
+                    need_lock=(state.has_collaborators and pair in service_draft_pairs),
+                )
+                card = replace(card, edit_lock=state)
+            enriched.append(card)
+        return enriched
 
     def _list_cloud_rows(
         self,

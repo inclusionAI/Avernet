@@ -28,6 +28,7 @@ from agentclaw.community.core.bot_inventory.types import (
     BusinessSpaceRef,
     DeployMode,
     DisplayState,
+    ServiceEditLockState,
     ServiceLifecycleCard,
 )
 
@@ -54,6 +55,12 @@ LOCAL = {
 }
 
 
+def _no_edit_locks():
+    view = MagicMock()
+    view.states_for_bots.return_value = {}
+    return view
+
+
 @pytest.fixture
 def service():
     bot = MagicMock()
@@ -72,6 +79,7 @@ def service():
             access_service=access,
             business_space=NoopBusinessSpaceContext(),
             lifecycle_view=BotLifecycleView(NoopServiceLifecyclePort()),
+            edit_lock_view=_no_edit_locks(),
         ),
         bot,
         desktop,
@@ -184,7 +192,9 @@ def test_service_bot_expands_to_publication_cards_before_pagination() -> None:
                 display_state=DisplayState.SERVICE_DRAFT,
                 status="draft",
                 actions=(BotAction.VIEW, BotAction.PUBLISH_STAGING),
+                internal_status="draft",
                 live_version=3,
+                has_draft=True,
             ),
             ServiceLifecycleCard(
                 publication_id=3,
@@ -192,6 +202,7 @@ def test_service_bot_expands_to_publication_cards_before_pagination() -> None:
                 display_state=DisplayState.SERVICE_OFFLINE,
                 status="released",
                 actions=(BotAction.VIEW,),
+                internal_status="released",
                 live_version=3,
             ),
         )
@@ -201,12 +212,23 @@ def test_service_bot_expands_to_publication_cards_before_pagination() -> None:
         1: PermissionLevel.OWNER,
         10: PermissionLevel.OWNER,
     }
+    edit_lock_view = MagicMock()
+    edit_lock_view.states_for_bots.return_value = {
+        ("s1", "u1"): ServiceEditLockState(
+            locked=True,
+            holder_user_id="editor-1",
+            holder_name="Editor One",
+            has_collaborators=True,
+            is_owner_holder=False,
+        )
+    }
     inventory = BotInventoryService(
         bot_service=bot,
         desktop_service=desktop,
         access_service=access,
         business_space=NoopBusinessSpaceContext(),
         lifecycle_view=BotLifecycleView(lifecycle_port),
+        edit_lock_view=edit_lock_view,
     )
 
     items, total = inventory.list_items(
@@ -227,7 +249,89 @@ def test_service_bot_expands_to_publication_cards_before_pagination() -> None:
     service_items = [item for item in items if item.bot_id == "s1"]
     assert [item.publication_id for item in service_items] == [4, 3]
     assert [item.card_id for item in service_items] == ["service:s1:4", "service:s1:3"]
+    assert [item.edit_lock.need_lock for item in service_items] == [True, True]
+    assert [item.edit_lock.holder_name for item in service_items] == [
+        "Editor One",
+        "Editor One",
+    ]
+    edit_lock_view.states_for_bots.assert_called_once_with(bots=[service_row])
     lifecycle_port.cards_for_bots.assert_called_once_with(bots=[service_row])
+
+
+@pytest.mark.unit
+def test_edit_lock_batch_reads_only_service_bots_on_current_page() -> None:
+    first = {
+        **CLOUD,
+        "id": 10,
+        "bot_id": "service-1",
+        "bot_name": "A Service",
+        "bot_type": "service",
+    }
+    second = {
+        **first,
+        "id": 11,
+        "bot_id": "service-2",
+        "bot_name": "B Service",
+    }
+    bot = MagicMock()
+    bot.list_bots_by_conditions.return_value = {
+        "total": 2,
+        "items": [first, second],
+    }
+    desktop = MagicMock()
+    desktop.list_user_bots.return_value = []
+    access = MagicMock()
+    access.get_operable_permission_levels.return_value = {
+        10: PermissionLevel.OWNER,
+        11: PermissionLevel.OWNER,
+    }
+    lifecycle_port = MagicMock()
+    lifecycle_port.cards_for_bots.return_value = {
+        row["bot_id"]: (
+            ServiceLifecycleCard(
+                publication_id=row["id"],
+                version=1,
+                display_state=DisplayState.SERVICE_ONLINE,
+                status="running",
+                actions=(BotAction.VIEW,),
+            ),
+        )
+        for row in (first, second)
+    }
+    edit_lock_view = MagicMock()
+    edit_lock_view.states_for_bots.return_value = {
+        ("service-1", "u1"): ServiceEditLockState(
+            locked=False,
+            holder_user_id=None,
+            holder_name=None,
+            has_collaborators=False,
+            is_owner_holder=False,
+        )
+    }
+    inventory = BotInventoryService(
+        bot_service=bot,
+        desktop_service=desktop,
+        access_service=access,
+        business_space=NoopBusinessSpaceContext(),
+        lifecycle_view=BotLifecycleView(lifecycle_port),
+        edit_lock_view=edit_lock_view,
+    )
+
+    items, total = inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.CLOUD,
+        page=1,
+        page_size=1,
+    )
+
+    assert total == 2
+    assert [item.bot_id for item in items] == ["service-1"]
+    edit_lock_view.states_for_bots.assert_called_once_with(bots=[first])
 
 
 @pytest.mark.unit
@@ -411,12 +515,30 @@ def test_team_space_lists_all_owners_and_scopes_actions_by_bot_permission() -> N
         )
         for row in rows
     }
+    edit_lock_view = MagicMock()
+    edit_lock_view.states_for_bots.return_value = {
+        ("service-owner", "u1"): ServiceEditLockState(
+            locked=False,
+            holder_user_id=None,
+            holder_name=None,
+            has_collaborators=False,
+            is_owner_holder=False,
+        ),
+        ("service-editor", "other-owner"): ServiceEditLockState(
+            locked=True,
+            holder_user_id="u1",
+            holder_name="Current User",
+            has_collaborators=True,
+            is_owner_holder=False,
+        ),
+    }
     inventory = BotInventoryService(
         bot_service=bot,
         desktop_service=desktop,
         access_service=access,
         business_space=business_space,
         lifecycle_view=BotLifecycleView(lifecycle_port),
+        edit_lock_view=edit_lock_view,
     )
 
     items, total = inventory.list_items(
@@ -465,6 +587,10 @@ def test_team_space_lists_all_owners_and_scopes_actions_by_bot_permission() -> N
         "edit": "Bot editor permission required",
         "delete": "Bot editor permission required",
     }
+    assert by_id["service-owner"].edit_lock is not None
+    assert by_id["service-editor"].edit_lock is not None
+    assert by_id["service-viewer"].edit_lock is None
+    edit_lock_view.states_for_bots.assert_called_once_with(bots=[editor_bot, owner_bot])
     assert all(item.space == team_space for item in items)
 
 

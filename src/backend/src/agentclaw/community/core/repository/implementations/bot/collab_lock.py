@@ -92,6 +92,23 @@ class BotCollabLockRepository(
             )
             return row.to_record() if row else None
 
+    def list_by_keys(self, lock_keys: List[str]) -> List[BotCollabLockRecord]:
+        """批量查询当前环境下的协作锁记录。"""
+        keys = list(dict.fromkeys(key for key in lock_keys if key))
+        if not keys:
+            return []
+        env = get_current_env()
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self._Lock)
+                .filter(
+                    self._Lock.lock_key.in_(keys),
+                    self._Lock.env == env,
+                )
+                .all()
+            )
+            return [row.to_record() for row in rows]
+
     def is_locked(self, lock_key: str) -> bool:
         """检查锁是否存在。"""
         env = get_current_env()

@@ -70,6 +70,7 @@ from agentclaw.community.core.bot_inventory.types import (
     BotInventoryKind,
     DeployMode,
     DisplayState,
+    ServiceEditLockState,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
@@ -371,6 +372,54 @@ def test_workshop_inventory_does_not_widen_from_a_shared_bot_grant(make_client):
 
     assert listed["items"] == [] and listed["total"] == 0
     inventory.list_items.assert_not_called()
+
+
+def test_workshop_inventory_serializes_batched_edit_lock(make_client):
+    inventory = MagicMock()
+    inventory.list_items.return_value = (
+        [
+            BotInventoryItem(
+                bot_id=GRANTED,
+                bot_name="service",
+                bot_desc="",
+                engine="openclaw",
+                bot_type="service",
+                kind=BotInventoryKind.SERVICE,
+                deploy_mode=DeployMode.CLOUD,
+                display_state=DisplayState.SERVICE_DRAFT,
+                status="draft",
+                owner_entity_id=USER,
+                space=None,
+                card_id=f"service:{GRANTED}:1",
+                edit_lock=ServiceEditLockState(
+                    locked=True,
+                    holder_user_id="editor-1",
+                    holder_name="Editor One",
+                    has_collaborators=True,
+                    is_owner_holder=False,
+                    need_lock=True,
+                ),
+            )
+        ],
+        1,
+    )
+    client = make_client(
+        GRANTED,
+        inventory_service=inventory,
+        space_context=NoopBusinessSpaceContext(),
+    )
+
+    item = _data(client.get("/openapi/v1/bots/all"))["items"][0]
+
+    assert item["edit_lock"] == {
+        "locked": True,
+        "acquired": None,
+        "holder_user_id": "editor-1",
+        "holder_name": "Editor One",
+        "has_collaborators": True,
+        "is_owner_holder": False,
+        "need_lock": True,
+    }
 
 
 def test_local_listing_passes_owned_grants_before_pagination(make_client):

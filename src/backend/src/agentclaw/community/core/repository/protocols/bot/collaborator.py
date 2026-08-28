@@ -110,6 +110,15 @@ class CollaboratorRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def list_by_bot_owner_pairs(
+        self,
+        pairs: List[tuple[str, str]],
+        env: str,
+    ) -> List[CollaboratorRecord]:
+        """批量获取指定 Bot/Owner 组合的协作者。"""
+        ...
+
+    @abstractmethod
     def list_by_user(
         self,
         user_id: str,
@@ -316,6 +325,11 @@ class BotCollabLockRepositoryProtocol(Protocol):
         Returns:
             BotCollabLockRecord，不存在返回None
         """
+        ...
+
+    @abstractmethod
+    def list_by_keys(self, lock_keys: List[str]) -> List[BotCollabLockRecord]:
+        """批量查询当前环境下的协作锁记录。"""
         ...
 
     @abstractmethod
