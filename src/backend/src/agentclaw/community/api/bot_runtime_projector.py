@@ -40,13 +40,5 @@ class BotRuntimeProjectorProtocol(
         scope: ProjectionScope,
     ) -> None: ...
 
-    async def project_for_cleanup(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        scope: ProjectionScope,
-    ) -> None: ...
-
 
 __all__ = ["BotRuntimeProjectorProtocol"]

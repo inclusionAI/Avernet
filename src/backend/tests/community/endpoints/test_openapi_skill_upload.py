@@ -80,7 +80,7 @@ class _RuntimeFactory:
     def create(self, **_kwargs):
         return self
 
-    def sync_runtime(self):
+    def project_skills(self):
         return True
 
     async def project(self, **_kwargs):
