@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Protocol, runtime_checkable
 
 from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
     LegacySkillSetScope,
+)
+from agentclaw.community.core.skill_center.skill_set_batch import (
+    SkillSetAddOutcome,
 )
 
 
@@ -62,15 +66,15 @@ class SkillSetManagementServiceProtocol(Protocol):
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> list[dict[str, Any]]: ...
 
-    async def add_skill(
+    async def add_skills(
         self,
         *,
         bot_id: str,
         owner_id: str,
         user_id: str,
         set_id: str,
-        skill_id: str,
-    ) -> dict[str, Any]: ...
+        skill_ids: Sequence[str],
+    ) -> list[SkillSetAddOutcome]: ...
 
     async def remove_skill(
         self,
