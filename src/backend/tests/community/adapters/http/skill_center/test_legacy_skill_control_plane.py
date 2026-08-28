@@ -35,6 +35,9 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
 )
+from agentclaw.community.core.skill_center.skill_set_batch import (
+    SkillSetAddOutcome,
+)
 
 
 class _Bots:
@@ -307,10 +310,15 @@ async def test_legacy_skill_set_batch_keeps_domain_partial_success() -> None:
         def resolve_legacy_skill_id(self, **kwargs):
             return kwargs["identifier"]
 
-        async def add_skill(self, **_kwargs):
-            raise SkillSetControlPlaneConflictError(
-                "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
-            )
+        async def add_skills(self, **_kwargs):
+            return [
+                SkillSetAddOutcome(
+                    skill_id="7",
+                    error=SkillSetControlPlaneConflictError(
+                        "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
+                    ),
+                )
+            ]
 
     response = await add_skills_to_set(
         "set-1",
@@ -347,18 +355,22 @@ async def test_legacy_skill_set_batch_uses_body_owner_for_collaborator() -> None
             assert kwargs["actor_id"] == "collaborator"
             return kwargs["identifier"]
 
-        async def add_skill(self, **kwargs):
+        async def add_skills(self, **kwargs):
             assert kwargs == {
                 "bot_id": "bot",
                 "owner_id": "owner",
                 "user_id": "collaborator",
                 "set_id": "set-1",
-                "skill_id": "7",
+                "skill_ids": ["7", "8"],
             }
+            return [
+                SkillSetAddOutcome(skill_id="7", changed=True),
+                SkillSetAddOutcome(skill_id="8", changed=True),
+            ]
 
     response = await add_skills_to_set(
         "set-1",
-        AddSkillsRequest(skill_ids=["7"], user_id="owner", bot_id="bot"),
+        AddSkillsRequest(skill_ids=["7", "8"], user_id="owner", bot_id="bot"),
         entity_id=None,
         entity_type=None,
         bot_id=None,
@@ -369,7 +381,10 @@ async def test_legacy_skill_set_batch_uses_body_owner_for_collaborator() -> None
     )
 
     assert response.success is True
-    assert response.data["success"] == [{"skill_id": "7", "name": "7"}]
+    assert response.data["success"] == [
+        {"skill_id": "7", "name": "7"},
+        {"skill_id": "8", "name": "8"},
+    ]
     assert response.data["failed"] == []
 
 
@@ -524,7 +539,7 @@ async def test_legacy_skill_set_batch_propagates_infrastructure_failure() -> Non
         def resolve_legacy_skill_id(self, **kwargs):
             return kwargs["identifier"]
 
-        async def add_skill(self, **_kwargs):
+        async def add_skills(self, **_kwargs):
             raise RuntimeError("database unavailable")
 
     # The route used to catch this and return a 500 reading "Skill set
@@ -555,7 +570,7 @@ async def test_legacy_skill_set_batch_does_not_hide_mutation_busy() -> None:
         def resolve_legacy_skill_id(self, **kwargs):
             return kwargs["identifier"]
 
-        async def add_skill(self, **_kwargs):
+        async def add_skills(self, **_kwargs):
             raise SkillSetControlPlaneConflictError("BOT_MUTATION_BUSY")
 
     # A busy fence is not one of the two per-skill conflicts the batch records
@@ -646,13 +661,16 @@ async def test_legacy_remove_reaches_the_default_set_exclusion_wire() -> None:
         "success": True,
         "message": "Skill removed from skill set",
     }
-    assert ("remove_skill", {
-        "bot_id": "persisted-bot",
-        "owner_id": "owner",
-        "user_id": "owner",
-        "set_id": "set-1",
-        "skill_id": "7",
-    }) in control_plane.calls
+    assert (
+        "remove_skill",
+        {
+            "bot_id": "persisted-bot",
+            "owner_id": "owner",
+            "user_id": "owner",
+            "set_id": "set-1",
+            "skill_id": "7",
+        },
+    ) in control_plane.calls
 
 
 @pytest.mark.asyncio
