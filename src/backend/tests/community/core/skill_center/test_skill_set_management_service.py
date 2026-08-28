@@ -2879,6 +2879,36 @@ def test_engine_projections_declare_the_protocol_as_a_base():
         )
 
 
+def test_an_incomplete_engine_projection_cannot_be_constructed():
+    """Omitting half the contract must fail at construction, not at use.
+
+    ``@abstractmethod`` is what turns the explicit base into a check. Without
+    it a subclass could declare the protocol, implement only ``apply``, pass
+    every registry and wiring test, and then raise ``AttributeError`` the
+    first time plan resolution asked it to validate — deep inside a mutation,
+    with the flush already run.
+    """
+    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+        EngineRuntimeProjection,
+    )
+
+    class MissingValidate(EngineRuntimeProjection):
+        async def apply(self, *, plan, scope, retired_mappings=()) -> None:
+            return None
+
+    class MissingApply(EngineRuntimeProjection):
+        def validate_plan(self, *, skill_assets, retired_mappings=()) -> None:
+            return None
+
+    for incomplete, missing in (
+        (MissingValidate, "validate_plan"),
+        (MissingApply, "apply"),
+    ):
+        with pytest.raises(TypeError) as excinfo:
+            incomplete()
+        assert missing in str(excinfo.value)
+
+
 def test_the_capability_plan_names_a_boundary_not_a_service():
     """``ResolvedCapabilityPlan.service`` must stay a declared boundary.
 

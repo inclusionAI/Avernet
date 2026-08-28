@@ -236,6 +236,13 @@ class EngineRuntimeProjection(Protocol):
         """
 ```
 
+Both methods carry `@abstractmethod`. The implementations name the protocol
+as a base, so an incomplete one fails at construction — in the composition
+root, at startup — rather than raising `AttributeError` mid-mutation, after
+the flush has already run. `EngineRuntimeProjection` is the only protocol
+here with explicit subclasses, so it is the only one where the annotation
+does anything.
+
 **1c.** `ProjectionScope` keeps every field, default, `everything()` and
 `inverted()`. Its docstring gains one paragraph: the guarantees it documents
 ("a single-MCP add stays a single device write", `claim_all_mcp`'s

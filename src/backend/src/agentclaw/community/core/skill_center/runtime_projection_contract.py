@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from abc import abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol, runtime_checkable
@@ -99,8 +100,14 @@ class EngineRuntimeProjection(Protocol):
     so a second call restates in full what the first already delivered. The
     same ``ProjectionScope`` means different things to the two, and neither
     reading is more correct — which is why the caller must not pick one.
+
+    Both methods are abstract. The implementations name this protocol as a
+    base, so a subclass that omits one fails at construction — in the
+    composition root, at startup — instead of raising ``AttributeError`` at
+    the moment a projection tries to use it.
     """
 
+    @abstractmethod
     def validate_plan(
         self,
         *,
@@ -116,6 +123,7 @@ class EngineRuntimeProjection(Protocol):
         """
         ...
 
+    @abstractmethod
     async def apply(
         self,
         *,
