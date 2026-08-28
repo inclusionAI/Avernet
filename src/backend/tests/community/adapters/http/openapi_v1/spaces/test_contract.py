@@ -334,6 +334,7 @@ def test_grant_endpoints_publish_stable_wire_and_delegate_actor(
         actor_id="owner-1",
         new_owner_user_id="manager-1",
         reason=None,
+        retain_previous_owner_as_manager=False,
     )
 
 

@@ -68,11 +68,6 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 class SpacesModule(Module):
     def configure(self, binder: Binder) -> None:
-        binder.bind(
-            DraftEditLeaseServiceProtocol,
-            to=DraftEditLeaseService,
-            scope=singleton,
-        )
         binder.bind(SpaceRepositoryProtocol, to=SpaceRepository, scope=singleton)
         binder.bind(
             MarketFavoriteRepositoryProtocol,
