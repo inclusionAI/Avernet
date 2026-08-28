@@ -132,7 +132,6 @@ def mock_bot_service():
     svc.delete_bot.return_value = None
     svc.restart_bot.return_value = BOT_SAMPLE
     svc.check_bot_name_exists.return_value = False
-    svc.switch_engine.return_value = BOT_SAMPLE
     svc.get_engine_paths.return_value = {"openclaw": "/some/path"}
     svc.get_bot_work_path.return_value = "/some/path"
     svc.get_bot_config_path.return_value = "/some/config"
@@ -925,56 +924,6 @@ class TestRestartBot:
         assert resp.status_code == 202
         assert resp.json()["success"] is True
         assert resp.json()["data"]["restart_in_progress"] is True
-
-
-# ---------------------------------------------------------------------------
-# POST /api/bots/switch-engine
-# ---------------------------------------------------------------------------
-
-class TestSwitchEngine:
-    def test_success(self, client):
-        tc, svc, _ = client
-        resp = tc.post("/api/bots/switch-engine", json={"bot_id": "default", "engine_type": "openclaw"})
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
-
-    def test_missing_bot_id(self, client):
-        tc, svc, _ = client
-        resp = tc.post("/api/bots/switch-engine", json={"engine_type": "openclaw"})
-        assert resp.json()["error_code"] == 400
-
-    def test_missing_engine_type(self, client):
-        tc, svc, _ = client
-        resp = tc.post("/api/bots/switch-engine", json={"bot_id": "default"})
-        assert resp.json()["error_code"] == 400
-
-    def test_bot_not_found(self, client):
-        tc, svc, _ = client
-        svc.switch_engine.side_effect = BotNotFoundError("nope")
-        resp = tc.post("/api/bots/switch-engine", json={"bot_id": "missing", "engine_type": "openclaw"})
-        assert resp.json()["error_code"] == 404
-
-    def test_service_error(self, client):
-        tc, svc, _ = client
-        svc.switch_engine.side_effect = BotServiceError("fail")
-        resp = tc.post("/api/bots/switch-engine", json={"bot_id": "default", "engine_type": "openclaw"})
-        assert resp.json()["error_code"] == 400
-
-    def test_default_teclaw_error_preserves_business_message(self, client):
-        tc, svc, _ = client
-        svc.switch_engine.side_effect = DefaultBotTeclawNotAllowedError()
-
-        resp = tc.post(
-            "/api/bots/switch-engine",
-            json={"bot_id": "default", "engine_type": "teclaw"},
-        )
-
-        assert resp.json() == {
-            "success": False,
-            "message": DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
-            "error_code": 400,
-            "data": None,
-        }
 
 
 # ---------------------------------------------------------------------------
