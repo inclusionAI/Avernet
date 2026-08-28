@@ -7,6 +7,7 @@ import inspect
 import json
 import pathlib
 import re
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -75,6 +76,7 @@ class _Repository:
             item={"server_code": kwargs["server_code"]},
             changed=True,
             previous_state=CapabilityDesiredState(set(), {}, {}),
+            mcp_codes=frozenset({kwargs["server_code"]}),
         )
 
     def list_mcps(self, **_kwargs):
@@ -819,7 +821,15 @@ async def test_collaborator_command_restores_desired_state_and_uses_true_owner()
 
 @pytest.mark.asyncio
 async def test_deactivate_retires_mappings_removed_from_the_runtime_projection():
-    repository = _Repository()
+    class _McpSetRepository(_Repository):
+        def set_skill_set_active(self, **kwargs) -> DesiredStateMutation:
+            mutation = super().set_skill_set_active(**kwargs)
+            return replace(
+                mutation,
+                mcp_codes=frozenset({"mcp.weather"}),
+            )
+
+    repository = _McpSetRepository()
     runtime = _Runtime(snapshots=[_Runtime._skill_mappings(), ()], fail_first=False)
     service = SkillSetManagementService(
         repository=repository,
@@ -846,12 +856,10 @@ async def test_deactivate_retires_mappings_removed_from_the_runtime_projection()
             "bot_id": "bot-1",
             "owner_id": "true-owner",
             "retired_mappings": _Runtime._skill_mappings(),
-            # deactivate declares what it released rather than reconciling:
-            # the Set's MCP codes come back on the mutation result, resolved
-            # under the row lock that uninstalled them.
-            "scope": ProjectionScope(
-                skills=True, mcp=True, released_mcp=frozenset()
-            ),
+            # Deactivation withdraws callable state but retains the Set's MCP
+            # configuration. The mutation result deliberately carries the
+            # Set's code to prove it is not treated as a physical release.
+            "scope": ProjectionScope(skills=True, mcp=True),
         }
     ]
 
@@ -2198,6 +2206,42 @@ async def test_compensation_inverts_the_declared_mcp_delta():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("method_name", ["add_mcp", "remove_mcp"])
+async def test_an_unchanged_mcp_membership_declares_no_runtime_delta(
+    method_name: str,
+) -> None:
+    class _UnchangedMcpRepository(_Repository):
+        @staticmethod
+        def _unchanged(server_code: str) -> DesiredStateMutation:
+            return DesiredStateMutation(
+                item={"server_code": server_code},
+                changed=False,
+                previous_state=CapabilityDesiredState(set(), {}, {}),
+            )
+
+        def add_mcp(self, **kwargs) -> DesiredStateMutation:
+            return self._unchanged(kwargs["server_code"])
+
+        def remove_mcp(self, **kwargs) -> DesiredStateMutation:
+            return self._unchanged(kwargs["server_code"])
+
+    runtime = _Runtime(fail_first=False)
+    service = _skill_service(_UnchangedMcpRepository(), runtime)
+
+    result = await getattr(service, method_name)(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+        server_code="mcp.weather",
+    )
+
+    assert result["changed"] is False
+    (call,) = runtime.reconcile_calls
+    assert call["scope"] == ProjectionScope()
+
+
+@pytest.mark.asyncio
 async def test_reconcile_scope_claims_every_projected_code():
     """A restart or upload has no mutation to ask, so nothing is assumed.
 
@@ -2922,19 +2966,25 @@ class _DefaultTargetRepository(_Repository):
 
     def exclude_default_mcp(self, **kwargs) -> DesiredStateMutation:
         self.exclusion_calls.append(("exclude_default_mcp", kwargs))
-        return self._mutation()
+        return replace(
+            self._mutation(), mcp_codes=frozenset({kwargs["server_code"]})
+        )
 
     def unexclude_default_mcp(self, **kwargs) -> DesiredStateMutation:
         self.exclusion_calls.append(("unexclude_default_mcp", kwargs))
-        return self._mutation()
+        return replace(
+            self._mutation(), mcp_codes=frozenset({kwargs["server_code"]})
+        )
 
 
 class _ProjectionCountingRuntime(_SuccessfulRuntime):
     def __init__(self) -> None:
         self.projections = 0
+        self.scopes: list[ProjectionScope] = []
 
-    async def project(self, **_kwargs) -> None:
+    async def project(self, *, scope: ProjectionScope, **_kwargs) -> None:
         self.projections += 1
+        self.scopes.append(scope)
 
 
 def _default_wire_service(
@@ -3091,6 +3141,10 @@ async def test_default_mcp_exclusion_wire_mirrors_the_skill_wire():
         "unexclude_default_mcp",
     ]
     assert runtime.projections == 2
+    assert runtime.scopes == [
+        ProjectionScope(mcp=True, released_mcp=frozenset({"mcp.gone"})),
+        ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.back"})),
+    ]
 
     with pytest.raises(
         SkillSetControlPlaneConflictError, match="SYSTEM_DEFAULT_IMMUTABLE"
@@ -3123,4 +3177,3 @@ async def test_unexcluding_a_default_mcp_still_requires_marketplace_permission()
             set_id="9", server_code="mcp.back",
         )
     assert repository.exclusion_calls == []
-
