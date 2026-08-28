@@ -93,6 +93,8 @@ class TaskService:
         bot_service=None,
         staff_dept: StaffDeptPlugin | None = None,
         task_auth_gate=None,
+        task_search_skill_enabled: bool = False,
+        task_settings=None,
         api_base_url: str | None = None,
         bot_token_provider=None,
     ) -> None:
@@ -119,6 +121,8 @@ class TaskService:
         self._staff_dept = staff_dept
         self._api_base_url = api_base_url
         self._task_auth_gate = task_auth_gate
+        self._task_search_skill_enabled = task_search_skill_enabled
+        self._task_settings = task_settings
         self._bot_token_provider = bot_token_provider
         # _build_engine(seam)签名保持不变(测试子类按旧签名覆写);claim_on JOIN 经 self._task_auth_gate
         # 传入 ExecutionEngine→dispatcher,不进签名避免破坏覆写 seam。
@@ -155,6 +159,8 @@ class TaskService:
             bcn=self._bcn,
             bcs_identity=self._bcs_identity,
             auth_gate=self._task_auth_gate,
+            task_search_skill_enabled=self._task_search_skill_enabled,
+            task_settings=self._task_settings,
             api_base_url=self._api_base_url,
             bot_token_provider=self._bot_token_provider,
         )

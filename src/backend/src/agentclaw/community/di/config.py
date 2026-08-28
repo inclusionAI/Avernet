@@ -623,6 +623,18 @@ class DormantNotifyConfig:
 
 
 @dataclass(frozen=True)
+class TaskDispatchConfig:
+    """Task dispatch policy switches (``task_dispatch`` user_config block).
+
+    The deterministic candidate-count rule is the safe default. Set
+    ``task_search_skill_enabled: true`` only when the owner Bot task-search
+    round-trip should decide the dispatch shape.
+    """
+
+    task_search_skill_enabled: bool = False
+
+
+@dataclass(frozen=True)
 class TaskQueueWorkerConfig:
     """In-process distributed-task-queue worker policy.
 

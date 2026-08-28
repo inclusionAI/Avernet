@@ -81,6 +81,8 @@ class ExecutionEngine:
         bcn: BcnService | None = None,
         bcs_identity=None,
         auth_gate=None,
+        task_search_skill_enabled: bool = False,
+        task_settings=None,
         api_base_url: str = "",
         bot_token_provider=None,
     ) -> None:
@@ -99,6 +101,8 @@ class ExecutionEngine:
         self._bcn = bcn
         self._bcs_identity = bcs_identity
         self._auth_gate = auth_gate
+        self._task_search_skill_enabled = task_search_skill_enabled
+        self._task_settings = task_settings
         self._api_base_url = api_base_url
         self._bot_token_provider = bot_token_provider
         self._bg_tasks: set[asyncio.Task] = set()
@@ -216,7 +220,12 @@ class ExecutionEngine:
         if self._bot is not None and self._discover is not None:
             pool.append(
                 SearchBasedDispatchStrategy(
-                    self._bot, self._discover, bcn=self._bcn, join_gate=self._auth_gate
+                    self._bot,
+                    self._discover,
+                    bcn=self._bcn,
+                    join_gate=self._auth_gate,
+                    use_search_skill=self._task_search_skill_enabled,
+                    task_settings=self._task_settings,
                 )
             )
         else:

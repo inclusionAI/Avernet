@@ -31,9 +31,9 @@ from __future__ import annotations
 
 import json
 import os
+from typing import Any
 
 import httpx
-from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
@@ -59,6 +59,8 @@ from agentclaw.community.adapters.http.task.schemas import (
     callback_from_dto,
     graph_to_dto,
     op_result_to_dto,
+    TaskSettingRequestDTO,
+    TaskSettingStateDTO,
     TaskClaimJoinFilterRequestDTO,
     TaskClaimJoinFilterStateDTO,
     TaskGrantRequestDTO,
@@ -81,7 +83,10 @@ from agentclaw.community.adapters.http.task.translator import (
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
+    CLAIM_JOIN_FILTER,
+    SEARCH_SKILL,
     TaskClaimJoinGateProtocol,
+    TaskSettingsServiceProtocol,
 )
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantServiceProtocol,
@@ -97,6 +102,7 @@ from agentclaw.community.core.task.task_discovery.discovery_service import (
 from agentclaw.community.core.task.task_discovery.scheduler import (
     TaskDiscoveryScheduler,
 )
+
 from agentclaw.community.core.task.task_discovery.task_reader import (
     TaskReader,
     clear_discovered_tasks,
@@ -260,14 +266,77 @@ async def revoke_task_claim(
     )
 
 
-# ===== claim_on JOIN 灰度开关(GET/POST /claim-join-filter) =====
-# 默认关闭;开启后派发策略对 LLM 决出的 assignee 做「搜推候选 ∩ task_claim_mode-on 名单」JOIN,
-# 丢掉的候选写 run_info.extend_props.unauthorized_bots(dashboard 暴露,引导 owner 开「任务认领」grant)。
+# ===== 通用任务开关(GET/POST /settings) =====
 
 
 @router.get(
+    "/settings",
+    response_model=Envelope[list[TaskSettingStateDTO]],
+)
+@envelope_errors
+async def get_task_settings(
+    request: Request,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: TaskSettingsServiceProtocol = Injected(TaskSettingsServiceProtocol),  # noqa: B008
+) -> Envelope[list[TaskSettingStateDTO]]:
+    """读取全部已支持的任务开关状态。"""
+    env = get_current_env()
+    setting_types = (CLAIM_JOIN_FILTER, SEARCH_SKILL)
+    states = [
+        TaskSettingStateDTO(
+            setting_type=setting_type,
+            enabled=service.get_enabled(setting_type=setting_type, env=env),
+            env=env,
+        )
+        for setting_type in setting_types
+    ]
+    logger.info(
+        "[task][settings] GET all env=%s operator=%s states=%s",
+        env,
+        user.id,
+        [(state.setting_type, state.enabled) for state in states],
+    )
+    return envelope(states, request)
+
+
+@router.post(
+    "/settings",
+    response_model=Envelope[TaskSettingStateDTO],
+)
+@envelope_errors
+async def set_task_setting(
+    body: TaskSettingRequestDTO,
+    request: Request,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: TaskSettingsServiceProtocol = Injected(TaskSettingsServiceProtocol),  # noqa: B008
+) -> Envelope[TaskSettingStateDTO]:
+    """根据请求体开启或关闭指定任务开关。"""
+    env = get_current_env()
+    enabled = service.set_enabled(
+        setting_type=body.setting_type,
+        enabled=body.enabled,
+        env=env,
+        operator=user.id,
+    )
+    logger.info(
+        "[task][settings] POST setting_type=%s requested=%s effective=%s env=%s operator=%s",
+        body.setting_type,
+        body.enabled,
+        enabled,
+        env,
+        user.id,
+    )
+    return envelope(
+        TaskSettingStateDTO(setting_type=body.setting_type, enabled=enabled, env=env),
+        request,
+    )
+
+
+# 旧路径保留为隐藏兼容入口，新的调用方应使用 /settings?setting_type=...。
+@router.get(
     "/claim-join-filter",
     response_model=Envelope[TaskClaimJoinFilterStateDTO],
+    include_in_schema=False,
 )
 @envelope_errors
 async def get_task_claim_join_filter(
@@ -275,10 +344,6 @@ async def get_task_claim_join_filter(
     user: AuthenticatedUser = Depends(get_current_user),
     service: TaskClaimJoinGateProtocol = Injected(TaskClaimJoinGateProtocol),  # noqa: B008
 ) -> Envelope[TaskClaimJoinFilterStateDTO]:
-    """读取 claim_on JOIN 开关状态(库侧真实读,当前 ``env``)。
-
-    默认关闭(false)= 派发直按 assignee(当前线上行为);true= 启用「搜推候选 ∩ claim_on 名单」JOIN。
-    详见 ``core/task/task_dispatch/claim_join_gate.py``。"""
     env = get_current_env()
     return envelope(
         TaskClaimJoinFilterStateDTO(enabled=service.get_enabled(env=env), env=env),
@@ -289,6 +354,7 @@ async def get_task_claim_join_filter(
 @router.post(
     "/claim-join-filter",
     response_model=Envelope[TaskClaimJoinFilterStateDTO],
+    include_in_schema=False,
 )
 @envelope_errors
 async def set_task_claim_join_filter(
@@ -297,17 +363,12 @@ async def set_task_claim_join_filter(
     user: AuthenticatedUser = Depends(get_current_user),
     service: TaskClaimJoinGateProtocol = Injected(TaskClaimJoinGateProtocol),  # noqa: B008
 ) -> Envelope[TaskClaimJoinFilterStateDTO]:
-    """开启/关闭 claim_on JOIN(默认关闭)。
-
-    上线流程:确认前端已为相关 bot 开启「任务认领」(grant 公共 api-key)后,再 ``POST {enabled:true}`` 开启;
-    开启前未开认领的 bot 仍直按 assignee 派发(不回归)。operator 留 audit。"""
     env = get_current_env()
-    enabled = service.set_enabled(
-        enabled=body.enabled,
-        env=env,
-        operator=user.id,
+    enabled = service.set_enabled(enabled=body.enabled, env=env, operator=user.id)
+    return envelope(
+        TaskClaimJoinFilterStateDTO(enabled=enabled, env=env),
+        request,
     )
-    return envelope(TaskClaimJoinFilterStateDTO(enabled=enabled, env=env), request)
 
 
 # ===== 回投 / BBS 接力 =====

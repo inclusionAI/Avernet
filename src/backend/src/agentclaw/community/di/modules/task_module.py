@@ -24,8 +24,11 @@ from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
+    SEARCH_SKILL,
     TaskClaimJoinGate,
     TaskClaimJoinGateProtocol,
+    TaskSettingsService,
+    TaskSettingsServiceProtocol,
 )
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantService,
@@ -56,7 +59,7 @@ from agentclaw.community.core.task.task_runner.integration.ports import (
     OpenApiBotPort,
 )
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
-from agentclaw.community.di.config import EconomyGovernanceConfig
+from agentclaw.community.di.config import EconomyGovernanceConfig, TaskDispatchConfig
 from agentclaw.community.di.profile import DeployProfile
 
 logger = logging.getLogger("task.module")
@@ -88,6 +91,7 @@ class TaskModule(Module):
         self,
         graph: TaskGraphService,
         bot_public: BotPublicServiceProtocol,
+        task_dispatch: TaskDispatchConfig,
         injector: Injector,
     ) -> TaskService:
         """构造 TaskService facade(引擎自当 ResultSink/TaskContextBuilder;构造期收端口)。
@@ -204,6 +208,14 @@ class TaskModule(Module):
             staff_dept = injector.get(StaffDeptPlugin)
         except Exception:  # noqa: BLE101 未绑定 → list 不附加 owner_user_name
             staff_dept = None
+        try:
+            task_settings = injector.get(TaskSettingsServiceProtocol)
+        except Exception as exc:  # noqa: BLE001 未绑定 → 使用静态默认值
+            logger.info(
+                "[task][task-module] TaskSettingsServiceProtocol 未绑定 → 使用静态默认值:%s",
+                exc,
+            )
+            task_settings = None
         # claim_on JOIN 灰度开关(默认关闭,HTTP 显式开启):经 task_claim_join_gate provider 解析
         # (系统配置 KV,跨副本共享);未绑(纯内核/轻量测试)→ None → gate 关 → 派发不做 claim_on 交集(不回归)。
         try:
@@ -252,6 +264,8 @@ class TaskModule(Module):
                 gov.iframe_callback_url if gov else ""
             ),
             bot_token_provider=bot_token_provider,
+            task_search_skill_enabled=task_dispatch.task_search_skill_enabled,
+            task_settings=task_settings,
         )
 
     @singleton
@@ -287,23 +301,34 @@ class TaskModule(Module):
 
     @singleton
     @provider
-    def task_claim_join_gate(
-        self, injector: Injector
-    ) -> TaskClaimJoinGateProtocol:
-        """claim_on JOIN 灰度开关(默认关闭,HTTP 显式开启):复用 SystemConfigServiceProtocol KV(category=task)。
-
-        线上现有 OOB 预授权 bot 不依赖本开关(直按 assignee 派发);人工确认 claim_on 名单后再经 HTTP 开启。
-        SystemConfigServiceProtocol 经 system_config_module 全 profile 绑定;未绑(纯内核/轻量测试)→
-        config=None → gate.is_enabled() 恒 False(fail-open,不回归现有派发)。"""
+    @inject
+    def task_settings_service(
+        self,
+        injector: Injector,
+        task_dispatch: TaskDispatchConfig,
+    ) -> TaskSettingsServiceProtocol:
+        """Generic runtime task switches backed by SystemConfigService KV."""
         try:
             config = injector.get(SystemConfigServiceProtocol)
-        except Exception as exc:  # noqa: BLE101 system_config_module 未装 → config=None → gate 恒关
+        except Exception as exc:  # noqa: BLE001 lightweight/community path
             logger.info(
-                "[task][task-module] claim_on JOIN 开关 SystemConfigServiceProtocol 未绑定 → gate 恒关闭:%s",
+                "[task][task-module] SystemConfigServiceProtocol 未绑定 → task settings 使用默认值:%s",
                 exc,
             )
             config = None
-        return TaskClaimJoinGate(config=config)
+        return TaskSettingsService(
+            config=config,
+            defaults={SEARCH_SKILL: task_dispatch.task_search_skill_enabled},
+        )
+
+    @singleton
+    @provider
+    @inject
+    def task_claim_join_gate(
+        self, settings: TaskSettingsServiceProtocol
+    ) -> TaskClaimJoinGateProtocol:
+        """Compatibility adapter for the claim_on JOIN dispatch filter."""
+        return TaskClaimJoinGate(settings=settings)
 
     @singleton
     @provider

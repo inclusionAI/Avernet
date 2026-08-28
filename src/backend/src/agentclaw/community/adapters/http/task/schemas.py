@@ -648,25 +648,40 @@ class TaskRevokeResultDTO(BaseModel):
     grant_status: str = Field(..., description="授权状态(revoked)")
 
 
-# ===== claim_on JOIN 灰度开关 DTO =====
-# 默认关闭;开启后派发「搜推候选 ∩ task_claim_mode-on 名单」JOIN。详
-# ``core/task/task_dispatch/claim_join_gate.py``。
+# ===== 通用任务开关 DTO =====
 
 
-class TaskClaimJoinFilterRequestDTO(BaseModel):
-    """设置 claim_on JOIN 开关的请求体。"""
+class TaskSettingRequestDTO(BaseModel):
+    """设置一种任务开关。"""
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = Field(
-        ...,
-        description="claim_on JOIN 开关:true=启用「搜推候选 ∩ claim_on 名单」JOIN 过滤(未命中降 MISS/降级);"
-        "false=关闭(直按 assignee 派发,即当前线上行为)",
+    setting_type: Literal["claim_join_filter", "search_skill"] = Field(
+        ..., description="任务开关类型"
     )
+    enabled: bool = Field(..., description="是否启用")
+
+
+class TaskSettingStateDTO(BaseModel):
+    """任务开关当前状态。"""
+
+    setting_type: Literal["claim_join_filter", "search_skill"] = Field(
+        ..., description="任务开关类型"
+    )
+    enabled: bool = Field(..., description="当前开关状态")
+    env: str = Field(..., description="生效环境(prod/pre/dev)")
+
+
+class TaskClaimJoinFilterRequestDTO(BaseModel):
+    """Legacy request DTO for the hidden compatibility route."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(..., description="是否启用 claim_join_filter")
 
 
 class TaskClaimJoinFilterStateDTO(BaseModel):
-    """开关当前状态回包(GET 读 / POST 写后回显)。"""
+    """Legacy response DTO for the hidden compatibility route."""
 
-    enabled: bool = Field(..., description="当前开关状态(true=已启用 claim_on JOIN)")
+    enabled: bool = Field(..., description="当前开关状态")
     env: str = Field(..., description="生效环境(prod/pre/dev)")
