@@ -167,54 +167,10 @@ class TestProvideSessionInitiator:
             self._make_cron_relay(), injector,
         )
         assert isinstance(result, CronRelaySessionInitiator)
+        from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
+            FrontendUrlProvider,
+        )
+
+        # FrontendUrlProvider is resolved atop (before DEPLOY_PROFILE check);
         # OpenApiBotPort should never be resolved in singlebox
-        injector.get.assert_not_called()
-
-
-class TestInjectFrontendUrlFromYaml:
-    @pytest.mark.parametrize(
-        ("env", "expected"),
-        [("pre", "http://pre.example.com"), ("prod", "http://prod.example.com")],
-    )
-    def test_uses_environment_specific_yaml_url(self, env, expected):
-        from agentclaw.community.core.task.task_discovery.session_initiator import (
-            FrontendUrlHolder,
-        )
-        from agentclaw.community.di.modules import config_module
-        from agentclaw.community.utils import env_utils
-
-        FrontendUrlHolder.set("")
-        config = {
-            "frontend_url": "http://default.example.com",
-            "frontend_url_pre": "http://pre.example.com",
-            "frontend_url_prod": "http://prod.example.com",
-        }
-        try:
-            with (
-                pytest.MonkeyPatch.context() as monkeypatch,
-            ):
-                monkeypatch.setattr(config_module, "_block", lambda _name: config)
-                monkeypatch.setattr(env_utils, "get_current_env", lambda: env)
-                TaskDiscoveryModule._inject_frontend_url_from_yaml()
-
-            assert FrontendUrlHolder.get() == expected
-        finally:
-            FrontendUrlHolder.set("")
-
-    def test_does_not_override_runtime_frontend_url(self):
-        from agentclaw.community.core.task.task_discovery.session_initiator import (
-            FrontendUrlHolder,
-        )
-        from agentclaw.community.di.modules import config_module
-
-        FrontendUrlHolder.set("http://runtime.example.com")
-        try:
-            with pytest.MonkeyPatch.context() as monkeypatch:
-                block = MagicMock()
-                monkeypatch.setattr(config_module, "_block", block)
-                TaskDiscoveryModule._inject_frontend_url_from_yaml()
-
-            assert FrontendUrlHolder.get() == "http://runtime.example.com"
-            block.assert_not_called()
-        finally:
-            FrontendUrlHolder.set("")
+        injector.get.assert_called_once_with(FrontendUrlProvider)
