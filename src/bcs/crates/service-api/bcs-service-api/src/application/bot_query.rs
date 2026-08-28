@@ -2,8 +2,10 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 use crate::core::{ActorKind, ActorStatus, BotCapabilities, DynamicStatusResponse, ServiceError};
+use crate::types::BotSearchFriendshipFilter;
 
 use super::bot_management::BotUseCaseError;
 
@@ -68,6 +70,14 @@ pub struct BotQueryEntry {
     pub env: Option<String>,
     pub dynamic_status: DynamicStatusResponse,
     pub created_by: Option<String>,
+    #[serde(default)]
+    pub user_visibility: String,
+    #[serde(default)]
+    pub friend_ext: Map<String, Value>,
+    #[serde(default)]
+    pub friend_check_in_strategy: String,
+    #[serde(default)]
+    pub is_friend: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,20 +108,38 @@ pub struct BotQueryByIdsResult {
 /// `tc_bot`: `Some(true)` restricts to TC (TeamClaw backend) bots — those with
 /// an owner-suffixed `bot_uuid` whose suffix equals `created_by`; `Some(false)`
 /// restricts to non-TC bots; `None` applies no such filter.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SearchBotsCommand {
     pub q: Option<String>,
     pub visibility: Option<Vec<String>>,
+    pub user_visibility: Option<Vec<String>>,
     pub status: Option<ActorStatus>,
     pub requester_actor_id: Option<String>,
+    pub viewer_actor_id: Option<String>,
+    pub friendship: Option<BotSearchFriendshipFilter>,
     pub tc_bot: Option<bool>,
+    pub offset: u64,
+    pub limit: u64,
+}
+
+impl Default for SearchBotsCommand {
+    fn default() -> Self {
+        Self {
+            q: None,
+            visibility: None,
+            user_visibility: None,
+            status: None,
+            requester_actor_id: None,
+            viewer_actor_id: None,
+            friendship: None,
+            tc_bot: None,
+            offset: 0,
+            limit: 20,
+        }
+    }
 }
 
 /// Response payload for `GET /bots/search`.
-///
-/// The service returns the **full** filtered + sorted set; the delivery
-/// adapter applies caller-dependent `is_friend` post-filtering and pagination
-/// so `total` / `offset` / `limit` reflect the final page.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotSearchResult {
     pub items: Vec<BotQueryEntry>,

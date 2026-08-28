@@ -1274,7 +1274,7 @@ async fn search_bots_route_rejects_invalid_visibility() {
 }
 
 #[tokio::test]
-async fn search_bots_route_forces_public_scope_without_bearer() {
+async fn search_bots_route_defaults_to_public_and_protected_without_bearer() {
     let query = Arc::new(RecordingBotQueryService {
         search_result: Ok(BotSearchResult {
             items: vec![query_entry("bot-alpha"), query_entry("bot-beta")],
@@ -1286,12 +1286,11 @@ async fn search_bots_route_forces_public_scope_without_bearer() {
     // No user-identity port ⇒ anonymous caller.
     let app = build_router(HttpAppState::new(services));
 
-    // Client tries visibility=protected, but without a Bearer it is intersected
-    // with the anonymous public-only scope, producing an empty visibility set.
+    // Without an explicit visibility filter, search defaults to public + protected.
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/bots/search?visibility=protected&offset=0&limit=20")
+                .uri("/bots/search?offset=0&limit=20")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1301,14 +1300,17 @@ async fn search_bots_route_forces_public_scope_without_bearer() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["total"], 0);
+    assert_eq!(json["total"], 2);
     assert_eq!(json["offset"], 0);
     assert_eq!(json["limit"], 20);
-    assert_eq!(json["items"].as_array().unwrap().len(), 0);
+    assert_eq!(json["items"].as_array().unwrap().len(), 2);
 
     let commands = query.search_commands.lock().await;
     assert_eq!(commands.len(), 1);
-    assert!(commands[0].visibility.as_ref().unwrap().is_empty());
+    assert_eq!(
+        commands[0].visibility.as_ref().unwrap(),
+        &vec!["public".to_string(), "protected".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -1326,8 +1328,8 @@ async fn search_bots_route_omits_is_friend_without_explicit_viewer() {
         ChainUserIdentityPort::new(chain),
     )));
 
-    // No visibility param with authenticated caller still controls visibility,
-    // but friendship is only calculated when explicit viewer params are present.
+    // No visibility param means the route uses the default public + protected scope,
+    // while friendship is only calculated when explicit viewer params are present.
     let response = app
         .oneshot(
             Request::builder()
@@ -1347,7 +1349,11 @@ async fn search_bots_route_omits_is_friend_without_explicit_viewer() {
 
     let commands = query.search_commands.lock().await;
     assert_eq!(commands.len(), 1);
-    assert!(commands[0].visibility.is_none());
+    assert_eq!(
+        commands[0].visibility.as_ref().unwrap(),
+        &vec!["public".to_string(), "protected".to_string()]
+    );
+    assert!(commands[0].viewer_actor_id.is_none());
     assert_eq!(commands[0].requester_actor_id.as_deref(), Some("human_alice"));
 }
 
@@ -1355,20 +1361,16 @@ async fn search_bots_route_omits_is_friend_without_explicit_viewer() {
 async fn search_bots_route_uses_explicit_viewer_for_is_friend_filter() {
     let query = Arc::new(RecordingBotQueryService {
         search_result: Ok(BotSearchResult {
-            items: vec![query_entry("bot-alpha"), query_entry("bot-beta")],
+            items: vec![
+                query_entry_with_friend("bot-alpha", Some(true)),
+                query_entry_with_friend("bot-beta", Some(false)),
+            ],
             total: 2,
         }),
         ..Default::default()
     });
-    let connect = Arc::new(RecordingSearchConnectService::with_friends(vec![FriendListEntry {
-        actor_id: "bot-alpha".to_string(),
-        name: Some("Alpha".to_string()),
-        summary: Some("friend".to_string()),
-        is_online: true,
-        kind: ActorKind::Bot,
-    }]));
     let services = Services::builder().bot_query(query.clone()).build_for_test();
-    let app = build_router(HttpAppState::new(services).with_connect(connect.clone()));
+    let app = build_router(HttpAppState::new(services));
 
     let response = app
         .oneshot(
@@ -1383,15 +1385,18 @@ async fn search_bots_route_uses_explicit_viewer_for_is_friend_filter() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["total"], 1);
+    assert_eq!(json["total"], 2);
     let items = json["items"].as_array().unwrap();
-    assert_eq!(items.len(), 1);
+    assert_eq!(items.len(), 2);
     assert_eq!(items[0]["bot_uuid"], "bot-alpha");
     assert_eq!(items[0]["is_friend"], true);
-    assert_eq!(
-        connect.list_friends_commands.lock().await.as_slice(),
-        ["viewer-bot"]
-    );
+    assert_eq!(items[1]["bot_uuid"], "bot-beta");
+    assert_eq!(items[1]["is_friend"], false);
+
+    let commands = query.search_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].viewer_actor_id.as_deref(), Some("viewer-bot"));
+    assert_eq!(commands[0].friendship, Some(bcs_service_api::BotSearchFriendshipFilter::Friends));
 }
 
 #[tokio::test]
@@ -1487,11 +1492,19 @@ async fn search_bots_route_accepts_multi_visibility_and_returns_friend_policy_fi
 
 
 #[tokio::test]
-async fn search_bots_route_filters_and_returns_internal_user_visibility() {
+async fn search_bots_route_forwards_user_visibility_and_returns_policy_fields() {
     let query = Arc::new(RecordingBotQueryService {
         search_result: Ok(BotSearchResult {
-            items: vec![query_entry("bot-alpha"), query_entry("bot-beta")],
-            total: 2,
+            items: vec![query_entry_with_policy(
+                "bot-alpha",
+                UserVisibility::Public,
+                serde_json::json!({"view_scope_user_friend_deps": ["dep-1"]})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                FriendCheckInStrategy::Open,
+            )],
+            total: 1,
         }),
         ..Default::default()
     });
@@ -1506,15 +1519,6 @@ async fn search_bots_route_filters_and_returns_internal_user_visibility() {
                 .unwrap()
                 .clone(),
             friend_check_in_strategy: FriendCheckInStrategy::Open,
-        },
-    );
-    attributes.insert(
-        "bot-beta".to_string(),
-        BotInternalAttributes {
-            visibility: "public".to_string(),
-            user_visibility: UserVisibility::Private,
-            friend_ext: serde_json::Map::new(),
-            friend_check_in_strategy: FriendCheckInStrategy::Approval,
         },
     );
     let services = Services::builder().bot_query(query.clone()).build_for_test();
@@ -1537,10 +1541,15 @@ async fn search_bots_route_filters_and_returns_internal_user_visibility() {
     let json: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["total"], 1);
     let items = json["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
     assert_eq!(items[0]["bot_uuid"], "bot-alpha");
     assert_eq!(items[0]["user_visibility"], "public");
     assert_eq!(items[0]["friend_ext"]["view_scope_user_friend_deps"][0], "dep-1");
     assert_eq!(items[0]["friend_check_in_strategy"], "OPEN");
+
+    let commands = query.search_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].user_visibility.as_ref().unwrap(), &vec!["public".to_string()]);
 }
 
 #[tokio::test]
@@ -1568,8 +1577,55 @@ async fn search_bots_route_filters_default_user_visibility() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["total"], 0);
-    assert_eq!(json["items"].as_array().unwrap().len(), 0);
+    assert_eq!(json["total"], 1);
+    assert_eq!(json["items"].as_array().unwrap().len(), 1);
+
+    let commands = query.search_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].user_visibility.as_ref().unwrap(), &vec!["private".to_string()]);
+}
+
+fn query_entry_with_friend(bot_uuid: &str, is_friend: Option<bool>) -> BotQueryEntry {
+    let mut entry = query_entry(bot_uuid);
+    entry.is_friend = is_friend;
+    entry
+}
+
+fn query_entry_with_policy(
+    bot_uuid: &str,
+    user_visibility: UserVisibility,
+    friend_ext: serde_json::Map<String, Value>,
+    friend_check_in_strategy: FriendCheckInStrategy,
+) -> BotQueryEntry {
+    BotQueryEntry {
+        bot_uuid: bot_uuid.to_string(),
+        capabilities: bcs_service_api::BotCapabilities {
+            name: Some(bot_uuid.to_string()),
+            summary: Some("Test bot".to_string()),
+            visibility: "public".to_string(),
+            ..Default::default()
+        },
+        visibility: "public".to_string(),
+        status: ActorStatus::Online,
+        actor_kind: ActorKind::Bot,
+        env: Some("dev".to_string()),
+        dynamic_status: DynamicStatusResponse {
+            status: "active".to_string(),
+        },
+        created_by: Some("alice".to_string()),
+        user_visibility: match user_visibility {
+            UserVisibility::Public => "public".to_string(),
+            UserVisibility::Protected => "protected".to_string(),
+            UserVisibility::Private => "private".to_string(),
+        },
+        friend_ext,
+        friend_check_in_strategy: match friend_check_in_strategy {
+            FriendCheckInStrategy::Open => "OPEN".to_string(),
+            FriendCheckInStrategy::Approval => "APPROVAL".to_string(),
+            FriendCheckInStrategy::DeptFree => "DEPT_FREE".to_string(),
+        },
+        is_friend: None,
+    }
 }
 
 fn query_entry(bot_uuid: &str) -> BotQueryEntry {
@@ -1589,5 +1645,9 @@ fn query_entry(bot_uuid: &str) -> BotQueryEntry {
             status: "active".to_string(),
         },
         created_by: Some("alice".to_string()),
+        user_visibility: "protected".to_string(),
+        friend_ext: serde_json::Map::new(),
+        friend_check_in_strategy: "APPROVAL".to_string(),
+        is_friend: None,
     }
 }

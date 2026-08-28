@@ -1,21 +1,23 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_service_api::{
+    application::v1::{FriendCheckInStrategy, UserVisibility},
     ActorKind, ActorStatus, BotCapabilities, BotConnectCommand, BotConnectParams, BotConnectResult,
-    BotConnectionControlPort, BotDeliveryTarget, BotDetailCommand, BotDetailResult,
+    BotConnectionControlPort, BotControlPlaneCoreService,
+    BotControlPlaneRecord, BotDeliveryTarget, BotDetailCommand, BotDetailResult,
     BotDiscoveryCommand, BotDiscoveryEntry, BotDiscoveryProviderInfo, BotDiscoveryResult,
     BotDiscoveryService, BotLeaveCommand, BotLeaveResult, BotListCommand, BotListEntry,
     BotListResult, BotManagementService, BotPagedListCommand, BotPagedListResult,
     BotQueryByIdsCommand, BotQueryByIdsResult, BotQueryEntry, BotQueryService,
-    BotRegistryCoreService, BotSearchResult, OrganizationCoreService, OrganizationMemberSummary,
-    SearchBotsCommand,
-    BotRuntimeConnectCommand, BotRuntimeConnectOutcome, BotRuntimeConnectionService,
-    BotRuntimeDisconnectCommand, BotRuntimeStatusCommand, BotRuntimeStatusOutcome,
-    BotStatusUpdateCommand, BotStatusUpdateResult, BotUseCaseError, BotVisibilityCommand,
-    BotVisibilityQueryCommand, BotVisibilityQueryResult, BotVisibilityResult, ConnectionKind,
-    BotDynamicStatus, DynamicStatusResponse, FriendCoreService, KickReason, ProviderBotBinding,
+    BotRegistryCoreService, BotSearchCandidateQuery, BotSearchFriendshipFilter, BotSearchResult,
+    OrganizationCoreService, OrganizationMemberSummary, SearchBotsCommand, BotRuntimeConnectCommand,
+    BotRuntimeConnectOutcome, BotRuntimeConnectionService, BotRuntimeDisconnectCommand,
+    BotRuntimeStatusCommand, BotRuntimeStatusOutcome, BotStatusUpdateCommand,
+    BotStatusUpdateResult, BotUseCaseError, BotVisibilityCommand, BotVisibilityQueryCommand,
+    BotVisibilityQueryResult, BotVisibilityResult, ConnectionKind, BotDynamicStatus,
+    DynamicStatusResponse, FriendCoreService, KickReason, ProviderBotBinding,
     ProviderBotDiscoverySelector, RegisteredBot, RelationCoreService, ServiceError, ServiceResult,
     SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult,
 };
@@ -28,7 +30,9 @@ use crate::core::BotCore;
 pub struct Bot {
     registry: Arc<dyn BotRegistryCoreService>,
     friend: Arc<dyn FriendCoreService>,
+    edge_grants: Option<Arc<dyn bcs_service_api::port::repo::EdgeGrantRepoPort>>,
     bot_core: Option<Arc<BotCore>>,
+    control_plane: Option<Arc<dyn BotControlPlaneCoreService>>,
     relation: Option<Arc<dyn RelationCoreService>>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     connection_control: Option<Arc<dyn BotConnectionControlPort>>,
@@ -47,7 +51,9 @@ impl Bot {
         Self {
             registry,
             friend,
+            edge_grants: None,
             bot_core: None,
+            control_plane: None,
             relation: None,
             user_directory: None,
             connection_control: None,
@@ -59,6 +65,24 @@ impl Bot {
     /// access or the readiness helper can reach them.
     pub fn with_bot_core(mut self, bot_core: Arc<BotCore>) -> Self {
         self.bot_core = Some(bot_core);
+        self
+    }
+
+    /// Wire the control-plane core so the optimized bot search path can push
+    /// filtering and paging down into the repository instead of loading every row.
+    pub fn with_control_plane(
+        mut self,
+        control_plane: Arc<dyn BotControlPlaneCoreService>,
+    ) -> Self {
+        self.control_plane = Some(control_plane);
+        self
+    }
+
+    pub fn with_edge_grants(
+        mut self,
+        edge_grants: Arc<dyn bcs_service_api::port::repo::EdgeGrantRepoPort>,
+    ) -> Self {
+        self.edge_grants = Some(edge_grants);
         self
     }
 
@@ -349,68 +373,115 @@ impl BotQueryService for Bot {
         &self,
         command: SearchBotsCommand,
     ) -> Result<BotSearchResult, BotUseCaseError> {
-        let q_lower = command
-            .q
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_lowercase());
+        let control_plane = self.control_plane.as_ref().ok_or_else(|| {
+            BotUseCaseError::Service(ServiceError::InvalidOperation {
+                message: "Bot is missing BotControlPlaneCoreService wiring; search_bots requires .with_control_plane(...)".to_string(),
+                request_id: None,
+            })
+        })?;
+        self.search_bots_via_control_plane(control_plane.as_ref(), command).await
+    }
+}
 
-        let mut filtered: Vec<RegisteredBot> = self
+impl Bot {
+    async fn search_bots_via_control_plane(
+        &self,
+        control_plane: &dyn BotControlPlaneCoreService,
+        command: SearchBotsCommand,
+    ) -> Result<BotSearchResult, BotUseCaseError> {
+        let viewer_actor_id = command.viewer_actor_id.as_deref();
+        let friend_ids = if let Some(viewer_actor_id) = viewer_actor_id {
+            if let Some(edge_grants) = self.edge_grants.as_ref() {
+                edge_grants
+                    .list_friends(viewer_actor_id, &bcs_config::resolve_env_str())
+                    .await
+                    .into_iter()
+                    .collect::<HashSet<_>>()
+            } else {
+                self.friend
+                    .list_friends(viewer_actor_id)
+                    .await
+                    .into_iter()
+                    .collect::<HashSet<_>>()
+            }
+        } else {
+            HashSet::new()
+        };
+        let friendship = command.friendship.unwrap_or(BotSearchFriendshipFilter::All);
+        if !matches!(friendship, BotSearchFriendshipFilter::All) && viewer_actor_id.is_none() {
+            return Err(ServiceError::InvalidOperation {
+                message: "friendship filter requires viewer_actor_id".to_string(),
+                request_id: None,
+            }
+            .into());
+        }
+
+        let query = BotSearchCandidateQuery {
+            acting_bot_id: command.requester_actor_id.clone().unwrap_or_default(),
+            env: bcs_config::resolve_env_str(),
+            visibility: bcs_service_api::BotCandidateVisibility::Discovery,
+            friend_ids,
+            name: command.q.clone(),
+            q: command.q.clone(),
+            visibility_filter: command.visibility.clone(),
+            user_visibility: command.user_visibility.clone(),
+            status: command.status,
+            friendship: Some(friendship),
+            tc_bot: command.tc_bot,
+            offset: command.offset,
+            limit: command.limit,
+        };
+        let (candidates, total) = control_plane.search_candidates(query).await?;
+        let candidate_bot_ids = candidates
+            .iter()
+            .map(|candidate| candidate.bot.record.bot_id.clone())
+            .collect::<Vec<_>>();
+        let active_bot_ids = self
             .registry
-            .list_all_bots()
+            .list_runtime_active_bot_ids(&candidate_bot_ids)
             .await
             .into_iter()
-            .filter(|bot| {
-                command.requester_actor_id.as_deref() != Some(bot.bot_uuid.as_str())
-            })
-            .filter(|bot| match command.visibility.as_ref() {
-                Some(wants) => wants.iter().any(|want| bot.capabilities.visibility == *want),
-                None => is_discover_visible(&bot.capabilities.visibility),
-            })
-            .filter(|bot| {
-                command.status.map_or(true, |want| bot.status == want)
-            })
-            .filter(|bot| match &q_lower {
-                Some(needle) => {
-                    let name = bot
-                        .capabilities
-                        .name
-                        .as_deref()
-                        .unwrap_or("")
-                        .to_lowercase();
-                    let summary = bot
-                        .capabilities
-                        .summary
-                        .as_deref()
-                        .unwrap_or("")
-                        .to_lowercase();
-                    name.contains(needle) || summary.contains(needle)
+            .collect::<HashSet<_>>();
+
+        let mut items = Vec::with_capacity(candidates.len());
+        for candidate in candidates {
+            let record = candidate.bot.record;
+            let capabilities = bot_capabilities_from_record(&record);
+            let bot_uuid = record.bot_id;
+            let dynamic_status = if record.status == ActorStatus::Online
+                && active_bot_ids.contains(&bot_uuid)
+            {
+                DynamicStatusResponse {
+                    status: "active".to_string(),
                 }
-                None => true,
-            })
-            .collect();
-
-        // TC (TeamClaw backend) bot filter: an owner-suffixed `bot_uuid` whose
-        // suffix equals its `created_by` owner — the persistent marker the
-        // delete flow treats as a TC bot (`is_owner_suffixed_bot_id_for_staff`).
-        if let Some(want_tc) = command.tc_bot {
-            filtered.retain(|bot| is_tc_bot(bot) == want_tc);
+            } else {
+                DynamicStatusResponse {
+                    status: "offline".to_string(),
+                }
+            };
+            items.push(BotQueryEntry {
+                bot_uuid,
+                capabilities,
+                visibility: record.visibility,
+                status: record.status,
+                actor_kind: record.kind,
+                env: Some(record.env),
+                dynamic_status,
+                created_by: record.created_by,
+                user_visibility: user_visibility_to_wire(record.user_visibility).to_string(),
+                friend_ext: record.friend_ext,
+                friend_check_in_strategy: friend_check_in_strategy_to_wire(
+                    record.friend_check_in_strategy,
+                )
+                .to_string(),
+                is_friend: viewer_actor_id.map(|_| candidate.is_friend),
+            });
         }
 
-        // Sort by display name ascending; bots without a name sort last.
-        filtered.sort_by(|a, b| {
-            (a.capabilities.name.as_deref().unwrap_or(""))
-                .cmp(b.capabilities.name.as_deref().unwrap_or(""))
-        });
-
-        let total = filtered.len() as u64;
-        let mut items = Vec::with_capacity(filtered.len());
-        for bot in filtered {
-            items.push(self.bot_to_query_entry(bot).await);
-        }
         Ok(BotSearchResult { items, total })
     }
+
+
 }
 
 #[async_trait]
@@ -1054,6 +1125,13 @@ impl Bot {
                 status: if is_active { "active" } else { "offline" }.to_string(),
             },
             created_by: bot.created_by,
+            user_visibility: user_visibility_to_wire(UserVisibility::Protected).to_string(),
+            friend_ext: serde_json::Map::new(),
+            friend_check_in_strategy: friend_check_in_strategy_to_wire(
+                FriendCheckInStrategy::Approval,
+            )
+            .to_string(),
+            is_friend: None,
         }
     }
 
@@ -1069,6 +1147,13 @@ impl Bot {
             env: bot.env,
             dynamic_status,
             created_by: bot.created_by,
+            user_visibility: user_visibility_to_wire(UserVisibility::Protected).to_string(),
+            friend_ext: serde_json::Map::new(),
+            friend_check_in_strategy: friend_check_in_strategy_to_wire(
+                FriendCheckInStrategy::Approval,
+            )
+            .to_string(),
+            is_friend: None,
         }
     }
 
@@ -1310,6 +1395,34 @@ fn contains_ignore_case(value: &str, query: &str) -> bool {
     value.to_lowercase().contains(&query.to_lowercase())
 }
 
+fn bot_capabilities_from_record(record: &BotControlPlaneRecord) -> BotCapabilities {
+    BotCapabilities {
+        name: non_empty_text(Some(record.name.as_str())),
+        summary: non_empty_text(Some(record.descriptor.summary.as_str())),
+        domains: record.descriptor.domains.clone(),
+        skills: record.descriptor.skills.clone(),
+        scopes: record.descriptor.scopes.clone(),
+        visibility: record.visibility.clone(),
+        ..Default::default()
+    }
+}
+
+fn user_visibility_to_wire(value: UserVisibility) -> &'static str {
+    match value {
+        UserVisibility::Public => "public",
+        UserVisibility::Protected => "protected",
+        UserVisibility::Private => "private",
+    }
+}
+
+fn friend_check_in_strategy_to_wire(value: FriendCheckInStrategy) -> &'static str {
+    match value {
+        FriendCheckInStrategy::Open => "OPEN",
+        FriendCheckInStrategy::Approval => "APPROVAL",
+        FriendCheckInStrategy::DeptFree => "DEPT_FREE",
+    }
+}
+
 fn non_empty_text(value: Option<&str>) -> Option<String> {
     value
         .map(str::trim)
@@ -1417,17 +1530,7 @@ fn is_owner_suffixed_bot_id_for_staff(bot_uuid: &str, staff_no: &str) -> bool {
         .is_some_and(|(_, suffix)| suffix == staff_no)
 }
 
-/// A TC (TeamClaw backend) bot: its `bot_uuid` is owner-suffixed and the
-/// suffix matches its bound `created_by` owner. This is the persisted marker
-/// for bots onboarded via the backend `ensure` flow (cf. the delete-flow
-/// "TC bot must be deleted from TC" gate).
-fn is_tc_bot(bot: &RegisteredBot) -> bool {
-    bot.created_by.as_deref().is_some_and(|owner| {
-        bot.bot_uuid
-            .rsplit_once(':')
-            .is_some_and(|(_, suffix)| suffix == owner)
-    })
-}
+
 
 fn authorize_bot_management(
     caller_actor_id: Option<&str>,

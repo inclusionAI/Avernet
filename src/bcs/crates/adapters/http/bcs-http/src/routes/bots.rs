@@ -11,14 +11,11 @@ use bcs_protocol::{
 use bcs_service_api::{
     ActorKind, ActorStatus, BotConnectCommand, BotDetailCommand, BotDetailResult, BotLeaveCommand,
     BotListCommand, BotListEntry, BotPagedListCommand, BotQueryByIdsCommand, BotQueryEntry,
-    application::v1::{
-        ApplicationError, BotInternalAttributes, FriendCheckInStrategy, UserVisibility,
-    },
     BotStatusUpdateCommand, BotUseCaseError, BotVisibilityCommand, BotVisibilityQueryCommand,
     BotVisibilityQueryResult, ConnectError, MyBotsCommand, SearchBotsCommand, ServiceError,
 };
 use serde::Deserialize;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::error::HttpAdapterError;
 use crate::mapping::capabilities::{
@@ -459,22 +456,14 @@ enum FriendshipFilter {
     NonFriends,
 }
 
-#[derive(Debug, Clone)]
-struct BotSearchPolicy {
-    user_visibility: String,
-    friend_ext: Map<String, Value>,
-    friend_check_in_strategy: String,
-}
-
-/// `GET /bots/search` — bot search with name fuzzy + keyword filtering + friendship filters.
-/// Spec: docs/superpowers/specs/2026-08-20-bot-search-endpoint-design.md
+/// `GET /bots/search` — control-plane backed bot search that pushes
+/// filter/paging down to the repository.
 pub async fn search_bots(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
     Query(q): Query<BotSearchQuery>,
 ) -> Result<Json<Value>, HttpAdapterError> {
-    // ── Validate pagination + filter params (spec §3.5) ────────────────────────
     let offset = q.offset.unwrap_or(0);
     let limit = match q.limit.unwrap_or(20) {
         limit if (1..=100).contains(&limit) => limit,
@@ -506,10 +495,7 @@ pub async fn search_bots(
     };
     let friendship = parse_friendship_filter(q.friendship.as_deref(), q.is_friend)?;
 
-    // ── Resolve caller (optional Bearer) ───────────────────────────────────────
     let caller_id = caller_actor_id_from_headers(&state, &headers, &uri).await;
-
-    // ── Resolve explicit friendship viewer ─────────────────────────────────────
     let viewer_actor_id = match (&q.viewer_actor_type, &q.viewer_actor_id) {
         (None, None) => None,
         (Some(actor_type), Some(actor_id)) => {
@@ -530,7 +516,7 @@ pub async fn search_bots(
         _ => {
             return Err(HttpAdapterError::BadRequest(
                 "viewer_actor_type and viewer_actor_id must be provided together".to_string(),
-            ));
+            ))
         }
     };
     if matches!(friendship, FriendshipFilter::Friends | FriendshipFilter::NonFriends)
@@ -541,99 +527,55 @@ pub async fn search_bots(
         ));
     }
 
-    // ── Effective visibility scope (spec §3.6.2) ───────────────────────────────
-    // No Bearer → only public can be returned. If the caller provided a visibility
-    // filter, intersect it with public so unsupported combinations produce an
-    // empty result instead of widening scope. Bearer + explicit visibility →
-    // respect it. Bearer + no visibility → None (service yields public+protected).
-    let effective_visibility = match (&caller_id, visibility) {
-        (None, None) => Some(vec!["public".to_string()]),
-        (None, Some(values)) => Some(values.into_iter().filter(|v| v == "public").collect()),
-        (Some(_), values) => values,
-    };
-    let effective_visibility_filter = effective_visibility.clone();
+    let effective_visibility = visibility.or_else(|| {
+        Some(vec!["public".to_string(), "protected".to_string()])
+    });
 
-    // ── Query the registry via the application service (carries status/online) ─
     let result = state
         .services
         .bot_query
         .search_bots(SearchBotsCommand {
             q: q.q.clone(),
             visibility: effective_visibility,
+            user_visibility,
             status,
             requester_actor_id: caller_id.clone(),
+            viewer_actor_id,
+            friendship: Some(match friendship {
+                FriendshipFilter::All => bcs_service_api::BotSearchFriendshipFilter::All,
+                FriendshipFilter::Friends => bcs_service_api::BotSearchFriendshipFilter::Friends,
+                FriendshipFilter::NonFriends => {
+                    bcs_service_api::BotSearchFriendshipFilter::NonFriends
+                }
+            }),
             tc_bot: q.tc_bot,
+            offset,
+            limit,
         })
         .await
         .map_err(bot_use_case_error_to_http)?;
 
-    // ── Friend set from the explicit viewer's edge_grants ──────────────────────
-    let needs_friend_set = viewer_actor_id.is_some();
-    let friend_ids: std::collections::HashSet<String> = match (&viewer_actor_id, needs_friend_set) {
-        (Some(viewer), true) => state
-            .connect
-            .list_friends(viewer)
-            .await
-            .map_err(HttpAdapterError::Service)?
-            .into_iter()
-            .map(|e| e.actor_id)
-            .collect(),
-        _ => std::collections::HashSet::new(),
-    };
-
-    // ── Enrich policy, post-filter viewer-dependent fields, then paginate ──────
-    let mut filtered: Vec<(BotQueryEntry, BotSearchPolicy)> = Vec::new();
-    for bot in result.items {
-        if let Some(wants) = effective_visibility_filter.as_ref() {
-            if !wants.iter().any(|want| bot.visibility == *want) {
-                continue;
-            }
-        }
-        let policy = load_bot_search_policy(&state, &bot.bot_uuid).await?;
-        if let Some(wants) = user_visibility.as_ref() {
-            if !wants.iter().any(|want| policy.user_visibility == *want) {
-                continue;
-            }
-        }
-        let is_friend = friend_ids.contains(&bot.bot_uuid);
-        let friendship_matches = match friendship {
-            FriendshipFilter::All => true,
-            FriendshipFilter::Friends => is_friend,
-            FriendshipFilter::NonFriends => !is_friend,
-        };
-        if friendship_matches {
-            filtered.push((bot, policy));
-        }
-    }
-
-    let total = filtered.len() as u64;
-    let page_items: Vec<(BotQueryEntry, BotSearchPolicy)> = filtered
+    let items: Vec<BotSearchEntry> = result
+        .items
         .into_iter()
-        .skip(offset as usize)
-        .take(limit as usize)
-        .collect();
-
-    // ── Build response (is_friend field only for an explicit viewer) ───────────
-    let items: Vec<BotSearchEntry> = page_items
-        .into_iter()
-        .map(|(bot, policy)| BotSearchEntry {
-            bot_uuid: bot.bot_uuid.clone(),
-            name: bot.capabilities.name.clone(),
-            summary: bot.capabilities.summary.clone(),
+        .map(|bot| BotSearchEntry {
+            bot_uuid: bot.bot_uuid,
+            name: bot.capabilities.name,
+            summary: bot.capabilities.summary,
             visibility: bot.visibility,
-            user_visibility: policy.user_visibility,
-            friend_ext: policy.friend_ext,
-            friend_check_in_strategy: policy.friend_check_in_strategy,
+            user_visibility: bot.user_visibility,
+            friend_ext: bot.friend_ext,
+            friend_check_in_strategy: bot.friend_check_in_strategy,
             status: actor_status_to_wire(bot.status).to_string(),
             actor_kind: actor_kind_to_wire(bot.actor_kind).to_string(),
             is_online: bot.dynamic_status.status == "active",
-            is_friend: viewer_actor_id.as_ref().map(|_| friend_ids.contains(&bot.bot_uuid)),
+            is_friend: bot.is_friend,
         })
         .collect();
 
     Ok(Json(serde_json::json!({
         "items": items,
-        "total": total,
+        "total": result.total,
         "offset": offset,
         "limit": limit,
     })))
@@ -684,75 +626,6 @@ fn parse_friendship_filter(
         value => Err(HttpAdapterError::BadRequest(format!(
             "friendship must be all|friends|non_friends, got '{value}'"
         ))),
-    }
-}
-
-async fn load_bot_search_policy(
-    state: &HttpAppState,
-    bot_id: &str,
-) -> Result<BotSearchPolicy, HttpAdapterError> {
-    let Some(service) = state.internal_bot_attributes_service.as_ref() else {
-        return Ok(default_bot_search_policy());
-    };
-    match service.get(bot_id.to_string()).await {
-        Ok(attributes) => Ok(bot_search_policy_from_attributes(attributes)),
-        Err(ApplicationError::NotFound { .. }) => Ok(default_bot_search_policy()),
-        Err(ApplicationError::InvalidInput { message, .. }) => {
-            Err(HttpAdapterError::BadRequest(message))
-        }
-        Err(ApplicationError::Unauthenticated) => Err(HttpAdapterError::Unauthorized(
-            "authentication is required".to_string(),
-        )),
-        Err(ApplicationError::Forbidden(message) | ApplicationError::ForbiddenCode { message, .. }) => {
-            Err(HttpAdapterError::Forbidden(message))
-        }
-        Err(ApplicationError::Conflict { message, .. }) => Err(HttpAdapterError::Conflict(message)),
-        Err(ApplicationError::Gone { message, .. }) => Err(HttpAdapterError::Gone(message)),
-        Err(ApplicationError::QuotaExceeded { message, .. })
-        | Err(ApplicationError::PayloadTooLarge { message, .. })
-        | Err(ApplicationError::Unprocessable { message, .. })
-        | Err(ApplicationError::BadGateway { message, .. })
-        | Err(ApplicationError::Internal(message)) => Err(HttpAdapterError::Service(
-            ServiceError::InternalError(message),
-        )),
-    }
-}
-
-fn bot_search_policy_from_attributes(attributes: BotInternalAttributes) -> BotSearchPolicy {
-    BotSearchPolicy {
-        user_visibility: user_visibility_to_wire(attributes.user_visibility).to_string(),
-        friend_ext: attributes.friend_ext,
-        friend_check_in_strategy: friend_check_in_strategy_to_wire(
-            attributes.friend_check_in_strategy,
-        )
-        .to_string(),
-    }
-}
-
-fn default_bot_search_policy() -> BotSearchPolicy {
-    BotSearchPolicy {
-        user_visibility: user_visibility_to_wire(UserVisibility::Protected).to_string(),
-        friend_ext: Map::new(),
-        friend_check_in_strategy: friend_check_in_strategy_to_wire(
-            FriendCheckInStrategy::Approval,
-        )
-        .to_string(),
-    }
-}
-
-fn user_visibility_to_wire(value: UserVisibility) -> &'static str {
-    match value {
-        UserVisibility::Public => "public",
-        UserVisibility::Protected => "protected",
-        UserVisibility::Private => "private",
-    }
-}
-
-fn friend_check_in_strategy_to_wire(value: FriendCheckInStrategy) -> &'static str {
-    match value {
-        FriendCheckInStrategy::Open => "OPEN",
-        FriendCheckInStrategy::Approval => "APPROVAL",
-        FriendCheckInStrategy::DeptFree => "DEPT_FREE",
     }
 }
 
