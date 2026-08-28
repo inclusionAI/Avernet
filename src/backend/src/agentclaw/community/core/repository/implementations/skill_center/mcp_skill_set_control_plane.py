@@ -20,7 +20,6 @@ from agentclaw.community.core.skill_center.policies.capability_ownership import 
     require_direct_mcp_control_allowed,
     require_can_join_set,
 )
-from agentclaw.community.core.skill_center.orm import DefaultSkillsetMcpExclusion
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -120,7 +119,10 @@ class McpSkillSetControlPlaneCommands:
                     env=get_current_env(), server_code=server_code,
                 )
             session.flush()
-            return DesiredStateMutation(self._as_item(row), True, old)
+            return DesiredStateMutation(
+                self._as_item(row), True, old,
+                mcp_codes=frozenset({server_code}),
+            )
 
     def remove_mcp(
         self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
@@ -129,34 +131,8 @@ class McpSkillSetControlPlaneCommands:
     ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
             row = self._set(session, bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type=engine_type, default_engine_types=default_engine_types, locked=True)
-            old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
-            if row.is_default:
-                existing = (
-                    session.query(DefaultSkillsetMcpExclusion)
-                    .filter(
-                        DefaultSkillsetMcpExclusion.avernet_tenant
-                        == get_current_avernet_tenant(),
-                        DefaultSkillsetMcpExclusion.user_id == owner_id,
-                        DefaultSkillsetMcpExclusion.bot_id == bot_id,
-                        DefaultSkillsetMcpExclusion.skill_set_id == int(row.id),
-                        DefaultSkillsetMcpExclusion.server_code == server_code,
-                    )
-                    .first()
-                )
-                if existing is not None:
-                    return SkillSetMutation(self._as_item(row), False, old)
-                session.add(
-                    DefaultSkillsetMcpExclusion(
-                        user_id=owner_id,
-                        bot_id=bot_id,
-                        skill_set_id=int(row.id),
-                        server_code=server_code,
-                        avernet_tenant=get_current_avernet_tenant(),
-                    )
-                )
-                session.flush()
-                return SkillSetMutation(self._as_item(row), True, old)
             self._ordinary(row)
+            old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             membership = (
                 self._scope(session.query(SkillSetMCPServer), SkillSetMCPServer)
                 .filter(SkillSetMCPServer.skill_set_id == row.id, SkillSetMCPServer.server_code == server_code)
@@ -171,7 +147,10 @@ class McpSkillSetControlPlaneCommands:
                     env=get_current_env(), server_codes={server_code},
                 )
             session.flush()
-            return DesiredStateMutation(self._as_item(row), True, old)
+            return DesiredStateMutation(
+                self._as_item(row), True, old,
+                mcp_codes=frozenset({server_code}),
+            )
 
     def exclude_default_mcp(
         self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
@@ -221,7 +200,10 @@ class McpSkillSetControlPlaneCommands:
             if not created and removed_installation == 0:
                 return DesiredStateMutation(self._as_item(row), False, old)
             session.flush()
-            return DesiredStateMutation(self._as_item(row), True, old)
+            return DesiredStateMutation(
+                self._as_item(row), True, old,
+                mcp_codes=frozenset({server_code}),
+            )
 
     def unexclude_default_mcp(
         self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
@@ -249,7 +231,10 @@ class McpSkillSetControlPlaneCommands:
                     env=get_current_env(), server_code=server_code,
                 )
             session.flush()
-            return DesiredStateMutation(self._as_item(row), True, old)
+            return DesiredStateMutation(
+                self._as_item(row), True, old,
+                mcp_codes=frozenset({server_code}),
+            )
 
     def excluded_default_mcp_codes(
         self, *, bot_id: str, owner_id: str, set_id: str
@@ -289,7 +274,9 @@ class McpSkillSetControlPlaneCommands:
                 env=get_current_env(), server_code=server_code,
             )
             session.flush()
-            return DesiredStateMutation({}, True, old)
+            return DesiredStateMutation(
+                {}, True, old, mcp_codes=frozenset({server_code})
+            )
 
     def uninstall_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str,
@@ -318,7 +305,10 @@ class McpSkillSetControlPlaneCommands:
                 env=get_current_env(), server_codes={server_code},
             ) > 0
             session.flush()
-            return DesiredStateMutation({}, changed, old)
+            return DesiredStateMutation(
+                {}, changed, old,
+                mcp_codes=frozenset({server_code}) if changed else frozenset(),
+            )
 
     def list_installed_mcps(self, *, bot_id: str, owner_id: str, engine_type: str | None = None) -> set[str]:
         with self._db.orm_session() as session:

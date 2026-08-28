@@ -52,11 +52,15 @@ class _Repository:
 
     def install_mcp(self, **kwargs) -> DesiredStateMutation:
         self.install_mcp_calls.append(kwargs)
-        return self._mutation()
+        return replace(
+            self._mutation(), mcp_codes=frozenset({kwargs["server_code"]})
+        )
 
     def uninstall_mcp(self, **kwargs) -> DesiredStateMutation:
         self.uninstall_mcp_calls.append(kwargs)
-        return self._mutation()
+        return replace(
+            self._mutation(), mcp_codes=frozenset({kwargs["server_code"]})
+        )
 
     def install_skill(self, **kwargs) -> DesiredStateMutation:
         self.install_skill_calls.append(kwargs)
@@ -541,6 +545,38 @@ async def test_deactivating_one_mcp_releases_only_that_code():
     assert scope.skills is False
     assert scope.released_mcp == frozenset({"mcp.weather"})
     assert scope.claimed_mcp == frozenset()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method_name", ["activate_mcp", "deactivate_mcp"])
+async def test_an_unchanged_direct_mcp_command_declares_no_runtime_delta(
+    method_name: str,
+) -> None:
+    class _UnchangedMcpRepository(_Repository):
+        def install_mcp(self, **kwargs) -> DesiredStateMutation:
+            self.install_mcp_calls.append(kwargs)
+            return DesiredStateMutation(
+                {}, False, CapabilityDesiredState(set(), {}, {})
+            )
+
+        def uninstall_mcp(self, **kwargs) -> DesiredStateMutation:
+            self.uninstall_mcp_calls.append(kwargs)
+            return DesiredStateMutation(
+                {}, False, CapabilityDesiredState(set(), {}, {})
+            )
+
+    runtime = _ScopeRecordingRuntime()
+    service = _service(repository=_UnchangedMcpRepository(), runtime=runtime)
+
+    result = await getattr(service, method_name)(
+        server_code="mcp.weather",
+        bot_id="bot-1",
+        owner_id="true-owner",
+        actor_id="true-owner",
+    )
+
+    assert result["changed"] is False
+    assert runtime.scopes == [ProjectionScope()]
 
 
 @pytest.mark.asyncio

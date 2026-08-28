@@ -107,6 +107,9 @@ from agentclaw.community.core.bot_management.services.teclaw_publish_task_handle
 from agentclaw.community.core.bot_management.services.template_service import (
     TemplateService,
 )
+from agentclaw.community.core.bot_management.engines.aicoding.restart_authorization_listener import (
+    AicodingRestartAuthorizationBaasPublishListener,
+)
 from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import (
     CronAutoSetupService,
 )
@@ -271,6 +274,24 @@ class BotManagementModule(Module):
     @inject
     def bot_repository(self, db: DatabasePlugin) -> BotRepository:
         return UnifiedBotRepository(db)
+
+
+    @singleton
+    @provider
+    @inject
+    def restart_authorization_baas_publish_listener(
+        self,
+        repository: BotRepository,
+        template_service: TemplateService,
+        mcp_sync_service: MCPSyncService,
+        skill_set_factory: SkillSetServiceFactory,
+    ) -> AicodingRestartAuthorizationBaasPublishListener:
+        return AicodingRestartAuthorizationBaasPublishListener(
+            bot_repo=repository,
+            template_service=template_service,
+            mcp_sync=mcp_sync_service,
+            skill_set_factory=skill_set_factory,
+        )
 
     @singleton
     @provider

@@ -2,13 +2,33 @@
 
 from fastapi import FastAPI
 
-from agentclaw.community.adapters.http.openapi_v1.skills.router import router
+from agentclaw.community.adapters.http.openapi_v1.skills.router import readme_router, router
 
 
 def _schema() -> dict:
     app = FastAPI()
     app.include_router(router)
+    app.include_router(readme_router)
     return app.openapi()
+
+
+def test_skill_readme_is_skill_addressed_and_uses_openapi_envelope() -> None:
+    operation = _schema()["paths"]["/openapi/v1/bots/skills/{skill_id}/readme"]["get"]
+    parameters = {item["name"]: item for item in operation["parameters"]}
+
+    assert parameters["skill_id"]["in"] == "path"
+    assert set(parameters) == {"skill_id"}
+    response = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert response["$ref"].endswith("Envelope_SkillContent_")
+    components = _schema()["components"]["schemas"]
+    envelope_properties = components["Envelope_SkillContent_"]["properties"]
+    assert set(envelope_properties) == {"code", "message", "data", "request_id"}
+    data_schema = envelope_properties["data"]
+    assert any(
+        item.get("$ref", "").endswith("SkillContent")
+        for item in data_schema.get("anyOf", [])
+    )
+    assert set(components["SkillContent"]["properties"]) == {"content"}
 
 
 def test_openapi_exposes_local_compatibility_and_skill_asset_operations() -> None:

@@ -233,12 +233,15 @@ class EngineProvisioningStrategy(ABC):
         *,
         mcp_sync: Any = None,
         skill_set_factory: Any = None,
+        template_service: Any = None,
     ) -> bool:
         """Optionally refresh engine-owned restart authorization/runtime state.
 
         Engines own their opt-in keys and side effects. Implementations must be
         best-effort: failures should be logged/swallowed so restart success is
-        not blocked. Return value only records whether the engine opted in.
+        not blocked. ``template_service`` is optional and lets strategies consume
+        persisted, engine-owned restart intents after async lifecycle events.
+        Return value only records whether the engine opted in.
         """
 
     @abstractmethod

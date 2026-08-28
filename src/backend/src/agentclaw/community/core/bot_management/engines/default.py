@@ -118,6 +118,7 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
         *,
         mcp_sync: object = None,
         skill_set_factory: object = None,
+        template_service: object = None,
     ) -> bool:
         return False
 
