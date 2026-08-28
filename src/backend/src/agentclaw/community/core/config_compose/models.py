@@ -61,8 +61,8 @@ class ComposeRequest:
     )
     """The bot's effective MCP set, when the caller already resolved it.
 
-    A whole-artifact delivery resolves this set during plan resolution
-    (``BotRuntimeProjector._build_plan``) and the composer would otherwise
+    A whole-artifact delivery resolves this set during capability-plan resolution
+    (``BotRuntimeProjector._build_capability_plan``) and the composer would otherwise
     re-read the identical set from the same database microseconds later — both
     reads go through ``collect_bot_active_mcps`` with
     ``strict_policy_context=True``, so they are contractually the same answer.

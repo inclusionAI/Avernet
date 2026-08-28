@@ -11,8 +11,9 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     EngineRuntimeProjection,
     ProjectionScope,
     ResolvedCapabilityPlan,
+    ResolvedSkillPlan,
 )
-from agentclaw.community.core.skill_center.runtime_resolver import RuntimeProjection
+from agentclaw.community.core.skill_center.runtime_resolver import RuntimeSkillProjection
 from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
     RegisteredSkillAsset,
@@ -66,7 +67,7 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
     async def apply(
         self,
         *,
-        plan: ResolvedCapabilityPlan,
+        plan: ResolvedSkillPlan,
         scope: ProjectionScope,
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None:
@@ -95,19 +96,18 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
 
         logger.info(
             "[WholeArtifactRuntimeProjection] Delivering whole artifact: "
-            "bot_id=%s, engine=%s, skills=%s, mcps=%s",
+            "bot_id=%s, engine=%s, skills=%s, mcp_scope=%s",
             plan.bot_id,
             plan.engine,
             len(plan.projection.skill_assets),
-            len(plan.projection.mcp_server_codes),
+            scope.mcp,
         )
         # This one call is the whole delivery. Despite the name, on a
-        # whole-artifact engine ``project_skills`` does not write Skills: it
-        # resolves the device, recomposes the Bot's entire
-        # ``BotConfigArtifact`` from the database — Skills, MCP servers, CLI,
-        # credentials — and POSTs it to ``/api/v1/bot/apply``. The MCP half of
-        # this projection rides in that same document, which is why there is
-        # no second call here.
+        # whole-artifact engine ``project_skills`` does not write only Skills:
+        # it resolves the device, recomposes the BotConfigArtifact from the
+        # database — Skills, MCP servers, and credentials — and POSTs it to
+        # ``/api/v1/bot/apply``. CLI authorization remains in Passport. The
+        # MCP half rides in the same artifact, so there is no second call.
         #
         # All of that is blocking, but staying off the event loop is
         # ``project_skills``'s own responsibility — it dispatches to a thread
@@ -127,16 +127,23 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
         # are derived from it — and the compose inside this call would
         # otherwise ask the same database the same question again, with
         # ``strict_policy_context=True`` on both sides making the two answers
-        # the same by contract.
+        # the same by contract. A Skill-only plan intentionally has no such
+        # value: passing ``None`` preserves ConfigComposer's database fallback
+        # without rebuilding the projector's Non-Skill plan.
+        effective_mcps = (
+            plan.effective_mcp_entries
+            if isinstance(plan, ResolvedCapabilityPlan)
+            else None
+        )
         if not await plan.service.project_skills(
             desired_skills=self._desired_skills(plan.projection),
-            effective_mcps=plan.effective_mcp_entries,
+            effective_mcps=effective_mcps,
         ):
             raise SkillSetRuntimeReconcileError()
 
     @staticmethod
     def _desired_skills(
-        projection: RuntimeProjection,
+        projection: RuntimeSkillProjection,
     ) -> list[dict[str, str | None]]:
         return [
             {

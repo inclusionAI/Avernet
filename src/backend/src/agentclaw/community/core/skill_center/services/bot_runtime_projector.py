@@ -30,6 +30,7 @@ from agentclaw.community.core.skill_center.factories import SkillSetServiceFacto
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
     ResolvedCapabilityPlan,
+    ResolvedSkillPlan,
 )
 from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
     EngineRuntimeProjectionRegistry,
@@ -37,9 +38,6 @@ from agentclaw.community.core.skill_center.services.runtime_projections.registry
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeDesiredState,
     RuntimeProjectionResolver,
-)
-from agentclaw.community.core.skills_pool.mapping_intent import (
-    build_logical_skill_mappings,
 )
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.log import get_logger
@@ -57,12 +55,13 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
     runtime contract selection, full mapping publication, MCP delivery, and the
     overwrite-style Passport MCP/CLI manifest.
 
-    Resolving and applying are separated by the ``ProjectionScope``: the plan
-    is always built whole — it is read-only, and every pre-flight failure in it
-    must happen before anything is written — while the scope decides which
-    halves are *written*. Keeping the reads unconditional is what lets a
-    projection abort cleanly, with nothing half-applied for a compensation to
-    unpick.
+    Resolving and applying are separated by the ``ProjectionScope``. The
+    Skill state is always resolved into ``ResolvedSkillPlan``, including its
+    Installation flush and engine validation. MCP/CLI/Passport pre-flight is
+    added only when the scope can write that half, producing the stricter
+    ``ResolvedCapabilityPlan``. A whole-artifact runtime independently
+    composes its retained MCP state from DB during its one delivery; CLI
+    authorization remains in Passport.
     """
 
     @inject
@@ -113,7 +112,9 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         self._registry.for_engine(engine).validate_plan(
             skill_assets=skill_assets
         )
-        return tuple(build_logical_skill_mappings(skill_assets))
+        return RuntimeProjectionResolver().resolve_skills(
+            tuple(skill_assets)
+        ).skill_mappings
 
     async def project(
         self,
@@ -127,7 +128,12 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             bot_id=bot_id,
             owner_id=owner_id,
             retired_mappings=retired_mappings,
+            scope=scope,
         )
+        if scope.mcp and not isinstance(plan, ResolvedCapabilityPlan):
+            # Contract guard before any engine write: an MCP scope must never
+            # cross the seam with a Skill-only plan.
+            raise SkillSetRuntimeReconcileError()
         # How a runtime consumes a projection — how many calls converging takes,
         # and whether the scope's halves mean anything to it at all — is the
         # engine's fact, so the engine's own implementation answers it. Nothing
@@ -141,6 +147,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         # platform's authorization record, the same for every engine. Its
         # trigger is unchanged.
         if scope.mcp:
+            assert isinstance(plan, ResolvedCapabilityPlan)
             self._apply_passport_projection(plan=plan)
         else:
             logger.info(
@@ -163,33 +170,46 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         ``skills`` flag is false already says exactly that — so no separate
         entry point into the engine's projection is needed.
         """
+        if not scope.mcp:
+            raise ValueError("project_mcp_and_cli requires scope.mcp=True")
         plan = self._resolve_plan(
             bot_id=bot_id,
             owner_id=owner_id,
+            scope=scope,
         )
+        assert isinstance(plan, ResolvedCapabilityPlan)
         await self._registry.for_engine(plan.engine).apply(
             plan=plan,
             scope=scope,
         )
-        if scope.mcp:
-            self._apply_passport_projection(plan=plan)
+        self._apply_passport_projection(plan=plan)
 
     def _resolve_plan(
         self,
         *,
         bot_id: str,
         owner_id: str,
+        scope: ProjectionScope,
         retired_mappings: Sequence[PoolSkillMapping] = (),
-    ) -> ResolvedCapabilityPlan:
+    ) -> ResolvedSkillPlan:
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()
-        return self._build_plan(
+        skill_plan = self._build_skill_plan(
             bot=bot,
             bot_id=bot_id,
             owner_id=owner_id,
             retired_mappings=retired_mappings,
         )
+        if not scope.mcp:
+            logger.info(
+                "[BotRuntimeProjector] Non-Skill plan skipped for Skill-only "
+                "scope: bot_id=%s, engine=%s",
+                bot_id,
+                skill_plan.engine,
+            )
+            return skill_plan
+        return self._build_capability_plan(skill_plan)
 
     def _resolve_mcp_identity_modes(
         self, *, bot: dict, bot_id: str, engine: str
@@ -215,14 +235,14 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         except McpIdentityUnresolvedError as exc:
             raise SkillSetRuntimeReconcileError() from exc
 
-    def _build_plan(
+    def _build_skill_plan(
         self,
         *,
         bot: dict,
         bot_id: str,
         owner_id: str,
         retired_mappings: Sequence[PoolSkillMapping] = (),
-    ) -> ResolvedCapabilityPlan:
+    ) -> ResolvedSkillPlan:
         engine = str(bot.get("active_engine") or "openclaw")
         service = self._factory.create(
             user_id=owner_id,
@@ -246,17 +266,32 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             skill_assets=skill_assets,
             retired_mappings=retired_mappings,
         )
+        return ResolvedSkillPlan(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            service=service,
+            bot=bot,
+            engine=engine,
+            projection=RuntimeProjectionResolver().resolve_skills(skill_assets),
+        )
+
+    def _build_capability_plan(
+        self, skill_plan: ResolvedSkillPlan
+    ) -> ResolvedCapabilityPlan:
+        bot = skill_plan.bot
+        bot_id = skill_plan.bot_id
+        owner_id = skill_plan.owner_id
+        engine = skill_plan.engine
+        service = skill_plan.service
         # Resolved here, with the other pre-flight checks, because it can fail:
         # doing it at the Passport call would abort after the device allow-list
-        # was already written, and the compensating projection would then hit
-        # the same failure and be unable to counter-project.
+        # was already written, and compensation would hit the same failure.
         identity_modes = self._resolve_mcp_identity_modes(
             bot=bot, bot_id=bot_id, engine=engine
         )
         # The legacy SkillSet service remains the authority for effective
-        # System Defaults during Phase 1.  It resolves template presets and
-        # applies ac_default_skillset_mcp_exclusion; rebuilding defaults from
-        # static constants here would silently resurrect user exclusions.
+        # System Defaults during Phase 1. It resolves template presets and
+        # applies ac_default_skillset_mcp_exclusion.
         try:
             effective_mcp_entries = service.collect_bot_active_mcps(
                 entity_id=str(bot.get("entity_id") or owner_id),
@@ -267,9 +302,6 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                 strict_policy_context=True,
             )
         except Exception as exc:
-            # A failed policy-context lookup is not an empty Default policy.
-            # Fail before any overwrite-style MCP or Passport projection so a
-            # transient dependency outage cannot remove template-only MCPs.
             raise SkillSetRuntimeReconcileError() from exc
         effective_default_mcp_codes = frozenset(
             str(item.get("server_code") or item.get("serverCode") or "").strip()
@@ -277,9 +309,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             if item.get("server_code") or item.get("serverCode")
         )
         try:
-            # CLI removal is currently persisted by the authorization service. Its
-            # current scope is therefore the only effective Default CLI fact;
-            # merging static engine defaults here would undo that removal.
+            # Passport is the authority for the effective Default CLI scope.
             effective_cli_items = self._passport.query_passport_clis(
                 bot_id, owner_id
             )
@@ -287,7 +317,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             raise SkillSetRuntimeReconcileError() from exc
         projection = RuntimeProjectionResolver().resolve(
             RuntimeDesiredState(
-                skills=skill_assets,
+                skills=skill_plan.projection.skill_assets,
                 installed_mcp_server_codes=frozenset(
                     self._repository.list_installed_mcps(
                         bot_id=bot_id, owner_id=owner_id
