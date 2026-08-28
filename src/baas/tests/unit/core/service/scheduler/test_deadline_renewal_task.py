@@ -1683,7 +1683,7 @@ class TestRenewalDigestLogging:
 
     @pytest.mark.asyncio
     async def test_get_device_info_failure_branch_emits_digest_line(self, caplog):
-        """a-failure below max_fail_count: ..., failed, -, -."""
+        """a-failure below max_fail_count: ..., failure, -, -."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
         mock_facade.get_device_info = AsyncMock(side_effect=Exception("timeout"))
         mock_repo.update_after_failure = MagicMock()
@@ -1695,7 +1695,8 @@ class TestRenewalDigestLogging:
         lines = self._digest_lines(caplog)
         assert len(lines) == 1
         fields = lines[0].split(",")
-        assert fields[6] == "failed"
+        # Strict legacy vocabulary: the "failed" outcome projects to "failure".
+        assert fields[6] == "failure"
         assert fields[7] == "-"
         assert fields[8] == "-"
 
@@ -1734,7 +1735,8 @@ class TestRenewalDigestLogging:
         lines = self._digest_lines(caplog)
         assert len(lines) == 1
         fields = lines[0].split(",")
-        assert fields[6] == "failed"
+        # Strict legacy vocabulary: the "failed" outcome projects to "failure".
+        assert fields[6] == "failure"
         assert fields[7] == "-"
         assert fields[8] == "-"
         # The formatter failure is warned on core-scheduler, never emitted
@@ -1820,7 +1822,8 @@ class TestRenewalDigestLogging:
     @pytest.mark.asyncio
     async def test_process_one_routes_renewal_raise_to_failed_digest(self, caplog):
         """A _renew_one raise routed to failure accounting still emits a
-        failed digest line — no silent terminal path."""
+        digest line projecting the failed outcome to "failure" — no silent
+        terminal path."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
         mock_repo.count_active.return_value = 1
         mock_repo.count_hot_arca_devices.return_value = 1
@@ -1845,7 +1848,8 @@ class TestRenewalDigestLogging:
         lines = self._digest_lines(caplog)
         assert len(lines) == 1
         fields = lines[0].split(",")
-        assert fields[6] == "failed"
+        # Strict legacy vocabulary: the "failed" outcome projects to "failure".
+        assert fields[6] == "failure"
         assert fields[7] == "-"
         assert fields[8] == "-"
 
@@ -1853,8 +1857,9 @@ class TestRenewalDigestLogging:
     async def test_process_one_failure_accounting_raise_still_emits_failed_digest(
         self, caplog
     ):
-        """Even failure accounting raising still emits a failed digest line —
-        the second-level fallback is not silent."""
+        """Even failure accounting raising still emits a digest line
+        projecting the failed outcome to "failure" — the second-level
+        fallback is not silent."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
         mock_repo.count_active.return_value = 1
         mock_repo.count_hot_arca_devices.return_value = 1
@@ -1874,6 +1879,7 @@ class TestRenewalDigestLogging:
         lines = self._digest_lines(caplog)
         assert len(lines) == 1
         fields = lines[0].split(",")
-        assert fields[6] == "failed"
+        # Strict legacy vocabulary: the "failed" outcome projects to "failure".
+        assert fields[6] == "failure"
         assert fields[7] == "-"
         assert fields[8] == "-"

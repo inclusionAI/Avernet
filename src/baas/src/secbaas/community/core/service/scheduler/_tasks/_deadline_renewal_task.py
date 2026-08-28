@@ -33,10 +33,12 @@ log = get_logger("core-scheduler")
 _DISCOVERY_SIDES = ("baas_device", "ac_entity_device_binding")
 
 # ttl_renew_digest field mapping: the digest CSV keeps the legacy table_type
-# vocabulary (baas / ac_binding) and folds the transient "stopped" outcome
-# into the monitor's "failure" bucket; every other result passes through.
+# vocabulary (baas / ac_binding) and the digest result column projects
+# strictly into the legacy alarm vocabulary {success, skipped, failure} —
+# both the transient "stopped" outcome and the ordinary "failed" outcome
+# fold into the monitor's "failure" bucket.
 _DIGEST_TABLE_TYPE = {"baas_device": "baas", "ac_entity_device_binding": "ac_binding"}
-_DIGEST_RESULT = {"stopped": "failure"}
+_DIGEST_RESULT = {"stopped": "failure", "failed": "failure"}
 
 
 def _digest_ttl(ms: int | None) -> str | None:
@@ -487,7 +489,8 @@ class DeadlineRenewalScheduler:
         Threads the run uuid from _run_once's report (uuid4 fallback for
         direct invocation — same behavior as the legacy renew_ttl path),
         maps source_table to the legacy digest table_type vocabulary and
-        the transient "stopped" outcome to "failure", and formats platform
+        the "stopped"/"failed" outcomes to the legacy "failure" bucket,
+        and formats platform
         epoch-ms TTLs via the fixed +08:00 wall clock so the digest stream
         is homogeneous with the health_check scanner's — dash placeholder
         when a TTL is unknown.
@@ -513,6 +516,7 @@ class DeadlineRenewalScheduler:
         """Execute a single renewal decision (Step 3 in design doc §8.2).
 
         Returns one of: "success" | "skipped" | "failed" | "stopped"
+        (digest result column folds "failed"/"stopped" into legacy "failure").
 
         Every terminal branch emits a ttl_renew_digest CSV line on the
         arca-renew-digest logger (via _emit_renew_digest) so the monitor
