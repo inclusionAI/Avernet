@@ -324,6 +324,50 @@ async def test_legacy_skill_set_batch_keeps_domain_partial_success() -> None:
 
 
 @pytest.mark.asyncio
+async def test_legacy_skill_set_batch_uses_body_owner_for_collaborator() -> None:
+    class _ControlPlane:
+        def get_set(self, **kwargs):
+            assert kwargs == {
+                "bot_id": "bot",
+                "owner_id": "owner",
+                "user_id": "collaborator",
+                "set_id": "set-1",
+            }
+            return {"id": "set-1", "is_default": False}
+
+        def resolve_legacy_skill_id(self, **kwargs):
+            assert kwargs["bot_id"] == "bot"
+            assert kwargs["owner_id"] == "owner"
+            assert kwargs["actor_id"] == "collaborator"
+            return kwargs["identifier"]
+
+        async def add_skill(self, **kwargs):
+            assert kwargs == {
+                "bot_id": "bot",
+                "owner_id": "owner",
+                "user_id": "collaborator",
+                "set_id": "set-1",
+                "skill_id": "7",
+            }
+
+    response = await add_skills_to_set(
+        "set-1",
+        AddSkillsRequest(skill_ids=["7"], user_id="owner", bot_id="bot"),
+        entity_id=None,
+        entity_type=None,
+        bot_id=None,
+        engine_type=None,
+        ctx=SimpleNamespace(user_id="collaborator", bot_id="default"),
+        bot_repo=_Bots(),
+        control_plane=_ControlPlane(),
+    )
+
+    assert response.success is True
+    assert response.data["success"] == [{"skill_id": "7", "name": "7"}]
+    assert response.data["failed"] == []
+
+
+@pytest.mark.asyncio
 async def test_legacy_skill_set_batch_validates_target_before_materialising_asset() -> (
     None
 ):

@@ -725,6 +725,9 @@ async def add_skills_to_set(
     ),
 ) -> AddSkillsResponse:
     """Add skills to a skill set."""
+    # The published batch body carries the addressed Bot owner in ``user_id``;
+    # the authenticated actor still comes exclusively from ``ctx`` below.
+    owner_id_hint = request.user_id or entity_id
     # Preserve omission so the legacy resolver can recover a non-default Bot.
     bot_id_hint = request.bot_id or bot_id
     (
@@ -737,7 +740,7 @@ async def add_skills_to_set(
     ) = _get_skill_set_path_params(
         ctx,
         set_id=skill_set_id,
-        entity_id=entity_id,
+        entity_id=owner_id_hint,
         entity_type=entity_type,
         bot_id=bot_id_hint,
         engine_type=engine_type,
