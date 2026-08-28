@@ -152,7 +152,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
         # ``SkillSetService.sync_mcp_desired_state``: this is a synchronous
         # device call carrying a blocking ws-info HTTP resolution behind it.
         elif not await asyncio.to_thread(
-            plan.service.sync_runtime,
+            plan.service.project_skills,
             desired_skills=self._desired_skills(plan.projection),
         ):
             raise SkillSetRuntimeReconcileError()
@@ -191,8 +191,8 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                 )
         # One call, not two: how many device writes an MCP projection takes,
         # and in what order, is decided by the service that owns device
-        # resolution. See ``SkillSetService.sync_mcp_projection``.
-        if not await plan.service.sync_mcp_projection(
+        # resolution. See ``SkillSetService.project_mcps``.
+        if not await plan.service.project_mcps(
             claimed=claimed, released=released, declared=codes
         ):
             raise SkillSetRuntimeReconcileError()

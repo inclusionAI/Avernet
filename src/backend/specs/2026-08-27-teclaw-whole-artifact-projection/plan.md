@@ -22,16 +22,16 @@ project(...)
   │
   ├─ if scope.skills or retired_mappings:  _apply_skill_projection(...)
   │        ├─ if engine == "teclaw" and any center corpus → refuse           (:417)
-  │        ├─ if engine == "teclaw": sync_runtime(...); return               (:426)
-  │        └─ else: Pool publish+verify, or legacy sync_runtime
+  │        ├─ if engine == "teclaw": project_skills(...); return               (:426)
+  │        └─ else: Pool publish+verify, or legacy project_skills
   │
   └─ if scope.mcp:                         _apply_non_skill_projection(...)
-           ├─ service.sync_mcp_projection(claimed, released, declared)   ← engine-specific
+           ├─ service.project_mcps(claimed, released, declared)   ← engine-specific
            └─ try: self._passport.update_passport(...)                   ← inline, :549-574
 ```
 
 **After**, the two statements inside the MCP half are separated because they
-have different owners — `sync_mcp_projection` is a runtime write that only
+have different owners — `project_mcps` is a runtime write that only
 per-domain engines need, `update_passport` is the platform authorization
 record that every engine needs identically:
 
@@ -48,14 +48,14 @@ project(...)
 
 `_apply_passport_projection` is **new** — it does not exist today. It is the
 `:549-574` block above, given a name so the projector can call it directly
-once `sync_mcp_projection` has moved out from in front of it (`tasks.md` 3.5).
+once `project_mcps` has moved out from in front of it (`tasks.md` 3.5).
 Its trigger is unchanged: `scope.mcp` before, `scope.mcp` after.
 
 Two implementations of `EngineRuntimeProjection`:
 
 | | `validate_plan` | `apply` |
 | --- | --- | --- |
-| `WholeArtifactRuntimeProjection` (teclaw) | refuse `center://` assets and `center` retirements | no-op if the scope declares nothing; else **one** `sync_runtime` |
+| `WholeArtifactRuntimeProjection` (teclaw) | refuse `center://` assets and `center` retirements | no-op if the scope declares nothing; else **one** `project_skills` |
 | `PerDomainRuntimeProjection` (everything else) | no-op — Center is supported | today's two scope-gated halves, verbatim |
 
 ### Why this over an `if`
@@ -96,12 +96,12 @@ rejected on two concrete grounds:
    `ConnInfoBuilder.build(...)` → a second bot query, and the builder performs
    a **blocking ws-info HTTP** call — which is why `sync_service.py:247,312`
    wrap it in `asyncio.to_thread` with a comment saying exactly that.
-   `SkillSetService.sync_runtime` already calls `resolve_for_bot` internally,
+   `SkillSetService.project_skills` already calls `resolve_for_bot` internally,
    so keying on provider would resolve the device context twice per
    projection — on the very path this change exists to make cheaper.
 2. **Failure surface.** `resolve_for_bot` raises `DeviceNotBoundError` for a
    Bot with no active binding. The projector resolves no device today; an
-   unbound Bot degrades inside `sync_runtime` to `False`, which becomes
+   unbound Bot degrades inside `project_skills` to `False`, which becomes
    `SkillSetRuntimeReconcileError` and is compensated by
    `MutationProjectionFlow`. Provider-keying would leak a different exception
    type out of `project()` and change that contract.
@@ -167,7 +167,7 @@ plugin conformance test — the machinery `DeviceSync` itself also avoids
 
 `ResolvedCapabilityPlan.service` is typed against `CapabilityRuntimeBoundary`
 — a protocol declaring exactly the two calls a projection may make,
-`sync_runtime` and `sync_mcp_projection` — rather than against
+`project_skills` and `project_mcps` — rather than against
 `SkillSetService` itself.
 
 Naming the concrete class would have made the seam only half-replaceable:
@@ -197,7 +197,7 @@ drift apart unnoticed.
 class ResolvedCapabilityPlan:
     bot_id: str
     owner_id: str
-    service: CapabilityRuntimeBoundary   # sync_runtime + sync_mcp_projection
+    service: CapabilityRuntimeBoundary   # project_skills + project_mcps
     bot: dict
     engine: str
     projection: RuntimeProjection
@@ -261,7 +261,7 @@ collaborators; works from the plan.
   spellings of one rule.
 - `apply`: return early (with today's skip-log) when the scope declares
   nothing; re-assert `validate_plan` from the plan's own assets as
-  defence-in-depth; then one `plan.service.sync_runtime(desired_skills=...)`,
+  defence-in-depth; then one `plan.service.project_skills(desired_skills=...)`,
   raising if falsy.
 
 **2b. `per_domain.py` — `PerDomainRuntimeProjection`.** Injected with
@@ -312,11 +312,12 @@ implementation a projection resolved to, once per projection.
 - `project_mcp_and_cli` collapses into the same four lines as `project`: its
   "MCP/CLI only" behaviour is already exactly what `apply` does when
   `scope.skills` is false, so no second protocol method is needed.
-- `project_for_cleanup` keeps its own Center refusal and its explicit
-  `service.sync_runtime(...)` — that is a deliberate legacy-synchronizer path,
-  not the Pool path, and the docstring says so. It then delegates the MCP half
-  through `apply` and calls the Passport. Its comment records that it has no
-  production caller.
+- `project_for_cleanup` is **deleted**, along with `_resolve_cleanup_plan` and
+  the projector's `_desired_skills`, which existed only to serve it. It had no
+  production caller — only tests and the Service API protocol reached it — so
+  it was a compatibility path kept alive by its own test coverage. Removed on
+  review, and removed from both the Core contract and the Service API protocol
+  with it. That is a public Service API surface change, and the only one here.
 
 **Expected end state: `grep -c teclaw bot_runtime_projector.py` → 0.**
 
@@ -341,8 +342,8 @@ The projector's fakes already live here. `_RuntimeFactoryService` (`:474`)
 records `desired_skills` / `mcp_codes` as last-write-wins scalars, which
 cannot distinguish one call from four; it already records `deliveries` as a
 list, with a comment on why. Follow that idiom: add `runtime_syncs` appended
-in `sync_runtime` (`:484`), and `mcp_projections` appended at the top of
-`sync_mcp_projection` (`:498`) before it delegates, preserving the
+in `project_skills` (`:484`), and `mcp_projections` appended at the top of
+`project_mcps` (`:498`) before it delegates, preserving the
 deliver-before-declare composition at `:512-514`. Leave `desired_skills`,
 `mcp_codes`, `deliveries`, `collect_calls` and the unrelated stub at `:2865`
 untouched.
@@ -366,7 +367,7 @@ fake registry would test the wiring instead of the behaviour.
    call. Guards the extraction. (criterion 4)
 4. `test_teclaw_empty_scope_delivers_nothing` — both lists empty, no Passport
    call. (criterion 8)
-5. `test_teclaw_failed_delivery_raises_reconcile_error` — `sync_runtime`
+5. `test_teclaw_failed_delivery_raises_reconcile_error` — `project_skills`
    returns `False`: `SkillSetRuntimeReconcileError`, no Passport call.
    (criterion 7)
 6. `test_per_domain_engine_keeps_the_scope_split` — an **openclaw** Bot with
@@ -445,7 +446,7 @@ passing unedited.
 currently fails at `sync_mcp_delivery:569-581`. Afterwards the composer's own
 collector raises `McpDetailUnavailableError` on the same condition
 (`config_compose/services/collector.py:62`), `_compose_and_deliver` converts
-it to `{"success": False}`, and a falsy `sync_runtime` still raises. Fail-closed
+it to `{"success": False}`, and a falsy `project_skills` still raises. Fail-closed
 one layer down; test 5 pins it.
 
 **A teclaw Bot whose MCP config reaches the container only via

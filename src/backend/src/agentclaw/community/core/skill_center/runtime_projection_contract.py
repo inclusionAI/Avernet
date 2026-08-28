@@ -29,7 +29,7 @@ class CapabilityRuntimeBoundary(Protocol):
     guarantees is documented on ``SkillSetService``.
     """
 
-    def sync_runtime(self, *, desired_skills: list[dict] | None = None) -> bool:
+    def project_skills(self, *, desired_skills: list[dict] | None = None) -> bool:
         """Apply one complete resolver-owned Skill snapshot to the runtime.
 
         Synchronous and blocking — device resolution sits behind it — so
@@ -37,7 +37,7 @@ class CapabilityRuntimeBoundary(Protocol):
         """
         ...
 
-    async def sync_mcp_projection(
+    async def project_mcps(
         self,
         *,
         claimed: frozenset[str],
@@ -269,16 +269,6 @@ class BotRuntimeProjectorProtocol(Protocol):
         scope: ProjectionScope,
     ) -> None:
         """Project MCP/CLI while an external authority owns Skill mappings."""
-        ...
-
-    async def project_for_cleanup(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        scope: ProjectionScope,
-    ) -> None:
-        """Remove historical capability state through the legacy runtime path."""
         ...
 
 

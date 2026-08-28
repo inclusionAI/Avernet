@@ -104,7 +104,7 @@ This is the relocation. Nothing here may change what any engine does.
 - [x] 3.3 **Move** `_apply_non_skill_projection` into it, minus its `try/except`
       Passport tail (`:549-574`). The `claim_all_mcp` branch, the
       claimed/released guard against the projected set, the guard-log and the
-      `sync_mcp_projection` call move **verbatim**.
+      `project_mcps` call move **verbatim**.
 
 - [x] 3.4 Give it `apply`, composing the two moved halves with today's scope
       gating and today's two skip-logs, in today's order. Give it
@@ -118,7 +118,7 @@ This is the relocation. Nothing here may change what any engine does.
       and keep it on `BotRuntimeProjector`. This method does **not** exist
       today: the Passport update is currently an unnamed `try/except` block at
       the tail of `_apply_non_skill_projection` (`:549-574`), reached only by
-      falling through `sync_mcp_projection`. 3.3 moves that call out to
+      falling through `project_mcps`. 3.3 moves that call out to
       `per_domain.py`, so the tail needs a name to be invoked on its own.
       **Move the body with no edits**: it is the identity-coloured
       `resource_scope` fix from
@@ -139,7 +139,7 @@ This is the relocation. Nothing here may change what any engine does.
       docstring's explanation of *why* the caller wants that.
 
 - [x] 3.8 `project_for_cleanup`: keep its own Center refusal and its explicit
-      `service.sync_runtime(...)` — a deliberate legacy-synchronizer path, not
+      `service.project_skills(...)` — a deliberate legacy-synchronizer path, not
       the Pool path — then delegate the MCP half through `apply` and call the
       Passport. Add a comment recording that it has no production caller.
 
@@ -177,8 +177,8 @@ This is the relocation. Nothing here may change what any engine does.
 
 - [x] 4.2 Extend `_RuntimeFactoryService` (`:474`) so call counts are
       observable, following its existing `deliveries` list idiom rather than
-      integer counters: `runtime_syncs` appended in `sync_runtime` (`:484`),
-      and `mcp_projections` appended at the top of `sync_mcp_projection`
+      integer counters: `runtime_syncs` appended in `project_skills` (`:484`),
+      and `mcp_projections` appended at the top of `project_mcps`
       (`:498`) **before** it delegates, preserving the deliver-before-declare
       composition at `:512-514`. Leave `desired_skills`, `mcp_codes`,
       `deliveries`, `collect_calls` and the unrelated stub at `:2865` alone.
@@ -191,7 +191,7 @@ This is the relocation. Nothing here may change what any engine does.
       spellings of one rule). `apply`: skip-log and return when the scope
       declares nothing (`scope.skills or scope.mcp or retired_mappings`);
       re-assert `validate_plan` from the plan's own assets as defence in
-      depth; then one `plan.service.sync_runtime(...)`, raising if falsy. Its
+      depth; then one `plan.service.project_skills(...)`, raising if falsy. Its
       docstring states the invariant: the plan is resolved, so one delivery
       carries both halves.
 
@@ -226,7 +226,7 @@ This is the relocation. Nothing here may change what any engine does.
         Guards 3.5. (criterion 4)
       - `test_teclaw_empty_scope_delivers_nothing` — both lists empty, no
         Passport call. (criterion 8)
-      - `test_teclaw_failed_delivery_raises_reconcile_error` — `sync_runtime`
+      - `test_teclaw_failed_delivery_raises_reconcile_error` — `project_skills`
         returns `False`: `SkillSetRuntimeReconcileError`, no Passport call.
         (criterion 7)
       - `test_registry_defaults_unknown_engines_to_the_per_domain_projection`
@@ -286,7 +286,7 @@ This is the relocation. Nothing here may change what any engine does.
 None blocking. Decisions confirmed with the author this session:
 
 1. **Registry keyed on `engine`, not device `provider`.** `resolve_for_bot`
-   costs a binding query plus a blocking ws-info HTTP that `sync_runtime`
+   costs a binding query plus a blocking ws-info HTTP that `project_skills`
    then repeats, and it raises `DeviceNotBoundError` for an unbound Bot,
    changing `project()`'s failure surface. `engine` is free and is already
    the module's vocabulary.

@@ -299,14 +299,6 @@ class _Runtime:
         if self._fail_first and len(self.owners) == 1:
             raise RuntimeError("runtime failed")
 
-    async def project_for_cleanup(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        scope: ProjectionScope = ProjectionScope.everything(),
-    ) -> None:
-        await self.project(bot_id=bot_id, owner_id=owner_id, scope=scope)
 
 
 class _Authorization:
@@ -341,8 +333,6 @@ class _SuccessfulRuntime:
     async def project(self, **_kwargs) -> None:
         return None
 
-    async def project_for_cleanup(self, **_kwargs) -> None:
-        return None
 
 
 class _LegacyResolutionRepository(_Repository):
@@ -517,7 +507,7 @@ class _RuntimeFactoryService:
             tuple[frozenset[str], frozenset[str], set[str]]
         ] = []
 
-    def sync_runtime(self, *, desired_skills: list[dict]) -> bool:
+    def project_skills(self, *, desired_skills: list[dict]) -> bool:
         self.desired_skills = desired_skills
         self.runtime_syncs.append(desired_skills)
         return True
@@ -532,7 +522,7 @@ class _RuntimeFactoryService:
         self.mcp_codes = server_codes
         return True
 
-    async def sync_mcp_projection(
+    async def project_mcps(
         self,
         *,
         claimed: frozenset[str],
@@ -2455,58 +2445,6 @@ async def test_existing_coding_runtime_uses_its_resolved_layout(
 
 
 @pytest.mark.asyncio
-async def test_historical_aicoding_cleanup_uses_legacy_runtime_not_pool_mapping():
-    factory = _RuntimeFactory()
-    pool = _RuntimePool()
-    runtime = BotRuntimeProjector(
-        factory=factory,
-        bot_repo=_HistoricalAicodingRuntimeBots(),
-        repository=_McpInstallations(),
-        reader=_reader(_RuntimeSkills()),
-        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
-        passport=_RuntimePassport(),
-        caller_identity_repo=_RuntimeCallerIdentity(),
-    )
-
-    await runtime.project_for_cleanup(
-        bot_id="bot-1", owner_id="true-owner",
-        scope=ProjectionScope.everything(),
-    )
-
-    assert factory.kwargs["engine_type"] == "aicoding"
-    assert factory.service.desired_skills == []
-    assert factory.service.mcp_codes is not None
-    assert pool.publish_calls == []
-    assert pool.verify_calls == []
-
-
-@pytest.mark.asyncio
-async def test_historical_cleanup_rejects_center_before_runtime_or_mcp_delivery():
-    factory = _RuntimeFactory()
-    pool = _CenterRuntimePool()
-    runtime = BotRuntimeProjector(
-        factory=factory,
-        bot_repo=_HistoricalAicodingRuntimeBots(),
-        repository=_McpInstallations(),
-        reader=_reader(_CenterRuntimeSkills()),
-        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
-        passport=_RuntimePassport(),
-        caller_identity_repo=_RuntimeCallerIdentity(),
-    )
-
-    with pytest.raises(SkillSetRuntimeReconcileError):
-        await runtime.project_for_cleanup(
-        bot_id="bot-1", owner_id="true-owner",
-        scope=ProjectionScope.everything(),
-    )
-
-    assert factory.service.desired_skills is None
-    assert factory.service.mcp_codes is None
-    assert pool.probe_calls == []
-    assert pool.publish_calls == []
-
-
-@pytest.mark.asyncio
 async def test_teclaw_v4_rejects_center_without_any_center_runtime_request():
     pool = _CenterRuntimePool()
     factory = _RuntimeFactory()
@@ -2729,7 +2667,7 @@ async def test_teclaw_failed_delivery_raises_reconcile_error():
     """
     passport = _RuntimePassport()
     factory = _RuntimeFactory()
-    factory.service.sync_runtime = lambda **_: False
+    factory.service.project_skills = lambda **_: False
     runtime = _teclaw_runtime(factory, passport=passport)
 
     with pytest.raises(SkillSetRuntimeReconcileError):
@@ -2742,7 +2680,7 @@ async def test_teclaw_failed_delivery_raises_reconcile_error():
 
 
 def _local_skill_reader():
-    """A per-domain Bot whose Skill half takes the legacy ``sync_runtime`` branch.
+    """A per-domain Bot whose Skill half takes the legacy ``project_skills`` branch.
 
     ``_RuntimeLayouts.get`` answers ``None`` (Pool does not own the runtime) and
     a ``local://`` asset yields no repo/center mapping, so
@@ -2795,24 +2733,16 @@ async def _drive_per_domain_legacy(factory):
     )
 
 
-async def _drive_cleanup(factory):
-    runtime = _projector_for(factory, teclaw=False, reader=_local_skill_reader())
-    await runtime.project_for_cleanup(
-        bot_id="bot-1", owner_id="true-owner",
-        scope=ProjectionScope(mcp=True),
-    )
-
-
 @pytest.mark.parametrize(
     "drive",
-    [_drive_whole_artifact, _drive_per_domain_legacy, _drive_cleanup],
-    ids=["whole-artifact", "per-domain-legacy", "cleanup"],
+    [_drive_whole_artifact, _drive_per_domain_legacy],
+    ids=["whole-artifact", "per-domain-legacy"],
 )
 @pytest.mark.asyncio
 async def test_runtime_delivery_never_runs_on_the_event_loop(drive):
-    """Every ``sync_runtime`` call site dispatches off the coroutine's thread.
+    """Every ``project_skills`` call site dispatches off the coroutine's thread.
 
-    ``sync_runtime`` is synchronous and carries a device resolution with a
+    ``project_skills`` is synchronous and carries a device resolution with a
     blocking ws-info HTTP call behind it; on a whole-artifact engine it also
     composes the full artifact and posts it. Callers reach the projector from
     async HTTP handlers (``DirectActivationService`` is one), so running it
@@ -2834,19 +2764,19 @@ async def test_runtime_delivery_never_runs_on_the_event_loop(drive):
     seen: list[int] = []
 
     factory = _RuntimeFactory()
-    original = factory.service.sync_runtime
+    original = factory.service.project_skills
 
     def _recording_sync_runtime(**kwargs):
         seen.append(threading.get_ident())
         return original(**kwargs)
 
-    factory.service.sync_runtime = _recording_sync_runtime
+    factory.service.project_skills = _recording_sync_runtime
 
     await drive(factory)
 
-    assert seen, "sync_runtime never ran — this case does not exercise the call site"
+    assert seen, "project_skills never ran — this case does not exercise the call site"
     assert loop_thread not in seen, (
-        "sync_runtime ran on the event loop thread; it must be dispatched "
+        "project_skills ran on the event loop thread; it must be dispatched "
         "through asyncio.to_thread so a slow device cannot block the worker"
     )
 
@@ -2963,7 +2893,7 @@ def test_the_capability_plan_names_a_boundary_not_a_service():
         )
 
     assert issubclass(SkillSetService, CapabilityRuntimeBoundary)
-    for name in ("sync_runtime", "sync_mcp_projection"):
+    for name in ("project_skills", "project_mcps"):
         assert shape(getattr(SkillSetService, name)) == shape(
             getattr(CapabilityRuntimeBoundary, name)
         ), (
@@ -3351,7 +3281,7 @@ async def test_the_projector_makes_one_mcp_call_not_two():
         async def sync_mcp_desired_state(self, **kwargs):
             raise AssertionError("the projector must not call declaration directly")
 
-        async def sync_mcp_projection(self, **kwargs) -> bool:
+        async def project_mcps(self, **kwargs) -> bool:
             calls.append(kwargs)
             return True
 

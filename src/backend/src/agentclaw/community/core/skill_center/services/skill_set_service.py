@@ -509,13 +509,13 @@ class SkillSetService:
             logger.warning(f"[_sync_symlinks_to_device_if_needed] Failed to sync symlinks: {e}", exc_info=True)
             return False
 
-    def sync_runtime(self, *, desired_skills: list[dict] | None = None) -> bool:
+    def project_skills(self, *, desired_skills: list[dict] | None = None) -> bool:
         """Apply one complete resolver-owned skill snapshot to the runtime."""
         return self._sync_symlinks_to_device_if_needed(
             self.user_id or self.entity_id, desired_skills
         )
 
-    async def sync_mcp_projection(
+    async def project_mcps(
         self,
         *,
         claimed: frozenset[str],

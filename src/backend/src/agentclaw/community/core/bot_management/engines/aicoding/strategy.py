@@ -680,7 +680,7 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                         entity_type=effective_entity_type,
                         engine_type=effective_engine,
                     )
-                    if skill_set_service.sync_runtime():
+                    if skill_set_service.project_skills():
                         logger.info(
                             "[aicoding.restart] skill symlink sync succeeded: "
                             "bot_id=%s, engine_type=%s",

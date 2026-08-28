@@ -88,9 +88,9 @@ something the first did not.
 ### Problem 1 — a projection issues between two and N+2 identical deliveries
 
 `project` runs the Skill half through `_apply_skill_projection`, whose teclaw
-branch is one `service.sync_runtime(...)` → `sync_symlinks` → one delivery.
+branch is one `service.project_skills(...)` → `sync_symlinks` → one delivery.
 It then runs the MCP half through `_apply_non_skill_projection` →
-`SkillSetService.sync_mcp_projection`, which is documented as *"One call, not
+`SkillSetService.project_mcps`, which is documented as *"One call, not
 two"* but is two calls to the device layer:
 
 - `sync_mcp_delivery(claimed, released)` — pushes each claimed MCP through
@@ -142,7 +142,7 @@ simply false against a whole-artifact runtime:
   so there is nothing to refresh against"* — teclaw inlines every MCP's
   endpoint, `api_key` and headers into the artifact, so one delivery is
   already complete. The flag's reason for existing does not apply.
-- `sync_mcp_projection`'s ordering invariant — *"configuration lands before
+- `project_mcps`'s ordering invariant — *"configuration lands before
   the allow-list cites it, and is withdrawn only after the allow-list stops
   covering it"* — is vacuous when both ride in the same document.
 - `project_mcp_and_cli`'s premise, *"a cutover task exclusively owns Skill
@@ -199,7 +199,7 @@ invariant every future caller has to rediscover.
 2. **The delivery is not conditional on the Skill flag.** An MCP-only scope
    (`skills=False, mcp=True`) still delivers exactly once on teclaw — today
    it reaches the runtime only through the MCP half.
-3. **No per-MCP device traffic on teclaw.** `sync_mcp_projection`,
+3. **No per-MCP device traffic on teclaw.** `project_mcps`,
    `sync_mcp_delivery` and `sync_mcp_desired_state` are not called at all for
    a teclaw Bot, so no `get_mcp_detail` catalogue lookup is issued on their
    behalf either.

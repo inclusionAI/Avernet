@@ -112,7 +112,7 @@ class TestSkillSetServiceUsesResolver:
 
         svc.get_symlink_mappings = MagicMock(return_value=[])
 
-        assert svc.sync_runtime() is True
+        assert svc.project_skills() is True
         svc.get_symlink_mappings.assert_called_once_with(
             user_id="owner-1", bolt_id="bot-1"
         )

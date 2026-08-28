@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
 
 from injector import inject
 
@@ -38,7 +36,6 @@ from agentclaw.community.core.skill_center.services.runtime_projections.registry
 )
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeDesiredState,
-    RuntimeProjection,
     RuntimeProjectionResolver,
 )
 from agentclaw.community.core.skills_pool.mapping_intent import (
@@ -176,49 +173,6 @@ class BotRuntimeProjector:
         if scope.mcp:
             self._apply_passport_projection(plan=plan)
 
-    async def project_for_cleanup(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        scope: ProjectionScope,
-    ) -> None:
-        """Safely remove legacy state without granting new runtime writes.
-
-        Historical engines use their existing full legacy synchronizer for
-        Local/Repo removal.  Center requires the Pool v3 contract and is never
-        permitted on this compatibility path.
-
-        The Skill half is written here rather than through the engine's
-        projection precisely because it must *not* take the Pool path this
-        engine would normally choose — that is what "compatibility path"
-        means. Only the MCP half is delegated. Note this method has no
-        production caller today: it is reachable only through the Service API
-        protocol, so treat any behaviour change here as unexercised.
-        """
-        plan = self._resolve_cleanup_plan(bot_id=bot_id, owner_id=owner_id)
-        if any(
-            mapping.corpus == "center"
-            for mapping in plan.projection.skill_mappings
-        ):
-            raise SkillSetRuntimeReconcileError()
-        if not await asyncio.to_thread(
-            plan.service.sync_runtime,
-            desired_skills=self._desired_skills(plan.projection),
-        ):
-            raise SkillSetRuntimeReconcileError()
-        # ``skills=False`` regardless of what the caller declared: the Skill
-        # half was just written by the legacy synchronizer above, and letting
-        # the engine's projection write it again would either duplicate that
-        # or route it onto the Pool path this compatibility path exists to
-        # avoid. Only the MCP half is the engine's here.
-        await self._registry.for_engine(plan.engine).apply(
-            plan=plan,
-            scope=replace(scope, skills=False),
-        )
-        if scope.mcp:
-            self._apply_passport_projection(plan=plan)
-
     def _resolve_plan(
         self,
         *,
@@ -235,17 +189,6 @@ class BotRuntimeProjector:
             owner_id=owner_id,
             retired_mappings=retired_mappings,
         )
-
-    def _resolve_cleanup_plan(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-    ) -> ResolvedCapabilityPlan:
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
-            raise LocalSkillNotFoundError()
-        return self._build_plan(bot=bot, bot_id=bot_id, owner_id=owner_id)
 
     def _resolve_mcp_identity_modes(
         self, *, bot: dict, bot_id: str, engine: str
@@ -456,18 +399,6 @@ class BotRuntimeProjector:
         except Exception as exc:
             raise SkillSetRuntimeReconcileError() from exc
 
-    @staticmethod
-    def _desired_skills(projection: RuntimeProjection) -> list[dict[str, str | None]]:
-        return [
-            {
-                "id": str(asset.skill_id),
-                "name": asset.name,
-                "git_path": asset.git_path,
-                "skill_uuid": asset.skill_uuid,
-                "sc_version_number": asset.sc_version_number,
-            }
-            for asset in projection.skill_assets
-        ]
 
 
 

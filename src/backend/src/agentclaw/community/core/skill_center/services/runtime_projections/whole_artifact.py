@@ -102,16 +102,29 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
             len(plan.projection.skill_assets),
             len(plan.projection.mcp_server_codes),
         )
-        # Off the event loop: ``sync_runtime`` is synchronous and, on a
-        # whole-artifact engine, expensive — device resolution (including a
-        # blocking ws-info HTTP call), a full artifact compose, and the
-        # outbound apply request. Callers reach here from async HTTP handlers
-        # such as ``DirectActivationService.activate_mcp``, so leaving it in
-        # the coroutine would let one slow container stall unrelated requests
-        # on the same worker. Same rule, and the same reason, as
-        # ``SkillSetService.sync_mcp_desired_state``.
+        # This one call is the whole delivery. Despite the name, on a
+        # whole-artifact engine ``project_skills`` does not write Skills: it
+        # resolves the device, recomposes the Bot's entire
+        # ``BotConfigArtifact`` from the database — Skills, MCP servers, CLI,
+        # credentials — and POSTs it to ``/api/v1/bot/apply``. The MCP half of
+        # this projection rides in that same document, which is why there is
+        # no second call here.
+        #
+        # Off the event loop because all of that is synchronous and expensive:
+        # device resolution (including a blocking ws-info HTTP call), the
+        # compose, and the outbound apply request. Callers reach here from
+        # async HTTP handlers such as ``DirectActivationService.activate_mcp``,
+        # so leaving it in the coroutine would let one slow container stall
+        # unrelated requests on the same worker. Same rule, and the same
+        # reason, as ``SkillSetService.sync_mcp_desired_state``.
+        #
+        # The snapshot is still passed even though the composer re-reads
+        # desired state itself. It is not redundant work: ``project_skills``
+        # falls back to ``get_active_skills`` when this is ``None``, which
+        # re-runs the flush-and-read that ``_resolve_plan`` just did. Handing
+        # over the resolved assets is what avoids that second pass.
         if not await asyncio.to_thread(
-            plan.service.sync_runtime,
+            plan.service.project_skills,
             desired_skills=self._desired_skills(plan.projection),
         ):
             raise SkillSetRuntimeReconcileError()

@@ -20,9 +20,9 @@ class EngineRuntimeProjectionRegistry:
     engine is already on the Bot row by the time a plan resolves, whereas
     resolving a provider means ``DeviceContextResolver.resolve_for_bot`` — a
     binding query, a blocking ws-info HTTP call, and a second Bot query —
-    which ``SkillSetService.sync_runtime`` then performs again, and which
+    which ``SkillSetService.project_skills`` then performs again, and which
     raises ``DeviceNotBoundError`` for an unbound Bot where the projector
-    today degrades through a falsy ``sync_runtime`` instead.
+    today degrades through a falsy ``project_skills`` instead.
 
     ``default`` is the per-domain contract, not a fourth enumerated key. Most
     engines want it, so registering is what marks an engine as *unusual*: a
