@@ -266,7 +266,10 @@ def _data(response):
 
 def test_the_listing_is_narrowed_to_the_delegated_bots(make_client):
     """Two bots owned, one delegated: one returned."""
-    client = make_client(GRANTED)
+    # The bots listing now resolves each row's owner-view space (Noop models
+    # the personal space with zero service calls), so it needs a serving
+    # space context rather than the unexpected-service guard.
+    client = make_client(GRANTED, space_context=NoopBusinessSpaceContext())
 
     listed = _data(client.get("/openapi/v1/bots"))
 
@@ -279,7 +282,7 @@ def test_the_count_describes_the_narrowed_set(make_client):
     A caller could subtract and learn exactly how many of the user's bots it was
     not granted — a number nobody agreed to share.
     """
-    client = make_client(GRANTED)
+    client = make_client(GRANTED, space_context=NoopBusinessSpaceContext())
 
     assert _data(client.get("/openapi/v1/bots"))["total"] == 1
 
@@ -291,7 +294,7 @@ def test_the_narrowing_happens_before_pagination(make_client, bots):
     — a page of 20 that returns 3 — is the kind of thing that looks like an
     off-by-one rather than a scoping failure.
     """
-    client = make_client(GRANTED)
+    client = make_client(GRANTED, space_context=NoopBusinessSpaceContext())
 
     client.get("/openapi/v1/bots")
 
@@ -310,7 +313,9 @@ def test_an_application_granted_nothing_gets_an_empty_page(make_client, bots):
 
 def test_a_human_caller_sees_everything_they_own(make_client, bots):
     """The narrowing applies to applications, not to people."""
-    client = make_client(GRANTED, with_user=True)
+    client = make_client(
+        GRANTED, with_user=True, space_context=NoopBusinessSpaceContext()
+    )
 
     listed = _data(client.get("/openapi/v1/bots"))
 
@@ -518,6 +523,10 @@ def cross_owner_client(bots):
             def configure(self, binder):
                 binder.bind(BotServiceProtocol, to=bots)
                 binder.bind(BotAppGrantServiceProtocol, to=_CrossOwnerGrants())
+                binder.bind(
+                    BusinessSpaceContextProtocol,
+                    to=NoopBusinessSpaceContext(),
+                )
 
         app = FastAPI()
         app.include_router(app_view_router)

@@ -567,7 +567,7 @@ async def list_bots(
     bots, including bots the user does not own, is the authorized-bots listing.
 
     The keyword, engine, and status filters are applied before pagination.
-    Each row carries the owner-view space of its ``ac_bots.space_id`` and the
+    Each row carries the owner-view space of its space assignment and the
     projected template snapshot. For richer inventory fields such as
     deployment mode, use GET /openapi/v1/bots/all.
     """
