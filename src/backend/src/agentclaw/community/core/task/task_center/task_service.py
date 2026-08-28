@@ -221,7 +221,8 @@ class TaskService:
             if self._harness is not None:
                 self._harness.register(task_id)
             bg = asyncio.create_task(self._engine.on_execute(task_id))
-            self._bg_tasks.add(bg); bg.add_done_callback(self._on_bg_done)
+            self._bg_tasks.add(bg)
+            bg.add_done_callback(self._on_bg_done)
             return TaskOpResult(task_id=task_id, success=True, run_id=graph.run_id)
         # dynamic (default): fire-and-forget on_execute
         if self._harness is not None:
