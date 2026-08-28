@@ -17,7 +17,26 @@ export default plugin;
 export { bcsPlugin, createBcsPlugin } from './channel.js';
 export { setBcsRuntime } from './runtime.js';
 export { getDefaultBcsUrl, listAccountIds, resolveAccount } from './accounts.js';
+export {
+  createBotDataDirInjector,
+  injectBotDataDir,
+  resolveBotDataDir,
+} from './bot-data-dir.js';
+export type { BotDataDirLog, BotDataDirRuntime } from './bot-data-dir.js';
 export { BCS_CORE_TOOL_NAMES, registerBcsCore } from './core.js';
 export { resolveGroupIdFromSessionKey } from './inbound-handler.js';
+export {
+  ensureServiceBotSession,
+  isServiceBot,
+  loadServiceBotCredentials,
+  parseServiceBotCredentials,
+  resolveServiceBotCredentialsBotId,
+} from './service-bot-session.js';
 export type { BcsCoreRegistration } from './core.js';
+export type {
+  EnsureServiceBotSessionOptions,
+  EnsureServiceBotSessionResult,
+  ServiceBotCredentials,
+  ServiceBotSessionInfo,
+} from './service-bot-session.js';
 export type { ResolvedBcsAccount } from './types.js';
