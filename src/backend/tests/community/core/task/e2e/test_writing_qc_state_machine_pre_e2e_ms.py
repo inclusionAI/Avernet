@@ -110,13 +110,13 @@ def _execute_body(writer_id: str, editor_id: str) -> dict:
         "owner_bot_id": writer_id,
         "execution_config": {
             "task_type": "yaml",
-            "yaml": WRITING_QC_YAML,
+            "kind": "manager_worker",
             "participant_bot_ids": [editor_id],
             "participant_bindings": {
                 "writer": [writer_id],
                 "editor": [editor_id],
             },
-            "group_name": "写作质检协同群(预发e2e)",
+            "group_name": "写作质检协同群_manager_worker",
         },
     }
 
