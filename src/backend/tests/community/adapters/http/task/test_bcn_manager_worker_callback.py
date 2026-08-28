@@ -136,6 +136,7 @@ def test_manager_worker_state_machine_event_not_diverted(harness):
                json=_ce("state_machine.run.created", {"group_id": "g1", "session_id": "s-sm", "run_id": "r1"},
                         {"run_id": "r1"}))
     assert r.status_code == 200, r.text
-    # state_machine 事件经现有 translate_bcn → ingest 落 fake(workflow_source=bcn),未被分流到 manager_worker
-    assert any(rec.status == "state_machine.run.created" for rec in fake.upserts)
+    # state_machine 事件经现有 translate_bcn → ingest 落 fake(workflow_source=bcn),未被分流到 manager_worker;
+    # req2:run.created 映射为 Status.RUNNING(非 run.completed)
+    assert any(rec.status == "RUNNING" for rec in fake.upserts)
     assert all(not getattr(rec, "invoker", "") == "bcn_manager_worker" for rec in fake.upserts)

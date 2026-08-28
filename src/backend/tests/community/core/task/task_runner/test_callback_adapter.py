@@ -278,12 +278,15 @@ class TestPersist:
         assert engine.reports == [] and engine.starts == []         # ingest 不推进编排核
         rec = repo.calls[0]
         assert rec.invoker == "bcn"
-        assert rec.run_id == "run-1" and rec.node_id == "N1"
+        assert rec.run_id == "run-1" and rec.node_id == ""        # req4:node_id 恒空
         assert rec.main_session_id == "s-1"                       # scope.session_id
-        assert rec.status == "state_machine.node.completed"       # event_type
+        assert rec.status == "RUNNING"                            # req2:node.completed → Status.RUNNING
         assert rec.result_success is True
         assert rec.result == {"success": True, "data": {"answer": 7}}
-        assert rec.execution_graph == raw["data"]                 # 事件体
+        # req1:execution_graph 为 graph_to_dict 形状(极简兜底),非事件体透传;无 router fetch → extend_props=None
+        eg = rec.execution_graph
+        assert eg["run_id"] == 0 and eg["status"] == "RUNNING"
+        assert eg["output"] == {"answer": 7} and eg["tasks"] == [] and eg["relations"] == []
         assert rec.extend_props is None
         assert _json.loads(rec.orig_callback_data) == raw         # 原始 event
 

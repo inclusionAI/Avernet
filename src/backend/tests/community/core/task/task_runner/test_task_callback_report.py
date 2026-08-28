@@ -524,21 +524,30 @@ class TestBCNStateMachine:
         assert len(repo.calls) == 1
         rec = repo.calls[0]
         assert rec.invoker == "bcn"
-        assert rec.run_id == "run-1" and rec.node_id == "N1"  # loop_task_id = run_id::node_id
+        assert rec.run_id == "run-1" and rec.node_id == ""  # req4:node_id 恒空(忽略事件 data.node_id)
         assert rec.main_session_id == "s-1"
-        assert rec.status == "state_machine.node.completed"
+        assert rec.status == "RUNNING"                     # req2:node.completed → RUNNING
         assert rec.result_success is True
-        assert rec.result == {"success": True, "data": {"answer": 7}}
-        # router 用 BCS run 明细覆盖 _raw_callback_body → orig_callback_data 是 run 明细,非原始 CloudEvent
-        assert json.loads(rec.orig_callback_data) == run_detail
-        # execution_graph = DAG(run nodes)+定义(graph nodes/edges)合并后的任务状态图谱
+        # run 明细经 result._ext_info 落库 → extend_props;result 同体携带 _ext_info(既有映射)
+        assert rec.result == {"success": True, "data": {"answer": 7}, "_ext_info": run_detail}
+        # req3:取回的原始 run 明细 → extend_props;orig_callback_data 保持原始 CloudEvent(不再覆盖)
+        assert rec.extend_props == run_detail
+        assert json.loads(rec.orig_callback_data) == ev
+        # req1:execution_graph = graph_to_dict 形状 TaskExecutionGraph(run 详情 + DAG 合并)
         eg = rec.execution_graph
-        assert eg["run_status"] == "running"
-        assert eg["definition"] == {"name": "sm"}
-        assert len(eg["nodes"]) == 1 and eg["nodes"][0]["node_id"] == "N1"
-        assert eg["nodes"][0]["display_name"] == "Step1"
-        assert eg["nodes"][0]["execution"]["status"] == "completed"
-        assert eg["edges"] == [{"src": "N1", "dst": "N2"}]
+        assert eg["run_id"] == 0 and eg["task_id"] == "" and eg["loop_round"] == 0
+        assert eg["status"] == "RUNNING"                   # event_type=node.completed → 图级 RUNNING
+        assert eg["output"] == {}                          # run_detail.run.output
+        assert eg["extend_props"]["run_status"] == "running"
+        assert eg["extend_props"]["definition"] == {"name": "sm"}
+        assert len(eg["tasks"]) == 1 and eg["tasks"][0]["node_id"] == "N1"
+        assert eg["tasks"][0]["status"] == "DONE"           # 节点执行 status=completed → DONE
+        assert eg["tasks"][0]["task_spec"]["metadata"]["title"] == "Step1"  # display_name
+        assert eg["tasks"][0]["run_info"]["assignee"] == "b1"
+        assert eg["tasks"][0]["run_info"]["extend_props"] == {"attempt": 1, "outcome": "success",
+                                                              "status": "completed"}
+        assert eg["relations"] == [{"src_id": "N1", "dst_id": "N2",
+                                    "type": "DEPENDENCY", "extend_props": {}}]
 
     def test_run_completed_converges_to_done(self, monkeypatch):
         run_detail = {"run": {"status": "completed", "output": {"final": "ok"}}, "nodes": []}
@@ -611,7 +620,12 @@ class TestBCNStateMachine:
         ingest = repo.get("run-1", "")
         assert ingest is not None
         assert json.loads(ingest.orig_callback_data) == ev  # 原始 CloudEvent(未覆盖)
-        assert ingest.execution_graph == ev["data"]          # 事件体 data
+        assert ingest.extend_props is None                 # fetch 失败 → 无 run 明细可落 extend_props
+        # req1:fetch 失败兜底 → execution_graph 为极简 graph_to_dict(非事件体透传)
+        eg = ingest.execution_graph
+        assert eg["run_id"] == 0 and eg["status"] == "DONE"  # run.completed → DONE
+        assert eg["output"] == {"final": "ok"}               # 兜底取事件 data.output
+        assert eg["tasks"] == [] and eg["relations"] == [] and eg["extend_props"] == {}
 
     def test_bcs_non_200_fetch_falls_back_to_raw_event(self, monkeypatch):
         _install_fake_bcs(monkeypatch, run_status=500)
@@ -621,7 +635,11 @@ class TestBCNStateMachine:
         _run(_dispatch_call(_req(ev), svc, NoopCallbackAuthenticator(),
                             InMemoryCallbackCorrelationRegistry()))
         assert engine.reports == []
-        assert json.loads(repo.calls[0].orig_callback_data) == ev  # 非 200 → 用原始事件
+        rec = repo.calls[0]
+        assert json.loads(rec.orig_callback_data) == ev  # 非 200 → 用原始事件
+        assert rec.extend_props is None                   # run 明细非 200 → 无 extend_props
+        eg = rec.execution_graph                          # fetch 兜底 → 极简 graph_to_dict
+        assert eg["status"] == "DONE" and eg["output"] == {}
 
     def test_handled_event_without_node_uses_run_id_as_loop_task_id(self, monkeypatch):
         _install_fake_bcs(monkeypatch, run_detail={"run": {"status": "running"}, "nodes": []})
@@ -631,8 +649,9 @@ class TestBCNStateMachine:
         _run(_dispatch_call(_req(ev), svc, NoopCallbackAuthenticator(),
                             InMemoryCallbackCorrelationRegistry()))
         rec = repo.calls[0]
-        assert rec.run_id == "run-1" and rec.node_id == ""  # 无 node_id
-        assert rec.status == "state_machine.run.started"
+        assert rec.run_id == "run-1" and rec.node_id == ""  # 无 node_id(req4 恒空)
+        assert rec.status == "RUNNING"                       # req2:run.started → RUNNING
+        assert rec.extend_props == {"run": {"status": "running"}, "nodes": []}  # req3 run 明细
 
     def test_non_handled_bcn_event_acks_without_persist(self):
         # message.created 非 manager-worker、非 handled state_machine → 不落库、不收敛、ack 带说明

@@ -392,13 +392,19 @@ class TestBCN:
         tc = translate_bcn(self._EVT)
         assert tc.disposition == "result"
         d = tc.data.data
-        assert d["loop_task_id"] == "run-1::N1"
+        assert d["loop_task_id"] == "run-1"             # req4:node_id 恒空,= run_id
         assert d["workflow_source"] == "bcn"
         assert d["workflow_instance_id"] == "s-1"          # scope.session_id → main_session_id
-        assert d["status"] == "state_machine.node.completed"
+        assert d["event_id"] == "evt-1"                    # CloudEvent 幂等键透传
+        assert d["status"] == "RUNNING"                     # req2:node.completed → RUNNING
         assert d["result"]["success"] is True
         assert d["result"]["data"] == {"answer": 7}
-        assert d["execution_graph"] == self._EVT["data"]
+        # req1:execution_graph 为 graph_to_dict 形状 TaskExecutionGraph(极简兜底),非事件体透传
+        eg = d["execution_graph"]
+        assert eg["run_id"] == 0 and eg["task_id"] == "" and eg["loop_round"] == 0
+        assert eg["status"] == "RUNNING"
+        assert eg["output"] == {"answer": 7}               # 兜底取事件 data.output
+        assert eg["extend_props"] == {} and eg["tasks"] == [] and eg["relations"] == []
         assert d["_raw_callback_body"] == self._EVT
 
     def test_node_started_is_start_no_success(self):
@@ -406,7 +412,8 @@ class TestBCN:
         e["data"] = {"run_id": "run-1", "node_id": "N1", "attempt": 1, "started_at": "t"}
         tc = translate_bcn(e)
         assert tc.disposition == "start"
-        assert tc.data.data["loop_task_id"] == "run-1::N1"
+        assert tc.data.data["loop_task_id"] == "run-1"   # req4:node_id 恒空
+        assert tc.data.data["status"] == "RUNNING"        # req2:node.started → RUNNING
         assert "success" not in tc.data.data["result"]     # started 不设 success
 
     def test_run_started_and_created_have_no_node_id(self):
@@ -414,7 +421,8 @@ class TestBCN:
         e["data"] = {"run_mode": "configured", "started_at": "t"}
         tc = translate_bcn(e)
         assert tc.disposition == "start"
-        assert tc.data.data["loop_task_id"] == "run-1"     # 无 node_id
+        assert tc.data.data["loop_task_id"] == "run-1"     # 无 node_id(req4 恒空)
+        assert tc.data.data["status"] == "RUNNING"          # req2:run.started → RUNNING
         ec = dict(self._EVT, event_type="state_machine.run.created")
         ec["data"] = {"definition_id": "d", "status": "running"}
         assert translate_bcn(ec).disposition == "start"
@@ -425,13 +433,17 @@ class TestBCN:
         tc = translate_bcn(e)
         assert tc.disposition == "result"
         assert tc.data.data["loop_task_id"] == "run-1"
+        assert tc.data.data["status"] == "DONE"           # req2:run.completed → DONE
         assert tc.data.data["result"]["success"] is True
         assert tc.data.data["result"]["data"] == {"final": True}
+        eg = tc.data.data["execution_graph"]
+        assert eg["status"] == "DONE" and eg["output"] == {"final": True}  # req1 兜底取事件 output
 
     def test_node_completed_failed_outcome(self):
         e = dict(self._EVT, event_type="state_machine.node.completed")
         e["data"] = {"run_id": "run-1", "node_id": "N1", "outcome": "failed", "reason": "boom"}
         d = translate_bcn(e).data.data
+        assert d["status"] == "RUNNING"                   # req2:node.completed → RUNNING(失败态由结果/收敛处理)
         assert d["result"]["success"] is False
         assert d["result"]["exec_error"] == "boom"
 

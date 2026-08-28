@@ -70,6 +70,7 @@ from agentclaw.community.adapters.http.task.schemas import (
     task_spec_from_dto,
 )
 from agentclaw.community.adapters.http.task.translator import (
+    _build_bcn_execution_graph,
     is_bcn_event_payload,
     is_claw_mind_payload,
     parse_manager_worker_bcn,
@@ -733,64 +734,6 @@ def _find_node_status(svc: TaskServiceProtocol, loop_task_id: str) -> Status | N
     return node.status if node is not None else None
 
 
-def _build_task_status_graph(
-    run_detail: dict | None, graph_detail: dict | None
-) -> dict | None:
-    """结合 BCS DAG(graph nodes+edges)与实际执行结果(run nodes)→ 任务状态图谱。
-
-    - run_detail: ``GET /state-machine-runs/{run_id}`` 响应(run 级 status/output + nodes 执行记录)。
-    - graph_detail: ``GET /state-machine-runs/{run_id}/graph`` 响应(definition + nodes DAG + edges 流转)。
-    合并后每个 node 同时含 DAG 定义(display_name/kind/assignee/final_output)+ 执行结果(status/attempt/outcome/artifact_text)。
-    """
-    if not run_detail and not graph_detail:
-        return None
-    # 执行结果按 node_id 索引(来自 run_detail.nodes)
-    _exec_by_node: dict[str, dict] = {}
-    if run_detail:
-        for _n in run_detail.get("nodes") or []:
-            _nid = _n.get("node_id")
-            if _nid:
-                _exec_by_node[_nid] = _n
-    # DAG nodes + edges(来自 graph_detail)
-    _dag_nodes = (graph_detail or {}).get("nodes") or []
-    _dag_edges = (graph_detail or {}).get("edges") or []
-    # 合并:DAG node 定义 + 该 node 的执行结果
-    _merged_nodes = []
-    for _dn in _dag_nodes:
-        _nid = _dn.get("node_id")
-        _exec = _exec_by_node.get(_nid, {})
-        _merged_nodes.append(
-            {
-                "node_id": _nid,
-                "display_name": _dn.get("display_name"),
-                "kind": _dn.get("kind"),
-                "assignee": _dn.get("assignee"),
-                "final_output": _dn.get("final_output"),
-                "execution": {
-                    "status": _exec.get("status") or _dn.get("status"),
-                    "attempt": _exec.get("attempt") or _dn.get("attempt"),
-                    "outcome": _exec.get("outcome"),
-                    "artifact_text": _exec.get("artifact_text"),
-                    "assignee_bot_id": _exec.get("assignee_bot_id"),
-                    "error": _exec.get("error"),
-                },
-            }
-        )
-    # fallback:graph 无 nodes 但 run_detail 有 → 直接用 run_detail 的 nodes
-    if not _merged_nodes and run_detail:
-        _merged_nodes = [
-            {"node_id": _n.get("node_id"), "execution": _n}
-            for _n in run_detail.get("nodes") or []
-        ]
-    return {
-        "run_status": ((run_detail or {}).get("run") or {}).get("status"),
-        "run_output": ((run_detail or {}).get("run") or {}).get("output"),
-        "definition": (graph_detail or {}).get("definition"),
-        "nodes": _merged_nodes,
-        "edges": _dag_edges,
-    }
-
-
 async def _dispatch(
     request: Request,
     disposition: str,
@@ -858,26 +801,33 @@ async def _dispatch(
                     _graph_resp.json() if _graph_resp.status_code == 200 else None
                 )
                 if _run_detail:
-                    _tc.data.data["_raw_callback_body"] = _run_detail
+                    # 查询出来的原始 run 明细 → extend_props(result._ext_info),req3;
+                    # orig_callback_data 保持原始 CloudEvent(_raw_callback_body 不再覆盖)。
+                    _tc.data.data.setdefault("result", {})["_ext_info"] = _run_detail
                     logger.info(
-                        "[task_callback_report] BCN run 明细已取回 run_id=%s → orig_callback_data",
+                        "[task_callback_report] BCN run 明细已取回 run_id=%s → extend_props",
                         _run_id,
                     )
+                    # 结合 run 明细 + DAG → TaskExecutionGraph(graph_to_dict 形状)→ execution_graph,req1
+                    _task_graph = _build_bcn_execution_graph(
+                        event_type=(_raw_obj.get("event_type") if isinstance(_raw_obj, dict) else None),
+                        run_id=_run_id,
+                        run_detail=_run_detail,
+                        graph_detail=_graph_detail,
+                    )
+                    if _task_graph:
+                        _tc.data.data["execution_graph"] = _task_graph
+                        logger.info(
+                            "[task_callback_report] 任务状态图谱已构建 run_id=%s tasks=%d relations=%d → execution_graph",
+                            _run_id,
+                            len(_task_graph.get("tasks") or []),
+                            len(_task_graph.get("relations") or []),
+                        )
                 else:
                     logger.warning(
                         "[task_callback_report] BCS run 明细非 200 run_id=%s status=%s",
                         _run_id,
                         _run_resp.status_code,
-                    )
-                # 结合 DAG(graph nodes+edges)与执行结果(run nodes)→ 任务状态图谱 → execution_graph
-                _task_graph = _build_task_status_graph(_run_detail, _graph_detail)
-                if _task_graph:
-                    _tc.data.data["execution_graph"] = _task_graph
-                    logger.info(
-                        "[task_callback_report] 任务状态图谱已构建 run_id=%s nodes=%d edges=%d → execution_graph",
-                        _run_id,
-                        len(_task_graph.get("nodes") or []),
-                        len(_task_graph.get("edges") or []),
                     )
             except Exception as exc:  # noqa: BLE001 查 BCS 明细/DAG 失败不阻断落库(fallback 存原始 CloudEvent)
                 logger.warning(
@@ -898,7 +848,8 @@ async def _dispatch(
         )
         if (
             _run_status is None
-            and _tc.data.data.get("status") == "state_machine.run.completed"
+            and isinstance(_raw_obj, dict)
+            and _raw_obj.get("event_type") == "state_machine.run.completed"
         ):
             _run_status = "completed"
             _converge_output = _tc.data.data.get("result", {}).get("data")

@@ -353,17 +353,166 @@ def is_bcn_event_payload(raw: Any) -> bool:
             and "event_id" in raw)
 
 
+# ===== BCN state_machine run/node 状态 → Task Status 枚举 + graph_to_dict 执行图构建器 =====
+# translate_bcn 兜底用事件 data 建极简图;router 取回 BCS run 明细/DAG 后调用同一构建器建全图。
+# 形状对齐 serializers.graph_to_dict / ClawMind _build_claw_mind_execution_graph
+# (run_id:int / task_id / loop_round / status / output / extend_props / tasks / relations)。
+
+def _bcn_state_machine_status(event_type: str) -> Status:
+    """state_machine 事件 → 回调行 status:``run.completed``→``DONE``，其余→``RUNNING``。
+
+    对齐 req2:仅 ``state_machine.run.completed`` 视作完成;node.completed 等判运行中
+    (节点/run 级终态由 BCS run 明细驱动收敛,回调行 status 仅做粗粒度审计投影)。"""
+    return Status.DONE if event_type == "state_machine.run.completed" else Status.RUNNING
+
+
+_BCN_NODE_STATUS_DONE = frozenset({"completed", "succeeded", "done", "success"})
+_BCN_NODE_STATUS_FAILED = frozenset({"failed", "error"})
+_BCN_NODE_STATUS_CANCELLED = frozenset({"cancelled", "canceled", "aborted"})
+
+
+def _bcn_node_status(exec_status: Any) -> Status:
+    """BCS node 执行态 → Task Status:completed→DONE、failed→FAILED、aborted→CANCELLED、其余→RUNNING。"""
+    s = str(exec_status or "").lower()
+    if s in _BCN_NODE_STATUS_DONE:
+        return Status.DONE
+    if s in _BCN_NODE_STATUS_FAILED:
+        return Status.FAILED
+    if s in _BCN_NODE_STATUS_CANCELLED:
+        return Status.CANCELLED
+    return Status.RUNNING
+
+
+def _bcn_run_id_as_int(run_id: Any) -> int:
+    """run_id 整数化(对齐 graph_to_dict.run_id:int);非数字(BCS run_id 字符串)→0。
+
+    真值字符串 run_id 仍保留在 task_callback.run_id 列与 extend_props 里,图内仅做 int 投影。"""
+    try:
+        return int(run_id) if run_id is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _bcn_node_task(dag_node: dict, exec_node: dict) -> dict[str, Any]:
+    """单节点:DAG 定义(display_name/assignee/final_output)+ 执行结果(status/attempt/outcome/...)→ graph_to_dict task。"""
+    nid = dag_node.get("node_id") or exec_node.get("node_id") or ""
+    ex_status = exec_node.get("status") or dag_node.get("status")
+    title = dag_node.get("display_name") or nid
+    final_out = exec_node.get("artifact_text") or dag_node.get("final_output")
+    ep: dict[str, Any] = {}
+    for k in ("attempt", "outcome", "assignee_bot_id", "error", "status"):
+        if exec_node.get(k) is not None:
+            ep[k] = exec_node[k]
+    return {
+        "node_id": nid,
+        "task_id": "",
+        "status": _bcn_node_status(ex_status).value,
+        "task_spec": {
+            "metadata": {"task_id": nid, "title": title, "instruction": ""},
+            "context": {"background": "", "extend_props": {}},
+            "goal": {"objective": "", "acceptances": []},
+        },
+        "run_info": {
+            "run_mode": None,
+            "assignee": dag_node.get("assignee"),
+            "start_time": None,
+            "end_time": None,
+            "output": (final_out if isinstance(final_out, dict) else {}),
+            "acceptance_result": None,
+            "extend_props": ep,
+        },
+    }
+
+
+def _build_bcn_execution_graph(
+    *, event_type: str, run_id: Any, data: dict | None = None,
+    run_detail: dict | None = None, graph_detail: dict | None = None,
+) -> dict[str, Any] | None:
+    """BCN state_machine → ``graph_to_dict`` 形状 TaskExecutionGraph 快照(对齐 ClawMind builder)。
+
+    - 无 ``run_detail``/``graph_detail``(``translate_bcn`` 兜底):用事件 ``data`` 建极简图
+      (``output=data.output``、空 tasks/relations)——保证落库 ``execution_graph`` 永不为原始事件体。
+    - 有明细(router 取回 BCS run 与 DAG):``tasks`` 由 DAG nodes + 执行结果按 ``node_id`` 合并,
+      ``relations`` 由 edges 派生(DEPENDENCY);图级 ``status`` 仍按 ``event_type`` 映射(req2),
+      ``run_detail.run.status`` / DAG ``definition`` 放图级 ``extend_props``(结构化,非原始明细)。
+      ``run_id`` 整数化(字符串 run_id→0,真值在 extend_props / run_id 列保留)。
+    """
+    data = data if isinstance(data, dict) else {}
+    run_detail = run_detail if isinstance(run_detail, dict) else None
+    graph_detail = graph_detail if isinstance(graph_detail, dict) else None
+    rid = _bcn_run_id_as_int(run_id)
+    status = _bcn_state_machine_status(event_type)
+
+    if not run_detail and not graph_detail:
+        out = data.get("output")
+        return {
+            "run_id": rid,
+            "task_id": "",
+            "loop_round": 0,
+            "status": status.value,
+            "output": (out if isinstance(out, dict) else {}),
+            "extend_props": {},
+            "tasks": [],
+            "relations": [],
+        }
+
+    run_obj = (run_detail or {}).get("run")
+    run_obj = run_obj if isinstance(run_obj, dict) else {}
+    run_output = run_obj.get("output")
+    # 执行结果按 node_id 索引(来自 run_detail.nodes)
+    exec_by_node: dict[str, dict] = {}
+    for _n in run_detail.get("nodes") or []:
+        if isinstance(_n, dict) and _n.get("node_id"):
+            exec_by_node[_n["node_id"]] = _n
+
+    tasks: list[dict[str, Any]] = []
+    for _dn in graph_detail.get("nodes") or []:
+        if isinstance(_dn, dict) and _dn.get("node_id"):
+            tasks.append(_bcn_node_task(_dn, exec_by_node.get(_dn["node_id"], {})))
+    # fallback:graph 无 nodes 但 run_detail 有执行 nodes → 直接用执行结果建 task
+    if not tasks:
+        for _ex in run_detail.get("nodes") or []:
+            if isinstance(_ex, dict) and _ex.get("node_id"):
+                tasks.append(_bcn_node_task({"node_id": _ex["node_id"]}, _ex))
+
+    relations: list[dict[str, Any]] = []
+    for _e in graph_detail.get("edges") or []:
+        if isinstance(_e, dict) and _e.get("src") and _e.get("dst"):
+            relations.append({"src_id": _e["src"], "dst_id": _e["dst"],
+                              "type": "DEPENDENCY", "extend_props": {}})
+
+    graph_ep: dict[str, Any] = {}
+    if run_obj.get("status") is not None:
+        graph_ep["run_status"] = run_obj.get("status")
+    if graph_detail.get("definition") is not None:
+        graph_ep["definition"] = graph_detail.get("definition")
+
+    return {
+        "run_id": rid,
+        "task_id": "",
+        "loop_round": 0,
+        "status": status.value,
+        "output": (run_output if isinstance(run_output, dict) else {}),
+        "extend_props": graph_ep,
+        "tasks": tasks,
+        "relations": relations,
+    }
+
+
 def translate_bcn(raw: dict) -> TranslatedCallback | None:
     """BCN CloudEvent → TaskCallbackData.data dict(对齐 task_callback 列);非处理事件返 ``None``。
 
     仅处理 ``_BCN_HANDLED_EVENTS``;disposition 由 event_type 推(created/started→start,completed→result)。
-    字段映射(拟,可调):
-    - ``invoker`` = "bcn";``loop_task_id`` = ``scope.run_id``(+ ``::data.node_id`` 若有);
+    字段映射:
+    - ``invoker`` = "bcn";``loop_task_id`` = ``scope.run_id``(node_id 恒空,req4);
     - ``workflow_instance_id`` = ``scope.session_id``(→ main_session_id);
-    - ``status`` = ``event_type``;``execution_graph`` = ``data``(事件体);
+    - ``status`` = ``_bcn_state_machine_status(event_type)``(``run.completed``→``DONE``,其余→``RUNNING``,req2);
+    - ``execution_graph`` = ``_build_bcn_execution_graph``(极简 graph_to_dict 兜底;router 取回 run 明细/DAG 后覆盖为全图,req1);
     - ``result.success`` 由 event_type 推(completed→True,除非 ``data.outcome`` 为 failed/error);``result.data`` = ``data.output``;
     - ``result.exec_error`` = ``data.reason``/``data.error_text``(若有);
-    - ``_raw_callback_body`` = 原始 event(→ orig_callback_data);``extend_props`` 不设。
+    - ``event_id`` = ``raw.event_id``(CloudEvent 幂等键;避免 run 明细经 ``result._ext_info`` 落 ``extend_props`` 后摘要素乱);
+    - ``_raw_callback_body`` = 原始 event(→ orig_callback_data,router 不再覆盖);``extend_props`` 不设
+      (router 取回 run 明细后落 ``result._ext_info`` → ``extend_props``,req3)。
     """
     event_type = raw.get("event_type")
     if event_type not in _BCN_HANDLED_EVENTS:
@@ -374,8 +523,8 @@ def translate_bcn(raw: dict) -> TranslatedCallback | None:
     data = data if isinstance(data, dict) else {}
 
     run_id = scope.get("run_id") or ""
-    node_id = data.get("node_id") or ""
-    loop_task_id = f"{run_id}::{node_id}" if node_id else run_id
+    # req4:node_id 恒空,loop_task_id = run_id(回调不走框架节点名;run_id 即回投键)。
+    loop_task_id = run_id
 
     is_completed = event_type.endswith(".completed")
     result: dict[str, Any] = {}
@@ -399,8 +548,11 @@ def translate_bcn(raw: dict) -> TranslatedCallback | None:
             "instance_id": 0,
             "workflow_source": "bcn",
             "workflow_instance_id": (scope.get("session_id") or ""),
-            "status": event_type,
-            "execution_graph": data,
+            "event_id": raw.get("event_id"),
+            "status": _bcn_state_machine_status(event_type).value,
+            "execution_graph": _build_bcn_execution_graph(
+                event_type=event_type, run_id=run_id, data=data,
+            ),
             "_raw_callback_body": raw,
             "result": result,
         }),
