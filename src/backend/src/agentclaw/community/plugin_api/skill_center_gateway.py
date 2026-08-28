@@ -436,7 +436,7 @@ class SkillCenterGateway(Plugin, Protocol):
 
     def get_team_by_ref(
         self, request: SkillCenterTeamLookupRequest
-    ) -> SkillCenterTeam | None: ...
+    ) -> SkillCenterTeam: ...
 
     def search_public_skills(
         self, request: SkillCenterPublicSkillSearchRequest

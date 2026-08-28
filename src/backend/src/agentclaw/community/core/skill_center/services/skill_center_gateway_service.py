@@ -89,9 +89,9 @@ class SkillCenterGatewayService:
 
     def get_team_by_ref(
         self, request: SkillCenterTeamLookupRequest
-    ) -> SkillCenterTeam | None:
+    ) -> SkillCenterTeam:
         team = self._gateway.get_team_by_ref(request)
-        if team is not None and (
+        if (
             team.ref_source != request.ref_source
             or team.ref_source_id != request.ref_source_id
         ):

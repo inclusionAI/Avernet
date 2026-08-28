@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import NoReturn
+
 from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterExactDownload,
     SkillCenterExactDownloadRequest,
@@ -33,7 +35,7 @@ class CommunitySkillCenterGateway(SkillCenterGateway):
     """The public distribution has no configured Skill Center service."""
 
     @staticmethod
-    def _unavailable() -> None:
+    def _unavailable() -> NoReturn:
         raise SkillCenterGatewayError(
             SkillCenterGatewayErrorCode.UNAVAILABLE,
             "Skill Center is not available in the community build",
@@ -44,7 +46,7 @@ class CommunitySkillCenterGateway(SkillCenterGateway):
 
     def get_team_by_ref(
         self, request: SkillCenterTeamLookupRequest
-    ) -> SkillCenterTeam | None:
+    ) -> SkillCenterTeam:
         self._unavailable()
 
     def search_public_skills(
