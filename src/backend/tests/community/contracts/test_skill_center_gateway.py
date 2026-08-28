@@ -187,6 +187,21 @@ def test_gateway_consumer_round_trips_team_publish_and_exact_version(world) -> N
     ]
 
 
+def test_local_gateway_reports_missing_team_reference_as_business_error(world) -> None:
+    service = world.get(SkillCenterGatewayService)
+    gateway = world.get(SkillCenterGateway)
+
+    with pytest.raises(SkillCenterGatewayError) as raised:
+        service.get_team_by_ref(
+            SkillCenterTeamLookupRequest(
+                ref_source="TEAMCLAW", ref_source_id="missing-space"
+            )
+        )
+
+    assert raised.value.code is SkillCenterGatewayErrorCode.BUSINESS
+    assert len(gateway.calls_to("get_team_by_ref")) == 1
+
+
 def test_gateway_consumer_routes_public_market_without_a_team(world) -> None:
     service = world.get(SkillCenterGatewayService)
     gateway = world.get(SkillCenterGateway)

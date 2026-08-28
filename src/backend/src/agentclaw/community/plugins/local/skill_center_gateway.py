@@ -7,6 +7,7 @@ import io
 import json
 from pathlib import Path
 import tempfile
+from typing import NoReturn
 import zipfile
 
 from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
@@ -61,7 +62,7 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
         self._artifacts: dict[tuple[str, str, str], tuple[str, str]] = {}
 
     @staticmethod
-    def _missing(message: str) -> None:
+    def _missing(message: str) -> NoReturn:
         raise SkillCenterGatewayError(SkillCenterGatewayErrorCode.BUSINESS, message)
 
     def _has_team(self, team_id: str) -> bool:
@@ -161,8 +162,13 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
 
     def get_team_by_ref(
         self, request: SkillCenterTeamLookupRequest
-    ) -> SkillCenterTeam | None:
-        return self._teams_by_ref.get((request.ref_source, request.ref_source_id))
+    ) -> SkillCenterTeam:
+        team = self._teams_by_ref.get((request.ref_source, request.ref_source_id))
+        if team is None:
+            self._missing(
+                f"Team reference {request.ref_source}/{request.ref_source_id} does not exist"
+            )
+        return team
 
     def search_public_skills(
         self, request: SkillCenterPublicSkillSearchRequest
