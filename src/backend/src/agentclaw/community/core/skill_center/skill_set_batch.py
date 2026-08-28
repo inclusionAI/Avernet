@@ -1,4 +1,4 @@
-"""Typed outcomes for one ordered SkillSet member-add batch."""
+"""Typed outcomes for one ordered SkillSet Skill-membership batch."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class SkillSetAddOutcome:
-    """One requested Skill's desired-state result.
+class SkillSetSkillOutcome:
+    """One requested Skill membership mutation's desired-state result.
 
     The legacy BFF contract deliberately permits a batch to have both
     successful and rejected members.  Keeping the domain exception here lets

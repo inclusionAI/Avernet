@@ -9,7 +9,7 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
     LegacySkillSetScope,
 )
 from agentclaw.community.core.skill_center.skill_set_batch import (
-    SkillSetAddOutcome,
+    SkillSetSkillOutcome,
 )
 
 
@@ -74,17 +74,17 @@ class SkillSetManagementServiceProtocol(Protocol):
         user_id: str,
         set_id: str,
         skill_ids: Sequence[str],
-    ) -> list[SkillSetAddOutcome]: ...
+    ) -> list[SkillSetSkillOutcome]: ...
 
-    async def remove_skill(
+    async def remove_skills(
         self,
         *,
         bot_id: str,
         owner_id: str,
         user_id: str,
         set_id: str,
-        skill_id: str,
-    ) -> dict[str, Any]: ...
+        skill_ids: Sequence[str],
+    ) -> list[SkillSetSkillOutcome]: ...
 
     def list_mcps(
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str

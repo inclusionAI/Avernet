@@ -281,14 +281,16 @@ async def remove_skill(
         SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[SkillSetMembershipResult]:
-    result = await service.remove_skill(
+    (result,) = await service.remove_skills(
         bot_id=bot_id,
         owner_id=owner_id,
         user_id=user_id,
         set_id=set_id,
-        skill_id=skill_id,
+        skill_ids=[skill_id],
     )
-    return envelope(SkillSetMembershipResult(**result), request)
+    if result.error is not None:
+        raise result.error
+    return envelope(SkillSetMembershipResult(changed=result.changed), request)
 
 
 @router.get("/{set_id}/mcps", response_model=Envelope[list[SkillSetMcpItem]])

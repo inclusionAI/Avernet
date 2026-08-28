@@ -889,14 +889,16 @@ async def remove_skill_from_set(
         control_plane=control_plane,
     )
 
-    result = await control_plane.remove_skill(
+    (result,) = await control_plane.remove_skills(
         bot_id=effective_bot_id,
         owner_id=effective_entity_id,
         user_id=_legacy_actor(ctx, user_id or entity_id),
         set_id=skill_set_id,
-        skill_id=skill_id,
+        skill_ids=[skill_id],
     )
-    if not result.get("changed"):
+    if result.error is not None:
+        raise result.error
+    if not result.changed:
         raise SkillSetControlPlaneNotFoundError("Skill not found in skill set")
     return MessageResponse(success=True, message="Skill removed from skill set")
 
