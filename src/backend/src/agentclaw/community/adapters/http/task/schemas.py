@@ -303,6 +303,10 @@ class TaskExecutionGraphDTO(BaseModel):
         None,
         description="回调审计 DAG 快照(按 root session_id 从 task_callback 反查挂图级)",
     )
+    execution_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="执行配置投影(task_type/yaml/workflow_id + 会话/群/父任务上下文扁平;历史记录 teamclaw_context 兼容归一)",
+    )
 
 
 def runtime_status_to_product_status(status: Any) -> str:
@@ -424,6 +428,34 @@ def acceptance_result_from_dto(dto: AcceptanceResultDTO):
     )
 
 
+def _normalize_execution_config(graph) -> dict[str, Any]:
+    """Dashboard ``execution_config`` 顶层投影(统一新规范)。
+
+    优先取 ``graph.extend_props["execution_config"]``(新建图时由 task_graph_service 写入);
+    历史记录若该处缺会话/群/父任务 4 字段、但根节点 ``task_spec.context.extend_props.teamclaw_context``
+    保留旧值,则只读回填进响应 ``execution_config``(不改存储,兼容归一)。``task_type`` 枚举转 value。
+    """
+    raw = graph.extend_props.get("execution_config") or {}
+    ec: dict[str, Any] = dict(raw) if isinstance(raw, dict) else {}
+    root = next(
+        (n for n in graph.tasks if n.node_id == getattr(graph, "task_id", "")),
+        None,
+    )
+    if root is None and graph.tasks:
+        root = graph.tasks[0]
+    if root is not None:
+        tc = (root.task_spec.context.extend_props or {}).get("teamclaw_context") or {}
+        if isinstance(tc, dict):
+            for key in ("main_session_id", "main_session_name", "source_group_id", "parent_task_id"):
+                # key in tc 而非 value 非空:历史 tc.parent_task_id 显式 None 同样回填,确保归一后繁键一致。
+                if key not in ec and key in tc:
+                    ec[key] = tc[key]
+    _tt = ec.get("task_type")
+    if hasattr(_tt, "value"):  # TaskType 枚举转字符串值,便于前端消费
+        ec["task_type"] = _tt.value
+    return ec
+
+
 def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGraphDTO:
     nodes: list[TaskNodeDTO] = []
     for n in graph.tasks:
@@ -508,6 +540,7 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
         relations=relations,
         extend_props=dict(graph.extend_props),
         execution_graph=graph.execution_graph,
+        execution_config=_normalize_execution_config(graph),
     )
 
 

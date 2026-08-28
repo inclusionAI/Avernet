@@ -81,5 +81,6 @@ class TaskInfoRequest:
             ),
             source_type=self.source_type.value,
             owner_bot_id=self.owner_bot_id,
+            owner_user_id=self.owner_user_id,
             execution_config=dict(self.execution_config),
         )

@@ -15,6 +15,7 @@ from enum import StrEnum
 from typing import Any, Protocol
 
 from agentclaw.community.core.task.domain.json_extract import extract_json
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.domain.models import TaskExecutionGraph, TaskNode
 from agentclaw.community.core.task.domain.prompt_constants import (
     NO_WEB_SEARCH_CONSTRAINT,
@@ -148,7 +149,10 @@ class SearchBasedDispatchStrategy:
     async def apply(self, node: TaskNode, graph: TaskExecutionGraph) -> SearchResult:
         if self._bot is None or self._discover is None:
             return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_port_stub")
-        owner = str(graph.extend_props.get("owner_bot_id") or "")
+        owner = compose_bot_identity(
+            str(graph.extend_props.get("owner_bot_id") or ""),
+            graph.extend_props.get("owner_user_id"),
+        )
         if not owner:
             return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_owner")
         candidates = await _prefetch_candidates(self._discover, node, graph)

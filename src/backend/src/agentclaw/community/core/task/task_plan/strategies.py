@@ -29,6 +29,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
 )
 from agentclaw.community.core.task.domain.prompt_constants import NO_WEB_SEARCH_CONSTRAINT
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 
 logger = logging.getLogger("task.planner")
 
@@ -103,7 +104,10 @@ class GapBasedPlanningStrategy:
         if self._bot is None:
             # 无规划端口:无法计算 gap / 产子 → 有 gap 拆不出(编排核走深度闸门 HUNG,不假 done)
             return PlanResult(children=[], has_gap=True, gap_detail="no_planning_port")
-        owner = str(graph.extend_props.get("owner_bot_id") or "")
+        owner = compose_bot_identity(
+            str(graph.extend_props.get("owner_bot_id") or ""),
+            graph.extend_props.get("owner_user_id"),
+        )
         if not owner:
             # 有端口但无 owner bot(owner_bot_id 缺失):无人可投规划 prompt → 有 gap 拆不出(→ HUNG)
             return PlanResult(children=[], has_gap=True, gap_detail="no_owner_bot")

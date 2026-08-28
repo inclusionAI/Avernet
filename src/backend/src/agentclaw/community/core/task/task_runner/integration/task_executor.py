@@ -12,6 +12,7 @@ import logging
 import time
 from typing import Any
 
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.domain.models import TaskNode, TaskNodePatch
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
@@ -130,6 +131,8 @@ class TaskExecutor:
         完成,执行器不再做表级授权 JOIN:直接按 ``node.run_info.assignee`` 投递。被 JOIN 丢掉的候选
         已由 dispatcher 写入 ``run_info.extend_props.unauthorized_bots``(dashboard 暴露)。"""
         assignee = node.run_info.assignee
+        assignee_owner_id = node.run_info.extend_props.get("assignee_owner_id")
+        openapi_bot_id = compose_bot_identity(assignee, assignee_owner_id)
         loop_task_id = f"{node.task_id}::{node.node_id}"
         session_id: str | None = None
         async with sem:
@@ -137,7 +140,7 @@ class TaskExecutor:
                 ctx = self._context.build(node.task_id, node.node_id)
                 message = self._formatter.format_execute(ctx, node)
                 sent = await self._bot.send_message(
-                    bot_id=assignee,
+                    bot_id=openapi_bot_id,
                     message=message,
                     metadata={"biz_task_id": node.task_id},
                 )
@@ -158,7 +161,7 @@ class TaskExecutor:
                 SingleBotHandle(
                     loop_task_id=loop_task_id,
                     run_id=run_id,
-                    bot_id=assignee,
+                    bot_id=openapi_bot_id,
                     registered_at=time.monotonic(),
                     session_id=session_id,
                 )
@@ -267,6 +270,14 @@ class TaskExecutor:
         raw_bindings = (
             self._state_machine_bindings(gf) if mode == "state_machine" else {}
         )
+        # A state-machine binding names the actual runtime Bot(s). BCS requires
+        # every binding target to also be present in participants, so merge
+        # binding targets into the participant roster before resolving UUIDs.
+        # Keep the original order and deduplicate exact product/composite IDs.
+        for spec in raw_bindings.values():
+            for binding_bot_id in spec["bot_ids"]:
+                if binding_bot_id not in bot_ids:
+                    bot_ids.append(binding_bot_id)
         manager_bot_id = (
             gf.extend_props.get("manager_bot_id") if mode == "manager_worker" else None
         )

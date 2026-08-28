@@ -21,7 +21,7 @@ from agentclaw.community.core.task.task_runner.integration.task_executor import 
 )
 
 
-def _node(assignee="bot9:ent1"):
+def _node(assignee="bot9:ent1", extend_props=None):
     return TaskNode(
         node_id="c1",
         task_id="t1",
@@ -31,7 +31,9 @@ def _node(assignee="bot9:ent1"):
             Context("bg"),
             Goal("O", [AcceptanceCriteria("a1", "d")]),
         ),
-        run_info=RuntimeInfo(run_mode="single_bot", assignee=assignee),
+        run_info=RuntimeInfo(
+            run_mode="single_bot", assignee=assignee, extend_props=extend_props or {}
+        ),
         node_run_graph=None,
     )  # type: ignore[arg-type]
 
@@ -102,6 +104,67 @@ def test_dispatch_single_bot_registers_handle():
     assert bot.sent[0][0] == "bot9:ent1"
     assert poller.registered[0].run_id == "mid_1"
     assert poller.registered[0].loop_task_id == "t1::c1"
+
+
+
+def test_dispatch_single_bot_composes_owner_for_pure_assignee():
+    bot = _Bot()
+    poller = _Poller()
+    exe = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=poller,
+    )
+
+    ok = _run(exe.dispatch([_node("default", {"assignee_owner_id": "146836"})]))
+
+    assert ok == [True]
+    assert bot.sent[0][0] == "default:146836"
+    assert poller.registered[0].bot_id == "default:146836"
+
+
+def test_dispatch_single_bot_rebuilds_composite_with_explicit_owner():
+    bot = _Bot()
+    poller = _Poller()
+    exe = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=poller,
+    )
+
+    ok = _run(
+        exe.dispatch([_node("default:old-owner", {"assignee_owner_id": "146836"})])
+    )
+
+    assert ok == [True]
+    assert bot.sent[0][0] == "default:146836"
+    assert poller.registered[0].bot_id == "default:146836"
+
+
+def test_dispatch_single_bot_uses_explicit_owner_for_composite_assignee():
+    bot = _Bot()
+    poller = _Poller()
+    exe = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=poller,
+    )
+
+    ok = _run(
+        exe.dispatch([_node("default:146836", {"assignee_owner_id": "other-owner"})])
+    )
+
+    assert ok == [True]
+    assert bot.sent[0][0] == "default:other-owner"
 
 
 def test_dispatch_single_bot_sends_assignee_verbatim():

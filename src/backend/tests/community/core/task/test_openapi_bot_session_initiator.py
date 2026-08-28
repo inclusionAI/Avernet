@@ -272,14 +272,36 @@ class TestBuildSessionUrl:
         assert "bot=b1%3Ao1" in url
         assert "session=agent%3Amain%3As1" in url
 
-    def test_frontend_url_holder_overrides(self):
-        FrontendUrlHolder.set("http://override:7777")
+    def test_frontend_url_provider_overrides(self):
+        """Provider 返回非空 → 覆盖构造 frontend_url(holder-override 语义
+        现由 CorpFrontendUrlProvider.get() 承载)。"""
+
+        class _StubProvider:
+            def get(self) -> str:
+                return "http://override:7777"
+
         initiator = OpenApiBotSessionInitiator(
             openapi_bot=_make_openapi_bot(),
             frontend_url="http://ignored:8000",
+            frontend_url_provider=_StubProvider(),
         )
         url = initiator._build_session_url("s2", "b2", "o2")
         assert url.startswith("http://override:7777/workspace")
+
+    def test_frontend_url_provider_empty_falls_back_to_ctor(self):
+        """Provider 返回空串(NullFrontendUrlProvider 语义) → 回落构造值。"""
+
+        class _EmptyProvider:
+            def get(self) -> str:
+                return ""
+
+        initiator = OpenApiBotSessionInitiator(
+            openapi_bot=_make_openapi_bot(),
+            frontend_url="http://ctor:8000",
+            frontend_url_provider=_EmptyProvider(),
+        )
+        url = initiator._build_session_url("s2", "b2", "o2")
+        assert url.startswith("http://ctor:8000/workspace")
 
     def test_strips_trailing_slash(self):
         initiator = OpenApiBotSessionInitiator(
