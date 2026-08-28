@@ -43,7 +43,7 @@ _TEST_KEY = "integration-test-shared-secret-32b!!"
 
 @pytest.fixture(autouse=True)
 def _signing_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PRINCIPAL_SIGNING_KEY", _TEST_KEY)
+    monkeypatch.setenv("principal_signing_key", _TEST_KEY)
 
 
 def _load_user_config() -> UserConfig:

@@ -38,7 +38,7 @@ _MARIADB_PASSWORD = os.environ.get("MARIADB_PASSWORD", "gatewaypass")
 
 def _signing_key() -> str:
     """Community env-var signing key name (configs/application.yaml)."""
-    return "PRINCIPAL_SIGNING_KEY"
+    return "principal_signing_key"
 
 
 def _probe_mariadb() -> str | None:

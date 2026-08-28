@@ -55,6 +55,7 @@ def auth_mock_enabled() -> bool:
     """Whether the operator switched the dev auth mock on for this process."""
     return os.getenv(AUTH_MOCK_ENV, "").strip() == "1"
 
+
 def auth_mock_user() -> str:
     return os.getenv(AUTH_MOCK_USER, "").strip()
 
@@ -75,7 +76,9 @@ class DevHeaderUserStrategy:
         if not user_id:
             user_id = auth_mock_user()
         if not user_id:
-            return None  # neither header nor env var → not applicable; runner fail-closes
+            return (
+                None  # neither header nor env var → not applicable; runner fail-closes
+            )
         logger.debug("dev auth header accepted: user=%s", user_id)
         subject = AuthenticatedUser(
             id=user_id,

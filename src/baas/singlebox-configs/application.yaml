@@ -45,6 +45,7 @@ user_config:
       avernet-sidecar: "nginx:alpine"
       init: "busybox:latest"
       nas-server: ""
+      env: ""
 
   bot_service:
     proxy_base_url: "https://proxy.example.com"

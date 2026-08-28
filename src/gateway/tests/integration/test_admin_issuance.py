@@ -24,7 +24,7 @@ _TEST_KEY = "integration-test-shared-secret-32b!!"
 def _signing_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """Provision the key before ``create_app()``; the community resolver reads
     ``{NAME}`` directly from the environment (``configs/application.yaml``)."""
-    monkeypatch.setenv("PRINCIPAL_SIGNING_KEY", _TEST_KEY)
+    monkeypatch.setenv("principal_signing_key", _TEST_KEY)
 
 
 @pytest.fixture(autouse=True)

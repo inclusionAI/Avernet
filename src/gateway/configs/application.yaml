@@ -82,7 +82,7 @@ user_config:
   # PrincipalSigner (JWT client) config. The signing key is a secret and is
   # resolved at runtime via the SecretResolver using ``secret_name``; the
   # remaining fields are non-secret and live here. With the community resolver
-  # above that means AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE, and its value
+  # above that means principal_signing_key, and its value
   # must equal the one the upstream verifies with — both sides log a
   # fingerprint of it at boot so the two can be compared without printing it.
   #

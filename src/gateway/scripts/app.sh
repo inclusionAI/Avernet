@@ -186,7 +186,7 @@ do_start() {
     fi
 
     if [[ "$env_name" == "local" ]]; then
-        export PRINCIPAL_SIGNING_KEY="${PRINCIPAL_SIGNING_KEY:-avernet-dev-signing-key-NOT-FOR-PROD}"
+        export principal_signing_key="${principal_signing_key:-avernet-dev-signing-key-NOT-FOR-PROD}"
     fi
 
     log_info "Starting gateway application..."

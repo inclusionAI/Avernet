@@ -37,7 +37,7 @@ services:
       ENGINE_PROXY_SERVER_URL: "${ENGINE_PROXY_SERVER_URL:-https://engineproxy.avernet.com}"
       BCSFUSE_SERVER_URL: "${BCSFUSE_SERVER_URL:-https://bcsfuse.avernet.com}"
       # Test-only HMAC signing key (community resolver reads AVERNET_SECRET_<NAME>_VALUE).
-      PRINCIPAL_SIGNING_KEY: "${PRINCIPAL_SIGNING_KEY:-gateway-test-signing-key-not-for-prod}"
+      principal_signing_key: "${principal_signing_key:-gateway-test-signing-key-not-for-prod}"
     ports:
       - "${HOST_PORT:-18888}:8888"
     depends_on:
