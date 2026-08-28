@@ -751,6 +751,7 @@ async def _dispatch(
     # ClawMind / BCN 是事件/工作流级回投(run_id/workflow_id 不对应框架节点):只落 task_callback 审计,
     # 不推进编排核(start_run/report_result 会 NodeNotFoundError),直接 ack。
     if is_claw_mind_payload(_raw_obj):
+        logger.info("[task_callback] claw_mind callback received")
         auth.verify(
             source="claw_mind",
             headers=request.headers,
@@ -761,6 +762,7 @@ async def _dispatch(
         await svc.callback.ingest(translate_claw_mind(_raw_obj, disposition).data)
         return envelope({"ok": True}, request)
     if is_bcn_event_payload(_raw_obj):
+        logger.info("[task_callback] bcn event received")
         auth.verify(
             source="bcn",
             headers=request.headers,
@@ -784,11 +786,13 @@ async def _dispatch(
             if isinstance(_raw_obj, dict)
             else None
         )
+        logger.info("[task_callback] bcn event run_id=%s", _run_id)
         if _run_id:
             try:
                 _bcs_base = os.environ.get(
                     "BCS_API_BASE_URL", "http://127.0.0.1:21000"
                 ).rstrip("/")
+                logger.info("[task_callback] bcn event bcs_base_url=%s", _bcs_base)
                 async with httpx.AsyncClient(timeout=10.0) as _cli:
                     _run_resp = await _cli.get(
                         f"{_bcs_base}/state-machine-runs/{_run_id}"

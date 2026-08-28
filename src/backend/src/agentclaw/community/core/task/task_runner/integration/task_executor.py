@@ -340,6 +340,16 @@ class TaskExecutor:
             "driver_bot": bcs_uuid(bot_ids[0]),
             "participants": participants,
         }
+
+        _api_base = gf.extend_props.get("api_base_url")
+        _corp_cb = ""
+        if self._bcs is not None:
+            _cb_fn = getattr(self._bcs, "task_callback_url", None)
+            if callable(_cb_fn):
+                _corp_cb = (_cb_fn() or "").strip()
+        _sink_base = _corp_cb or _api_base or self._api_base_url
+        logger.info("[task][task_executor] form_coop_group sink_base_url=%s, api_base=%s", _sink_base, _api_base)
+
         if mode == "manager_worker":
             mgr = str(manager_bot_id or bot_ids[0])
             req_kwargs["group_strategy"] = "manager_worker"
@@ -402,24 +412,37 @@ class TaskExecutor:
             )
         # BCN 事件回调订阅仅对 manager_worker 生效。state_machine/chat 使用 poller
         # 兜底收敛，避免 BCS require_human 拒绝 Bot/HMAC-only 建群请求。
-        _api_base = gf.extend_props.get("api_base_url")
-        _corp_cb = ""
-        if self._bcs is not None:
-            _cb_fn = getattr(self._bcs, "task_callback_url", None)
-            if callable(_cb_fn):
-                _corp_cb = (_cb_fn() or "").strip()
-        _sink_base = _corp_cb or _api_base or self._api_base_url
         if mode == "manager_worker" and _sink_base:
             _sink_base = str(_sink_base).rstrip("/")
             req_kwargs["event_subscriptions"] = [
                 {
                     "name": "avernet-manager-worker",
                     "event_filters": [
-                        "group.created",
                         "session.created",
                         "task.assigned",
                         "task.completed",
                         "session.completed",
+                    ],
+                    "payload": {"mode": "full"},
+                    "sink": {
+                        "type": "webhook",
+                        "url": _sink_base + _BCN_EVENT_CALLBACK_PATH,
+                        "request_timeout_ms": 10000,
+                    },
+                }
+            ]
+
+        if mode == "state_machine" and _sink_base:
+            _sink_base = str(_sink_base).rstrip("/")
+            req_kwargs["event_subscriptions"] = [
+                {
+                    "name": "avernet-state_machine",
+                    "event_filters": [
+                        'state_machine.run.created',
+                        'state_machine.run.started',
+                        'state_machine.node.started',
+                        'state_machine.node.completed',
+                        'state_machine.run.completed'
                     ],
                     "payload": {"mode": "full"},
                     "sink": {
