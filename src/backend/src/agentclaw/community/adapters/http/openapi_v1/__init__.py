@@ -220,7 +220,10 @@ from .render_screens import router as render_screens_router
 from .repository_catalog import router as repository_catalog_router
 from .routines import router as routines_router
 from .routines.owner_router import router as routines_owner_router
-from .skills import publish_status_router as skill_publish_status_router
+from .skills import (
+    publish_status_router as skill_publish_status_router,
+    readme_router as skill_readme_router,
+)
 from .skills import router as skills_router
 from .skill_sets import router as skill_sets_router
 from .service_publications import (
@@ -282,6 +285,14 @@ _MIXED_GROUPS = [
 _OPEN_SUBGROUPS = [
     # Skill Workbench status is tenant-identical and app-admissible.
     skill_publish_status_router,
+]
+
+# Skill README is user-scoped: public Repo Skills are globally addressable, but
+# Local Skills must be authorized against the Bot resolved from the Skill row.
+# Keep it on the user-scoped response surface so the published contract carries
+# the standard 403 response as well as the principal requirement.
+_USER_SCOPED_SUBGROUPS = [
+    skill_readme_router,
 ]
 
 _SUBGROUPS = [
@@ -479,7 +490,7 @@ def build_public_router() -> APIRouter:
         public.include_router(
             router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
         )
-    for router in _SUBGROUPS:
+    for router in _SUBGROUPS + _USER_SCOPED_SUBGROUPS:
         public.include_router(
             router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
         )
