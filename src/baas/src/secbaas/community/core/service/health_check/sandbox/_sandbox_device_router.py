@@ -15,7 +15,7 @@ from secbaas.community.api.health_check.sandbox import (
 
 # 兼容别名：digest 三件套已抽离到 core/utils/_renewal_digest.py 中立模块，
 # 此处 re-export 是为第三方 import 与 Phase 3 过渡（删除 legacy router 类）保留。
-from secbaas.community.core.utils._renewal_digest import (  # isort: skip
+from secbaas.community.core.utils import (  # isort: skip
     RENEWAL_DIGEST_LOGGER as arca_renew_digest_logger,  # noqa: N811, F401
     log_renew_digest as _log_renew_digest,
     ttl_for_digest as _ttl_for_digest,  # noqa: F401

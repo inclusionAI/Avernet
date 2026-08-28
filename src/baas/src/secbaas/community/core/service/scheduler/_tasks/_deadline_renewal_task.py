@@ -16,7 +16,7 @@ from uuid import uuid4
 from secbaas.community.core.repository.arca_ttl import TtlRenewalScheduleRepository
 from secbaas.community.core.service.distributed_lock import DistributedLockService
 from secbaas.community.core.service.paas import PaasServiceFacade
-from secbaas.community.core.utils._renewal_digest import log_renew_digest
+from secbaas.community.core.utils import log_renew_digest
 from secbaas.community.core.utils.time_utils import (
     format_ttl_expiration_time,
     naive_cst_fromtimestamp,

@@ -12,9 +12,9 @@ import logging
 
 import pytest
 
-from secbaas.community.core.utils import _renewal_digest
-from secbaas.community.core.utils._renewal_digest import (
+from secbaas.community.core.utils import (
     RENEWAL_DIGEST_LOGGER,
+    _renewal_digest,
     log_renew_digest,
     ttl_for_digest,
 )
