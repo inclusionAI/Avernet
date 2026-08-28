@@ -2406,6 +2406,27 @@ def test_mcp_exclusion_mirrors_the_skill_pair():
         ] == ["mcp.member"]
 
 
+def test_ordinary_remove_mcp_refuses_a_default_set_address() -> None:
+    """Default opt-out has one command; membership removal must not duplicate it."""
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, _skill = _seed_default_with_member(db)
+
+    with pytest.raises(
+        SkillSetControlPlaneConflictError, match="SYSTEM_DEFAULT_IMMUTABLE"
+    ):
+        repository.remove_mcp(
+            set_id=str(default.id), server_code="mcp.member", **_DEFAULT_SCOPE
+        )
+
+    assert (
+        repository.excluded_default_mcp_codes(
+            bot_id="bot", owner_id="owner", set_id=str(default.id)
+        )
+        == set()
+    )
+
+
 def test_exclusion_commands_refuse_an_ordinary_set_address():
     db = _Database()
     repository = CapabilityDesiredStateRepository(db)
