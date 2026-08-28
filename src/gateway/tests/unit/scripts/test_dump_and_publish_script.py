@@ -39,7 +39,14 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
 
     assert result.returncode == 0, result.stdout + result.stderr
     document = json.loads((tmp_path / "bcn.openapi.json").read_text(encoding="utf-8"))
-    assert sum(len(path_item) for path_item in document["paths"].values()) == 57
+    # 55 pre-existing operations + the two register operations (token issue +
+    # anonymous registration) — contract PR: register token and bot
+    # registration on the collaboration surface.
+    assert sum(len(path_item) for path_item in document["paths"].values()) == 59
+    assert (
+        "get" in document["paths"]["/openapi/v1/collaboration/register/token"]
+    )
+    assert "post" in document["paths"]["/openapi/v1/collaboration/register"]
     assert (
         "post"
         in document["paths"]["/openapi/v1/collaboration/sessions/{session_id}/token"]
@@ -89,6 +96,7 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
         "Collaboration / Friendships",
         "Collaboration / Groups",
         "Collaboration / Sessions",
+        "Collaboration / Register",
         "Collaboration / Invitations",
         "Collaboration / Channels",
         "Collaboration / Event Subscriptions",
