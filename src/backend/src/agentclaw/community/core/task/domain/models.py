@@ -63,6 +63,7 @@ class TaskType(StrEnum):
     YAML = "yaml"
     WORKFLOW = "workflow"
     DYNAMIC = "dynamic"
+    STATIC_PLAN = "static_plan"
 
 
 # ===== 规格面(Task Specification)=====

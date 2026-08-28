@@ -1,0 +1,95 @@
+"""Runtime for explicit static DAGs; no dynamic Planner decisions."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from agentclaw.community.core.task.domain.models import RuntimeInfo, Status, TaskNode, TaskSpec, Metadata, Context, Goal
+from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+from .static_plan import StaticPlanDefinition, StaticPlanNodeDefinition
+
+
+@dataclass(frozen=True)
+class StaticPlanReadiness:
+    ready: tuple[TaskNode, ...] = ()
+    skipped: tuple[TaskNode, ...] = ()
+
+
+class StaticPlanRuntime:
+    def __init__(self, definition: StaticPlanDefinition, inputs: dict[str, Any]):
+        self.definition = definition
+        self.inputs = inputs
+        self.by_id = {n.node_id: n for n in definition.nodes}
+
+    def nodes(self, task_id: str, root_spec: TaskSpec) -> list[TaskNode]:
+        result = []
+        for item in self.definition.nodes:
+            spec = TaskSpec(
+                metadata=Metadata(task_id=task_id, title=item.name, instruction=item.name),
+                context=Context(background=root_spec.context.background,
+                                extend_props={"static_input": dict(item.input)}),
+                goal=Goal(objective=item.name, acceptances=[]),
+            )
+            result.append(TaskNode(
+                node_id=item.node_id, task_id=task_id, status=Status.PENDING,
+                task_spec=spec, run_info=RuntimeInfo(), node_run_graph=None,  # type: ignore[arg-type]
+            ))
+        return result
+
+    def ready(self, graph) -> StaticPlanReadiness:
+        """Return executable and conditionally skipped nodes without persisting mutations.
+
+        The graph service is the only state mutation gateway.  Readiness calculation
+        may decorate in-memory dispatch metadata, but status/output changes are
+        returned to the engine and persisted through ``update_task_node_info``.
+        """
+        done = {n.node_id for n in graph.tasks if n.status == Status.DONE}
+        ready: list[TaskNode] = []
+        skipped: list[TaskNode] = []
+        for node_id, definition in self.by_id.items():
+            node = next((n for n in graph.tasks if n.node_id == node_id), None)
+            if node is None or node.status != Status.PENDING or node.run_info.extend_props.get("dispatching"):
+                continue
+            node.run_info.extend_props["static_blocked"] = True
+            if not set(definition.depends_on).issubset(done):
+                continue
+            if definition.enabled_when and not self._enabled(definition.enabled_when, graph):
+                skipped.append(node)
+                continue
+            self._decorate(node, definition, graph)
+            node.run_info.extend_props["static_blocked"] = None
+            ready.append(node)
+        return StaticPlanReadiness(tuple(ready), tuple(skipped))
+
+    def _decorate(self, node: TaskNode, definition: StaticPlanNodeDefinition, graph) -> None:
+        resolved = {key: self.resolve(value, graph) for key, value in definition.input.items()}
+        node.task_spec.context.extend_props["static_input"] = resolved
+        node.task_spec.metadata.instruction = f"{node.task_spec.metadata.instruction}\n输入: {resolved}"
+        node.run_info.extend_props["static_bot_id"] = definition.bot_id
+        if definition.node_type == "collaboration":
+            node.run_info.extend_props["pending_group_formation"] = GroupFormation(
+                bot_ids=[str(x) for x in definition.bot_ids if x], collab_mode="chat",
+                group_name=f"{graph.task_id}-{node.node_id}",
+                extend_props={"static_input": resolved},
+            )
+
+    def resolve(self, value: Any, graph) -> Any:
+        if not isinstance(value, str) or not value.startswith("$."):
+            return value
+        parts = value[2:].split(".")
+        if parts == ["input", "okr"]:
+            return self.inputs.get("okr")
+        if len(parts) >= 3 and parts[1] == "output":
+            node = next((n for n in graph.tasks if n.node_id == parts[0]), None)
+            current: Any = node.run_info.output if node else None
+            for part in parts[2:]:
+                current = current.get(part) if isinstance(current, dict) else None
+            return current
+        return None
+
+    def _enabled(self, expression: str, graph) -> bool:
+        # Static-plan expressions are intentionally small and declarative.
+        if "== true" in expression:
+            left = expression.split("==", 1)[0].strip()
+            return self.resolve(left, graph) is True
+        return True

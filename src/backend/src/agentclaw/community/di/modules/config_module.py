@@ -837,6 +837,32 @@ class ConfigModule(Module):
 
     @singleton
     @provider
+    def task_dispatch(self) -> cfg.TaskDispatchConfig:
+        """Task dispatch policy.
+
+        YAML shape::
+
+            task_dispatch:
+              task_search_skill_enabled: false
+
+        The default keeps dispatch deterministic and avoids depending on the
+        owner Bot's task-search skill. Set it to true to restore the skill
+        round-trip for staged experiments.
+        """
+        block = _block("task_dispatch")
+        defaults = cfg.TaskDispatchConfig()
+        return cfg.TaskDispatchConfig(
+            task_search_skill_enabled=_coerce(
+                block,
+                "task_search_skill_enabled",
+                _as_bool,
+                defaults.task_search_skill_enabled,
+                "task_dispatch",
+            )
+        )
+
+    @singleton
+    @provider
     def task_queue_worker(self) -> cfg.TaskQueueWorkerConfig:
         """In-process distributed-task-queue worker policy.
 
