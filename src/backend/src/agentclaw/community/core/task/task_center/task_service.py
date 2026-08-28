@@ -12,6 +12,7 @@ import logging
 import time
 import uuid
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, Callable
 
 from sqlalchemy.exc import IntegrityError
@@ -23,10 +24,12 @@ from agentclaw.community.core.repository.protocols.task import (
     TaskNodeRunInfoRepositoryProtocol,
 )
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceResult, NodeOpResult, Status, TaskCallbackData, TaskExecutionGraph, TaskNode, TaskNodePatch,
-    TaskOpResult, TaskSpec, TaskType,
+    AcceptanceResult, NodeOpResult, Status, TaskCallbackData, TaskExecutionGraph,
+    TaskNode, TaskNodePatch, TaskOpResult, TaskSourceType, TaskSpec, TaskType,
 )
-from agentclaw.community.core.task.domain.requests import TaskInfoRequest
+from agentclaw.community.core.task.domain.requests import (
+    RequestContext, RequestGoal, RequestMetadata, RequestTaskSpec, TaskInfoRequest,
+)
 from agentclaw.community.core.task.repository.types import (
     TaskInfoRecord, TaskNodeRecord, TaskNodeRunInfoRecord,
 )
@@ -123,6 +126,40 @@ class TaskService:
             bot_token_provider=self._bot_token_provider,
         )
 
+    async def run_template(self, template_id: str, inputs: dict[str, Any], *,
+                           owner_user_id: str, owner_bot_id: str) -> TaskOpResult:
+        """Load and validate a static template, then enter the existing execute path."""
+        from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
+        template_dir = Path(__file__).resolve().parents[3] / "configs" / "task-plans"
+        template_path = template_dir / f"{template_id}.yaml"
+        definition = StaticPlanDefinition.from_file(template_id, template_dir)
+        definition.validate_input(inputs)
+        definition.validate_bindings()
+        plan_yaml = template_path.read_text(encoding="utf-8")
+        request = TaskInfoRequest(
+            task_spec=RequestTaskSpec(
+                metadata=RequestMetadata(
+                    title=template_id,
+                    instruction=f"运行静态模板 {template_id}",
+                ),
+                context=RequestContext(
+                    background="",
+                    extend_props={"template_input": dict(inputs)},
+                ),
+                goal=RequestGoal(objective=template_id),
+            ),
+            source_type=TaskSourceType.API,
+            owner_user_id=owner_user_id,
+            owner_bot_id=definition.entry_bot_id or owner_bot_id,
+            execution_config={
+                "task_type": TaskType.STATIC_PLAN,
+                "static_plan_id": template_id,
+                "static_plan_yaml": plan_yaml,
+                "template_input": dict(inputs),
+            },
+        )
+        return await self.execute(request)
+
     @property
     def callback(self) -> TaskLoopCallback:
         """供执行实体(bot workflow / bcn 协作群)PUSH 回投的入口(适配层 → 编排核 on_report)。"""
@@ -180,6 +217,12 @@ class TaskService:
             return await self._run_workflow(task_id, request, task_info, graph.run_id)
         if task_type == TaskType.YAML:
             return await self._run_yaml(task_id, request, task_info, graph.run_id)
+        if task_type == TaskType.STATIC_PLAN:
+            if self._harness is not None:
+                self._harness.register(task_id)
+            bg = asyncio.create_task(self._engine.on_execute(task_id))
+            self._bg_tasks.add(bg); bg.add_done_callback(self._on_bg_done)
+            return TaskOpResult(task_id=task_id, success=True, run_id=graph.run_id)
         # dynamic (default): fire-and-forget on_execute
         if self._harness is not None:
             self._harness.register(task_id)

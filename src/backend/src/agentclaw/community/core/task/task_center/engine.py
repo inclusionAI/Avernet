@@ -310,12 +310,85 @@ class ExecutionEngine:
             logger.warning("[task][action-log] task=%s node=%s action=%s 追加失败:%s",
                            task_id, node_id, action.value, ex)
 
+    def _static_runtime(self, task_id: str):
+        from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
+        from agentclaw.community.core.task.task_plan.static_plan_runtime import StaticPlanRuntime
+        cfg = self._graph._execution_config(task_id)
+        if cfg.get("task_type") != "static_plan":
+            return None
+        definition = StaticPlanDefinition.from_yaml(str(cfg["static_plan_yaml"]))
+        return StaticPlanRuntime(definition, dict(cfg.get("template_input") or {}))
+
+    async def _on_static_execute(self, task_id: str) -> None:
+        runtime = self._static_runtime(task_id)
+        if runtime is None:
+            return
+        graph = self._graph.query_task_dashboard(task_id)
+        root = self._root(task_id)
+        if root is None or graph.relations:
+            return
+        nodes = runtime.nodes(task_id, root.task_spec)
+        self._graph.add_task_nodes(nodes, root.node_id)
+        side: list[tuple] = []
+        await self._prepare_static(task_id, runtime, side)
+        await self._drain(task_id, side)
+
+    async def _prepare_static(self, task_id: str, runtime, side: list[tuple]) -> None:
+        graph = self._graph.query_task_dashboard(task_id)
+        readiness = runtime.ready(graph)
+        for node in readiness.skipped:
+            self._graph.update_task_node_info(
+                TaskNodePatch(
+                    task_id=task_id,
+                    node_id=node.node_id,
+                    status=Status.DONE,
+                    output_patch={"skipped": True},
+                    extend_props_patch={"static_blocked": None},
+                )
+            )
+        if readiness.ready:
+            # Reuse the normal dispatcher so static nodes retain the same
+            # single-bot and runtime-created group delivery semantics.
+            await self._prepare_into(task_id, side)
+
+    async def _on_static_report(self, task_id: str, node_id: str) -> None:
+        runtime = self._static_runtime(task_id)
+        if runtime is None:
+            return
+        graph = self._graph.query_task_dashboard(task_id)
+        reported = next((n for n in graph.tasks if n.node_id == node_id), None)
+        definition = runtime.by_id.get(node_id)
+        if reported is not None and definition is not None:
+            raw = dict(reported.run_info.output)
+            mapped: dict[str, Any] = {}
+            for key, expression in definition.output.items():
+                if expression in ("$.result", "$.report.result"):
+                    mapped[key] = raw.get("result", raw)
+                elif expression.startswith("$.result."):
+                    current: Any = raw.get("result", raw)
+                    for part in expression[len("$.result."):].split("."):
+                        current = current.get(part) if isinstance(current, dict) else None
+                    mapped[key] = current
+            if mapped:
+                self._graph.update_task_node_info(
+                    TaskNodePatch(task_id=task_id, node_id=node_id, output_patch=mapped)
+                )
+        side: list[tuple] = []
+        await self._prepare_static(task_id, runtime, side)
+        if all(n.status in {Status.DONE, Status.FAILED, Status.HUNG} for n in self._graph.query_task_dashboard(task_id).tasks if n.node_id in runtime.by_id):
+            self._graph.update_task_graph_info(task_id, TaskGraphPatch(status=Status.DONE))
+            return
+        await self._drain(task_id, side)
+
     # ===== on_execute =====
     async def on_execute(self, task_id: str) -> None:
         """execute 事件:initialize_graph 后,条件 a(根 PENDING)→ plan(None 自发现根)→add→dispatch→start_run。"""
         if self._is_graph_terminal(task_id):
             logger.info("[task][on_execute] task=%s 图已终态(%s),冻结驱动", task_id,
                         self._graph.query_task_dashboard(task_id).status.value)
+            return
+        if self._static_runtime(task_id) is not None:
+            await self._on_static_execute(task_id)
             return
         side: list[tuple] = []
         with self._lock_for(task_id):
@@ -395,6 +468,20 @@ class ExecutionEngine:
                     patch.acceptance_result.verdict if patch.acceptance_result else "fold-only")
         with self._lock_for(patch.task_id):
             result = self._graph.update_task_node_info(patch)
+            if self._static_runtime(patch.task_id) is not None:
+                # Static plans use the same harness contract as dynamic tasks:
+                # an execution failure means the bot/group did not complete,
+                # so retry through the existing recovery path instead of
+                # silently stopping the static DAG.
+                if patch.exec_error is not None:
+                    side: list[tuple] = []
+                    await self._on_harness_collect(
+                        patch.task_id, patch.node_id, patch.exec_error, side
+                    )
+                    await self._drain(patch.task_id, side)
+                elif patch.acceptance_result is not None:
+                    await self._on_static_report(patch.task_id, patch.node_id)
+                return result
             # 动作历史:EXECUTE(执行产出)+ VERIFY(验收结论)——回投即一个执行动作闭环
             _out = dict(patch.output_patch) if patch.output_patch else {}
             if patch.exec_error is not None:
@@ -821,6 +908,7 @@ class ExecutionEngine:
         pending = [n for n in all_pending
                    if not n.run_info.extend_props.get("dispatching")
                    and not n.run_info.extend_props.get("dispatch_error")
+                   and not n.run_info.extend_props.get("static_blocked")
                    and n.run_info.run_mode != "bbs"]
         if not pending:
             return
