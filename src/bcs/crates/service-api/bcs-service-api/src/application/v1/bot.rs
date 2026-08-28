@@ -278,5 +278,7 @@ pub trait BotService: Send + Sync {
 
     async fn update(&self, command: UpdateBot) -> Result<Bot, ApplicationError>;
 
+    /// Materializes the authenticated Human Actor, then lists actors owned by it.
+    /// Human materialization is idempotent and does not bind physical Bot ownership.
     async fn list_mine(&self, command: ListMyBots) -> Result<Page<Bot>, ApplicationError>;
 }

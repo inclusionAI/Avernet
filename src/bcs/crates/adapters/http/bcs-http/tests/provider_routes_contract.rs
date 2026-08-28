@@ -2079,7 +2079,7 @@ async fn register_provider_bot_reuses_provider_ref_as_bot_uuid_for_allowed_switc
 }
 
 #[tokio::test]
-async fn provider_bot_attributes_require_an_allowlisted_provider_admin_and_bound_bot() {
+async fn provider_bot_attributes_allow_an_allowlisted_provider_admin_to_manage_unbound_plugin_bots() {
     let provider_id = "prv_internal_attributes".to_string();
     let admin_token = "admin-token";
     let TestApp {
@@ -2135,7 +2135,8 @@ async fn provider_bot_attributes_require_an_allowlisted_provider_admin_and_bound
                     json!({
                         "name": "Teamclaw Bot",
                         "owners": ["alice"],
-                        "provider_bot_ref": "teamclaw-bot:alice"
+                        "provider_bot_ref": "teamclaw-bot:alice",
+                        "connection_mode": "plugin"
                     })
                     .to_string(),
                 ))

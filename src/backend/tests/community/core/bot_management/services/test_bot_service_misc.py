@@ -1123,6 +1123,22 @@ class TestTemplateFactoryBranchCoverage:
         assert result == {"total": 1, "items": items}
         assert result["items"][0]["template_config"] == {"template_key": "normalCC"}
 
+    def test_list_bots_by_conditions_skips_template_enrichment_when_opted_out(self):
+        # The inventory pull fetches every matching row and never surfaces
+        # template_config; it opts out so the batched template read disappears
+        # from the /bots/all request path.
+        svc = _make_service()
+        items = [{"bot_id": "b1", "template_type": "normalCC"}]
+        svc._repository.list_by_conditions.return_value = (1, items)
+
+        result = svc.list_bots_by_conditions(
+            page=1, page_size=10, attach_templates=False
+        )
+
+        assert result == {"total": 1, "items": items}
+        assert "template_config" not in result["items"][0]
+        svc._template_service.list_templates_by_bot_ids.assert_not_called()
+
     def test_aicoding_personal_coding_uses_legacy_bcn_provider_fallback(self):
         assert BotService._should_register_bcn_provider(
             active_engine="aicoding",

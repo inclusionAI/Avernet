@@ -16,65 +16,26 @@ def resolver() -> CommunitySecretResolver:
     return CommunitySecretResolver(env_prefix=_PREFIX)
 
 
-def test_resolves_user_and_value_from_env(resolver, monkeypatch):
-    monkeypatch.setenv(f"{_PREFIX}GIT_TOKEN_USER", "alice")
-    monkeypatch.setenv(f"{_PREFIX}GIT_TOKEN_VALUE", "s3cr3t")
+def test_resolves_value_from_env(resolver, monkeypatch):
+    monkeypatch.setenv(f"{_PREFIX}git_token", "s3cr3t")
     secret = resolver.get_secret("git_token")
     assert isinstance(secret, _EnvSecret)
-    assert secret.secret_user == "alice"
     assert secret.secret_value == "s3cr3t"
+    assert secret.secret_user == ""
 
 
-def test_name_is_normalized_uppercase_and_dashes(resolver, monkeypatch):
-    # "my-git-token" → "MY_GIT_TOKEN"
-    monkeypatch.setenv(f"{_PREFIX}MY_GIT_TOKEN_VALUE", "v")
-    secret = resolver.get_secret("my-git-token")
-    assert secret is not None
-    assert secret.secret_value == "v"
+def test_resolves_with_prefix(resolver, monkeypatch):
+    monkeypatch.setenv(f"{_PREFIX}my_secret", "val")
+    secret = resolver.get_secret("my_secret")
+    assert secret.secret_value == "val"
 
 
 def test_absent_secret_returns_none(resolver, monkeypatch):
-    monkeypatch.delenv(f"{_PREFIX}MISSING_USER", raising=False)
-    monkeypatch.delenv(f"{_PREFIX}MISSING_VALUE", raising=False)
+    monkeypatch.delenv(f"{_PREFIX}missing", raising=False)
     assert resolver.get_secret("missing") is None
 
 
-def test_value_only_still_resolves_with_empty_user(resolver, monkeypatch):
-    # A token-only secret (no user) is present; user defaults to "".
-    monkeypatch.setenv(f"{_PREFIX}TOKEN_ONLY_VALUE", "tok")
-    secret = resolver.get_secret("token_only")
-    assert secret is not None
-    assert secret.secret_user == ""
-    assert secret.secret_value == "tok"
-
-
-def test_user_only_without_value_returns_none(resolver, monkeypatch):
-    # A half-set secret (user set, value missing) is treated as absent, not as a
-    # present secret with an empty value — so consumers fall back rather than
-    # run with an empty credential.
-    monkeypatch.setenv(f"{_PREFIX}HALF_USER", "alice")
-    monkeypatch.delenv(f"{_PREFIX}HALF_VALUE", raising=False)
-    assert resolver.get_secret("half") is None
-
-
-def test_registered_name_must_be_prefix_free(resolver, monkeypatch):
-    """The name is the bare key — the resolver adds the prefix itself.
-
-    Registering a name that already carries the prefix double-prefixes the
-    lookup and the secret never resolves, which for the principal signing key
-    means every /openapi/v1 request answers 401. The commented example in
-    application-community.yaml is the thing this guards.
-    """
-    monkeypatch.setenv(f"{_PREFIX}GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE", "shared-hmac")
-
-    assert resolver.get_secret("gateway_principal_signing_key").secret_value == (
-        "shared-hmac"
-    )
-    assert resolver.get_secret(f"{_PREFIX}gateway_principal_signing_key") is None
-
-
 def test_prefix_isolates_lookup(monkeypatch):
-    # A different prefix does not see another prefix's vars.
-    monkeypatch.setenv("OTHER_PREFIX_FOO_VALUE", "x")
+    monkeypatch.setenv("OTHER_PREFIX_foo", "x")
     resolver = CommunitySecretResolver(env_prefix="AGENTCLAW_SECRET_")
     assert resolver.get_secret("foo") is None

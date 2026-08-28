@@ -588,6 +588,7 @@ async fn relay_final_chat_event(
     }
     let mut bot_deliveries = Vec::new();
     let mut delivery_results = Vec::new();
+    let mut provider_send_failed = false;
 
     // Finalize the run's open chat segment: flush the buffered streaming text
     // as ONE row, using the final frame's complete text. (Final-only runs with
@@ -696,6 +697,8 @@ async fn relay_final_chat_event(
             flow.registry.get_protocol_version(&target.bot_uuid).await,
             &delivery_target,
         );
+        let is_provider_send = delivery_target.is_http_provider()
+            && target.delivery_type == DeliveryType::Send;
         let provider_tags = if delivery_target.is_http_provider() {
             group
                 .participants
@@ -755,6 +758,9 @@ async fn relay_final_chat_event(
             .await;
         match delivery {
             Ok(result) => {
+                if is_provider_send && !result.delivered {
+                    provider_send_failed = true;
+                }
                 log_relay_deliver_result(
                     cmd,
                     &run_id,
@@ -783,6 +789,9 @@ async fn relay_final_chat_event(
                 bot_deliveries.push(result);
             }
             Err(error) => {
+                if is_provider_send {
+                    provider_send_failed = true;
+                }
                 let error_text = error.to_string();
                 log_relay_deliver_result(
                     cmd,
@@ -811,6 +820,26 @@ async fn relay_final_chat_event(
 
     if bot_deliveries.iter().any(|delivery| delivery.delivered) {
         flow.group.increment_message_count(&cmd.group_id).await?;
+    }
+
+    if provider_send_failed {
+        if let Some(ref system_message) = flow.system_message {
+            let session_id = cmd.bcs_session_id.as_deref().unwrap_or(&cmd.group_id);
+            let receivers = group
+                .participants
+                .iter()
+                .filter(|participant| participant.is_bot() && participant.bot_uuid != cmd.bot_id)
+                .cloned()
+                .collect();
+            let event = SystemMessageEvent::GenericNotification {
+                group_id: cmd.group_id.clone(),
+                message: "消息投递失败，请稍后重试。".to_string(),
+                receivers,
+            };
+            let _ = system_message
+                .notify(&cmd.group_id, event, session_id, &group.participants)
+                .await;
+        }
     }
 
     if !decision.hidden_mentions.is_empty() {
@@ -854,13 +883,40 @@ async fn handle_task_bot_event(
     }
 
     let response_text = preview_task_response_text(flow, &entry, cmd).await;
-    let group = flow.group.get(&entry.group_id).await;
+    let mut group = flow.group.get(&entry.group_id).await;
+    if let (Some(group), Some(session_id)) = (group.as_mut(), entry.session_id.as_deref()) {
+        crate::task_flow::apply_session_participants(
+            flow,
+            group,
+            &entry.group_id,
+            session_id,
+        )
+        .await?;
+    }
 
     let target_bot_name = entry
         .target_bot_name
         .as_deref()
         .unwrap_or(entry.target_bot.as_str());
     let manager_result_run_id = uuid::Uuid::new_v4().to_string();
+    let delivery_target = flow
+        .registry
+        .resolve_delivery_target(&entry.driver_bot)
+        .await?;
+    let provider_tags = if delivery_target.is_http_provider() {
+        group
+            .as_ref()
+            .and_then(|group| {
+                group
+                    .participants
+                    .iter()
+                    .find(|participant| participant.bot_uuid == entry.driver_bot)
+            })
+            .map(|participant| participant.tags.as_slice())
+            .unwrap_or(&[])
+    } else {
+        &[]
+    };
     let frame = build_task_result_frame(
         group.as_ref(),
         &entry.group_id,
@@ -871,11 +927,8 @@ async fn handle_task_bot_event(
         &response_text,
         &entry.task_id,
         &manager_result_run_id,
+        provider_tags,
     );
-    let delivery_target = flow
-        .registry
-        .resolve_delivery_target(&entry.driver_bot)
-        .await?;
     let delivery_kind = BotDeliveryKind::TaskResult;
     let result = flow
         .bot_delivery
@@ -2091,6 +2144,7 @@ fn build_task_result_frame(
     response_text: &str,
     task_id: &str,
     run_id: &str,
+    tags: &[String],
 ) -> BcsFrame {
     let group_context = GroupContext {
         session_id: manager_session_id.to_string(),
@@ -2111,7 +2165,7 @@ fn build_task_result_frame(
         from_bot_id: None,
         from_bot_owner: None,
     };
-    let params = serde_json::json!({
+    let mut params = serde_json::json!({
         "session_key": manager_session_id,
         "bcs_group_id": manager_session_id,
         "bcs_session_id": manager_session_id,
@@ -2132,6 +2186,9 @@ fn build_task_result_frame(
         "timeout_ms": null,
         "idempotency_key": null,
     });
+    if !tags.is_empty() {
+        params["tags"] = serde_json::json!(tags);
+    }
 
     BcsFrame::Request(RequestFrame::new(
         run_id.to_string(),

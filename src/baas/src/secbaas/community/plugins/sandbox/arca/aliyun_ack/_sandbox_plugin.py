@@ -82,6 +82,7 @@ def _build_template_vars(
     images: dict[str, str] | None,
     storage: Storage | None = None,
     resource_spec: ResourceSpecification | None = None,
+    ttl_in_minutes: float | int | None = None,
 ) -> dict[str, str]:
     """Build runtime variables for template rendering.
 
@@ -89,6 +90,12 @@ def _build_template_vars(
     ``{"avernet-agent": "...", "avernet-sidecar": "...", "init": "...",
     "nas-server": "..."}``). Each is exposed as ``${AGENT_IMAGE}``,
     ``${SIDECAR_IMAGE}``, ``${INIT_IMAGE}``, ``${NAS_SERVER}`` respectively.
+
+    ``ttl_in_minutes``, when provided, is exposed as
+    ``${TTL_EXPIRATION_TIMESTAMP}`` — the absolute expiry deadline (ms epoch,
+    ``now + ttl_in_minutes*60*1000``) recorded in the Pod's
+    ``avernet.arcasandbox/ttl_expiration_timestamp`` annotation. An empty string
+    (no TTL) renders an empty annotation value.
     """
     images = images or {}
     storage_id = (
@@ -100,6 +107,11 @@ def _build_template_vars(
     storage_size = storage.quota if storage and storage.quota else "1Gi"
     cpu = str(resource_spec.cpu) if resource_spec else "2"
     memory = f"{resource_spec.memory}Gi" if resource_spec else "4Gi"
+    ttl_expiration_timestamp = ""
+    if ttl_in_minutes is not None:
+        ttl_expiration_timestamp = str(
+            int(time.time() * 1000 + ttl_in_minutes * 60 * 1000)
+        )
     return {
         "UID": uid,
         "NAMESPACE": namespace,
@@ -112,6 +124,7 @@ def _build_template_vars(
         "MOUNT_PATH": mount_path,
         "CPU": cpu,
         "MEMORY": memory,
+        "TTL_EXPIRATION_TIMESTAMP": ttl_expiration_timestamp,
     }
 
 
@@ -201,6 +214,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         storage: Storage | None,
         resource_spec: ResourceSpecification | None,
         outbound_operation_rule: OutBoundOperationRule | None = None,
+        ttl_in_minutes: float | int | None = None,
     ) -> tuple[str, str]:
         """Render the template YAML and apply it to the cluster.
 
@@ -214,6 +228,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             images,
             storage=storage,
             resource_spec=resource_spec,
+            ttl_in_minutes=ttl_in_minutes,
         )
         variables["HEADER_RULES_YAML"] = _convert_outbound_rules(
             outbound_operation_rule
@@ -274,6 +289,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             storage,
             resource_spec,
             outbound_operation_rule=outbound_operation_rule,
+            ttl_in_minutes=ttl_in_minutes,
         )
         try:
             core_api = CoreV1Api(self._client())
@@ -344,15 +360,6 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         if pod.spec and pod.spec.containers:
             container_name = pod.spec.containers[0].name
 
-        ttl_in_minutes: float | int | None = None
-        if pod.metadata and pod.metadata.annotations:
-            raw_ttl = pod.metadata.annotations.get("avernet.arcasandbox/ttl-minutes")
-            if raw_ttl is not None:
-                try:
-                    ttl_in_minutes = float(raw_ttl)
-                except (TypeError, ValueError):
-                    ttl_in_minutes = None
-
         logger.info("[aliyun_ack] sandbox connected sandbox_id=%s", sandbox_id)
         return AliyunAckSandbox(
             sandbox_id=sandbox_id,
@@ -363,7 +370,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             deployment_name=deployment_name,
             container_name=container_name,
             image="",
-            ttl_in_minutes=ttl_in_minutes,
+            ttl_in_minutes=None,
         )
 
     def resolve_ws_conn_info(
@@ -402,7 +409,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         token = self._arca_utils._get_proxypass_token(
             paas_device_id, port=port, template_id=template_id
         )
-        url = self._arca_utils.build_proxypass_url(target, norm_path, scheme="https")
+        url = self._arca_utils.build_proxypass_url(target, norm_path, scheme="http")
         return HttpConnectionInfo(http_url=url, token=token, target=target)
 
     def close(self) -> None:

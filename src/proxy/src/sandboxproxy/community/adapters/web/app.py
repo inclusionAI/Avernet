@@ -32,8 +32,18 @@ def get_container() -> ApplicationContainer:
 
 def bootstrap_app(*, return_container: bool = False) -> Any:
     from sandboxproxy.community.config import ConfigLoader
+    from sandboxproxy.community.logger import get_logger_plugin
 
     loaded = ConfigLoader.load()
+
+    logger_plugin = get_logger_plugin()
+    logger_plugin.configure(
+        log_level=loaded.log_config.log_level or "INFO",
+        log_dir=loaded.log_config.log_dir or "",
+        app_name=loaded.app_name or "sandboxproxy",
+        trace_log_dir=getattr(loaded.log_config, "trace_log_dir", "") or "",
+    )
+
     logger.info("config loaded: app_name=%s", loaded.app_name)
 
     container = ApplicationContainer()

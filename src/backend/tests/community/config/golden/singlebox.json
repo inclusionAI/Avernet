@@ -201,6 +201,13 @@
       ],
       "storage_dir": "./data/skills_scan"
     },
+    "task_discovery_dingtalk": {
+      "ak_id": "",
+      "ak_secret": "",
+      "card_template_id": "",
+      "frontend_url": "http://localhost:8000",
+      "robot_code": ""
+    },
     "task_queue_worker": {
       "enabled": true,
       "poll_interval_seconds": 0.2,
@@ -301,6 +308,15 @@
     "gateway": {
       "base_url": "http://127.0.0.1:9999",
       "base_url_pre": ""
+    },
+    "http_client_pool": {
+      "defaults": {
+        "http2": false,
+        "keepalive_expiry": 5.0,
+        "max_connections": 100,
+        "max_keepalive_connections": 20
+      },
+      "overrides": {}
     },
     "kb": {
       "base_url": "",

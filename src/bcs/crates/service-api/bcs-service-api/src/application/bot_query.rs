@@ -84,7 +84,7 @@ pub struct BotQueryByIdsResult {
 }
 
 /// Request for `GET /bots/search`: name/summary fuzzy search + visibility
-/// + actor-status filtering over the active bot registry.
+/// + actor-status filtering over the bot registry.
 ///
 /// `visibility`: `None` → return `public` + `protected` bots (default visible
 /// scope); `Some(values)` → return only bots whose visibility is one of those

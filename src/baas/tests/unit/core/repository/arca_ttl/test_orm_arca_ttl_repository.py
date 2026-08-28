@@ -70,7 +70,7 @@ class TestRegister:
         compiled = stmt.compile(dialect=mysql.dialect())
         sql_text = str(compiled)
 
-        assert "INSERT INTO baas_arca_ttl_renewal_schedule" in sql_text
+        assert "INSERT INTO baas_bot_ttl_renewal_schedule" in sql_text
         assert "ON DUPLICATE KEY UPDATE" in sql_text
         assert "gmt_modified" in sql_text
 
@@ -122,7 +122,7 @@ class TestRegister:
         )
         sql_text = str(compiled)
 
-        assert "INSERT INTO baas_arca_ttl_renewal_schedule" in sql_text
+        assert "INSERT INTO baas_bot_ttl_renewal_schedule" in sql_text
         assert "ON CONFLICT (env, source_table, source_id)" in sql_text
         assert "DO UPDATE SET" in sql_text
         assert "gmt_modified" in sql_text
@@ -147,7 +147,7 @@ class TestRegisterIfMissing:
         compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         sql_text = str(compiled)
 
-        assert "INSERT INTO baas_arca_ttl_renewal_schedule" in sql_text
+        assert "INSERT INTO baas_bot_ttl_renewal_schedule" in sql_text
         params = compiled.params
         assert params["env"] == "test"
         assert params["sandbox_id"] == "sb-001"
@@ -202,10 +202,10 @@ class TestListDueForRenewal:
         # never the DB clock function.
         assert "next_renew_at < %s" in sql_text
         assert "now()" not in sql_text
-        assert "ORDER BY baas_arca_ttl_renewal_schedule.next_renew_at ASC" in sql_text
+        assert "ORDER BY baas_bot_ttl_renewal_schedule.next_renew_at ASC" in sql_text
         assert "LIMIT %s" in sql_text
         # Rule 1 deviation: cold side restricted to the requested source_table
-        assert "baas_arca_ttl_renewal_schedule.source_table = %s" in sql_text
+        assert "baas_bot_ttl_renewal_schedule.source_table = %s" in sql_text
 
         params = compiled.params
         assert params["env_1"] == "test" or params["env_2"] == "test"
@@ -264,7 +264,7 @@ class TestListDueForRenewal:
         compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         sql_text = str(compiled)
         assert "baas_device.env = %s" in sql_text
-        assert "baas_arca_ttl_renewal_schedule.env = %s" in sql_text
+        assert "baas_bot_ttl_renewal_schedule.env = %s" in sql_text
         assert "test" in compiled.params.values()
         # WR-03: the device-side JOIN also requires is_deleted = 0 (ON-side,
         # so a soft-deleted device reads as an orphan instead of renewing).
@@ -307,7 +307,7 @@ class TestUpdateAfterSuccess:
         compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         sql_text = str(compiled)
 
-        assert "UPDATE baas_arca_ttl_renewal_schedule SET" in sql_text
+        assert "UPDATE baas_bot_ttl_renewal_schedule SET" in sql_text
         assert "next_renew_at=%s" in sql_text
         assert "renew_fail_count=%s" in sql_text
         assert "last_renewed_at=now()" in sql_text
@@ -333,7 +333,7 @@ class TestUpdateAfterFailure:
         compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         sql_text = str(compiled)
 
-        assert "UPDATE baas_arca_ttl_renewal_schedule SET" in sql_text
+        assert "UPDATE baas_bot_ttl_renewal_schedule SET" in sql_text
         assert "next_renew_at=%s" in sql_text
         assert "renew_fail_count=%s" in sql_text
         assert "gmt_modified=now()" in sql_text
@@ -359,7 +359,7 @@ class TestPostponeRenewal:
         compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         sql_text = str(compiled)
 
-        assert "UPDATE baas_arca_ttl_renewal_schedule SET" in sql_text
+        assert "UPDATE baas_bot_ttl_renewal_schedule SET" in sql_text
         assert "next_renew_at=%s" in sql_text
         assert "renew_fail_count=%s" in sql_text
         assert "gmt_modified=now()" in sql_text
@@ -385,7 +385,7 @@ class TestSetStatus:
         compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         sql_text = str(compiled)
 
-        assert "UPDATE baas_arca_ttl_renewal_schedule SET" in sql_text
+        assert "UPDATE baas_bot_ttl_renewal_schedule SET" in sql_text
         assert "gmt_modified=now()" in sql_text
 
         params = compiled.params
@@ -409,8 +409,8 @@ class TestCountActive:
         sql_text = str(compiled)
 
         assert "count(*)" in sql_text
-        assert "baas_arca_ttl_renewal_schedule" in sql_text
-        assert "baas_arca_ttl_renewal_schedule.env = %s" in sql_text
+        assert "baas_bot_ttl_renewal_schedule" in sql_text
+        assert "baas_bot_ttl_renewal_schedule.env = %s" in sql_text
         assert compiled.params["status_1"] == "ACTIVE"
         assert compiled.params["env_1"] == "test"
 
@@ -436,12 +436,24 @@ class TestFindUnregistered:
         compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         sql_text = str(compiled)
 
-        assert "LEFT OUTER JOIN baas_arca_ttl_renewal_schedule" in sql_text
+        assert "LEFT OUTER JOIN baas_bot_ttl_renewal_schedule" in sql_text
         assert "provider_device_id AS sandbox_id" in sql_text
+        assert (
+            "json_unquote(json_extract(baas_device.provider_device_props, "
+            "'$.ttl_expiration_timestamp'))" in sql_text
+        )
+        # WR-02: dual-key projection — COALESCE prefers the new
+        # ttl_expiration_timestamp key and falls back to the legacy
+        # integer-ms ttl_expiration_time key for pre-release rows.
+        assert "coalesce(" in sql_text
+        assert (
+            "json_unquote(json_extract(baas_device.provider_device_props, "
+            "'$.ttl_expiration_time'))" in sql_text
+        )
         assert "baas_device.provider_type = %s" in sql_text
         assert "baas_device.is_deleted = %s" in sql_text
         assert "baas_device.env = %s" in sql_text
-        assert "baas_arca_ttl_renewal_schedule.id IS NULL" in sql_text
+        assert "baas_bot_ttl_renewal_schedule.id IS NULL" in sql_text
 
         params = compiled.params
         assert params["env_1"] == "test" or params["env_2"] == "test"
@@ -473,14 +485,25 @@ class TestFindUnregistered:
         compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         sql_text = str(compiled)
 
-        assert "LEFT OUTER JOIN baas_arca_ttl_renewal_schedule" in sql_text
+        assert "LEFT OUTER JOIN baas_bot_ttl_renewal_schedule" in sql_text
         assert "ac_entity_device_binding" in sql_text
         assert (
             "json_unquote(json_extract(ac_entity_device_binding.device_props, "
             "'$.sandbox_id'))" in sql_text
         )
+        assert (
+            "json_unquote(json_extract(ac_entity_device_binding.device_props, "
+            "'$.ttl_expiration_timestamp'))" in sql_text
+        )
+        # WR-02: dual-key projection — COALESCE falls back to the legacy
+        # integer-ms ttl_expiration_time key for pre-release rows.
+        assert "coalesce(" in sql_text
+        assert (
+            "json_unquote(json_extract(ac_entity_device_binding.device_props, "
+            "'$.ttl_expiration_time'))" in sql_text
+        )
         assert "ac_entity_device_binding.env = %s" in sql_text
-        assert "baas_arca_ttl_renewal_schedule.id IS NULL" in sql_text
+        assert "baas_bot_ttl_renewal_schedule.id IS NULL" in sql_text
         # D-16': production binding table has no is_deleted column
         assert "is_deleted" not in sql_text
 
@@ -513,10 +536,10 @@ class TestFindUnregistered:
             mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         )
         assert (
-            "baas_arca_ttl_renewal_schedule.sandbox_id = "
+            "baas_bot_ttl_renewal_schedule.sandbox_id = "
             "baas_device.provider_device_id" in sql_text
         )
-        assert "baas_arca_ttl_renewal_schedule.id IS NULL" in sql_text
+        assert "baas_bot_ttl_renewal_schedule.id IS NULL" in sql_text
 
         assert len(results) == 1
         assert results[0]["sandbox_id"] == "sb-new-456"
@@ -540,10 +563,10 @@ class TestFindUnregistered:
 
         compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         sql_text = str(compiled)
-        assert "baas_arca_ttl_renewal_schedule.source_id = baas_device.id" in sql_text
-        assert "baas_arca_ttl_renewal_schedule.status = %s" in sql_text
+        assert "baas_bot_ttl_renewal_schedule.source_id = baas_device.id" in sql_text
+        assert "baas_bot_ttl_renewal_schedule.status = %s" in sql_text
         assert compiled.params["status_1"] == "ACTIVE"
-        assert "baas_arca_ttl_renewal_schedule.id IS NULL" in sql_text
+        assert "baas_bot_ttl_renewal_schedule.id IS NULL" in sql_text
 
     def test_find_unregistered_binding_stale_sandbox_not_suppressed(self):
         """Test 13a: binding ON equates s.sandbox_id with the device_props
@@ -566,7 +589,7 @@ class TestFindUnregistered:
             mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         )
         assert (
-            "baas_arca_ttl_renewal_schedule.sandbox_id = "
+            "baas_bot_ttl_renewal_schedule.sandbox_id = "
             "json_unquote(json_extract(ac_entity_device_binding.device_props, "
             "'$.sandbox_id'))" in sql_text
         )
@@ -593,12 +616,12 @@ class TestFindUnregistered:
         compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         sql_text = str(compiled)
         assert (
-            "baas_arca_ttl_renewal_schedule.source_id = "
+            "baas_bot_ttl_renewal_schedule.source_id = "
             "ac_entity_device_binding.id" in sql_text
         )
-        assert "baas_arca_ttl_renewal_schedule.status = %s" in sql_text
+        assert "baas_bot_ttl_renewal_schedule.status = %s" in sql_text
         assert compiled.params["status_1"] == "ACTIVE"
-        assert "baas_arca_ttl_renewal_schedule.id IS NULL" in sql_text
+        assert "baas_bot_ttl_renewal_schedule.id IS NULL" in sql_text
 
     def test_find_unregistered_sqlite_dialect_skips_unquote(self):
         """D-05': sqlite returns bare json_extract text — no unquote wrapper."""
@@ -614,6 +637,10 @@ class TestFindUnregistered:
         assert (
             "json_extract(ac_entity_device_binding.device_props, '$.sandbox_id')"
             in sql_text
+        )
+        assert (
+            "json_extract(ac_entity_device_binding.device_props, "
+            "'$.ttl_expiration_timestamp')" in sql_text
         )
         assert "json_unquote" not in sql_text
         assert "is_deleted" not in sql_text

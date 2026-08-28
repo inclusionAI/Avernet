@@ -344,6 +344,9 @@ def test_mcp_membership_is_independent_for_two_owners_sharing_default_bot_id():
         owner_id="owner-a",
         set_id=str(owner_a.id),
         server_code="mcp.weather",
+        name="Weather",
+        description=None,
+        icon=None,
     )
 
     assert result.changed is True
@@ -431,6 +434,7 @@ def test_create_rejects_a_duplicate_name_without_a_durable_replay_record():
         description="description",
     )
     assert first["name"] == "set"
+    assert first["is_active"] is True
     with pytest.raises(SkillSetControlPlaneConflictError, match="SKILL_SET_NAME_CONFLICT"):
         repository.create_set(
             bot_id="bot", owner_id="owner", name="set", description="description"
@@ -522,11 +526,16 @@ def test_active_skill_set_mutates_mcp_membership_and_installation_atomically():
         session.flush()
 
     added = repository.add_mcp(
-        bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather"
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather",
+        name="Weather MCP", description="Weather tools",
+        icon="https://example.test/weather.png",
     )
     assert added.changed is True
     with db.orm_session() as session:
-        assert session.query(SkillSetMCPServer).count() == 1
+        membership = session.query(SkillSetMCPServer).one()
+        assert (membership.name, membership.description, membership.icon) == (
+            "Weather MCP", "Weather tools", "https://example.test/weather.png",
+        )
         assert {
             row.server_code for row in session.query(BotMCPInstallation).all()
         } == {"mcp.weather"}
@@ -556,14 +565,16 @@ def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
         SkillSetControlPlaneConflictError, match="RESOURCE_DIRECT_ACTIVE"
     ):
         repository.add_mcp(
-            bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather"
+            bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather",
+            name="Weather", description=None, icon=None,
         )
     assert repository.uninstall_mcp(
         bot_id="bot", owner_id="owner", server_code="mcp.weather",
         platform_default_codes=frozenset(),
     ).changed
     assert repository.add_mcp(
-        bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather"
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather",
+        name="Weather", description=None, icon=None,
     ).changed
     with pytest.raises(
         SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_SKILL_SET"
@@ -2066,6 +2077,9 @@ def test_a_default_set_mcp_member_cannot_join_an_ordinary_set():
             owner_id="owner",
             set_id=str(ordinary.id),
             server_code="mcp.default-member",
+            name="mcp.default-member",
+            description=None,
+            icon=None,
             engine_type="openclaw",
             default_engine_types=("openclaw",),
         )
@@ -2615,3 +2629,142 @@ def test_restore_desired_state_compensates_mcp_exclusion_commands():
         assert [
             row.server_code for row in session.query(BotMCPInstallation).all()
         ] == ["mcp.member"]
+
+
+# ── A Skill mutation names the MCP dependencies it moves ──────────────
+#
+# The Skill's ``mcp_dependencies`` join or leave the Bot's projected MCP set
+# along with the Skill, and the command can only scope its projection if the
+# mutation names them. Read under the row lock the transaction already holds,
+# for the same reason activation reads its member codes there.
+
+
+def _seed_skill_with_dependencies(db, dependencies: str | None):
+    with db.transactional_orm_session() as session:
+        skill = Skill(
+            name="dependent",
+            git_path="git://dependent",
+            env="dev",
+            mcp_dependencies=dependencies,
+        )
+        skill_set = SkillSet(
+            name="set", user_id="owner", bolt_id="bot", is_active=True, env="dev"
+        )
+        session.add_all([skill, skill_set])
+        session.flush()
+    return skill, skill_set
+
+
+def test_add_skill_reports_the_skill_s_mcp_dependencies():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    skill, skill_set = _seed_skill_with_dependencies(
+        db, '["mcp.weather", {"server_code": "mcp.maps"}]'
+    )
+
+    result = repository.add_skill(
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id),
+        skill_id=str(skill.id),
+    )
+
+    # Both stored shapes decode, through the same decoder the projection uses.
+    assert result.mcp_codes == frozenset({"mcp.weather", "mcp.maps"})
+
+
+def test_add_skill_reports_no_dependencies_when_the_skill_declares_none():
+    """What lets a dependency-free Skill mutation skip the MCP projection."""
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    skill, skill_set = _seed_skill_with_dependencies(db, None)
+
+    result = repository.add_skill(
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id),
+        skill_id=str(skill.id),
+    )
+
+    assert result.mcp_codes == frozenset()
+
+
+def test_a_no_op_add_skill_claims_nothing():
+    """Re-adding an existing member changes no MCP, so it claims none."""
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    skill, skill_set = _seed_skill_with_dependencies(db, '["mcp.weather"]')
+    repository.add_skill(
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id),
+        skill_id=str(skill.id),
+    )
+
+    result = repository.add_skill(
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id),
+        skill_id=str(skill.id),
+    )
+
+    assert not result.changed
+    assert result.mcp_codes == frozenset()
+
+
+def test_remove_skill_reports_the_dependencies_it_releases():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    skill, skill_set = _seed_skill_with_dependencies(db, '["mcp.weather"]')
+    repository.add_skill(
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id),
+        skill_id=str(skill.id),
+    )
+
+    result = repository.remove_skill(
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id),
+        skill_id=str(skill.id),
+    )
+
+    assert result.changed
+    assert result.mcp_codes == frozenset({"mcp.weather"})
+
+
+def test_a_no_op_remove_skill_releases_nothing():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    skill, skill_set = _seed_skill_with_dependencies(db, '["mcp.weather"]')
+
+    result = repository.remove_skill(
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id),
+        skill_id=str(skill.id),
+    )
+
+    assert not result.changed
+    assert result.mcp_codes == frozenset()
+
+
+def test_excluding_a_default_member_releases_its_dependencies():
+    """Exclusion is the Default Set's per-Bot deactivation of one member, so
+    it moves that member's dependencies exactly as an ordinary remove does."""
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        default = SkillSet(
+            name="default", user_id="", bolt_id="", engine_type="openclaw",
+            is_default=True, env="dev",
+        )
+        skill = Skill(
+            name="member", git_path="git://member", env="dev",
+            mcp_dependencies='["mcp.weather"]',
+        )
+        session.add_all([default, skill])
+        session.flush()
+        session.add_all([
+            SkillSetSkill(skill_set_id=default.id, skill_id=skill.id, env="dev"),
+            BotSkillInstallation(
+                bot_id="bot", owner_id="owner", skill_id=skill.id, env="dev"
+            ),
+        ])
+
+    excluded = repository.exclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    )
+    assert excluded.mcp_codes == frozenset({"mcp.weather"})
+
+    restored = repository.unexclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    )
+    assert restored.mcp_codes == frozenset({"mcp.weather"})

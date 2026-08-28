@@ -92,3 +92,30 @@ def test_list_records_filters_owner(db):
     records = repo.list_records(owner_user_id="U-1")
 
     assert [record.task_id for record in records] == ["T-1"]
+
+
+def test_list_records_page_filters_and_returns_total(db):
+    repo = TaskInfoRepository(db)
+    repo.insert(_record("T-1", Status.PENDING))
+    repo.insert(_record("T-2", Status.RUNNING))
+    third = _record("T-3", Status.RUNNING)
+    repo.insert(TaskInfoRecord(
+        id=third.id,
+        task_id=third.task_id,
+        source_type=third.source_type,
+        owner_user_id="U-2",
+        owner_bot_id=third.owner_bot_id,
+        execution_config=third.execution_config,
+        task_spec=third.task_spec,
+        status=third.status,
+    ))
+
+    records, total = repo.list_records_page(
+        Status.RUNNING,
+        owner_user_id="U-1",
+        page=1,
+        page_size=1,
+    )
+
+    assert total == 1
+    assert [record.task_id for record in records] == ["T-2"]

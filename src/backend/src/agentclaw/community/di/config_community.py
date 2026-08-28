@@ -35,14 +35,44 @@ class BcsAuthConfig:
 class CommunityDatabaseConfig:
     """Relational-store connection for the community ``CommunityDatabase``.
 
-    Community-only: sourced from the ``database`` block of ``user_config``
-    (overridable by the ``DATABASE_URL`` env var in the provider). ``url`` is a
-    SQLAlchemy URL — SQLite file / Postgres / MySQL. The default is a local
-    SQLite file so a bare community boot works; a real deploy points it at a
-    pre-provisioned store. Corp/test never resolve this type.
+    Community-only: sourced from the ``database`` block of ``user_config``.
+    Corp/test never resolve this type.
+
+    ``backend`` is the one field a deployment flips to change stores — ``sqlite``
+    for a local or single-node run, ``mysql`` for a managed instance (including
+    OceanBase, which speaks the MySQL protocol). It selects engine setup
+    (pooling, pragmas), and the provider rejects a ``url`` whose scheme disagrees
+    with it, so the two can never drift into a confusing half-configured state.
+
+    ``url`` is a SQLAlchemy URL, sourced from the YAML's env placeholder rather
+    than written into the file, so no password is ever committed.
+
+    **These field defaults are the no-block fallback, not what community
+    deploys.** The shipped ``application-community.yaml`` sets ``mysql`` with a
+    required ``${DATABASE_URL}``, because the community profile is the deployed
+    Aliyun/OceanBase configuration. The SQLite values below apply only if the
+    ``database`` block is absent entirely — a DSN cannot be a literal default,
+    since host and credentials are per-deployment.
+
+    ``create_schema`` lets the app emit its own DDL at boot, which is what a
+    container deployment needs — nobody runs ``CREATE TABLE`` between
+    ``kubectl apply`` and the first request. Set it false when the schema is
+    provisioned out of band or managed by migrations.
     """
 
+    backend: str = "sqlite"
     url: str = "sqlite:///./data/agentclaw.db"
+    create_schema: bool = True
+
+
+#: Accepted ``database.backend`` values mapped to the SQLAlchemy URL scheme each
+#: one requires. Adding a backend means adding its engine setup to
+#: ``plugins/community/database.py`` at the same time.
+DATABASE_BACKEND_SCHEMES: dict[str, str] = {
+    "sqlite": "sqlite",
+    "mysql": "mysql",
+    "postgresql": "postgresql",
+}
 
 
 @dataclass(frozen=True)
@@ -116,3 +146,38 @@ class CommunitySecretConfig:
     """
 
     env_prefix: str = "AGENTCLAW_SECRET_"
+
+
+@dataclass(frozen=True)
+class OutboundRuleEntryConfig:
+    """One outbound-header rule from the ``outbound_rules.header_rules`` YAML list.
+
+    Maps 1:1 to :class:`~agentclaw.community.kernel.device_dto.HeaderOperationRule`.
+    Field names match the YAML keys, not the DTO field names, so the YAML reads
+    naturally to an operator::
+
+        - domains: ["*.example.com"]
+          action: "set"
+          header_name: "X-Custom-Header"
+          value: "my-value"
+    """
+
+    domains: tuple[str, ...] = ()
+    action: str = "set"
+    header_name: str = ""
+    value: str = ""
+    placeholder: str | None = None
+    separator: str | None = None
+
+
+@dataclass(frozen=True)
+class OutboundRulesConfig:
+    """Outbound-header rule set for the community ``CommunityOutboundRuleProvider``.
+
+    Community-only: sourced from the ``outbound_rules`` block of ``user_config``.
+    An empty ``header_rules`` tuple (the default) means no egress mutation —
+    the same behavior as before this was configurable. Corp/test never resolve
+    this type.
+    """
+
+    header_rules: tuple[OutboundRuleEntryConfig, ...] = ()

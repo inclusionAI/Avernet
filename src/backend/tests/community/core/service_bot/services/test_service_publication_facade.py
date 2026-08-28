@@ -180,7 +180,9 @@ def test_list_containers_reports_missing_live_runtime_as_conflict(deps):
 
 
 def test_restart_container_accepts_owned_abnormal_instance(deps):
-    deps.device_service.get_instances_by_bot.return_value = {"devices": [_container()]}
+    deps.device_service.get_instances_by_bot.return_value = {
+        "devices": [_container()]
+    }
     deps.device_service.restart_device_by_bot.return_value = {"publish_id": 42}
 
     result = deps.facade.restart_container(
@@ -263,9 +265,7 @@ def test_restart_container_still_carries_the_owner_bar():
     ],
 )
 def test_restart_container_normalizes_runtime_failures(deps, failure, expected):
-    deps.device_service.get_instances_by_bot.return_value = {
-        "devices": [_container()]
-    }
+    deps.device_service.get_instances_by_bot.return_value = {"devices": [_container()]}
     deps.device_service.restart_device_by_bot.side_effect = failure
 
     with pytest.raises(expected):
@@ -994,7 +994,7 @@ def test_lock_is_not_created_without_collaborators(deps):
     deps.lock_service.steal_lock.assert_not_called()
 
 
-def test_lock_projection_does_not_require_lock_without_draft(deps):
+def test_lock_projection_requires_lock_for_any_collaborative_write(deps):
     deps.lock_service.get_lock_info.return_value = SimpleNamespace(
         lock=None,
         holder_name=None,
@@ -1008,7 +1008,7 @@ def test_lock_projection_does_not_require_lock_without_draft(deps):
     info = deps.facade.get_lock("bot-1", actor_id="member", owner_id="owner")
 
     assert info.has_collaborators is True
-    assert info.need_lock is False
+    assert info.need_lock is True
 
 
 def test_lock_takeover_still_requires_bot_membership():
@@ -1111,7 +1111,7 @@ def test_the_four_owner_operations_kept_their_bar():
         )
 
 
-def test_lock_is_rejected_without_an_editable_draft(deps):
+def test_lock_can_be_acquired_without_an_editable_draft(deps):
     deps.lock_service.get_lock_info.return_value = SimpleNamespace(
         lock=None,
         holder_name=None,
@@ -1122,7 +1122,11 @@ def test_lock_is_rejected_without_an_editable_draft(deps):
         record(1, PublishStatus.SUCCESS)
     ]
 
-    with pytest.raises(ServicePublicationConflictError):
-        deps.facade.acquire_lock("bot-1", actor_id="member", owner_id="owner")
+    deps.lock_service.acquire_lock.return_value = SimpleNamespace(
+        holder_user_id="member"
+    )
 
-    deps.lock_service.acquire_lock.assert_not_called()
+    result = deps.facade.acquire_lock("bot-1", actor_id="member", owner_id="owner")
+
+    assert result.holder_user_id == "member"
+    deps.lock_service.acquire_lock.assert_called_once_with("bot-1", "owner", "member")

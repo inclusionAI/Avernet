@@ -13,6 +13,7 @@ def _make_bot_service(repository=None, device_service=None, bcn_service=None) ->
     """Build a BotService with MagicMock fallbacks for the injected deps
     not under test (DI ctor requires all of them)."""
     return BotService(
+        caller_identity_repo=MagicMock(),
         drm_reader=MagicMock(),
         repository=repository or Mock(),
         allocation_config=MagicMock(),

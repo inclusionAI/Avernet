@@ -73,19 +73,42 @@ def _map_status(resp: httpx.Response) -> None:
 
 
 class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenApi HTTP client; exercised by singlebox/corp acceptance / 联调, not CI LOCAL line coverage
-    def __init__(self, keys: ApiKeyProvider, *, http_client: httpx.AsyncClient | None = None) -> None:
+    def __init__(self, keys: ApiKeyProvider, *, http_client: httpx.AsyncClient | None = None,
+                 ensure_grant: bool = False) -> None:
         self._k = keys
         self._client = http_client or httpx.AsyncClient(base_url=keys.base_url)
+        # ensure_grant=False(默认):OOB 预授权模式,跳过 allowed-bots GET/grant,直进 send_message。
+        # admin allowed-bots 端点只认 Human Cookie,corp 无 cookie 时 Bearer-only 打它会被 BaaS 判 500;
+        # prod 假定 bot 已 OOB 预授权 → 默认跳过。需自查/grant 的(测试/联调)显式传 ensure_grant=True。
+        self._ensure_grant = ensure_grant
 
     async def _aclose(self) -> None:
         await self._client.aclose()
 
+    def _headers(self) -> dict[str, str]:
+        """请求头:Bearer + 可选 Cookie/Referer。
+
+        真实 ACE 网关后的 host(``agentclaw-*`` / ``secbaas-*``)除 Bearer 外还需登录 Cookie(+ Referer)
+        才能过 ACE;否则 ACE 回 HTTP 200 的 USER_NOT_LOGIN 登录门(无业务 data),被误当成功而 run_id=None。
+        本地 singlebox 与 service-to-service(``CorpApiKeyProvider`` cookie/referer 空)不加 → 行为不变。
+        """
+        h: dict[str, str] = {"Authorization": f"Bearer {self._k.api_key}"}
+        if self._k.cookie:
+            h["Cookie"] = self._k.cookie
+        if self._k.referer:
+            h["Referer"] = self._k.referer
+        return h
+
     async def ensure_grant(self, bot_id: str) -> None:
+        if not self._ensure_grant:
+            logger.info("[task][openapi_bot] ensure_grant 跳过(OOB 预授权模式) bot_id=%s", bot_id)
+            return
+        logger.info("[task][openapi_bot] ensure_grant bot_id=%s", bot_id)
         prefix = self._k.api_key_prefix or self._k.api_key[:_DEFAULT_KEY_PREFIX_LEN]
         logger.info("[task][openapi_bot] >>> ensure_grant GET /api/v1/api-keys/%s/allowed-bots bot_id=%s base_url=%s",
                     prefix, bot_id, self._k.base_url)
         r = await self._client.get(f"/api/v1/api-keys/{prefix}/allowed-bots",
-                                   headers={"Authorization": f"Bearer {self._k.api_key}"})
+                                   headers=self._headers())
         logger.info("[task][openapi_bot] <<< ensure_grant GET allowed-bots status=%s body=%s",
                     r.status_code, _resp_summary(r))
         _map_status(r)
@@ -109,23 +132,35 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
                     bot_id, self._k.base_url, len(message or ""))
         r = await self._client.post("/openapi/v1/messages",
                                     json={"bot_id": bot_id, "message": message},
-                                    headers={"Authorization": f"Bearer {self._k.api_key}"})
+                                    headers=self._headers())
         logger.info("[task][openapi_bot] <<< send_message status=%s body=%s",
                     r.status_code, _resp_summary(r))
         _map_status(r)
-        data = r.json().get("data") or {}
-        # message_id 即 run_id;session_id 前向兼容——当前 BaaS 回包未提供时为 None,将来 BaaS 补字段自动落库。
+        payload = r.json()
+        data = payload.get("data") or {}
+        message_id = data.get("message_id")
+        code = payload.get("code")
+        # 业务信封校验:HTTP 200 但 code!=0 或无 message_id(如 ACE 登录门/未授权),若不拦截会 run_id=None,
+        # 后续 get_run(None) 报误导 404 "Message not found: None"。校验后直抛,带 code/payload 便于定位。
+        if (code is not None and code != 0) or not message_id:
+            raise OpenApiError(
+                f"send_message 业务失败 code={code} message_id={message_id!r} payload={payload}"
+            )
         logger.info("[task][openapi_bot] send_message 结果 message_id(run_id)=%s session_id=%s",
-                    data.get("message_id"), data.get("session_id"))
-        return BotSendResult(run_id=data.get("message_id"), session_id=data.get("session_id"))
+                    message_id, data.get("session_id"))
+        return BotSendResult(run_id=message_id, session_id=data.get("session_id"))
 
     async def get_run(self, run_id: str) -> dict[str, Any]:
         logger.info("[task][openapi_bot] >>> get_run GET /openapi/v1/messages/%s base_url=%s", run_id, self._k.base_url)
         r = await self._client.get(f"/openapi/v1/messages/{run_id}",
-                                   headers={"Authorization": f"Bearer {self._k.api_key}"})
+                                   headers=self._headers())
         logger.info("[task][openapi_bot] <<< get_run status=%s body=%s", r.status_code, _resp_summary(r))
         _map_status(r)
-        return r.json().get("data") or {}
+        payload = r.json()
+        code = payload.get("code")
+        if code is not None and code != 0:
+            raise OpenApiError(f"get_run 业务失败 code={code} payload={payload}")
+        return payload.get("data") or {}
 
     async def cancel_run(self, run_id: str) -> None:
         """Best-effort stop tracking hook.
@@ -143,6 +178,7 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
         终态返回 get_run 的 data dict;超时(默认 180s=3 分钟)抛 OpenApiTimeoutError;
         grant 403 → OpenApiAuthError、5xx → OpenApiServerError 透传给同步调用方。
         """
+        logger.info("[task][openapi_bot] <<< send_and_wait, bot_id=%s", bot_id)
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(
@@ -152,8 +188,9 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
             loop.close()
 
     async def send_and_wait_async(self, *, bot_id: str, message: str,
-                                   metadata: dict[str, Any] | None, timeout: float,
-                                   poll_interval: float) -> dict[str, Any]:
+                                   metadata: dict[str, Any] | None = None, timeout: float = 180.0,
+                                   poll_interval: float = 2.0) -> dict[str, Any]:
+        logger.info("[task][openapi_bot] >>> send_and_wait_async bot_id=%s base_url=%s", bot_id, self._k.base_url)
         await self.ensure_grant(bot_id)
         sent = await self.send_message(bot_id=bot_id, message=message, metadata=metadata or {})
         run_id = sent.run_id

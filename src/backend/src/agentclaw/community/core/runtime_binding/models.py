@@ -14,6 +14,14 @@ class RuntimeBindingSource(StrEnum):
     CALLER_INSTANCE = "caller_instance"
 
 
+class RuntimeBindingTarget(StrEnum):
+    """Explicit runtime family requested by a trusted server-side caller."""
+
+    AUTO = "auto"
+    CALLER_SERVICE = "caller_service"
+    CALLER_INSTANCE = "caller_instance"
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeBindingRequest:
     """Trusted request context used to find one existing binding."""
@@ -24,6 +32,7 @@ class RuntimeBindingRequest:
     stage: str = "draft"
     allow_initializing_caller_binding_id: int | None = None
     environment: str | None = None
+    target: RuntimeBindingTarget = RuntimeBindingTarget.AUTO
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,4 +47,5 @@ __all__ = [
     "ResolvedRuntimeBinding",
     "RuntimeBindingRequest",
     "RuntimeBindingSource",
+    "RuntimeBindingTarget",
 ]

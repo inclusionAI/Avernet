@@ -2,12 +2,12 @@
 
 The corp ``SecretResolver`` resolves a named credential from the corp secret
 store. A community deployment has no such service; the natural, dependency-free
-credential source is the process environment. ``get_secret(name)`` reads two
-env vars per secret — ``{env_prefix}{NAME}_USER`` and
-``{env_prefix}{NAME}_VALUE`` — and returns an object exposing ``.secret_user`` /
-``.secret_value`` (the duck-typed shape every consumer already reads). When
-neither var is set the secret is absent and the lookup returns ``None``,
-matching the Protocol's "absent ⇒ None" contract.
+credential source is the process environment. ``get_secret(name)`` reads one
+env var — the secret name itself — and returns an object exposing
+``.secret_user`` / ``.secret_value`` (the duck-typed shape every consumer
+already reads). When the env var is not set a ``KeyError`` is raised, so a
+missing secret fails loudly at the point of use rather than silently
+returning ``None``.
 
 A real, deployable implementation (not a ``MockSeam`` test double).
 """
@@ -29,21 +29,14 @@ class _EnvSecret:
 
 
 class CommunitySecretResolver(SecretResolver):
-    """Resolve a named secret from two prefixed environment variables."""
+    """Resolve a named secret from the environment variable of the same name."""
 
     def __init__(self, env_prefix: str) -> None:
         self._prefix = env_prefix
 
     def get_secret(self, secret_name: str) -> _EnvSecret | None:
-        norm = secret_name.upper().replace("-", "_")
-        value = os.environ.get(f"{self._prefix}{norm}_VALUE")
+        key = f"{self._prefix}{secret_name}"
+        value = os.environ.get(key)
         if value is None:
-            # Absent — the credential's value is unset, so the secret does not
-            # exist. Returning None (never a half-populated object with an empty
-            # value) preserves the Protocol's "absent ⇒ None" contract, so a
-            # consumer that branches on ``secret is not None`` falls back rather
-            # than running with an empty credential. ``_USER`` is secondary —
-            # a token-only secret (value set, no user) resolves with user="".
             return None
-        user = os.environ.get(f"{self._prefix}{norm}_USER")
-        return _EnvSecret(secret_user=user or "", secret_value=value)
+        return _EnvSecret(secret_user="", secret_value=value)

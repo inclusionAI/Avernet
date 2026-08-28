@@ -197,6 +197,14 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/{bot_id}/mcps",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/caller-context",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "PATCH",
+        "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
         "POST",
         "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
@@ -528,33 +536,33 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/connection"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # harness — bot-scoped diagnostics and patching under the addressed bot.
-    # These operations are intentionally user-only for now: harness access is
-    # checked against the verified user's owner/collaborator relationship, and
-    # app-only delegation is not part of this public contract.
+    # These operations now go through the addressed-bot grant seam so that both
+    # human collaborators and delegated application callers can reach the bot,
+    # with the owner resolved by the harness access dependency itself.
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/harness/diagnose",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/harness/preview",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/harness/apply",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/harness/rollback",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/harness/dim-report",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/harness/dim-history",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # ── B: returns a set of bots, narrowed to the granted ones ───────────────
     ("GET", "/openapi/v1/bots"): AdmissionMode.GRANT_FILTERED,
     # The application's own view, and the **complete** one: a granted bot the
@@ -794,15 +802,19 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
 #: make any future handler-level grant exception visible in review.
 SKILL_SCOPED_OPERATIONS = frozenset()
 
-#: No current harness operation self-checks an app-only grant. Harness is a
-#: user-only surface for now, so app-only callers are refused before the
-#: harness owner/collaborator access dependency runs.
-HARNESS_SCOPED_OPERATIONS = frozenset()
-
-#: No current harness operation self-checks an app-only grant. Harness is a
-#: user-only surface for now, so app-only callers are refused before the
-#: harness owner/collaborator access dependency runs.
-HARNESS_SCOPED_OPERATIONS = frozenset()
+#: Harness operations resolve the bot owner from the repository record rather
+#: than from an ``owner_id`` query parameter. This preserves the existing wire
+#: contract (``bot_id`` on the path, ``user_id`` in the query) while still
+#: running an addressed-bot grant check for application callers inside the
+#: handler's own ``require_harness_bot_access`` dependency.
+HARNESS_SCOPED_OPERATIONS = frozenset({
+    ("POST", "/openapi/v1/bots/{bot_id}/harness/diagnose"),
+    ("POST", "/openapi/v1/bots/{bot_id}/harness/preview"),
+    ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"),
+    ("POST", "/openapi/v1/bots/{bot_id}/harness/rollback"),
+    ("GET", "/openapi/v1/bots/{bot_id}/harness/dim-report"),
+    ("GET", "/openapi/v1/bots/{bot_id}/harness/dim-history"),
+})
 
 #: The modes that admit a caller naming no end user. Everything else refuses at
 #: ``require_principal``, which is what a route inherits by saying nothing.
@@ -959,6 +971,7 @@ class ActingCaller:
 __all__ = [
     "ADMISSION",
     "ADMITTING_MODES",
+    "HARNESS_SCOPED_OPERATIONS",
     "SKILL_SCOPED_OPERATIONS",
     "ActingCaller",
     "AdmissionMode",

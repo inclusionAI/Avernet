@@ -27,7 +27,6 @@ import asyncio
 import logging
 import threading
 from dataclasses import dataclass
-
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.domain.errors import NodeNotFoundError, TaskStateError
 from agentclaw.community.core.task.domain.models import (
@@ -44,11 +43,9 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
 
-
 logger = logging.getLogger("task.engine")
 
 _DEFAULT_MAX_HARNESS = 3  # 执行报错 harness 重投上限(达上限→HUNG)
-
 
 @dataclass(frozen=True)
 class CoopGroupStart:
@@ -67,7 +64,7 @@ class ExecutionEngine:
     测试可经 facade/engine 子类覆写 ``_build_*`` 注入 stub 策略/投递(测试 seam)。"""
 
     def __init__(self, graph, *, bot=None, bcs=None, discover=None, bcn: BcnService | None = None,
-                 bcs_identity=None, api_base_url: str = "") -> None:
+                 bcs_identity=None, api_base_url: str = "", bot_token_provider=None) -> None:
         """graph: TaskGraphService;bot: OpenApiBotPort;bcs: BcsClientPort;discover: BotDiscoverServiceProtocol。
         端口由 DI 从配置注入(local/prod/double 只换端口实现,引擎代码不变)。prod 必传;测试子类覆写
         ``_build_*`` 注入 stub 策略/投递时可省略(走 super 路径默认 berth)。
@@ -83,6 +80,7 @@ class ExecutionEngine:
         self._bcn = bcn
         self._bcs_identity = bcs_identity
         self._api_base_url = api_base_url
+        self._bot_token_provider = bot_token_provider  # driver-bot session_token 取数(直读 bcs_bots);None→不发 Bearer
         self._bg_tasks: set[asyncio.Task] = set()
         self._locks: dict[str, threading.RLock] = {}
         self._locks_guard = threading.RLock()
@@ -139,6 +137,7 @@ class ExecutionEngine:
             bot=self._bot, bcs=self._bcs, formatter=PromptFormatterImpl(),
             context=self, sink=self, poller=poller, identity_resolver=self._bcs_identity,
             graph=self._graph, api_base_url=self._api_base_url, bcn=self._bcn,
+            bot_token_provider=self._bot_token_provider,
         )
         import threading as _t
         self._poller_thread = _t.Thread(target=poller.run_poll_loop, daemon=True, name="task-exec-poller")
@@ -834,6 +833,14 @@ class ExecutionEngine:
             if gf is not None:
                 logger.info("[task][prepare] task=%s node=%s → group(HIT_MULTI_BOTS collab=%s bot_ids=%s)",
                             task_id, node.node_id, gf.collab_mode, gf.bot_ids)
+                # 群验收需要完整 goal/instruction，而不是只有一句 task_context。
+                gf.extend_props.setdefault("task_objective", node.task_spec.goal.objective)
+                gf.extend_props.setdefault("task_instruction", node.task_spec.metadata.instruction)
+                gf.extend_props.setdefault(
+                    "acceptances",
+                    [{"id": a.id, "description": a.description}
+                     for a in node.task_spec.goal.acceptances],
+                )
                 # 飞行标记:group 交付 _drain 拉群前置,防并发 cycle 双搜推双拉群
                 self._graph.update_task_node_info(
                     TaskNodePatch(task_id=task_id, node_id=node.node_id, run_mode="coop_group",

@@ -41,6 +41,7 @@ def _make_service(
     cron_provider = MagicMock(return_value=cron_svc)
 
     service = BotService(
+        caller_identity_repo=MagicMock(),
         drm_reader=MagicMock(),
         repository=mock_repo,
         allocation_config=MagicMock(),

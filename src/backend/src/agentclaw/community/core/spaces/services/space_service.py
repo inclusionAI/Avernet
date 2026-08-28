@@ -17,6 +17,7 @@ from agentclaw.community.core.spaces.models import (
     PersonalSpaceLookupRecord,
     SpaceRecord,
     SpaceScTeamRepairResult,
+    SpaceListScope,
     SpaceScTeamRepairStatus,
     SpaceSummaryRecord,
     SpaceType,
@@ -246,6 +247,7 @@ class SpaceService:
         space_type: SpaceType | None,
         page_no: int,
         page_size: int,
+        scope: SpaceListScope = SpaceListScope.ALL,
     ) -> tuple[int, list[SpaceSummaryRecord]]:
         return self._repository.list_spaces(
             user_id=user_id,
@@ -254,4 +256,5 @@ class SpaceService:
             space_type=space_type.value if space_type is not None else None,
             offset=(page_no - 1) * page_size,
             limit=page_size,
+            scope=scope,
         )

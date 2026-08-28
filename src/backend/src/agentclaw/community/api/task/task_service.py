@@ -43,6 +43,16 @@ class TaskServiceProtocol(Protocol):
         """列持久化任务记录,可选按状态和 owner 过滤。"""
         ...
 
+    def list_tasks_page(
+        self,
+        status: "str | None" = None,
+        owner_user_id: "str | None" = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[TaskInfoRecord], int]:
+        """列持久化任务记录的一页(1-based),可选按状态和 owner 过滤,返回 (items, total)。"""
+        ...
+
     def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:
         """BBS 接力步②:任务根级 CAS 占有(恰一赢;输者/非 bbs 任务 → TaskStateError)。
 

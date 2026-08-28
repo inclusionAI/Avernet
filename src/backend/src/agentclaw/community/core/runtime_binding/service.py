@@ -21,6 +21,7 @@ from agentclaw.community.core.runtime_binding.models import (
     ResolvedRuntimeBinding,
     RuntimeBindingRequest,
     RuntimeBindingSource,
+    RuntimeBindingTarget,
 )
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -78,6 +79,14 @@ class RuntimeBindingResolutionService:
     ) -> RuntimeBindingSource:
         require_known_stage(request.stage)
         bot_type = self._value(bot.get("bot_type"))
+        if request.target is RuntimeBindingTarget.CALLER_INSTANCE:
+            return RuntimeBindingSource.CALLER_INSTANCE
+        if request.target is RuntimeBindingTarget.CALLER_SERVICE:
+            if bot_type != SERVICE_BOT_TYPE:
+                raise RuntimeBindingNotFoundError(
+                    "personal bot has no Caller Service runtime binding"
+                )
+            return self._service_source(request.stage)
         if bot_type == SERVICE_BOT_TYPE and self._value(bot.get("call_type")) == "caller":
             return RuntimeBindingSource.CALLER_INSTANCE
         if bot_type != SERVICE_BOT_TYPE:
@@ -89,6 +98,14 @@ class RuntimeBindingResolutionService:
         if request.stage == STAGE_DRAFT:
             return RuntimeBindingSource.SERVICE_DRAFT
         if request.stage == STAGE_VERIFY:
+            return RuntimeBindingSource.SERVICE_VERIFY
+        return RuntimeBindingSource.SERVICE_ONLINE
+
+    @staticmethod
+    def _service_source(stage: str) -> RuntimeBindingSource:
+        if stage == STAGE_DRAFT:
+            return RuntimeBindingSource.SERVICE_DRAFT
+        if stage == STAGE_VERIFY:
             return RuntimeBindingSource.SERVICE_VERIFY
         return RuntimeBindingSource.SERVICE_ONLINE
 

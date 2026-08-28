@@ -316,16 +316,17 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
         let delivery = self.delivery.clone();
         let bot_run_context = self.bot_run_context.clone();
         let provider_chat_run_timeout_ms = self.provider_chat_run_timeout_ms;
-        results.extend(join_all(commands.into_iter().map(|cmd| {
+        let delivery_outcomes = join_all(commands.into_iter().map(|cmd| {
             let recipient = cmd.recipient_id.clone();
             let delivery = delivery.clone();
             let bot_run_context = bot_run_context.clone();
             async move {
-                let delivered = match delivery.deliver(cmd.cmd).await {
-                    Ok(r) => r.delivered,
+                let is_provider_send = cmd.record_run_context;
+                let (delivered, mut error) = match delivery.deliver(cmd.cmd).await {
+                    Ok(r) => (r.delivered, r.error),
                     Err(e) => {
                         tracing::warn!(%recipient, error = %e, "system message delivery failed");
-                        false
+                        (false, Some(e))
                     }
                 };
                 if delivered && cmd.record_run_context {
@@ -343,19 +344,25 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                             .await;
                     }
                 }
-                let error = if delivered {
-                    None
-                } else {
-                    Some(ServiceError::InternalError("delivery failed".to_string()))
-                };
-                SystemMessageRecipientResult {
-                    recipient_id: recipient,
-                    delivered,
-                    error,
+                if !delivered && error.is_none() {
+                    error = Some(ServiceError::InternalError("delivery failed".to_string()));
                 }
+                let provider_delivery_failed = is_provider_send && !delivered;
+                (
+                    SystemMessageRecipientResult {
+                        recipient_id: recipient,
+                        delivered,
+                        error,
+                    },
+                    provider_delivery_failed,
+                )
             }
         }))
-        .await);
+        .await;
+        let provider_delivery_failed = delivery_outcomes
+            .iter()
+            .any(|(_, provider_delivery_failed)| *provider_delivery_failed);
+        results.extend(delivery_outcomes.into_iter().map(|(result, _)| result));
 
         for r in &results {
             if r.delivered {
@@ -381,6 +388,23 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                 tracing::warn!(
                     group_id = %group.id, %session_id, error = %e,
                     "system message frontend delivery failed"
+                );
+            }
+        }
+        if provider_delivery_failed {
+            let content = "消息投递失败，请稍后重试。";
+            let event_json = build_frontend_system_event_frame(&group.id, content, session_id);
+            let target = FrontendDeliveryTarget::Session { session_id: session_id.to_string() };
+            if let Err(e) = self.frontend_delivery.publish(FrontendDeliveryCommand {
+                target,
+                event_json,
+                delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
+                run_fallback: None,
+                exclude_conn_id: None,
+            }).await {
+                tracing::warn!(
+                    group_id = %group.id, %session_id, error = %e,
+                    "provider delivery failure notice delivery failed"
                 );
             }
         }

@@ -20,6 +20,7 @@ from agentclaw.community.core.skill_center.policies.capability_ownership import 
     require_direct_mcp_control_allowed,
     require_can_join_set,
 )
+from agentclaw.community.core.skill_center.orm import DefaultSkillsetMcpExclusion
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -66,6 +67,7 @@ class McpSkillSetControlPlaneCommands:
 
     def add_mcp(
         self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
+        name: str, description: str | None, icon: str | None,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
@@ -107,7 +109,8 @@ class McpSkillSetControlPlaneCommands:
                 is_in_another_set=membership is not None,
             )
             session.add(SkillSetMCPServer(
-                skill_set_id=row.id, server_code=server_code, name=server_code,
+                skill_set_id=row.id, server_code=server_code, name=name,
+                description=description, icon=icon,
                 user_id=row.user_id, env=get_current_env(),
                 avernet_tenant=get_current_avernet_tenant(),
             ))
@@ -126,8 +129,34 @@ class McpSkillSetControlPlaneCommands:
     ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
             row = self._set(session, bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type=engine_type, default_engine_types=default_engine_types, locked=True)
-            self._ordinary(row)
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
+            if row.is_default:
+                existing = (
+                    session.query(DefaultSkillsetMcpExclusion)
+                    .filter(
+                        DefaultSkillsetMcpExclusion.avernet_tenant
+                        == get_current_avernet_tenant(),
+                        DefaultSkillsetMcpExclusion.user_id == owner_id,
+                        DefaultSkillsetMcpExclusion.bot_id == bot_id,
+                        DefaultSkillsetMcpExclusion.skill_set_id == int(row.id),
+                        DefaultSkillsetMcpExclusion.server_code == server_code,
+                    )
+                    .first()
+                )
+                if existing is not None:
+                    return SkillSetMutation(self._as_item(row), False, old)
+                session.add(
+                    DefaultSkillsetMcpExclusion(
+                        user_id=owner_id,
+                        bot_id=bot_id,
+                        skill_set_id=int(row.id),
+                        server_code=server_code,
+                        avernet_tenant=get_current_avernet_tenant(),
+                    )
+                )
+                session.flush()
+                return SkillSetMutation(self._as_item(row), True, old)
+            self._ordinary(row)
             membership = (
                 self._scope(session.query(SkillSetMCPServer), SkillSetMCPServer)
                 .filter(SkillSetMCPServer.skill_set_id == row.id, SkillSetMCPServer.server_code == server_code)

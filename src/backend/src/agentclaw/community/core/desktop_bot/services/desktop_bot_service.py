@@ -120,24 +120,44 @@ class DesktopBotService:
 
     _CHECK_STATUSES = ("PENDING", "ACTIVE", "OFFLINE", "RELEASING", "FAILED")
 
+    # 一次 IN 查询的页大小。历史实现按状态各取 100（5 次串行往返、上限 500 行），
+    # 这里用同样的上限一页取完；超出再翻页，覆盖只会更全。
+    _LIST_PAGE_SIZE = 500
+
     def list_user_bots(self, user_id: str) -> list[dict[str, Any]]:
-        """列出指定用户的桌面 Bot。"""
+        """列出指定用户的桌面 Bot（一次 status-IN 查询 + 翻页补拉）。
+
+        按状态逐个查询的旧实现每次调用要 5 次 DB 往返，是 /bots/all 聚合
+        p50 里占比最大的单点。查询失败沿用旧契约：记 warning、返回已取到的
+        行（单查询下即空列表），不向上抛。
+        """
         all_bots: list[dict[str, Any]] = []
-        for status in self._CHECK_STATUSES:
+        page = 1
+        while True:
             try:
-                _, bots = self._bot_repo.search_bots(
+                total, bots = self._bot_repo.search_bots(
                     bot_type="desktop",
                     owner_id=user_id,
-                    bot_status=status,
-                    page=1,
-                    page_size=100,
+                    bot_status=None,
+                    bot_status_list=list(self._CHECK_STATUSES),
+                    page=page,
+                    page_size=self._LIST_PAGE_SIZE,
                 )
-                all_bots.extend(bots)
             except Exception as e:
                 logger.warning(
                     "[DesktopBotService.list_user_bots] query failed "
-                    "user_id=%s status=%s: %s", user_id, status, e,
+                    "user_id=%s page=%s: %s", user_id, page, e,
                 )
+                break
+            page_bots = list(bots)
+            all_bots.extend(page_bots)
+            if not page_bots:
+                break
+            if isinstance(total, int) and len(all_bots) >= total:
+                break
+            if len(page_bots) < self._LIST_PAGE_SIZE:
+                break
+            page += 1
         return all_bots
 
     def check_user_bots_status(self, user_id: str) -> None:

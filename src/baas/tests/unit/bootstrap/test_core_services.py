@@ -64,6 +64,14 @@ class TestCoreServiceContainerStandalone:
         for attr in expected:
             assert hasattr(container, attr), f"Missing provider: {attr}"
 
+    def test_stream_converter_factory_only_registers_default(self):
+        factory = CoreServiceContainer().stream_converter_factory()
+
+        assert factory.create("default").name() == "default"
+
+        with pytest.raises(KeyError, match="SSE converter not registered: bcn"):
+            factory.create("bcn")
+
     def test_bot_health_checker_config_resolves_with_config(self):
         """bot_health_checker_config resolves when config is set."""
         container = CoreServiceContainer()

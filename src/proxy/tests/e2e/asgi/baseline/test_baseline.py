@@ -69,6 +69,6 @@ class TestBaselineLifecycle:
     def test_proxypass_accepts_valid_token(self, client, jwt_secret: str) -> None:
         token = _sign(jwt_secret, {"sub": "u1", "exp": time.time() + 3600})
         resp = client.get(
-            "/proxypass/ARCA_1", headers={"Authorization": f"Bearer {token}"}
+            "/proxypass/ARCA_1", headers={"X-PROXYPASS-TOKEN": token}
         )
         assert resp.status_code != 401

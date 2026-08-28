@@ -69,6 +69,9 @@ from agentclaw.community.core.bot_management.services.default_image_policy_liste
 )
 from agentclaw.community.core.bot_collaborator.models import CollaboratorRole
 from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.identity import (
+    CallerIdentityRepositoryProtocol,
+)
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, _get_engine_types
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
@@ -325,6 +328,11 @@ class BotService:
         device_status_client: "DeviceStatusClient",
         cron_auto_setup_service_provider: "Callable[[], CronAutoSetupService]",
         drm_reader: DRMReaderPlugin,
+        # Required, not defaulted: the restart authorization refresh
+        # republishes an overwrite-style Passport MCP scope, and a missing
+        # identity source there is a silent privilege change rather than a
+        # degraded mode. The DI provider always supplies it.
+        caller_identity_repo: "CallerIdentityRepositoryProtocol",
         workspace_hosting_config: "cfg.WorkspaceHostingConfig | None" = None,
         policy_service: "PolicyServiceProtocol | None" = None,
         baas_template_resolver: "BaasTemplateResolverProtocol | None" = None,
@@ -345,6 +353,7 @@ class BotService:
         self._bcn_service = bcn_service
         self._bot_publish_repo = bot_publish_repo
         self._passport_plugin = passport_plugin
+        self._caller_identity_repo = caller_identity_repo
         self._oss_record_repo = oss_record_repo
         self._drm_reader = drm_reader
         # Cycle-breakers: BotPublishService.__init__ depends on BotService,
@@ -2209,6 +2218,7 @@ class BotService:
         page: int = 1,
         page_size: int = 20,
         bot_ids: Optional[List[str]] = None,
+        attach_templates: bool = True,
     ) -> Dict[str, Any]:
         """
         List bots by conditions with pagination.
@@ -2228,6 +2238,9 @@ class BotService:
                 an empty list means none. The distinction is load-bearing —
                 treating empty as unrestricted would show a caller entitled to
                 nothing everything.
+            attach_templates: Attach ac_templates.ext as template_config to
+                each returned bot (the get/list consistency contract). Pass
+                False only when the caller provably never reads that field.
 
         Returns:
             Dictionary with 'total' and 'items' keys
@@ -2245,7 +2258,12 @@ class BotService:
             page_size=page_size,
             bot_ids=bot_ids,
         )
-        self._attach_template_configs_to_bots(items)
+        # Callers that never surface template_config (the bot inventory pulls
+        # every matching row) pay one batched template read per page for data
+        # they drop; they opt out here. Default stays True for the established
+        # list/detail consistency contract.
+        if attach_templates:
+            self._attach_template_configs_to_bots(items)
         return {
             "total": total,
             "items": items,
@@ -4302,6 +4320,7 @@ class BotService:
                 passport_plugin=self._passport_plugin,
                 skill_set_factory=self._skill_set_factory,
                 template_service=self._template_service,
+                caller_identity_repo=self._caller_identity_repo,
             )
         except Exception as exc:
             # Optional engine extensions must never block the existing restart path.

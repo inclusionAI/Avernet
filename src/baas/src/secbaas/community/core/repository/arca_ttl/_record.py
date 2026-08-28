@@ -4,7 +4,7 @@ from datetime import datetime
 
 @dataclass(slots=True)
 class TtlRenewalScheduleRecord:
-    """Database record for baas_arca_ttl_renewal_schedule table.
+    """Database record for baas_bot_ttl_renewal_schedule table.
 
     Columns per DDL schema (design doc §7.2):
     id, gmt_create, gmt_modified, sandbox_id, source_table, source_id,

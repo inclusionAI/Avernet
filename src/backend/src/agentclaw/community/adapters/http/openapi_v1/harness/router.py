@@ -8,8 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, ERROR_RESPONSES
 from agentclaw.community.adapters.http.openapi_v1.principal import (
+    ActingCallerDep,
     UserIdDep,
-    refuse_app_only_caller,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
@@ -70,26 +70,29 @@ logger = get_logger()
 router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/harness",
     tags=["harness"],
-    dependencies=[Depends(refuse_app_only_caller)],
     route_class=PublicAPIRoute,
 )
 
 
 async def require_harness_bot_access(
-    user_id: UserIdDep,
+    caller: ActingCallerDep,
     bot_id: Annotated[str, Path(..., description="Bot ID")],
     bot_repo: BotRepository = Injected(BotRepository),
     collaborator_service: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
 ) -> str:
     """Ensure the caller may operate on *bot_id* in harness context.
 
-    Resolves the bot owner and either:
-    - returns silently if the caller is the owner, or
-    - checks collaborator permission via CollaboratorService.
+    The harness surface now participates in the addressed-bot grant seam: an
+    application calling alone must hold a live grant for ``(app_id, bot_id,
+    owner_id, user_id)``. Once the grant resolves, the owner is read from the
+    resolved bot record and the usual owner/collaborator check is applied.
 
-    Raises HTTPException 404 (not 403) on failure, matching the public surface
-    convention that existence and authorization are indistinguishable.
+    This keeps the wire contract unchanged: callers still supply only ``bot_id``
+    on the path and ``user_id`` as the query parameter; the owner is resolved
+    from the repository rather than demanded as a parameter.
     """
+    user_id = caller.user_id
+
     if bot_id == "default":
         return user_id
 
@@ -100,6 +103,22 @@ async def require_harness_bot_access(
     owner_id = bot.get("owner_id") if isinstance(bot, dict) else getattr(bot, "owner_id", None)
     if not owner_id:
         raise HTTPException(status_code=404, detail="Not found")
+
+    if caller.is_application:
+        if caller.grants is None:
+            raise HTTPException(status_code=404, detail="Not found")
+        try:
+            record = caller.grants.find(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                user_id=user_id,
+                app_id=caller.app_id,
+            )
+        except Exception as exc:
+            logger.warning("[harness] grant lookup failed: %s", exc)
+            raise HTTPException(status_code=404, detail="Not found") from exc
+        if record is None:
+            raise HTTPException(status_code=404, detail="Not found")
 
     if user_id == owner_id:
         return user_id

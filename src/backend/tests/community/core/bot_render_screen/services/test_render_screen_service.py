@@ -44,11 +44,6 @@ def _dynamic_shared_bot(**overrides):
         owner_id="owner_001",
         active_engine="claude_code",
         template_type="architect",
-        template_config={
-            "capabilities": {
-                "member_management": True,
-            },
-        },
     )
     defaults.update(overrides)
     return defaults
@@ -126,24 +121,55 @@ class TestListRenderScreens:
         assert len(result) == 1
         mock_repo.list_by_bot_id.assert_called_once_with(bot_id="bot_001", owner_id=None)
 
-    def test_shared_coding_bot_denies_non_collaborator(self, service, mock_repo, mock_bot_repo):
+    def test_shared_coding_bot_list_open_to_group_viewers(self, service, mock_repo, mock_bot_repo):
+        # 读放开：群聊/分享场景的非协作查看者也能读到共享 bot 的副屏配置，
+        # 否则前端渲染副屏会报「组件库不存在」。写权限不受影响。
         mock_bot_repo.get_by_id.return_value = _bot(template_type="applicationCoding", active_engine="claude_code")
-        with pytest.raises(PermissionError):
-            service.list_render_screens(
-                bot_id="bot_001",
-                owner_id="owner_001",
-                current_user_id="stranger",
-            )
+        mock_repo.list_by_bot_id.return_value = [_record(id=1, owner_id="owner_001")]
+
+        result = service.list_render_screens(
+            bot_id="bot_001",
+            owner_id="owner_001",
+            current_user_id="stranger",
+        )
+
+        assert len(result) == 1
+        mock_repo.list_by_bot_id.assert_called_once_with(bot_id="bot_001", owner_id=None)
 
 
-    def test_missing_bot_fails_closed(self, service, mock_bot_repo):
+    def test_external_bcn_bot_without_management_record_uses_owner_scope(
+        self, service, mock_repo, mock_bot_repo
+    ):
         mock_bot_repo.get_by_id.return_value = None
-        with pytest.raises(PermissionError, match="无权查看此 Bot 的 CDN 配置"):
-            service.list_render_screens(
-                bot_id="bot_missing",
-                owner_id="owner_001",
-                current_user_id="user_001",
-            )
+        mock_repo.list_by_bot_id.return_value = [
+            _record(bot_id="bot_1eff6708", owner_id="user_001")
+        ]
+
+        result = service.list_render_screens(
+            bot_id="bot_1eff6708",
+            owner_id=None,
+            current_user_id="user_001",
+        )
+
+        assert len(result) == 1
+        mock_repo.list_by_bot_id.assert_called_once_with(
+            bot_id="bot_1eff6708",
+            owner_id="user_001",
+        )
+
+
+class TestAuthorizeRenderScreenBot:
+    def test_external_bcn_bot_without_management_record_uses_owner_scope(
+        self, service, mock_bot_repo
+    ):
+        mock_bot_repo.get_by_id.return_value = None
+
+        scope = service.authorize_render_screen_bot(
+            bot_id="bot_1eff6708",
+            user_id="user_001",
+        )
+
+        assert scope == "owner"
 
 
 class TestCreateRenderScreen:
@@ -244,17 +270,34 @@ class TestCreateRenderScreen:
             )
 
 
-    def test_create_missing_bot_fails_closed(self, service, mock_bot_repo):
+    def test_create_external_bcn_bot_uses_owner_scope(
+        self, service, mock_repo, mock_bot_repo
+    ):
         mock_bot_repo.get_by_id.return_value = None
-        with pytest.raises(PermissionError, match="无权操作此 Bot 的 CDN 配置"):
-            service.create_render_screen(
-                bot_id="bot_missing",
-                owner_id="user_001",
-                name="看板",
-                cdn_url="https://cdn.example.com/v1/index.js",
-                creator_id="user_001",
-                current_user_id="user_001",
-            )
+        mock_repo.list_by_bot_id.return_value = []
+        mock_repo.insert.return_value = 45
+
+        record_id = service.create_render_screen(
+            bot_id="bot_1eff6708",
+            owner_id="user_001",
+            name="看板",
+            cdn_url="https://cdn.example.com/v1/index.js",
+            creator_id="user_001",
+            current_user_id="user_001",
+        )
+
+        assert record_id == 45
+        mock_repo.list_by_bot_id.assert_called_once_with(
+            bot_id="bot_1eff6708",
+            owner_id="user_001",
+        )
+        mock_repo.insert.assert_called_once_with(
+            bot_id="bot_1eff6708",
+            owner_id="user_001",
+            name="看板",
+            cdn_url="https://cdn.example.com/v1/index.js",
+            creator_id="user_001",
+        )
 
 
 class TestUpdateRenderScreen:
@@ -300,7 +343,26 @@ class TestAuthorizeRenderScreenRecord:
             service.authorize_render_screen_record(record_id=1, user_id="stranger")
 
 
-    def test_authorize_record_missing_bot_fails_closed(self, service, mock_repo, mock_bot_repo):
+    def test_authorize_external_bcn_record_allows_record_owner(
+        self, service, mock_repo, mock_bot_repo
+    ):
+        mock_repo.get_by_id.return_value = _record(
+            id=1,
+            bot_id="bot_1eff6708",
+            owner_id="user_001",
+        )
+        mock_bot_repo.get_by_id.return_value = None
+
+        record = service.authorize_render_screen_record(
+            record_id=1,
+            user_id="user_001",
+        )
+
+        assert record.id == 1
+
+    def test_authorize_external_bcn_record_denies_non_owner(
+        self, service, mock_repo, mock_bot_repo
+    ):
         mock_repo.get_by_id.return_value = _record(id=1, owner_id="owner_001")
         mock_bot_repo.get_by_id.return_value = None
         with pytest.raises(PermissionError, match="无权操作此 Bot 的 CDN 配置"):

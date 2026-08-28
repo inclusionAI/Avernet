@@ -515,35 +515,132 @@ class SkillSetService:
             self.user_id or self.entity_id, desired_skills
         )
 
-    async def sync_mcp_desired_state(self, *, server_codes: set[str]) -> bool:
-        """Project the complete MCP desired state to the Bot runtime.
+    async def sync_mcp_projection(
+        self,
+        *,
+        claimed: frozenset[str],
+        released: frozenset[str],
+        declared: set[str],
+    ) -> bool:
+        """Apply one MCP projection to this Bot's device.
 
-        ``sync_all_mcp_servers`` is deliberately called even for an empty
-        set: it is the device-level reconciliation command that clears stale
-        allow-list entries.  Per-server detail delivery precedes that full
-        declaration so all newly allowed MCPs have their configured payload.
+        The projector's single MCP entry point. It hands over what the
+        mutation changed and what the Bot should end up holding; deciding how
+        many device calls that takes, and in what order, belongs here, because
+        this service — not the projector — owns device resolution.
 
-        Detail delivery is handed to ``sync_mcp_details_for_bot`` rather than
-        looped one ``sync_mcp_detail`` at a time: every entry here targets the
-        same bot, and that entrypoint resolves the device once for the whole
-        batch instead of paying a blocking ws-info round trip per MCP.
+        The order is the invariant, not an implementation detail:
+        configuration lands before the allow-list cites it, and is withdrawn
+        only after the allow-list stops covering it, so the device never
+        references an MCP it has no configuration for.
+
+        Both halves must run. A change that only releases still has to
+        re-declare the smaller allow-list, and a change that only claims still
+        has to declare the larger one — the declaration is a full replacement,
+        so skipping it would leave the device's view of the set behind.
         """
+        if not await self.sync_mcp_delivery(claimed=claimed, released=released):
+            return False
+        return await self.sync_mcp_desired_state(server_codes=declared)
+
+    async def sync_mcp_delivery(
+        self, *, claimed: frozenset[str], released: frozenset[str]
+    ) -> bool:
+        """Deliver configuration for newly claimed MCPs, withdraw it for released ones.
+
+        The counterpart to ``sync_mcp_desired_state``: that one *declares* the
+        complete allow-list, which is overwrite-style and must always carry
+        the whole set. This one *delivers*, which is per-MCP and must only
+        touch what actually changed — re-pushing an unchanged MCP rewrites its
+        device-side configuration from the DB for no reason, and deleting one
+        that is still supplied would break it.
+
+        Both sets are declared by the mutation and already guarded against the
+        projected set by the caller, so they are as small as the change was:
+        one code for an MCP add or remove, the Set's members for an
+        activation. ``sync_mcp_details_for_bot`` resolves the device once for
+        the batch, so at one entry that is one device write, not a fan-out.
+        """
+        if not claimed and not released:
+            return True
         try:
             entries: list[dict[str, Any]] = []
-            for server_code in sorted(server_codes):
+            for server_code in sorted(claimed):
                 detail = self.mcp_center.get_mcp_detail(server_code)
                 if not detail:
+                    # Only ever a code we are actually installing — an
+                    # unrelated catalogue gap cannot reach here and block the
+                    # whole projection.
+                    logger.error(
+                        "[sync_mcp_delivery] no catalogue detail for %s, bot_id=%s",
+                        server_code, self.bot_id,
+                    )
                     return False
                 entries.append(detail)
-            delivery = await self._mcp_sync_service.sync_mcp_details_for_bot(
-                user_id=self.user_id or self.entity_id or "",
-                mcp_entries=entries,
-                bot_id=self.bot_id,
-                entity_id=self.entity_id,
-                engine_type=self.engine_type,
+            if entries:
+                logger.info(
+                    "[sync_mcp_delivery] pushing MCP configuration: bot_id=%s, "
+                    "mcps=%s, codes=%s",
+                    self.bot_id, len(entries), sorted(claimed),
+                )
+                delivery = await self._mcp_sync_service.sync_mcp_details_for_bot(
+                    user_id=self.user_id or self.entity_id or "",
+                    mcp_entries=entries,
+                    bot_id=self.bot_id,
+                    entity_id=self.entity_id,
+                    engine_type=self.engine_type,
+                )
+                if not delivery.get("success"):
+                    logger.error(
+                        "[sync_mcp_delivery] MCP configuration push failed: "
+                        "bot_id=%s, error=%s",
+                        self.bot_id, delivery.get("error"),
+                    )
+                    return False
+            for server_code in sorted(released):
+                # WARNING, not INFO: this deletes the MCP's stored endpoint,
+                # api_key and headers from the device, and nothing here can
+                # put them back.
+                logger.warning(
+                    "[sync_mcp_delivery] removing MCP configuration from device: "
+                    "bot_id=%s, server_code=%s",
+                    self.bot_id, server_code,
+                )
+                removal = await self._mcp_sync_service.remove_mcp_detail(
+                    server_code=server_code,
+                    bot_id=self.bot_id,
+                    user_id=self.entity_id or self.user_id or "",
+                )
+                if not removal.get("success"):
+                    logger.error(
+                        "[sync_mcp_delivery] MCP removal failed: bot_id=%s, "
+                        "server_code=%s, error=%s",
+                        self.bot_id, server_code, removal.get("error"),
+                    )
+                    return False
+            return True
+        except Exception:
+            logger.warning(
+                "[sync_mcp_delivery] MCP delivery failed for bot_id=%s",
+                self.bot_id,
+                exc_info=True,
             )
-            if not delivery.get("success"):
-                return False
+            return False
+
+    async def sync_mcp_desired_state(self, *, server_codes: set[str]) -> bool:
+        """Declare the complete MCP allow-list to the Bot runtime.
+
+        Declaration is total on purpose: ``sync_all_mcp_servers`` is the
+        device-level reconciliation command and clears stale entries, so it
+        runs even for an empty set.
+
+        It is *only* declaration. Per-MCP configuration delivery is scoped to
+        what a mutation actually changed and lives in ``sync_mcp_delivery``,
+        which the caller runs first so configuration lands before the
+        allow-list cites it. Folding the two together is what made every
+        mutation re-push every MCP the Bot had.
+        """
+        try:
             # resolve_for_bot 与 sync_all_mcp_servers 都是同步阻塞调用(前者含
             # ws-info HTTP,后者是设备侧 HTTP),留在协程里会占住 event loop。
             ctx = await asyncio.to_thread(
@@ -551,15 +648,21 @@ class SkillSetService:
                 self.bot_id,
                 self.entity_id or self.user_id or "",
             )
+            logger.info(
+                "[sync_mcp_desired_state] declaring MCP allow-list: bot_id=%s, mcps=%s",
+                self.bot_id, len(server_codes),
+            )
             return bool(
                 await asyncio.to_thread(
                     self._device_sync_dispatcher.dispatch(ctx).sync_all_mcp_servers,
-                    entries,
+                    # ``filter_servers`` reads server_code/serverCode off each
+                    # entry, so bare strings would silently declare nothing.
+                    [{"server_code": code} for code in sorted(server_codes)],
                 )
             )
         except Exception:
             logger.warning(
-                "[sync_mcp_desired_state] MCP projection failed for bot_id=%s",
+                "[sync_mcp_desired_state] MCP allow-list declaration failed for bot_id=%s",
                 self.bot_id,
                 exc_info=True,
             )
@@ -1910,42 +2013,3 @@ class SkillSetService:
                 elif sc:
                     duplicate_server_codes.append(sc)
         return active_skill_sets_info, duplicate_server_codes
-
-    async def refresh_mcp_scope(
-        self,
-        user_id: str,
-        engine_type: Optional[str] = None,
-    ) -> dict[str, Any]:
-        """刷新MCP授权范围（异步方法）。
-
-        向设备声明filter-servers白名单，并更新passport的MCP codes列表。
-        不包含MCP详细配置的推送——那是 sync_mcp_details / sync_mcp_detail 的职责。
-
-        Args:
-            user_id: User ID for database queries (required, cannot be empty)
-            engine_type: Engine type for scoping. If None, falls back to Bot.active_engine.
-
-        Returns:
-            ``{"success": bool, "error": str|None}`` 格式的结果字典。
-        """
-        if not user_id:
-            raise ValueError("user_id is required and cannot be empty")
-
-        # Fallback to Bot.active_engine if not provided
-        effective_engine = engine_type
-        if not effective_engine:
-            try:
-                bot = self._bot_repo.get_by_id_and_owner(self.bot_id, self.entity_id)
-                if bot:
-                    effective_engine = bot.get("active_engine") or "openclaw"
-            except Exception as e:
-                logger.warning(f"[SkillSetService] Failed to get bot active_engine: {e}")
-            effective_engine = effective_engine or "openclaw"
-
-        return await self._mcp_sync_service.refresh_mcp_scope(
-            user_id=user_id,
-            entity_id=self.entity_id,
-            bot_id=self.bot_id,
-            entity_type=self.entity_type,
-            engine_type=effective_engine,
-        )

@@ -24,11 +24,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import json
 import os
 import unittest
 from datetime import datetime
-from pathlib import Path
 
 import httpx
 
@@ -38,10 +36,6 @@ from agentclaw.community.core.task.task_discovery.discovery_service import (
 from agentclaw.community.core.task.task_discovery.models import DiscoveredTask
 from agentclaw.community.core.task.task_discovery.session_initiator import (
     CronRelaySessionInitiator,
-)
-from agentclaw.community.core.task.task_discovery.task_reader import (
-    SqliteTaskReader,
-    init_discovered_tasks_db,
 )
 from agentclaw.community.plugin_api.notify_sender import NotifyMessage
 
@@ -81,18 +75,58 @@ _EXPECTED_TASK_COUNT = len(_MOCK_TASKS)
 _EXPECTED_TASK_IDS = {t["task_id"] for t in _MOCK_TASKS}
 _EXPECTED_PROJECT_NAMES = {t["title"] for t in _MOCK_TASKS}
 
-# 默认 db 文件路径:上溯到项目根 → scripts/.dependencies/data/discovered_tasks.db
-_DATA_FILE = Path(__file__).resolve()
-for _ in range(8):
-    _DATA_FILE = _DATA_FILE.parent
-_DATA_FILE = _DATA_FILE / "scripts" / ".dependencies" / "data" / "discovered_tasks.db"
+class _InMemoryTaskReader:
+    """轻量内存 reader — 供直接构造 DiscoveryService 的 e2e 测试使用。
 
-
-def _write_mock_data(bot_id: str, owner_id: str) -> None:
-    """将内联测试数据写入 SQLite db,供 backend SqliteTaskReader 读取。
-
-    动态填充 bot_id/owner_id 与实际 bot 匹配。
+    返回预设的 DiscoveredTask 列表，替代旧 SqliteTaskReader 的文件读取。
     """
+
+    def __init__(self, tasks: list[DiscoveredTask]) -> None:
+        self._tasks = tasks
+
+    def read_discovered_tasks(self) -> list[DiscoveredTask]:
+        return list(self._tasks)
+
+    def read_pending_tasks(self) -> list[DiscoveredTask]:
+        return [t for t in self._tasks if t.needs_confirmation]
+
+    def read_pending_tasks_for_bot(
+        self, bot_id: str, owner_id: str, dt: str,
+    ) -> list[DiscoveredTask]:
+        return [
+            t for t in self.read_pending_tasks()
+            if t.bot_id == bot_id and t.owner_id == owner_id and t.dt == dt
+        ]
+
+
+def _build_mock_tasks(bot_id: str, owner_id: str) -> list[DiscoveredTask]:
+    """构建内联测试 DiscoveredTask 对象，动态填充 bot_id/owner_id。"""
+    tasks = []
+    for t in _MOCK_TASKS:
+        task = dict(t)
+        task["bot_id"] = bot_id
+        task["owner_id"] = owner_id
+        task["task_id"] = f"discover_task_{bot_id}_{owner_id}_{_TODAY}"
+        tasks.append(DiscoveredTask(
+            task_id=task["task_id"],
+            bot_id=task["bot_id"],
+            owner_id=task["owner_id"],
+            dt=task["dt"],
+            title=task["title"],
+            instruction=task.get("instruction", ""),
+            background=task.get("background", ""),
+            discovery_basis=task.get("discovery_basis", ""),
+            priority=task.get("priority", "medium"),
+            discovered_at=task.get("discovered_at"),
+            status=task.get("status", "pending_confirmation"),
+            objective=task.get("objective", ""),
+            acceptances=list(task.get("acceptances", [])),
+        ))
+    return tasks
+
+
+def _seed_backend(bot_id: str, owner_id: str) -> list[dict]:
+    """通过 HTTP /discovery/tasks 向 backend 写入 mock 数据。"""
     tasks = []
     for t in _MOCK_TASKS:
         task = dict(t)
@@ -100,8 +134,14 @@ def _write_mock_data(bot_id: str, owner_id: str) -> None:
         task["owner_id"] = owner_id
         task["task_id"] = f"discover_task_{bot_id}_{owner_id}_{_TODAY}"
         tasks.append(task)
-    init_discovered_tasks_db(_DATA_FILE, tasks)
-    print(f"[setup] mock 数据已写入 {_DATA_FILE} ({len(tasks)} tasks, bot={bot_id})")
+    r = httpx.post(
+        f"{_BACKEND}/api/v1/collaboration/tasks/discovery/tasks",
+        json={"tasks": tasks},
+        timeout=15.0, headers=_HDRS,
+    )
+    r.raise_for_status()
+    print(f"[setup] written {len(tasks)} tasks via HTTP /discovery/tasks (bot={bot_id})")
+    return tasks
 
 
 class _HttpCronRelay:
@@ -213,8 +253,9 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
         owner_id = bot.get("owner_id", _USER_ID)
         print(f"[bot] 使用已有 bot: bot_id={bot_id} owner_id={owner_id}")
 
-        # 准备 mock 数据（动态填充 bot_id/owner_id）
-        _write_mock_data(bot_id, owner_id)
+        # 准备 mock 数据 — 向 backend 播种 + 本地内存 reader
+        _seed_backend(bot_id, owner_id)
+        self._mock_tasks = _build_mock_tasks(bot_id, owner_id)
 
         loop = asyncio.new_event_loop()
         try:
@@ -225,7 +266,7 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
     async def _run(self, loop: asyncio.AbstractEventLoop, bot_id: str, owner_id: str) -> None:
         # ===== 直接构造 DiscoveryService（绕过 HTTP /discover 端点）=====
 
-        reader = SqliteTaskReader(str(_DATA_FILE))
+        reader = _InMemoryTaskReader(self._mock_tasks)
         relay = _HttpCronRelay(_BACKEND, _USER_ID)
         initiator = CronRelaySessionInitiator(cron_relay=relay)
         notifier = _MockNotifySender()
@@ -272,7 +313,7 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
             self.assertIsNotNone(surl, f"任务 {tid} session_url 为空")
             self.assertTrue(notified, f"任务 {tid} 通知未发送")
 
-        # 3) 通过 SqliteTaskReader 直接验证任务状态（绕过 HTTP /status 端点）
+        # 3) 通过内存 reader 直接验证任务状态（绕过 HTTP /status 端点）
         all_tasks = reader.read_discovered_tasks()
         status_tasks = [
             t for t in all_tasks
@@ -285,8 +326,8 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
             self.assertIn(t.bot_id, [bot_id], f"task {t.task_id} bot_id 不匹配")
             self.assertIn(t.owner_id, [owner_id], f"task {t.task_id} owner_id 不匹配")
             self.assertIsNotNone(t.dt, f"task {t.task_id} dt 为空")
-            self.assertIsNotNone(t.status, f"task status 为空")
-            self.assertIsNotNone(t.priority, f"task priority 为空")
+            self.assertIsNotNone(t.status, "task status 为空")
+            self.assertIsNotNone(t.priority, "task priority 为空")
 
         # 4) 验证 engine session 实际存在
         first_sid = results[0].session.session_id
@@ -381,7 +422,7 @@ class TestDiscoveryStatusE2E(unittest.TestCase):
         bot = active_bots[0] if active_bots else bots[0]
         self._bot_id = bot["bot_id"]
         self._owner_id = bot.get("owner_id", _USER_ID)
-        _write_mock_data(self._bot_id, self._owner_id)
+        _seed_backend(self._bot_id, self._owner_id)
         print(f"[setup] bot_id={self._bot_id} owner_id={self._owner_id}")
 
     def test_discover_then_status(self) -> None:

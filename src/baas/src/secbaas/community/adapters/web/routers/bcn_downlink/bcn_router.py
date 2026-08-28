@@ -74,6 +74,7 @@ from secbaas.community.spi.secret import SecretStorePlugin
 
 logger = get_logger("router-open-api")
 
+
 router = APIRouter(prefix="/bcn", tags=["BCN Downlink"])
 
 

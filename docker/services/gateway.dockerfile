@@ -39,7 +39,14 @@ WORKDIR /app
 
 RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        procps \
+        net-tools \
+        iproute2 \
+        vim \
+        less \
+        jq \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 admin \
     && useradd --uid 10001 --gid admin --create-home --shell /bin/bash admin
@@ -56,7 +63,7 @@ RUN mkdir -p /app/tmp /home/admin/logs \
 
 USER admin
 
-EXPOSE 8888
+EXPOSE 8080
 
 # GATEWAY_PORT only steers the healthcheck; the real listen port comes from
 # module_config.web.port in the mounted config. Keep them in sync.

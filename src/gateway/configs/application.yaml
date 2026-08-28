@@ -365,6 +365,31 @@ user_config:
       user: required
       app: required
 
+    # Group creation selects either the Human or an authenticated Bot as its
+    # effective Actor. App remains required as the integration credential;
+    # BCN rejects missing actors and mismatched User/Bot ownership claims.
+    "POST /openapi/v1/collaboration/groups":
+      user: optional
+      app: required
+      bot: optional
+
+    # Resource-level authorization stays in BCN: the selected Bot must have a
+    # readable or management relation to the target Group/Session.
+    "/openapi/v1/collaboration/groups/{group_id}":
+      user: optional
+      app: required
+      bot: optional
+
+    "POST /openapi/v1/collaboration/groups/{group_id}/sessions":
+      user: optional
+      app: required
+      bot: optional
+
+    "/openapi/v1/collaboration/sessions/{session_id}":
+      user: optional
+      app: required
+      bot: optional
+
     # New-version publish-to-users: served by the backend (the antprocess
     # approval + bcs_pub callback live there), pulled out of the
     # collaboration→bcs domain by the `collaboration-publish` match upstream. A
@@ -420,10 +445,13 @@ user_config:
 
 # The harness operations sit beneath the addressed bot, so the wide
     # "/openapi/v1/bots/**" rule above would otherwise admit them with no user
-    # on the wire. They diagnose and patch a bot's live config files — a human
-    # stays on the boundary, and the extra literal segment outranks the prefix.
+    # on the wire. They now participate in the addressed-bot grant seam and
+    # accept delegated application callers in addition to human operators; the
+    # extra literal segment outranks the prefix, and backend admission checks
+    # the grant once the request reaches it.
     "/openapi/v1/bots/{bot_id}/harness/**":
-      user: required
+      user: optional
+      app: optional
 
     # HarnessFlow (task escort) — served by clawweb. Authz is delegated to
     # clawweb; the gateway passes through both identities when present.

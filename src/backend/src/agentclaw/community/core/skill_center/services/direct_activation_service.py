@@ -44,9 +44,12 @@ from agentclaw.community.core.skill_center.policies.platform_default_mcp import 
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
+    ProjectionScope,
 )
 from agentclaw.community.core.skill_center.services._mutation_flow import (
     MutationProjectionFlow,
+    skill_claim_scope,
+    skill_release_scope,
 )
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 
@@ -125,6 +128,15 @@ class DirectActivationService:
                     engine_type=bot_engine_type(bot),
                     default_engine_types=bot_default_engine_types(bot),
                 ),
+                # Skills only — unless the Skill carries MCP dependencies,
+                # which join the Bot's projected MCP set along with it. The
+                # repository names them on the mutation result, read under the
+                # row lock, exactly as ``add_skill`` does; declaring
+                # ``mcp=False`` regardless would leave a dependency
+                # whitelisted but never configured on the device.
+                scope_from_result=(
+                    skill_claim_scope if active else skill_release_scope
+                ),
             )
         except SkillSetControlPlaneNotFoundError as exc:
             raise LocalSkillNotFoundError() from exc
@@ -201,6 +213,10 @@ class DirectActivationService:
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
             ),
+            # One MCP in, no Skill touched.
+            scope=ProjectionScope(
+                mcp=True, claimed_mcp=frozenset({server_code})
+            ),
         )
         self._audit(
             bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
@@ -224,6 +240,12 @@ class DirectActivationService:
                 platform_default_codes=platform_default_codes,
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
+            ),
+            # One MCP out, no Skill touched. The projector subtracts the
+            # projected set before deleting, so a code the default policy or a
+            # Skill dependency still supplies survives.
+            scope=ProjectionScope(
+                mcp=True, released_mcp=frozenset({server_code})
             ),
         )
         self._audit(

@@ -182,6 +182,18 @@ user_config:
     app_secret: "dummy-dingtalk-app-secret"
     robot_code: "dummy-dingtalk-app-key"
 
+  # ── Task Discovery 钉钉交互卡片凭证 ──
+  # notify_sender.py 的 DingTalkYamlHolder 启动时读取此块；
+  # 优先级：API holder > YAML holder > env。community 源码留空，
+  # 真实凭证通过 SINGLEBOX_DINGTALK_* 环境变量或 API 注入。
+  # corp 环境用 application-default.yaml / application-prod.yaml 各自覆盖。
+  task_discovery_dingtalk:
+    ak_id: ""
+    ak_secret: ""
+    robot_code: ""
+    card_template_id: ""
+    frontend_url: "http://localhost:8000"
+
   # ── Economy / Governance ──────────────────────────────────────────
   economy_governance:
     dry_run: true

@@ -1,0 +1,37 @@
+import type { ChatBotView } from '@/services/workspace/botSessionService';
+import { botSessionService } from '@/services/workspace/botSessionService';
+import { useEffect, useState } from 'react';
+
+export interface UseOwnedBotsResult {
+  chatBots: ChatBotView[];
+  isLoading: boolean;
+}
+
+/** 侧边栏「我的 Bot」数据源：用户身份下通过 GET /openapi/v1/bots 拉取，Bot 身份返回空列表。 */
+export function useOwnedBots(activeIdentityId: string | null, isUserIdentity: boolean): UseOwnedBotsResult {
+  const [chatBots, setChatBots] = useState<ChatBotView[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!activeIdentityId || !isUserIdentity) {
+      setChatBots([]);
+      return;
+    }
+    let cancelled = false;
+    setIsLoading(true);
+    void botSessionService
+      .listOwnedBots(activeIdentityId)
+      .then((res) => {
+        if (cancelled) return;
+        setChatBots(res.ok ? res.data : []);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeIdentityId, isUserIdentity]);
+
+  return { chatBots, isLoading };
+}

@@ -11,6 +11,7 @@ import asyncio
 import logging
 import time
 import uuid
+from dataclasses import replace
 from typing import Any, Callable
 
 from sqlalchemy.exc import IntegrityError
@@ -35,8 +36,27 @@ from agentclaw.community.core.task.task_runner.callback_adapter import (
     CallbackAdapter,
     TaskLoopCallback,
 )
+from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 
 logger = logging.getLogger("task.service")
+
+
+def _resolve_coop_collab_mode(has_yaml: bool, group_kind: str | None) -> str:
+    """由 execution_config.group_kind(补充字段)+ 是否带 yaml 推导协作群 collab_mode(group_strategy)。
+
+    既有「有 yaml → state_machine」判断**不变**(group_kind 不介入);group_kind 只在无 yaml 时补充:
+    chat(新增)/manager_worker(默认)。state_machine 需 yaml 定义;未知值 → ValueError。
+    对齐 BCS collaboration.strategy 取值:chat / manager_worker / state_machine(参见语雀《BCS Group 回调接入说明》§4)。
+    """
+    if has_yaml:
+        return "state_machine"
+    if group_kind in ("chat", "manager_worker"):
+        return group_kind
+    if group_kind is None:
+        return "manager_worker"
+    if group_kind == "state_machine":
+        raise ValueError("group_kind=state_machine 需要 yaml 定义")
+    raise ValueError(f"未知 group_kind: {group_kind!r}")
 
 
 # TaskService 结构化实现 api.task.task_service.TaskServiceProtocol —— 依 api/README 四层
@@ -55,7 +75,9 @@ class TaskService:
                  task_node_repo: TaskNodeRepositoryProtocol | None = None,
                  task_node_run_info_repo: TaskNodeRunInfoRepositoryProtocol | None = None,
                  bot_service=None,
-                 api_base_url: str | None = None) -> None:
+                 staff_dept: StaffDeptPlugin | None = None,
+                 api_base_url: str | None = None,
+                 bot_token_provider=None) -> None:
         """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
         bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。
         BBS 候选通过注入的 BcnService.list_bots_by_task_modes(复用统一 provider 身份)查询。
@@ -76,7 +98,9 @@ class TaskService:
         self._run_info_repo = task_node_run_info_repo
         self._callback_repo = callback_repo
         self._bot_service = bot_service
+        self._staff_dept = staff_dept
         self._api_base_url = api_base_url
+        self._bot_token_provider = bot_token_provider  # driver-bot session_token 取数(直读 bcs_bots);经 _build_engine 透传给 TaskExecutor
         self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
         # fire-and-forget 后台推进任务跟踪(防 GC + 异常可见 + drain seam)
         self._bg_tasks: set[asyncio.Task] = set()
@@ -96,12 +120,28 @@ class TaskService:
             self._graph, bot=bot, bcs=bcs, discover=discover, bcn=self._bcn,
             bcs_identity=self._bcs_identity,
             api_base_url=self._api_base_url,
+            bot_token_provider=self._bot_token_provider,
         )
 
     @property
     def callback(self) -> TaskLoopCallback:
         """供执行实体(bot workflow / bcn 协作群)PUSH 回投的入口(适配层 → 编排核 on_report)。"""
         return self._callback
+
+    @staticmethod
+    def _normalize_owner_bot_id(request: TaskInfoRequest) -> TaskInfoRequest:
+        """Keep new task_info rows semantically split while accepting legacy composite input."""
+        bot_id, separator, embedded_owner_id = str(request.owner_bot_id or "").partition(":")
+        if not separator:
+            return request
+        owner_user_id = request.owner_user_id or embedded_owner_id
+        if request.owner_user_id and embedded_owner_id and request.owner_user_id != embedded_owner_id:
+            logger.warning(
+                "[task][execute] owner identity mismatch: owner_bot_id=%s owner_user_id=%s; "
+                "keep explicit owner_user_id",
+                request.owner_bot_id, request.owner_user_id,
+            )
+        return replace(request, owner_bot_id=bot_id, owner_user_id=owner_user_id)
 
     async def execute(self, request: TaskInfoRequest) -> TaskOpResult:
         """提交执行任务:生成 task_id → 持久化 task_info(PENDING)→ initialize_graph →
@@ -113,6 +153,7 @@ class TaskService:
         长编排(owner bot ``send_and_wait_async`` 分钟级 + dispatch 投递)异步进行,
         调用方经 ``get_task_dashboard`` 轮询观察推进。后台任务异常经 done_callback 记 log
         (不向调用方抛;图停在中间态由 harness 旁路巡检兜底复位)。"""
+        request = self._normalize_owner_bot_id(request)
         task_id = self._task_id_provider()
         task_info = request.to_task_info(task_id)
         if self._task_info_repo is not None:
@@ -179,7 +220,7 @@ class TaskService:
         _task_context = ((_ts.goal.objective or _ts.metadata.instruction or _ts.metadata.title) or "").strip()
         gf = GroupFormation(
             bot_ids=[request.owner_bot_id, *ec.get("participant_bot_ids", [])],
-            collab_mode="state_machine" if has_yaml else "manager_worker",
+            collab_mode=_resolve_coop_collab_mode(has_yaml, ec.get("group_kind")),
             group_name=ec.get("group_name", f"task-{task_id}"),
             members_info=[],
             extend_props={
@@ -194,6 +235,12 @@ class TaskService:
                 "participant_bindings": ec.get("participant_bindings"),
                 # 任务描述(目标)→ BCS 建群 context → <GroupContext> `目标` 行。
                 "task_context": _task_context or None,
+                "task_objective": task_info.task_spec.goal.objective,
+                "task_instruction": task_info.task_spec.metadata.instruction,
+                "acceptances": [
+                    {"id": a.id, "description": a.description}
+                    for a in task_info.task_spec.goal.acceptances
+                ],
             },
         )
         try:
@@ -393,6 +440,78 @@ class TaskService:
                 node.run_info.extend_props["assignee_owner_id"] = info.get("owner_id")
                 node.run_info.extend_props["assignee_name"] = info.get("bot_name")
 
+    @staticmethod
+    def _split_owner_bot_id(owner_bot_id: str, owner_user_id: str) -> tuple[str, str]:
+        """Normalize legacy ``bot_id:owner_id`` storage without writing it back."""
+        bot_id, separator, embedded_owner_id = str(owner_bot_id or "").partition(":")
+        effective_owner_id = embedded_owner_id if separator and embedded_owner_id else owner_user_id
+        return bot_id, effective_owner_id
+
+    def _enrich_task_owner_display(
+        self, records: list[TaskInfoRecord]
+    ) -> list[TaskInfoRecord]:
+        """Return list records with normalized owner IDs and best-effort names.
+
+        Name lookup is display enrichment only. Missing optional ports, missing
+        records, and lookup failures produce ``None`` and never fail the list API.
+        """
+        if not records:
+            return []
+
+        normalized: list[tuple[TaskInfoRecord, str, str]] = []
+        for record in records:
+            bot_id, owner_id = self._split_owner_bot_id(
+                record.owner_bot_id, record.owner_user_id
+            )
+            normalized.append((record, bot_id, owner_id))
+
+        bot_names: dict[tuple[str, str], str | None] = {}
+        if self._bot_service is not None:
+            pairs = list(dict.fromkeys(
+                (bot_id, owner_id)
+                for _, bot_id, owner_id in normalized
+                if bot_id and owner_id
+            ))
+            if pairs:
+                try:
+                    result = self._bot_service.list_bots_by_owner_bot_pairs(
+                        pairs=pairs, page=1, page_size=len(pairs)
+                    ) or {}
+                    for item in result.get("items") or []:
+                        if not isinstance(item, dict):
+                            continue
+                        key = (
+                            str(item.get("bot_id") or ""),
+                            str(item.get("owner_id") or ""),
+                        )
+                        if key[0] and key[1]:
+                            bot_names[key] = item.get("bot_name")
+                except Exception as exc:  # noqa: BLE001 display enrichment only
+                    logger.warning("[task][list] owner bot name lookup failed: %s", exc)
+
+        user_names: dict[str, str | None] = {}
+        if self._staff_dept is not None:
+            for _, _, owner_id in normalized:
+                if not owner_id or owner_id in user_names:
+                    continue
+                try:
+                    profile = self._staff_dept.get_profile_by_work_no(work_no=owner_id)
+                    user_names[owner_id] = getattr(profile, "nick_name", None)
+                except Exception as exc:  # noqa: BLE001 display enrichment only
+                    logger.warning("[task][list] owner user name lookup failed user_id=%s: %s", owner_id, exc)
+                    user_names[owner_id] = None
+
+        return [
+            replace(
+                record,
+                owner_bot_id=bot_id,
+                owner_user_id=owner_id,
+                owner_bot_name=bot_names.get((bot_id, owner_id)),
+                owner_user_name=user_names.get(owner_id),
+            )
+            for record, bot_id, owner_id in normalized
+        ]
+
     def list_tasks(
         self,
         status: str | None = None,
@@ -402,7 +521,24 @@ class TaskService:
         if self._task_info_repo is None:
             return []
         st = Status(status) if status else None
-        return self._task_info_repo.list_records(st, owner_user_id=owner_user_id)
+        records = self._task_info_repo.list_records(st, owner_user_id=owner_user_id)
+        return self._enrich_task_owner_display(records)
+
+    def list_tasks_page(
+        self,
+        status: str | None = None,
+        owner_user_id: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[TaskInfoRecord], int]:
+        """列持久化 ``task_info`` 记录的一页(1-based),可选按状态和 owner 过滤。"""
+        if self._task_info_repo is None:
+            return [], 0
+        st = Status(status) if status else None
+        records, total = self._task_info_repo.list_records_page(
+            st, owner_user_id=owner_user_id, page=page, page_size=page_size
+        )
+        return self._enrich_task_owner_display(records), total
 
     def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:
         """BBS 接力步②:任务根级 CAS 占有(委托 TaskGraphService.claim_bbs_owner)。

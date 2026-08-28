@@ -12,10 +12,11 @@ use bcs_service_api::application::v1::{
     EventDeliverySummary, EventSinkInput, EventSinkView, EventSubscription,
     EventSubscriptionDesiredStatus, EventSubscriptionService, EventSubscriptionTestResult,
     EventWebhookEndpointView, GetEventDelivery, GetEventSubscription,
-    GroupEventSubscriptionProvisioner, InlineGroupEventSubscriptionRequest, ListEventDeliveries,
-    ListEventSubscriptions, PatchEventSinkInput, PatchEventSubscription,
-    PendingGroupEventSubscriptions, PreparedGroupEventSubscriptions, ReplayEventDelivery,
+    GroupEventSubscriptionProvisioner, IdentityPolicy, InlineGroupEventSubscriptionRequest,
+    ListEventDeliveries, ListEventSubscriptions, PatchEventSinkInput, PatchEventSubscription,
+    PendingGroupEventSubscriptions, PreparedGroupEventSubscriptions, Principal, ReplayEventDelivery,
     ReplayEventDeliveryResult, SkipEventDelivery, SkipEventDeliveryResult, TestEventSubscription,
+    select_principal,
 };
 use bcs_service_api::port::repo::{
     AppendEventRecord, CancelPendingEventSubscriptions, CreateEventReplayTarget,
@@ -843,14 +844,18 @@ impl GroupEventSubscriptionProvisioner for EventSubscriptionApplicationService {
         requests: Vec<InlineGroupEventSubscriptionRequest>,
     ) -> Result<PreparedGroupEventSubscriptions, ApplicationError> {
         self.ensure_enabled()?;
-        let user = caller
-            .user
-            .as_ref()
-            .ok_or(ApplicationError::Unauthenticated)?;
-        let actor = EventActor {
-            actor_type: EventActorType::Human,
-            id: format!("human_{}", user.id),
-            display_name: user.display_name.clone().or_else(|| user.full_name.clone()),
+        let principal = select_principal(caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let actor = match principal {
+            Principal::Human(human) => EventActor {
+                actor_type: EventActorType::Human,
+                id: format!("human_{}", human.subject.id),
+                display_name: human.subject.display_name.or(human.subject.full_name),
+            },
+            Principal::Bot(bot) => EventActor {
+                actor_type: EventActorType::Bot,
+                id: bot.bot_uuid,
+                display_name: None,
+            },
         };
         let grant = AuthorizedEventSubscriptionScope {
             actor: actor.clone(),

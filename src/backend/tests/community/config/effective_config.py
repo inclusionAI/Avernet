@@ -11,6 +11,13 @@ Two layers are captured per profile:
   the same merge the loaders perform. This catches relocation of **every** yaml
   block, including corp-only blocks (``arca_sandbox`` …) that the neutral
   ``ConfigModule`` does not type.
+
+  Deliberately **not** env-expanded: a ``${DATABASE_URL:-…}`` placeholder is
+  snapshotted verbatim rather than resolved. Expanding here would make the
+  golden depend on whatever the runner happens to export, which is the same
+  determinism problem ``DORMANT_DRY_RUN`` is neutralized for below. So this
+  layer pins the shipped yaml *text*; the expansion itself is covered by
+  ``tests/community/local/test_load_yaml_configs.py``.
 - ``typed`` — every neutral ``ConfigModule`` dataclass, resolved against the
   merged config. This additionally catches ``di/config.py`` **code-default**
   changes (folded in by the providers), which the raw layer cannot see.
@@ -78,6 +85,7 @@ _PROVIDER_METHODS = (
     "workspace_hosting",
     "skill_scan",
     "masa_agent_eval",
+    "http_client_pool",
     "desktop_bot_periodic_scan",
     "dormant_config",
     "dormant_notify",

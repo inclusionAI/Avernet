@@ -254,6 +254,7 @@ def test_upload_replacement_returns_200_and_updated_operation():
             binder.bind(SkillQueryServiceProtocol, to=_Query())
             binder.bind(LocalSkillUploadServiceProtocol, to=_UpdatedUpload())
             binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
+            bind_bot_access_seam(binder)
 
     app = FastAPI()
     app.include_router(router)
@@ -291,6 +292,7 @@ def test_upload_folder_preserves_legacy_file_paths_and_returns_created_skill():
             binder.bind(SkillQueryServiceProtocol, to=query)
             binder.bind(LocalSkillUploadServiceProtocol, to=upload)
             binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
+            bind_bot_access_seam(binder)
 
     app = FastAPI()
     app.include_router(router)
@@ -328,6 +330,7 @@ def test_upload_folder_rejects_misaligned_paths_before_service_call():
             binder.bind(SkillQueryServiceProtocol, to=query)
             binder.bind(LocalSkillUploadServiceProtocol, to=upload)
             binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
+            bind_bot_access_seam(binder)
 
     app = FastAPI()
     app.include_router(router)

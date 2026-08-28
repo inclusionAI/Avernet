@@ -1,0 +1,15 @@
+{
+  "extends": "./src/.umi/tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "noUnusedLocals": true,
+    "strict": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@@/*": ["./src/.umi/*"],
+      "@tc-chat/core": ["./node_modules/@tc-chat/core"]
+    }
+  },
+  "exclude": ["node_modules", "dist", "src/.umi/*", ".tmp"],
+  "include": ["mock/**/*", "src/**/*", "test/**/*", "config/**/*"]
+}

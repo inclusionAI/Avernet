@@ -102,8 +102,10 @@ GroupsPath:
     tags: ["Collaboration / Groups"]
     summary: Create a collaboration group or direct-message group.
     x-avernet-security:
-      user: required
+      user: optional
       app: required
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
     requestBody:
       required: true
       content:
@@ -152,7 +154,10 @@ GroupsPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: A selected Bot is not collaboration-eligible.
+        description: >-
+          No Human or Bot Actor is available, the authenticated User/Bot
+          ownership claims conflict, or a selected Bot is not
+          collaboration-eligible.
         x-error-codes:
           - forbidden
         content:
@@ -250,8 +255,10 @@ GroupPath:
     tags: ["Collaboration / Groups"]
     summary: Get target-independent group detail.
     x-avernet-security:
-      user: required
+      user: optional
       app: required
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
     responses:
@@ -279,9 +286,9 @@ GroupPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
         description: >-
-          Neither the authenticated User's Human Actor nor a Bot created by
-          that Human is a Group Participant. Public groups are exempt from
-          this check and are readable by any authenticated caller.
+          The selected HumanOrOwnedBot Principal has no authorized participant
+          relation to the Group and is not the authenticated Bot management
+          actor. Public groups are exempt from this resource check.
         x-error-codes:
           - forbidden
         content:
@@ -311,8 +318,10 @@ GroupPath:
     tags: ["Collaboration / Groups"]
     summary: Update the explicitly mutable group properties.
     x-avernet-security:
-      user: required
+      user: optional
       app: required
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
     requestBody:
@@ -347,13 +356,10 @@ GroupPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
         description: >-
-          Principal cannot manage the group. A Human Principal may manage when
-          it can act as at least one Group management actor: the driver,
-          originator, or ManagerWorker manager participant. Human-to-actor authority is
-          checked only against these target actors: direct human_{user.id}, a
-          Bot whose created_by equals the Human user id, or a creator relation
-          edge from human_{user.id} to that Bot. The server does not enumerate
-          every Bot created by the Human for this authorization decision.
+          Principal cannot manage the group. A Bot Principal must itself be a
+          Group management actor: the driver, originator, or ManagerWorker
+          manager participant. A Human Principal may act directly or through
+          ownership or a creator relation to one of those actors.
         x-error-codes:
           - forbidden
         content:
@@ -386,8 +392,10 @@ GroupPath:
     tags: ["Collaboration / Groups"]
     summary: Delete a group using the authenticated Principal as caller.
     x-avernet-security:
-      user: required
+      user: optional
       app: required
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
       - $ref: ../shared.yaml#/ActingBotIdQuery
@@ -416,11 +424,9 @@ GroupPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
         description: >-
-          Principal cannot delete the group. A Human Principal may delete when
-          it can act as at least one Group management actor: the driver,
-          originator, or ManagerWorker manager participant. Human-to-actor authority is
-          checked only against these target actors rather than by enumerating
-          all Bots created by the Human.
+          Principal cannot delete the group. A Bot Principal must itself be a
+          Group management actor. A Human Principal may act directly or
+          through ownership or a creator relation to a management actor.
         x-error-codes:
           - forbidden
         content:
@@ -597,14 +603,13 @@ CreateCollaborationGroup:
     originator:
       type: string
       description: >
-        Optional caller-designated originator. Omitted (or set to the
-        authenticated user `human_<staff_no>`) sets the originator to the
-        calling user. When set to any other value, it must identify either
-        the caller-self or a registered Bot the caller owns (`created_by`
-        matches the caller); otherwise the request is rejected. When it is
-        a caller-owned Bot distinct from the driver, the driver must be
-        reachable from that originator (public visibility, or a friend of
-        it). The `dm` group kind does not carry an originator.
+        Optional caller-designated originator. When omitted, the selected
+        HumanOrOwnedBot Principal becomes the originator. A Human Principal
+        may instead select a registered Bot it owns (`created_by` matches the
+        caller). A Bot Principal may select only itself. When a Human selects
+        an owned Bot distinct from the driver, the driver must be reachable
+        from that originator (public visibility, or a friend of it). The `dm`
+        group kind does not carry an originator.
     event_subscriptions:
       type: array
       maxItems: 32

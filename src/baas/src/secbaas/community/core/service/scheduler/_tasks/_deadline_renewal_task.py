@@ -17,8 +17,8 @@ from secbaas.community.core.repository.arca_ttl import TtlRenewalScheduleReposit
 from secbaas.community.core.service.distributed_lock import DistributedLockService
 from secbaas.community.core.service.paas import PaasServiceFacade
 from secbaas.community.core.utils.time_utils import (
-    naive_utc_fromtimestamp,
-    naive_utc_now,
+    naive_cst_fromtimestamp,
+    naive_cst_now,
     renewal_window,
 )
 from secbaas.community.logger import get_logger
@@ -38,7 +38,7 @@ class DeadlineRenewalScheduler:
     for registration with the AppScheduler cron lifecycle.
 
     The scheduler selects containers due for renewal by querying the
-    baas_arca_ttl_renewal_schedule cold table rather than scanning the
+    baas_bot_ttl_renewal_schedule cold table rather than scanning the
     hot tables, reducing per-run query volume by >99%.
 
     Constructor dependencies (injected by DI container):
@@ -200,10 +200,11 @@ class DeadlineRenewalScheduler:
                 )
 
         # ---- Step 1: Cold Table Query + LEFT JOIN ----
-        # The due gate time is computed ONCE per round as naive UTC and
-        # passed to the repository as a bound parameter — the comparison
-        # is then time-zone independent of the DB server clock (CR-01).
-        due_now = naive_utc_now()
+        # The due gate time is computed ONCE per round as naive
+        # Asia/Shanghai (+08:00, no DST) and passed to the repository as
+        # a bound parameter — the comparison is then time-zone
+        # independent of the DB server clock (CR-01).
+        due_now = naive_cst_now()
         # WR-05: per-side isolation — a failure on ONE source table must
         # not discard the healthy side's due batch (return_exceptions +
         # per-side handling empties only the failed side).
@@ -378,7 +379,7 @@ class DeadlineRenewalScheduler:
                         if ttl_ms_str:
                             try:
                                 ttl_ms = int(ttl_ms_str)
-                                ttl_dt = naive_utc_fromtimestamp(ttl_ms / 1000)
+                                ttl_dt = naive_cst_fromtimestamp(ttl_ms / 1000)
                                 next_renew_at = ttl_dt - self._renewal_window
                             except (ValueError, OSError, OverflowError):
                                 # Unparseable ttl — fall back to now + window
@@ -392,7 +393,7 @@ class DeadlineRenewalScheduler:
                                     row["source_table"],
                                     row["id"],
                                 )
-                                next_renew_at = naive_utc_now() + self._renewal_window
+                                next_renew_at = naive_cst_now() + self._renewal_window
                         else:
                             log.info(
                                 "[DeadlineRenewalScheduler] discovery scan: "
@@ -403,7 +404,7 @@ class DeadlineRenewalScheduler:
                                 row["source_table"],
                                 row["id"],
                             )
-                            next_renew_at = naive_utc_now() + self._renewal_window
+                            next_renew_at = naive_cst_now() + self._renewal_window
 
                         self._schedule_repo.register_if_missing(
                             self._config.env,
@@ -455,7 +456,10 @@ class DeadlineRenewalScheduler:
           (e) remaining < 0 (expired) → failed
           (f) remaining > 24h (cannot renew) → skipped (postpone)
           (g) 12h < remaining <= 24h (not yet due) → skipped (postpone)
-          (h) 0 <= remaining <= 12h (renewal window) → extend_ttl()
+          (h) 0 <= remaining <= 12h (renewal window) → extend_ttl(); on
+              success next_renew_at is derived from the post-extend TTL
+              re-read (WR-03: Arca clamps extensions at its 24h remaining
+              cap, so assuming now + window can overshoot the real expiry)
         """
         sandbox_id = record.get("sandbox_id", "")
 
@@ -517,7 +521,7 @@ class DeadlineRenewalScheduler:
 
         # ---- Step 3(f): remaining > 24h — cannot renew (API constraint) ----
         if remaining_hours > 24:
-            expiration_dt = naive_utc_fromtimestamp(ttl_ms / 1000.0)
+            expiration_dt = naive_cst_fromtimestamp(ttl_ms / 1000.0)
             next_renew = expiration_dt - self._renewal_window
             self._schedule_repo.postpone_renewal(
                 self._config.env,
@@ -536,7 +540,7 @@ class DeadlineRenewalScheduler:
 
         # ---- Step 3(g): 12h < remaining <= 24h — not yet due ----
         if remaining_hours > self._config.renew_threshold_hours:
-            expiration_dt = naive_utc_fromtimestamp(ttl_ms / 1000.0)
+            expiration_dt = naive_cst_fromtimestamp(ttl_ms / 1000.0)
             next_renew = expiration_dt - self._renewal_window
             self._schedule_repo.postpone_renewal(
                 self._config.env,
@@ -590,8 +594,45 @@ class DeadlineRenewalScheduler:
             )
             return await self._handle_failure(record)
 
-        # Renewal success
-        next_renew = naive_utc_now() + self._renewal_window
+        # Renewal success — WR-03: derive next_renew from the authoritative
+        # post-extend TTL instead of assuming now + renewal_window. Arca
+        # clamps the remaining TTL at its 24h cap
+        # (ArcaPaasService._update_device_ttl_sync targets now+23h for that
+        # reason), so for configs whose window exceeds the post-extend
+        # remaining (default_ttl_minutes > ~2x the cap) the assumed target
+        # can land at/after the real expiry and the device expires before
+        # the next due scan. Re-read the platform TTL to get the clamped
+        # reality; if that read fails, fall back to a short rescan interval
+        # so the next round re-derives from the platform via step (a).
+        new_expiration_ms: int | None = None
+        try:
+            post_extend_info = await self._paas_facade.get_device_info(sandbox_id)
+            raw_post_ttl = post_extend_info.ttl_timestamp if post_extend_info else None
+            if raw_post_ttl:
+                new_expiration_ms = int(float(raw_post_ttl))
+        except Exception:
+            new_expiration_ms = None
+
+        if new_expiration_ms is not None:
+            new_expiration_dt = naive_cst_fromtimestamp(new_expiration_ms / 1000)
+            next_renew = new_expiration_dt - self._renewal_window
+            log.info(
+                "[DeadlineRenewalScheduler] sandbox_id=%s post-extend ttl=%d — "
+                "next_renew derived from clamped expiry",
+                sandbox_id,
+                new_expiration_ms,
+            )
+        else:
+            log.warning(
+                "[DeadlineRenewalScheduler] sandbox_id=%s renewed %d min but "
+                "post-extend TTL re-read failed — conservative short-interval "
+                "rescan; next round re-derives from the platform",
+                sandbox_id,
+                ttl_minutes,
+            )
+            next_renew = naive_cst_now() + timedelta(
+                seconds=self._config.cron_interval_seconds
+            )
         self._schedule_repo.update_after_success(
             self._config.env, record["source_table"], record["source_id"], next_renew
         )
@@ -647,7 +688,7 @@ class DeadlineRenewalScheduler:
             return "stopped"
 
         # Retry: schedule next attempt after retry_delay_minutes
-        next_retry = naive_utc_now() + timedelta(
+        next_retry = naive_cst_now() + timedelta(
             minutes=self._config.retry_delay_minutes
         )
         self._schedule_repo.update_after_failure(

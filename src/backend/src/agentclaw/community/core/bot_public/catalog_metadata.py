@@ -51,6 +51,14 @@ class BotCatalogMetadata:
     user_visibility: Any = None
 
 
+@dataclass(frozen=True)
+class BotCatalogMetadataPage:
+    """One BCS page, retaining BCS pagination metadata for the public result."""
+
+    total: int
+    items: Sequence[BotCatalogMetadata]
+
+
 class BotCatalogMetadataUnavailableError(Exception):
     """The catalog metadata port cannot make an authoritative decision."""
 
@@ -68,7 +76,7 @@ class BotCatalogMetadataServiceProtocol(Protocol):
         filters: BotCatalogSearchFilters | None,
         caller: BotCatalogCaller,
         request_id: str,
-    ) -> Sequence[BotCatalogMetadata]: ...
+    ) -> BotCatalogMetadataPage: ...
 
 
 class BotCatalogSearchUnavailableError(Exception):

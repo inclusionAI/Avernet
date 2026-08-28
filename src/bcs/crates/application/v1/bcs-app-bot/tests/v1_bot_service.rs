@@ -1108,6 +1108,118 @@ async fn update_requires_created_by_and_rejects_descriptor_for_human() {
 }
 
 #[tokio::test]
+async fn mine_materializes_the_current_human_before_listing() {
+    let fixture = Fixture::new();
+    assert!(fixture.repo.get("human_staff-1").await.is_none());
+
+    let mut caller = human_caller("staff-1");
+    let user = caller.user.as_mut().expect("human caller");
+    user.display_name = Some(" Display Name ".to_string());
+    user.full_name = Some("Full Name".to_string());
+
+    let page = fixture
+        .service
+        .list_mine(ListMyBots {
+            caller,
+            kind: Some(BotKind::Human),
+            name: None,
+            status: None,
+            reachability: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("list mine");
+
+    assert_eq!(page.total, 1);
+    let Bot::Human(human) = &page.items[0] else {
+        panic!("expected human actor");
+    };
+    assert_eq!(human.bot_id, "human_staff-1");
+    assert_eq!(human.name, "Display Name");
+}
+
+#[tokio::test]
+async fn mine_uses_non_empty_identity_name_fallbacks_for_materialized_humans() {
+    let fixture = Fixture::new();
+    let cases = [
+        (
+            "staff-display",
+            Some(" Display "),
+            Some("Full"),
+            "username",
+            "Display",
+        ),
+        (
+            "staff-full",
+            Some("   "),
+            Some(" Full "),
+            "username",
+            "Full",
+        ),
+        (
+            "staff-username",
+            None,
+            Some("   "),
+            " username ",
+            "username",
+        ),
+        ("staff-id", None, None, "   ", "staff-id"),
+    ];
+
+    for (staff_no, display_name, full_name, username, expected_name) in cases {
+        let mut caller = human_caller(staff_no);
+        let user = caller.user.as_mut().expect("human caller");
+        user.display_name = display_name.map(str::to_string);
+        user.full_name = full_name.map(str::to_string);
+        user.username = username.to_string();
+
+        fixture
+            .service
+            .list_mine(ListMyBots {
+                caller,
+                kind: Some(BotKind::Human),
+                name: None,
+                status: None,
+                reachability: None,
+                offset: 0,
+                limit: 20,
+            })
+            .await
+            .expect("list mine");
+
+        let stored = fixture
+            .repo
+            .get(&format!("human_{staff_no}"))
+            .await
+            .expect("materialized human actor");
+        assert_eq!(stored.capabilities.name.as_deref(), Some(expected_name));
+    }
+}
+
+#[tokio::test]
+async fn mine_validates_pagination_before_materializing_the_human() {
+    let fixture = Fixture::new();
+
+    let error = fixture
+        .service
+        .list_mine(ListMyBots {
+            caller: human_caller("invalid"),
+            kind: None,
+            name: None,
+            status: None,
+            reachability: None,
+            offset: 0,
+            limit: 0,
+        })
+        .await
+        .expect_err("invalid pagination must fail");
+
+    assert_eq!(error.code(), "invalid_request");
+    assert!(fixture.repo.get("human_invalid").await.is_none());
+}
+
+#[tokio::test]
 async fn mine_accepts_tenantless_users_and_callers_without_user_are_forbidden() {
     let fixture = Fixture::new();
     fixture

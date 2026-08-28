@@ -34,7 +34,8 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use support::{
-    NOW_MS, caller, create_command, group_scope, harness, harness_with_eventing_config,
+    NOW_MS, bot_caller, caller, create_command, group_scope, harness,
+    harness_with_eventing_config,
 };
 
 fn inline_subscription(name: &str, filters: Vec<&str>) -> InlineGroupEventSubscriptionRequest {
@@ -87,6 +88,31 @@ async fn inline_group_prepare_fixes_scope_and_cancellation_never_activates() {
         .expect("load cancelled subscription")
         .expect("cancelled subscription");
     assert_eq!(cancelled.status, EventSubscriptionStatus::Deleted);
+}
+
+#[tokio::test]
+async fn inline_group_prepare_projects_a_bot_caller_as_the_event_actor() {
+    let harness = harness(true);
+
+    let prepared = harness
+        .service
+        .prepare(
+            &bot_caller(),
+            "server-group-id",
+            vec![inline_subscription("inline", vec!["group.*"])],
+        )
+        .await
+        .expect("prepare inline subscription as Bot");
+
+    assert_eq!(prepared.actor.actor_type, EventActorType::Bot);
+    assert_eq!(prepared.actor.id, "bot-owner");
+    let (record, _) = harness
+        .repo
+        .get_subscription(&prepared.subscription_ids[0], "test")
+        .await
+        .expect("load pending subscription")
+        .expect("pending subscription");
+    assert_eq!(record.created_by, prepared.actor);
 }
 
 #[tokio::test]

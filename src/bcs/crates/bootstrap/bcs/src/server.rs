@@ -513,6 +513,7 @@ impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher 
                 thinking: None,
                 idempotency_key: Some(idempotency_key),
                 source_im_message_id: None,
+                channel_sender_identity: None,
                 sender_conn_id: None,
                 provider_bypass_headers: Vec::new(),
             })
@@ -5634,13 +5635,6 @@ mod tests {
 
     #[async_trait]
     impl A2aChatRunService for AdminRunTestA2aRuns {
-        async fn run_blocking_chat(
-            &self,
-            _cmd: bcs_service_api::BlockingA2aChatCommand,
-        ) -> bcs_service_api::ServiceResult<bcs_service_api::BlockingA2aChatOutcome> {
-            unreachable!("admin run test only uses async chat")
-        }
-
         async fn start_async_chat(
             &self,
             cmd: bcs_service_api::AsyncA2aChatCommand,

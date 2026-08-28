@@ -108,6 +108,55 @@ class TestLoadYamlConfigsOverlaySelection:
         assert str(first_configs) in str(error.value)
         assert str(fallback_configs) in str(error.value)
 
+    def test_corp_overlay_merges_on_top(self, monkeypatch, tmp_path):
+        """Three-layer merge: base + community overlay + corp overlay.
+
+        The corp overlay (``{stem}-corp.yaml``) injects real credentials that
+        must not live in community source. When present alongside the config
+        pair, ``_load_yaml_configs`` deep-merges it on top.
+        """
+        overlay_name = "application-test.yaml"
+        configs = tmp_path / "configs"
+        configs.mkdir()
+        (configs / "application.yaml").write_text("user_config:\n  base: base-val\n")
+        (configs / overlay_name).write_text("user_config:\n  overlay: overlay-val\n")
+        corp_name = "application-test-corp.yaml"
+        (configs / corp_name).write_text(
+            "user_config:\n  overlay: corp-override\n  corp_secret: real-secret\n"
+        )
+
+        community_root = tmp_path / "community"
+        community_configs = community_root / "configs"
+        community_configs.mkdir(parents=True)
+        (community_configs / "application.yaml").write_text("user_config:\n  base: base-val\n")
+        (community_configs / overlay_name).write_text("user_config:\n  overlay: overlay-val\n")
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            yaml_provider,
+            "__file__",
+            str(community_root / "core" / "config" / "yaml_provider.py"),
+        )
+
+        result = _load_yaml_configs(overlay_name)
+        assert result["user_config"]["base"] == "base-val"
+        assert result["user_config"]["overlay"] == "corp-override"
+        assert result["user_config"]["corp_secret"] == "real-secret"
+
+
+@pytest.fixture(autouse=True)
+def _community_database_url(monkeypatch):
+    """The community overlay requires a deployment-supplied ``DATABASE_URL``.
+
+    It is the Aliyun/OceanBase profile, so its ``database.url`` placeholder has
+    no inline default and strict expansion raises without one. These tests are
+    about overlay *merging*, not the DSN, so they supply what a deployment would.
+    The tests that assert the requirement itself set or clear it explicitly.
+    """
+    monkeypatch.setenv(
+        "DATABASE_URL", "mysql+pymysql://t:t@127.0.0.1:3306/agentclaw"
+    )
+
 
 class TestCommunityOverlaySelection:
     """DEPLOY_PROFILE=community 加载中性基座 application.yaml + community overlay
@@ -119,7 +168,7 @@ class TestCommunityOverlaySelection:
         # bcs 块只在 community overlay 里（不在 base application.yaml）。
         bcs = user_config.get("bcs", {})
         assert bcs.get("user_path") == "/auth/user"
-        assert bcs.get("base_url", "").startswith("http")
+        assert bcs.get("base_url", "") == ""  # ${BCS_URL:-} defaults to empty
         # 证明基座确实被合并进来了：一个只在中性 base 里的块（device_provider）出现。
         assert user_config.get("device_provider") == "local"
         assert cfg.get("app_name") == "agentclaw"
@@ -213,15 +262,98 @@ class TestCommunityOverlaySelection:
     def test_community_overlay_exposes_data_infra_blocks(self):
         # B3：database/cache/object_storage/secret 四块只在 community overlay。
         user_config = _load_yaml_configs("application-community.yaml").get("user_config", {})
-        assert user_config.get("database", {}).get("url", "").startswith("sqlite:///")
+        assert user_config.get("database", {}).get("backend") == "mysql"
+        assert user_config.get("database", {}).get("url", "").startswith("mysql+")
         assert user_config.get("cache", {}).get("redis_url") == ""
         storage = user_config.get("object_storage", {})
         assert storage.get("backend") == "fs"
         assert storage.get("s3", {}).get("region") == "us-east-1"
-        assert user_config.get("secret", {}).get("env_prefix") == "AGENTCLAW_SECRET_"
+        assert user_config.get("secret", {}).get("env_prefix") == ""
 
     def test_base_application_yaml_has_no_data_infra_blocks(self):
         # 这四块必须只在 community overlay，不能泄漏进 corp/test 路径。
         user_config = _load_yaml_configs("application-test.yaml").get("user_config", {})
         for block in ("database", "cache", "object_storage", "secret"):
             assert block not in user_config
+
+
+class TestEnvPlaceholderExpansion:
+    """``${NAME}`` / ``${NAME:-default}`` expansion, matching baas/gateway/proxy.
+
+    Config loading is the approved site for raw environment access, so a
+    deployment injects its DSNs and secrets here rather than through bespoke
+    ``os.environ`` reads scattered across DI providers.
+    """
+
+    def test_expands_a_set_variable(self, monkeypatch):
+        monkeypatch.setenv("AC_TEST_HOST", "db.internal")
+        result = yaml_provider._expand_env_placeholders({"url": "${AC_TEST_HOST}"})
+        assert result == {"url": "db.internal"}
+
+    def test_falls_back_to_the_inline_default(self, monkeypatch):
+        monkeypatch.delenv("AC_TEST_MISSING", raising=False)
+        result = yaml_provider._expand_env_placeholders(
+            {"url": "${AC_TEST_MISSING:-sqlite:///./data/agentclaw.db}"}
+        )
+        assert result == {"url": "sqlite:///./data/agentclaw.db"}
+
+    def test_set_but_empty_beats_the_default(self, monkeypatch):
+        # An operator who exports NAME= means empty, not "use the default".
+        monkeypatch.setenv("AC_TEST_EMPTY", "")
+        result = yaml_provider._expand_env_placeholders({"k": "${AC_TEST_EMPTY:-fallback}"})
+        assert result == {"k": ""}
+
+    def test_strict_rejects_an_unset_variable_with_no_default(self, monkeypatch):
+        # Strict is the default: a deployment that forgot to wire a Secret fails
+        # at boot instead of serving a half-configured surface.
+        monkeypatch.delenv("AC_TEST_MISSING", raising=False)
+        with pytest.raises(KeyError, match="AC_TEST_MISSING"):
+            yaml_provider._expand_env_placeholders({"k": "${AC_TEST_MISSING}"})
+
+    def test_lenient_leaves_an_unresolvable_placeholder_intact(self, monkeypatch):
+        monkeypatch.delenv("AC_TEST_MISSING", raising=False)
+        result = yaml_provider._expand_env_placeholders(
+            {"k": "${AC_TEST_MISSING}"}, strict=False
+        )
+        assert result == {"k": "${AC_TEST_MISSING}"}
+
+    def test_walks_nested_dicts_lists_and_leaves_non_strings_alone(self, monkeypatch):
+        monkeypatch.setenv("AC_TEST_V", "x")
+        tree = {"a": [{"b": "${AC_TEST_V}"}], "n": 7, "t": True, "none": None}
+        assert yaml_provider._expand_env_placeholders(tree) == {
+            "a": [{"b": "x"}],
+            "n": 7,
+            "t": True,
+            "none": None,
+        }
+
+    def test_expands_several_placeholders_in_one_string(self, monkeypatch):
+        monkeypatch.setenv("AC_TEST_H", "host")
+        monkeypatch.setenv("AC_TEST_P", "3306")
+        result = yaml_provider._expand_env_placeholders({"u": "mysql://${AC_TEST_H}:${AC_TEST_P}/db"})
+        assert result == {"u": "mysql://host:3306/db"}
+
+    def test_community_overlay_database_url_honours_the_env(self, monkeypatch):
+        # End-to-end through the real overlay: the shipped `${DATABASE_URL:-...}`
+        # placeholder is what a deployment overrides.
+        monkeypatch.setenv("DATABASE_URL", "mysql+pymysql://u:p@rds:3306/agentclaw")
+        user_config = _load_yaml_configs("application-community.yaml")["user_config"]
+        assert user_config["database"]["url"] == "mysql+pymysql://u:p@rds:3306/agentclaw"
+
+    def test_community_overlay_requires_database_url(self, monkeypatch):
+        # No inline default: community is the deployed Aliyun/OceanBase profile,
+        # so a missing Secret must fail the boot rather than silently pointing
+        # production traffic at a local file.
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        with pytest.raises(KeyError, match="DATABASE_URL"):
+            _load_yaml_configs("application-community.yaml")
+
+    def test_local_overlays_load_bare_under_strict_expansion(self, monkeypatch):
+        # Guard: the local-facing overlays must boot with nothing exported, so
+        # every placeholder they ship carries a default. Strict expansion
+        # enforces it. `application-community.yaml` is deliberately NOT in this
+        # list — it is the deployed profile and requires DATABASE_URL (see
+        # test_community_overlay_requires_database_url).
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        for overlay in ("application-singlebox.yaml", "application-test.yaml"):
+            assert _load_yaml_configs(overlay)

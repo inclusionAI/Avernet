@@ -4,6 +4,7 @@ from agentclaw.community.core.runtime_binding.models import (
     ResolvedRuntimeBinding,
     RuntimeBindingRequest,
     RuntimeBindingSource,
+    RuntimeBindingTarget,
 )
 from agentclaw.community.core.runtime_binding.service import (
     RuntimeBindingResolutionService,
@@ -14,4 +15,5 @@ __all__ = [
     "RuntimeBindingRequest",
     "RuntimeBindingResolutionService",
     "RuntimeBindingSource",
+    "RuntimeBindingTarget",
 ]

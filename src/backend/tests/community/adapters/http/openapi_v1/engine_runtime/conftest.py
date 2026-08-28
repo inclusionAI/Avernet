@@ -18,8 +18,12 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 from tests.community.adapters.http.openapi_v1.conftest import (
+    SeamLocks,
     mount_public_error_handlers,
     user_scoped_client,
+)
+from agentclaw.community.api.collaborator_lock_service import (
+    CollaboratorLockServiceProtocol,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
@@ -195,6 +199,7 @@ def bind_seam_from_relay(binder, relay: FakeRelay) -> None:
     binder.bind(BotRepository, to=InstanceProvider(_Bots()))
     binder.bind(CollaboratorServiceProtocol, to=InstanceProvider(_Collaborators()))
     binder.bind(BotCollabLogRepositoryProtocol, to=InstanceProvider(_Audit()))
+    binder.bind(CollaboratorLockServiceProtocol, to=InstanceProvider(SeamLocks()))
 
 
 @pytest.fixture

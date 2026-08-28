@@ -12,7 +12,6 @@ use bcs_protocol::{
 use bcs_service_api::{
     A2aChatCommand, A2aChatOutcome, A2aChatRunService, A2aChatService, A2aRunStatus,
     ActorStatus, AsyncA2aChatAccepted, AsyncA2aChatCommand,
-    BlockingA2aChatCommand, BlockingA2aChatOutcome,
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotRegistryCoreService, BotRunContext, BotRunContextPort, CallerContext,
     ChatRunCancelCommand, ChatRunCleanupPort,
@@ -276,59 +275,6 @@ impl DirectChatRunSnapshotPort for A2aChat {
 
 #[async_trait]
 impl A2aChatRunService for A2aChat {
-    async fn run_blocking_chat(
-        &self,
-        cmd: BlockingA2aChatCommand,
-    ) -> ServiceResult<BlockingA2aChatOutcome> {
-        let (response_tx, mut response_rx) = mpsc::channel::<String>(16);
-        self.chat_run_events
-            .register(
-                cmd.run_id.clone(),
-                cmd.session_key.clone(),
-                response_tx,
-                Some("http-chat".to_string()),
-                cmd.run_channel_from.clone(),
-            )
-            .await;
-        self.register_bot_run_context(&cmd.run_id, &cmd.target_bot_id, &cmd.session_key, cmd.timeout_ms)
-            .await;
-
-        let chat_result = self
-            .chat(A2aChatCommand {
-                caller: cmd.caller.clone(),
-                target_bot_id: cmd.target_bot_id.clone(),
-                message: cmd.message,
-                from_actor_id: cmd.from_actor_id,
-                authenticated_staff_id: cmd.authenticated_staff_id,
-                run_id: Some(cmd.run_id.clone()),
-                async_mode: false,
-                session_key: Some(cmd.session_key.clone()),
-                timeout_ms: Some(cmd.timeout_ms),
-                client: cmd.client.or_else(|| Some("http-chat".to_string())),
-                tags: cmd.tags,
-                response_mode: cmd.response_mode,
-                caller_wait_mode: None,
-                organization_code: cmd.organization_code,
-                provider_bypass_headers: cmd.provider_bypass_headers,
-            })
-            .await;
-
-        if let Err(err) = chat_result {
-            self.chat_run_events.unregister(&cmd.run_id).await;
-            return Err(err);
-        }
-
-        self.drain_blocking_run(
-            cmd.caller,
-            &cmd.run_id,
-            &cmd.target_bot_id,
-            &cmd.session_key,
-            cmd.timeout_ms,
-            &mut response_rx,
-        )
-        .await
-    }
-
     async fn start_async_chat(
         &self,
         cmd: AsyncA2aChatCommand,
@@ -915,93 +861,6 @@ impl A2aChatService for A2aChat {
 }
 
 impl A2aChat {
-    async fn drain_blocking_run(
-        &self,
-        caller: CallerContext,
-        run_id: &str,
-        target_bot_id: &str,
-        session_key: &str,
-        timeout_ms: u64,
-        response_rx: &mut mpsc::Receiver<String>,
-    ) -> ServiceResult<BlockingA2aChatOutcome> {
-        let timeout_duration = Duration::from_millis(timeout_ms);
-
-        loop {
-            match tokio::time::timeout(timeout_duration, response_rx.recv()).await {
-                Ok(Some(event_str)) => {
-                    let terminal = match self.record_run_event(run_id, &event_str).await {
-                        Ok(terminal) => terminal,
-                        Err(error) => {
-                            self.chat_run_events.unregister(run_id).await;
-                            return Err(error);
-                        }
-                    };
-                    if terminal {
-                        break;
-                    }
-                }
-                Ok(None) => {
-                    let status = A2aChatService::get_run(self, caller.clone(), run_id).await?;
-                    let content = run_content(&status);
-                    let _ = self
-                        .fail_run_if_open_with_reason(
-                            run_id,
-                            "Bot channel closed without response",
-                            DirectChatRunReason::BotNotConnected,
-                        )
-                        .await;
-                    if content.is_empty() {
-                        self.chat_run_events.unregister(run_id).await;
-                        return Err(ServiceError::InternalError(
-                            "Bot channel closed without response".to_string(),
-                        ));
-                    }
-                    break;
-                }
-                Err(_) => {
-                    let status = A2aChatService::get_run(self, caller.clone(), run_id).await?;
-                    if run_content(&status).is_empty() {
-                        let _ = self
-                            .fail_run_if_open_with_reason(
-                                run_id,
-                                "Timeout waiting for bot response",
-                                DirectChatRunReason::Timeout,
-                            )
-                            .await;
-                        self.chat_run_events.unregister(run_id).await;
-                        return Err(ServiceError::InternalError(
-                            "Timeout waiting for bot response".to_string(),
-                        ));
-                    }
-                    let _ = self
-                        .fail_run_if_open_with_reason(
-                            run_id,
-                            "Timeout waiting for bot response",
-                            DirectChatRunReason::Timeout,
-                        )
-                        .await;
-                    break;
-                }
-            }
-        }
-
-        self.chat_run_events.unregister(run_id).await;
-        let status = A2aChatService::get_run(self, caller, run_id).await?;
-        if status.status == "failed" {
-            return Err(ServiceError::InternalError(format!(
-                "Bot error: {}",
-                run_error_message(&status)
-            )));
-        }
-
-        Ok(BlockingA2aChatOutcome {
-            delivered: true,
-            bot_uuid: target_bot_id.to_string(),
-            session_id: session_key.to_string(),
-            content: run_content(&status),
-        })
-    }
-
     async fn drain_async_run(
         &self,
         run_id: String,
@@ -1237,26 +1096,6 @@ fn run_status(record: &ChatRunRecord, cancelled: Option<bool>) -> A2aRunStatus {
     }
 }
 
-fn run_content(status: &A2aRunStatus) -> String {
-    status
-        .response
-        .as_ref()
-        .and_then(|response| response.get("content"))
-        .and_then(|content| content.as_str())
-        .unwrap_or("")
-        .to_string()
-}
-
-fn run_error_message(status: &A2aRunStatus) -> String {
-    status
-        .response
-        .as_ref()
-        .and_then(|response| response.get("error_message"))
-        .and_then(|message| message.as_str())
-        .unwrap_or("Unknown error")
-        .to_string()
-}
-
 fn build_chat_send_frame(
     run_id: &str,
     session_key: &str,
@@ -1286,6 +1125,7 @@ fn build_chat_send_frame(
             actor_id: Some(from_bot_id.to_string()),
             actor_name: Some(from_bot_name.to_string()),
             thread_id: None,
+            identity_forwarding: None,
         },
         session_context: GroupContext {
             session_id: session_key.to_string(),

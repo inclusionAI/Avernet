@@ -17,9 +17,8 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
-from injector import Binder, Module, inject, provider, singleton
+from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.bot_service import (
     BotServiceProtocol as _ApiBotServiceProtocol,
@@ -39,6 +38,9 @@ from agentclaw.community.core.repository.protocols.task import (
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
 )
+from agentclaw.community.core.task.task_discovery.openapi_bot_session_initiator import (
+    OpenApiBotSessionInitiator,
+)
 from agentclaw.community.core.task.task_discovery.protocols import (
     BotServiceProtocol as _TaskDiscoveryBotServiceProtocol,
     CronRelayServiceProtocol as _TaskDiscoveryCronRelayProtocol,
@@ -52,23 +54,18 @@ from agentclaw.community.core.task.task_discovery.session_initiator import (
     SessionInitiator,
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
-    SqliteTaskReader,
+    OrmTaskReader,
     TaskReader,
 )
+from agentclaw.community.core.task.task_runner.integration.ports import (
+    OpenApiBotPort,
+)
+from agentclaw.community.di.profile import DeployProfile
+from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
 
-#: 默认 db 文件路径(8 级上溯到项目根)
-_PROJECT_ROOT = Path(__file__).resolve()
-for _ in range(8):
-    _PROJECT_ROOT = _PROJECT_ROOT.parent
-_DEFAULT_DB = str(
-    _PROJECT_ROOT / "scripts" / ".dependencies" / "data" / "discovered_tasks.db"
-)
-
-
-def _resolve_db_path() -> str:
-    """从环境变量或默认路径解析 db 文件路径。"""
-    return os.environ.get("TASK_DISCOVERY_DATA_FILE", _DEFAULT_DB)
+logger = get_logger()
 
 
 _DEFAULT_BACKEND_URL = "http://localhost:8888"
@@ -76,13 +73,38 @@ _DEFAULT_FRONTEND_URL = "http://localhost:8000"
 
 
 def _resolve_frontend_url() -> str:
-    """Resolve frontend workbench URL from env (DI factory — config lives here, not in core/)."""
-    return os.environ.get("FRONTEND_URL", _DEFAULT_FRONTEND_URL)
+    """Resolve frontend workbench URL — env-aware fallback chain.
+
+    Priority: ``FRONTEND_URL`` env > ``SINGLEBOX_FRONTEND_URL`` env (singlebox)
+    > ``http://localhost:8000``.
+
+    Does NOT inline corporate DNS names (satisfies the OSS architecture gate
+    ``test_shipped_config_no_corp_identifiers``). The singlebox env overlay sets
+    ``SINGLEBOX_FRONTEND_URL`` to the local domain; the community source defaults
+    to ``localhost``.
+    """
+    url = os.environ.get("FRONTEND_URL")
+    if url:
+        return url
+    if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == DeployProfile.SINGLEBOX.value:
+        return os.environ.get("SINGLEBOX_FRONTEND_URL", _DEFAULT_FRONTEND_URL)
+    return _DEFAULT_FRONTEND_URL
 
 
 def _resolve_backend_url() -> str:
-    """Resolve backend self URL from env (DI factory — config lives here, not in core/)."""
-    return os.environ.get("BACKEND_URL", _DEFAULT_BACKEND_URL)
+    """Resolve backend self URL — env-aware fallback chain.
+
+    Priority: ``BACKEND_URL`` env > ``SINGLEBOX_BACKEND_URL`` env (singlebox)
+    > ``http://localhost:8888``.
+
+    Mirrors ``task_module.py._resolve_api_base_url``: env-aware, no inline corp DNS.
+    """
+    url = os.environ.get("BACKEND_URL")
+    if url:
+        return url
+    if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == DeployProfile.SINGLEBOX.value:
+        return os.environ.get("SINGLEBOX_BACKEND_URL", _DEFAULT_BACKEND_URL)
+    return _DEFAULT_BACKEND_URL
 
 
 class TaskDiscoveryModule(Module):
@@ -132,8 +154,42 @@ class TaskDiscoveryModule(Module):
     def _provide_session_initiator(
         self,
         cron_relay: _ApiCronRelayServiceProtocol,
+        injector: Injector,
     ) -> SessionInitiator:
-        """构建 CronRelaySessionInitiator（注入 cron relay + resolved URLs）。"""
+        """构建 SessionInitiator — 按 DEPLOY_PROFILE 分发。
+
+        - singlebox → ``CronRelaySessionInitiator`` (cron relay + 直连 engine WebSocket)
+        - corp/pre/prod → ``OpenApiBotSessionInitiator`` (BaaS Open API + Bearer 鉴权)
+          当 ``OpenApiBotPort`` 未绑定或返回 None (fail-closed) → 回退 CronRelaySessionInitiator。
+
+        对齐 ``task_module.py`` 的 ``injector.get(OpenApiBotPort)`` + try/except 降级模式。
+        """
+        if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
+            # corp/pre/prod: 尝试从 DI 注入 OpenApiBotPort (corp overlay 绑定)
+            try:
+                openapi_bot = injector.get(OpenApiBotPort)
+                if openapi_bot is not None:
+                    logger.info(
+                        "[task_discovery] SessionInitiator → OpenApiBotSessionInitiator "
+                        "(corp path, openapi_bot=%s)",
+                        type(openapi_bot).__name__,
+                    )
+                    return OpenApiBotSessionInitiator(
+                        openapi_bot=openapi_bot,
+                        frontend_url=_resolve_frontend_url(),
+                        backend_url=_resolve_backend_url(),
+                    )
+                logger.warning(
+                    "[task_discovery] OpenApiBotPort resolved to None (fail-closed) "
+                    "→ falling back to CronRelaySessionInitiator",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[task_discovery] OpenApiBotPort DI 未绑定/解析失败 "
+                    "→ falling back to CronRelaySessionInitiator: %s: %s",
+                    type(exc).__name__, exc,
+                )
+        # singlebox or fallback
         return CronRelaySessionInitiator(
             cron_relay=cron_relay,
             frontend_url=_resolve_frontend_url(),
@@ -142,9 +198,14 @@ class TaskDiscoveryModule(Module):
 
     @singleton
     @provider
-    def _provide_task_reader(self) -> TaskReader:
-        """构建 SqliteTaskReader（注入 db path）。"""
-        return SqliteTaskReader(_resolve_db_path())
+    @inject
+    def _provide_task_reader(self, db: DatabasePlugin) -> TaskReader:
+        """构建 OrmTaskReader（注入 DatabasePlugin）。
+
+        corp 走 ZDAS/OceanBase，local 走 SQLite 内存库。
+        替代原 SqliteTaskReader 的直接 sqlite3 文件访问。
+        """
+        return OrmTaskReader(db)
 
     @singleton
     @provider

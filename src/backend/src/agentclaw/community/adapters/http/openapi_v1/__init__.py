@@ -182,6 +182,7 @@ from .bots.engine_config import router as engine_config_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
 from .channels import router as channels_router
+from .caller_identity import router as caller_identity_router
 from .containers import router as containers_router
 from .diagnostics import router as diagnostics_router
 from .editors import router as editors_router
@@ -326,6 +327,7 @@ _ADDRESSED_BOT_SUBGROUPS = [
     containers_router,
     diagnostics_router,
     channels_router,
+    caller_identity_router,
     skill_sets_router,
     bot_mcp_router,
 ]
