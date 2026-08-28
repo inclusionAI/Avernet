@@ -162,3 +162,50 @@ async fn metric_counts_counts_active_runs_only() {
         "terminal runs must be excluded from the gauge"
     );
 }
+
+fn repo_mysql() -> SqlChatRunRepo {
+    // MySQL flavor over the local SQLite db. The MySQL code paths we test here
+    // return early (no-op) before issuing any DB statement, so the SQLite db is
+    // never actually queried — it just satisfies the constructor.
+    let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    SqlChatRunRepo::new(db, DbSqlFlavor::Mysql, cache, "bcs:".to_string(), 120_000)
+}
+
+#[tokio::test]
+async fn list_active_excludes_acked_detached_and_drop_retires_them() {
+    let repo = repo();
+    // Acknowledged detached-delivery run: delivered successfully, overdue, but
+    // must NOT be failed on timeout — list_active skips it.
+    let mut detached = record("detached", 1);
+    detached.state = ChatRunState::Running;
+    detached.completion_policy = ChatRunCompletionPolicy::DetachDeliveryAck;
+    detached.delivery_ack_at_ms = Some(0);
+    detached.expires_at_ms = 5;
+    // A plain overdue run: should appear in list_active (eligible for force_fail).
+    let mut overdue = record("overdue", 1);
+    overdue.expires_at_ms = 5;
+    repo.create(detached).await.unwrap();
+    repo.create(overdue).await.unwrap();
+
+    let active = repo.list_active(10).await.unwrap();
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].run_id, "overdue");
+
+    // Retire the acked-detached run past its retention (now=100, retention=50).
+    let dropped = repo.drop_detached_expired(100, 50).await.unwrap();
+    assert_eq!(dropped.len(), 1);
+    assert_eq!(dropped[0].run_id, "detached");
+    assert!(repo.get("detached").await.unwrap().is_none());
+    assert!(repo.get("overdue").await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn mysql_flavor_deletes_are_noops_delegated_to_platform() {
+    // In MySQL mode, terminal-row and detached-row pruning are delegated to the
+    // platform scheduled task (spec §11.2); the code paths must no-op (return
+    // empty) without touching the DB.
+    let repo = repo_mysql();
+    assert!(repo.delete_expired_terminal(100, 50).await.unwrap().is_empty());
+    assert!(repo.drop_detached_expired(100, 50).await.unwrap().is_empty());
+}

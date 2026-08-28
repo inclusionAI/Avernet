@@ -1653,6 +1653,24 @@ mod tests {
     use super::*;
     use secrecy::ExposeSecret;
 
+    #[test]
+    fn validate_run_store_selectors_accepts_known_and_rejects_unknown() {
+        let mut config = BcsConfig::default();
+        // Defaults (memory / memory) are valid.
+        assert!(config.validate_run_store_selectors().is_ok());
+        // Explicit known values are valid.
+        config.async_chat_run_store = "persistent".to_string();
+        config.bot_run_context_store = "redis".to_string();
+        assert!(config.validate_run_store_selectors().is_ok());
+        // Unknown chat-run selector (e.g. a typo) must fail startup.
+        config.async_chat_run_store = "persisent".to_string();
+        assert!(config.validate_run_store_selectors().is_err());
+        config.async_chat_run_store = "persistent".to_string();
+        // Unknown run-context selector must fail startup.
+        config.bot_run_context_store = "reds".to_string();
+        assert!(config.validate_run_store_selectors().is_err());
+    }
+
     #[allow(unsafe_code)]
     fn safe_set_var(key: &str, value: impl AsRef<std::ffi::OsStr>) {
         unsafe {
