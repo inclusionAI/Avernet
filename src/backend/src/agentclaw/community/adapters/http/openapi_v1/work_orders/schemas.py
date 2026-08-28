@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, field_serializer
@@ -217,14 +217,16 @@ class WorkOrderEventType(_DocumentedEnum):
     }
 
 
-def _utc_datetime(value: datetime | None) -> str | None:
+def _database_datetime(value: datetime | None) -> str | None:
+    """Serialize database clock values without adding a timezone marker.
+
+    Work-order timestamps follow the repository convention: the database
+    writes its current time into timezone-less DATETIME columns.  Keep that
+    clock value unchanged for the frontend instead of relabelling it as UTC.
+    """
     if value is None:
         return None
-    if value.tzinfo is None or value.utcoffset() is None:
-        value = value.replace(tzinfo=timezone.utc)
-    else:
-        value = value.astimezone(timezone.utc)
-    return value.isoformat().replace("+00:00", "Z")
+    return value.replace(tzinfo=None).isoformat()
 
 
 class _UtcResponseModel(BaseModel):
@@ -236,8 +238,8 @@ class _UtcResponseModel(BaseModel):
         check_fields=False,
         when_used="json",
     )
-    def _serialize_utc_datetime(self, value: datetime | None) -> str | None:
-        return _utc_datetime(value)
+    def _serialize_database_datetime(self, value: datetime | None) -> str | None:
+        return _database_datetime(value)
 
 
 class CreateSpaceJoinRequest(BaseModel):

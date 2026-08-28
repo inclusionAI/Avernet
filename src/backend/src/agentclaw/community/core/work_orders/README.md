@@ -42,6 +42,7 @@ internal_dependencies:
   - agentclaw.community.log
   - agentclaw.community.utils.avernet_tenant_guard
   - agentclaw.community.utils.env_utils
+  - agentclaw.community.utils.work_no
 ```
 
 ### Change impact
