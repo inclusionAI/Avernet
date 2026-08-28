@@ -1016,3 +1016,64 @@ class TestApplyDeviceTemplateConfigPassthrough:
 
             # Confirm template_config was forwarded to _do_allocate
             assert mock_alloc.call_args.kwargs.get("template_config") == {"image": "img"}
+
+
+class TestGetDeviceConnectionRecordPassthrough:
+    """Regression: the router forwards ``record=`` on *every* call, including
+    when it is ``None``, so an override that does not accept the keyword raises
+    ``TypeError`` on every device connection in that composition.
+
+    The singlebox override was missed when the keyword was added to the base,
+    the router, and the local and baas providers; nothing caught it because the
+    repo lints with ruff rather than a type checker. The hierarchy is walked
+    rather than listed, because a hand-maintained list is exactly how the
+    fourth override was missed — whoever forgets the keyword forgets the list
+    entry too."""
+
+    def _overrides(self):
+        """Every class that defines its own ``get_device_connection``."""
+        # Importing the DI modules is what registers the subclasses that live
+        # outside core/devices (singlebox, testing) with __subclasses__.
+        import agentclaw.community.di.modules.infrastructure.singlebox.devices  # noqa: F401
+        import agentclaw.community.di.modules.devices_module  # noqa: F401
+        from agentclaw.community.core.devices.services.device_service import (
+            DeviceService,
+        )
+
+        def walk(cls):
+            yield cls
+            for sub in cls.__subclasses__():
+                yield from walk(sub)
+
+        return [
+            cls
+            for cls in walk(DeviceService)
+            if "get_device_connection" in cls.__dict__
+        ]
+
+    def test_every_override_accepts_the_record_keyword(self):
+        overrides = self._overrides()
+        # Guard the guard: an import regression that empties the walk would
+        # otherwise make this test vacuously green.
+        assert len(overrides) >= 4, f"expected the known overrides, got {overrides}"
+        for cls in overrides:
+            params = inspect.signature(cls.get_device_connection).parameters
+            assert "record" in params, f"{cls.__name__} would TypeError on record="
+            assert params["record"].default is None, (
+                f"{cls.__name__} must keep record optional"
+            )
+
+    def test_the_router_forwards_the_record_to_the_provider(self):
+        """Accepting the keyword is not enough — it has to reach the provider,
+        or the four redundant reads come back and the guard is bypassed."""
+        router, _, _, _ = _make_router(is_local=True)
+        provider = router._providers[LOCAL_DEVICE_PROVIDER]
+        record = _make_record(id=1)
+
+        router.get_device_connection(
+            binding_id=1, operator=_make_operator("u001"), record=record
+        )
+
+        assert (
+            provider.get_device_connection.call_args.kwargs.get("record") is record
+        )

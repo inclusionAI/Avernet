@@ -55,6 +55,7 @@ from engine.community.core.skills.models import (
     SyncBindPathsRequest,
     SyncSymlinksRequest,
     SyncSymlinksResult,
+    inline_verification_verdict,
 )
 from engine.community.core.skills.protocol import SkillsService
 from engine.community.plugin_api.openclaw.skills import OpenClawSkillsPort
@@ -295,6 +296,7 @@ class OpenClawSkillsAdapter(SkillsService):
         return PoolMappingPublishResult(
             published=raw.get("published") is True,
             evidence=dict(raw.get("evidence") or {}),
+            verified=inline_verification_verdict(raw),
         )
 
     async def verify_pool_mappings(

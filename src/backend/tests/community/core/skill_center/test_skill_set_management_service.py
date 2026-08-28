@@ -691,6 +691,18 @@ class _RuntimePool:
         self.verify_calls.append(kwargs)
         return True
 
+    async def publish_and_verify_mappings(self, **kwargs):
+        # Records into the same two lists the two-call API filled, so every
+        # existing assertion on publish_calls / verify_calls keeps its meaning.
+        # The real runtime skips the verify leg when the device reports a
+        # verdict inline; this double stands in for one that does not, so the
+        # projector is exercised on the round-trip path it must still support.
+        from agentclaw.community.core.skills_pool.models import MappingPublishOutcome
+
+        published = await self.publish_mappings(**kwargs)
+        verified = published and await self.verify_mappings(**kwargs)
+        return MappingPublishOutcome(published=published, verified=verified)
+
 
 class _CenterRuntimePool(_RuntimePool):
     def __init__(self) -> None:
@@ -3157,11 +3169,16 @@ async def test_an_inactive_set_still_skips_projection_entirely():
 
 
 def _scoped_projector(pool=None, passport=None, factory=None):
+    # One store for both, mirroring the DI composition root, which injects a
+    # single CapabilityDesiredStateRepository into the projector and the
+    # reader. The fake holds no state a read observes, so this is fixture
+    # fidelity rather than something the assertions here exercise.
+    repository = _McpInstallations()
     return BotRuntimeProjector(
         factory=factory or _RuntimeFactory(),
         bot_repo=_RuntimeBots(),
-        repository=_McpInstallations(),
-        reader=_reader(_RuntimeSkills()),
+        repository=repository,
+        reader=_reader(_RuntimeSkills(), repository=repository),
         registry=_registry(pool_runtime=pool or _RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=passport or _RuntimePassport(),
         caller_identity_repo=_RuntimeCallerIdentity(),
@@ -3553,3 +3570,71 @@ async def test_unexcluding_a_default_mcp_still_requires_marketplace_permission()
             set_id="9", server_code="mcp.back",
         )
     assert repository.exclusion_calls == []
+
+
+
+# ── P2: the projector's device-call count follows the runtime's verdict ──
+
+
+class _InlineVerifiedRuntimePool(_RuntimePool):
+    """A device that verifies its own publish, as engines do after P2."""
+
+    def __init__(self, verified: bool = True) -> None:
+        super().__init__()
+        self.verified = verified
+
+    async def publish_and_verify_mappings(self, **kwargs):
+        from agentclaw.community.core.skills_pool.models import MappingPublishOutcome
+
+        self.publish_calls.append(kwargs)
+        return MappingPublishOutcome(
+            published=True, verified=self.verified, reported_inline=True
+        )
+
+
+@pytest.mark.asyncio
+async def test_inline_verified_runtime_costs_one_device_call() -> None:
+    """The saving P2 exists for: no verify leg when the publish already knows."""
+    pool = _InlineVerifiedRuntimePool()
+
+    await _scoped_projector(pool=pool).project(
+        bot_id="bot-1", owner_id="true-owner",
+        retired_mappings=_Runtime._skill_mappings(),
+        scope=ProjectionScope.everything(),
+    )
+
+    assert len(pool.publish_calls) == 1
+    assert pool.verify_calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_without_the_signal_still_gets_both_calls() -> None:
+    """Older devices report nothing, and must keep the separate verify."""
+    pool = _RuntimePool()
+
+    await _scoped_projector(pool=pool).project(
+        bot_id="bot-1", owner_id="true-owner",
+        retired_mappings=_Runtime._skill_mappings(),
+        scope=ProjectionScope.everything(),
+    )
+
+    assert len(pool.publish_calls) == 1
+    assert len(pool.verify_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_reporting_failure_still_fails_the_projection() -> None:
+    """Skipping the round trip must not soften what an unverified publish means."""
+    pool = _InlineVerifiedRuntimePool(verified=False)
+
+    with pytest.raises(SkillSetRuntimeReconcileError):
+        await _scoped_projector(pool=pool).project(
+            bot_id="bot-1", owner_id="true-owner",
+            retired_mappings=_Runtime._skill_mappings(),
+            scope=ProjectionScope.everything(),
+        )
+
+    # The point of a reported failure is that it is final: no fallback verify,
+    # which would put back the round trip this change removes.
+    assert len(pool.publish_calls) == 1
+    assert pool.verify_calls == []

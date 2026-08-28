@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from agentclaw.community.core.skills_pool.models import (
     PoolCutoverStatus,
     PoolSkillMapping,
+    SkillMappingSourceLayout,
 )
 from agentclaw.community.core.skills_pool.quarantine import RuntimeQuarantineCleanupStatus
 from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
@@ -325,3 +327,312 @@ async def test_pool_runtime_fails_closed_for_unknown_cleanup_status() -> None:
         "reason": "invalid_runtime_response",
         "raw_status": "FUTURE_STATUS",
     }
+
+
+# ── P1/P2: one device resolution per projection, and no needless verify ──
+
+
+class InlineVerifiedTransport(FakeTransport):
+    """A runtime that verifies its own publish and reports the verdict."""
+
+    def __init__(self, verified: bool = True) -> None:
+        super().__init__()
+        self.verified = verified
+
+    async def invoke(self, conn_info, method, path, *, body, timeout):
+        response = await super().invoke(
+            conn_info, method, path, body=body, timeout=timeout
+        )
+        if path.endswith("/publish"):
+            # The engine's real shape: the digest lives inside evidence,
+            # alongside the per-mapping path lists that make the whole
+            # response too big to log.
+            response["data"] = {
+                "published": True,
+                "verified": self.verified,
+                "evidence": {
+                    "kept": ["/a/very/long/path"] * 50,
+                    "verification": {
+                        "ran": True,
+                        "valid": False,
+                        "failure_count": 3,
+                    },
+                },
+            }
+        return response
+
+
+def _runtime(resolver, transport):
+    return OpenClawSkillsPoolRuntime(
+        resolver=resolver,
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+
+
+def _local_mappings():
+    return [PoolSkillMapping(corpus="local", relative_path="a", link_name="a")]
+
+
+def _paths(transport):
+    return [call["path"] for call in transport.calls]
+
+
+@pytest.mark.asyncio
+async def test_publish_and_verify_resolves_the_device_once() -> None:
+    """Two device calls, one resolution — the point of the combined entry."""
+    resolver = FakeResolver()
+    transport = FakeTransport()
+
+    outcome = await _runtime(resolver, transport).publish_and_verify_mappings(
+        bot_id="bot-1", user_id="user-1", mappings=_local_mappings()
+    )
+
+    assert outcome.verified is True
+    assert len(resolver.calls) == 1
+    assert sum(path.endswith(("/publish", "/verify")) for path in _paths(transport)) == 2
+
+
+@pytest.mark.asyncio
+async def test_center_ensure_shares_the_resolved_context() -> None:
+    """Three device calls for a Center projection still resolve once."""
+    resolver = FakeResolver()
+    transport = CenterEnsureTransport()
+    mappings = [
+        PoolSkillMapping(
+            corpus="center",
+            relative_path=None,
+            link_name="a",
+            skill_uuid="uuid-a",
+            sc_version_number="1",
+        )
+    ]
+
+    outcome = await _runtime(resolver, transport).publish_and_verify_mappings(
+        bot_id="bot-1",
+        user_id="user-1",
+        mappings=mappings,
+        mapping_contract_version=MAPPING_V3_CONTRACT_VERSION,
+    )
+
+    assert outcome.verified is True
+    assert len(resolver.calls) == 1
+    assert len(transport.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_inline_verification_skips_the_separate_verify_call() -> None:
+    resolver = FakeResolver()
+    transport = InlineVerifiedTransport(verified=True)
+
+    outcome = await _runtime(resolver, transport).publish_and_verify_mappings(
+        bot_id="bot-1", user_id="user-1", mappings=_local_mappings()
+    )
+
+    assert (outcome.published, outcome.verified, outcome.reported_inline) == (
+        True,
+        True,
+        True,
+    )
+    assert not any(path.endswith("/verify") for path in _paths(transport))
+
+
+@pytest.mark.asyncio
+async def test_inline_verification_failure_is_not_retried_by_the_verify_call() -> None:
+    """``verified: false`` is the runtime's answer, not a reason to ask again."""
+    resolver = FakeResolver()
+    transport = InlineVerifiedTransport(verified=False)
+
+    outcome = await _runtime(resolver, transport).publish_and_verify_mappings(
+        bot_id="bot-1", user_id="user-1", mappings=_local_mappings()
+    )
+
+    assert outcome.published is True
+    assert outcome.verified is False
+    assert outcome.reported_inline is True
+    assert not any(path.endswith("/verify") for path in _paths(transport))
+
+
+@pytest.mark.asyncio
+async def test_inline_verification_failure_logs_the_diagnosis(caplog) -> None:
+    """The failed verdict is final, so this warning is the only diagnostic.
+
+    It logs the bounded verification digest, not the whole response: the
+    publish evidence carries a path list per mapping, which on a large Bot
+    would bury the failure detail and repeat on every retry.
+    """
+    resolver = FakeResolver()
+    transport = InlineVerifiedTransport(verified=False)
+
+    with caplog.at_level(logging.WARNING):
+        await _runtime(resolver, transport).publish_and_verify_mappings(
+            bot_id="bot-1", user_id="user-1", mappings=_local_mappings()
+        )
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings, "a failed inline verdict must warn"
+    rendered = warnings[-1].getMessage()
+    assert "inline as failed" in rendered
+    assert "failure_count" in rendered
+    # The bulky half stays out.
+    assert "'kept'" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_publish_mappings_alone_never_claims_the_verdict_is_final(
+    caplog,
+) -> None:
+    """A separate verify still follows this path, so the verdict is not final.
+
+    The warning belongs to publish_and_verify_mappings, which does not re-ask
+    the device. Emitting it from the shared publish body would alert on every
+    projection whose separate verify then succeeds.
+    """
+    resolver = FakeResolver()
+    transport = InlineVerifiedTransport(verified=False)
+
+    with caplog.at_level(logging.WARNING):
+        published = await _runtime(resolver, transport).publish_mappings(
+            bot_id="bot-1", user_id="user-1", mappings=_local_mappings()
+        )
+
+    assert published is True
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+@pytest.mark.asyncio
+async def test_failed_publish_warns_once_not_twice(caplog) -> None:
+    """A publish that never happened did not "report" a verification verdict."""
+
+    class FailedWithVerdict(FakeTransport):
+        async def invoke(self, conn_info, method, path, *, body, timeout):
+            await super().invoke(conn_info, method, path, body=body, timeout=timeout)
+            return {"success": False, "data": {"verified": False}}
+
+    resolver = FakeResolver()
+
+    with caplog.at_level(logging.WARNING):
+        outcome = await _runtime(
+            resolver, FailedWithVerdict()
+        ).publish_and_verify_mappings(
+            bot_id="bot-1", user_id="user-1", mappings=_local_mappings()
+        )
+
+    assert outcome.published is False
+    assert len([r for r in caplog.records if r.levelno >= logging.WARNING]) == 1
+
+
+@pytest.mark.asyncio
+async def test_absent_signal_falls_back_to_the_separate_verify_call() -> None:
+    """An older runtime says nothing; absence must never read as verified."""
+    resolver = FakeResolver()
+    transport = FakeTransport()  # publish data carries no "verified" key
+
+    outcome = await _runtime(resolver, transport).publish_and_verify_mappings(
+        bot_id="bot-1", user_id="user-1", mappings=_local_mappings()
+    )
+
+    assert outcome.verified is True
+    assert outcome.reported_inline is False
+    assert any(path.endswith("/verify") for path in _paths(transport))
+
+
+@pytest.mark.asyncio
+async def test_failed_publish_never_reaches_verify() -> None:
+    class FailingPublish(FakeTransport):
+        async def invoke(self, conn_info, method, path, *, body, timeout):
+            response = await super().invoke(
+                conn_info, method, path, body=body, timeout=timeout
+            )
+            if path.endswith("/publish"):
+                return {"success": False, "data": {}}
+            return response
+
+    resolver = FakeResolver()
+    transport = FailingPublish()
+
+    outcome = await _runtime(resolver, transport).publish_and_verify_mappings(
+        bot_id="bot-1", user_id="user-1", mappings=_local_mappings()
+    )
+
+    assert outcome.published is False
+    assert outcome.verified is False
+    assert not any(path.endswith("/verify") for path in _paths(transport))
+
+
+@pytest.mark.asyncio
+async def test_unresolvable_device_reports_an_unpublished_outcome() -> None:
+    class BrokenResolver:
+        def resolve_for_bot(self, bot_id, user_id):
+            raise RuntimeError("no active binding")
+
+    transport = FakeTransport()
+
+    outcome = await _runtime(BrokenResolver(), transport).publish_and_verify_mappings(
+        bot_id="bot-1", user_id="user-1", mappings=_local_mappings()
+    )
+
+    assert outcome.published is False
+    assert outcome.verified is False
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_publish_and_verify_send_the_same_mapping_set() -> None:
+    """Verify must check what publish wrote, retirements and layout included.
+
+    Without this, dropping ``retired_mappings`` or ``source_layout`` from the
+    fallback verify call still passes every other test in this file, while
+    production verifies a different set than it published — a retirement that
+    failed to apply would report verified.
+    """
+    resolver = FakeResolver()
+    transport = FakeTransport()
+    mappings = _local_mappings()
+    retired = [PoolSkillMapping(corpus="local", relative_path="b", link_name="b")]
+
+    await _runtime(resolver, transport).publish_and_verify_mappings(
+        bot_id="bot-1",
+        user_id="user-1",
+        mappings=mappings,
+        retired_mappings=retired,
+        source_layout=SkillMappingSourceLayout.LEGACY,
+    )
+
+    bodies = {
+        call["path"].rsplit("/", 1)[-1]: call["body"]
+        for call in transport.calls
+        if call["path"].endswith(("/publish", "/verify"))
+    }
+    assert set(bodies) == {"publish", "verify"}
+    assert bodies["publish"] == bodies["verify"]
+    assert bodies["verify"]["retired_mappings"] == [retired[0].to_dict()]
+    assert bodies["verify"]["source_layout"] == SkillMappingSourceLayout.LEGACY.value
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_evidence_payload_does_not_break_the_warning() -> None:
+    """This log is the only diagnostic on a final failed verdict, so it must
+    survive a device that puts something unexpected in ``evidence``."""
+
+    class MalformedEvidence(FakeTransport):
+        async def invoke(self, conn_info, method, path, *, body, timeout):
+            response = await super().invoke(
+                conn_info, method, path, body=body, timeout=timeout
+            )
+            if path.endswith("/publish"):
+                response["data"] = {
+                    "published": True,
+                    "verified": False,
+                    "evidence": "mapping_invalid",
+                }
+            return response
+
+    outcome = await _runtime(
+        FakeResolver(), MalformedEvidence()
+    ).publish_and_verify_mappings(
+        bot_id="bot-1", user_id="user-1", mappings=_local_mappings()
+    )
+
+    assert outcome.published is True
+    assert outcome.verified is False

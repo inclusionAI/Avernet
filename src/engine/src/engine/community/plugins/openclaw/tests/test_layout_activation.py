@@ -44,7 +44,7 @@ from engine.community.plugins.openclaw.layout_sync import (
     write_baseline_manifest,
 )
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
-from engine.community.plugins.skills_pool import layout_atomic
+from engine.community.plugins.skills_pool import layout_activation, layout_atomic
 from engine.community.plugins.skills_pool.layout_activation import (
     mapping_sources_use_pool,
 )
@@ -2084,3 +2084,283 @@ def test_logical_dot_mapping_is_rejected_before_active_tree_mutation(
 
     assert not active_target.exists()
     assert not active_target.is_symlink()
+
+
+# ── P2: a publish reports its own verification, so the caller can skip /verify ──
+
+
+def test_publish_reports_inline_verification(tmp_path: Path) -> None:
+    home, legacy_local, pool_local, _ = _prepared_home(tmp_path)
+    mappings = [
+        SkillMapping(
+            source=str(pool_local / "handmade"),
+            target=str(legacy_local.parent / "handmade"),
+        )
+    ]
+
+    published = publish_pool_mappings(mappings=mappings, home=home)
+
+    assert published.published is True
+    assert published.verified is True
+    # The caller reads the verdict off the wire, so it has to survive to_data.
+    assert published.to_data()["verified"] is True
+    # And the same check run separately must agree, or the inline verdict is
+    # not standing in for anything.
+    assert verify_skill_mappings(mappings=mappings, home=home).valid is True
+    # Exact equality, not per-key: what this pins is that the digest stays
+    # *bounded*. Adding an unbounded field back — the whole failure list, or
+    # the raw verification evidence — is the regression, and only an equality
+    # assertion sees it. The coverage counters are part of the contract too: a
+    # valid verdict over zero managed entries is vacuous, and once the caller
+    # skips its own verify this is the only record of what was checked.
+    assert published.evidence["verification"] == {
+        "ran": True,
+        "valid": True,
+        "checked": 1,
+        "managed_checked": 1,
+        "retired_checked": 0,
+        "failure_count": 0,
+        "first_failures": [],
+    }
+
+
+def test_a_failing_inline_verification_is_reported_as_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The verdict has to come from the real check and reach the wire as False.
+
+    The backend treats False as final and issues no separate verify, so if the
+    inline call were ever wired such that it could only answer True, the whole
+    fail-closed path would be silently dead. A publish that lands cannot be
+    made to disagree with itself without racing, so the check is stubbed and
+    what is pinned is that its answer is the one reported.
+    """
+    home, legacy_local, pool_local, _ = _prepared_home(tmp_path)
+    mappings = [
+        SkillMapping(
+            source=str(pool_local / "handmade"),
+            target=str(legacy_local.parent / "handmade"),
+        )
+    ]
+    monkeypatch.setattr(
+        layout_activation,
+        "verify_skill_mappings",
+        lambda **_kwargs: MappingVerificationResult(
+            valid=False,
+            evidence={"failures": [{"target": "t", "reason": "target_mismatch"}]},
+        ),
+    )
+
+    published = publish_pool_mappings(mappings=mappings, home=home)
+
+    assert published.published is True
+    assert published.verified is False
+    assert published.to_data()["verified"] is False
+    assert published.evidence["verification"]["failure_count"] == 1
+
+
+def test_an_unverifiable_publish_reports_no_verdict_rather_than_failing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The links are already written by then, so the publish must still succeed.
+
+    Letting the OSError escape would turn a landed publish into a 500 and have
+    the control plane record a failure for state that is actually correct.
+    """
+    home, legacy_local, pool_local, _ = _prepared_home(tmp_path)
+    mappings = [
+        SkillMapping(
+            source=str(pool_local / "handmade"),
+            target=str(legacy_local.parent / "handmade"),
+        )
+    ]
+
+    def _raise(**_kwargs):
+        raise OSError(errno.ENOENT, "active root vanished")
+
+    monkeypatch.setattr(layout_activation, "verify_skill_mappings", _raise)
+
+    published = publish_pool_mappings(mappings=mappings, home=home)
+
+    assert published.published is True
+    assert published.verified is None  # → caller falls back to a separate verify
+    assert "verified" not in published.to_data()
+    # Not silent: an old runtime and a current one whose check could not run
+    # both report nothing, and only this tells them apart.
+    assert published.evidence["verification"] == {
+        "ran": False,
+        "error_type": "FileNotFoundError",
+        "errno": errno.ENOENT,
+    }
+
+
+def test_a_result_that_did_not_verify_omits_the_key_entirely(tmp_path: Path) -> None:
+    """Absence is the signal that this runtime does not verify inline.
+
+    A ``null`` would read as "checked, result unknown" and let a client skip
+    the separate verify it still needs, so the key must not appear at all.
+    """
+    assert MappingPublishResult(published=False, evidence={}).to_data() == {
+        "published": False,
+        "evidence": {},
+    }
+    assert "verified" not in MappingPublishResult(published=True, evidence={}).to_data()
+
+
+def test_a_failed_publish_reports_no_verification_verdict(tmp_path: Path) -> None:
+    home, legacy_local, pool_local, _ = _prepared_home(tmp_path)
+    target = legacy_local.parent / "occupied"
+    target.mkdir()  # a real directory, not a link the publish may replace
+
+    result = publish_pool_mappings(
+        mappings=[SkillMapping(source=str(pool_local / "handmade"), target=str(target))],
+        home=home,
+    )
+
+    assert result.published is False
+    assert result.verified is None
+    assert "verified" not in result.to_data()
+
+
+def test_cutover_finalize_trusts_the_publish_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The publish already verified the filesystem nothing has touched since.
+
+    Re-running the check here walks every mapping source a second time for an
+    answer already in hand — on the cutover critical path.
+    """
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    calls: list[str] = []
+    real_verify = layout_activation.verify_skill_mappings
+
+    def _counting_verify(**kwargs):
+        calls.append("verify")
+        return real_verify(**kwargs)
+
+    monkeypatch.setattr(layout_activation, "verify_skill_mappings", _counting_verify)
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[
+            SkillMapping(
+                source=str(pool_local / "handmade"),
+                target=str(legacy_local.parent / "handmade"),
+            )
+        ],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.COMMITTED
+    # Two: the publish's own inline pass, and the final verification after the
+    # marker write — which is legitimate, the filesystem changed in between.
+    # The third, re-checking an untouched tree straight after the publish, is
+    # the walk this path stopped doing.
+    assert len(calls) == 2
+
+
+def test_cutover_reports_sync_pending_when_the_fallback_verify_cannot_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Post-boundary, an unrunnable verification is retryable, not committed.
+
+    Letting the OSError escape hands it to the callers' own handlers, which
+    decide by looking at ``legacy_local``: a resume then reports COMMITTED
+    with the active marker and the bridges never written, and a fresh cutover
+    reports TRANSIENT_ERROR, which the control plane records as a failure
+    *before* a boundary it has already crossed.
+    """
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+
+    def _raise(**_kwargs):
+        raise OSError(errno.EIO, "verification unavailable")
+
+    monkeypatch.setattr(layout_activation, "verify_skill_mappings", _raise)
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[
+            SkillMapping(
+                source=str(pool_local / "handmade"),
+                target=str(legacy_local.parent / "handmade"),
+            )
+        ],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.POST_CUTOVER_SYNC_PENDING
+    assert result.evidence["reason"] == "pool_mapping_verify_io_error"
+    assert result.evidence["error_type"] == "OSError"
+    assert result.evidence["errno"] == errno.EIO
+
+
+def test_the_failure_list_in_the_digest_is_truncated(tmp_path: Path, monkeypatch) -> None:
+    """The bound is the point of the digest — the caller logs it on every retry."""
+    home, legacy_local, pool_local, _ = _prepared_home(tmp_path)
+    failures = [{"target": f"t{i}", "reason": "target_mismatch"} for i in range(9)]
+    monkeypatch.setattr(
+        layout_activation,
+        "verify_skill_mappings",
+        lambda **_kwargs: MappingVerificationResult(
+            valid=False, evidence={"failures": failures}
+        ),
+    )
+
+    published = publish_pool_mappings(
+        mappings=[
+            SkillMapping(
+                source=str(pool_local / "handmade"),
+                target=str(legacy_local.parent / "handmade"),
+            )
+        ],
+        home=home,
+    )
+
+    digest = published.evidence["verification"]
+    assert digest["failure_count"] == 9
+    assert digest["first_failures"] == failures[:5]
+
+
+def test_resume_reports_sync_pending_rather_than_a_false_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The dangerous half of the same mis-classification.
+
+    On a resume — no active marker, ``legacy_local`` already a symlink into
+    the pool — an escaping OSError reaches a handler that decides by probing
+    ``legacy_local``, finds the symlink, and reports COMMITTED. The active
+    marker and the bridges would never have been written, so the control plane
+    would record a finished cutover that did not finish.
+    """
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    shutil.rmtree(legacy_local)
+    legacy_local.symlink_to(pool_local, target_is_directory=True)
+
+    def _raise(**_kwargs):
+        raise OSError(errno.EIO, "verification unavailable")
+
+    monkeypatch.setattr(layout_activation, "verify_skill_mappings", _raise)
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[
+            SkillMapping(
+                source=str(pool_local / "handmade"),
+                target=str(legacy_local.parent / "handmade"),
+            )
+        ],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is not PoolActivationStatus.COMMITTED
+    assert result.status is PoolActivationStatus.POST_CUTOVER_SYNC_PENDING
+    assert result.evidence["reason"] == "pool_mapping_verify_io_error"

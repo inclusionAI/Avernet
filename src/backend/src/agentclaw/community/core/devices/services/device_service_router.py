@@ -27,6 +27,7 @@ from agentclaw.community.core.devices.models import (
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
 )
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_policy import (
     ArcaBotCreateBaasRolloutDecision,
@@ -39,10 +40,7 @@ from agentclaw.community.core.devices.services.device_instance_service import (
     EvalBindingNotFoundError,
     InstanceHealthStatus,
 )
-from agentclaw.community.core.devices.services.device_service import (
-    BAAS_DEVICE_PROVIDER,
-    DeviceService,
-)
+from agentclaw.community.core.devices.services.device_service import BAAS_DEVICE_PROVIDER, DeviceService, require_matching_record  # noqa: E501 — file is at the 1000-line cap
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.log import get_logger
 
@@ -176,16 +174,17 @@ class DeviceServiceRouter(DeviceService):
             f"default={default_provider_key}"
         )
 
-    def _get_provider_for_binding(self, binding_id: int) -> DeviceService:
+    def _get_provider_for_binding(self, binding_id: int, *, record: DeviceBindingRecord | None = None) -> DeviceService:
         """根据 binding_id 获取对应的 Provider 服务.
 
         Args:
             binding_id: 设备绑定 ID
+            record: 已取到的 binding 行;路由只读 ``device_provider`` 一列。
 
         Returns:
             对应的 DeviceService 实例
         """
-        record = self._repo.get_by_id(binding_id)
+        record = record if record is not None else self._repo.get_by_id(binding_id)
         if record is None:
             logger.warning(
                 f"[_get_provider_for_binding] Binding {binding_id} not found, using default"
@@ -657,6 +656,7 @@ class DeviceServiceRouter(DeviceService):
         """
         return self._default_service.batch_set_env(binding_ids=binding_ids, env=env)
 
+    @override
     def get_device_connection(
         self,
         *,
@@ -667,6 +667,7 @@ class DeviceServiceRouter(DeviceService):
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
         path: str | None = None,
+        record: DeviceBindingRecord | None = None,
     ):
         """获取设备连接信息 - 根据 binding_id 路由.
 
@@ -674,12 +675,15 @@ class DeviceServiceRouter(DeviceService):
         不传则由 BaaS 自动选活跃实例(本地/非 BaaS provider 忽略)。
 
         ``path`` 透传给 provider,仅对"由服务端拼出完整 URL"的链路(BaaS relay)
-        有意义;其余 provider 忽略。
+        有意义;其余 provider 忽略。``record`` 可选:传已取到的 binding 行(须同
+        id)则路由和 provider 都不再自查;不传则两边各自查一次(原行为)。
         """
-        service = self._get_provider_for_binding(binding_id)
+        require_matching_record(record, binding_id, caller="router.get_device_connection")
+        service = self._get_provider_for_binding(binding_id, record=record)
         return service.get_device_connection(
             binding_id=binding_id, operator=operator, port=port, ttl=ttl,
             device_uuid=device_uuid, ws_conn_mode=ws_conn_mode, path=path,
+            record=record,
         )
 
     @override

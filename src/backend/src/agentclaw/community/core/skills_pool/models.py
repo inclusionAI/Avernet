@@ -103,11 +103,34 @@ class PoolCutoverResult:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class MappingPublishOutcome:
+    """One publish attempt and whether the runtime ended up converged.
+
+    ``published`` and ``verified`` stay separate because the callers that
+    report ``PUBLISH_FAILED`` and ``VERIFY_FAILED`` as distinct outcomes need
+    to tell them apart; a caller that only cares whether the runtime converged
+    reads ``verified`` alone (it is never ``True`` without ``published``).
+
+    ``reported_inline`` says the publish response carried the verdict, so no
+    separate verify round trip was needed — whichever way that verdict went.
+    It is not "verified, inline": a runtime reporting ``verified: false``
+    still reported inline. Evidence for logs and rollout metrics, never
+    control flow; a caller deciding on it would be deciding on the device's
+    build rather than on whether the mapping set converged.
+    """
+
+    published: bool
+    verified: bool
+    reported_inline: bool = False
+
+
 __all__ = [
     "AICodingPoolPaths",
     "FILESYSTEM_POOL_ENGINES",
     "ClaudeCodePoolPaths",
     "HermesPoolPaths",
+    "MappingPublishOutcome",
     "OpenClawPoolPaths",
     "PoolPaths",
     "PoolCutoverResult",

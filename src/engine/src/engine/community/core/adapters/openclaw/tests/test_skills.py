@@ -44,6 +44,10 @@ class _FakeSkillsPort:
         self.calls["clean_symlinks"] = params
         return self._results["clean_symlinks"]
 
+    async def publish_pool_mappings(self, params):
+        self.calls["publish_pool_mappings"] = params
+        return self._results["publish_pool_mappings"]
+
 
 async def test_ensure_center_skills_serializes_and_builds_result():
     port = _FakeSkillsPort(ensure_center_skills={
@@ -127,3 +131,36 @@ async def test_per_skill_ops_raise_capability_not_supported(call):
     adapter = OpenClawSkillsAdapter(_FakeSkillsPort())
     with pytest.raises(CapabilityNotSupportedError):
         await call(adapter)
+
+
+# ── P2: the inline-verification verdict has to survive the adapter hop ──
+
+
+_ABSENT = object()
+
+
+@pytest.mark.parametrize(
+    "raw_verified, expected",
+    [
+        (True, True),
+        (False, False),
+        # All three of these mean "this runtime did not report a verdict", and
+        # none may become False — the backend reads False as a real, final
+        # verification failure and answers by refusing to converge. `null` is
+        # its own case: it is what a client would see as "checked, result
+        # unknown" if the engine ever sent the key unconditionally.
+        (_ABSENT, None),
+        (None, None),
+        ("true", None),
+    ],
+)
+async def test_publish_carries_the_inline_verdict(raw_verified, expected):
+    raw = {"published": True, "evidence": {}}
+    if raw_verified is not _ABSENT:
+        raw["verified"] = raw_verified
+    adapter = OpenClawSkillsAdapter(_FakeSkillsPort(publish_pool_mappings=raw))
+
+    result = await adapter.publish_pool_mappings([])
+
+    assert result.published is True
+    assert result.verified is expected

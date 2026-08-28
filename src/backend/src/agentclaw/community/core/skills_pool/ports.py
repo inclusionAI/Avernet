@@ -9,6 +9,7 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
     RuntimeLayoutProbeResult,
 )
 from agentclaw.community.core.skills_pool.models import (
+    MappingPublishOutcome,
     PoolCutoverResult,
     PoolSkillMapping,
     SkillMappingSourceLayout,
@@ -80,6 +81,26 @@ class SkillsPoolRuntimeProtocol(Protocol):
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
         mapping_contract_version: str = "skills-pool-mapping-v2",
     ) -> bool: ...
+
+    async def publish_and_verify_mappings(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        mappings: list[PoolSkillMapping],
+        retired_mappings: Sequence[PoolSkillMapping] = (),
+        source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
+        mapping_contract_version: str = "skills-pool-mapping-v2",
+    ) -> MappingPublishOutcome:
+        """Publish, then establish convergence with the fewest device calls.
+
+        Separate from ``publish_mappings`` / ``verify_mappings`` rather than
+        replacing them: the migration and recovery paths report publish and
+        verify failures as distinct outcomes and still call the two halves
+        directly. They can adopt this later — ``MappingPublishOutcome`` keeps
+        the two facts apart for exactly that reason.
+        """
+        ...
 
 
 __all__ = [
