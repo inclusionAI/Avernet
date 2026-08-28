@@ -55,6 +55,7 @@ class SpaceSkillGrantServiceProtocol(Protocol):
         actor_id: str,
         new_owner_user_id: str,
         reason: str | None,
+        retain_previous_owner_as_manager: bool = False,
     ) -> SpaceSkillGrantViewRecord:
         """Atomically move the unique OWNER slot and return the new view."""
         ...

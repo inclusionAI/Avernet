@@ -112,6 +112,7 @@ class SpaceSkillRepository(Protocol):
         new_owner_user_id: str,
         reason: str | None,
         env: str,
+        retain_previous_owner_as_manager: bool = False,
     ) -> SpaceSkillGrantSetRecord: ...
 
 

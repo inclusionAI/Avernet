@@ -12,17 +12,11 @@ from agentclaw.community.core.work_orders.models import WorkOrderStatus
 
 
 def test_space_skill_editor_request_service_routes_through_work_order_repository(
-    monkeypatch,
 ) -> None:
     repository = MagicMock()
     repository.create_skill_editor_request.return_value.status = WorkOrderStatus.PENDING
-    service = SpaceSkillEditorRequestService(repository)
+    service = SpaceSkillEditorRequestService(repository, lambda: "test")
     assert isinstance(service, SpaceSkillEditorRequestServiceProtocol)
-    monkeypatch.setattr(
-        "agentclaw.community.core.skill_center.services.space_skill_editor_request_service.get_current_env",
-        lambda: "test",
-    )
-
     result = service.create_request(
         space_id=7,
         skill_id=9,

@@ -316,36 +316,35 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
             )
             if approver is None:
                 raise WorkOrderAccessDeniedError("current user is not an approver")
-            member = (
-                db.query(SpaceMemberModel.id)
-                .filter(
-                    SpaceMemberModel.space_id == space_id,
-                    SpaceMemberModel.user_id == order.applicant_user_id,
-                    SpaceMemberModel.status == "ACTIVE",
-                    SpaceMemberModel.env == env,
-                )
-                .first()
-            )
-            if member is None:
-                raise WorkOrderSkillEditorRequestNotAllowedError(
-                    "applicant is no longer an active Team Space member"
-                )
-
-            grant = (
-                db.query(SkillGrant)
-                .filter(
-                    SkillGrant.skill_id == skill_id,
-                    SkillGrant.user_id == order.applicant_user_id,
-                    SkillGrant.env == env,
-                )
-                .with_for_update()
-                .one_or_none()
-            )
-            if grant is not None and grant.role == "OWNER" and grant.status == "ACTIVE":
-                raise WorkOrderSkillApplicantAlreadyEditorError(
-                    "applicant is now the Skill Owner"
-                )
             if target_status is WorkOrderStatus.APPROVED:
+                member = (
+                    db.query(SpaceMemberModel.id)
+                    .filter(
+                        SpaceMemberModel.space_id == space_id,
+                        SpaceMemberModel.user_id == order.applicant_user_id,
+                        SpaceMemberModel.status == "ACTIVE",
+                        SpaceMemberModel.env == env,
+                    )
+                    .first()
+                )
+                if member is None:
+                    raise WorkOrderSkillEditorRequestNotAllowedError(
+                        "applicant is no longer an active Team Space member"
+                    )
+                grant = (
+                    db.query(SkillGrant)
+                    .filter(
+                        SkillGrant.skill_id == skill_id,
+                        SkillGrant.user_id == order.applicant_user_id,
+                        SkillGrant.env == env,
+                    )
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if grant is not None and grant.role == "OWNER" and grant.status == "ACTIVE":
+                    raise WorkOrderSkillApplicantAlreadyEditorError(
+                        "applicant is now the Skill Owner"
+                    )
                 if grant is None:
                     grant = SkillGrant(
                         skill_id=skill_id,

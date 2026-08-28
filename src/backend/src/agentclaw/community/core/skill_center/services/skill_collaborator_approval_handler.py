@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import json
-
-from injector import inject
+from collections.abc import Callable
 
 from agentclaw.community.core.repository.protocols.work_orders import (
     WorkOrderRepositoryProtocol,
@@ -26,13 +25,14 @@ from agentclaw.community.core.work_orders.models import (
 from agentclaw.community.core.work_orders.protocols import (
     SkillCollaboratorApprovalHandlerProtocol,
 )
-from agentclaw.community.utils.env_utils import get_current_env
-
-
 class SkillCollaboratorApprovalHandler(SkillCollaboratorApprovalHandlerProtocol):
-    @inject
-    def __init__(self, repository: WorkOrderRepositoryProtocol) -> None:
+    def __init__(
+        self,
+        repository: WorkOrderRepositoryProtocol,
+        env_provider: Callable[[], str],
+    ) -> None:
         self._repository = repository
+        self._env_provider = env_provider
 
     def process(
         self,
@@ -79,7 +79,7 @@ class SkillCollaboratorApprovalHandler(SkillCollaboratorApprovalHandlerProtocol)
             review_remark=review_remark,
             target_status=target_status,
             notification=notification,
-            env=get_current_env(),
+            env=self._env_provider(),
         )
 
 

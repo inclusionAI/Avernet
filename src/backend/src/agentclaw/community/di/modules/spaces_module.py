@@ -40,6 +40,9 @@ from agentclaw.community.core.repository.protocols.skill_center import (
     SpaceSkillRepository,
     DraftEditLeaseRepository,
 )
+from agentclaw.community.core.repository.protocols.work_orders import (
+    WorkOrderRepositoryProtocol,
+)
 from agentclaw.community.core.spaces.services import (
     SpaceAccessService,
     SpaceMemberService,
@@ -65,11 +68,6 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 class SpacesModule(Module):
     def configure(self, binder: Binder) -> None:
-        binder.bind(
-            SpaceSkillEditorRequestServiceProtocol,
-            to=SpaceSkillEditorRequestService,
-            scope=singleton,
-        )
         binder.bind(
             DraftEditLeaseServiceProtocol,
             to=DraftEditLeaseService,
@@ -120,6 +118,15 @@ class SpacesModule(Module):
     ) -> SpaceSkillGrantServiceProtocol:
         """Assemble Grant policy with environment resolution at the DI boundary."""
         return SpaceSkillGrantService(access, repository, get_current_env)
+
+    @singleton
+    @provider
+    @inject
+    def space_skill_editor_request_service(
+        self, repository: WorkOrderRepositoryProtocol
+    ) -> SpaceSkillEditorRequestServiceProtocol:
+        """Assemble editor-request policy with environment at the boundary."""
+        return SpaceSkillEditorRequestService(repository, get_current_env)
 
     @singleton
     @provider

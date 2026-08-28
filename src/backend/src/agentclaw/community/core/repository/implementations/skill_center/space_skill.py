@@ -369,6 +369,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
         new_owner_user_id: str,
         reason: str | None,
         env: str,
+        retain_previous_owner_as_manager: bool = False,
     ) -> SpaceSkillGrantSetRecord:
         with self._db.transactional_orm_session() as session:
             self._require_binding(
@@ -427,10 +428,11 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                 .with_for_update()
                 .one_or_none()
             )
-            current_owner.status = "REVOKED"
+            current_owner.status = "ACTIVE" if retain_previous_owner_as_manager else "REVOKED"
+            current_owner.role = "MANAGER" if retain_previous_owner_as_manager else "OWNER"
             current_owner.owner_slot = None
-            current_owner.revoked_at = datetime.now(UTC).replace(tzinfo=None)
-            current_owner.revoked_by = actor_id
+            current_owner.revoked_at = None if retain_previous_owner_as_manager else datetime.now(UTC).replace(tzinfo=None)
+            current_owner.revoked_by = None if retain_previous_owner_as_manager else actor_id
             session.flush()
 
             if target is None:

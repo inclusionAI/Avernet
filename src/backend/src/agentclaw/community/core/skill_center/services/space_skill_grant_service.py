@@ -113,6 +113,7 @@ class SpaceSkillGrantService:
         actor_id: str,
         new_owner_user_id: str,
         reason: str | None,
+        retain_previous_owner_as_manager: bool = False,
     ) -> SpaceSkillGrantViewRecord:
         space, member = self._access.require_space_member(
             space_id=space_id, user_id=actor_id
@@ -138,6 +139,7 @@ class SpaceSkillGrantService:
             actor_id=actor_id,
             new_owner_user_id=new_owner_user_id,
             reason=normalized_reason,
+            retain_previous_owner_as_manager=retain_previous_owner_as_manager,
             env=env,
         )
         return self._present(

@@ -161,6 +161,10 @@ class TransferSkillOwnerRequest(BaseModel):
         max_length=1024,
         description="Required audit reason when a Space administrator transfers ownership.",
     )
+    retain_previous_owner_as_manager: bool = Field(
+        default=False,
+        description="Whether to retain the previous OWNER as an active MANAGER.",
+    )
 
 
 class CreateSkillEditorRequest(BaseModel):

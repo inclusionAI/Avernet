@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-from injector import inject
+from collections.abc import Callable
 
 from agentclaw.community.core.repository.protocols.work_orders import (
     WorkOrderRepositoryProtocol,
 )
 from agentclaw.community.core.work_orders.errors import WorkOrderInvalidReasonError
-from agentclaw.community.utils.env_utils import get_current_env
-
-
 class SpaceSkillEditorRequestService:
-    @inject
-    def __init__(self, repository: WorkOrderRepositoryProtocol) -> None:
+    def __init__(
+        self,
+        repository: WorkOrderRepositoryProtocol,
+        env_provider: Callable[[], str],
+    ) -> None:
         self._repository = repository
+        self._env_provider = env_provider
 
     def create_request(
         self,
@@ -33,7 +34,7 @@ class SpaceSkillEditorRequestService:
             applicant_user_id=applicant_user_id,
             applicant_name=applicant_user_id,
             apply_reason=normalized,
-            env=get_current_env(),
+            env=self._env_provider(),
         )
 
 

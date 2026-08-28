@@ -122,6 +122,7 @@ def test_owner_transfer_does_not_require_admin_reason():
         actor_id="owner-1",
         new_owner_user_id="member-2",
         reason=None,
+        retain_previous_owner_as_manager=True,
     )
 
     assert result["owner"]["user_id"] == "member-2"
@@ -131,6 +132,7 @@ def test_owner_transfer_does_not_require_admin_reason():
         actor_id="owner-1",
         new_owner_user_id="member-2",
         reason=None,
+        retain_previous_owner_as_manager=True,
         env="test",
     )
 

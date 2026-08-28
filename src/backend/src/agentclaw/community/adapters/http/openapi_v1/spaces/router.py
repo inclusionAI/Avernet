@@ -405,6 +405,7 @@ async def transfer_space_skill_owner(
         actor_id=user_id,
         new_owner_user_id=body.new_owner_user_id,
         reason=body.reason,
+        retain_previous_owner_as_manager=body.retain_previous_owner_as_manager,
     )
     return envelope(SpaceSkillGrants.model_validate(result), request)
 

@@ -16,7 +16,7 @@ from agentclaw.community.core.work_orders.models import (
 )
 
 
-def test_skill_collaborator_handler_delegates_atomic_approval(monkeypatch) -> None:
+def test_skill_collaborator_handler_delegates_atomic_approval() -> None:
     now = datetime(2026, 8, 26, 8, 0, 0)
     repository = MagicMock()
     expected = WorkOrderReviewResult(
@@ -27,11 +27,7 @@ def test_skill_collaborator_handler_delegates_atomic_approval(monkeypatch) -> No
         reviewed_at=now,
     )
     repository.review_skill_editor_request.return_value = expected
-    handler = SkillCollaboratorApprovalHandler(repository)
-    monkeypatch.setattr(
-        "agentclaw.community.core.skill_center.services.skill_collaborator_approval_handler.get_current_env",
-        lambda: "test",
-    )
+    handler = SkillCollaboratorApprovalHandler(repository, lambda: "test")
     detail = WorkOrderDetail(
         work_order=WorkOrderRecord(
             id=11,
