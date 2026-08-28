@@ -9,7 +9,8 @@ Dev mode (BCSFUSE_PROVIDER_MODE=dev or dev_smoke):
   never be exposed to untrusted networks.
 
 Runtime mode:
-  All requests require a valid Bearer token matching BCSFUSE_AUTH_TOKEN.
+  If BCSFUSE_AUTH_TOKEN is set, all requests require a valid Bearer token.
+  If BCSFUSE_AUTH_TOKEN is empty/unset, authentication is disabled.
 """
 import os
 from typing import Any, Optional
@@ -53,7 +54,17 @@ class SimpleTokenAuthProvider:
                 "authenticated": True,
             }
 
-        if not token or not self.valid_token:
+        # OSS/ACK: if no token is configured, authentication is disabled.
+        # This keeps the service usable for callers that do not yet send tokens.
+        if not self.valid_token:
+            return {
+                "user_id": "anonymous",
+                "username": "anonymous",
+                "roles": ["user"],
+                "authenticated": True,
+            }
+
+        if not token:
             return None
 
         if token == self.valid_token:
