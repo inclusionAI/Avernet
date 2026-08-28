@@ -189,7 +189,14 @@ def _get_path_params(
             e,
         )
 
-    return effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop
+    return (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        runtime_engine,
+        effective_entity_type,
+        is_desktop,
+    )
 
 
 def _get_skill_set_path_params(
@@ -752,8 +759,9 @@ async def add_skills_to_set(
         control_plane=control_plane,
     )
 
-    # Historical batch wire permits partial success.  Each member remains
-    # an atomic control-plane command; the adapter only serializes results.
+    # Historical batch wire permits partial success.  Resolve its loose
+    # identifiers here, then pass every durable ID through one control-plane
+    # batch so an active Set gets one final runtime projection.
     results: dict[str, list] = {
         "success": [],
         "failed": [],
@@ -771,6 +779,7 @@ async def add_skills_to_set(
     )
     if target_set.get("is_default"):
         raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")
+    resolved: list[tuple[str, str]] = []
     for skill_id in request.skill_ids:
         try:
             stable_skill_id = control_plane.resolve_legacy_skill_id(
@@ -779,16 +788,7 @@ async def add_skills_to_set(
                 actor_id=actor_id,
                 identifier=skill_id,
             )
-            await control_plane.add_skill(
-                bot_id=effective_bot_id,
-                owner_id=effective_entity_id,
-                user_id=actor_id,
-                set_id=skill_set_id,
-                skill_id=stable_skill_id,
-            )
-            results["success"].append(
-                {"skill_id": str(stable_skill_id), "name": str(skill_id)}
-            )
+            resolved.append((str(skill_id), stable_skill_id))
         except (
             LocalSkillNotFoundError,
             SkillSetControlPlaneNotFoundError,
@@ -801,6 +801,40 @@ async def add_skills_to_set(
             }:
                 raise
             results["failed"].append({"skill_id": skill_id, "error": str(exc)})
+    if resolved:
+        outcomes = await control_plane.add_skills(
+            bot_id=effective_bot_id,
+            owner_id=effective_entity_id,
+            user_id=actor_id,
+            set_id=skill_set_id,
+            skill_ids=[stable_skill_id for _, stable_skill_id in resolved],
+        )
+        for (legacy_skill_id, stable_skill_id), outcome in zip(resolved, outcomes):
+            if outcome.succeeded:
+                results["success"].append(
+                    {"skill_id": stable_skill_id, "name": legacy_skill_id}
+                )
+                continue
+            assert outcome.error is not None
+            if isinstance(
+                outcome.error,
+                (LocalSkillNotFoundError, SkillSetControlPlaneNotFoundError),
+            ):
+                results["failed"].append(
+                    {"skill_id": legacy_skill_id, "error": str(outcome.error)}
+                )
+                continue
+            if isinstance(outcome.error, SkillSetControlPlaneConflictError) and str(
+                outcome.error
+            ) in {
+                "RESOURCE_DIRECT_ACTIVE",
+                "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
+            }:
+                results["failed"].append(
+                    {"skill_id": legacy_skill_id, "error": str(outcome.error)}
+                )
+                continue
+            raise outcome.error
     success_count = len(results["success"])
     failed_count = len(results["failed"])
     return AddSkillsResponse(

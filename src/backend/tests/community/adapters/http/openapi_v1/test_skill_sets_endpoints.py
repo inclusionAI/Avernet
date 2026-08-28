@@ -12,6 +12,9 @@ from agentclaw.community.adapters.http.openapi_v1.skill_sets.router import route
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
 )
+from agentclaw.community.core.skill_center.skill_set_batch import (
+    SkillSetAddOutcome,
+)
 from tests.community.adapters.http.openapi_v1.conftest import (
     bind_bot_access_seam,
     mount_public_error_handlers,
@@ -22,6 +25,7 @@ from tests.community.adapters.http.openapi_v1.conftest import (
 class _ControlPlane:
     def __init__(self) -> None:
         self.created: dict | None = None
+        self.added: dict | None = None
 
     def list_sets(self, **_kwargs):
         return [
@@ -62,8 +66,9 @@ class _ControlPlane:
     def list_skills(self, **_kwargs):
         return []
 
-    async def add_skill(self, **_kwargs):
-        return {"changed": True}
+    async def add_skills(self, **kwargs):
+        self.added = kwargs
+        return [SkillSetAddOutcome(skill_id="9", changed=True)]
 
     async def remove_skill(self, **_kwargs):
         return {"changed": False}
@@ -130,13 +135,21 @@ def test_create_is_inactive_without_an_idempotency_key():
 
 
 def test_membership_and_activation_are_bot_scoped():
-    client = _client(_ControlPlane())
+    control = _ControlPlane()
+    client = _client(control)
 
     member = client.put("/openapi/v1/bots/bot-1/skill-sets/2/skills/9")
     active = client.post("/openapi/v1/bots/bot-1/skill-sets/2/activate")
 
     assert member.status_code == 200
     assert member.json()["data"] == {"changed": True}
+    assert control.added == {
+        "bot_id": "bot-1",
+        "owner_id": "actor",
+        "user_id": "actor",
+        "set_id": "2",
+        "skill_ids": ["9"],
+    }
     assert active.status_code == 200
     assert active.json()["data"]["is_active"] is True
 

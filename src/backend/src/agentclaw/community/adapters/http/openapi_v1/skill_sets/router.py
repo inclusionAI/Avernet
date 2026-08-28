@@ -57,6 +57,7 @@ McpServerCodePath = Annotated[
     Path(description="Opaque MCP server identifier."),
 ]
 
+
 def _set(item: dict[str, Any]) -> SkillSetItem:
     return SkillSetItem(
         id=str(item["id"]),
@@ -252,14 +253,16 @@ async def add_skill(
         SkillSetManagementServiceProtocol
     ),
 ) -> Envelope[SkillSetMembershipResult]:
-    result = await service.add_skill(
+    (result,) = await service.add_skills(
         bot_id=bot_id,
         owner_id=owner_id,
         user_id=user_id,
         set_id=set_id,
-        skill_id=skill_id,
+        skill_ids=[skill_id],
     )
-    return envelope(SkillSetMembershipResult(**result), request)
+    if result.error is not None:
+        raise result.error
+    return envelope(SkillSetMembershipResult(changed=result.changed), request)
 
 
 @router.delete(
