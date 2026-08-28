@@ -9,6 +9,7 @@ from agentclaw.community.core.bot_inventory.types import (
     BotAction,
     BusinessSpaceRef,
     DisplayState,
+    ServiceEditLockState,
     ServiceLifecycleCard,
 )
 
@@ -145,3 +146,12 @@ class ServiceLifecyclePort(Protocol):
     def cards_for_bots(
         self, *, bots: Sequence[Mapping[str, Any]]
     ) -> Mapping[str, Sequence[ServiceLifecycleCard]]: ...
+
+
+@runtime_checkable
+class ServiceEditLockPort(Protocol):
+    """Batch service-Bot edit-lock projection consumed by inventory."""
+
+    def states_for_bots(
+        self, *, bots: Sequence[Mapping[str, Any]]
+    ) -> Mapping[tuple[str, str], ServiceEditLockState]: ...

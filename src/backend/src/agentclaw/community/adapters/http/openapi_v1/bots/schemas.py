@@ -13,6 +13,9 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
+from agentclaw.community.adapters.http.openapi_v1.service_publications.schemas import (
+    EditLock,
+)
 
 # Request bodies reject unknown keys. Pydantic's default is to *ignore* them,
 # which on a public API means a typo'd or immutable field (``engine`` on update)
@@ -713,6 +716,10 @@ class BotInventoryItem(BaseModel):
     disabled_actions: dict[str, str] | None = Field(
         default=None,
         description="Unavailable actions mapped to caller-facing reasons, when any.",
+    )
+    edit_lock: EditLock | None = Field(
+        default=None,
+        description="Current Bot-level collaborative edit lock for an operable service Bot; null for other cards.",
     )
 
 

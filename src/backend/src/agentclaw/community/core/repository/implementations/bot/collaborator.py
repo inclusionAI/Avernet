@@ -124,6 +124,32 @@ class CollaboratorRepository(
             rows = query.order_by(self._Collaborator.gmt_create.asc()).all()
             return [r.to_record() for r in rows]
 
+    def list_by_bot_owner_pairs(
+        self,
+        pairs: List[tuple[str, str]],
+        env: str,
+    ) -> List[CollaboratorRecord]:
+        """List collaborators for multiple exact Bot/Owner pairs."""
+        wanted = set(pairs)
+        if not wanted:
+            return []
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self._Collaborator)
+                .filter(
+                    self._Collaborator.bot_id.in_({bot_id for bot_id, _ in wanted}),
+                    self._Collaborator.owner_id.in_(
+                        {owner_id for _, owner_id in wanted}
+                    ),
+                    self._Collaborator.env == env,
+                )
+                .order_by(self._Collaborator.gmt_create.asc())
+                .all()
+            )
+            return [
+                row.to_record() for row in rows if (row.bot_id, row.owner_id) in wanted
+            ]
+
     def list_by_user(
         self,
         user_id: str,

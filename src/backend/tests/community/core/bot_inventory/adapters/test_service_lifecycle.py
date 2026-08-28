@@ -76,10 +76,12 @@ def test_cards_are_batched_and_expand_each_service_bot(monkeypatch) -> None:
     assert result["service-1"][0].display_state is DisplayState.SERVICE_DRAFT
     assert result["service-1"][0].status == "draft"
     assert result["service-1"][0].internal_status == PublishStatus.DRAFT.value
+    assert all(card.has_draft for card in result["service-1"])
     assert BotAction.DELETE in result["service-1"][0].actions
     assert result["service-2"][0].display_state is DisplayState.SERVICE_ONLINE
     assert result["service-2"][0].status == "running"
     assert result["service-2"][0].live_version == 7
+    assert result["service-2"][0].has_draft is False
 
 
 @pytest.mark.unit
@@ -114,6 +116,7 @@ def test_missing_publish_rows_keep_a_safe_read_only_card(monkeypatch) -> None:
     assert cards[0].status == "draft"
     assert cards[0].internal_status == "ACTIVE"
     assert cards[0].actions == (BotAction.VIEW,)
+    assert cards[0].has_draft is False
 
 
 @pytest.mark.unit

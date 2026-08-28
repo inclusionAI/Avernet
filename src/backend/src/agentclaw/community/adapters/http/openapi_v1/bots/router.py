@@ -223,6 +223,17 @@ def _to_inventory_item(item: CoreItem) -> BotInventoryItem:
             "name": item.space.name,
             "kind": item.space.kind,
         }
+    edit_lock = None
+    if item.edit_lock is not None:
+        edit_lock = {
+            "locked": item.edit_lock.locked,
+            "acquired": None,
+            "holder_user_id": item.edit_lock.holder_user_id,
+            "holder_name": item.edit_lock.holder_name,
+            "has_collaborators": item.edit_lock.has_collaborators,
+            "is_owner_holder": item.edit_lock.is_owner_holder,
+            "need_lock": item.edit_lock.need_lock,
+        }
     return BotInventoryItem(
         bot_id=item.bot_id,
         card_id=item.card_id,
@@ -246,6 +257,7 @@ def _to_inventory_item(item: CoreItem) -> BotInventoryItem:
         passport_id=item.passport_id,
         actions=[a.value for a in item.actions],
         disabled_actions=dict(item.disabled_actions) if item.disabled_actions else None,
+        edit_lock=edit_lock,
     )
 
 
