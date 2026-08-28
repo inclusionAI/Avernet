@@ -21,6 +21,7 @@ provides:
   - "BotCapabilityAuthorizationHookProtocol"
   - "SkillSetManagementService"
   - "RuntimeProjectionResolver"
+  - "resolve_effective_mcp_server_codes"
   - "BotCapabilityStateReader"
   - "BotRuntimeProjector"
   - "BotRuntimeProjectorProtocol"
