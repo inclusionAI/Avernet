@@ -315,11 +315,12 @@ def test_unified_space_join_approval_adds_member_in_same_transaction(db) -> None
             .filter(WorkOrderModel.id == record.id)
             .scalar()
         )
-        member_role, member_status, member_created_by = (
+        member_role, member_status, member_created_by, member_user_name = (
             session.query(
                 SpaceMemberModel.role,
                 SpaceMemberModel.status,
                 SpaceMemberModel.created_by,
+                SpaceMemberModel.user_name,
             )
             .filter(
                 SpaceMemberModel.space_id == team.id,
@@ -339,6 +340,7 @@ def test_unified_space_join_approval_adds_member_in_same_transaction(db) -> None
     assert member_role == SpaceRole.MEMBER.value
     assert member_status == "ACTIVE"
     assert member_created_by == "owner-unified"
+    assert member_user_name == "applicant-unified"
     assert notice_category == NotificationCategory.NOTICE.value
 
     _, items = spaces.list_spaces(
@@ -738,6 +740,7 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
                 title="approved",
                 content="approved content",
             ),
+            applicant_user_name="Applicant",
             env="dev",
         )
     approved_notification = _review_notification(
@@ -752,13 +755,13 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
         review_remark="ok",
         target_status=WorkOrderStatus.APPROVED,
         notification=approved_notification,
+        applicant_user_name="Applicant",
         env="dev",
     )
     assert result.status is WorkOrderStatus.APPROVED
-    assert (
-        spaces.get_member(space_id=space.id, user_id="applicant-1", env="dev")
-        is not None
-    )
+    member = spaces.get_member(space_id=space.id, user_id="applicant-1", env="dev")
+    assert member is not None
+    assert member.user_name == "Applicant"
     _, joined_spaces = spaces.list_spaces(
         user_id="applicant-1",
         env="dev",
@@ -789,6 +792,7 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
                 title="rejected",
                 content="rejected content",
             ),
+            applicant_user_name=None,
             env="dev",
         )
 
@@ -911,6 +915,7 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
             title="custom rejected title",
             content="custom rejected content",
         ),
+        applicant_user_name=None,
         env="dev",
     )
     assert result.status is WorkOrderStatus.REJECTED

@@ -71,6 +71,7 @@ from agentclaw.community.plugin_api.staff_dept import (
     StaffProfileLookupError,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.utils.work_no import normalize_work_no_for_lookup
 
 
 logger = get_logger()
@@ -413,7 +414,7 @@ class WorkOrderService:
     def _get_applicant_name(self, *, applicant_user_id: str) -> str:
         try:
             profile = self._staff_dept.get_profile_by_work_no(
-                work_no=applicant_user_id
+                work_no=normalize_work_no_for_lookup(applicant_user_id)
             )
         except StaffProfileLookupError:
             logger.warning(
@@ -496,6 +497,13 @@ class WorkOrderService:
             self._access.require_space_owner(space_id=detail.space_id, user_id=actor_id)
         except SpaceAccessDeniedError as exc:
             raise WorkOrderAccessDeniedError("space owner role required") from exc
+        applicant_user_name = (
+            self._get_applicant_name(
+                applicant_user_id=detail.work_order.applicant_user_id
+            )
+            if target_status is WorkOrderStatus.APPROVED
+            else None
+        )
         notification = self._notifications.build_space_join_review_result(
             detail=detail,
             target_status=target_status,
@@ -507,6 +515,7 @@ class WorkOrderService:
             review_remark=review_remark,
             target_status=target_status,
             notification=notification,
+            applicant_user_name=applicant_user_name,
             env=get_current_env(),
         )
 

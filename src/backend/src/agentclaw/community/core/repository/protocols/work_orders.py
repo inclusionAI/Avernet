@@ -128,6 +128,7 @@ class WorkOrderRepositoryProtocol(Protocol):
         review_remark: str | None,
         target_status: WorkOrderStatus,
         notification: WorkOrderNotificationDraft,
+        applicant_user_name: str | None,
         env: str,
     ) -> WorkOrderReviewResult: ...
 

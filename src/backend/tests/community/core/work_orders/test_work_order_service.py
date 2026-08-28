@@ -606,10 +606,10 @@ def test_create_space_join_request_uses_staff_nickname() -> None:
     repository.create_space_join_request.return_value = _work_order()
 
     service.create_space_join_request(
-        space_id=7, applicant_user_id="applicant-1", reason="join"
+        space_id=7, applicant_user_id="1234", reason="join"
     )
 
-    staff_dept.get_profile_by_work_no.assert_called_once_with(work_no="applicant-1")
+    staff_dept.get_profile_by_work_no.assert_called_once_with(work_no="001234")
     assert (
         repository.create_space_join_request.call_args.kwargs["applicant_name"]
         == "花花"
@@ -783,6 +783,7 @@ def test_review_requires_owner_and_delegates(
         review_remark="ok",
         target_status=status,
         notification=notification,
+        applicant_user_name=("applicant-1" if status is WorkOrderStatus.APPROVED else None),
         env="dev",
     )
 
@@ -821,6 +822,7 @@ def test_approve_accepts_missing_or_blank_remark(value: str | None) -> None:
         review_remark=None,
         target_status=WorkOrderStatus.APPROVED,
         notification=notification,
+        applicant_user_name="applicant-1",
         env="dev",
     )
 
