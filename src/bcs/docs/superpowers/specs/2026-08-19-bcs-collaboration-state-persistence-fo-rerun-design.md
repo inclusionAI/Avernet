@@ -13,12 +13,13 @@
   - `src/bcs/docs/superpowers/specs/2026-08-21-bcs-custom-opening-message-design.md`
   - `src/bcs/docs/plans/2026-08-12-bcn-provider-sse-hitl-design.md`
 
-> 实施门禁：rerun HTTP/副屏、lineage 表结构和 callback lease 可以按独立代码切片开发，
-> 但不能据此宣称 State Machine rerun/FO 已可发布。启用 rerun 路由前，Phase 2/3 必须完成
-> §8.6、§12.4–§12.5 定义的原子 Run 创建、rendered opening/initial dispatch checkpoint 和
-> reconciler。仅发现已有 direct child 后直接返回不是 recovery；否则进程退出仍可能留下
-> `Pending/Running Run + 无可恢复动作`。该门禁是对增量实施顺序的说明，不放宽本文的最终
-> 一致性和验收标准。
+> 实施门禁：rerun HTTP/副屏、lineage 表结构和 callback lease 可以按独立代码切片开发。
+> 手动 rerun 路由启用前，至少必须保证 direct child 原子物化，并且相同 source 的幂等 replay
+> 会主动恢复该 child 的 Run start、opening 持久化和仍为 Pending 的 initial frontier；仅发现
+> direct child 后直接返回不算 recovery。本期手动 rerun 采用该 request-retry recovery 路径。
+> 这不代表完整 State Machine FO 已可发布：无人重试时的后台接管，以及 dispatching/judging/
+> progressing/finalizing 的主动恢复，仍必须等待 §8.6、§12.4–§12.5 的 checkpoint 和 reconciler
+> 完成后才能启用或宣称。
 
 ## 1. 摘要
 
@@ -385,7 +386,10 @@ Pending 表示仍等待上游或未选择分支，Ready 表示已经进入可执
 Run，并对 `(env, rerun_of)` 建唯一约束；NULL 允许多个首次执行 Run，非 NULL 保证每个 Run 最多创建一个直接子
 Run。
 
-首次请求原子创建直接子 Run；相同 source Run 的重复请求返回已存在的直接子 Run，不再次增加 Session activation。
+首次请求原子创建直接子 Run；相同 source Run 的重复请求命中已存在的直接子 Run，不再次增加 Session activation。
+若该 child 仍为 Pending，或已经 Running 但仍有 Pending initial node，幂等 replay 必须继续完成 Run start、以稳定
+`client_msg_id` 持久化 opening，并只 dispatch 尚未启动的 initial node，然后返回该 child；不能把半物化 child
+原样返回并永久占用 lineage。已经 terminal 的 child 只返回现状，不重新执行。
 若子 Run 再次 Failed 后需要继续重跑，下一次操作必须以该子 Run ID 作为 source，从而形成无分叉 lineage。副屏
 不会把较早 source Run 自动切换或改写为最新后代；用户必须打开当前 Failed 子 Run 后发起下一次重跑。HTTP path
 中的 `run_id` 必须始终等于新 Run 的 `rerun_of`，不能由后端静默改写为其他后代。
@@ -867,9 +871,12 @@ Run，FO 不得调用当前 Group 配置重新渲染；没有本期 rendered ope
 2. 复制 source Run 的 input 和完整 immutable snapshot；
 3. 根据 snapshot 为所有 definition node 创建新的 Node Run，不复制 source outcome、artifact 或 skip fact；
 4. 所有新 Node attempt 从 0 开始，graph roots 形成 initial frontier，其余 Node 使用现有 Pending；
-5. Run、Node、snapshot、lineage、rerun idempotency record、rendered opening 和 initial Bot dispatch checkpoint
-   在同一事务提交；
-6. 事务后仍由 rerun 请求同步完成 opening 和 initial frontier。
+5. Session activation、Run、Node、snapshot 和 lineage 在同一事务提交，唯一 `rerun_of` 提供 rerun 幂等事实；
+6. 事务后由 rerun 请求同步完成 Run start、opening 和 initial frontier；opening 使用稳定 `client_msg_id`，Node
+   start 使用现有 CAS 和稳定 delivery request ID；
+7. 若进程在第 5 步提交后、第 6 步完成前退出，相同 source 的幂等 replay 必须恢复 Pending child，或继续 Running
+   child 中尚为 Pending 的 initial node。该 request-retry recovery 是本期手动 rerun 的发布门槛，但不替代完整
+   State Machine FO reconciler。
 
 `from_failed`、`from_node`、latest snapshot、新 input 和 artifact reuse 都是后续独立需求，本期不预留执行分支、
 hash 字段或 public enum。
@@ -1419,6 +1426,8 @@ DB 与 memory 实现必须对相同 rerun idempotency key、Session activation C
 - 所有 Node 全新创建且 attempt 从 `0` 开始；
 - 不复制 source artifact、outcome 或中间状态；
 - 并发 rerun 只能为 source Run 创建一个直接子 Run；
+- 模拟 direct child 已原子物化但仍为 Pending，幂等 replay 会启动同一 child、持久化 opening 并 dispatch initial
+  node，不创建第二个 child；
 - 首次 rerun application outcome 为 `created=true`，幂等 replay 为 `created=false`，HTTP 分别返回 201/200 且
   replay 响应包含 `idempotent_replay=true`；
 - Service Session activation 唯一性；

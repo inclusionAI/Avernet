@@ -3018,6 +3018,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
     setHumanResponseText('');
     setHumanResponseSubmitting(false);
     setHumanResponseError(null);
+    setRerunSubmitting(false);
     setRerunError(null);
     nodeDetailAbortRef.current?.abort();
     nodeDetailAbortRef.current = null;
