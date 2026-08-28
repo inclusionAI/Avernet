@@ -7,34 +7,6 @@ bot it acts on — not from taste. ``test_principal_seam.py`` fails if the surfa
 and this table disagree in either direction, so a route added tomorrow is
 refused until someone puts it in a group on purpose.
 
-Two id models, and both spell their parameter ``user_id``
---------------------------------------------------------
-
-Missing this is the mistake this module exists to prevent.
-
-**User-scoped groups** (``bots``, ``resources``, ``routines``, ``skills``,
-``identity``, ``mcp``) resolve the bot with ``get_by_id_and_owner(bot_id,
-user_id)``. Caller and owner are necessarily the same person; a non-owner gets a
-masked ``404``. A bot merely *shared* with the caller is unreachable here **for
-a human too**, so an application acting as that human inherits the same limit
-without anything being written to enforce it.
-
-**Engine-runtime groups** (``sessions``, ``engine``, ``models``, ``nodes``,
-``approvals``, ``connection``) take ``user_id`` as the *caller* and a second
-``owner_id`` naming the *addressed bot's owner*, then adjudicate through the
-collaborator gate. This is where a shared bot is reachable, and therefore where
-a delegation actually pays off. For an app-only caller the addressed owner comes from the
-**grant record**, never from the request — see ``engine_runtime/params.py``.
-
-The invariant every mode below serves
--------------------------------------
-
-    An application's reach is exactly its granting user's reach, and never more.
-
-Not a copy taken at consent time — the live thing. The grant says only "this
-application may act as this person"; whether that person may still operate that
-bot is asked again on every request, by the same gate they would face
-themselves.
 """
 
 from __future__ import annotations

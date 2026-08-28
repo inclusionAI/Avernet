@@ -64,10 +64,8 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     UnsupportedEngineError,
     UserIdMismatchError,
 )
-from agentclaw.community.adapters.http.openapi_v1.errors_space import (
-    SpaceErrorCode,
-    SpacePublicErrorMessage,
-)
+from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
+from agentclaw.community.adapters.http.openapi_v1.space_skill_error_mappings import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.errors_work_order import (
     WorkOrderErrorCode,
     WorkOrderPublicErrorMessage,
@@ -123,11 +121,6 @@ from agentclaw.community.core.bot_inventory.errors import (
     BotInventoryOperationNotAllowedError,
     BotInventoryPermissionError,
     BotInventoryUpstreamError,
-)
-from agentclaw.community.core.bot_management.errors import (
-    ApplicationCodingUnavailableError,
-    BotCombinationUnsupportedError,
-    BotTemplateInvalidError,
 )
 from agentclaw.community.core.bot_dormant.activate_service import InvalidBotStateError
 from agentclaw.community.core.devices.services.device_context import (
@@ -231,15 +224,6 @@ from agentclaw.community.core.skill_center.errors import (
     SkillEngineNotSupportedError,
     SkillParameterValidationError,
     SkillRuntimeNameConflictError,
-    SpaceSkillGrantConflictError,
-    SpaceSkillGrantForbiddenError,
-    SpaceSkillGrantMemberRequiredError,
-    SpaceSkillGrantNotFoundError,
-    SpaceSkillGrantReasonRequiredError,
-    DraftEditLeaseConflictError,
-    DraftEditLeaseForbiddenError,
-    DraftEditLeaseNotFoundError,
-    DraftEditLeaseTokenRejectedError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
     SkillSetControlPlaneNotFoundError,
@@ -378,30 +362,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     FavoriteNotFoundError: (404, "Not found"),
     SpaceAlreadyExistsError: (409, "Space already exists"),
     SpaceMemberAlreadyExistsError: (409, "Space member already exists"),
-    SpaceSkillGrantForbiddenError: (
-        403,
-        SpacePublicErrorMessage.SKILL_GRANT_FORBIDDEN,
-    ),
-    SpaceSkillGrantNotFoundError: (
-        404,
-        SpacePublicErrorMessage.SKILL_GRANT_NOT_FOUND,
-    ),
-    SpaceSkillGrantMemberRequiredError: (
-        409,
-        SpacePublicErrorMessage.SKILL_GRANT_MEMBER_REQUIRED,
-    ),
-    SpaceSkillGrantConflictError: (
-        409,
-        SpacePublicErrorMessage.SKILL_GRANT_CONFLICT,
-    ),
-    SpaceSkillGrantReasonRequiredError: (
-        422,
-        SpacePublicErrorMessage.SKILL_GRANT_REASON_REQUIRED,
-    ),
-    DraftEditLeaseForbiddenError: (403, SpacePublicErrorMessage.DRAFT_EDIT_LEASE_FORBIDDEN),
-    DraftEditLeaseNotFoundError: (404, SpacePublicErrorMessage.DRAFT_EDIT_LEASE_NOT_FOUND),
-    DraftEditLeaseConflictError: (409, SpacePublicErrorMessage.DRAFT_EDIT_LEASE_CONFLICT),
-    DraftEditLeaseTokenRejectedError: (409, SpacePublicErrorMessage.DRAFT_EDIT_LEASE_TOKEN_REJECTED),
+    **SPACE_SKILL_HTTP_ERRORS,
     SpaceCreatorInvariantError: (409, "Space creator cannot be removed or demoted"),
     PersonalSpaceInvariantError: (409, "Personal space membership is immutable"),
     SkillCenterTeamCreateError: (
@@ -799,15 +760,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
 # subcode without changing any existing public response.
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillCenterTeamCreateError: SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED,
-    SpaceSkillGrantForbiddenError: SpaceErrorCode.SKILL_GRANT_FORBIDDEN,
-    SpaceSkillGrantNotFoundError: SpaceErrorCode.SKILL_GRANT_NOT_FOUND,
-    SpaceSkillGrantMemberRequiredError: SpaceErrorCode.SKILL_GRANT_MEMBER_REQUIRED,
-    SpaceSkillGrantConflictError: SpaceErrorCode.SKILL_GRANT_CONFLICT,
-    SpaceSkillGrantReasonRequiredError: SpaceErrorCode.SKILL_GRANT_REASON_REQUIRED,
-    DraftEditLeaseForbiddenError: SpaceErrorCode.DRAFT_EDIT_LEASE_FORBIDDEN,
-    DraftEditLeaseNotFoundError: SpaceErrorCode.DRAFT_EDIT_LEASE_NOT_FOUND,
-    DraftEditLeaseConflictError: SpaceErrorCode.DRAFT_EDIT_LEASE_CONFLICT,
-    DraftEditLeaseTokenRejectedError: SpaceErrorCode.DRAFT_EDIT_LEASE_TOKEN_REJECTED,
+    **SPACE_SKILL_ERROR_CODES,
     WorkOrderInvalidEventError: WorkOrderErrorCode.INVALID_REASON,
     WorkOrderInvalidReasonError: WorkOrderErrorCode.INVALID_REASON,
     WorkOrderInvalidRemarkError: WorkOrderErrorCode.INVALID_REMARK,
