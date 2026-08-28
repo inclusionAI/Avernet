@@ -35,12 +35,14 @@ class DesiredStateMutation:
     mcp_codes: frozenset[str] = frozenset()
     """MCP codes this mutation claimed or released, if it touched any.
 
-    Two kinds of command fill it, for the same reason: neither can name its
-    MCP scope before the mutation runs. Activation learns the Set's member
-    codes; a Skill mutation learns the Skill's ``mcp_dependencies``, which
-    join or leave the projected MCP set along with the Skill. Both are read
-    under the row lock the transaction already holds, so the scope names what
-    was actually installed rather than what a second, unlocked query saw.
+    Commands fill it when the committed mutation actually moves MCP state.
+    Explicit MCP and Direct commands name their changed code; activation learns
+    the Set's member codes; a Skill mutation learns the Skill's
+    ``mcp_dependencies``. No-op mutations leave it empty, so callers do not
+    synthesize a runtime delta from request parameters alone. The values are
+    resolved under the row lock the transaction already holds, so the scope
+    names what was actually installed rather than what a second, unlocked
+    query saw.
 
     Candidates, not a verdict — the projector intersects them with the set it
     resolved, so a claim that does not survive projection is never delivered

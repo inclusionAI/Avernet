@@ -43,6 +43,8 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 )
 from agentclaw.community.core.skill_center.services._mutation_flow import (
     MutationProjectionFlow,
+    mcp_claim_scope,
+    mcp_release_scope,
     skill_claim_scope,
     skill_release_scope,
 )
@@ -478,9 +480,7 @@ class SkillSetManagementService:
                 bot_id=bot_id,
                 actor_id=user_id,
                 action="default_set_unexclude_mcp",
-                scope=ProjectionScope(
-                    mcp=True, claimed_mcp=frozenset({server_code})
-                ),
+                scope_from_result=mcp_claim_scope,
                 mutation=lambda: self._repository.unexclude_default_mcp(
                     bot_id=bot_id,
                     owner_id=str(bot["owner_id"]),
@@ -497,7 +497,7 @@ class SkillSetManagementService:
             actor_id=user_id,
             action="skill_set_add_mcp",
             runtime_required=bool(target.get("is_active")),
-            scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({server_code})),
+            scope_from_result=mcp_claim_scope,
             mutation=lambda: self._repository.add_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -528,9 +528,7 @@ class SkillSetManagementService:
                 bot_id=bot_id,
                 actor_id=user_id,
                 action="default_set_exclude_mcp",
-                scope=ProjectionScope(
-                    mcp=True, released_mcp=frozenset({server_code})
-                ),
+                scope_from_result=mcp_release_scope,
                 mutation=lambda: self._repository.exclude_default_mcp(
                     bot_id=bot_id,
                     owner_id=str(bot["owner_id"]),
@@ -549,7 +547,7 @@ class SkillSetManagementService:
             actor_id=user_id,
             action="skill_set_remove_mcp",
             runtime_required=bool(target.get("is_active")),
-            scope=ProjectionScope(mcp=True, released_mcp=frozenset({server_code})),
+            scope_from_result=mcp_release_scope,
             mutation=lambda: self._repository.remove_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -600,9 +598,10 @@ class SkillSetManagementService:
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_deactivate",
-            scope_from_result=lambda result: ProjectionScope(
-                skills=True, mcp=True, released_mcp=result.mcp_codes
-            ),
+            # Deactivation withdraws callable state but keeps the Set and its
+            # configuration. Re-project both inventories without claiming or
+            # physically releasing MCP details.
+            scope=ProjectionScope(skills=True, mcp=True),
             mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),

@@ -208,7 +208,6 @@ def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
     skill_set_service.sync_runtime.assert_called_once_with()
 
 
-
 def test_aicoding_refresh_does_not_retry_mcp_detail_when_runtime_not_ready() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     mcp_sync = MagicMock()
