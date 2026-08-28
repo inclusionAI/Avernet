@@ -44,10 +44,11 @@ from agentclaw.community.core.skill_center.policies.platform_default_mcp import 
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
-    ProjectionScope,
 )
 from agentclaw.community.core.skill_center.services._mutation_flow import (
     MutationProjectionFlow,
+    mcp_claim_scope,
+    mcp_release_scope,
     skill_claim_scope,
     skill_release_scope,
 )
@@ -213,10 +214,7 @@ class DirectActivationService:
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
             ),
-            # One MCP in, no Skill touched.
-            scope=ProjectionScope(
-                mcp=True, claimed_mcp=frozenset({server_code})
-            ),
+            scope_from_result=mcp_claim_scope,
         )
         self._audit(
             bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
@@ -241,12 +239,7 @@ class DirectActivationService:
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
             ),
-            # One MCP out, no Skill touched. The projector subtracts the
-            # projected set before deleting, so a code the default policy or a
-            # Skill dependency still supplies survives.
-            scope=ProjectionScope(
-                mcp=True, released_mcp=frozenset({server_code})
-            ),
+            scope_from_result=mcp_release_scope,
         )
         self._audit(
             bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
