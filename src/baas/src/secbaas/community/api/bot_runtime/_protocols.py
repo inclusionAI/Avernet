@@ -404,6 +404,42 @@ class BotRunner(Protocol):
         """
         ...
 
+    async def list_sessions(
+        self,
+        *,
+        bot_id: str,
+        context: "BotChatContext",
+        metadata: dict[str, Any],
+        user_id: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list["SessionInfo"]:
+        """查询指定 bot 下的会话列表（只读）
+
+        复用 ``_resolve_bot_route(bot_id, metadata)`` 的 binding 解析与
+        service 选择链路，调用 ``BotService.list_sessions`` 经
+        AsyncSessionClient 访问 engine `GET /api/sessions`。
+
+        Args:
+            bot_id: Bot 唯一标识，格式为 <real_bot_id>:<entity_id>。
+                可省略 entity 部分；与 ``get_session_info`` 同语义。
+            context: 请求上下文（身份认证、调用者信息等）
+            metadata: 元数据，支持 bot_options.lifecycle_stage 指定生命周期阶段
+            user_id: 可选，限定特定 user 的会话；不传则列出该 bot 全部会话
+            limit: 分页大小，范围 1-100，默认 20
+            offset: 分页偏移，默认 0
+
+        Returns:
+            SessionInfo 列表（adapter 层 SessionInfo；`bot_id` 由
+            router 层基于 binding 回填）
+
+        Raises:
+            BotBindingNotFoundError: binding 不存在
+            BotNotFoundError: bot 不存在
+            BotServiceError: 上游 engine 不可用或未实现 SESSION_LIST capability
+        """
+        ...
+
     def get_result(self, run_id: str) -> Any:
         """获取执行结果
 

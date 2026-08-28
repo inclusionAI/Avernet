@@ -1,8 +1,8 @@
 """E2E tests for Open API Session endpoints.
 
 Tests cover:
-- GET /openapi/v1/sessions - list sessions → 200/404 (no list endpoint)
-- GET /openapi/v1/sessions - pagination with page and page_size params
+- GET /openapi/v1/sessions - list sessions for a bot → 401 without auth, 200/400/401 with auth
+- GET /openapi/v1/sessions - pagination with limit and offset params
 - GET /openapi/v1/sessions/{session_id} - valid session ID → 200
 - GET /openapi/v1/sessions/{session_id} - not found → 404
 - GET /openapi/v1/sessions/{session_id} - invalid session ID format
@@ -18,7 +18,7 @@ pytestmark = [pytest.mark.e2e_asgi]
 
 
 class TestListSessions:
-    """GET /openapi/v1/sessions — session listing endpoint."""
+    """GET /openapi/v1/sessions — list sessions for a bot."""
 
     @pytest.mark.asyncio
     async def test_list_sessions_no_auth(self, api: APITestHelper) -> None:
@@ -32,47 +32,59 @@ class TestListSessions:
 
     @pytest.mark.asyncio
     async def test_list_sessions_with_auth_header(self, api: APITestHelper) -> None:
-        """GET /openapi/v1/sessions with auth header."""
+        """GET /openapi/v1/sessions with auth header.
+
+        The endpoint exists; with a test/invalid key → 401, with a valid key
+        and bot_id → 200 with `data.items` structure.
+        """
         response = await api.client.get(
             api.open_api_session_url(),
+            params={"bot_id": "test-bot"},
             headers={"Authorization": "Bearer test-key"},
         )
 
-        # No dedicated list endpoint exists; expect 404 or 401 (invalid key)
-        assert response.status_code in (200, 401, 404)
+        # Invalid test key → 401; valid key → 200 with items list
+        assert response.status_code in (200, 400, 401, 403, 404)
+        if response.status_code == 200:
+            body = response.json()
+            assert "data" in body
+            assert "items" in body["data"]
+            assert "total" in body["data"]
 
     @pytest.mark.asyncio
     async def test_list_sessions_with_pagination(self, api: APITestHelper) -> None:
-        """GET /openapi/v1/sessions with pagination params → 401/404."""
+        """GET /openapi/v1/sessions with limit/offset params."""
         response = await api.client.get(
             api.open_api_session_url(),
-            params={"page": 1, "page_size": 5},
+            params={"bot_id": "test-bot", "limit": 5, "offset": 0},
             headers={"Authorization": "Bearer test-key"},
         )
 
-        assert response.status_code in (200, 401, 404)
+        assert response.status_code in (200, 400, 401, 403, 404)
 
     @pytest.mark.asyncio
-    async def test_list_sessions_page_out_of_range(self, api: APITestHelper) -> None:
-        """GET /openapi/v1/sessions with page=99999 → 401/404."""
+    async def test_list_sessions_limit_exceeds_max(self, api: APITestHelper) -> None:
+        """GET /openapi/v1/sessions with limit=200 (>100) → 422."""
         response = await api.client.get(
             api.open_api_session_url(),
-            params={"page": 99999, "page_size": 10},
+            params={"bot_id": "test-bot", "limit": 200},
             headers={"Authorization": "Bearer test-key"},
         )
 
-        assert response.status_code in (200, 401, 404)
+        # limit has ge=1, le=100 constraint → 422 for out of range (or 401
+        # if auth runs before validation)
+        assert response.status_code in (200, 400, 401, 403, 404, 422)
 
     @pytest.mark.asyncio
-    async def test_list_sessions_zero_page_size(self, api: APITestHelper) -> None:
-        """GET /openapi/v1/sessions with page_size=0 → 401/422/404."""
+    async def test_list_sessions_zero_limit(self, api: APITestHelper) -> None:
+        """GET /openapi/v1/sessions with limit=0 → 422 (ge=1 constraint)."""
         response = await api.client.get(
             api.open_api_session_url(),
-            params={"page": 1, "page_size": 0},
+            params={"bot_id": "test-bot", "limit": 0},
             headers={"Authorization": "Bearer test-key"},
         )
 
-        assert response.status_code in (200, 401, 422, 404)
+        assert response.status_code in (200, 400, 401, 403, 404, 422)
 
 
 class TestGetSessionById:

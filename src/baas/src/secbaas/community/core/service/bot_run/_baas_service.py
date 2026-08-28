@@ -659,6 +659,76 @@ class BaasBotService(BotService):
                 f"Failed to get session: {_safe_client_msg(e)}"
             ) from e
 
+    async def list_sessions(
+        self,
+        *,
+        agent_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+        user_id: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[SessionInfo]:
+        """查询指定 bot 下的会话列表（只读）
+
+        复用 ``_resolve_ws_connection_for_binding`` + ``_create_session_client``
+        链路，调用 ``AsyncSessionClient.list_sessions`` 访问 engine
+        `GET /api/sessions`，按 ``agent_id`` 过滤。返回 adapter 层
+        ``SessionInfo`` 列表（``bot_id`` 由 router 层基于 binding 注入）。
+
+        Args:
+            agent_id: 路由后的 bot_id，作为 engine 侧 ``agent_id`` 过滤项
+            binding_info: 已解析的 binding 信息
+            context: 可选请求上下文（用于提取 tenant）
+            user_id: 可选，限定特定 user 的会话
+            limit: 分页大小（已由 router 收紧至 1-100）
+            offset: 分页偏移
+
+        Returns:
+            adapter 层 SessionInfo 列表（携带 title/user_id/agent_id/model/
+            created_at/updated_at/message_count；``bot_id`` 由 router 层基于
+            ``resolved_bot_id`` 注入，因为 adapter ``SessionInfo`` 无 bot_id 字段）
+
+        Raises:
+            BotServiceError: 上游 engine 返回 503/warning 或请求失败
+        """
+        try:
+            conn_info = await self._resolve_ws_connection_for_binding(
+                binding_info, context=context
+            )
+        except Exception as e:
+            logger.warning("Failed to resolve WS connection: %s", e)
+            raise BotServiceError(
+                f"Failed to resolve WS connection: {_safe_client_msg(e)}"
+            ) from e
+
+        session_client = self._create_session_client(
+            conn_info, binding_info.engine_type
+        )
+        try:
+            async with session_client:
+                return await session_client.list_sessions(
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    limit=limit,
+                    offset=offset,
+                    engine=binding_info.engine_type,
+                )
+        except BotServiceError:
+            raise
+        except aiohttp.ClientResponseError as e:
+            # engine 未实现 SESSION_LIST capability 时返回 503/warning，
+            # 不 silent：透传为 BotServiceError → router 映射 400
+            logger.warning("Failed to list sessions: %s", e)
+            raise BotServiceError(
+                f"Failed to list sessions: {_safe_client_msg(e)}"
+            ) from e
+        except Exception as e:
+            logger.warning("Failed to list sessions: %s", e)
+            raise BotServiceError(
+                f"Failed to list sessions: {_safe_client_msg(e)}"
+            ) from e
+
     # ── 私有方法 ─────────────────────────────────────────────────────────────
 
     def _adapter_for(self, engine_type: str | None) -> BotEngineAdapter | None:

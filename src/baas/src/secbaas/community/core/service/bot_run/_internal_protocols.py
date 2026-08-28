@@ -183,6 +183,40 @@ class BotService(Protocol):
         """
         ...
 
+    async def list_sessions(
+        self,
+        *,
+        agent_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+        user_id: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[SessionInfo]:
+        """查询指定 bot 下的会话列表（只读）
+
+        通过 AsyncSessionClient 调用 engine `GET /api/sessions`，按
+        ``agent_id``（即 route_bot_id）过滤，可选按 ``user_id`` 收窄。
+        不创建新会话。
+
+        Args:
+            agent_id: 路由后的 bot_id，作为 engine 侧 ``agent_id`` 过滤项
+            binding_info: 已解析的 binding 信息（用于创建底层连接）
+            context: 可选的请求上下文（用于提取 tenant）
+            user_id: 可选，限定特定 user 的会话；不传则列出该 bot 全部会话
+            limit: 分页大小，范围 1-100
+            offset: 分页偏移
+
+        Returns:
+            SessionInfo 列表（adapter 层 SessionInfo，由上层映射为
+            OpenAPI 响应；bot_id 由调用方注入）
+
+        Raises:
+            BotServiceError: 上游 engine 返回 503/warning（如未实现
+                SESSION_LIST capability）或请求失败
+        """
+        ...
+
 
 @runtime_checkable
 class MessageDispatcher(Protocol):

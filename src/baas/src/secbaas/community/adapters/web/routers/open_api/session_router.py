@@ -14,6 +14,9 @@ from secbaas.community.adapters.web.routers.open_api.dependencies import (
 )
 from secbaas.community.adapters.web.routers.open_api.model import (
     MessageItem,
+    SessionListItem,
+    SessionListResponse,
+    SessionListResponseData,
     SessionMessagesResponse,
     SessionMessagesResponseData,
     SessionQueryResponse,
@@ -49,6 +52,165 @@ def _check_app_type(api_key_record: APIKeyRecord) -> None:
                 "code": OpenAPICode.FORBIDDEN,
                 "message": get_code_message(OpenAPICode.FORBIDDEN),
             },
+        )
+
+
+@router.get(
+    "/sessions",
+    response_model=SessionListResponse,
+    summary="List sessions of a bot",
+    description="List sessions of a specific bot using a Bearer Token-authenticated API Key. "
+    "Only sessions the caller is permitted to access are returned.",
+    responses={
+        200: {"description": "Query successful"},
+        401: {"description": "Authentication failed"},
+        403: {"description": "Access denied"},
+        404: {"description": "Bot not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+@inject
+async def list_bot_sessions(
+    bot_id: str | None = Query(
+        default=None,
+        description="Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.",
+    ),
+    user_id: str | None = Query(
+        default=None,
+        description="Optional user ID to scope the listed sessions.",
+    ),
+    limit: int = Query(
+        default=20, ge=1, le=100, description="Page size, range 1-100. Default 20."
+    ),
+    offset: int = Query(default=0, ge=0, description="Pagination offset. Default 0."),
+    lifecycle_stage: str = Query(
+        default="online",
+        description="Bot lifecycle stage. Options: online, verify, draft, all",
+    ),
+    api_key_record: APIKeyRecord = Depends(validate_api_key),
+    context: BotChatContext = Depends(get_bot_chat_context),
+    bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
+) -> SessionListResponse:
+    """List sessions endpoint
+
+    Returns sessions for the resolved bot_id. `total` is the count of items in
+    the current page (the engine ``/api/sessions`` endpoint does not return a
+    global total); callers can infer ``has_more`` via ``len(items) == limit``.
+
+    Args:
+        bot_id: Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.
+        user_id: Optional user ID to scope the listed sessions.
+        limit: Page size, range 1-100. Default 20.
+        offset: Pagination offset. Default 0.
+        lifecycle_stage: Bot lifecycle stage. Options: online, verify, draft, all. Default: online
+        api_key_record: Record obtained from API Key validation
+        context: Request context (authentication, caller identity, etc.)
+        bot_runner: BotRunner instance
+
+    Returns:
+        SessionListResponse: Session list response
+    """
+    # Only app_type=bot can resolve bot_id from the API Key; other types must pass it explicitly
+    if bot_id:
+        resolved_bot_id = bot_id
+    elif api_key_record.app_type == "bot":
+        resolved_bot_id = resolve_bot_id_from_api_key(api_key_record)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": OpenAPICode.BUSINESS_ERROR,
+                "message": "bot_id is a required parameter",
+            },
+        )
+
+    _check_app_type(api_key_record)
+    if api_key_record.app_type != "bot":
+        resolved_bot_id = validate_policy(api_key_record, resolved_bot_id)
+
+    logger.info(
+        f"list_bot_sessions: bot_id={resolved_bot_id}, user_id={user_id}, "
+        f"limit={limit}, offset={offset}, lifecycle_stage={lifecycle_stage}, "
+        f"api_key_prefix={api_key_record.api_key_prefix}"
+    )
+
+    try:
+        sessions = await bot_runner.list_sessions(
+            bot_id=resolved_bot_id,
+            context=context,
+            metadata={"bot_options": {"lifecycle_stage": lifecycle_stage}},
+            user_id=user_id,
+            limit=limit,
+            offset=offset,
+        )
+
+        # Build response items. The adapter-level SessionInfo (from
+        # AsyncSessionClient) carries title/user_id/agent_id/model/
+        # created_at/updated_at/message_count; `bot_id` is injected from the
+        # resolved binding (adapter SessionInfo has no bot_id field).
+        items = [
+            SessionListItem(
+                session_id=getattr(s, "id", None) or getattr(s, "session_id", ""),
+                bot_id=resolved_bot_id,
+                title=getattr(s, "title", None),
+                user_id=getattr(s, "user_id", None),
+                agent_id=getattr(s, "agent_id", None),
+                model=getattr(s, "model", None),
+                created_at=getattr(s, "created_at", None),
+                updated_at=getattr(s, "updated_at", None),
+                message_count=getattr(s, "message_count", 0) or 0,
+            )
+            for s in sessions
+        ]
+
+        logger.info(
+            f"list_bot_sessions success: bot_id={resolved_bot_id}, "
+            f"returned={len(items)}, limit={limit}, offset={offset}"
+        )
+
+        return SessionListResponse(
+            code=0,
+            message="success",
+            data=SessionListResponseData(
+                items=items,
+                total=len(items),
+                limit=limit,
+                offset=offset,
+            ),
+        )
+
+    except BotBindingNotFoundError as e:
+        logger.warning(
+            f"list_bot_sessions binding not found: bot_id={resolved_bot_id}, error={e}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": 60001, "message": str(e)},
+        )
+    except BotNotFoundError as e:
+        logger.warning(
+            f"list_bot_sessions bot not found: bot_id={resolved_bot_id}, error={e}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": 60001, "message": str(e)},
+        )
+    except BotServiceError as e:
+        logger.error(
+            f"list_bot_sessions bot service error: bot_id={resolved_bot_id}, error={e}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": OpenAPICode.BUSINESS_ERROR, "message": str(e)},
+        )
+    except Exception as e:
+        logger.error(
+            f"list_bot_sessions unexpected error: bot_id={resolved_bot_id}, error={e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": 50001, "message": f"Internal server error: {str(e)}"},
         )
 
 

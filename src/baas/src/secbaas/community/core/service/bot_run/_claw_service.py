@@ -433,6 +433,57 @@ class ClawBotService(BotService):
         except Exception as e:
             raise BotServiceError(f"Failed to get session: {e}") from e
 
+    async def list_sessions(
+        self,
+        *,
+        agent_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+        user_id: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[SessionInfo]:
+        """查询指定 bot 下的会话列表（只读）
+
+        通过 AsyncSessionClient 调用 engine `GET /api/sessions`，按
+        ``agent_id`` 过滤。返回 adapter 层 SessionInfo 列表（``bot_id``
+        由 router 层基于 ``resolved_bot_id`` 注入）。
+
+        Args:
+            agent_id: 路由后的 bot_id，作为 engine 侧 ``agent_id`` 过滤项
+            binding_info: 已解析的 binding 信息
+            context: 可选请求上下文（ClawBotService 未使用）
+            user_id: 可选，限定特定 user 的会话
+            limit: 分页大小
+            offset: 分页偏移
+
+        Returns:
+            adapter 层 SessionInfo 列表
+
+        Raises:
+            BotServiceError: 请求失败
+        """
+        sandbox_id = binding_info.sandbox_id
+        if sandbox_id is None:
+            raise BotServiceError("ClawBotService requires sandbox_id in binding_info.")
+
+        session_client = self._create_session_client(sandbox_id)
+        try:
+            async with session_client:
+                return await session_client.list_sessions(
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    limit=limit,
+                    offset=offset,
+                )
+        except aiohttp.ClientResponseError as e:
+            # engine 未实现 SESSION_LIST capability 时返回 503/warning
+            raise BotServiceError(f"Failed to list sessions: {e}") from e
+        except BotServiceError:
+            raise
+        except Exception as e:
+            raise BotServiceError(f"Failed to list sessions: {e}") from e
+
     # ── 私有方法 ─────────────────────────────────────────────────────────────
 
     def _adapter_for(self, engine_type: str | None) -> BotEngineAdapter | None:

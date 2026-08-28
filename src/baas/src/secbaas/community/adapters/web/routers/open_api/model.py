@@ -209,3 +209,52 @@ class SessionMessagesResponse(ApiResponse[SessionMessagesResponseData]):
     data: SessionMessagesResponseData | None = Field(
         default=None, description="Session message data"
     )
+
+
+class SessionListItem(BaseModel):
+    """Session list item.
+
+    Only exposes fields common to all engines' `list()` returns and the
+    response contract; engine-specific fields (runtime, ext_info, etc.) are
+    not surfaced. `bot_id` is filled in by the service/runner layer from the
+    resolved binding (the adapter `SessionInfo` does not carry it).
+    """
+
+    session_id: str = Field(..., description="Session ID")
+    bot_id: str = Field(..., description="Bot ID (resolved binding bot_id)")
+    title: str | None = Field(default=None, description="Session title")
+    user_id: str | None = Field(default=None, description="User ID")
+    agent_id: str | None = Field(default=None, description="Agent ID")
+    model: str | None = Field(default=None, description="Model name")
+    created_at: str | None = Field(
+        default=None, description="Session creation time (ISO 8601)"
+    )
+    updated_at: str | None = Field(
+        default=None, description="Session last update time (ISO 8601)"
+    )
+    message_count: int = Field(default=0, description="Message count in session")
+
+
+class SessionListResponseData(BaseModel):
+    """Session list response data.
+
+    `total` is the count of items in the current page (the engine
+    `/api/sessions` endpoint does not return a global total), i.e.
+    `total == len(items)`. Callers can infer `has_more` via
+    `len(items) == limit`.
+    """
+
+    items: list[SessionListItem] = Field(
+        default_factory=list, description="Session list for the current page"
+    )
+    total: int = Field(default=0, description="Item count in the current page")
+    limit: int = Field(default=20, description="Page size used for this query")
+    offset: int = Field(default=0, description="Offset used for this query")
+
+
+class SessionListResponse(ApiResponse[SessionListResponseData]):
+    """Session list standard response"""
+
+    data: SessionListResponseData | None = Field(
+        default=None, description="Session list data"
+    )
