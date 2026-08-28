@@ -9,6 +9,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetRuntimeReconcileError,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    EngineRuntimeProjection,
     ProjectionScope,
     ResolvedCapabilityPlan,
 )
@@ -20,7 +21,7 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 
-class WholeArtifactRuntimeProjection:
+class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
     """Deliver the Bot's complete capability state in a single runtime call.
 
     The contract teclaw v4 obeys. Every ``DeviceSync`` entry point on such an

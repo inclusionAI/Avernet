@@ -9,6 +9,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetRuntimeReconcileError,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    EngineRuntimeProjection,
     ProjectionScope,
     ResolvedCapabilityPlan,
 )
@@ -33,7 +34,7 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 
-class PerDomainRuntimeProjection:
+class PerDomainRuntimeProjection(EngineRuntimeProjection):
     """Write each half of the projection to its own runtime endpoint.
 
     The contract every filesystem engine obeys: Skills reach the device as a

@@ -4,15 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
+from agentclaw.community.core.skill_center.runtime_resolver import (
+    RegisteredSkillAsset,
+    RuntimeProjection,
+)
+from agentclaw.community.core.skill_center.services.skill_set_service import (
+    SkillSetService,
+)
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
-
-
-if TYPE_CHECKING:
-    from agentclaw.community.core.skill_center.runtime_resolver import (
-        RuntimeProjection,
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,11 +34,9 @@ class ResolvedCapabilityPlan:
     #: The Bot this plan is for, and the owner whose desired state it reads.
     bot_id: str
     owner_id: str
-    #: ``SkillSetService`` for this Bot. Typed loosely on purpose: importing
-    #: it here would close a cycle (``skill_center.services`` already imports
-    #: this module), and the contract needs no more than "the thing the
-    #: projection calls".
-    service: Any
+    #: The Bot's ``SkillSetService`` — the runtime boundary an implementation
+    #: writes through.
+    service: SkillSetService
     #: The ``ac_bots`` row. Carries ``env`` / ``entity_id`` / ``active_engine``
     #: that a filesystem-layout decision needs.
     bot: dict
@@ -45,7 +44,7 @@ class ResolvedCapabilityPlan:
     #: applies is decided from this and nothing else.
     engine: str
     #: The deduplicated Skill/MCP/CLI snapshot to converge the runtime on.
-    projection: "RuntimeProjection"
+    projection: RuntimeProjection
     #: Effective Default CLI facts, as the authorization service holds them.
     effective_cli_items: list[dict]
     #: Per-MCP execution identity, resolved during plan resolution because it
@@ -74,7 +73,7 @@ class EngineRuntimeProjection(Protocol):
     def validate_plan(
         self,
         *,
-        skill_assets: Sequence[Any],
+        skill_assets: Sequence[RegisteredSkillAsset],
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None:
         """Refuse desired state this runtime has no contract for.

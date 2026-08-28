@@ -2852,6 +2852,34 @@ async def test_runtime_delivery_never_runs_on_the_event_loop(drive):
 
 
 
+def test_engine_projections_declare_the_protocol_as_a_base():
+    """Both implementations extend ``EngineRuntimeProjection`` nominally.
+
+    ``runtime_checkable`` would accept them structurally, so this is not about
+    making them work — it is about making the contract they answer to visible
+    at the class statement, the way ``BaasDeviceSyncService(DeviceSync)`` and
+    ``TeclawDeviceSyncService(DeviceSync)`` already do. An implementation that
+    dropped the base would still pass every behavioural test here while
+    hiding which seam it belongs to.
+    """
+    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+        EngineRuntimeProjection,
+    )
+    from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
+        PerDomainRuntimeProjection,
+    )
+    from agentclaw.community.core.skill_center.services.runtime_projections.whole_artifact import (
+        WholeArtifactRuntimeProjection,
+    )
+
+    for impl in (PerDomainRuntimeProjection, WholeArtifactRuntimeProjection):
+        assert EngineRuntimeProjection in impl.__mro__, (
+            f"{impl.__name__} must declare EngineRuntimeProjection as a base, "
+            "not merely satisfy it structurally"
+        )
+
+
+
 def test_registry_defaults_unknown_engines_to_the_per_domain_projection():
     """An unregistered engine gets the per-domain contract.
 
