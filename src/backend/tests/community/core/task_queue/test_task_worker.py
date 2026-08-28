@@ -57,7 +57,7 @@ class InMemorySqliteDB:
 
 
 class _World:
-    def __init__(self, config: TaskQueueWorkerConfig, queue_config: TaskQueueConfig = None):
+    def __init__(self, config: TaskQueueWorkerConfig):
         engine = create_engine(
             "sqlite:///:memory:",
             connect_args={"check_same_thread": False},
@@ -72,7 +72,7 @@ class _World:
         # The owning app, shared by both sides exactly as DI shares it: the
         # enqueue path stamps it and the worker claims with it, so a mismatch
         # here would show up as a worker that claims nothing.
-        self.queue_config = queue_config or TaskQueueConfig(app=APP)
+        self.queue_config = TaskQueueConfig(app=APP)
         # One latch, shared by the enqueue path and the worker — same wiring
         # the DI module provides in production.
         self.wakeup = WorkerWakeup()
