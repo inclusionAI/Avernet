@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, replace
 from typing import Any, Optional
 
@@ -33,6 +34,23 @@ CRON_READ_TIMEOUT_SECONDS = 10.0
 RUNTIME_DEVICE_QUERY_TIMEOUT_SECONDS = 10.0
 RUNTIME_DEVICE_QUERY_CONCURRENCY = 8
 RUNTIME_QUERY_PREPARE_CONCURRENCY = 8
+
+#: How long a binding's "sandbox destroyed" verdict suppresses its queries.
+#: ARCA/BaaS instances are reclaimed while the binding row stays ACTIVE, and a
+#: listing fan-out would otherwise replay a guaranteed 404 per destroyed
+#: instance on every request (pre 2026-08-28: 6 dead sandboxes of one bot per
+#: request). The window is short so a recreated sandbox becomes visible again
+#: within roughly one console polling cycle.
+SANDBOX_DESTROYED_TTL_SECONDS = 60.0
+
+#: Substrings that identify the destroyed-sandbox verdict in adapter error
+#: payloads (both spellings observed in pre logs; matched case-insensitively).
+_SANDBOX_DESTROYED_MARKERS = ("沙箱已销毁", "sandbox destroyed")
+
+
+def _mentions_destroyed_sandbox(message: str) -> bool:
+    lowered = message.lower()
+    return any(marker in lowered for marker in _SANDBOX_DESTROYED_MARKERS)
 
 
 @dataclass(frozen=True)
@@ -307,6 +325,28 @@ class CronRuntimeTargetMixin:
         async with self._runtime_query_prepare_semaphore:
             return await asyncio.to_thread(self._prepare_runtime_query, target)
 
+    # ── 沙箱已销毁负缓存 ──────────────────────────────────────────
+
+    def _sandbox_down_deadline(self, binding_id: int) -> float | None:
+        """Return the live skip-deadline for a binding, else ``None``.
+
+        Expired entries are dropped here (lazy TTL) — the map only ever
+        holds bindings that failed recently, so it stays tiny.
+        """
+        deadline = self._sandbox_down_until.get(binding_id)
+        if deadline is None:
+            return None
+        if deadline <= time.monotonic():
+            del self._sandbox_down_until[binding_id]
+            return None
+        return deadline
+
+    def _mark_sandbox_down(self, binding_id: int) -> None:
+        """Record a destroyed-sandbox verdict for a binding."""
+        self._sandbox_down_until[binding_id] = (
+            time.monotonic() + SANDBOX_DESTROYED_TTL_SECONDS
+        )
+
     async def _fetch_runtime_target_crons(
         self,
         target: CronRuntimeTarget,
@@ -314,6 +354,26 @@ class CronRuntimeTargetMixin:
         path: str = "/api/cron",
     ) -> dict:
         """读取单个运行态目标的 cron 列表或运行中任务。"""
+        deadline = self._sandbox_down_deadline(target.binding_id)
+        if deadline is not None:
+            logger.info(
+                "[_fetch_runtime_target_crons] Skip bot=%s stage=%s "
+                "binding=%s: sandbox-destroyed verdict cached (%.0fs left)",
+                target.bot_id,
+                target.runtime_stage,
+                target.binding_id,
+                deadline - time.monotonic(),
+            )
+            return {
+                "success": False,
+                "reason": "sandbox_destroyed_cached",
+                "error": (
+                    f"skipped: binding {target.binding_id} failed with a "
+                    f"sandbox-destroyed verdict within the last "
+                    f"{SANDBOX_DESTROYED_TTL_SECONDS:g}s"
+                ),
+            }
+
         ctx, failure = await self._prepare_runtime_query_async(target)
         if failure is not None:
             return failure
@@ -345,13 +405,20 @@ class CronRuntimeTargetMixin:
                 target.runtime_stage,
                 e,
             )
+            if _mentions_destroyed_sandbox(str(e)):
+                self._mark_sandbox_down(target.binding_id)
             return {"success": False, "reason": "cron_api_failed", "error": str(e)}
 
         if not result.get("success", True):
+            error_text = str(
+                result.get("message") or result.get("error") or "cron api failed"
+            )
+            if _mentions_destroyed_sandbox(error_text):
+                self._mark_sandbox_down(target.binding_id)
             return {
                 "success": False,
                 "reason": "cron_api_failed",
-                "error": result.get("message") or result.get("error") or "cron api failed",
+                "error": error_text,
             }
 
         return result

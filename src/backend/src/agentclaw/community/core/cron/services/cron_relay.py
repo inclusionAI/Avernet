@@ -91,6 +91,10 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         self._runtime_query_prepare_semaphore = asyncio.Semaphore(
             RUNTIME_QUERY_PREPARE_CONCURRENCY
         )
+        # 沙箱已销毁负缓存：binding 级"实例已被回收"判决，TTL 内跳过该
+        # binding 的查询与转发（方法定义在 CronRuntimeTargetMixin）。
+        # 实例被重建后最多一个 TTL 窗口内列表仍报该 binding 失败。
+        self._sandbox_down_until: dict[int, float] = {}
 
     async def list_all_crons(
         self,
