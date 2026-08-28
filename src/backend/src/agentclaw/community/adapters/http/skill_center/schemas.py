@@ -148,7 +148,10 @@ class AddSkillsToSetRequest(BaseModel):
 # AddSkillsRequest is the skillsets router version (same shape, kept for clarity)
 class AddSkillsRequest(BaseModel):
     skill_ids: List[str] = Field(..., description="List of skill IDs to add")
-    user_id: Optional[str] = Field(None, description="User ID for permission check")
+    user_id: Optional[str] = Field(
+        None,
+        description="Target Bot owner ID for legacy routing and permission checks",
+    )
     bot_id: Optional[str] = Field(None, description="Bot ID (optional, default: default)")
 
 

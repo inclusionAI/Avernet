@@ -499,6 +499,7 @@ async def get_skill_set(
     ),
 ) -> SkillSetDetailResponse:
     """Get a skill set by ID."""
+    owner_id_hint = user_id or entity_id
     # Get effective path parameters
     (
         effective_entity_id,
@@ -510,7 +511,7 @@ async def get_skill_set(
     ) = _get_skill_set_path_params(
         ctx,
         set_id=skill_set_id,
-        entity_id=entity_id,
+        entity_id=owner_id_hint,
         entity_type=entity_type,
         bot_id=bot_id,
         engine_type=engine_type,
@@ -550,6 +551,7 @@ async def update_skill_set(
     ),
 ) -> SkillSetDetailResponse:
     """Update a skill set."""
+    owner_id_hint = request.user_id or entity_id
     # Preserve omission so the legacy resolver can recover a non-default Bot.
     bot_id_hint = bot_id or request.bot_id
     (
@@ -562,7 +564,7 @@ async def update_skill_set(
     ) = _get_skill_set_path_params(
         ctx,
         set_id=skill_set_id,
-        entity_id=entity_id,
+        entity_id=owner_id_hint,
         entity_type=entity_type,
         bot_id=bot_id_hint,
         engine_type=engine_type,
@@ -609,6 +611,7 @@ async def delete_skill_set(
     ),
 ) -> MessageResponse:
     """Delete a skill set."""
+    owner_id_hint = user_id or entity_id
     (
         effective_entity_id,
         effective_bot_id,
@@ -619,7 +622,7 @@ async def delete_skill_set(
     ) = _get_skill_set_path_params(
         ctx,
         set_id=skill_set_id,
-        entity_id=entity_id,
+        entity_id=owner_id_hint,
         entity_type=entity_type,
         bot_id=bot_id,
         engine_type=engine_type,
@@ -658,6 +661,7 @@ async def get_skill_set_skills(
     ),
 ) -> SkillSetSkillsResponse:
     """Get all skills in a skill set."""
+    owner_id_hint = user_id or entity_id
     # Get effective path parameters
     (
         effective_entity_id,
@@ -669,7 +673,7 @@ async def get_skill_set_skills(
     ) = _get_skill_set_path_params(
         ctx,
         set_id=skill_set_id,
-        entity_id=entity_id,
+        entity_id=owner_id_hint,
         entity_type=entity_type,
         bot_id=bot_id,
         engine_type=engine_type,
@@ -832,6 +836,7 @@ async def remove_skill_from_set(
     ),
 ) -> MessageResponse:
     """Remove a skill from a skill set."""
+    owner_id_hint = user_id or entity_id
     (
         effective_entity_id,
         effective_bot_id,
@@ -842,7 +847,7 @@ async def remove_skill_from_set(
     ) = _get_skill_set_path_params(
         ctx,
         set_id=skill_set_id,
-        entity_id=entity_id,
+        entity_id=owner_id_hint,
         entity_type=entity_type,
         bot_id=bot_id,
         engine_type=engine_type,
@@ -1767,6 +1772,7 @@ async def get_skill_set_mcps(
     ),
 ) -> SkillSetMCPsResponse:
     """Get all MCP servers in a skill set."""
+    owner_id_hint = user_id or entity_id
     # Get effective path parameters
     (
         effective_entity_id,
@@ -1778,7 +1784,7 @@ async def get_skill_set_mcps(
     ) = _get_skill_set_path_params(
         ctx,
         set_id=skill_set_id,
-        entity_id=entity_id,
+        entity_id=owner_id_hint,
         entity_type=entity_type,
         bot_id=bot_id,
         engine_type=engine_type,
@@ -1789,7 +1795,7 @@ async def get_skill_set_mcps(
     legacy_set = control_plane.get_set(
         bot_id=effective_bot_id,
         owner_id=effective_entity_id,
-        user_id=_legacy_actor(ctx, entity_id),
+        user_id=_legacy_actor(ctx, owner_id_hint),
         set_id=skill_set_id,
     )
     if legacy_set.get("is_default"):
@@ -1804,7 +1810,7 @@ async def get_skill_set_mcps(
         mcps = control_plane.list_mcps(
             bot_id=effective_bot_id,
             owner_id=effective_entity_id,
-            user_id=_legacy_actor(ctx, entity_id),
+            user_id=_legacy_actor(ctx, owner_id_hint),
             set_id=skill_set_id,
         )
     return SkillSetMCPsResponse(
