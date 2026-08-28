@@ -120,7 +120,7 @@ def test_graph_version_rejects_stale_writer(db):
 
 
 def test_second_graph_service_hydrates_from_shared_store(db):
-    from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+    from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
     task_id = "T-CROSS-INSTANCE"
     TaskInfoRepository(db).insert(

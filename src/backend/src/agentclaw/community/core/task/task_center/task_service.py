@@ -176,9 +176,9 @@ class TaskService:
                     task_id, task_info.owner_bot_id,
                     task_info.task_spec.metadata.title, graph.run_id)
         task_type = request.execution_config.get("task_type")
-        if task_type == TaskType.WORKFLOW:
+        if task_type == TaskType.STATIC_SINGLE_WORKFLOW:
             return await self._run_workflow(task_id, request, task_info, graph.run_id)
-        if task_type == TaskType.YAML:
+        if task_type == TaskType.STATIC_GROUP_WORKFLOW:
             return await self._run_yaml(task_id, request, task_info, graph.run_id)
         # dynamic (default): fire-and-forget on_execute
         if self._harness is not None:

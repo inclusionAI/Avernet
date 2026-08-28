@@ -109,7 +109,7 @@ def _execute_body(writer_id: str, editor_id: str) -> dict:
         # 纯 bot_id(预发真 BCS 解析身份,无 singlebox :user_id 透传)。
         "owner_bot_id": writer_id,
         "execution_config": {
-            "task_type": "yaml",
+            "task_type": "STATIC-GROUP-WORKFLOW",
             "yaml": WRITING_QC_YAML,
             "participant_bot_ids": [editor_id],
             "participant_bindings": {

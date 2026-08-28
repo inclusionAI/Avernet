@@ -31,7 +31,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
     TaskGraphPatch,
 )
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 
 # ===== fixtures / helpers =====

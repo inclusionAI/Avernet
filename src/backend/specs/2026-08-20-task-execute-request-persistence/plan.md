@@ -334,7 +334,7 @@ from agentclaw.community.core.task.domain.requests import (
     RequestTaskSpec, TaskInfoRequest,
 )
 from agentclaw.community.core.task.task_center.task_service import TaskService
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 
 class _SqliteDB:
@@ -778,7 +778,7 @@ def _task_info_request(task_id: str = "t1", max_depth: int = 3):
 ```python
 def _build_facade(svc=None, *, decomposer=None, discover=None, runner=None,
                   harness=None, verify=None, bbs=None, task_id_provider=None) -> tuple:
-    from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+    from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
     svc = svc or TaskGraphService()
     factory = None
     if decomposer is not None:

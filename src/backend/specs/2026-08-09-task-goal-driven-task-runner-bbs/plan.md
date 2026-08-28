@@ -38,7 +38,7 @@
 | 文件 | 责任 | 动作 |
 |---|---|---|
 | `core/task/domain/models.py` | `TaskSummary` 加 `bbs_mode` | Modify |
-| `core/task/task_graph/task_graph_service.py` | SSOT 加法:`claim_bbs_owner`/`attach_bbs_node`/`list_task_summaries` 填 `bbs_mode`/`_execution_config` 加 `BBS_MAX_DEPTH` 默认 | Modify |
+| `core/task/task_context/task_graph_service.py` | SSOT 加法:`claim_bbs_owner`/`attach_bbs_node`/`list_task_summaries` 填 `bbs_mode`/`_execution_config` 加 `BBS_MAX_DEPTH` 默认 | Modify |
 | `core/task/task_center/task_service.py` | facade 加法:`claim_bbs_task`/`attach_bbs_node`/`report_bbs_result` | Modify |
 | `core/task/task_center/engine.py` | 加法:`on_bbs_report`(collector-free 翻态+收口+清 owner);`_prepare_into` 跳过 `run_mode=="bbs"` | Modify |
 | `core/task/task_harness/harness.py` | `_poll_once` RUNNING 扫:`run_mode=="bbs"` SLA 到期走"清 `bbs_owner`+标终态",不重派 | Modify |
@@ -56,7 +56,7 @@
 
 **Files:**
 - Modify: `core/task/domain/models.py:145-154`(`TaskSummary`)
-- Modify: `core/task/task_graph/task_graph_service.py:365-380`(`list_task_summaries`)
+- Modify: `core/task/task_context/task_graph_service.py:365-380`(`list_task_summaries`)
 - Modify: `adapters/http/task/schemas.py:107-114`(`TaskSummaryDTO`)
 - Modify: `adapters/http/task/translator.py`(TaskSummary→DTO 映射,grep `TaskSummaryDTO(`)
 - Test: `tests/community/core/task/test_bbs_summary_mode.py`
@@ -69,7 +69,7 @@
 
 ```python
 # tests/community/core/task/test_bbs_summary_mode.py
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.domain.models import TaskInfo, TaskSpec, Metadata, Goal, AcceptanceCriteria, Context
 
 def _task_info(task_id="t1"):
@@ -128,7 +128,7 @@ Expected: PASS
 
 ```bash
 git add src/backend/src/agentclaw/community/core/task/domain/models.py \
-  src/backend/src/agentclaw/community/core/task/task_graph/task_graph_service.py \
+  src/backend/src/agentclaw/community/core/task/task_context/task_graph_service.py \
   src/backend/src/agentclaw/community/adapters/http/task/schemas.py \
   src/backend/src/agentclaw/community/adapters/http/task/translator.py \
   tests/community/core/task/test_bbs_summary_mode.py
@@ -140,7 +140,7 @@ git commit -m "feat(task): expose bbs_mode on TaskSummary/DTO for relay discover
 ### Task 2: `BBS_MAX_DEPTH` 默认接入 `_execution_config`
 
 **Files:**
-- Modify: `core/task/task_graph/task_graph_service.py:53-54`(模块默认常量)、`401-409`(`_execution_config`)
+- Modify: `core/task/task_context/task_graph_service.py:53-54`(模块默认常量)、`401-409`(`_execution_config`)
 - Test: `tests/community/core/task/test_bbs_config.py`
 
 **Interfaces:**
@@ -151,7 +151,7 @@ git commit -m "feat(task): expose bbs_mode on TaskSummary/DTO for relay discover
 
 ```python
 # tests/community/core/task/test_bbs_config.py
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.domain.models import TaskInfo, TaskSpec, Metadata, Goal, AcceptanceCriteria, Context
 
 def _ti(tid="c1"):
@@ -199,7 +199,7 @@ Expected: PASS
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/backend/src/agentclaw/community/core/task/task_graph/task_graph_service.py tests/community/core/task/test_bbs_config.py
+git add src/backend/src/agentclaw/community/core/task/task_context/task_graph_service.py tests/community/core/task/test_bbs_config.py
 git commit -m "feat(task): default BBS_MAX_DEPTH in _execution_config"
 ```
 
@@ -208,7 +208,7 @@ git commit -m "feat(task): default BBS_MAX_DEPTH in _execution_config"
 ### Task 3: `TaskGraphService.claim_bbs_owner` + `TaskService.claim_bbs_task` + Protocol
 
 **Files:**
-- Modify: `core/task/task_graph/task_graph_service.py`(加 `claim_bbs_owner`)
+- Modify: `core/task/task_context/task_graph_service.py`(加 `claim_bbs_owner`)
 - Modify: `core/task/task_center/task_service.py:26-86`(加 `claim_bbs_task`)
 - Modify: `core/task/openapi/v1/task_service.py`(`TaskServiceProtocol` 加签名)
 - Test: `tests/community/core/task/test_bbs_claim.py`
@@ -222,7 +222,7 @@ git commit -m "feat(task): default BBS_MAX_DEPTH in _execution_config"
 ```python
 # tests/community/core/task/test_bbs_claim.py
 import threading
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.domain.models import TaskInfo, TaskSpec, Metadata, Goal, AcceptanceCriteria, Context, TaskGraphPatch
 from agentclaw.community.core.task.domain.errors import TaskStateError
 
@@ -311,7 +311,7 @@ Expected: PASS
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/backend/src/agentclaw/community/core/task/task_graph/task_graph_service.py \
+git add src/backend/src/agentclaw/community/core/task/task_context/task_graph_service.py \
   src/backend/src/agentclaw/community/core/task/task_center/task_service.py \
   src/backend/src/agentclaw/community/core/task/openapi/v1/task_service.py \
   tests/community/core/task/test_bbs_claim.py
@@ -406,7 +406,7 @@ git commit -m "feat(task): POST /api/v1/collaboration/tasks/bbs/claim route (tas
 ### Task 5: `TaskGraphService.attach_bbs_node` + `TaskService.attach_bbs_node` + Protocol
 
 **Files:**
-- Modify: `core/task/task_graph/task_graph_service.py`(加 `attach_bbs_node`)
+- Modify: `core/task/task_context/task_graph_service.py`(加 `attach_bbs_node`)
 - Modify: `core/task/task_center/task_service.py`(加 `attach_bbs_node`)
 - Modify: `core/task/openapi/v1/task_service.py`(Protocol 加签名)
 - Test: `tests/community/core/task/test_bbs_attach.py`
@@ -421,7 +421,7 @@ git commit -m "feat(task): POST /api/v1/collaboration/tasks/bbs/claim route (tas
 # tests/community/core/task/test_bbs_attach.py
 import uuid
 import pytest
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.domain.models import (TaskInfo, TaskSpec, Metadata, Goal, AcceptanceCriteria, Context,
     TaskGraphPatch, Status)
 from agentclaw.community.core.task.domain.errors import TaskStateError
@@ -533,7 +533,7 @@ Expected: PASS
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/backend/src/agentclaw/community/core/task/{task_graph/task_graph_service.py,task_center/task_service.py,api/task_service.py} tests/community/core/task/test_bbs_attach.py
+git add src/backend/src/agentclaw/community/core/task/{task_context/task_graph_service.py,task_center/task_service.py,api/task_service.py} tests/community/core/task/test_bbs_attach.py
 git commit -m "feat(task): attach_bbs_node (scoped bbs child + start, depth gate)"
 ```
 
@@ -638,7 +638,7 @@ git commit -m "feat(task): POST /api/v1/collaboration/tasks/bbs/attach route (sc
 ```python
 # tests/community/core/task/test_bbs_report.py
 import pytest
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.domain.models import (TaskInfo, TaskSpec, Metadata, Goal, AcceptanceCriteria, Context,
     TaskGraphPatch, TaskNodePatch, Status, AcceptanceResult, AcceptanceVerdict)
@@ -853,7 +853,7 @@ git commit -m "feat(task): POST /api/v1/collaboration/tasks/bbs/result route (co
 ```python
 # tests/community/core/task/test_bbs_drain_guard.py
 import pytest
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.domain.models import (TaskInfo, TaskSpec, Metadata, Goal, AcceptanceCriteria, Context,
     TaskGraphPatch, TaskNode, RuntimeInfo, Status)

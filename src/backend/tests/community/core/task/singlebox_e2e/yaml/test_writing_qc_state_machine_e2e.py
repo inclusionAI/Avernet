@@ -192,7 +192,7 @@ def _execute_body(writer_id: str, editor_id: str) -> dict:
         # owner/driver = writer;participant_bot_ids 只列 editor(writer 已在 owner 槽)。
         "owner_bot_id": writer,
         "execution_config": {
-            "task_type": "yaml",
+            "task_type": "STATIC-GROUP-WORKFLOW",
             "yaml": WRITING_QC_YAML,
             "participant_bot_ids": [editor],
             # 逻辑角色→产品 bot 绑定(创建群接口 participant_bindings 入参)。
