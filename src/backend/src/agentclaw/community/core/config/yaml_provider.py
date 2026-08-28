@@ -117,13 +117,7 @@ def _load_yaml_configs(
     *,
     strict: bool = True,
 ) -> dict[str, Any]:
-    """Merge application.yaml with the caller-selected overlay, expanding env vars.
-
-    Three-layer merge: base → community overlay → corp overlay (optional).
-    The corp overlay (``{overlay_name}-corp.yaml``) injects real credentials
-    and values that should NOT live in community source (ocb-public). It is
-    absent in community-only / test builds and simply skipped.
-    """
+    """Merge application.yaml with the caller-selected overlay, expanding env vars."""
     # B11: configs live in the community subtree (agentclaw/community/configs). In a
     # deploy the assembled runtime `configs/` (cwd) holds them; in the monorepo they
     # resolve from the subtree. Community never searches corp/configs — the test
@@ -133,14 +127,11 @@ def _load_yaml_configs(
         Path(__file__).resolve().parents[2] / "configs",  # agentclaw/community/configs
     ]
 
-    # Corp overlay search dirs (local monorepo + deployed configs/).
-    # Filename: application-singlebox-corp.yaml (derived from overlay name).
-    stem = overlay_name.removesuffix(".yaml")
-    corp_overlay_name = f"{stem}-corp.yaml"
-    corp_config_dirs = [
-        Path.cwd() / "configs",
-        Path(__file__).resolve().parents[8] / "src" / "backend" / "src" / "agentclaw" / "corp" / "configs",
-    ]
+    # B11: A corp overlay (``{stem}-corp.yaml``) injects real credentials that must
+    # not live in community source.  When present alongside the config pair it is
+    # deep-merged on top, producing a three-layer stack:
+    #   application.yaml  ⊕  application-<profile>.yaml  ⊕  application-<profile>-corp.yaml
+    corp_overlay_name = overlay_name.removesuffix(".yaml") + "-corp.yaml"
 
     for config_dir in config_dirs:
         base_path = config_dir / "application.yaml"
@@ -154,15 +145,13 @@ def _load_yaml_configs(
         logger.info("YamlConfigProvider loaded overlay: %s", overlay_path)
         merged = _deep_merge(base_config, overlay_config)
 
-        # Third layer: corp overlay (optional, absent in community-only builds).
-        for cdir in corp_config_dirs:
-            corp_path = cdir / corp_overlay_name
-            if corp_path.exists():
-                with open(corp_path, "r", encoding="utf-8") as f:
-                    corp_config = yaml.safe_load(f) or {}
-                logger.info("YamlConfigProvider loaded corp overlay: %s", corp_path)
-                merged = _deep_merge(merged, corp_config)
-                break
+        # Corporation overlay (optional layer on top of base ⊕ community overlay).
+        corp_overlay_path = config_dir / corp_overlay_name
+        if corp_overlay_path.exists():
+            with open(corp_overlay_path, "r", encoding="utf-8") as file:
+                corp_config = yaml.safe_load(file) or {}
+            logger.info("YamlConfigProvider loaded corp overlay: %s", corp_overlay_path)
+            merged = _deep_merge(merged, corp_config)
 
         # Expand after the merge so an overlay can introduce a placeholder the
         # base does not carry, and before AppConfig so every consumer — typed
