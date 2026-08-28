@@ -528,6 +528,7 @@ class TaskExecutor:
             bool(req.participant_bindings),
         )
         try:
+            logger.info("[task][task_executor] form_coop_group create_group request=%s", req)
             res = await self._bcs.create_group(req)
         except Exception:
             logger.exception(
