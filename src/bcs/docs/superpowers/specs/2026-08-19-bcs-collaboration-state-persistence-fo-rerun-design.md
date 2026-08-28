@@ -837,7 +837,10 @@ rerun_of
 created_by
 ```
 
-首次执行保存 `root_run_id=run_id`、`rerun_of=NULL`。重跑保存 `rerun_of=source_run_id`，并令 `root_run_id=source.root_run_id`；若 legacy source 尚无 root，则退化为 `source_run_id`。因此连续 rerun 同时保留直接父节点和整条执行族的稳定根。
+首次执行保存 `root_run_id=run_id`、`rerun_of=NULL`。重跑保存 `rerun_of=source_run_id`，并令
+`root_run_id=source.root_run_id`；若 legacy source 尚无 root，则在应用语义上把该 `NULL` 视为
+`source.run_id`，新子 Run 直接保存这个有效 root。连续 rerun 因而仍能保留直接父节点和稳定根，且不需要对
+历史 Run 做全表回填。
 
 ### 12.3 Rerun Opening Message
 
@@ -1172,10 +1175,10 @@ request_id
 
 部署顺序固定为：
 
-1. 先应用 additive schema migration；新增列使用兼容 default/nullable，新增唯一约束在必要回填完成后启用；
+1. 先应用 additive schema migration；新增列使用兼容 default/nullable，并启用 `(env, rerun_of)` 唯一约束；
 2. 停止新流量进入 pre-FO 实例，等待其 Manager-Worker active task 和 State Machine active Run drain；无法 drain 的执行在维护窗口内确定性终止并对用户可见；
 3. 下线全部 pre-FO 实例，确认不存在只存于旧进程内存的 active task；
-4. 回填历史 Run lineage，并校验数据库中不存在仍 active 的 pre-FO Task/Run；
+4. 不回填历史 Run lineage；校验数据库中不存在仍 active 的 pre-FO Task/Run；
 5. 启动 FO 版本并启用数据库 source of truth 和主动 reconciler。
 
 不需要为 pre-FO 旧实例实现双写或 lease 兼容层。这个限制只针对首次引入 FO 的版本边界；后续版本只要继续遵守相同数据库 phase、CAS、lease 和 checkpoint contract，就可以按常规多实例滚动发布。
@@ -1186,9 +1189,14 @@ request_id
 dispatch 或 finalization checkpoint。切换前仍为 Pending/Running/RetryScheduled 的 Run 必须先 drain，或在维护窗口
 内按现有运维规则确定性终止；切换校验发现此类记录时不得启用主动 FO。
 
-历史数据只做以下最小回填：
+历史数据不对 `bcs_state_machine_runs` 执行全表 lineage 回填，只做以下兼容处理：
 
-- 现有 Run 写入 `root_run_id=run_id`、`rerun_of=NULL`；
+- 现有 Run 的 `root_run_id=NULL` 保持不变，应用语义按 `COALESCE(root_run_id, run_id)` 解释；新增
+  `rerun_of` 列的 NULL default 已自然表示“不是 rerun”，不需要 UPDATE；
+- legacy Run 第一次被 rerun 时，新子 Run 使用 source 的有效 root，即
+  `source.root_run_id.unwrap_or(source.run_id)`；后续子 Run 均保存非空 root；
+- 后续若增加数据库 lineage 查询，查询根 Run 时必须同时覆盖 `run_id=root` 和 `root_run_id=root`，不能假设
+  legacy 根 Run 已物理回填；
 - 历史 ServiceInvocation Run 只有在能从审计和 Session 历史无歧义确定 activation 时才回填
   `session_activation_count`，否则保留 legacy NULL；
 - 新增 runtime phase、lease、finalization 和 checkpoint 字段保持 NULL/default；只有 FO 版本新创建或推进的执行

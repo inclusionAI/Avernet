@@ -1362,10 +1362,6 @@ async fn add_sqlite_state_machine_rerun_lineage_schema(db: &dyn DbPlugin) -> DbR
         }
     }
     db.execute(DbStatement::new(
-        "UPDATE bcs_state_machine_runs SET root_run_id = run_id WHERE root_run_id IS NULL",
-    ))
-    .await?;
-    db.execute(DbStatement::new(
         "CREATE UNIQUE INDEX IF NOT EXISTS uk_sm_run_rerun_of \
          ON bcs_state_machine_runs(env, rerun_of)",
     ))
@@ -1992,7 +1988,7 @@ assert_eq!(report.pending_versions[10].version, 11);
     }
 
     #[tokio::test]
-    async fn sqlite_rerun_lineage_migration_repairs_legacy_run_table() -> DbResult<()> {
+    async fn sqlite_rerun_lineage_migration_preserves_legacy_null_root() -> DbResult<()> {
         let db = LocalSqliteDbPlugin::new()?;
         db.execute(DbStatement::new(
             "CREATE TABLE bcs_state_machine_runs (
@@ -2000,6 +1996,11 @@ assert_eq!(report.pending_versions[10].version, 11);
                 run_id TEXT NOT NULL,
                 created_at_ms INTEGER NOT NULL
             )",
+        ))
+        .await?;
+        db.execute(DbStatement::new(
+            "INSERT INTO bcs_state_machine_runs (env, run_id, created_at_ms) \
+             VALUES ('test', 'legacy-run', 1)",
         ))
         .await?;
 
@@ -2012,6 +2013,14 @@ assert_eq!(report.pending_versions[10].version, 11);
         }
         assert!(index_exists(&db, "uk_sm_run_rerun_of").await?);
         assert!(index_exists(&db, "idx_sm_runs_root").await?);
+        let rows = db
+            .query(DbStatement::new(
+                "SELECT root_run_id FROM bcs_state_machine_runs WHERE run_id = 'legacy-run'",
+            ))
+            .await?;
+        let legacy_root: Option<String> =
+            bcs_db_api::db_get_column_opt(&rows[0], "root_run_id")?;
+        assert_eq!(legacy_root, None);
         Ok(())
     }
 
@@ -2028,6 +2037,7 @@ assert_eq!(report.pending_versions[10].version, 11);
         assert!(migration.contains(
             "ADD INDEX `idx_sm_runs_root` (`env`, `root_run_id`, `created_at_ms`)"
         ));
+        assert!(!migration.contains("SET `root_run_id` = `run_id`"));
     }
 
     #[tokio::test]

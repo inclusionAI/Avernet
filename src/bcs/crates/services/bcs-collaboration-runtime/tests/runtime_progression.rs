@@ -661,6 +661,15 @@ async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun()
         SessionStatus::Running
     );
 
+    // Simulate a pre-lineage Run. The migration deliberately leaves its
+    // root_run_id NULL, so rerun must treat the source Run itself as the root.
+    let mut legacy_source = view.run.clone();
+    legacy_source.root_run_id = None;
+    store
+        .create_run(legacy_source, view.nodes.clone())
+        .await
+        .expect("preserve legacy NULL root before rerun");
+
     let rerun = runtime
         .rerun_state_machine_run(RerunStateMachineCommand {
             source_run_id: started.view.run.run_id.clone(),
