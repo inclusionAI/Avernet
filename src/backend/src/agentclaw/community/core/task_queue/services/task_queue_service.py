@@ -3,7 +3,12 @@
 Thin wrapper over the repository. Timing is owned by the database: this service
 just forwards the relative ``delay_seconds`` / ``deadline_seconds`` durations
 (the repository turns them into absolute ``run_at`` / ``deadline_at`` with the
-DB clock) and stamps the current ``env``.
+DB clock) and stamps the current ``env`` and ``app``.
+
+``app`` names the deployment that owns the row in the shared ``ac_task_queue``
+table and comes from config (:class:`TaskQueueConfig`), never from the caller —
+it must match what this deployment's :class:`TaskWorker` claims with, and an
+adopter has no way to know that.
 
 It also carries the one piece of policy the repository has no business knowing:
 whether an enqueue should wake the in-process worker immediately (see
@@ -20,6 +25,7 @@ from agentclaw.community.core.repository.protocols.platform import TaskQueueRepo
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
 from agentclaw.community.core.task_queue.types import EnqueueResult
+from agentclaw.community.di.config import TaskQueueConfig
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -32,10 +38,12 @@ class TaskQueueService:
         repo: TaskQueueRepositoryProtocol,
         registry: HandlerRegistry,
         wakeup: WorkerWakeup,
+        config: TaskQueueConfig,
     ) -> None:
         self._repo = repo
         self._registry = registry
         self._wakeup = wakeup
+        self._config = config
 
     def enqueue(
         self,
@@ -55,7 +63,7 @@ class TaskQueueService:
         - ``delay_seconds`` — how long until the task first becomes eligible
           (``run_at = now + delay``); ``0`` (default) means immediately.
         - ``idempotency_key`` — opt-in submission dedup. With a key, at most one
-          **live** task exists per key within this ``(env, task_type)``: a
+          **live** task exists per key within this ``(env, app, task_type)``: a
           duplicate enqueue inserts nothing and returns the live task with
           ``created=False``. Terminal tasks release their key, so a retry or a
           later re-run of the same logical work is *not* suppressed. Omit it
@@ -84,6 +92,7 @@ class TaskQueueService:
             delay_seconds=delay_seconds,
             deadline_seconds=deadline_seconds,
             env=get_current_env(),
+            app=self._config.app,
             idempotency_key=idempotency_key,
         )
         if self._should_wake(result, task_type=task_type, delay_seconds=delay_seconds):
