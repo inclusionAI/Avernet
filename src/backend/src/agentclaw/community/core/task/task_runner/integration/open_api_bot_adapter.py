@@ -160,9 +160,10 @@ class OpenApiBotAdapter(
             bot_id,
             self._k.base_url,
         )
-        r = await self._client.get(
-            f"/api/v1/api-keys/{prefix}/allowed-bots", headers=self._headers()
-        )
+        async with self._client_for_current_loop() as client:
+            r = await client.get(
+                f"/api/v1/api-keys/{prefix}/allowed-bots", headers=self._headers()
+            )
         logger.info(
             "[task][openapi_bot] <<< ensure_grant GET allowed-bots status=%s body=%s",
             r.status_code,
@@ -182,11 +183,12 @@ class OpenApiBotAdapter(
             bool(self._k.cookie),
             bool(self._k.referer),
         )
-        g = await self._client.post(
-            f"/api/v1/api-keys/{prefix}/allowed-bots/grant",
-            json={"bot_id": bot_id},
-            headers={"Cookie": self._k.cookie, "Referer": self._k.referer},
-        )
+        async with self._client_for_current_loop() as client:
+            g = await client.post(
+                f"/api/v1/api-keys/{prefix}/allowed-bots/grant",
+                json={"bot_id": bot_id},
+                headers={"Cookie": self._k.cookie, "Referer": self._k.referer},
+            )
         logger.info(
             "[task][openapi_bot] <<< ensure_grant POST grant status=%s body=%s",
             g.status_code,
@@ -216,13 +218,14 @@ class OpenApiBotAdapter(
             bcs_bot_id,
             self._k.base_url,
         )
-        g = await self._client.post(
-            f"/api/v1/api-keys/{prefix}/allowed-bots/grant",
-            json={
-                "bot_id": bcs_bot_id
-            },  # secbaas body 字段名仍 bot_id,值=bcs_bot_id(real:entity)
-            headers={"Cookie": cookie, "Referer": referer},
-        )
+        async with self._client_for_current_loop() as client:
+            g = await client.post(
+                f"/api/v1/api-keys/{prefix}/allowed-bots/grant",
+                json={
+                    "bot_id": bcs_bot_id
+                },  # secbaas body 字段名仍 bot_id,值=bcs_bot_id(real:entity)
+                headers={"Cookie": cookie, "Referer": referer},
+            )
         logger.info(
             "[task][openapi_bot] <<< grant status=%s body=%s",
             g.status_code,
@@ -244,11 +247,12 @@ class OpenApiBotAdapter(
             bcs_bot_id,
             self._k.base_url,
         )
-        r = await self._client.post(
-            f"/api/v1/api-keys/{prefix}/allowed-bots/revoke",
-            json={"bot_id": bcs_bot_id},
-            headers={"Cookie": cookie, "Referer": referer},
-        )
+        async with self._client_for_current_loop() as client:
+            r = await client.post(
+                f"/api/v1/api-keys/{prefix}/allowed-bots/revoke",
+                json={"bot_id": bcs_bot_id},
+                headers={"Cookie": cookie, "Referer": referer},
+            )
         logger.info(
             "[task][openapi_bot] <<< revoke status=%s body=%s",
             r.status_code,
@@ -267,11 +271,12 @@ class OpenApiBotAdapter(
             self._k.base_url,
             len(message or ""),
         )
-        r = await self._client.post(
-            "/openapi/v1/messages",
-            json={"bot_id": bot_id, "message": message},
-            headers=self._headers(),
-        )
+        async with self._client_for_current_loop() as client:
+            r = await client.post(
+                "/openapi/v1/messages",
+                json={"bot_id": bot_id, "message": message},
+                headers=self._headers(),
+            )
         logger.info(
             "[task][openapi_bot] <<< send_message status=%s body=%s",
             r.status_code,
@@ -301,9 +306,10 @@ class OpenApiBotAdapter(
             run_id,
             self._k.base_url,
         )
-        r = await self._client.get(
-            f"/openapi/v1/messages/{run_id}", headers=self._headers()
-        )
+        async with self._client_for_current_loop() as client:
+            r = await client.get(
+                f"/openapi/v1/messages/{run_id}", headers=self._headers()
+            )
         logger.info(
             "[task][openapi_bot] <<< get_run status=%s body=%s",
             r.status_code,

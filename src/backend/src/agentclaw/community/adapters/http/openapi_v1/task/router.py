@@ -19,6 +19,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
+from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
@@ -34,6 +35,7 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskGrantResultDTO,
     TaskInfoRecordDTO,
     TaskInfoRequestDTO,
+    TemplateRunRequestDTO,
     TaskOpResultDTO,
     TaskRevokeRequestDTO,
     TaskRevokeResultDTO,
@@ -58,6 +60,20 @@ router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"], rout
 # mount. Operations with no bot to gate (execute/dashboard) declare this so the route
 # is visibly gated, then ``del principal`` since the identity is not used.
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
+
+
+@router.post("/run-template", response_model=Envelope[TaskOpResultDTO])
+@envelope_errors
+async def run_template(
+    body: TemplateRunRequestDTO,
+    request: Request,
+    principal: PrincipalDep,
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),
+) -> Envelope[TaskOpResultDTO]:
+    """Run a preconfigured static DAG; the skill only supplies template_id and input."""
+    result = await service.run_template(body.template_id, body.input,
+                                        owner_user_id=caller_owner_id(principal), owner_bot_id="")
+    return envelope(op_result_to_dto(result), request)
 
 
 @router.post("/execute", response_model=Envelope[TaskOpResultDTO])
