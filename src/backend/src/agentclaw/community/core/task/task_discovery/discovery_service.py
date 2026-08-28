@@ -4,7 +4,7 @@
 1. ``TaskReader`` 读取已发现的待确认任务 (按 bot_id/owner_id/dt 过滤)
 2. 为每个 bot 的所有任务通过 ``SessionInitiator`` 创建 engine session（获得 session_id）
    — 同时通过 WebSocket ``chat.send`` 注入发现提示消息
-3. session 创建成功后通过 ``NotifySenderPlugin`` 投递通知（发现摘要 + session 链接）
+3. session 创建成功后通过 ``NotifyMessagesProvider`` 投递通知（发现摘要 + session 链接）
 4. 用户在前端确认后，由执行框架处理（不在本模块）
 
 使用方式::
@@ -40,6 +40,12 @@ from agentclaw.community.core.task.task_discovery.models import (
     DiscoveredTask,
     DiscoverySession,
 )
+from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
+    FrontendUrlProvider,
+)
+from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
+    NotifyMessagesProvider,
+)
 from agentclaw.community.core.task.task_discovery.protocols import (
     BotServiceProtocol,
     WorkOrderServiceProtocol,
@@ -56,10 +62,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderEventType,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.notify_sender import (
-    NotifyMessage,
-    NotifySenderPlugin,
-)
+from agentclaw.community.plugin_api.notify_sender import NotifyMessage
 from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
@@ -87,7 +90,7 @@ class DiscoveryResult:
 class DiscoveryService:
     """任务主动发现编排服务。
 
-    将 TaskReader、SessionInitiator 和 NotifySenderPlugin 编排在一起，
+    将 TaskReader、SessionInitiator 和 NotifyMessagesProvider 编排在一起，
     提供 "发现 → 创建 session+注入消息 → 通知" 流程。
     """
 
@@ -95,10 +98,11 @@ class DiscoveryService:
         self,
         reader: TaskReader,
         session_initiator: SessionInitiator,
-        notify_sender: NotifySenderPlugin,
+        notify_sender: NotifyMessagesProvider,
         bot_service: BotServiceProtocol | None = None,
         discovery_lock_repo: TaskDiscoveryLockRepositoryProtocol | None = None,
         work_order_service: WorkOrderServiceProtocol | None = None,
+        frontend_url_provider: FrontendUrlProvider | None = None,
     ):
         self._reader = reader
         self._session_initiator = session_initiator
@@ -108,6 +112,7 @@ class DiscoveryService:
         #: 工单通知投递（直接领域调用 WorkOrderService）。注入时在发现流程里额外
         #: 把"待确认任务"写成一条 NOTICE 工单事件，落 ac_work_order_notification。
         self._work_order_service = work_order_service
+        self._frontend_url_provider = frontend_url_provider
 
         #: 最近的发现结果 (task_id → DiscoveryResult)，供外部查询
         self._discoveries: dict[str, DiscoveryResult] = {}
@@ -130,6 +135,7 @@ class DiscoveryService:
         Holder: ``HOSTNAME`` 环境变量或 ``socket.gethostname()``。
         TTL: ``DISCOVERY_LOCK_TTL_SECONDS`` (600s) — 崩机后 stale reaper 恢复。
         """
+        logger.debug("[task_discovery] → DiscoveryService._try_acquire_lock(bot_id=%s)", bot_id)
         env = get_current_env()
         today = datetime.now().strftime("%Y-%m-%d")
         holder = os.environ.get("HOSTNAME", socket.gethostname())
@@ -164,6 +170,7 @@ class DiscoveryService:
         TODO: 未来在两个集合交集的基础上，通过 dream mode 接口进一步缩小范围
         —— 只对开启了 dream mode 且任务发现 ready 的 bot 执行发现。
         """
+        logger.debug("[task_discovery] → DiscoveryService.discover_all_bots()")
         # 1) 从 db 读取所有 pending 任务，提取唯一 (bot_id, owner_id)
         pending = self._reader.read_pending_tasks()
         if not pending:
@@ -271,6 +278,7 @@ class DiscoveryService:
            — 同时通过 WebSocket 注入发现提示消息
         3. 发送通知（发现摘要 + session 链接）
         """
+        logger.debug("[task_discovery] → DiscoveryService.discover(bot_id=%s, owner_id=%s, agent_id=%s)", bot_id, owner_id, agent_id)
         dt = datetime.now().strftime("%Y-%m-%d")
         tasks = self._reader.read_pending_tasks_for_bot(bot_id, owner_id, dt)
         if not tasks:
@@ -311,6 +319,7 @@ class DiscoveryService:
         model: str | None,
     ) -> DiscoveryResult:
         """处理单个任务：创建 session+注入消息 → 发通知。"""
+        logger.debug("[task_discovery] → DiscoveryService._discover_single(task_id=%s, bot_id=%s)", task.task_id, bot_id)
         try:
             session = await self._session_initiator.initiate_session(
                 all_tasks,
@@ -356,14 +365,15 @@ class DiscoveryService:
         session: DiscoverySession,
         task_count: int,
     ) -> bool:
-        """通过 NotifySenderPlugin 投递通知，返回是否发送成功。
+        """通过 NotifyMessagesProvider 投递通知，返回是否发送成功。
 
-        NotifySenderPlugin Protocol 约定 send() 从不抛异常；
+        NotifyMessagesProvider Protocol 约定 send() 从不抛异常；
         返回 str 为消息 ID（成功），None 为失败。
         通知 body 是 bot 的「告知」：发现摘要 + 确认引导。
         deep_link 指向 session，用户点击后进入 session 确认。
         extra 携带通用交互卡片参数（不绑定具体服务商）。
         """
+        logger.debug("[task_discovery] → DiscoveryService._send_notification(task_id=%s, user_id=%s)", task.task_id, user_id)
         session_url = session.session_url
         message = NotifyMessage(
             title="发现待确认任务",
@@ -374,6 +384,8 @@ class DiscoveryService:
                 "channel": "tc_card",
                 "card_template_id": os.environ.get(
                     "TASK_DISCOVERY_CARD_TEMPLATE_ID", ""
+                ) or os.environ.get(
+                    "SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID", ""
                 ),
                 "card_biz_id": f"discover_things_{task.task_id}",
                 "card_data": json.dumps(
@@ -410,6 +422,7 @@ class DiscoveryService:
         ``work_order_service`` 未注入时直接返回 False（no-op，保持向后兼容）。
         失败不抛异常 — 仅记 warning 并返回 False，不影响发现主流程。
         """
+        logger.debug("[task_discovery] → DiscoveryService._send_work_order_event(task_id=%s, user_id=%s)", task.task_id, user_id)
         svc = self._work_order_service
         if svc is None:
             return False
@@ -460,10 +473,39 @@ class DiscoveryService:
 
         从内存 ``self._discoveries`` 读取 — 后端重启后会丢，仅反映进程内最近的 discover 结果。
         """
+        logger.debug("[task_discovery] → DiscoveryService.get_discovery_result(task_id=%s)", task_id)
         return self._discoveries.get(task_id)
 
 
 __all__ = [
     "DiscoveryService",
     "DiscoveryResult",
+    "create_default_service",
 ]
+
+
+def create_default_service(
+    *,
+    data_file: str,
+    notify_sender: NotifyMessagesProvider,
+    session_creator: object | None = None,
+) -> DiscoveryService:
+    """构建一个默认的 ``DiscoveryService`` 实例（用于 lifecycle 手动触发路径）。
+
+    Args:
+        data_file: SqliteTaskReader 的 DB 文件路径。
+        notify_sender: 通知发送端口。
+        session_creator: 可选的 session creator（用于构建 SessionInitiator）。
+    """
+    logger.debug("[task_discovery] → create_default_service(data_file=%s)", data_file)
+    reader = SqliteTaskReader(data_file)
+    from agentclaw.community.core.task.task_discovery.session_initiator import (
+        CronRelaySessionInitiator,
+    )
+
+    session_initiator = CronRelaySessionInitiator(cron_relay=None)
+    return DiscoveryService(
+        reader=reader,
+        session_initiator=session_initiator,
+        notify_sender=notify_sender,
+    )

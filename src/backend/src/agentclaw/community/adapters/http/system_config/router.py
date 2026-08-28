@@ -163,6 +163,14 @@ async def set_config(
         description=req.description,
         operator=operator,
     )
+    if not config_id:
+        # set_config 返回 0 = 分类创建/写入失败,不得报"已保存"误导调用方
+        return ApiResponse(
+            success=False,
+            message="配置保存失败(分类创建或写入失败)",
+            error_code=50001,
+            data={"config_id": config_id},
+        )
     return ApiResponse(
         success=True,
         message="配置已保存",

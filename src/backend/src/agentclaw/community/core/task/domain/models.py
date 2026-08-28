@@ -125,6 +125,7 @@ class TaskInfo:
     task_spec: TaskSpec
     source_type: str       # "bot" | "coop_group"
     owner_bot_id: str         # owning bot id
+    owner_user_id: str = ""   # owning user id, kept separate from owner_bot_id
     execution_config: dict[str, Any] = field(default_factory=dict)  # 指定 bot/workflow yaml/MAX_DEPTH 等
 
 

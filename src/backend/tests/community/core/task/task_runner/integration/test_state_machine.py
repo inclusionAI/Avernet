@@ -202,6 +202,63 @@ def test_form_coop_group_does_not_attach_event_subscriptions():
     assert not bcs.created_req.event_subscriptions
 
 
+def test_form_coop_group_compares_referenced_bots_by_pure_bot_id():
+    """owner 切分补全丢 ``:owner`` 后 ``bot_ids[0]`` 为纯 bot_id,而 ``participant_bindings`` 透传全 ``bot:owner`` 串;
+    校验须按纯 bot_id 归一化比对,否则 owner 同时被 ``bot_ids``(纯)与 bindings(全串)引用时被假性判"不在
+    GroupFormation.bot_ids"(回归:预发 e2e owner=20260825_bohtfhe6:35983 兼 binding writer,被报
+    ``group bindings reference bots outside GroupFormation.bot_ids: [..bohtfhe6:35983]``)。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["b1", "e1:35983"], collab_mode="state_machine",
+        extend_props={"collaboration_definition_yaml": "kind: collab",
+                      "participant_bindings": {"writer": ["b1:35983"], "editor": ["e1:35983"]}},
+    )))
+    req = bcs.created_req
+    assert req is not None
+    assert set(req.participant_bindings) == {"writer", "editor"}
+    # double resolver 对每个 id 拼 :double-owner(全串 b1:35983 → b1:35983:double-owner),证明流程确实到 resolve
+    assert req.participant_bindings["writer"]["bot_ids"] == ["b1:35983:double-owner"]
+    assert req.participant_bindings["editor"]["bot_ids"] == ["e1:35983:double-owner"]
+
+
+def test_form_coop_group_adds_binding_targets_to_participants():
+    """Every participant_binding target must also be listed in participants."""
+    bcs = _Bcs()
+    exe = TaskExecutor(
+        bot=None,
+        bcs=bcs,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=_Poller(),
+        identity_resolver=_DoubleBcsBotIdentityResolver(),
+    )
+
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["default:146836", "default:153364"],
+        collab_mode="state_machine",
+        extend_props={
+            "collaboration_definition_yaml": "kind: collab",
+            "participant_bindings": {
+                "writer": ["default:153364"],
+                "editor": ["default:146836"],
+            },
+        },
+    )))
+
+    req = bcs.created_req
+    assert req is not None
+    participant_ids = {p["bot_uuid"] for p in req.participants}
+    assert participant_ids == {
+        "default:146836:double-owner",
+        "default:153364:double-owner",
+    }
+    assert req.participant_bindings["editor"]["bot_ids"] == ["default:146836:double-owner"]
+    assert req.participant_bindings["writer"]["bot_ids"] == ["default:153364:double-owner"]
+
+
 def test_form_coop_group_manager_worker_attaches_event_subscriptions():
     """manager_worker 群内联挂 §4 event_subscriptions(BCS 主动推回 /callback/report,激活既有
     apply_manager_worker_event → execution_graph audit 快照 + converge_by_session)。鉴权用既有

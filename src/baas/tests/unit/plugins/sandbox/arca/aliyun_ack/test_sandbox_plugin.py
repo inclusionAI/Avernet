@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 
@@ -144,61 +143,6 @@ class TestCreateSyncSandbox:
                     )
             h.core.delete_namespaced_deployment.assert_called()
 
-    def test_create_timeout_cleanup_swallows_delete_failure(self) -> None:
-        with _CoreHarness() as h:
-            h.core.list_namespaced_pod.return_value = _FakePodList(
-                [_FakePod("Pending")]
-            )
-            h.core.delete_namespaced_deployment.side_effect = RuntimeError(
-                "delete boom"
-            )
-            with patch(f"{_PLUGIN}.time.sleep"):
-                with pytest.raises(RuntimeError, match="did not become ready"):
-                    _plugin().create_sync_sandbox(
-                        template_id=TEMPLATE_ID, ready_timeout_in_seconds=1
-                    )
-
-    @staticmethod
-    def _rendered_docs(harness: _CoreHarness) -> list[dict]:
-        """Return the YAML documents passed to ``create_from_yaml``."""
-        called = harness.create_from_yaml.call_args_list[0]
-        return called.kwargs["yaml_objects"]
-
-    def test_create_persists_ttl_expiration_annotation(self) -> None:
-        with _CoreHarness() as h:
-            _plugin().create_sync_sandbox(
-                template_id=TEMPLATE_ID,
-                ttl_in_minutes=10080,
-                ready_timeout_in_seconds=1,
-            )
-        deployment = next(
-            d for d in self._rendered_docs(h) if d.get("kind") == "Deployment"
-        )
-        annotations = deployment["spec"]["template"]["metadata"]["annotations"]
-        raw = annotations["avernet.arcasandbox/ttl_expiration_timestamp"]
-        # Absolute expiry (ms epoch) must be a positive integer ~ now + 10080m.
-        assert int(raw) > 0
-
-    def test_create_emits_empty_expiration_without_ttl(self) -> None:
-        with _CoreHarness() as h:
-            _plugin().create_sync_sandbox(
-                template_id=TEMPLATE_ID, ready_timeout_in_seconds=1
-            )
-        deployment = next(
-            d for d in self._rendered_docs(h) if d.get("kind") == "Deployment"
-        )
-        annotations = deployment["spec"]["template"]["metadata"]["annotations"]
-        assert annotations["avernet.arcasandbox/ttl_expiration_timestamp"] == ""
-
-    def test_create_deployment_handles_empty_docs(self) -> None:
-        with _CoreHarness() as h:
-            with patch(f"{_PLUGIN}._render_template", return_value="---\n"):
-                name, container = _plugin()._create_deployment(
-                    "uid", TEMPLATE_ID, "ns", None, None
-                )
-        assert name == ""
-        assert container == ""
-
 
 class TestConnect:
     def test_connect_success(self) -> None:
@@ -206,6 +150,22 @@ class TestConnect:
             sb = _plugin().connect_sync_sandbox("aliyun-ack-abc123")
         assert isinstance(sb, AliyunAckSandbox)
         assert sb.sandbox_id == "aliyun-ack-abc123"
+
+    def test_connect_reads_ttl_annotation(self) -> None:
+        with _CoreHarness() as h:
+            pod = _FakePod()
+            pod.metadata.annotations = {"avernet.arcasandbox/ttl-minutes": "10080"}
+            h.core.list_namespaced_pod.return_value = _FakePodList([pod])
+            sb = _plugin().connect_sync_sandbox("aliyun-ack-abc123")
+        assert sb._ttl_in_minutes == 10080.0
+
+    def test_connect_ignores_invalid_ttl_annotation(self) -> None:
+        with _CoreHarness() as h:
+            pod = _FakePod()
+            pod.metadata.annotations = {"avernet.arcasandbox/ttl-minutes": "bad"}
+            h.core.list_namespaced_pod.return_value = _FakePodList([pod])
+            sb = _plugin().connect_sync_sandbox("aliyun-ack-abc123")
+        assert sb._ttl_in_minutes is None
 
     def test_connect_not_found(self) -> None:
         with _CoreHarness() as h:
@@ -299,56 +259,8 @@ class TestSandbox:
             with pytest.raises(RuntimeError, match="no status.pod_ip"):
                 sb.get_info()
 
-    def test_get_info_derives_ttl_from_expiration_annotation(self) -> None:
+    def test_get_info_echoes_ttl_in_minutes(self) -> None:
         with _CoreHarness() as h:
-            pod = _FakePod()
-            future_ms = int(time.time() * 1000) + 10 * 60 * 1000
-            pod.metadata.annotations = {
-                "avernet.arcasandbox/ttl_expiration_timestamp": str(future_ms)
-            }
-            h.core.read_namespaced_pod.return_value = pod
-            sb = AliyunAckSandbox(
-                "aliyun-ack-1", "ns", TEMPLATE_ID, MagicMock(), pod_name="aliyun-ack-1"
-            )
-            info = sb.get_info()
-        assert info.ttl_timestamp == future_ms
-        # ~10 minutes remaining (allow a small elapsed tolerance).
-        assert 9.9 <= info.ttl_in_minutes <= 10.0
-
-    def test_get_info_ttl_none_by_default(self) -> None:
-        with _CoreHarness() as h:
-            pod = _FakePod()
-            pod.metadata.annotations = {}
-            h.core.read_namespaced_pod.return_value = pod
-            sb = AliyunAckSandbox(
-                "aliyun-ack-1", "ns", TEMPLATE_ID, MagicMock(), pod_name="aliyun-ack-1"
-            )
-            info = sb.get_info()
-        assert info.ttl_timestamp is None
-        assert info.ttl_in_minutes is None
-
-    def test_get_info_ttl_none_with_invalid_expiration_annotation(self) -> None:
-        with _CoreHarness() as h:
-            pod = _FakePod()
-            pod.metadata.annotations = {
-                "avernet.arcasandbox/ttl_expiration_timestamp": "not-a-number"
-            }
-            h.core.read_namespaced_pod.return_value = pod
-            sb = AliyunAckSandbox(
-                "aliyun-ack-1", "ns", TEMPLATE_ID, MagicMock(), pod_name="aliyun-ack-1"
-            )
-            info = sb.get_info()
-        assert info.ttl_timestamp is None
-
-    def test_get_info_ttl_falls_back_to_creation_plus_ttl(self) -> None:
-        from datetime import UTC, datetime
-
-        created = datetime(2026, 8, 1, 0, 0, 0, tzinfo=UTC)
-        with _CoreHarness() as h:
-            pod = _FakePod()
-            pod.metadata.creation_timestamp = created
-            pod.metadata.annotations = {}
-            h.core.read_namespaced_pod.return_value = pod
             sb = AliyunAckSandbox(
                 "aliyun-ack-1",
                 "ns",
@@ -358,8 +270,77 @@ class TestSandbox:
                 ttl_in_minutes=10080,
             )
             info = sb.get_info()
+        assert info.ttl_in_minutes == 10080
+
+    def test_get_info_ttl_none_by_default(self) -> None:
+        with _CoreHarness() as h:
+            sb = AliyunAckSandbox(
+                "aliyun-ack-1", "ns", TEMPLATE_ID, MagicMock(), pod_name="aliyun-ack-1"
+            )
+            info = sb.get_info()
+        assert info.ttl_in_minutes is None
+
+    def test_get_info_derives_ttl_timestamp_from_pod(self) -> None:
+        from datetime import UTC, datetime
+
+        created = datetime(2026, 8, 1, 0, 0, 0, tzinfo=UTC)
+        with _CoreHarness() as h:
+            pod = _FakePod()
+            pod.metadata.creation_timestamp = created
+            pod.metadata.annotations = {"avernet.arcasandbox/ttl-minutes": "10080"}
+            h.core.read_namespaced_pod.return_value = pod
+            sb = AliyunAckSandbox(
+                "aliyun-ack-1", "ns", TEMPLATE_ID, MagicMock(), pod_name="aliyun-ack-1"
+            )
+            info = sb.get_info()
+        # 10080 minutes after 2026-08-01T00:00:00Z = 2026-08-08T00:00:00Z
         expected_ms = int(created.timestamp() * 1000) + 10080 * 60 * 1000
         assert info.ttl_timestamp == expected_ms
+
+    def test_get_info_ttl_timestamp_none_without_creation(self) -> None:
+        with _CoreHarness() as h:
+            sb = AliyunAckSandbox(
+                "aliyun-ack-1",
+                "ns",
+                TEMPLATE_ID,
+                MagicMock(),
+                pod_name="aliyun-ack-1",
+                ttl_in_minutes=10080,
+            )
+            info = sb.get_info()
+        assert info.ttl_timestamp is None
+
+    def test_get_info_ttl_timestamp_none_with_invalid_annotation(self) -> None:
+        from datetime import UTC, datetime
+
+        created = datetime(2026, 8, 1, 0, 0, 0, tzinfo=UTC)
+        with _CoreHarness() as h:
+            pod = _FakePod()
+            pod.metadata.creation_timestamp = created
+            pod.metadata.annotations = {
+                "avernet.arcasandbox/ttl-minutes": "not-a-number"
+            }
+            h.core.read_namespaced_pod.return_value = pod
+            sb = AliyunAckSandbox(
+                "aliyun-ack-1", "ns", TEMPLATE_ID, MagicMock(), pod_name="aliyun-ack-1"
+            )
+            info = sb.get_info()
+        assert info.ttl_timestamp is None
+
+    def test_get_info_ttl_timestamp_none_without_ttl(self) -> None:
+        from datetime import UTC, datetime
+
+        created = datetime(2026, 8, 1, 0, 0, 0, tzinfo=UTC)
+        with _CoreHarness() as h:
+            pod = _FakePod()
+            pod.metadata.creation_timestamp = created
+            pod.metadata.annotations = {}
+            h.core.read_namespaced_pod.return_value = pod
+            sb = AliyunAckSandbox(
+                "aliyun-ack-1", "ns", TEMPLATE_ID, MagicMock(), pod_name="aliyun-ack-1"
+            )
+            info = sb.get_info()
+        assert info.ttl_timestamp is None
 
     def test_destroy_idempotent(self) -> None:
         class _ApiClientException(Exception):

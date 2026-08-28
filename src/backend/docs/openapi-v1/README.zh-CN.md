@@ -1148,6 +1148,17 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
 
+- **2026-08-27** —— **Owner 级定时任务聚合列表。** 新增
+  `GET /openapi/v1/bots/routines/all`：按认证用户聚合其名下（含协作参与）所有 Bot
+  的定时任务，全部运行态（draft/verify/online）平铺，同一配置跨运行态可多行并以
+  `runtime_stage` 区分；`Routine` 纯加法扩展可选字段
+  `bot_name`/`owner_id`/`runtime_stage`（per-bot 列表同享 `bot_name` 回填）。
+  机器调用者按 `USER_GATED` 接纳（同 `/bots/ceiling`：须持有该用户至少一个实时
+  delegation，否则 404 掩蔽）；服务层复用 `list_all_crons` 的 fan-out/去重/部分失败
+  容忍，`failed_targets` 不出公开面。地址为字面量 `all`，挂载先于 legacy
+  `/{routine_id}` shim 以免被通配捕获。Gateway `bots.openapi.json` 已重新生成，需
+  同步独立维护的 OCB/Sofapy 副本；转发与鉴权由既有宽泛 `/openapi/v1/bots/**` 规则
+  覆盖。
 - **2026-08-20** —— **新增认证 Bot Catalog 查询。** 提供
   `GET /openapi/v1/bots/catalog/search` 与 `/discover`；User 和 App 身份读取
   相同的公开白名单投影，不再接受 `user_id` 或返回用户 `friendship`。

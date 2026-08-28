@@ -18,6 +18,7 @@ run dict 形状对齐 BaaS ``get_run`` data:``{status: COMPLETED|FAILED, result{
 
 env 选实现落在组合根(``TaskModule._resolve_ports``),本类不读 env、不含 case 知识。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -31,19 +32,31 @@ from typing import Any
 import httpx
 import websockets
 
-from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult, OpenApiBotPort
-from agentclaw.community.core.task.task_runner.integration.protocols import BotPublicServiceProtocol
+from agentclaw.community.core.task.task_runner.integration.ports import (
+    BotSendResult,
+    OpenApiBotPort,
+)
+from agentclaw.community.core.task.task_runner.integration.protocols import (
+    BotPublicServiceProtocol,
+)
 
 _WS_PATH = "/api/openclaw/ws"
 _CONNECT_PARAMS = {
     "minProtocol": 3,
     "maxProtocol": 3,
-    "client": {"id": "singlebox-task-engine", "version": "1.0.0", "platform": "linux", "mode": "operator"},
+    "client": {
+        "id": "singlebox-task-engine",
+        "version": "1.0.0",
+        "platform": "linux",
+        "mode": "operator",
+    },
     "role": "operator",
 }
 
 
-class SingleboxEngineAdapter(OpenApiBotPort):  # pragma: no cover — live singlebox per-bot engine (WebSocket round-trip); needs a real singlebox backend, exercised by singlebox acceptance / 联调, not CI LOCAL line coverage
+class SingleboxEngineAdapter(
+    OpenApiBotPort
+):  # pragma: no cover — live singlebox per-bot engine (WebSocket round-trip); needs a real singlebox backend, exercised by singlebox acceptance / 联调, not CI LOCAL line coverage
     """singlebox 直连 per-bot 引擎的 OpenApiBotPort 实现(WebSocket)。
 
     构造期收 backend(LocalAuth)地址 + user_id;per-bot 引擎 target 经 backend 解析并缓存。
@@ -64,8 +77,12 @@ class SingleboxEngineAdapter(OpenApiBotPort):  # pragma: no cover — live singl
         self._collect_timeout = collect_timeout
         self._lock = threading.Lock()
         self._targets: dict[str, str] = {}  # bot_id → "localhost:20014"
-        self._runs: dict[str, dict[str, Any]] = {}  # run_id → {status, result{content}, error}
-        self._collectors: dict[str, Any] = {}  # run_id → run_coroutine_threadsafe Future
+        self._runs: dict[
+            str, dict[str, Any]
+        ] = {}  # run_id → {status, result{content}, error}
+        self._collectors: dict[
+            str, Any
+        ] = {}  # run_id → run_coroutine_threadsafe Future
         self._cancelled_runs: set[str] = set()
         # 后台 loop:send_message 的 WS 收集器(poller 跨 loop 轮询 get_run,桥接流式→轮询)
         self._bg_loop = asyncio.new_event_loop()
@@ -73,6 +90,20 @@ class SingleboxEngineAdapter(OpenApiBotPort):  # pragma: no cover — live singl
             target=self._bg_loop.run_forever, daemon=True, name="singlebox-ws-collector"
         )
         self._bg_thread.start()
+
+    @property
+    def api_key_prefix(self) -> str:
+        # singlebox 不走 secbaas grant,派发也不做 claim_on 名单 JOIN(本地直连引擎),返回空串占位满足 OpenApiBotPort 契约。
+        # claim_on JOIN 发生在 corp/prod(OpenApiBotAdapter + BcnService 名单),singlebox 无 secbaas api-key,不参与。
+        return ""
+
+    async def grant(self, *, bcs_bot_id: str, cookie: str, referer: str) -> None:  # noqa: ARG002
+        raise NotImplementedError(
+            "singlebox 不支持 secbaas grant(本地直连引擎,无 api-key 授权闭环)"
+        )
+
+    async def revoke(self, *, bcs_bot_id: str, cookie: str, referer: str) -> None:  # noqa: ARG002
+        raise NotImplementedError("singlebox 不支持 secbaas revoke")
 
     async def _aclose(self) -> None:
         with self._lock:
@@ -92,7 +123,9 @@ class SingleboxEngineAdapter(OpenApiBotPort):  # pragma: no cover — live singl
         """singlebox 无 api-key grant:仅预解析并缓存 bot → 引擎 target(等同"确保可达")。"""
         await self._resolve_target(bot_id)
 
-    async def send_message(self, *, bot_id: str, message: str, metadata: dict[str, Any]) -> BotSendResult:
+    async def send_message(
+        self, *, bot_id: str, message: str, metadata: dict[str, Any]
+    ) -> BotSendResult:
         """fire ``chat.send``:解析 target+建 session → 后台 WS 收帧存 ``_runs`` → 立即返 BotSendResult。
 
         解析/建会话失败不抛(避免打断 executor gather):落 FAILED 进 ``_runs``,poller 收口。
@@ -147,9 +180,13 @@ class SingleboxEngineAdapter(OpenApiBotPort):  # pragma: no cover — live singl
 
     # ===== internals =====
 
-    async def _collect(self, run_id: str, target: str, session_key: str, message: str) -> None:
+    async def _collect(
+        self, run_id: str, target: str, session_key: str, message: str
+    ) -> None:
         try:
-            run = await self._ws_chat_roundtrip(target, session_key, message, self._collect_timeout)
+            run = await self._ws_chat_roundtrip(
+                target, session_key, message, self._collect_timeout
+            )
         except asyncio.CancelledError:
             return
         finally:
@@ -194,7 +231,9 @@ class SingleboxEngineAdapter(OpenApiBotPort):  # pragma: no cover — live singl
         c.raise_for_status()
         target = (c.json().get("data") or {}).get("target")
         if not target:
-            raise RuntimeError(f"no connection target: bot={bot_id} binding={binding_id}")
+            raise RuntimeError(
+                f"no connection target: bot={bot_id} binding={binding_id}"
+            )
         with self._lock:
             self._targets[bot_id] = target
         return target
@@ -217,17 +256,39 @@ class SingleboxEngineAdapter(OpenApiBotPort):  # pragma: no cover — live singl
         try:
             async with websockets.connect(uri, open_timeout=10) as ws:
                 # 1) 握手
-                await ws.send(json.dumps({"type": "req", "id": "1", "method": "connect",
-                                          "params": _CONNECT_PARAMS}))
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "req",
+                            "id": "1",
+                            "method": "connect",
+                            "params": _CONNECT_PARAMS,
+                        }
+                    )
+                )
                 hs = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
                 if not hs.get("ok"):
-                    return {"status": "FAILED", "error": f"handshake_failed: {json.dumps(hs)[:200]}"}
+                    return {
+                        "status": "FAILED",
+                        "error": f"handshake_failed: {json.dumps(hs)[:200]}",
+                    }
                 # 2) 发消息
-                await ws.send(json.dumps({"type": "req", "id": "2", "method": "chat.send",
-                                          "params": {"sessionKey": session_key, "message": message}}))
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "req",
+                            "id": "2",
+                            "method": "chat.send",
+                            "params": {"sessionKey": session_key, "message": message},
+                        }
+                    )
+                )
                 ack = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
                 if not ack.get("ok"):
-                    return {"status": "FAILED", "error": f"chat_send_rejected: {json.dumps(ack)[:200]}"}
+                    return {
+                        "status": "FAILED",
+                        "error": f"chat_send_rejected: {json.dumps(ack)[:200]}",
+                    }
                 # 3) 读事件到 final
                 while deadline is None or time.monotonic() < deadline:
                     try:
@@ -246,9 +307,15 @@ class SingleboxEngineAdapter(OpenApiBotPort):  # pragma: no cover — live singl
                     payload = data.get("payload") or {}
                     state = payload.get("state")
                     if state == "final":
-                        return {"status": "COMPLETED", "result": {"content": _extract_final_text(payload)}}
+                        return {
+                            "status": "COMPLETED",
+                            "result": {"content": _extract_final_text(payload)},
+                        }
                     if state == "error":
-                        return {"status": "FAILED", "error": payload.get("errorMessage") or "chat_error"}
+                        return {
+                            "status": "FAILED",
+                            "error": payload.get("errorMessage") or "chat_error",
+                        }
                 return {"status": "FAILED", "error": "timeout"}
         except Exception as e:  # noqa: BLE001 本地链路异常收口成 FAILED(不抛)
             return {"status": "FAILED", "error": f"{type(e).__name__}: {e}"}
@@ -293,7 +360,8 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
         """``GET /api/bots/by-owner-or-collaborator`` 取本 user 的 bot 列表(LocalAuth ``x-user-id``)。"""
         r = await self._http.get(
             f"{self._backend}/api/bots/by-owner-or-collaborator",
-            params={"user_id": self._user_id}, headers=self._hdrs(),
+            params={"user_id": self._user_id},
+            headers=self._hdrs(),
         )
         if r.status_code != 200:
             return []
@@ -332,7 +400,10 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
             existing = await self._find_existing_bot(bot_name)
             if existing:
                 bot_id = existing.get("bot_id")
-                if str(existing.get("status") or "").upper() != "ACTIVE" and wait_active:
+                if (
+                    str(existing.get("status") or "").upper() != "ACTIVE"
+                    and wait_active
+                ):
                     try:
                         await self.wait_active(bot_id)  # 残留/并发 PENDING bot 等就绪
                     except Exception:  # noqa: BLE001  等不到 ACTIVE 仍返回(下游 WS 自愈)
@@ -351,7 +422,9 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
             "entity_id": self._user_id,
             "entity_type": "staff",
         }
-        r = await self._http.post(f"{self._backend}/api/bots", headers=self._hdrs(), json=body)
+        r = await self._http.post(
+            f"{self._backend}/api/bots", headers=self._hdrs(), json=body
+        )
         r.raise_for_status()
         data = r.json()
         if not data.get("success"):
@@ -404,7 +477,9 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
                         if str(it.get("status") or "").upper() == "ACTIVE":
                             return it
             await asyncio.sleep(self._wait_active_interval)
-        raise RuntimeError(f"bot {bot_id} not ACTIVE within {self._wait_active_timeout}s (last={last})")
+        raise RuntimeError(
+            f"bot {bot_id} not ACTIVE within {self._wait_active_timeout}s (last={last})"
+        )
 
     async def set_public(self, bot_id: str, public: bool = True) -> dict[str, Any]:
         """``POST /api/bots/{bot_id}/public`` 设公开(供 BCSFuse discover 可见)。"""
@@ -416,7 +491,9 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
         r.raise_for_status()
         return r.json()
 
-    async def onboard_to_bcn(self, bot_id: str, bot_desc: str | None = None) -> dict[str, Any]:
+    async def onboard_to_bcn(
+        self, bot_id: str, bot_desc: str | None = None
+    ) -> dict[str, Any]:
         """``PUT /api/bots/{bot_id}`` 改 ``bot_desc`` → 触发 ``bot_service._sync_bot_to_bcn`` → ``BcnService.onboard_bot``
         → BCN ``POST /admin/bots/onboard`` 把 ``{bot_id}:{owner_id}`` 注册进协作网。
 
@@ -434,10 +511,14 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
         r.raise_for_status()
         data = r.json()
         if not data.get("success"):
-            raise RuntimeError(f"onboard_to_bcn failed (PUT /api/bots/{bot_id}): {data.get('message') or data}")
+            raise RuntimeError(
+                f"onboard_to_bcn failed (PUT /api/bots/{bot_id}): {data.get('message') or data}"
+            )
         return data
 
-    async def set_bcs_visibility(self, bot_id: str, visibility: str = "public") -> dict[str, Any]:
+    async def set_bcs_visibility(
+        self, bot_id: str, visibility: str = "public"
+    ) -> dict[str, Any]:
         """``PUT /bots/{bot_uuid}/visibility`` 到 BCS(:21000) 设**单个 bot** 的 BCS visibility。
 
         bot_uuid = ``{bot_id}:{owner_id}``(BCN onboard 时的 bcn_bot_id 格式,owner=本 provisioner 的
@@ -448,7 +529,9 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
         ``default_visibility="protected"`` 是公共配置不能动,故对**要进协作群的成员 bot** 单独 PUT 成
         ``public``,绕开好友校验、让真 ``form_coop_group`` 建群过(UI 可见真群)。只调你要的 bot,不改全局。
         """
-        bcs_url = os.environ.get("BCS_API_BASE_URL", "http://127.0.0.1:21000").rstrip("/")
+        bcs_url = os.environ.get("BCS_API_BASE_URL", "http://127.0.0.1:21000").rstrip(
+            "/"
+        )
         bot_uuid = f"{bot_id}:{self._user_id}"
         r = await self._http.put(
             f"{bcs_url}/bots/{bot_uuid}/visibility",
@@ -462,7 +545,9 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
             )
         return r.json() if r.text else {}
 
-    async def set_bbs_task_dream_mode(self, bot_id: str, enabled: bool = True) -> dict[str, Any]:
+    async def set_bbs_task_dream_mode(
+        self, bot_id: str, enabled: bool = True
+    ) -> dict[str, Any]:
         """开启单个 bot 的 BCS ``task_dream_mode``(BBS 主动 bid roster 入选开关)。
 
         唯一 setter 是 principal-gated 的 BCS openapi ``PATCH /openapi/v1/collaboration/bots/{bot_id}``
@@ -486,21 +571,32 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
 
         import jwt  # PyJWT(Avernet gateway_principal verifier 同库;HS256)
 
-        bcs_url = os.environ.get("BCS_API_BASE_URL", "http://127.0.0.1:21000").rstrip("/")
+        bcs_url = os.environ.get("BCS_API_BASE_URL", "http://127.0.0.1:21000").rstrip(
+            "/"
+        )
         key = os.environ.get(
-            "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE", "avernet-dev-signing-key-NOT-FOR-PROD")
+            "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE",
+            "avernet-dev-signing-key-NOT-FOR-PROD",
+        )
         bot_uuid = f"{bot_id}:{self._user_id}"
         now = int(_t.time())
         claims: dict[str, Any] = {
-            "iss": "gateway", "aud": "bcs", "iat": now, "exp": now + 300,
-            "principals": [{
-                "type": "user",
-                "subject": {
-                    "id": self._user_id, "username": self._user_id,
-                    "display_name": "singlebox-e2e", "full_name": None,
-                    "tenant_id": "default",
-                },
-            }],
+            "iss": "gateway",
+            "aud": "bcs",
+            "iat": now,
+            "exp": now + 300,
+            "principals": [
+                {
+                    "type": "user",
+                    "subject": {
+                        "id": self._user_id,
+                        "username": self._user_id,
+                        "display_name": "singlebox-e2e",
+                        "full_name": None,
+                        "tenant_id": "default",
+                    },
+                }
+            ],
         }
         token = jwt.encode(claims, key, algorithm="HS256", headers={"kid": "bare"})
         r = await self._http.patch(
@@ -556,7 +652,11 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
             form = {"file_paths": json.dumps(["SKILL.md"])}
             r = await self._http.post(
                 f"{self._backend}/api/skills/upload",
-                params={"user_id": self._user_id, "bot_id": bot_id, "upload_mode": upload_mode},
+                params={
+                    "user_id": self._user_id,
+                    "bot_id": bot_id,
+                    "upload_mode": upload_mode,
+                },
                 headers=self._hdrs(),
                 files=files,
                 data=form,
@@ -565,11 +665,15 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
             body = r.json()
             sid = (body.get("data") or {}).get("id") if body.get("success") else None
             if not sid:
-                raise RuntimeError(f"upload skill {sd} failed: {body.get('message') or body}")
+                raise RuntimeError(
+                    f"upload skill {sd} failed: {body.get('message') or body}"
+                )
             skill_ids.append(str(sid))
 
         # 2) ensure skill set (同名已存则复用其 id,避免重复建)
-        skill_set_id = await self._ensure_skill_set(bot_id, skill_set_name, skill_set_desc)
+        skill_set_id = await self._ensure_skill_set(
+            bot_id, skill_set_name, skill_set_desc
+        )
 
         # 3) add skills to set (自动激活;重复添加返回 already-in-set,不视为失败)
         if skill_ids:
@@ -577,7 +681,11 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
                 f"{self._backend}/api/skillsets/{skill_set_id}/skills",
                 params={"user_id": self._user_id, "bot_id": bot_id},
                 headers=self._hdrs(),
-                json={"skill_ids": skill_ids, "user_id": self._user_id, "bot_id": bot_id},
+                json={
+                    "skill_ids": skill_ids,
+                    "user_id": self._user_id,
+                    "bot_id": bot_id,
+                },
             )
             r.raise_for_status()
 
@@ -594,7 +702,7 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
             headers=self._hdrs(),
         )
         r.raise_for_status()
-        return (r.json().get("data") or [])
+        return r.json().get("data") or []
 
     async def list_skill_sets(self, bot_id: str) -> list[dict[str, Any]]:
         """``GET /api/skillsets`` 取 bot 的能力集列表(is_active 标志即引擎加载态)。"""
@@ -614,7 +722,12 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
         names: set[str] = set()
         r = await self._http.get(
             f"{self._backend}/api/skills",
-            params={"user_id": self._user_id, "bot_id": bot_id, "page": 1, "page_size": 200},
+            params={
+                "user_id": self._user_id,
+                "bot_id": bot_id,
+                "page": 1,
+                "page_size": 200,
+            },
             headers=self._hdrs(),
         )
         if r.status_code == 200:
@@ -628,6 +741,7 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
     def _read_skill_name(skill_md_path: str) -> str | None:
         """从 ``SKILL.md`` frontmatter 解析 ``name:`` 字段(幂等跳过判定依据);无 frontmatter 返 None。"""
         import os as _os
+
         if not _os.path.exists(skill_md_path):
             return None
         with open(skill_md_path, "r", encoding="utf-8") as fh:
@@ -640,7 +754,7 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
         for line in text[3:end].splitlines():
             ls = line.strip()
             if ls.startswith("name:"):
-                return ls[len("name:"):].strip().strip('"').strip("'")
+                return ls[len("name:") :].strip().strip('"').strip("'")
         return None
 
     async def _ensure_skill_set(self, bot_id: str, name: str, desc: str | None) -> str:
@@ -658,7 +772,12 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
             f"{self._backend}/api/skillsets",
             params={"user_id": self._user_id, "bot_id": bot_id},
             headers=self._hdrs(),
-            json={"name": name, "description": desc or "", "user_id": self._user_id, "bot_id": bot_id},
+            json={
+                "name": name,
+                "description": desc or "",
+                "user_id": self._user_id,
+                "bot_id": bot_id,
+            },
         )
         r.raise_for_status()
         body = r.json()
@@ -667,7 +786,9 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
             raise RuntimeError(f"create skillset failed: {body}")
         return str(sid)
 
-    async def _activate_skill_set(self, skill_set_id: str, bot_id: str, entity_type: str) -> dict[str, Any]:
+    async def _activate_skill_set(
+        self, skill_set_id: str, bot_id: str, entity_type: str
+    ) -> dict[str, Any]:
         r = await self._http.post(
             f"{self._backend}/api/skills/skillset/activate",
             headers=self._hdrs(),
@@ -680,8 +801,6 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
         )
         r.raise_for_status()
         return r.json()
-
-
 
 
 class SingleboxKeywordBotDiscover:
@@ -735,17 +854,20 @@ class SingleboxKeywordBotDiscover:
             "context": {"mode": "singlebox_keyword", "fallback_to_all": used_fallback},
         }
 
-    def _query(self, *, user_id: str, search: str | None, top_k: int) -> list[dict[str, Any]]:
+    def _query(
+        self, *, user_id: str, search: str | None, top_k: int
+    ) -> list[dict[str, Any]]:
         """调 ``search_public_bots_by_keyword`` 并收口异常→空列表(不阻断其它字段预查)。"""
         try:
             res = self._bps.search_public_bots_by_keyword(
-                user_id=user_id, search=search, page=1, page_size=top_k,
+                user_id=user_id,
+                search=search,
+                page=1,
+                page_size=top_k,
             )
         except Exception:  # noqa: BLE001  端口异常→空候选
             return []
         return res.get("items") or []
-
-
 
 
 def _extract_final_text(payload: dict[str, Any]) -> str:

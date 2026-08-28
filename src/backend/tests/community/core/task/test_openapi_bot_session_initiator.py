@@ -16,9 +16,6 @@ from agentclaw.community.core.task.task_discovery.models import (
 from agentclaw.community.core.task.task_discovery.openapi_bot_session_initiator import (
     OpenApiBotSessionInitiator,
 )
-from agentclaw.community.core.task.task_discovery.session_initiator import (
-    FrontendUrlHolder,
-)
 from agentclaw.community.core.task.task_runner.integration.ports import (
     BotSendResult,
 )
@@ -73,14 +70,6 @@ def _make_openapi_bot(
             run_id="run-123", session_id="sess-456"
         )
     return bot
-
-
-@pytest.fixture(autouse=True)
-def _clear_frontend_url_holder():
-    """Reset FrontendUrlHolder between tests so it doesn't leak."""
-    FrontendUrlHolder._url = ""
-    yield
-    FrontendUrlHolder._url = ""
 
 
 def _run(coro):
@@ -272,14 +261,36 @@ class TestBuildSessionUrl:
         assert "bot=b1%3Ao1" in url
         assert "session=agent%3Amain%3As1" in url
 
-    def test_frontend_url_holder_overrides(self):
-        FrontendUrlHolder.set("http://override:7777")
+    def test_frontend_url_provider_overrides(self):
+        """Provider 返回非空 → 覆盖构造 frontend_url(holder-override 语义
+        现由 CorpFrontendUrlProvider.get() 承载)。"""
+
+        class _StubProvider:
+            def get(self) -> str:
+                return "http://override:7777"
+
         initiator = OpenApiBotSessionInitiator(
             openapi_bot=_make_openapi_bot(),
             frontend_url="http://ignored:8000",
+            frontend_url_provider=_StubProvider(),
         )
         url = initiator._build_session_url("s2", "b2", "o2")
         assert url.startswith("http://override:7777/workspace")
+
+    def test_frontend_url_provider_empty_falls_back_to_ctor(self):
+        """Provider 返回空串(NullFrontendUrlProvider 语义) → 回落构造值。"""
+
+        class _EmptyProvider:
+            def get(self) -> str:
+                return ""
+
+        initiator = OpenApiBotSessionInitiator(
+            openapi_bot=_make_openapi_bot(),
+            frontend_url="http://ctor:8000",
+            frontend_url_provider=_EmptyProvider(),
+        )
+        url = initiator._build_session_url("s2", "b2", "o2")
+        assert url.startswith("http://ctor:8000/workspace")
 
     def test_strips_trailing_slash(self):
         initiator = OpenApiBotSessionInitiator(
@@ -289,3 +300,81 @@ class TestBuildSessionUrl:
         url = initiator._build_session_url("s3", "b3", "o3")
         assert "host:8000/workspace" in url
         assert "host:8000//workspace" not in url
+
+
+# ---------------------------------------------------------------------------
+# _update_session_title — double agent:main: prefix guard
+# ---------------------------------------------------------------------------
+
+class TestUpdateSessionTitle:
+    """Verify _update_session_title guards against double agent:main: prefix
+    and calls engine directly (not the OpenAPI v1 public surface).
+
+    BaaS may return session_id already containing the ``agent:main:`` prefix.
+    Also, the title update now resolves engine target and calls the engine's
+    ``POST /api/sessions/{session_id}/update`` directly, bypassing the
+    OpenAPI v1 admission layer (which requires Bearer/Cookie auth → 401 for
+    internal service calls).
+    """
+
+    @staticmethod
+    def _capture_update_url(session_id: str, *, bot_id: str = "bot-1",
+                            owner_id: str = "owner-1") -> str | None:
+        """Run _update_session_title with mocked engine target + httpx,
+        return the captured POST URL."""
+        from unittest.mock import MagicMock, patch
+
+        initiator = OpenApiBotSessionInitiator(
+            openapi_bot=_make_openapi_bot(),
+            backend_url="http://localhost:8888",
+        )
+        # Mock _resolve_engine_target to return a fake engine address
+        initiator._resolve_engine_target = AsyncMock(return_value="localhost:20010")
+
+        captured: list[str] = []
+
+        class _MockResp:
+            status_code = 200
+            text = "{}"
+
+        with patch(
+            "agentclaw.community.core.task.task_discovery.openapi_bot_session_initiator.httpx.AsyncClient"
+        ) as mock_cls:
+            cli = MagicMock()
+            cli.__aenter__ = AsyncMock(return_value=cli)
+            cli.__aexit__ = AsyncMock(return_value=None)
+
+            async def _post(url, **kw):
+                captured.append(url)
+                return _MockResp()
+
+            cli.post = _post
+            mock_cls.return_value = cli
+            _run(initiator._update_session_title(
+                session_id, "[DreamMode-任务发现] Title", bot_id, owner_id,
+            ))
+
+        return captured[0] if captured else None
+
+    def test_no_double_prefix_when_session_id_has_agent_main(self):
+        """session_id already has agent:main: → no double prefix in URL."""
+        url = self._capture_update_url("agent:main:session:abc:owner-1")
+        assert url is not None
+        assert "agent:main:agent:main:" not in url
+        assert "agent:main:session:abc:owner-1" in url
+
+    def test_prefix_added_when_session_id_lacks_agent_main(self):
+        """session_id without agent:main: → prefix is correctly prepended."""
+        url = self._capture_update_url("session:abc:owner-1")
+        assert url is not None
+        assert "agent:main:session:abc:owner-1" in url
+        assert "agent:main:agent:main:" not in url
+
+    def test_calls_engine_directly_not_openapi_v1(self):
+        """Title update goes to engine's /api/sessions/{id}/update,
+        NOT the backend's /openapi/v1/ surface (which requires auth)."""
+        url = self._capture_update_url("session:abc:owner-1")
+        assert url is not None
+        assert "/api/sessions/" in url
+        assert "/update" in url
+        assert "/openapi/v1/" not in url

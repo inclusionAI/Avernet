@@ -32,7 +32,9 @@ from agentclaw.community.core.task.task_graph.task_graph_service import TaskGrap
 
 
 # ===== domain helpers =====
-def _task_info(task_id: str = "t1", max_depth: int = 3) -> TaskInfo:
+def _task_info(
+    task_id: str = "t1", max_depth: int = 3, task_type: str = "dynamic"
+) -> TaskInfo:
     return TaskInfo(
         task_spec=TaskSpec(
             metadata=Metadata(task_id=task_id, title="T", instruction="do"),
@@ -41,7 +43,11 @@ def _task_info(task_id: str = "t1", max_depth: int = 3) -> TaskInfo:
         ),
         source_type="bot",
         owner_bot_id="b1",
-        execution_config={"MAX_DEPTH": max_depth, "BBS_MAX_DEPTH": 3},
+        execution_config={
+            "MAX_DEPTH": max_depth,
+            "BBS_MAX_DEPTH": 3,
+            "task_type": task_type,
+        },
     )
 
 
@@ -212,6 +218,89 @@ class TestOnExecute:
         eng = _engine(svc, planner=planner)
         _run(eng.on_execute("t1"))
         assert planner.plan_calls == 0
+
+
+# ===== external-managed workflow/yaml isolation =====
+class TestExternalManagedIsolation:
+    @pytest.mark.parametrize("task_type", ["workflow", "yaml"])
+    def test_on_execute_does_not_enter_dynamic_planner(self, svc, task_type):
+        graph = svc.initialize_graph(_task_info(task_type=task_type))
+        planner = StubPlanner(lambda g: [_child("should-not-exist")])
+        dispatcher = StubDispatcher()
+        eng = _engine(svc, planner=planner, dispatcher=dispatcher)
+
+        _run(eng.on_execute("t1"))
+
+        assert planner.plan_calls == 0
+        assert dispatcher is not None
+        assert [n.node_id for n in graph.tasks] == ["t1"]
+        assert graph.tasks[0].status == Status.PENDING
+
+    @pytest.mark.parametrize("task_type", ["workflow", "yaml"])
+    def test_report_only_updates_graph_without_driving_next_step(self, svc, task_type):
+        graph = svc.initialize_graph(_task_info(task_type=task_type))
+        svc.update_task_node_info(
+            _patch("t1", "t1", status=Status.RUNNING, run_mode="single_bot", assignee="b")
+        )
+        planner = StubPlanner(lambda g: [_child("should-not-exist")])
+        dispatcher = StubDispatcher()
+        runner = StubRunner()
+        eng = _engine(svc, planner=planner, dispatcher=dispatcher, runner=runner)
+
+        _run(
+            eng.on_report(
+                _patch(
+                    "t1",
+                    "t1",
+                    output_patch={"content": "third-party result"},
+                    acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS),
+                )
+            )
+        )
+
+        assert graph.tasks[0].status == Status.DONE
+        assert graph.status == Status.DONE
+        assert planner.plan_calls == 0
+        assert runner.run_calls == []
+        assert [n.node_id for n in graph.tasks] == ["t1"]
+
+    @pytest.mark.parametrize("task_type", ["workflow", "yaml"])
+    def test_failure_report_does_not_reset_or_redispatch(self, svc, task_type):
+        graph = svc.initialize_graph(_task_info(task_type=task_type))
+        svc.update_task_node_info(
+            _patch("t1", "t1", status=Status.RUNNING, run_mode="coop_group", assignee="group-1")
+        )
+        runner = StubRunner()
+        eng = _engine(svc, runner=runner)
+
+        _run(
+            eng.on_report(
+                _patch(
+                    "t1",
+                    "t1",
+                    acceptance_result=AcceptanceResult(
+                        verdict=AcceptanceVerdict.FAIL, gaps=["third-party failure"]
+                    ),
+                )
+            )
+        )
+        assert graph.tasks[0].status == Status.FAILED
+        assert runner.run_calls == []
+
+        _run(eng.on_harness(_patch("t1", "t1", exec_error="timeout")))
+        assert graph.tasks[0].status == Status.FAILED
+        assert runner.run_calls == []
+
+    @pytest.mark.parametrize("task_type", ["workflow", "yaml"])
+    def test_redrive_does_not_dispatch_external_task(self, svc, task_type):
+        graph = svc.initialize_graph(_task_info(task_type=task_type))
+        runner = StubRunner()
+        eng = _engine(svc, runner=runner)
+
+        _run(eng.redrive("t1"))
+
+        assert runner.run_calls == []
+        assert [n.node_id for n in graph.tasks] == ["t1"]
 
 
 # ===== on_report PASS =====

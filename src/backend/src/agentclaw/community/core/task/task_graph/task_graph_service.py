@@ -249,6 +249,7 @@ class TaskGraphService:
             graph.extend_props["execution_config"] = dict(task_info.execution_config)
             graph.extend_props["source_type"] = task_info.source_type
             graph.extend_props["owner_bot_id"] = task_info.owner_bot_id
+            graph.extend_props["owner_user_id"] = task_info.owner_user_id
             self._graphs[task_id] = graph
             if self._graph_repo is not None:
                 self._graph_versions[task_id] = self._graph_repo.create_graph(

@@ -28,8 +28,6 @@ spec:
       labels:
         app: avernet-agent
         biz-id: "${UID}"
-      annotations:
-        avernet.arcasandbox/ttl_expiration_timestamp: "${TTL_EXPIRATION_TIMESTAMP}"
     spec:
       initContainers:
       - name: init-dir

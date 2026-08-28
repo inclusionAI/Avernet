@@ -19,6 +19,9 @@ from typing import Any, Protocol
 import httpx
 import websockets
 
+from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
+    FrontendUrlProvider,
+)
 from agentclaw.community.core.task.task_discovery.models import (
     DiscoveredTask,
     DiscoverySession,
@@ -27,23 +30,6 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-
-class FrontendUrlHolder:
-    """运行时前端 URL holder — 允许通过 API 动态注入，无需重启 backend。
-
-    优先级：holder > 构造注入值 > 默认值。
-    这是一个纯类变量 holder，不读取环境变量 — env 解析在 DI factory 完成。
-    """
-    _url: str = ""
-
-    @classmethod
-    def set(cls, url: str) -> None:
-        cls._url = url.rstrip("/")
-        logger.info("[FrontendUrlHolder] frontend url injected at runtime: %s", cls._url)
-
-    @classmethod
-    def get(cls) -> str:
-        return cls._url
 
 #: WebSocket 协议常量
 _WS_PROTOCOL = 3
@@ -89,11 +75,13 @@ class CronRelaySessionInitiator:
         frontend_url: str = "http://localhost:8000",
         backend_url: str = "http://localhost:8888",
         wait_for_reply: bool = False,
+        frontend_url_provider: FrontendUrlProvider | None = None,
     ):
         self._cron_relay = cron_relay
         self._frontend_url = frontend_url
         self._backend_url = backend_url
         self._wait_for_reply = wait_for_reply
+        self._frontend_url_provider = frontend_url_provider
 
     async def initiate_session(
         self,
@@ -112,6 +100,7 @@ class CronRelaySessionInitiator:
             3. WebSocket 连 engine → chat.send 发现提示消息
             4. 返回 DiscoverySession
         """
+        logger.debug("[task_discovery] → CronRelaySessionInitiator.initiate_session(bot_id=%s, owner_id=%s, task_count=%d)", bot_id, owner_id, len(tasks))
         first_task = tasks[0]
         task_count = len(tasks)
         title = (
@@ -226,6 +215,7 @@ class CronRelaySessionInitiator:
         Returns:
             如 ``localhost:20010``，失败返回 None。
         """
+        logger.debug("[task_discovery] → CronRelaySessionInitiator._extract_engine_target(bot_id=%s, owner_id=%s)", bot_id, owner_id)
         try:
             async with httpx.AsyncClient(timeout=10.0) as cli:
                 bot_resp = await cli.get(
@@ -262,6 +252,7 @@ class CronRelaySessionInitiator:
 
         仅 log warning，不抛异常 — 消息注入失败不影响 session 创建结果。
         """
+        logger.debug("[task_discovery] → CronRelaySessionInitiator._ws_send_message(target=%s, session_key=%s)", target, session_key)
         uri = f"ws://{target}/api/openclaw/ws"
         connect_params = {
             "minProtocol": _WS_PROTOCOL,
@@ -333,6 +324,7 @@ class CronRelaySessionInitiator:
 
     async def _wait_for_final(self, ws: Any, session_key: str) -> None:
         """等待 chat agent 输出 state=final 事件。"""
+        logger.debug("[task_discovery] → CronRelaySessionInitiator._wait_for_final(session_key=%s)", session_key)
         try:
             while True:
                 raw = await asyncio.wait_for(
@@ -362,7 +354,7 @@ class CronRelaySessionInitiator:
           验收标准   ← task.acceptances（为空则提示确认时补充）
           约束       ← task.background
         """
-        lines = ["/task 我为您发现了以下可能有意义的事情，请确认是否执行：\n"]
+        lines = ["/task 用taskloop 这个skill。\n"]
         for i, task in enumerate(tasks, 1):
             lines.append(f"{i}. 【{task.title}】")
             lines.append(f"   目标：{task.objective or task.title}")
@@ -390,13 +382,20 @@ class CronRelaySessionInitiator:
         前端所需的完整 session key，这样 session_url 可直接被钉钉卡片 /
         通知 / 测试脚本消费，无需外部拼装。
 
-        动态解析 frontend URL — 支持运行时 API 注入（FrontendUrlHolder）。
+        动态解析 frontend URL — 优先 ``FrontendUrlProvider`` (DI 注入),
+        未注入/返回空时回落构造参数 ``self._frontend_url``。
         """
         from urllib.parse import quote
 
-        base = FrontendUrlHolder.get() or self._frontend_url
-        base = base.rstrip("/")
-        full_session_key = f"agent:main:{session_id}"
+        provided = (
+            self._frontend_url_provider.get() if self._frontend_url_provider else ""
+        )
+        base = (provided or self._frontend_url).rstrip("/")
+        full_session_key = (
+            session_id
+            if session_id.startswith("agent:main:")
+            else f"agent:main:{session_id}"
+        )
         encoded_sid = quote(full_session_key, safe="")
         return f"{base}/assistant?botId={agent_id}&sessionId={encoded_sid}"
 

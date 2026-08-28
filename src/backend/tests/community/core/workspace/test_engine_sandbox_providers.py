@@ -189,6 +189,8 @@ class TestAICodingProvider:
         assert plan.workspace_subdir == "workspace"
         assert plan.skill_source_relpath == "workspace/skills"
         assert plan.skill_target_relpath == "workspace/skills"
+        assert "workspace/.repos/" in plan.rsync_excludes
+        assert "workspace/.prewarm_ready.json" in plan.rsync_excludes
 
     def test_build_plan_keeps_extra_sync_from_claude(self):
         provider = AICodingSandboxProvider(workspace=_workspace())

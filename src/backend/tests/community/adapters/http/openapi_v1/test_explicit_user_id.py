@@ -291,10 +291,14 @@ _NO_USER_DIMENSION = {
     # measures a dependency the path does not have.
     ("get", f"{PUBLIC_API_PREFIX}/bots/loadtest/hello"),
     # Task public surface: execute submits (owner in body), dashboard reads by
-    # task_id — neither scopes to a caller-supplied user_id. list does, so it
-    # is NOT here.
+    # task_id — neither scopes to a caller-supplied user_id. grant/revoke
+    # identify the operator from the verified principal (Cookie/Referer relayed
+    # to secbaas, the api-key held server-side), not a caller-supplied user_id.
+    # list does take a caller-supplied user_id filter, so it is NOT here.
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/execute"),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/dashboard"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/grant"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/revoke"),
 }
 
 # Read-only operations that accept a user_id as a caller-selected filter rather
@@ -398,7 +402,15 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: publish-to-users route moved from /bots/{bot_id}/public-bcs to the external
 #: /collaboration/bots/{bot_uuid}/public, so one path-addressed {bot_id}
 #: operation became a {bot_uuid}-named one: path -1, none +1.
-_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 62}
+#:
+#: ``none`` then moved 62 → 63 with the owner-level routines aggregate
+#: (``GET /openapi/v1/bots/routines/all``): it lists the named user's whole
+#: fleet, so it addresses no single bot.
+#:
+#: The task grant/revoke operations also carry the target in ``bcs_bot_id``
+#: request-body fields rather than a ``bot_id`` parameter, adding two more
+#: operations without changing the path/query counts.
+_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 65}
 
 
 def _schema() -> dict:
@@ -521,7 +533,9 @@ def test_the_pinned_number_of_operations_take_it():
     # count: 182 → 181. execute/dashboard take no user_id at all — see
     # _NO_USER_DIMENSION.
     # Caller identity context and call-type update add two operations.
-    assert len(taking) == 183
+    # The owner-level routines aggregate (GET /bots/routines/all) adds one
+    # account-level operation: 183 → 184.
+    assert len(taking) == 184
 
 
 def test_the_exempt_operations_take_none():

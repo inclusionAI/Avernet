@@ -7,6 +7,7 @@ distinct ids), and ``Index(..., unique=True)`` for unique keys. OceanBase-only
 modifiers (``BLOCK_SIZE``/``LOCAL``/``GLOBAL``) are ORM-unrepresentable and live
 only in ``core/task/sql/*.sql``.
 """
+
 from __future__ import annotations
 
 import json
@@ -63,7 +64,9 @@ def _loads(text: Optional[str]) -> Optional[dict[str, Any]]:
 class TaskInfoModel(Base):
     __tablename__ = "task_info"
 
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
     task_id = Column(_TASK_ID, nullable=False)
     source_type = Column(String(128), nullable=False)
     owner_user_id = Column(_USER_ID, nullable=False)
@@ -80,7 +83,9 @@ class TaskInfoModel(Base):
     lease_until = Column(BigInteger, nullable=True)
     heartbeat_at = Column(BigInteger, nullable=True)
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    gmt_modified = Column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
 
     __table_args__ = (
         Index("uk_task_id", "task_id", unique=True),
@@ -113,13 +118,17 @@ class TaskInfoModel(Base):
 class TaskNodeModel(Base):
     __tablename__ = "task_node"
 
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
     task_id = Column(_TASK_ID, nullable=False)
     node_id = Column(_NODE_ID, nullable=False)
     task_spec = Column(Text, nullable=False)
     status = Column(String(64), nullable=False)
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    gmt_modified = Column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
 
     __table_args__ = (
         Index("uk_task_node_identity", "task_id", "node_id", unique=True),
@@ -141,7 +150,9 @@ class TaskNodeModel(Base):
 class TaskNodeRunInfoModel(Base):
     __tablename__ = "task_node_run_info"
 
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
     node_id = Column(_NODE_ID, nullable=False)
     task_id = Column(_TASK_ID, nullable=False)
     run_mode = Column(String(64), nullable=True)
@@ -155,7 +166,9 @@ class TaskNodeRunInfoModel(Base):
     update_time = Column(BigInteger, nullable=True)
     end_time = Column(BigInteger, nullable=True)
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    gmt_modified = Column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
 
     __table_args__ = (
         Index("uk_task_node", "task_id", "node_id", "retry", unique=True),
@@ -187,7 +200,9 @@ class TaskNodeRunInfoModel(Base):
 class TaskNodeRelationModel(Base):
     __tablename__ = "task_node_relation"
 
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
     task_id = Column(_TASK_ID, nullable=False)
     src_node_id = Column(_NODE_ID, nullable=False)
     dst_node_id = Column(_NODE_ID, nullable=False)
@@ -196,7 +211,9 @@ class TaskNodeRelationModel(Base):
     )
     extend_props = Column(Text, nullable=True)
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    gmt_modified = Column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
 
     __table_args__ = (
         Index("uk_src_dst", "task_id", "src_node_id", "dst_node_id", unique=True),
@@ -219,7 +236,9 @@ class TaskNodeRelationModel(Base):
 class TaskCallbackModel(Base):
     __tablename__ = "task_callback"
 
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
     invoker = Column(String(128), nullable=False)
     run_id = Column(_RUN_ID, nullable=False)
     node_id = Column(_NODE_ID, nullable=False)  # D5.1: NOT NULL, varchar(128)
@@ -235,7 +254,9 @@ class TaskCallbackModel(Base):
     process_status = Column(String(64), nullable=True)
     processed_at = Column(DateTime, nullable=True)
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    gmt_modified = Column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
 
     __table_args__ = (
         Index("uk_workflow_instance", "run_id", "node_id", unique=True),
@@ -263,12 +284,15 @@ class TaskCallbackModel(Base):
             gmt_modified=self.gmt_modified,
         )
 
+
 class TaskActionLogModel(Base):
     """Append-only high-volume node action history."""
 
     __tablename__ = "task_action_log"
 
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
     event_id = Column(String(256), nullable=False)
     task_id = Column(_TASK_ID, nullable=False)
     node_id = Column(_NODE_ID, nullable=False)
@@ -281,7 +305,9 @@ class TaskActionLogModel(Base):
     payload = Column(Text, nullable=False)
     instance_id = Column(String(256), nullable=True)
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    gmt_modified = Column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
 
     __table_args__ = (
         Index("uk_task_action_event", "event_id", unique=True),

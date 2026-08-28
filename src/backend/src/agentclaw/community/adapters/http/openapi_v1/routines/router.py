@@ -84,6 +84,9 @@ def _map_routine(data: dict) -> Routine:
     return Routine(
         routine_id=str(data.get("id", "")),
         bot_id=str(data.get("bot_id", "")),
+        bot_name=str(data.get("bot_name", "")) or None,
+        owner_id=str(data.get("owner_id", "")) or None,
+        runtime_stage=str(data.get("runtime_stage", "")) or None,
         name=str(data.get("name", "") or ""),
         trigger=ScheduleTrigger(type="schedule", cron=str(sched.get("expr", ""))),
         command=str(payload.get("message", "") or ""),

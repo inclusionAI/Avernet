@@ -15,6 +15,10 @@ from agentclaw.community.core.task.domain.models import Status, TaskCallbackData
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
 )
+from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+    _bcn_state_machine_status,
+    _claw_mind_status_to_task,
+)
 
 from .schemas import TaskCallbackRequest, TaskNodeCallbackRequest
 
@@ -113,7 +117,7 @@ def translate_claw_mind(raw: dict, disposition: Literal["start", "result"]) -> T
       ``_claw_mind_status_to_task`` 映射的 task Status 枚举值(落 ``task_callback.status``,ClawMind 7 态 → task 7 态语义对应);
     - ``result.success`` 由底层 status 语义推(succeeded/completed→True;failed/cancelled/aborted→False;未知→不设 success);
     - ``result.data`` = ``node_executions[0].output_json``;``result.exec_error`` = ``node_executions[0].error_text``;
-    - ``execution_graph`` = 全量 ``ext_info``(flow_runs + node_executions 快照 → task_callback.execution_graph);
+    - ``execution_graph`` 不在此构建(ClawMind 图由 ``CallbackDataEnricher.enrich_claw_mind`` 从 ``ext_info`` 纯函数构建,adapter 仅做字段映射);
     - ``_raw_callback_body`` = 原始 body(→ task_callback.orig_callback_data);
     - ``extend_props`` 不设(claw_mind 无额外扩展,graph 已在 execution_graph);其余字段按语义,无则 ``""`` / ``0``。
     """
@@ -137,7 +141,7 @@ def translate_claw_mind(raw: dict, disposition: Literal["start", "result"]) -> T
     err = first_node.get("error_text")
     if err:
         result["exec_error"] = err
-    # ext_info 全量作 execution_graph 快照(不再折进 result._ext_info,避免与 execution_graph 重复);
+    # execution_graph 由 CallbackDataEnricher.enrich_claw_mind 从 ext_info 构建(adapter 仅做字段映射);
     # 原始 body 留作 _raw_callback_body → task_callback.orig_callback_data。
 
     return TranslatedCallback(
@@ -150,186 +154,10 @@ def translate_claw_mind(raw: dict, disposition: Literal["start", "result"]) -> T
             "workflow_source": "claw_mind",
             "workflow_instance_id": (flow_runs.get("origin_session_id") or ""),
             "status": _claw_mind_status_to_task(low_status).value,
-            "execution_graph": _build_claw_mind_execution_graph(ext, run_status=low_status),
             "_raw_callback_body": raw,
             "result": result,
         }),
     )
-
-
-# ===== ClawMind ext_info → TaskExecutionGraph(graph_to_dict 形状)执行图快照 =====
-# adapter 层不 import repository serializers(避免跨层),此处手写与
-# core/task/repository/serializers.py:graph_to_dict 同型的 dict;若 graph_to_dict
-# 形状变更需同步。落 task_callback.execution_graph 只读投影。
-
-# 底层 status → TaskExecutionGraph 7 态:succeeded/done→DONE、failed→FAILED、
-# cancelled/aborted→CANCELLED、running/started→RUNNING,余缺省 PENDING。
-_CLAW_MIND_TO_TASK_STATUS: dict[str, Status] = {
-    "succeeded": Status.DONE, "completed": Status.DONE, "done": Status.DONE,
-    "node_succeeded": Status.DONE, "success": Status.DONE,
-    "failed": Status.FAILED, "node_failed": Status.FAILED,
-    "cancelled": Status.CANCELLED, "canceled": Status.CANCELLED, "aborted": Status.CANCELLED,
-    "running": Status.RUNNING, "started": Status.RUNNING, "in_progress": Status.RUNNING,
-    "active": Status.RUNNING,
-    "pending": Status.PENDING, "queued": Status.PENDING, "waiting": Status.PENDING, "blocked": Status.PENDING,
-    "planning": Status.PLANNING,
-}
-
-
-def _claw_mind_status_to_task(low_status: Any) -> Status:
-    return _CLAW_MIND_TO_TASK_STATUS.get(str(low_status or "").lower(), Status.PENDING)
-
-
-def _parse_json(value: Any, default: Any = None) -> Any:
-    """容错解析 *_json 字段:dict 原样、str→ json.loads、None/异常 → default。"""
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except (ValueError, TypeError):
-            return default
-    return default
-
-
-def _parse_dict(value: Any) -> dict[str, Any]:
-    parsed = _parse_json(value, {})
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def _to_ms(value: Any) -> int | None:
-    """ClawMind 秒级时间戳 → 毫秒(对齐 RuntimeInfo.start_time/end_time 约定)。
-    探测值 < 1e12 视为秒(×1000)、已毫秒保持;非法/None → None。"""
-    if value is None:
-        return None
-    try:
-        v = int(value)
-    except (TypeError, ValueError):
-        return None
-    return v * 1000 if v < 1_000_000_000_000 else v
-
-
-# 图级 extend_props 白名单(workflow 标识/运行指标);credentials_json/identity_key/
-# plugin_version 等密钥·摘要·版本,以及图级 node_count/succeeded_count(节点为权威源)均不入。
-_CLAW_MIND_GRAPH_KEEP = (
-    "workflow_id", "workflow_title", "flow_id", "origin_session_id",
-    "total_duration_ms", "total_token_usage", "triggered_by",
-    "current_phase", "started_at", "completed_at",
-)
-_CLAW_MIND_NODE_KEEP = (
-    "session_id", "session_key", "embedded_session_key",
-    "branch_id", "progress_message", "triggered_by",
-)
-
-
-def _build_claw_mind_execution_graph(ext: dict, *, run_status: Any) -> dict[str, Any] | None:
-    """ClawMind ext_info(flow_runs + node_executions)→ graph_to_dict 形状执行图快照。
-
-    - ``run_id`` = int(flow_runs.id)(非法 → 0);图级 status 由底层 status 映射 7 态;
-      ``output`` = 解析 flow_runs.result_json;
-    - extend_props 白名单取 flow_runs 的 workflow 标识/运行指标;
-    - nodes 取 node_executions:task_spec.metadata.title ← node_title(缺则 node_id),
-      run_info.{start,end}_time 秒→毫秒;output = 解析 output_json;token_usage/input/
-      system_context/timing/error 等富字段折叠进 run_info.extend_props;
-    - relations 由各节点 input_json.nodeOutputKeys(params 的兄弟字段)派生(多父 DAG),
-      两端须都在节点集内,过滤悬挂边(默认 DEPENDENCY)。
-    无 flow_runs 且无 node_executions → None。
-    """
-    flow_runs = ext.get("flow_runs") if isinstance(ext, dict) else None
-    flow_runs = flow_runs if isinstance(flow_runs, dict) else {}
-    node_execs = ext.get("node_executions") if isinstance(ext, dict) else None
-    node_execs = node_execs if isinstance(node_execs, list) else []
-    if not flow_runs and not node_execs:
-        return None
-
-    node_ids = {ne.get("node_id") for ne in node_execs
-                if isinstance(ne, dict) and ne.get("node_id")}
-
-    tasks: list[dict[str, Any]] = []
-    relations: list[dict[str, Any]] = []
-    for ne in node_execs:
-        if not isinstance(ne, dict) or not ne.get("node_id"):
-            continue
-        node_id = ne["node_id"]
-        status = _claw_mind_status_to_task(ne.get("status") or run_status)
-        input_doc = _parse_dict(ne.get("input_json"))
-        ik_raw = input_doc.get("nodeOutputKeys")
-        input_keys = ik_raw if isinstance(ik_raw, list) else []
-
-        ep: dict[str, Any] = {}
-        if ne.get("executor_type"):
-            ep["executor_type"] = ne["executor_type"]
-        if ne.get("attempt") is not None:
-            ep["attempt"] = ne["attempt"]
-        tok = _parse_dict(ne.get("token_usage_json"))
-        if tok:
-            ep["token_usage"] = tok
-        if input_doc:
-            ep["input"] = input_doc
-        sc = _parse_dict(ne.get("system_context_json"))
-        if sc:
-            ep["system_context"] = sc
-        if ne.get("duration_ms") is not None:
-            ep["duration_ms"] = ne["duration_ms"]
-        if ne.get("started_at") is not None:
-            ep["started_at"] = ne["started_at"]          # 原始秒
-        if ne.get("completed_at") is not None:
-            ep["completed_at"] = ne["completed_at"]
-        if ne.get("error_text"):
-            ep["error_text"] = ne["error_text"]
-        for k in _CLAW_MIND_NODE_KEEP:
-            if ne.get(k):
-                ep[k] = ne[k]
-
-        for src in input_keys:
-            if isinstance(src, str) and src in node_ids and src != node_id:
-                relations.append({"src_id": src, "dst_id": node_id,
-                                  "type": "DEPENDENCY", "extend_props": {}})
-
-        title = ne.get("node_title") or node_id
-        tasks.append({
-            "node_id": node_id,
-            "task_id": "",
-            "status": status.value,
-            "task_spec": {
-                "metadata": {"task_id": node_id, "title": title, "instruction": ""},
-                "context": {"background": "", "extend_props": {}},
-                "goal": {"objective": "", "acceptances": []},
-            },
-            "run_info": {
-                "run_mode": None,
-                "assignee": None,
-                "start_time": _to_ms(ne.get("started_at")),
-                "end_time": _to_ms(ne.get("completed_at")),
-                "output": _parse_dict(ne.get("output_json")),
-                "acceptance_result": None,
-                "extend_props": ep,
-            },
-        })
-
-    graph_ep: dict[str, Any] = {}
-    for k in _CLAW_MIND_GRAPH_KEEP:
-        if flow_runs.get(k) is not None:
-            graph_ep[k] = flow_runs[k]
-    graph_params = _parse_dict(flow_runs.get("params_json"))
-    if graph_params:
-        graph_ep["params"] = graph_params
-
-    try:
-        run_id = int(flow_runs["id"]) if flow_runs.get("id") is not None else 0
-    except (TypeError, ValueError):
-        run_id = 0
-
-    return {
-        "run_id": run_id,
-        "task_id": "",
-        "loop_round": 0,
-        "status": _claw_mind_status_to_task(run_status).value,
-        "output": _parse_dict(flow_runs.get("result_json")),
-        "extend_props": graph_ep,
-        "tasks": tasks,
-        "relations": relations,
-    }
 
 
 # ===== BCN(BCS Group)CloudEvent 回调解析(语雀《BCS Group 回调接入说明》) =====
@@ -357,13 +185,16 @@ def translate_bcn(raw: dict) -> TranslatedCallback | None:
     """BCN CloudEvent → TaskCallbackData.data dict(对齐 task_callback 列);非处理事件返 ``None``。
 
     仅处理 ``_BCN_HANDLED_EVENTS``;disposition 由 event_type 推(created/started→start,completed→result)。
-    字段映射(拟,可调):
-    - ``invoker`` = "bcn";``loop_task_id`` = ``scope.run_id``(+ ``::data.node_id`` 若有);
+    字段映射:
+    - ``invoker`` = "bcn";``loop_task_id`` = ``scope.run_id``(node_id 恒空,req4);
     - ``workflow_instance_id`` = ``scope.session_id``(→ main_session_id);
-    - ``status`` = ``event_type``;``execution_graph`` = ``data``(事件体);
+    - ``status`` = ``_bcn_state_machine_status(event_type)``(``run.completed``→``DONE``,其余→``RUNNING``,req2);
+    - ``execution_graph`` 不在此构建(由 ``CallbackDataEnricher.enrich_bcn`` 取 BCS run 明细/DAG 后构建;fetch 失败用事件体兜底);
     - ``result.success`` 由 event_type 推(completed→True,除非 ``data.outcome`` 为 failed/error);``result.data`` = ``data.output``;
     - ``result.exec_error`` = ``data.reason``/``data.error_text``(若有);
-    - ``_raw_callback_body`` = 原始 event(→ orig_callback_data);``extend_props`` 不设。
+    - ``event_id`` = ``raw.event_id``(CloudEvent 幂等键;避免 run 明细经 ``result._ext_info`` 落 ``extend_props`` 后摘要素乱);
+    - ``_raw_callback_body`` = 原始 event(→ orig_callback_data,router 不再覆盖);``extend_props`` 不设
+      (router 取回 run 明细后落 ``result._ext_info`` → ``extend_props``,req3)。
     """
     event_type = raw.get("event_type")
     if event_type not in _BCN_HANDLED_EVENTS:
@@ -374,8 +205,8 @@ def translate_bcn(raw: dict) -> TranslatedCallback | None:
     data = data if isinstance(data, dict) else {}
 
     run_id = scope.get("run_id") or ""
-    node_id = data.get("node_id") or ""
-    loop_task_id = f"{run_id}::{node_id}" if node_id else run_id
+    # req4:node_id 恒空,loop_task_id = run_id(回调不走框架节点名;run_id 即回投键)。
+    loop_task_id = run_id
 
     is_completed = event_type.endswith(".completed")
     result: dict[str, Any] = {}
@@ -399,8 +230,8 @@ def translate_bcn(raw: dict) -> TranslatedCallback | None:
             "instance_id": 0,
             "workflow_source": "bcn",
             "workflow_instance_id": (scope.get("session_id") or ""),
-            "status": event_type,
-            "execution_graph": data,
+            "event_id": raw.get("event_id"),
+            "status": _bcn_state_machine_status(event_type).value,
             "_raw_callback_body": raw,
             "result": result,
         }),

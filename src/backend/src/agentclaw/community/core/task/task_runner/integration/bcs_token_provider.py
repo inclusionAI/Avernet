@@ -17,6 +17,9 @@ class BcsTokenProvider(Protocol):
     @property
     def base_url(self) -> str: ...
 
+    @property
+    def task_callback_url(self) -> str: ...  # 任务回投 origin(scheme://netloc);corp env-aware 注入,空→TaskExecutor 兜底 api_base_url
+
 @dataclass(frozen=True)
 class LocalBcsTokenProvider:
     """singlebox 本地 BCS 凭据:复用 BcsHttpAdapter 直连本地 BCS(:21000)。
@@ -30,6 +33,7 @@ class LocalBcsTokenProvider:
     base_url: str
     token: str = ""
     secret: str = ""
+    task_callback_url: str = ""  # 任务回投 origin(scheme://netloc);singlebox 空 → TaskExecutor 兜底 api_base_url
 
     @classmethod
     def from_env(cls) -> "LocalBcsTokenProvider":

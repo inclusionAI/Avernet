@@ -182,11 +182,21 @@ class SystemConfigService:
         Returns:
             配置项 ID
         """
-        # 确保分类存在
+        # 确保分类存在(不存在则自动创建,对齐 docstring "如果分类不存在会自动创建")
         cat = self._repo.get_category(category=category, env=env)
         if cat is None:
-            logger.info(f"category not found!{category}")
-            return 0
+            parent_id = self.create_category(
+                category=category,
+                category_name=category,
+                description=description,
+                env=env,
+                operator=operator,
+            )
+            if not parent_id:
+                logger.warning(
+                    f"[set_config] auto-create category failed: category={category}, env={env}"
+                )
+                return 0
         else:
             parent_id = cat.id
 

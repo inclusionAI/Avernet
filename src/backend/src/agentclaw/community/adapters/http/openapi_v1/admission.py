@@ -257,6 +257,9 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # path, so the shared dependency checks it like every other operation.
     ("GET", "/openapi/v1/bots/{bot_id}/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    # The owner-level aggregate lists the named user's fleet, not one bot —
+    # gated on a live delegation like the ceiling (see owner_router).
+    ("GET", "/openapi/v1/bots/routines/all"): AdmissionMode.USER_GATED,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/routines/{routine_id}",
@@ -597,6 +600,11 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/collaboration/tasks/execute"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/list"): AdmissionMode.OPEN,
+    # Grant/revoke are stateless relays to secbaas (api-key server-side; the
+    # human Cookie/Referer authorizes the action) — OPEN at the gate, secbaas
+    # authorizes. Same shape as the other task public operations.
+    ("POST", "/openapi/v1/collaboration/tasks/grant"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/collaboration/tasks/revoke"): AdmissionMode.OPEN,
     # Department directory search — a tenant-wide catalogue read, not a user's.
     ("GET", "/openapi/v1/org/dept"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
