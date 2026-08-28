@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any, Mapping
 
 from agentclaw.community.core.bot_inventory.errors import (
@@ -12,8 +13,12 @@ from agentclaw.community.core.bot_inventory.errors import (
 from agentclaw.community.core.bot_inventory.protocols import (
     BotInventoryAccessPort,
     BotInventoryBotPort,
+    BotInventoryTemplatePort,
     BusinessSpaceContextProtocol,
     DesktopBotInventoryPort,
+)
+from agentclaw.community.core.bot_management.template_public_view import (
+    project_template_config_for_public,
 )
 from agentclaw.community.core.bot_inventory.services.lifecycle_view import (
     BotLifecycleView,
@@ -38,12 +43,14 @@ class BotInventoryService:
         access_service: BotInventoryAccessPort,
         business_space: BusinessSpaceContextProtocol,
         lifecycle_view: BotLifecycleView,
+        template_port: BotInventoryTemplatePort,
     ) -> None:
         self._bot = bot_service
         self._desktop = desktop_service
         self._access = access_service
         self._business_space = business_space
         self._lifecycle = lifecycle_view
+        self._template_port = template_port
 
     def list_items(
         self,
@@ -128,7 +135,39 @@ class BotInventoryService:
         )
         total = len(cards)
         start = (page - 1) * page_size
-        return cards[start : start + page_size], total
+        page_items = self._attach_page_templates(cards[start : start + page_size])
+        return page_items, total
+
+    def _attach_page_templates(
+        self, items: list[BotInventoryItem]
+    ) -> list[BotInventoryItem]:
+        """Project template_config onto the returned page slice only.
+
+        The fan-out intentionally pulls rows with ``attach_templates=False``
+        (one batched template read per 200-row page would tax every listing);
+        this is the single place template snapshots enter the read model, and
+        it sees only the page the caller will actually see — so the per-request
+        template cost is one bounded read over ≤page_size ids.
+        """
+        bot_ids = [item.bot_id for item in items if item.template_type]
+        if not bot_ids:
+            return items
+        ext_by_bot_id = self._template_port.list_template_configs_by_bot_ids(
+            list(bot_ids)
+        )
+        enriched: list[BotInventoryItem] = []
+        for item in items:
+            if not item.template_type:
+                enriched.append(item)
+                continue
+            projected = project_template_config_for_public(
+                ext_by_bot_id.get(item.bot_id)
+            )
+            if projected is None and item.template_config is None:
+                enriched.append(item)
+                continue
+            enriched.append(replace(item, template_config=projected))
+        return enriched
 
     def _list_cloud_rows(
         self,
@@ -346,6 +385,7 @@ class BotInventoryService:
             internal_status=(
                 lifecycle_card.internal_status if lifecycle_card else None
             ),
+            template_type=_optional_str(row.get("template_type")),
         )
 
     @staticmethod

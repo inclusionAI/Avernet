@@ -54,6 +54,21 @@ LOCAL = {
 }
 
 
+class _StubTemplatePort:
+    """Recording stub: answers ``ac_templates.ext`` snapshots per bot id."""
+
+    def __init__(self, ext_by_bot_id: dict[str, dict] | None = None) -> None:
+        self.calls: list[list[str]] = []
+        self.ext_by_bot_id = ext_by_bot_id or {}
+
+    def list_template_configs_by_bot_ids(self, bot_ids: list[str]) -> dict[str, dict]:
+        self.calls.append(list(bot_ids))
+        wanted = set(bot_ids)
+        return {
+            bot_id: ext for bot_id, ext in self.ext_by_bot_id.items() if bot_id in wanted
+        }
+
+
 @pytest.fixture
 def service():
     bot = MagicMock()
@@ -72,6 +87,7 @@ def service():
             access_service=access,
             business_space=NoopBusinessSpaceContext(),
             lifecycle_view=BotLifecycleView(NoopServiceLifecyclePort()),
+            template_port=_StubTemplatePort(),
         ),
         bot,
         desktop,
@@ -100,9 +116,10 @@ def test_list_items_combines_filters_and_paginates(service) -> None:
 
 @pytest.mark.unit
 def test_cloud_pull_opts_out_of_template_attach(service) -> None:
-    # Inventory cards never surface template_config, so every pulled page must
-    # skip the batched template read — one fewer DB round trip per page on the
-    # /bots/all path.
+    # The fan-out still pulls without template attachment: snapshots enter the
+    # read model only through the page-slice enrichment (see the
+    # test_page_slice_* cases below), so every pulled page keeps skipping the
+    # batched template read.
     inventory, bot, _ = service
 
     inventory.list_items(
@@ -207,6 +224,7 @@ def test_service_bot_expands_to_publication_cards_before_pagination() -> None:
         access_service=access,
         business_space=NoopBusinessSpaceContext(),
         lifecycle_view=BotLifecycleView(lifecycle_port),
+        template_port=_StubTemplatePort(),
     )
 
     items, total = inventory.list_items(
@@ -417,6 +435,7 @@ def test_team_space_lists_all_owners_and_scopes_actions_by_bot_permission() -> N
         access_service=access,
         business_space=business_space,
         lifecycle_view=BotLifecycleView(lifecycle_port),
+        template_port=_StubTemplatePort(),
     )
 
     items, total = inventory.list_items(
@@ -534,3 +553,112 @@ def test_service_upgrade_action_requires_admin() -> None:
     )
     assert admin_actions == (BotAction.VIEW, BotAction.UPGRADE)
     assert admin_disabled == {"delete": "Bot Owner permission required"}
+
+
+def _inventory_with(bot_rows: list[dict], stub: _StubTemplatePort) -> BotInventoryService:
+    bot = MagicMock()
+    bot.list_bots_by_conditions.return_value = {"total": len(bot_rows), "items": bot_rows}
+    desktop = MagicMock()
+    desktop.list_user_bots.return_value = []
+    access = MagicMock()
+    access.get_operable_permission_levels.side_effect = lambda **kwargs: {
+        int(row["id"]): PermissionLevel.OWNER for row in kwargs["bots"]
+    }
+    return BotInventoryService(
+        bot_service=bot,
+        desktop_service=desktop,
+        access_service=access,
+        business_space=NoopBusinessSpaceContext(),
+        lifecycle_view=BotLifecycleView(NoopServiceLifecyclePort()),
+        template_port=stub,
+    )
+
+
+def _template_bot(bot_id: str, row_id: int) -> dict:
+    return {
+        **CLOUD,
+        "id": row_id,
+        "bot_id": bot_id,
+        "bot_name": f"Bot {bot_id}",
+        "template_type": "applicationCoding",
+    }
+
+
+@pytest.mark.unit
+def test_page_slice_attaches_projected_template_config() -> None:
+    # Three template-backed bots, page_size=2 -> the port sees only the
+    # returned page's template-backed ids, and the stored ext is projected
+    # (token stripped) before it reaches the read model.
+    stub = _StubTemplatePort(
+        {
+            "b1": {"devflow_workflow": "w1", "token": "raw-secret"},
+            "b2": {"template_key": "normalCC", "runtime": "codefuse"},
+            "b3": {"devflow_workflow": "w3"},
+        }
+    )
+    inventory = _inventory_with(
+        [_template_bot("b1", 11), _template_bot("b2", 12), _template_bot("b3", 13)],
+        stub,
+    )
+
+    items, total = inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.CLOUD,
+        page=1,
+        page_size=2,
+    )
+
+    assert total == 3
+    assert len(items) == 2
+    assert len(stub.calls) == 1
+    assert set(stub.calls[0]) == {"b1", "b2"}
+    assert items[0].template_type == "applicationCoding"
+    assert items[0].template_config == {"devflow_workflow": "w1"}
+    assert items[1].template_config == {"template_key": "normalCC"}
+
+
+@pytest.mark.unit
+def test_page_slice_without_template_bots_skips_the_port() -> None:
+    stub = _StubTemplatePort()
+    inventory = _inventory_with([CLOUD], stub)
+
+    items, _ = inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.CLOUD,
+        page=1,
+        page_size=20,
+    )
+
+    assert items
+    assert stub.calls == []
+
+
+@pytest.mark.unit
+def test_page_slice_missing_template_row_leaves_config_none() -> None:
+    stub = _StubTemplatePort({})  # template row absent for the bot
+    inventory = _inventory_with([_template_bot("b1", 11)], stub)
+
+    items, _ = inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.CLOUD,
+        page=1,
+        page_size=20,
+    )
+
+    assert items[0].template_type == "applicationCoding"
+    assert items[0].template_config is None

@@ -109,6 +109,20 @@ class BotInventoryAccessPort(Protocol):
 
 
 @runtime_checkable
+class BotInventoryTemplatePort(Protocol):
+    """Page-slice template-config reader for the inventory read model.
+
+    The listing fan-out deliberately skips template attachment (cost); this
+    port is called with ONLY the returned page's template-backed bot ids and
+    answers with the stored ``ac_templates.ext`` snapshot per bot.
+    """
+
+    def list_template_configs_by_bot_ids(
+        self, bot_ids: list[str]
+    ) -> dict[str, dict[str, Any]]: ...
+
+
+@runtime_checkable
 class BusinessSpaceContextProtocol(Protocol):
     """Minimal consumer-side business-space context API.
 

@@ -109,6 +109,10 @@ class BotInventoryItem:
     publication_version: int | None = None
     live_version: int | None = None
     internal_status: str | None = None
+    # Template identity (engine stays the engine vocabulary; coding identity
+    # lives in template_type + the public projection of template_config).
+    template_type: str | None = None
+    template_config: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
