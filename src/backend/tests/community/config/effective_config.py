@@ -89,6 +89,7 @@ _PROVIDER_METHODS = (
     "desktop_bot_periodic_scan",
     "dormant_config",
     "dormant_notify",
+    "task_queue",
     "task_queue_worker",
 )
 
