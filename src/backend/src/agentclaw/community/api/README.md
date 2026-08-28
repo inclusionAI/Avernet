@@ -119,6 +119,7 @@ internal_dependencies:
   - agentclaw.community.kernel.device_dto            # OutBoundOperationRule — typed in baas_service.py Protocol (B6)
   - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py
+  - agentclaw.community.plugin_api.skill_center_gateway # Public catalogue request/result DTOs typed in skill_center_gateway_service.py
 ```
 
 ### Change impact

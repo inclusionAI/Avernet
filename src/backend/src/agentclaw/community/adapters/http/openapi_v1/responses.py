@@ -280,8 +280,11 @@ from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterPublishStatusError,
     SkillCenterTeamCreateError,
 )
-
 T = TypeVar("T")
+
+
+class SkillCenterMarketplaceUnavailableError(RuntimeError):
+    """A public Skill Center marketplace read could not be served."""
 
 
 def _trace_id(request: Request) -> str:
@@ -374,6 +377,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         SpacePublicErrorMessage.SKILL_CENTER_TEAM_CREATE_FAILED,
     ),
     SkillCenterMarketSearchError: (502, "Skill Center marketplace unavailable"),
+    SkillCenterMarketplaceUnavailableError: (
+        502,
+        "Skill Center marketplace unavailable",
+    ),
     SkillCenterPublishStatusError: (502, "Skill Center publish status unavailable"),
     # Staff directory infra failure (master-data service unreachable/errored).
     # 502, not 200-null: "directory down" must stay distinct from "no dept" so an
