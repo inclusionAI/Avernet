@@ -220,6 +220,9 @@
       "scan_interval_minutes": 0,
       "storage_dir": "./data/skills_scan"
     },
+    "task_queue": {
+      "app": "agentclaw"
+    },
     "task_queue_worker": {
       "batch_size": 10,
       "enabled": true,

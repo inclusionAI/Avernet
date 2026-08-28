@@ -22,7 +22,12 @@ from sqlalchemy.dialects import mysql
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base
-from agentclaw.community.core.task_queue.types import TaskRecord, TaskStatus
+from agentclaw.community.core.task_queue.types import (
+    DEFAULT_APP,
+    MAX_APP_LEN,
+    TaskRecord,
+    TaskStatus,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 
 # SQLite only auto-increments columns declared as exactly "INTEGER PRIMARY
@@ -136,12 +141,31 @@ class TaskQueueModel(Base):
         comment="enforcement copy of idempotency_key; NULLed on terminal transitions",
     )
 
-    # ── env scoping / audit ─────────────────────────────────────────────
+    # ── env / app scoping / audit ───────────────────────────────────────
     env = Column(
         String(20),
         nullable=False,
         default=get_current_env,
         comment="环境标识: prod/pre/dev; all queries filter by env",
+    )
+    # Which application owns the row. A second, independent backend now shares
+    # this table, and without this column both fleets claim each other's tasks —
+    # each running a ``task_type`` its registry never heard of. Every query that
+    # selects work (claim, the dedup lookups, list_by_status) filters on it, and
+    # the value comes from deployment config (``TaskQueueConfig.app``, read off
+    # the top-level ``app_name``), never from a per-call argument, exactly like
+    # ``env``.
+    #
+    # ``server_default`` mirrors the deployed DDL so an INSERT that predates this
+    # column still lands on the owning app rather than failing NOT NULL. It is a
+    # compatibility floor, not the source of the value: the repository always
+    # writes ``app`` explicitly, because a deployment whose configured app is not
+    # the default would otherwise enqueue rows it can never claim.
+    app = Column(
+        String(MAX_APP_LEN),
+        nullable=False,
+        server_default=DEFAULT_APP,
+        comment="app who owns the task; all queries that select work filter by app",
     )
     gmt_create = Column(DateTime, default=func.now(), nullable=False, comment="first-enqueue audit time")
     gmt_modified = Column(
@@ -157,8 +181,14 @@ class TaskQueueModel(Base):
         Index("idx_env_status_run_at", "env", "status", "run_at"),
         # Reclaim scan: env-scoped lookup of expired RUNNING leases.
         Index("idx_env_lease_expires_at", "env", "lease_expires_at"),
+        # The same two scans once the table is shared with another backend:
+        # every claim/reclaim query now also filters on app, so the leading
+        # columns have to match or the scan degrades to a full partition read on
+        # the busiest statement the component runs.
+        Index("idx_env_app_status_run_at", "env", "app", "status", "run_at"),
+        Index("idx_env_app_lease_expires_at", "env", "app", "lease_expires_at"),
         # Active-only enqueue dedup: at most one *live* task per key within an
-        # (env, task_type). Terminal rows null their active key and drop out.
+        # (env, app, task_type). Terminal rows null their active key and drop out.
         # A NULL active key is the opt-out — both MySQL/OceanBase and SQLite
         # treat NULLs as distinct in a unique index, so un-keyed enqueues never
         # collide with each other. That property is relied upon, not incidental.
@@ -176,6 +206,14 @@ class TaskQueueModel(Base):
         # _find_active_by_key and appears in no other index, so pinning it costs
         # nothing elsewhere.
         #
+        # app keeps the table default for the same reason as env, and matches the
+        # deployed DDL, which declares no collation for it either. It reads on the
+        # ci collation as "two app names that differ only by case are one app" —
+        # accepted deliberately, since both the enqueue and the claim side take
+        # the name from the same config value. It does mean two deployments must
+        # not be told apart by case alone; give them names that differ by more
+        # than that.
+        #
         # utf8mb4_bin is PAD SPACE, so it settles case but not trailing spaces;
         # enqueue and HandlerRegistry.register reject values carrying any.
         #
@@ -187,6 +225,27 @@ class TaskQueueModel(Base):
         # active key once per partition and defeat dedup, so anyone provisioning
         # the table by hand has to know it — do not read this declaration as the
         # complete specification of the index.
+        Index(
+            "uk_env_app_task_type_active_idempotency_key",
+            "env",
+            "app",
+            "task_type",
+            "active_idempotency_key",
+            unique=True,
+        ),
+        # The pre-app dedup index, still present on the deployed table. It is
+        # declared here because it is *there*: it enforces a scope wider than the
+        # code's — one live key per (env, task_type) across every app — so a keyed
+        # enqueue can be rejected by it while this app holds no such key at all.
+        # Leaving it out of the ORM would hide that case from SQLite entirely and
+        # let it surface first in production, which is precisely the divergence
+        # the collation notes above exist to avoid. ``enqueue`` recognises the
+        # rejection as a dedup conflict, finds no holder of its own, and ends up
+        # raising once its retries are spent.
+        #
+        # It is redundant once every app writes its own ``app``, and dropping it
+        # is the last step of this migration — drop it there and here in the same
+        # change (README "Provisioning").
         Index(
             "uk_env_task_type_active_idempotency_key",
             "env",
@@ -210,6 +269,7 @@ class TaskQueueModel(Base):
             attempts=self.attempts,
             last_error=self.last_error,
             env=self.env,
+            app=self.app,
             idempotency_key=self.idempotency_key,
             gmt_create=self.gmt_create,
             gmt_modified=self.gmt_modified,
