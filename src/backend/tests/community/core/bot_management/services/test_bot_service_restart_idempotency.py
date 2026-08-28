@@ -2239,10 +2239,11 @@ class TestRestartAuthorizationResyncWiring:
             {"confirmed_template_update": True},
             mcp_sync=mcp_sync,
             skill_set_factory=svc._skill_set_factory,
+            template_service=svc._template_service,
         )
         assert repo.release_calls == 1
 
-    def test_baas_in_place_restart_refreshes_after_restart(self):
+    def test_baas_in_place_restart_defers_refresh_to_publish_event(self):
         repo = FakeRestartLockRepo()
         device_service = MagicMock()
         mcp_sync = object()
@@ -2278,10 +2279,7 @@ class TestRestartAuthorizationResyncWiring:
             )
 
         assert result == bot
-        refresh_strategy.refresh_restart_authorization.assert_called_once_with(
-            ANY,
-            bot,
-            {"confirmed_template_update": True},
-            mcp_sync=mcp_sync,
-            skill_set_factory=svc._skill_set_factory,
-        )
+        # BaaS in-place restart is asynchronous: runtime authorization refresh
+        # is dispatched by BaasPublishCompletedEvent after publish success, not
+        # immediately after /update accepts the restart.
+        refresh_strategy.refresh_restart_authorization.assert_not_called()
