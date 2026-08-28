@@ -291,7 +291,10 @@ class TaskService:
             (_ts.goal.objective or _ts.metadata.instruction or _ts.metadata.title) or ""
         ).strip()
         gf = GroupFormation(
-            bot_ids=[request.owner_bot_id, *ec.get("participant_bot_ids", [])],
+            bot_ids=[
+                compose_bot_identity(request.owner_bot_id, request.owner_user_id),
+                *ec.get("participant_bot_ids", []),
+            ],
             collab_mode=_resolve_coop_collab_mode(has_yaml, ec.get("group_kind")),
             group_name=ec.get("group_name", f"task-{task_id}"),
             members_info=[],

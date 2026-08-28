@@ -270,6 +270,14 @@ class TaskExecutor:
         raw_bindings = (
             self._state_machine_bindings(gf) if mode == "state_machine" else {}
         )
+        # A state-machine binding names the actual runtime Bot(s). BCS requires
+        # every binding target to also be present in participants, so merge
+        # binding targets into the participant roster before resolving UUIDs.
+        # Keep the original order and deduplicate exact product/composite IDs.
+        for spec in raw_bindings.values():
+            for binding_bot_id in spec["bot_ids"]:
+                if binding_bot_id not in bot_ids:
+                    bot_ids.append(binding_bot_id)
         manager_bot_id = (
             gf.extend_props.get("manager_bot_id") if mode == "manager_worker" else None
         )
