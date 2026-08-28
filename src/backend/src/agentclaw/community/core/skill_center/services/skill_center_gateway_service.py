@@ -168,11 +168,8 @@ class SkillCenterGatewayService:
         self, request: SkillCenterPublishStatusRequest
     ) -> SkillCenterPublishStatus:
         status = self._gateway.get_publish_status(request)
-        if (
-            status.skill_code != request.skill_code
-            or status.version_number != request.version_number
-        ):
-            self._reject("Skill Center returned status for a different Skill version")
+        if status.skill_code != request.skill_code:
+            self._reject("Skill Center returned status for a different Skill")
         expected_completed = status.status is not SkillCenterPublishState.PENDING
         expected_success = status.status is SkillCenterPublishState.PUBLISHED
         if (

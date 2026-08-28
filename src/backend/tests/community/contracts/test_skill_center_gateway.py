@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import hashlib
+import json
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 import zipfile
@@ -25,6 +26,7 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterPublicSkillSearchRequest,
     SkillCenterReadScope,
     SkillCenterSecurityCheckReport,
+    SkillCenterPublishStatus,
     SkillCenterPublishStatusRequest,
     SkillCenterPublishState,
     SkillCenterPublishSubmitRequest,
@@ -70,7 +72,7 @@ def _all_gateway_requests() -> tuple[tuple[str, object], ...]:
         ),
         (
             "get_publish_status",
-            SkillCenterPublishStatusRequest("team-1", "skill", "1"),
+            SkillCenterPublishStatusRequest("skill"),
         ),
         (
             "list_versions",
@@ -128,11 +130,7 @@ def test_gateway_consumer_round_trips_team_publish_and_exact_version(world) -> N
     ).items == (detail,)
 
     status = service.get_publish_status(
-        SkillCenterPublishStatusRequest(
-            team_id=team.team_id,
-            skill_code="skill-uuid",
-            version_number="2",
-        )
+        SkillCenterPublishStatusRequest(skill_code="skill-uuid")
     )
     assert status.status == "PUBLISHED"
     assert status.status is SkillCenterPublishState.PUBLISHED
@@ -145,6 +143,8 @@ def test_gateway_consumer_round_trips_team_publish_and_exact_version(world) -> N
     assert status.is_success is True
     assert isinstance(status.standard_check_result, SkillCenterStandardCheckResult)
     assert isinstance(status.security_check_report, SkillCenterSecurityCheckReport)
+    assert status.standard_check_result.raw == {"passed": True}
+    assert status.security_check_report.raw == {"risk": "LOW"}
     versions = service.list_versions(
         SkillCenterVersionListRequest(
             team_id=team.team_id,
@@ -187,7 +187,7 @@ def test_gateway_consumer_round_trips_team_publish_and_exact_version(world) -> N
     ]
 
 
-def test_local_gateway_reports_missing_team_reference_as_business_error(world) -> None:
+def test_local_gateway_reports_missing_team_reference_as_team_not_found(world) -> None:
     service = world.get(SkillCenterGatewayService)
     gateway = world.get(SkillCenterGateway)
 
@@ -198,7 +198,7 @@ def test_local_gateway_reports_missing_team_reference_as_business_error(world) -
             )
         )
 
-    assert raised.value.code is SkillCenterGatewayErrorCode.BUSINESS
+    assert raised.value.code is SkillCenterGatewayErrorCode.TEAM_NOT_FOUND
     assert len(gateway.calls_to("get_team_by_ref")) == 1
 
 
@@ -234,6 +234,7 @@ def test_gateway_public_catalog_preserves_documented_filters_and_metadata(
         sort_by=SkillCenterSortOrder.DOWNLOAD,
         creator_name="示例用户",
         creator_work_no="123456",
+        belong_to=SkillCenterBelongTo.PERSONAL,
         page_num=2,
         page_size=50,
     )
@@ -283,7 +284,9 @@ def test_gateway_public_catalog_preserves_documented_filters_and_metadata(
     assert result.items[0].creator_work_no == "123456"
     assert result.items[0].tags == ("研发效能",)
     assert result.items[0].office_download_url.endswith("office.zip")
-    assert gateway.calls_to("search_public_skills")[0].args == (request,)
+    recorded_request = gateway.calls_to("search_public_skills")[0].args[0]
+    assert recorded_request == request
+    assert recorded_request.belong_to is SkillCenterBelongTo.PERSONAL
 
 
 def test_local_gateway_round_trips_documented_public_skill_and_tags(world) -> None:
@@ -353,6 +356,33 @@ def test_local_gateway_round_trips_documented_public_skill_and_tags(world) -> No
     assert [version.version_number for version in versions] == ["v1.0"]
     assert download.version_number == "v1.0"
     assert download.sha256
+
+
+def test_local_gateway_filters_public_catalog_by_belong_to(world) -> None:
+    service = world.get(SkillCenterGatewayService)
+    team = service.create_team(
+        SkillCenterTeamCreateRequest("space-team", "Team", "TEAMCLAW", "space-team")
+    )
+    service.submit_publish(
+        SkillCenterPublishSubmitRequest(
+            team_id=team.team_id,
+            skill_code="team-owned-skill",
+            skill_name="Team Skill",
+            version_number="1",
+            package_url="https://example.invalid/team-skill.zip",
+            visibility=SkillCenterVisibility.PUBLIC,
+        )
+    )
+
+    team_page = service.search_public_skills(
+        SkillCenterPublicSkillSearchRequest(belong_to=SkillCenterBelongTo.TEAM)
+    )
+    personal_page = service.search_public_skills(
+        SkillCenterPublicSkillSearchRequest(belong_to=SkillCenterBelongTo.PERSONAL)
+    )
+
+    assert [skill.skill_code for skill in team_page.items] == ["team-owned-skill"]
+    assert personal_page.items == ()
 
 
 def test_local_gateway_rejects_cross_team_skill_code_reuse(world) -> None:
@@ -620,25 +650,81 @@ def test_gateway_consumer_propagates_stable_error_without_retry(world) -> None:
     assert len(gateway.calls_to("submit_publish")) == 1
 
 
-@pytest.mark.parametrize("operation", ["get_publish_status", "get_exact_download"])
-def test_local_gateway_rejects_an_unknown_exact_version(world, operation: str) -> None:
+def test_local_gateway_rejects_an_unknown_publish_status_skill(world) -> None:
     service = world.get(SkillCenterGatewayService)
     gateway = world.get(SkillCenterGateway)
-    request = {
-        "get_publish_status": SkillCenterPublishStatusRequest(
-            "unknown-team", "skill", "9"
-        ),
-        "get_exact_download": SkillCenterExactDownloadRequest(
-            "skill", "9", SkillCenterReadScope.TEAM, "unknown-team"
-        ),
-    }[operation]
 
     with pytest.raises(SkillCenterGatewayError) as raised:
-        getattr(service, operation)(request)
+        service.get_publish_status(SkillCenterPublishStatusRequest("unknown-skill"))
 
     assert raised.value.code is SkillCenterGatewayErrorCode.BUSINESS
-    expected_direct_calls = 1 if operation == "get_publish_status" else 0
-    assert len(gateway.calls_to(operation)) == expected_direct_calls
+    assert len(gateway.calls_to("get_publish_status")) == 1
+
+
+def test_local_gateway_rejects_an_unknown_exact_version(world) -> None:
+    service = world.get(SkillCenterGatewayService)
+    gateway = world.get(SkillCenterGateway)
+
+    with pytest.raises(SkillCenterGatewayError) as raised:
+        service.get_exact_download(
+            SkillCenterExactDownloadRequest(
+                "skill", "9", SkillCenterReadScope.TEAM, "unknown-team"
+            )
+        )
+
+    assert raised.value.code is SkillCenterGatewayErrorCode.BUSINESS
+    assert gateway.calls_to("get_exact_download") == []
+
+
+def test_gateway_status_query_returns_the_current_sc_version(world) -> None:
+    service = world.get(SkillCenterGatewayService)
+    gateway = world.get(SkillCenterGateway)
+    gateway.set_override(
+        "get_publish_status",
+        lambda request: SkillCenterPublishStatus(
+            skill_code=request.skill_code,
+            version_number="server-current-version",
+            status=SkillCenterPublishState.PENDING,
+            is_completed=False,
+            is_success=False,
+        ),
+    )
+
+    status = service.get_publish_status(SkillCenterPublishStatusRequest("skill"))
+
+    assert status.version_number == "server-current-version"
+    assert len(gateway.calls_to("get_publish_status")) == 1
+
+
+def test_publish_reports_preserve_unknown_sc_fields_without_aliasing() -> None:
+    standard_payload = {
+        "passed": True,
+        "checks": [{"ruleCode": "manifest", "result": "PASS"}],
+    }
+    security_payload = {
+        "risk": "LOW",
+        "details": {"scanner": "sc", "score": 0},
+    }
+
+    standard = SkillCenterStandardCheckResult(raw=standard_payload)
+    security = SkillCenterSecurityCheckReport(raw=security_payload)
+    standard_payload["checks"][0]["result"] = "MUTATED"
+    security_payload["details"]["score"] = 99
+
+    expected_standard = {
+        "passed": True,
+        "checks": [{"ruleCode": "manifest", "result": "PASS"}],
+    }
+    expected_security = {
+        "risk": "LOW",
+        "details": {"scanner": "sc", "score": 0},
+    }
+    assert standard.to_raw_dict() == expected_standard
+    assert security.to_raw_dict() == expected_security
+    assert json.loads(json.dumps(standard.to_raw_dict())) == expected_standard
+    assert json.loads(json.dumps(security.to_raw_dict())) == expected_security
+    with pytest.raises(TypeError):
+        standard.raw["passed"] = False  # type: ignore[index]
 
 
 @pytest.mark.parametrize(
@@ -652,9 +738,6 @@ def test_local_gateway_rejects_an_unknown_exact_version(world, operation: str) -
             skill_name="Skill",
             version_number="1",
             package_url="https://example.invalid/package.zip",
-        ),
-        lambda: SkillCenterPublishStatusRequest(
-            team_id="", skill_code="skill", version_number="1"
         ),
         lambda: SkillCenterVersionListRequest(
             skill_code="skill", scope=SkillCenterReadScope.TEAM, team_id=""
@@ -670,6 +753,22 @@ def test_local_gateway_rejects_an_unknown_exact_version(world, operation: str) -
 def test_team_scoped_requests_reject_empty_team_id(factory) -> None:
     with pytest.raises(ValueError, match="team_id is required"):
         factory()
+
+
+def test_publish_status_request_rejects_empty_skill_code() -> None:
+    with pytest.raises(ValueError, match="skill_code is required"):
+        SkillCenterPublishStatusRequest(skill_code="")
+
+
+def test_publish_status_response_requires_sc_version() -> None:
+    with pytest.raises(ValueError, match="version_number is required"):
+        SkillCenterPublishStatus(
+            skill_code="skill",
+            version_number="",
+            status=SkillCenterPublishState.PENDING,
+            is_completed=False,
+            is_success=False,
+        )
 
 
 def test_team_response_rejects_empty_team_id() -> None:

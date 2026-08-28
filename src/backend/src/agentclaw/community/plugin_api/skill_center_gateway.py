@@ -12,9 +12,11 @@ composition-root configuration.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import Enum
 import re
+from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.plugin_api.base import Plugin
@@ -32,10 +34,45 @@ def _validate_page(page_num: int, page_size: int) -> None:
         raise ValueError("page_size must be between 1 and 100")
 
 
+def _freeze_json(value: object) -> object:
+    if isinstance(value, Mapping):
+        if any(not isinstance(key, str) for key in value):
+            raise ValueError("raw report keys must be strings")
+        return MappingProxyType(
+            {key: _freeze_json(item) for key, item in value.items()}
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_json(item) for item in value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise ValueError("raw report values must be JSON-compatible")
+
+
+def _freeze_json_object(value: Mapping[str, object]) -> Mapping[str, object]:
+    frozen = _freeze_json(value)
+    assert isinstance(frozen, Mapping)
+    return frozen
+
+
+def _thaw_json(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {key: _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(item) for item in value]
+    return value
+
+
+def _thaw_json_object(value: Mapping[str, object]) -> dict[str, object]:
+    thawed = _thaw_json(value)
+    assert isinstance(thawed, dict)
+    return thawed
+
+
 class SkillCenterGatewayErrorCode(str, Enum):
     """Stable failure categories exposed without leaking HTTP or an SC SDK."""
 
     BUSINESS = "business_error"
+    TEAM_NOT_FOUND = "team_not_found"
     TIMEOUT = "timeout"
     UNKNOWN_RESPONSE = "unknown_response"
     PROTOCOL = "protocol_error"
@@ -157,6 +194,7 @@ class SkillCenterPublicSkillSearchRequest:
     sort_by: SkillCenterSortOrder = SkillCenterSortOrder.LATEST
     creator_name: str | None = None
     creator_work_no: str | None = None
+    belong_to: SkillCenterBelongTo | None = None
 
     def __post_init__(self) -> None:
         _validate_page(self.page_num, self.page_size)
@@ -294,14 +332,10 @@ class SkillCenterPublishSubmission:
 
 @dataclass(frozen=True)
 class SkillCenterPublishStatusRequest:
-    team_id: str
     skill_code: str
-    version_number: str
 
     def __post_init__(self) -> None:
-        _require(self.team_id, "team_id")
         _require(self.skill_code, "skill_code")
-        _require(self.version_number, "version_number")
 
 
 @dataclass(frozen=True)
@@ -316,12 +350,30 @@ class SkillCenterCheckFinding:
 @dataclass(frozen=True)
 class SkillCenterStandardCheckResult:
     findings: tuple[SkillCenterCheckFinding, ...] = ()
+    raw: Mapping[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "raw", _freeze_json_object(self.raw))
+
+    def to_raw_dict(self) -> dict[str, object]:
+        """Return an unaliased JSON-builtins payload for presentation adapters."""
+
+        return _thaw_json_object(self.raw)
 
 
 @dataclass(frozen=True)
 class SkillCenterSecurityCheckReport:
     risk_level: str | None = None
     findings: tuple[SkillCenterCheckFinding, ...] = ()
+    raw: Mapping[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "raw", _freeze_json_object(self.raw))
+
+    def to_raw_dict(self) -> dict[str, object]:
+        """Return an unaliased JSON-builtins payload for presentation adapters."""
+
+        return _thaw_json_object(self.raw)
 
 
 @dataclass(frozen=True)
@@ -340,6 +392,10 @@ class SkillCenterPublishStatus:
     error_message: str | None = None
     standard_check_result: SkillCenterStandardCheckResult | None = None
     security_check_report: SkillCenterSecurityCheckReport | None = None
+
+    def __post_init__(self) -> None:
+        _require(self.skill_code, "skill_code")
+        _require(self.version_number, "version_number")
 
     @property
     def completed(self) -> bool:
@@ -423,11 +479,13 @@ class SkillCenterExactDownload:
 class SkillCenterGateway(Plugin, Protocol):
     """Transport/config/auth adapter boundary for the new SC lifecycle.
 
-    Team catalogue and publication operations require a non-empty request-level
-    ``team_id``. Version listing and exact download require an explicit
-    ``PUBLIC`` or ``TEAM`` scope; Public Reference reads omit Team because
-    ``skill_code`` is globally unique. Public market operations deliberately
-    have no Team. Implementations issue at most one publish submission; this
+    Team catalogue and publish-submission operations require a non-empty
+    request-level ``team_id``. Publish status follows SC's globally unique
+    ``skill_code`` wire and returns SC's current version. Version listing and
+    exact download retain an explicit ``PUBLIC`` or ``TEAM`` consumer trust
+    scope, although SC's wire identifies those reads by ``skill_code`` (and an
+    exact version for download). Public market operations deliberately have no
+    Team context. Implementations issue at most one publish submission; this
     contract never chooses retry, Attempt, ``RESULT_UNKNOWN``, Version creation,
     or materialization policy.
     """
