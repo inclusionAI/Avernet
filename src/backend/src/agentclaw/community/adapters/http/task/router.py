@@ -30,9 +30,6 @@ task_loop inbound PUSH callback(前缀 ``/api/v1/collaboration/tasks/callback``)
 from __future__ import annotations
 
 import json
-import os
-
-import httpx
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -70,13 +67,15 @@ from agentclaw.community.adapters.http.task.schemas import (
     task_spec_from_dto,
 )
 from agentclaw.community.adapters.http.task.translator import (
-    _build_bcn_execution_graph,
     is_bcn_event_payload,
     is_claw_mind_payload,
     parse_manager_worker_bcn,
     translate,
     translate_bcn,
     translate_claw_mind,
+)
+from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+    CallbackDataEnricher,
 )
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
@@ -320,6 +319,7 @@ async def report_callback(
     svc: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
     auth: CallbackAuthenticator = Injected(CallbackAuthenticator),  # noqa: B008
     registry: CallbackCorrelationRegistry = Injected(CallbackCorrelationRegistry),  # noqa: B008
+    enricher: CallbackDataEnricher = Injected(CallbackDataEnricher),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
     """统一回投入口:仅接 ``request``,交 ``_dispatch`` 按 body 形态区分 ClawMind/BCN/羽雀 → 转换 → 入库/推进。
 
@@ -339,7 +339,7 @@ async def report_callback(
         request.url.path,
         _preview,
     )
-    return await _dispatch(request, "result", TaskCallbackRequest, svc, auth, registry)
+    return await _dispatch(request, "result", TaskCallbackRequest, svc, auth, registry, enricher)
 
 
 @router.post("/bbs/claim", response_model=Envelope[dict[str, Any]])
@@ -741,6 +741,7 @@ async def _dispatch(
     svc: TaskServiceProtocol,
     auth: CallbackAuthenticator,
     registry: CallbackCorrelationRegistry,
+    enricher: CallbackDataEnricher,
 ) -> Envelope[dict[str, Any]]:
     raw = await request.body()
     # 回调 body 按调用者分流:ClawMind(HttpCallbackPayload 四字段)/ BCN(CloudEvent 信封)/ 羽雀(默认 schema)。
@@ -759,7 +760,9 @@ async def _dispatch(
             method=request.method,
             path=request.url.path,
         )
-        await svc.callback.ingest(translate_claw_mind(_raw_obj, disposition).data)
+        _tc = translate_claw_mind(_raw_obj, disposition)
+        enricher.enrich_claw_mind(_tc.data, _raw_obj)
+        await svc.callback.ingest(_tc.data)
         return envelope({"ok": True}, request)
     if is_bcn_event_payload(_raw_obj):
         logger.info("[task_callback] bcn event received")
@@ -778,67 +781,19 @@ async def _dispatch(
         _tc = translate_bcn(_raw_obj)
         if _tc is None:
             return envelope({"ok": True}, request, message="bcn event not handled")
-        # 从 CloudEvent 取 scope.run_id → 经 BCS GET /state-machine-runs/{run_id} 查 run 明细
-        # → 把明细覆盖 _raw_callback_body,落 task_callback.orig_callback_data(而非原始 CloudEvent)。
-        _run_detail: dict | None = None
+        # 回调数据处理(execution_graph 构建 + run 明细 → extend_props)统一交 CallbackDataEnricher,
+        # base_url 取自注入的 BcsTokenProvider(替代原 os.environ BCS_API_BASE_URL/httpx 内联)。
         _run_id = (
             ((_raw_obj.get("scope") or {}).get("run_id"))
             if isinstance(_raw_obj, dict)
             else None
         )
         logger.info("[task_callback] bcn event run_id=%s", _run_id)
-        if _run_id:
-            try:
-                _bcs_base = os.environ.get(
-                    "BCS_API_BASE_URL", "http://127.0.0.1:21000"
-                ).rstrip("/")
-                logger.info("[task_callback] bcn event bcs_base_url=%s", _bcs_base)
-                async with httpx.AsyncClient(timeout=10.0) as _cli:
-                    _run_resp = await _cli.get(
-                        f"{_bcs_base}/state-machine-runs/{_run_id}"
-                    )
-                    _graph_resp = await _cli.get(
-                        f"{_bcs_base}/state-machine-runs/{_run_id}/graph"
-                    )
-                _run_detail = _run_resp.json() if _run_resp.status_code == 200 else None
-                _graph_detail = (
-                    _graph_resp.json() if _graph_resp.status_code == 200 else None
-                )
-                if _run_detail:
-                    # 查询出来的原始 run 明细 → extend_props(result._ext_info),req3;
-                    # orig_callback_data 保持原始 CloudEvent(_raw_callback_body 不再覆盖)。
-                    _tc.data.data.setdefault("result", {})["_ext_info"] = _run_detail
-                    logger.info(
-                        "[task_callback_report] BCN run 明细已取回 run_id=%s → extend_props",
-                        _run_id,
-                    )
-                    # 结合 run 明细 + DAG → TaskExecutionGraph(graph_to_dict 形状)→ execution_graph,req1
-                    _task_graph = _build_bcn_execution_graph(
-                        event_type=(_raw_obj.get("event_type") if isinstance(_raw_obj, dict) else None),
-                        run_id=_run_id,
-                        run_detail=_run_detail,
-                        graph_detail=_graph_detail,
-                    )
-                    if _task_graph:
-                        _tc.data.data["execution_graph"] = _task_graph
-                        logger.info(
-                            "[task_callback_report] 任务状态图谱已构建 run_id=%s tasks=%d relations=%d → execution_graph",
-                            _run_id,
-                            len(_task_graph.get("tasks") or []),
-                            len(_task_graph.get("relations") or []),
-                        )
-                else:
-                    logger.warning(
-                        "[task_callback_report] BCS run 明细非 200 run_id=%s status=%s",
-                        _run_id,
-                        _run_resp.status_code,
-                    )
-            except Exception as exc:  # noqa: BLE001 查 BCS 明细/DAG 失败不阻断落库(fallback 存原始 CloudEvent)
-                logger.warning(
-                    "[task_callback_report] 查 BCS run 明细/DAG 失败 run_id=%s: %s",
-                    _run_id,
-                    exc,
-                )
+        _run_detail = (
+            await enricher.enrich_bcn(_tc.data, _raw_obj, _run_id)
+            if _run_id
+            else None
+        )
         await svc.callback.ingest(_tc.data)
         # 终态收敛:优先用 BCS run 明细(run_detail.run.status);fetch 失败/非 200 时,若事件本身是
         # state_machine.run.completed(BCS 已表明 run 成功完成),用事件体兜底收敛,不让 BCS 瞬时
@@ -941,8 +896,9 @@ async def workflow_start(
     svc: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
     auth: CallbackAuthenticator = Injected(CallbackAuthenticator),  # noqa: B008
     registry: CallbackCorrelationRegistry = Injected(CallbackCorrelationRegistry),  # noqa: B008
+    enricher: CallbackDataEnricher = Injected(CallbackDataEnricher),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
-    return await _dispatch(request, "start", TaskCallbackRequest, svc, auth, registry)
+    return await _dispatch(request, "start", TaskCallbackRequest, svc, auth, registry, enricher)
 
 
 @task_callback_router.post("/workflow_result", response_model=Envelope[dict[str, Any]])
@@ -952,8 +908,9 @@ async def workflow_result(
     svc: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
     auth: CallbackAuthenticator = Injected(CallbackAuthenticator),  # noqa: B008
     registry: CallbackCorrelationRegistry = Injected(CallbackCorrelationRegistry),  # noqa: B008
+    enricher: CallbackDataEnricher = Injected(CallbackDataEnricher),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
-    return await _dispatch(request, "result", TaskCallbackRequest, svc, auth, registry)
+    return await _dispatch(request, "result", TaskCallbackRequest, svc, auth, registry, enricher)
 
 
 @task_callback_router.post("/node_start", response_model=Envelope[dict[str, Any]])
@@ -963,9 +920,10 @@ async def node_start(
     svc: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
     auth: CallbackAuthenticator = Injected(CallbackAuthenticator),  # noqa: B008
     registry: CallbackCorrelationRegistry = Injected(CallbackCorrelationRegistry),  # noqa: B008
+    enricher: CallbackDataEnricher = Injected(CallbackDataEnricher),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
     return await _dispatch(
-        request, "start", TaskNodeCallbackRequest, svc, auth, registry
+        request, "start", TaskNodeCallbackRequest, svc, auth, registry, enricher
     )
 
 
@@ -976,7 +934,8 @@ async def node_result(
     svc: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
     auth: CallbackAuthenticator = Injected(CallbackAuthenticator),  # noqa: B008
     registry: CallbackCorrelationRegistry = Injected(CallbackCorrelationRegistry),  # noqa: B008
+    enricher: CallbackDataEnricher = Injected(CallbackDataEnricher),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
     return await _dispatch(
-        request, "result", TaskNodeCallbackRequest, svc, auth, registry
+        request, "result", TaskNodeCallbackRequest, svc, auth, registry, enricher
     )

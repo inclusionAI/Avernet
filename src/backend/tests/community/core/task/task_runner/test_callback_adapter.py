@@ -243,17 +243,8 @@ class TestPersist:
         assert rec.result_success is True
         assert rec.exec_error is None
         assert rec.result == {"success": True, "data": {"answer": 42}}
-        # execution_graph 已转结构化 TaskExecutionGraph(graph_to_dict 形状),非原始 ext_info 透传
-        eg = rec.execution_graph
-        assert eg["run_id"] == 0 and eg["task_id"] == "" and eg["status"] == "DONE"
-        assert eg["output"] == {}
-        assert eg["extend_props"] == {"origin_session_id": "S-9"}
-        assert len(eg["tasks"]) == 1
-        assert eg["tasks"][0]["node_id"] == "N1"
-        assert eg["tasks"][0]["status"] == "DONE"
-        assert eg["tasks"][0]["task_spec"]["metadata"]["title"] == "N1"   # 无 node_title → 退 node_id
-        assert eg["tasks"][0]["run_info"]["output"] == {"answer": 42}
-        assert eg["relations"] == []
+        # execution_graph 不在 translator 产物(由 CallbackDataEnricher.enrich_claw_mind 构建后落库)
+        assert rec.execution_graph is None
         assert rec.extend_props is None                            # claw_mind 无额外扩展
         assert _json.loads(rec.orig_callback_data) == raw          # 原始 body
 
@@ -283,10 +274,8 @@ class TestPersist:
         assert rec.status == "RUNNING"                            # req2:node.completed → Status.RUNNING
         assert rec.result_success is True
         assert rec.result == {"success": True, "data": {"answer": 7}}
-        # req1:execution_graph 为 graph_to_dict 形状(极简兜底),非事件体透传;无 router fetch → extend_props=None
-        eg = rec.execution_graph
-        assert eg["run_id"] == 0 and eg["status"] == "RUNNING"
-        assert eg["output"] == {"answer": 7} and eg["tasks"] == [] and eg["relations"] == []
+        # execution_graph 不在 translator 产物(由 CallbackDataEnricher.enrich_bcn 取 run 明细后构建)
+        assert rec.execution_graph is None
         assert rec.extend_props is None
         assert _json.loads(rec.orig_callback_data) == raw         # 原始 event
 
