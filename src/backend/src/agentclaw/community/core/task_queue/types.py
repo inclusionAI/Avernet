@@ -17,6 +17,23 @@ from enum import Enum
 from typing import NamedTuple, Optional, Union
 
 
+#: The ``app`` an ``ac_task_queue`` row belongs to when nothing names one — the
+#: deployed table's column default (``app varchar(32) NOT NULL DEFAULT
+#: 'agentclaw'``) and, so the two can never disagree, the default of
+#: :class:`~agentclaw.community.di.config.TaskQueueConfig` as well. A deployment
+#: that enqueued under one app and claimed under another would simply never run
+#: its own work, so the two defaults are pinned together by a test.
+DEFAULT_APP = "agentclaw"
+
+#: Stored width of the ``app`` column. Enforced where the value enters — the
+#: config provider, which reads the deployment's ``app_name`` — rather than only
+#: in the schema, because the engines disagree about overflow exactly as they do
+#: for the dedup key: SQLite ignores the bound, a strict MySQL/OceanBase raises,
+#: and a non-strict one **silently truncates** — filing every row under a name
+#: the claim filter then never matches, so the work is enqueued and never runs.
+MAX_APP_LEN = 32
+
+
 class TaskStatus(str, Enum):
     """Status of an ``ac_task_queue`` row.
 
@@ -69,6 +86,10 @@ class TaskRecord:
     attempts: int
     last_error: Optional[str]
     env: str
+    #: The application that owns this task. Set from deployment config at
+    #: enqueue and matched by every query that selects work, so one backend
+    #: never claims another's rows out of the shared table.
+    app: str
     #: The caller-supplied enqueue dedup key, or ``None`` when the caller opted
     #: out. Retained after the task goes terminal (it is the audit value), so
     #: "which task handled key X?" stays answerable. The separate enforcement
