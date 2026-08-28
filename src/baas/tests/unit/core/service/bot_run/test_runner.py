@@ -435,6 +435,49 @@ class TestContextPassthrough:
         assert call_kw["api_key_prefix"] == API_KEY_PREFIX
 
 
+# ==================== Tests: list_sessions (read-only) ====================
+
+
+class TestListSessions:
+    """BotRunner.list_sessions delegates to BotService.list_sessions."""
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_delegates_to_service(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        from secbaas.community.api.bot_runtime import SessionListItem
+
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        expected = [
+            SessionListItem(session_id="s1", bot_id=BOT_ID, title="t1"),
+            SessionListItem(session_id="s2", bot_id=BOT_ID, title="t2"),
+        ]
+        mock_bot_service.list_sessions = AsyncMock(return_value=expected)
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner.list_sessions(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            context=context,
+            metadata={},
+            limit=10,
+            offset=0,
+        )
+
+        assert result == expected
+        mock_bot_service.list_sessions.assert_called_once()
+        kw = mock_bot_service.list_sessions.call_args.kwargs
+        assert kw["limit"] == 10
+        assert kw["offset"] == 0
+        assert isinstance(kw["binding_info"], BotBindingInfo)
+        assert kw["context"] is context
+
+
 # ==================== Tests: send_message flow ====================
 
 

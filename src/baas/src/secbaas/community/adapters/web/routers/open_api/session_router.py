@@ -14,6 +14,9 @@ from secbaas.community.adapters.web.routers.open_api.dependencies import (
 )
 from secbaas.community.adapters.web.routers.open_api.model import (
     MessageItem,
+    SessionListItem,
+    SessionListResponse,
+    SessionListResponseData,
     SessionMessagesResponse,
     SessionMessagesResponseData,
     SessionQueryResponse,
@@ -49,6 +52,155 @@ def _check_app_type(api_key_record: APIKeyRecord) -> None:
                 "code": OpenAPICode.FORBIDDEN,
                 "message": get_code_message(OpenAPICode.FORBIDDEN),
             },
+        )
+
+
+@router.get(
+    "/sessions",
+    response_model=SessionListResponse,
+    summary="List sessions of a bot",
+    description="List sessions belonging to a specific bot using a Bearer Token-authenticated API Key",
+    responses={
+        200: {"description": "Query successful"},
+        401: {"description": "Authentication failed"},
+        403: {"description": "Access denied"},
+        404: {"description": "Bot not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+@inject
+async def list_sessions(
+    bot_id: str | None = Query(
+        default=None,
+        description="Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.",
+    ),
+    limit: int = Query(
+        default=20, ge=1, le=100, description="Maximum number of sessions to return"
+    ),
+    offset: int = Query(default=0, ge=0, description="Number of sessions to skip"),
+    lifecycle_stage: str = Query(
+        default="online",
+        description="Bot lifecycle stage. Options: online, verify, draft, all",
+    ),
+    api_key_record: APIKeyRecord = Depends(validate_api_key),
+    context: BotChatContext = Depends(get_bot_chat_context),
+    bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
+) -> SessionListResponse:
+    """List sessions endpoint
+
+    Args:
+        bot_id: Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.
+        limit: Maximum number of sessions to return. Default 20, range 1-100
+        offset: Number of sessions to skip. Default 0
+        lifecycle_stage: Bot lifecycle stage. Options: online, verify, draft, all. Default: online
+        api_key_record: Record obtained from API Key validation
+        context: Request context (authentication, caller identity, etc.)
+        bot_runner: BotRunner instance
+
+    Returns:
+        SessionListResponse: Session list response
+    """
+    # Only app_type=bot can resolve bot_id from the API Key; other types must pass it explicitly
+    if bot_id:
+        resolved_bot_id = bot_id
+    elif api_key_record.app_type == "bot":
+        resolved_bot_id = resolve_bot_id_from_api_key(api_key_record)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": OpenAPICode.BUSINESS_ERROR,
+                "message": "bot_id is a required parameter",
+            },
+        )
+
+    _check_app_type(api_key_record)
+    if api_key_record.app_type != "bot":
+        resolved_bot_id = validate_policy(api_key_record, resolved_bot_id)
+
+    logger.info(
+        f"list_sessions: bot_id={resolved_bot_id}, "
+        f"lifecycle_stage={lifecycle_stage}, limit={limit}, offset={offset}, "
+        f"api_key_prefix={api_key_record.api_key_prefix}"
+    )
+
+    try:
+        sessions = await bot_runner.list_sessions(
+            bot_id=resolved_bot_id,
+            context=context,
+            metadata={"bot_options": {"lifecycle_stage": lifecycle_stage}},
+            limit=limit,
+            offset=offset,
+        )
+
+        items = [
+            SessionListItem(
+                session_id=s.session_id,
+                bot_id=s.bot_id,
+                title=s.title,
+                status=s.status,
+                model=s.model,
+                created_at=s.created_at,
+                updated_at=s.updated_at,
+                message_count=s.message_count,
+                last_message=s.last_message,
+            )
+            for s in sessions
+        ]
+        total = len(items)
+        # limit/offset 已下推到上游 AsyncSessionClient.list_sessions，上游按 limit
+        # 截断本页。当本页返回数达到 limit 时，按游标分页惯例判定“可能还有更多”
+        # （下一页可能为空，客户端据此停止）。原 `total > limit` 在上游严格遵守
+        # limit 的真实路径下恒为 False，会让非末页也返回 has_more=false。
+        has_more = total >= limit
+
+        logger.info(
+            f"list_sessions success: bot_id={resolved_bot_id}, "
+            f"returned={total}, has_more={has_more}"
+        )
+
+        return SessionListResponse(
+            code=0,
+            message="success",
+            data=SessionListResponseData(
+                items=items,
+                total=total,
+                has_more=has_more,
+            ),
+        )
+
+    except BotBindingNotFoundError as e:
+        logger.warning(
+            f"list_sessions binding not found: bot_id={resolved_bot_id}, error={e}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": 60001, "message": str(e)},
+        )
+    except BotNotFoundError as e:
+        logger.warning(
+            f"list_sessions bot not found: bot_id={resolved_bot_id}, error={e}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": 60001, "message": str(e)},
+        )
+    except BotServiceError as e:
+        logger.error(
+            f"list_sessions bot service error: bot_id={resolved_bot_id}, error={e}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": OpenAPICode.BUSINESS_ERROR, "message": str(e)},
+        )
+    except Exception as e:
+        logger.error(
+            f"list_sessions unexpected error: bot_id={resolved_bot_id}, error={e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": 50001, "message": f"Internal server error: {str(e)}"},
         )
 
 

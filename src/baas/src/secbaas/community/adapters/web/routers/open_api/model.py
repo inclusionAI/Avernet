@@ -209,3 +209,37 @@ class SessionMessagesResponse(ApiResponse[SessionMessagesResponseData]):
     data: SessionMessagesResponseData | None = Field(
         default=None, description="Session message data"
     )
+
+
+class SessionListItem(BaseModel):
+    """Session list item"""
+
+    session_id: str = Field(..., description="Session ID")
+    bot_id: str = Field(..., description="Bot ID")
+    title: str = Field(default="", description="Session title")
+    status: str = Field(default="active", description="Session status")
+    model: str | None = Field(default=None, description="Model name")
+    created_at: datetime | None = Field(default=None, description="Creation time")
+    updated_at: datetime | None = Field(default=None, description="Update time")
+    message_count: int = Field(default=0, description="Message count in session")
+    last_message: dict[str, Any] | None = Field(
+        default=None, description="Last message summary"
+    )
+
+
+class SessionListResponseData(BaseModel):
+    """Session list response data"""
+
+    items: list[SessionListItem] = Field(
+        default_factory=list, description="Session list"
+    )
+    total: int = Field(default=0, description="Total sessions in current page")
+    has_more: bool = Field(default=False, description="Whether there are more sessions")
+
+
+class SessionListResponse(ApiResponse[SessionListResponseData]):
+    """Session list standard response"""
+
+    data: SessionListResponseData | None = Field(
+        default=None, description="Session list data"
+    )

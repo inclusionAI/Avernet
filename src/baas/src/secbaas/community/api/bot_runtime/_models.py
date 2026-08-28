@@ -97,6 +97,39 @@ class SessionInfo:
 
 
 @dataclass(slots=True)
+class SessionListItem:
+    """会话列表项
+
+    承载 `GET /openapi/v1/sessions` 列表接口每条会话的丰富字段，对齐
+    适配层 `AsyncSessionClient.SessionInfo`。相比 `SessionInfo`（单会话
+    查询，信息较贫乏），本模型保留 title / model / message_count /
+    last_message 等列表场景所需信息。
+
+    Attributes:
+        session_id: 会话 ID
+        bot_id: Bot ID（bare，不含 entity_id）
+        title: 会话标题
+        status: 会话状态（"active" 等）
+        model: 模型名称，适配层未返回时为 None（intentional optional）
+        created_at: 创建时间
+        updated_at: 更新时间，未返回时为 None
+        message_count: 会话内消息数
+        last_message: 最近一条消息摘要，仅在适配层确实返回时携带，
+                      None 为 intentional optional 状态
+    """
+
+    session_id: str
+    bot_id: str
+    title: str = ""
+    status: str = "active"
+    model: str | None = None
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime | None = None
+    message_count: int = 0
+    last_message: dict[str, Any] | None = None
+
+
+@dataclass(slots=True)
 class BotResponse:
     """Bot 响应
 

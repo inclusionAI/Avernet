@@ -35,6 +35,7 @@ from ._models import (
     MessageDeliverRequest,
     MessageInfo,
     SessionInfo,
+    SessionListItem,
 )
 from ._protocols import (
     BotCmdDispatcher,
@@ -71,6 +72,7 @@ __all__ = [
     "MessageDeliverRequest",
     "MessageInfo",
     "SessionInfo",
+    "SessionListItem",
     "WsConnectionInfo",
     "HttpConnectionInfo",
     # Protocols

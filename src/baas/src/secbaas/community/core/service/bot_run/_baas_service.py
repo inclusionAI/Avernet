@@ -35,6 +35,7 @@ from secbaas.community.api.bot_runtime import (
     NoActiveDevicesError,
     NoDevicesFoundError,
     SessionInfo,
+    SessionListItem,
     SessionNotFoundError,
     WsConnectionInfo,
 )
@@ -659,6 +660,71 @@ class BaasBotService(BotService):
                 f"Failed to get session: {_safe_client_msg(e)}"
             ) from e
 
+    async def list_sessions(
+        self,
+        *,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[SessionListItem]:
+        """查询指定 Bot 下的会话列表（只读）
+
+        镜像 get_session 的连接解析与 client 创建链路，底层调用
+        `AsyncSessionClient.list_sessions`。user_id 由 resolve_user_id 派生，
+        agent_id 取 binding_info.bot_id（real bot id）。
+
+        Args:
+            binding_info: 已解析的 binding 信息（用于创建底层连接）
+            context: 可选的请求上下文
+            limit: 返回条数上限
+            offset: 偏移量
+
+        Returns:
+            SessionListItem 列表
+
+        Raises:
+            BotServiceError: 上游服务请求失败
+        """
+        try:
+            conn_info = await self._resolve_ws_connection_for_binding(
+                binding_info, context
+            )
+        except Exception as e:
+            logger.warning("Failed to resolve WS connection: %s", e)
+            raise BotServiceError(
+                f"Failed to resolve WS connection: {_safe_client_msg(e)}"
+            ) from e
+
+        session_client = self._create_session_client(
+            conn_info, binding_info.engine_type
+        )
+        # agent_id 取 real bot id（binding_info.bot_id），user_id 经
+        # resolve_user_id 派生；解析错误将静默返回空列表，故沿用 create_session
+        # 的派生路径（context.app_id / entity_id）。
+        metadata: dict[str, Any] = {}
+        user_id = resolve_user_id(metadata, binding_info, context, binding_info.bot_id)
+        try:
+            async with session_client:
+                adapter_sessions = await session_client.list_sessions(
+                    user_id=user_id,
+                    agent_id=binding_info.bot_id,
+                    limit=limit,
+                    offset=offset,
+                    engine=binding_info.engine_type,
+                )
+                return [
+                    _map_adapter_session_list_item(item, binding_info.bot_id)
+                    for item in adapter_sessions
+                ]
+        except BotServiceError:
+            raise
+        except Exception as e:
+            logger.warning("Failed to list sessions: %s", e)
+            raise BotServiceError(
+                f"Failed to list sessions: {_safe_client_msg(e)}"
+            ) from e
+
     # ── 私有方法 ─────────────────────────────────────────────────────────────
 
     def _adapter_for(self, engine_type: str | None) -> BotEngineAdapter | None:
@@ -1063,4 +1129,26 @@ def _map_adapter_session_info(
         status="active",
         created_at=_parse_datetime(adapter_session.created_at) or datetime.now(),
         updated_at=_parse_datetime(adapter_session.updated_at),
+    )
+
+
+def _map_adapter_session_list_item(
+    adapter_session: AdapterSessionInfo,
+    bot_id: str,
+) -> SessionListItem:
+    """Map adapter-layer SessionInfo to api-level SessionListItem (list endpoint).
+
+    Preserves title / model / message_count / last_message, which the single
+    SessionInfo mapping drops. Used by BaasBotService.list_sessions.
+    """
+    return SessionListItem(
+        session_id=adapter_session.id,
+        bot_id=bot_id,
+        title=adapter_session.title or "",
+        status="active",
+        model=adapter_session.model,
+        created_at=_parse_datetime(adapter_session.created_at) or datetime.now(),
+        updated_at=_parse_datetime(adapter_session.updated_at),
+        message_count=adapter_session.message_count,
+        last_message=adapter_session.last_message,
     )

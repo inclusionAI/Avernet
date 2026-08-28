@@ -586,6 +586,152 @@
         "title": "RunResultResponseData",
         "type": "object"
       },
+      "SessionListItem": {
+        "description": "Session list item",
+        "properties": {
+          "session_id": {
+            "description": "Session ID",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "bot_id": {
+            "description": "Bot ID",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "description": "Session title",
+            "title": "Title",
+            "type": "string"
+          },
+          "status": {
+            "default": "active",
+            "description": "Session status",
+            "title": "Status",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model name",
+            "title": "Model"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Creation time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Update time",
+            "title": "Updated At"
+          },
+          "message_count": {
+            "default": 0,
+            "description": "Message count in session",
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "last_message": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last message summary",
+            "title": "Last Message"
+          }
+        },
+        "required": [
+          "session_id",
+          "bot_id"
+        ],
+        "title": "SessionListItem",
+        "type": "object"
+      },
+      "SessionListResponse": {
+        "description": "Session list standard response",
+        "properties": {
+          "code": {
+            "default": 0,
+            "description": "响应码，0 表示成功",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionListResponseData"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session list data"
+          },
+          "message": {
+            "default": "success",
+            "description": "响应消息",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "SessionListResponse",
+        "type": "object"
+      },
+      "SessionListResponseData": {
+        "description": "Session list response data",
+        "properties": {
+          "items": {
+            "description": "Session list",
+            "items": {
+              "$ref": "#/components/schemas/SessionListItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "default": 0,
+            "description": "Total sessions in current page",
+            "title": "Total",
+            "type": "integer"
+          },
+          "has_more": {
+            "default": false,
+            "description": "Whether there are more sessions",
+            "title": "Has More",
+            "type": "boolean"
+          }
+        },
+        "title": "SessionListResponseData",
+        "type": "object"
+      },
       "SessionMessagesResponse": {
         "description": "Session message list standard response",
         "properties": {
@@ -1175,6 +1321,125 @@
         "summary": "Query conversation result",
         "tags": [
           "runs"
+        ]
+      }
+    },
+    "/openapi/v1/sessions": {
+      "get": {
+        "description": "List sessions belonging to a specific bot using a Bearer Token-authenticated API Key",
+        "operationId": "list_sessions_openapi_v1_sessions_get",
+        "parameters": [
+          {
+            "description": "Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.",
+            "in": "query",
+            "name": "bot_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.",
+              "title": "Bot Id"
+            }
+          },
+          {
+            "description": "Maximum number of sessions to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Maximum number of sessions to return",
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of sessions to skip",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of sessions to skip",
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Bot lifecycle stage. Options: online, verify, draft, all",
+            "in": "query",
+            "name": "lifecycle_stage",
+            "required": false,
+            "schema": {
+              "default": "online",
+              "description": "Bot lifecycle stage. Options: online, verify, draft, all",
+              "title": "Lifecycle Stage",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionListResponse"
+                }
+              }
+            },
+            "description": "Query successful"
+          },
+          "401": {
+            "description": "Authentication failed"
+          },
+          "403": {
+            "description": "Access denied"
+          },
+          "404": {
+            "description": "Bot not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "summary": "List sessions of a bot",
+        "tags": [
+          "sessions"
         ]
       }
     },

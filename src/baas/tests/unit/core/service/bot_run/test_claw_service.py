@@ -516,6 +516,68 @@ class TestGetMessages:
         assert result[0].content == "hello"
 
 
+# ==================== list_sessions Tests ====================
+
+
+class TestListSessions:
+    @pytest.mark.asyncio
+    async def test_list_sessions_no_sandbox_id_raises_error(self, service, baas_binding):
+        with pytest.raises(BotServiceError, match="requires sandbox_id"):
+            await service.list_sessions(binding_info=baas_binding)
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_success(self, service, arca_binding, monkeypatch):
+        from secbaas.community.core.service.bot_run._async_session_client import (
+            SessionInfo as AdapterSessionInfo,
+        )
+
+        adapter_session = AdapterSessionInfo(
+            id="sess-1",
+            title="t1",
+            model="m",
+            created_at="2025-01-15T10:30:00Z",
+            updated_at="2025-01-15T11:00:00Z",
+            message_count=4,
+        )
+
+        session_client = AsyncMock()
+        session_client.list_sessions.return_value = [adapter_session]
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+
+        monkeypatch.setattr(service, "_create_session_client", lambda x: session_client)
+
+        result = await service.list_sessions(
+            binding_info=arca_binding,
+            limit=10,
+            offset=0,
+        )
+
+        assert len(result) == 1
+        assert result[0].session_id == "sess-1"
+        assert result[0].bot_id == BOT_ID
+        assert result[0].title == "t1"
+        assert result[0].model == "m"
+        assert result[0].message_count == 4
+        session_client.list_sessions.assert_called_once()
+        kw = session_client.list_sessions.call_args.kwargs
+        assert kw["agent_id"] == BOT_ID
+        assert kw["limit"] == 10
+        assert kw["offset"] == 0
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_error_wrapped(self, service, arca_binding, monkeypatch):
+        session_client = AsyncMock()
+        session_client.list_sessions.side_effect = RuntimeError("boom")
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+
+        monkeypatch.setattr(service, "_create_session_client", lambda x: session_client)
+
+        with pytest.raises(BotServiceError, match="Failed to list sessions"):
+            await service.list_sessions(binding_info=arca_binding)
+
+
 # ==================== Create Session Comprehensive Tests ====================
 
 

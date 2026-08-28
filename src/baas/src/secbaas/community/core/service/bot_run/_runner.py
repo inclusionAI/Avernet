@@ -34,6 +34,7 @@ from secbaas.community.api.bot_runtime import (
     BotChatContext,
     MessageInfo,
     SessionInfo,
+    SessionListItem,
 )
 from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.api.sse import StreamChunk
@@ -438,6 +439,30 @@ class BotRunner:
             session_id=session_id,
             binding_info=route.binding_info,
             context=context,
+        )
+
+    async def list_sessions(
+        self,
+        *,
+        bot_id: str,
+        context: BotChatContext,
+        metadata: dict[str, Any],
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[SessionListItem]:
+        """查询指定 Bot 下的会话列表（只读）
+
+        复用 get_session_info 的 Bot 路由解析链路，委派 BotService.list_sessions
+        调用上游 list_sessions。异常映射沿用 get_session_info（SessionNotFoundError
+        一般不适用于列表，但保留 BotBindingNotFoundError/BotNotFoundError→404、
+        BotServiceError→400 由路由层处理）。
+        """
+        route = await self._resolve_bot_route(bot_id, metadata)
+        return await route.bot_service.list_sessions(
+            binding_info=route.binding_info,
+            context=context,
+            limit=limit,
+            offset=offset,
         )
 
     def get_result(self, run_id: str) -> Any:

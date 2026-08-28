@@ -18,6 +18,7 @@ from secbaas.community.api.bot_runtime import (
     BotResponse,
     MessageInfo,
     SessionInfo,
+    SessionListItem,
 )
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.bot_run_queue import BotRunQueueRecord
@@ -180,6 +181,34 @@ class BotService(Protocol):
 
         Returns:
             消息信息列表
+        """
+        ...
+
+    async def list_sessions(
+        self,
+        *,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[SessionListItem]:
+        """查询指定 Bot 下的会话列表（只读）
+
+        形状镜像 get_session：解析 WS 连接 → 创建 AsyncSessionClient →
+        调用上游 list_sessions。user_id 由 resolve_user_id 派生，
+        agent_id 取 binding_info.bot_id（real bot id）。
+
+        Args:
+            binding_info: 已解析的 binding 信息（用于创建底层连接）
+            context: 可选的请求上下文（身份认证、调用者信息等）
+            limit: 返回条数上限，默认 20
+            offset: 偏移量，默认 0
+
+        Returns:
+            SessionListItem 列表
+
+        Raises:
+            BotServiceError: 上游服务请求失败
         """
         ...
 

@@ -85,6 +85,16 @@ class TestOpenAPIDependencies:
         assert response.status_code == 401
 
     @pytest.mark.asyncio
+    async def test_list_sessions_without_api_key(self, api: APITestHelper) -> None:
+        """GET /openapi/v1/sessions without Authorization → 401."""
+        response = await api.client.get(
+            api.open_api_session_url(),
+        )
+
+        # The auth dependency fires before bot_id validation
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
     async def test_run_result_without_api_key(self, api: APITestHelper) -> None:
         """GET /openapi/v1/runs/xxx without Authorization → 401."""
         response = await api.client.get(

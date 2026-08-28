@@ -26,6 +26,7 @@ from ._models import (
     BotChatContext,
     MessageInfo,
     SessionInfo,
+    SessionListItem,
 )
 
 if TYPE_CHECKING:
@@ -401,6 +402,37 @@ class BotRunner(Protocol):
 
         Returns:
             消息信息列表
+        """
+        ...
+
+    async def list_sessions(
+        self,
+        *,
+        bot_id: str,
+        context: "BotChatContext",
+        metadata: dict[str, Any],
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list["SessionListItem"]:
+        """查询指定 Bot 下的会话列表（只读）
+
+        复用 get_session_info 的鉴权 / 策略 / Bot 路由解析链路，底层调用
+        `AsyncSessionClient.list_sessions`。仅返回调用方有权限访问的会话。
+
+        Args:
+            bot_id: Bot 唯一标识，格式为 <real_bot_id>:<entity_id>
+            context: 请求上下文（身份认证、调用者信息等）
+            metadata: 元数据，支持 bot_options.lifecycle_stage 指定生命周期阶段
+            limit: 返回条数上限，默认 20
+            offset: 偏移量，默认 0
+
+        Returns:
+            SessionListItem 列表，按适配层返回顺序排列
+
+        Raises:
+            BotBindingNotFoundError: Bot 绑定不存在
+            BotNotFoundError: Bot 不存在
+            BotServiceError: 上游服务请求失败
         """
         ...
 
