@@ -292,6 +292,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                     self._Member(
                         space_id=space_id,
                         user_id=order.applicant_user_id,
+                        user_name=order.applicant_user_id,
                         role=SpaceRole.MEMBER.value,
                         status="ACTIVE",
                         env=env,
@@ -629,6 +630,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         review_remark: str | None,
         target_status: WorkOrderStatus,
         notification: WorkOrderNotificationDraft,
+        applicant_user_name: str | None,
         env: str,
     ):
         reviewed_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -744,6 +746,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                     self._Member(
                         space_id=space_id,
                         user_id=work_order.applicant_user_id,
+                        user_name=applicant_user_name,
                         role=SpaceRole.MEMBER.value,
                         env=env,
                         created_by=reviewer_user_id,
