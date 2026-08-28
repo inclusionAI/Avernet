@@ -538,8 +538,8 @@ class TestBCNStateMachine:
                                      InMemoryCallbackCorrelationRegistry()))
         _ok_envelope(result)
         assert engine.reports == []  # run 仍 running,不收敛
-        assert len(repo.calls) == 1
-        rec = repo.calls[0]
+        assert len(repo.calls) == 2   # 两步落库:原始 + enrich 后更新
+        rec = repo.get("run-1", "")
         assert rec.invoker == "bcn"
         assert rec.run_id == "run-1" and rec.node_id == ""  # req4:node_id 恒空(忽略事件 data.node_id)
         assert rec.main_session_id == "s-1"
@@ -652,7 +652,7 @@ class TestBCNStateMachine:
         _run(_dispatch_call(_req(ev), svc, NoopCallbackAuthenticator(),
                             InMemoryCallbackCorrelationRegistry()))
         assert engine.reports == []
-        rec = repo.calls[0]
+        rec = repo.get("run-1", "")
         assert json.loads(rec.orig_callback_data) == ev  # 非 200 → 用原始事件
         assert rec.extend_props is None                   # run 明细非 200 → 无 extend_props
         eg = rec.execution_graph                          # fetch 兜底 → 极简 graph_to_dict
@@ -665,7 +665,7 @@ class TestBCNStateMachine:
         svc, _engine, repo, _ri = _make_svc()
         _run(_dispatch_call(_req(ev), svc, NoopCallbackAuthenticator(),
                             InMemoryCallbackCorrelationRegistry()))
-        rec = repo.calls[0]
+        rec = repo.get("run-1", "")
         assert rec.run_id == "run-1" and rec.node_id == ""  # 无 node_id(req4 恒空)
         assert rec.status == "RUNNING"                       # req2:run.started → RUNNING
         assert rec.extend_props == {"run": {"status": "running"}, "nodes": []}  # req3 run 明细
