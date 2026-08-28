@@ -36,7 +36,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneNotFoundError,
 )
 from agentclaw.community.core.skill_center.skill_set_batch import (
-    SkillSetAddOutcome,
+    SkillSetSkillOutcome,
 )
 
 
@@ -312,7 +312,7 @@ async def test_legacy_skill_set_batch_keeps_domain_partial_success() -> None:
 
         async def add_skills(self, **_kwargs):
             return [
-                SkillSetAddOutcome(
+                SkillSetSkillOutcome(
                     skill_id="7",
                     error=SkillSetControlPlaneConflictError(
                         "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
@@ -364,8 +364,8 @@ async def test_legacy_skill_set_batch_uses_body_owner_for_collaborator() -> None
                 "skill_ids": ["7", "8"],
             }
             return [
-                SkillSetAddOutcome(skill_id="7", changed=True),
-                SkillSetAddOutcome(skill_id="8", changed=True),
+                SkillSetSkillOutcome(skill_id="7", changed=True),
+                SkillSetSkillOutcome(skill_id="8", changed=True),
             ]
 
     response = await add_skills_to_set(
@@ -430,9 +430,9 @@ async def test_legacy_exact_set_routes_keep_the_target_owner_for_collaborators()
             self.operations.append(("list_skills", kwargs))
             return []
 
-        async def remove_skill(self, **kwargs):
-            self.operations.append(("remove_skill", kwargs))
-            return {"changed": True}
+        async def remove_skills(self, **kwargs):
+            self.operations.append(("remove_skills", kwargs))
+            return [SkillSetSkillOutcome(skill_id="7", changed=True)]
 
         def list_mcps(self, **kwargs):
             self.operations.append(("list_mcps", kwargs))
@@ -487,7 +487,7 @@ async def test_legacy_exact_set_routes_keep_the_target_owner_for_collaborators()
         "update_set",
         "delete_set",
         "list_skills",
-        "remove_skill",
+        "remove_skills",
         "get_set",
         "list_mcps",
     ]
@@ -639,9 +639,9 @@ async def test_legacy_remove_reaches_the_default_set_exclusion_wire() -> None:
             self.calls.append(("get_set", kwargs))
             return {"id": "set-1", "is_default": True}
 
-        async def remove_skill(self, **kwargs):
-            self.calls.append(("remove_skill", kwargs))
-            return {"id": "set-1", "is_default": True, "changed": True}
+        async def remove_skills(self, **kwargs):
+            self.calls.append(("remove_skills", kwargs))
+            return [SkillSetSkillOutcome(skill_id="7", changed=True)]
 
     control_plane = _ControlPlane()
     response = await remove_skill_from_set(
@@ -662,15 +662,40 @@ async def test_legacy_remove_reaches_the_default_set_exclusion_wire() -> None:
         "message": "Skill removed from skill set",
     }
     assert (
-        "remove_skill",
+        "remove_skills",
         {
             "bot_id": "persisted-bot",
             "owner_id": "owner",
             "user_id": "owner",
             "set_id": "set-1",
-            "skill_id": "7",
+                "skill_ids": ["7"],
         },
     ) in control_plane.calls
+
+
+@pytest.mark.asyncio
+async def test_legacy_remove_keeps_the_historical_missing_member_404() -> None:
+    from agentclaw.community.adapters.http.skill_center.skillsets import (
+        remove_skill_from_set,
+    )
+
+    class _ControlPlane(_LegacySetScopeControlPlane):
+        async def remove_skills(self, **_kwargs):
+            return [SkillSetSkillOutcome(skill_id="7", changed=False)]
+
+    with pytest.raises(SkillSetControlPlaneNotFoundError, match="Skill not found"):
+        await remove_skill_from_set(
+            "set-1",
+            "7",
+            user_id="owner",
+            entity_id=None,
+            entity_type=None,
+            bot_id=None,
+            engine_type=None,
+            ctx=SimpleNamespace(user_id="owner", bot_id="default"),
+            bot_repo=_AddressedBots(),
+            control_plane=_ControlPlane(),
+        )
 
 
 @pytest.mark.asyncio

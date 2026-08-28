@@ -13,7 +13,7 @@ from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
 )
 from agentclaw.community.core.skill_center.skill_set_batch import (
-    SkillSetAddOutcome,
+    SkillSetSkillOutcome,
 )
 from tests.community.adapters.http.openapi_v1.conftest import (
     bind_bot_access_seam,
@@ -26,6 +26,7 @@ class _ControlPlane:
     def __init__(self) -> None:
         self.created: dict | None = None
         self.added: dict | None = None
+        self.removed: dict | None = None
 
     def list_sets(self, **_kwargs):
         return [
@@ -68,10 +69,11 @@ class _ControlPlane:
 
     async def add_skills(self, **kwargs):
         self.added = kwargs
-        return [SkillSetAddOutcome(skill_id="9", changed=True)]
+        return [SkillSetSkillOutcome(skill_id="9", changed=True)]
 
-    async def remove_skill(self, **_kwargs):
-        return {"changed": False}
+    async def remove_skills(self, **kwargs):
+        self.removed = kwargs
+        return [SkillSetSkillOutcome(skill_id="9", changed=False)]
 
     async def activate(self, **_kwargs):
         return {
@@ -144,6 +146,16 @@ def test_membership_and_activation_are_bot_scoped():
     assert member.status_code == 200
     assert member.json()["data"] == {"changed": True}
     assert control.added == {
+        "bot_id": "bot-1",
+        "owner_id": "actor",
+        "user_id": "actor",
+        "set_id": "2",
+        "skill_ids": ["9"],
+    }
+    removed = client.delete("/openapi/v1/bots/bot-1/skill-sets/2/skills/9")
+    assert removed.status_code == 200
+    assert removed.json()["data"] == {"changed": False}
+    assert control.removed == {
         "bot_id": "bot-1",
         "owner_id": "actor",
         "user_id": "actor",

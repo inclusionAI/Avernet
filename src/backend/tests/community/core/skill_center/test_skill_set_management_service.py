@@ -34,7 +34,7 @@ from agentclaw.community.core.skill_center.services.skill_set_management_service
     SkillSetManagementService,
 )
 from agentclaw.community.core.skill_center.skill_set_batch import (
-    SkillSetAddOutcome,
+    SkillSetSkillOutcome,
 )
 from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
     BotCapabilityStateReader,
@@ -1139,7 +1139,7 @@ def test_inactive_set_metadata_updates_do_not_require_runtime_readiness() -> Non
     ("method_name", "resource_kwargs"),
     [
         ("add_skills", {"skill_ids": ["skill-1"]}),
-        ("remove_skill", {"skill_id": "skill-1"}),
+        ("remove_skills", {"skill_ids": ["skill-1"]}),
         ("add_mcp", {"server_code": "mcp.weather"}),
         ("remove_mcp", {"server_code": "mcp.weather"}),
     ],
@@ -1170,12 +1170,18 @@ async def test_inactive_set_membership_does_not_require_runtime_readiness(
         **resource_kwargs,
     )
 
-    if method_name == "add_skills":
-        assert result == [SkillSetAddOutcome(skill_id="skill-1", changed=True)]
+    if method_name in {"add_skills", "remove_skills"}:
+        assert result == [SkillSetSkillOutcome(skill_id="skill-1", changed=True)]
     else:
         assert result["is_active"] is False
     assert repository.membership_calls[0][0] == (
-        "add_skill" if method_name == "add_skills" else method_name
+        (
+            "add_skill"
+            if method_name == "add_skills"
+            else "remove_skill"
+            if method_name == "remove_skills"
+            else method_name
+        )
     )
     assert runtime.snapshot_calls == []
     assert runtime.reconcile_calls == []
@@ -3136,8 +3142,8 @@ async def test_batch_add_to_an_active_set_projects_the_final_state_once():
     )
 
     assert outcomes == [
-        SkillSetAddOutcome(skill_id="7", changed=True),
-        SkillSetAddOutcome(skill_id="8", changed=True),
+        SkillSetSkillOutcome(skill_id="7", changed=True),
+        SkillSetSkillOutcome(skill_id="8", changed=True),
     ]
     assert [call["skill_id"] for call in repository.skill_calls] == ["7", "8"]
     assert runtime.projections == 1
@@ -3169,7 +3175,7 @@ async def test_batch_add_keeps_legacy_partial_success_and_projects_once():
         skill_ids=["7", "missing"],
     )
 
-    assert outcomes[0] == SkillSetAddOutcome(skill_id="7", changed=True)
+    assert outcomes[0] == SkillSetSkillOutcome(skill_id="7", changed=True)
     assert outcomes[1].skill_id == "missing"
     assert isinstance(outcomes[1].error, SkillSetControlPlaneNotFoundError)
     assert runtime.projections == 1
@@ -3219,16 +3225,63 @@ async def test_batch_add_restores_prior_members_when_a_later_write_fails():
 
 
 @pytest.mark.asyncio
-async def test_remove_skill_releases_the_skill_s_mcp_dependencies():
+async def test_batch_remove_from_an_active_set_projects_the_final_state_once():
     repository = _SkillRepository({"mcp.weather"})
-    runtime = _Runtime(fail_first=False)
+    runtime = _ProjectionCountingRuntime()
 
-    await _skill_service(repository, runtime).remove_skill(
+    outcomes = await _skill_service(repository, runtime).remove_skills(
         bot_id="bot-1",
         owner_id="true-owner",
         user_id="true-owner",
         set_id="set-1",
-        skill_id="7",
+        skill_ids=["7", "8"],
+    )
+
+    assert outcomes == [
+        SkillSetSkillOutcome(skill_id="7", changed=True),
+        SkillSetSkillOutcome(skill_id="8", changed=True),
+    ]
+    assert runtime.projections == 1
+    assert runtime.scopes == [
+        ProjectionScope(
+            skills=True,
+            mcp=True,
+            released_mcp=frozenset({"mcp.weather"}),
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_batch_remove_runtime_failure_restores_the_whole_batch_once():
+    repository = _SkillRepository({"mcp.weather"})
+    runtime = _Runtime()
+
+    with pytest.raises(SkillSetRuntimeReconcileError):
+        await _skill_service(repository, runtime).remove_skills(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            user_id="true-owner",
+            set_id="set-1",
+            skill_ids=["7", "8"],
+        )
+
+    assert len(repository.restore_calls) == 1
+    forward, compensating = runtime.reconcile_calls
+    assert forward["scope"].released_mcp == frozenset({"mcp.weather"})
+    assert compensating["scope"].claimed_mcp == frozenset({"mcp.weather"})
+
+
+@pytest.mark.asyncio
+async def test_remove_skill_releases_the_skill_s_mcp_dependencies():
+    repository = _SkillRepository({"mcp.weather"})
+    runtime = _Runtime(fail_first=False)
+
+    await _skill_service(repository, runtime).remove_skills(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+        skill_ids=["7"],
     )
 
     (call,) = runtime.reconcile_calls
@@ -3519,15 +3572,15 @@ async def test_removing_a_default_member_performs_the_exclusion_and_reconciles()
     runtime = _ProjectionCountingRuntime()
     service = _default_wire_service(repository, runtime)
 
-    result = await service.remove_skill(
+    (result,) = await service.remove_skills(
         bot_id="bot-1",
         owner_id="true-owner",
         user_id="true-owner",
         set_id="9",
-        skill_id="7",
+        skill_ids=["7"],
     )
 
-    assert result["changed"] is True
+    assert result.changed is True
     assert [name for name, _ in repository.exclusion_calls] == ["exclude_default_skill"]
     assert repository.exclusion_calls[0][1]["skill_id"] == "7"
     assert runtime.projections == 1
