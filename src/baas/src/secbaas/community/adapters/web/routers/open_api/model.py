@@ -209,3 +209,55 @@ class SessionMessagesResponse(ApiResponse[SessionMessagesResponseData]):
     data: SessionMessagesResponseData | None = Field(
         default=None, description="Session message data"
     )
+
+
+class SessionListItem(BaseModel):
+    """Session list item.
+
+    Field set is aligned with the api-level ``SessionInfo`` returned by
+    ``BotRunner.list_sessions``. ``title`` / ``user_id`` / ``agent_id`` /
+    ``model`` / ``message_count`` are optional: the upstream
+    ``AsyncSessionClient.list_sessions`` carries them, but they are not
+    surfaced through the api-level ``SessionInfo`` mapping today, so they are
+    surfaced as ``None`` rather than fabricated.
+    """
+
+    session_id: str = Field(..., description="Session ID")
+    bot_id: str | None = Field(default=None, description="Bot ID")
+    status: str | None = Field(default=None, description="Session status")
+    title: str | None = Field(default=None, description="Session title")
+    user_id: str | None = Field(default=None, description="User ID")
+    agent_id: str | None = Field(default=None, description="Agent ID")
+    model: str | None = Field(default=None, description="Model name")
+    message_count: int | None = Field(
+        default=None, description="Number of messages in the session"
+    )
+    created_at: datetime | None = Field(default=None, description="Creation time")
+    updated_at: datetime | None = Field(default=None, description="Update time")
+
+
+class SessionListResponseData(BaseModel):
+    """Session list response data.
+
+    ``total`` and ``has_more`` are derived from the returned ``items`` list
+    because ``AsyncSessionClient.list_sessions`` does not return a total count.
+    ``has_more = len(items) == limit`` is a conservative hint, not a precise
+    indicator — see spec §3.1.
+    """
+
+    items: list[SessionListItem] = Field(
+        default_factory=list, description="Session list"
+    )
+    total: int = Field(default=0, description="Number of sessions in this response")
+    has_more: bool = Field(
+        default=False,
+        description="Conservative hint: True when the returned page is full",
+    )
+
+
+class SessionListResponse(ApiResponse[SessionListResponseData]):
+    """Session list standard response"""
+
+    data: SessionListResponseData | None = Field(
+        default=None, description="Session list data"
+    )

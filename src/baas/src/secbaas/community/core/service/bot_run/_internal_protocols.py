@@ -183,6 +183,34 @@ class BotService(Protocol):
         """
         ...
 
+    async def list_sessions(
+        self,
+        *,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[SessionInfo]:
+        """查询绑定 Bot 下的会话列表（只读）
+
+        复用 ``get_session`` 的连接解析链路（``_resolve_ws_connection_for_binding``
+        + ``_create_session_client``）调用上游 ``AsyncSessionClient.list_sessions``，
+        不创建新会话。
+
+        Args:
+            binding_info: 已解析的 binding 信息（用于创建底层连接）
+            context: 可选的请求上下文（身份认证、调用者信息等，用于提取 tenant）
+            metadata: 可选元数据，``metadata["list_options"]`` 携带
+                ``user_id`` / ``agent_id`` / ``limit`` / ``offset`` 透传给
+                ``AsyncSessionClient.list_sessions``
+
+        Returns:
+            SessionInfo 列表
+
+        Raises:
+            BotServiceError: 请求失败
+        """
+        ...
+
 
 @runtime_checkable
 class MessageDispatcher(Protocol):

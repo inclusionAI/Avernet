@@ -440,6 +440,26 @@ class BotRunner:
             context=context,
         )
 
+    async def list_sessions(
+        self,
+        *,
+        bot_id: str,
+        context: BotChatContext,
+        metadata: dict[str, Any],
+    ) -> list[SessionInfo]:
+        """查询指定 Bot 下的会话列表（只读）
+
+        复用 ``get_session_info`` 的 binding 解析链路，委托 ``BotService.list_sessions``
+        调用上游 ``AsyncSessionClient.list_sessions``。``metadata["list_options"]``
+        携带 ``user_id`` / ``agent_id`` / ``limit`` / ``offset`` 透传给底层。
+        """
+        route = await self._resolve_bot_route(bot_id, metadata)
+        return await route.bot_service.list_sessions(
+            binding_info=route.binding_info,
+            context=context,
+            metadata=metadata,
+        )
+
     def get_result(self, run_id: str) -> Any:
         """获取执行结果
 

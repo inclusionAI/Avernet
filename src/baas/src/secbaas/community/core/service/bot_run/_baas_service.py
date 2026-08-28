@@ -659,6 +659,84 @@ class BaasBotService(BotService):
                 f"Failed to get session: {_safe_client_msg(e)}"
             ) from e
 
+    async def list_sessions(
+        self,
+        *,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[SessionInfo]:
+        """查询绑定 Bot 下的会话列表（只读）
+
+        复用 ``get_session`` 的连接解析链路（``_resolve_ws_connection_for_binding``
+        + ``_create_session_client``），调用上游 ``AsyncSessionClient.list_sessions``。
+        ``metadata["list_options"]`` 携带 ``user_id`` / ``agent_id`` / ``limit`` /
+        ``offset`` 透传给底层；默认 ``limit=20``、``offset=0``。每个 adapter
+        ``SessionInfo`` 经 ``_map_adapter_session_info`` 映射为 api-level
+        ``SessionInfo``。
+
+        Args:
+            binding_info: 已解析的 binding 信息（用于创建底层连接）
+            context: 可选的请求上下文（用于提取 tenant）
+            metadata: 可选元数据，``list_options`` 子字典透传给底层
+
+        Returns:
+            SessionInfo 列表
+
+        Raises:
+            BotServiceError: 请求失败
+        """
+        try:
+            conn_info = await self._resolve_ws_connection_for_binding(
+                binding_info, context
+            )
+        except Exception as e:
+            logger.warning("Failed to resolve WS connection: %s", e)
+            raise BotServiceError(
+                f"Failed to resolve WS connection: {_safe_client_msg(e)}"
+            ) from e
+
+        session_client = self._create_session_client(
+            conn_info, binding_info.engine_type
+        )
+
+        list_options: dict[str, Any] = {}
+        if metadata:
+            raw_options = metadata.get("list_options")
+            if isinstance(raw_options, dict):
+                list_options = raw_options
+
+        user_id = list_options.get("user_id")
+        agent_id = list_options.get("agent_id")
+        limit = list_options.get("limit", 20)
+        offset = list_options.get("offset", 0)
+
+        try:
+            async with session_client:
+                adapter_sessions = await session_client.list_sessions(
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    limit=limit,
+                    offset=offset,
+                    engine=binding_info.engine_type,
+                )
+                return [
+                    _map_adapter_session_info(item, binding_info.bot_id)
+                    for item in adapter_sessions
+                ]
+        except aiohttp.ClientResponseError as e:
+            logger.warning("Failed to list sessions: %s", e)
+            raise BotServiceError(
+                f"Failed to list sessions: {_safe_client_msg(e)}"
+            ) from e
+        except BotServiceError:
+            raise
+        except Exception as e:
+            logger.warning("Failed to list sessions: %s", e)
+            raise BotServiceError(
+                f"Failed to list sessions: {_safe_client_msg(e)}"
+            ) from e
+
     # ── 私有方法 ─────────────────────────────────────────────────────────────
 
     def _adapter_for(self, engine_type: str | None) -> BotEngineAdapter | None:

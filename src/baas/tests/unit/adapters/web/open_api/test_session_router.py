@@ -19,6 +19,7 @@ from secbaas.community.adapters.web.routers.open_api.session_router import (
     _check_app_type,
     get_session,
     get_session_messages,
+    list_sessions,
 )
 from secbaas.community.api.api_gateway import APIKeyRecord
 from secbaas.community.api.bot_runtime import (
@@ -45,6 +46,8 @@ SESSION_ID = "sess-001"
 # FastAPI Query defaults are NOT applied on direct invocation.
 DEFAULT_LIFECYCLE_STAGE = "online"
 DEFAULT_LIMIT = 1000
+DEFAULT_LIST_LIMIT = 20
+DEFAULT_LIST_OFFSET = 0
 
 
 def _make_api_key_record(app_type="system", app_id="bot-1:entity-1", tenant="t1"):
@@ -925,6 +928,354 @@ class TestGetSessionMessages:
                     limit=DEFAULT_LIMIT,
                     bot_id=BOT_ID,
                     lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                    api_key_record=_make_api_key_record(),
+                    context=_make_context(),
+                    bot_runner=mock_runner,
+                )
+        assert exc.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert exc.value.detail["code"] == 50001
+        assert "Internal server error" in exc.value.detail["message"]
+
+
+# ── list_sessions ─────────────────────────────────────────────
+
+
+class TestListSessions:
+    """list_sessions 端点核心逻辑测试。"""
+
+    @pytest.mark.asyncio
+    async def test_bot_app_type_resolves_from_api_key(self):
+        """app_type='bot' 不传 bot_id 时从 API Key 解析。"""
+        api_key = _make_api_key_record(app_type="bot", app_id="bot-1:entity-1")
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.list_sessions = AsyncMock(return_value=[])
+
+        with (
+            patch(RESOLVE_PATH, return_value=BOT_ID) as mock_resolve,
+            patch(POLICY_PATH),
+        ):
+            await list_sessions(
+                bot_id=None,
+                lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                limit=DEFAULT_LIST_LIMIT,
+                offset=DEFAULT_LIST_OFFSET,
+                user_id=None,
+                agent_id=None,
+                api_key_record=api_key,
+                context=_make_context(),
+                bot_runner=mock_runner,
+            )
+            mock_resolve.assert_called_once_with(api_key)
+
+    @pytest.mark.asyncio
+    async def test_system_app_type_without_bot_id_returns_400(self):
+        """app_type='system' 不传 bot_id 返回 400。"""
+        api_key = _make_api_key_record(app_type="system")
+        mock_runner = AsyncMock(spec=BotRunner)
+
+        with pytest.raises(HTTPException) as exc:
+            await list_sessions(
+                bot_id=None,
+                lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                limit=DEFAULT_LIST_LIMIT,
+                offset=DEFAULT_LIST_OFFSET,
+                user_id=None,
+                agent_id=None,
+                api_key_record=api_key,
+                context=_make_context(),
+                bot_runner=mock_runner,
+            )
+        assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+        assert exc.value.detail["code"] == OpenAPICode.BUSINESS_ERROR
+
+    @pytest.mark.asyncio
+    async def test_explicit_bot_id_used_directly(self):
+        """显式传入 bot_id 时直接使用。"""
+        api_key = _make_api_key_record(app_type="bot", app_id="bot-default:entity-1")
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.list_sessions = AsyncMock(return_value=[])
+
+        with patch(POLICY_PATH, return_value=BOT_ID):
+            await list_sessions(
+                bot_id="bot-explicit:entity-1",
+                lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                limit=DEFAULT_LIST_LIMIT,
+                offset=DEFAULT_LIST_OFFSET,
+                user_id=None,
+                agent_id=None,
+                api_key_record=api_key,
+                context=_make_context(),
+                bot_runner=mock_runner,
+            )
+
+        mock_runner.list_sessions.assert_called_once()
+        assert (
+            mock_runner.list_sessions.call_args[1]["bot_id"]
+            == "bot-explicit:entity-1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_bot_type_skips_validate_policy(self):
+        """app_type='bot' 时跳过 validate_policy。"""
+        api_key = _make_api_key_record(app_type="bot", app_id=BOT_ID)
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.list_sessions = AsyncMock(return_value=[])
+
+        with (
+            patch(POLICY_PATH) as mock_policy,
+            patch(RESOLVE_PATH, return_value=BOT_ID),
+        ):
+            await list_sessions(
+                bot_id=None,
+                lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                limit=DEFAULT_LIST_LIMIT,
+                offset=DEFAULT_LIST_OFFSET,
+                user_id=None,
+                agent_id=None,
+                api_key_record=api_key,
+                context=_make_context(),
+                bot_runner=mock_runner,
+            )
+            mock_policy.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_system_type_calls_validate_policy(self):
+        """app_type='system' 调用 validate_policy。"""
+        api_key = _make_api_key_record(app_type="system")
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.list_sessions = AsyncMock(return_value=[])
+
+        with patch(POLICY_PATH, return_value=BOT_ID) as mock_policy:
+            await list_sessions(
+                bot_id=BOT_ID,
+                lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                limit=DEFAULT_LIST_LIMIT,
+                offset=DEFAULT_LIST_OFFSET,
+                user_id=None,
+                agent_id=None,
+                api_key_record=api_key,
+                context=_make_context(),
+                bot_runner=mock_runner,
+            )
+            mock_policy.assert_called_once_with(api_key, BOT_ID)
+
+    @pytest.mark.asyncio
+    async def test_success_returns_items_total_has_more(self):
+        """成功返回 items/total/has_more。"""
+        sessions = [
+            _make_session_info(session_id="sess-001"),
+            _make_session_info(session_id="sess-002"),
+        ]
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.list_sessions = AsyncMock(return_value=sessions)
+
+        with patch(POLICY_PATH, return_value=BOT_ID):
+            result = await list_sessions(
+                bot_id=BOT_ID,
+                lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                limit=DEFAULT_LIST_LIMIT,
+                offset=DEFAULT_LIST_OFFSET,
+                user_id=None,
+                agent_id=None,
+                api_key_record=_make_api_key_record(),
+                context=_make_context(),
+                bot_runner=mock_runner,
+            )
+
+        assert result.code == 0
+        assert result.message == "success"
+        assert len(result.data.items) == 2
+        assert result.data.total == 2
+        assert result.data.has_more is False
+        assert result.data.items[0].session_id == "sess-001"
+        assert result.data.items[1].session_id == "sess-002"
+
+    @pytest.mark.asyncio
+    async def test_success_has_more_when_full_page(self):
+        """返回满页 (len==limit) 时 has_more=True。"""
+        sessions = [
+            _make_session_info(session_id=f"sess-{i:03d}") for i in range(5)
+        ]
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.list_sessions = AsyncMock(return_value=sessions)
+
+        with patch(POLICY_PATH, return_value=BOT_ID):
+            result = await list_sessions(
+                bot_id=BOT_ID,
+                lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                limit=5,
+                offset=DEFAULT_LIST_OFFSET,
+                user_id=None,
+                agent_id=None,
+                api_key_record=_make_api_key_record(),
+                context=_make_context(),
+                bot_runner=mock_runner,
+            )
+
+        assert result.data.total == 5
+        assert result.data.has_more is True
+
+    @pytest.mark.asyncio
+    async def test_limit_offset_passthrough_to_metadata(self):
+        """limit/offset/user_id/agent_id 透传至 metadata.list_options。"""
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.list_sessions = AsyncMock(return_value=[])
+
+        with patch(POLICY_PATH, return_value=BOT_ID):
+            await list_sessions(
+                bot_id=BOT_ID,
+                lifecycle_stage="verify",
+                limit=15,
+                offset=30,
+                user_id="u-1",
+                agent_id="a-1",
+                api_key_record=_make_api_key_record(),
+                context=_make_context(),
+                bot_runner=mock_runner,
+            )
+
+        mock_runner.list_sessions.assert_called_once_with(
+            bot_id=BOT_ID,
+            context=_make_context(),
+            metadata={
+                "bot_options": {"lifecycle_stage": "verify"},
+                "list_options": {
+                    "user_id": "u-1",
+                    "agent_id": "a-1",
+                    "limit": 15,
+                    "offset": 30,
+                },
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_non_allowed_app_type_returns_403(self):
+        """app_type 不在 ('system','app','bot') -> 403。"""
+        api_key = _make_api_key_record(app_type="user")
+        mock_runner = AsyncMock(spec=BotRunner)
+
+        with pytest.raises(HTTPException) as exc:
+            await list_sessions(
+                bot_id=BOT_ID,
+                lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                limit=DEFAULT_LIST_LIMIT,
+                offset=DEFAULT_LIST_OFFSET,
+                user_id=None,
+                agent_id=None,
+                api_key_record=api_key,
+                context=_make_context(),
+                bot_runner=mock_runner,
+            )
+        assert exc.value.status_code == status.HTTP_403_FORBIDDEN
+
+    @pytest.mark.asyncio
+    async def test_session_not_found_returns_404(self):
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.list_sessions = AsyncMock(
+            side_effect=SessionNotFoundError(SESSION_ID),
+        )
+
+        with patch(POLICY_PATH, return_value=BOT_ID):
+            with pytest.raises(HTTPException) as exc:
+                await list_sessions(
+                    bot_id=BOT_ID,
+                    lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                    limit=DEFAULT_LIST_LIMIT,
+                    offset=DEFAULT_LIST_OFFSET,
+                    user_id=None,
+                    agent_id=None,
+                    api_key_record=_make_api_key_record(),
+                    context=_make_context(),
+                    bot_runner=mock_runner,
+                )
+        assert exc.value.status_code == status.HTTP_404_NOT_FOUND
+        assert exc.value.detail["code"] == OpenAPICode.BUSINESS_ERROR
+
+    @pytest.mark.asyncio
+    async def test_bot_binding_not_found_returns_404(self):
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.list_sessions = AsyncMock(
+            side_effect=BotBindingNotFoundError(BOT_ID),
+        )
+
+        with patch(POLICY_PATH, return_value=BOT_ID):
+            with pytest.raises(HTTPException) as exc:
+                await list_sessions(
+                    bot_id=BOT_ID,
+                    lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                    limit=DEFAULT_LIST_LIMIT,
+                    offset=DEFAULT_LIST_OFFSET,
+                    user_id=None,
+                    agent_id=None,
+                    api_key_record=_make_api_key_record(),
+                    context=_make_context(),
+                    bot_runner=mock_runner,
+                )
+        assert exc.value.status_code == status.HTTP_404_NOT_FOUND
+        assert exc.value.detail["code"] == 60001
+
+    @pytest.mark.asyncio
+    async def test_bot_not_found_returns_404(self):
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.list_sessions = AsyncMock(
+            side_effect=BotNotFoundError("bot-1"),
+        )
+
+        with patch(POLICY_PATH, return_value=BOT_ID):
+            with pytest.raises(HTTPException) as exc:
+                await list_sessions(
+                    bot_id=BOT_ID,
+                    lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                    limit=DEFAULT_LIST_LIMIT,
+                    offset=DEFAULT_LIST_OFFSET,
+                    user_id=None,
+                    agent_id=None,
+                    api_key_record=_make_api_key_record(),
+                    context=_make_context(),
+                    bot_runner=mock_runner,
+                )
+        assert exc.value.status_code == status.HTTP_404_NOT_FOUND
+        assert exc.value.detail["code"] == 60001
+
+    @pytest.mark.asyncio
+    async def test_bot_service_error_returns_400(self):
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.list_sessions = AsyncMock(
+            side_effect=BotServiceError("service unavailable"),
+        )
+
+        with patch(POLICY_PATH, return_value=BOT_ID):
+            with pytest.raises(HTTPException) as exc:
+                await list_sessions(
+                    bot_id=BOT_ID,
+                    lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                    limit=DEFAULT_LIST_LIMIT,
+                    offset=DEFAULT_LIST_OFFSET,
+                    user_id=None,
+                    agent_id=None,
+                    api_key_record=_make_api_key_record(),
+                    context=_make_context(),
+                    bot_runner=mock_runner,
+                )
+        assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+        assert exc.value.detail["code"] == OpenAPICode.BUSINESS_ERROR
+
+    @pytest.mark.asyncio
+    async def test_generic_exception_returns_500(self):
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.list_sessions = AsyncMock(
+            side_effect=RuntimeError("unexpected failure"),
+        )
+
+        with patch(POLICY_PATH, return_value=BOT_ID):
+            with pytest.raises(HTTPException) as exc:
+                await list_sessions(
+                    bot_id=BOT_ID,
+                    lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                    limit=DEFAULT_LIST_LIMIT,
+                    offset=DEFAULT_LIST_OFFSET,
+                    user_id=None,
+                    agent_id=None,
                     api_key_record=_make_api_key_record(),
                     context=_make_context(),
                     bot_runner=mock_runner,

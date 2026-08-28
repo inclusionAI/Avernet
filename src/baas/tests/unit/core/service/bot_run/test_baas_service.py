@@ -2154,6 +2154,213 @@ class TestSendMessageWaitResult:
             assert call_kwargs["wait_result"] is False
 
 
+# ==================== TestListSessions ====================
+
+
+class TestListSessions:
+    """list_sessions tests.
+
+    Covers connection resolution passthrough, AsyncSessionClient.list_sessions
+    argument forwarding, _map_adapter_session_info mapping and error wrapping.
+    """
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_success_maps_adapter_sessions(
+        self, service, wss_resolver
+    ):
+        """list_sessions maps each adapter SessionInfo via _map_adapter_session_info."""
+        from secbaas.community.core.service.bot_run._async_session_client import (
+            SessionInfo as AdapterSessionInfo,
+        )
+
+        adapter_sessions = [
+            AdapterSessionInfo(
+                id="sess-001",
+                title="t1",
+                user_id="u1",
+                agent_id=BOT_UUID,
+                created_at="2025-01-01T00:00:00Z",
+                updated_at="2025-01-02T00:00:00Z",
+            ),
+            AdapterSessionInfo(id="sess-002", title="t2"),
+        ]
+
+        session_client = AsyncMock()
+        session_client.list_sessions.return_value = adapter_sessions
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+
+        binding = _make_binding_info()
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+        ):
+            result = await service.list_sessions(binding_info=binding)
+
+        assert len(result) == 2
+        assert result[0].session_id == "sess-001"
+        assert result[0].bot_id == BOT_UUID
+        assert result[0].status == "active"
+        assert result[1].session_id == "sess-002"
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_forwards_list_options(self, service, wss_resolver):
+        """list_options (user_id/agent_id/limit/offset/engine) are forwarded."""
+        session_client = AsyncMock()
+        session_client.list_sessions.return_value = []
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+
+        binding = _make_binding_info(engine_type="openclaw")
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+        ):
+            await service.list_sessions(
+                binding_info=binding,
+                metadata={
+                    "list_options": {
+                        "user_id": "u-1",
+                        "agent_id": "a-1",
+                        "limit": 7,
+                        "offset": 9,
+                    }
+                },
+            )
+
+        session_client.list_sessions.assert_called_once_with(
+            user_id="u-1",
+            agent_id="a-1",
+            limit=7,
+            offset=9,
+            engine="openclaw",
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_defaults_when_no_list_options(
+        self, service, wss_resolver
+    ):
+        """Without list_options, defaults limit=20 offset=0 are forwarded."""
+        session_client = AsyncMock()
+        session_client.list_sessions.return_value = []
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+
+        binding = _make_binding_info(engine_type="openclaw")
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+        ):
+            await service.list_sessions(binding_info=binding)
+
+        session_client.list_sessions.assert_called_once_with(
+            user_id=None,
+            agent_id=None,
+            limit=20,
+            offset=0,
+            engine="openclaw",
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_ws_connection_failure_wraps_bot_service_error(
+        self, service, wss_resolver
+    ):
+        """WS resolution failure is wrapped as BotServiceError."""
+        binding = _make_binding_info()
+
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            side_effect=RuntimeError("conn down"),
+        ):
+            with pytest.raises(BotServiceError) as exc:
+                await service.list_sessions(binding_info=binding)
+
+        assert "Failed to resolve WS connection" in str(exc.value)
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_client_response_error_wraps_bot_service_error(
+        self, service, wss_resolver
+    ):
+        """aiohttp.ClientResponseError from list_sessions is wrapped as BotServiceError."""
+        import aiohttp
+
+        session_client = AsyncMock()
+        session_client.list_sessions.side_effect = aiohttp.ClientResponseError(
+            request_info=MagicMock(),
+            history=(),
+            status=500,
+            message="upstream error",
+        )
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+
+        binding = _make_binding_info()
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+        ):
+            with pytest.raises(BotServiceError) as exc:
+                await service.list_sessions(binding_info=binding)
+
+        assert "Failed to list sessions" in str(exc.value)
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_generic_error_wraps_bot_service_error(
+        self, service, wss_resolver
+    ):
+        """Generic exceptions are wrapped as BotServiceError."""
+        session_client = AsyncMock()
+        session_client.list_sessions.side_effect = RuntimeError("boom")
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+
+        binding = _make_binding_info()
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+        ):
+            with pytest.raises(BotServiceError) as exc:
+                await service.list_sessions(binding_info=binding)
+
+        assert "Failed to list sessions" in str(exc.value)
+
+
 # ==================== ANY matcher for mock assertions ====================
 
 
