@@ -17,7 +17,7 @@
 # The runtime stack is driven by docker-compose.gateway-test.yml (single source
 # of truth for env wiring). Every value can be overridden via env:
 #   DATABASE_URL, REDIS_URL, GATEWAY_PORT, *_SERVER_URL, HOST_PORT,
-#   AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE.
+#   PRINCIPAL_SIGNING_KEY.
 
 set -euo pipefail
 
@@ -35,7 +35,7 @@ export BAAS_SERVER_URL="${BAAS_SERVER_URL:-https://baas.avernet.com}"
 export BCS_SERVER_URL="${BCS_SERVER_URL:-https://bcs.avernet.com}"
 export ENGINE_PROXY_SERVER_URL="${ENGINE_PROXY_SERVER_URL:-https://engineproxy.avernet.com}"
 export BCSFUSE_SERVER_URL="${BCSFUSE_SERVER_URL:-https://bcsfuse.avernet.com}"
-export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-gateway-test-signing-key-not-for-prod}"
+export PRINCIPAL_SIGNING_KEY="${PRINCIPAL_SIGNING_KEY:-gateway-test-signing-key-not-for-prod}"
 
 # Host port mapped to the gateway (for the /health probe).
 HOST_PORT="${HOST_PORT:-18888}"
