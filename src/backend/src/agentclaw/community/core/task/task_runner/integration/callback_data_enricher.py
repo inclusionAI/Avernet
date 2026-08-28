@@ -375,28 +375,39 @@ class CallbackDataEnricher:
         """BCN state_machine:查 BCS run 明细 + DAG → enrich(cd.data);返 run_detail(供收敛)。"""
         if not isinstance(cd.data, dict):
             return None
+        _sid = (cd.data.get("workflow_instance_id") or "")
+        if not _sid and isinstance(raw, dict):
+            scope = raw.get("scope")
+            if isinstance(scope, dict) and scope.get("session_id"):
+                _sid = str(scope["session_id"])
         event_type = raw.get("event_type") if isinstance(raw, dict) else None
         run_detail: dict | None = None
         graph_detail: dict | None = None
-        logger.info("[task_callback] BCN fetch run 明细 run_id=%s bcs_base_url=%s", run_id, self._base)
+        logger.info(
+            "[task_callback] BCN fetch run 明细 run_id=%s session_id=%s bcs_base_url=%s",
+            run_id,
+            _sid,
+            self._base,
+        )
         try:
             run_detail, graph_detail = await self._fetch_run_and_graph(run_id)
         except Exception as exc:  # noqa: BLE001 查 BCS 明细/DAG 失败不阻断(用事件体兜底建图)
-            logger.warning("[task_callback] 查 BCS run 明细/DAG 失败 run_id=%s: %s", run_id, exc)
+            logger.warning("[task_callback] 查 BCS run 明细/DAG 失败 run_id=%s session_id=%s: %s", run_id, _sid, exc)
         if run_detail:
             # 查询出来的原始 run 明细 → extend_props(result._ext_info);
             # orig_callback_data 保持原始 CloudEvent(callback 数据由 _raw_callback_body 承载,不在此覆盖)。
             cd.data.setdefault("result", {})["_ext_info"] = run_detail
-            logger.info("[task_callback] BCN run 明细已取回 run_id=%s → extend_props, detail=%s", run_id, run_detail)
-            logger.info("[task_callback] BCN run 明细已取回 run_id=%s → extend_props, graph_detail=%s", run_id, graph_detail)
+            logger.info("[task_callback] BCN run 明细已取回 run_id=%s session_id=%s → extend_props, detail=%s", run_id, _sid, run_detail)
+            logger.info("[task_callback] BCN run 明细已取回 run_id=%s session_id=%s → extend_props, graph_detail=%s", run_id, _sid, graph_detail)
             eg = _build_bcn_execution_graph(
                 event_type=event_type, run_id=run_id,
                 run_detail=run_detail, graph_detail=graph_detail,
             )
         else:
             logger.warning(
-                "[task_callback] BCS run 明细非 200/未取到 run_id=%s → 用事件体兜底建极简图",
+                "[task_callback] BCS run 明细非 200/未取到 run_id=%s session_id=%s → 用事件体兜底建极简图",
                 run_id,
+                _sid,
             )
             eg = _build_bcn_execution_graph(
                 event_type=event_type, run_id=run_id,

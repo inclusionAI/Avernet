@@ -390,9 +390,7 @@ async def report_callback(
     workflow_start/node_start 端点各自走(disposition=start)。领域异常上抛 → ``@envelope_errors`` 映射。"""
     # 入口日志:打出回调原始 body(CloudEvent / HttpCallbackPayload / 羽雀 schema 都能见),便于排查。
     # Starlette request.body() 首次读后缓存,_dispatch 再读仍得同一份,不冲突。
-    logger.info("[task_callback] receive_one_callback")
     _body = await request.body()
-    logger.info("[task_callback] receive_one_callback, body=%s", request.body())
     _preview = _body[:4000].decode("utf-8", "replace")
     if len(_body) > 4000:
         _preview += f"...(truncated, total {len(_body)} bytes)"
@@ -796,6 +794,24 @@ def _find_node_status(svc: TaskServiceProtocol, loop_task_id: str) -> Status | N
     return node.status if node is not None else None
 
 
+def _session_id_of(raw_obj: Any) -> str:
+    """从原始回调 body 提取 session_id(即落库 ``main_session_id`` 源),供入口/链路日志关联。
+
+    BCN / manager_worker = ``scope.session_id``;ClawMind = ``ext_info.flow_runs.origin_session_id``;
+    羽雀 schema / 兜底 DTO 形态不含,返 ``""``(其 session_id 经 translate 后落在 ``workflow_instance_id``)。"""
+    if not isinstance(raw_obj, dict):
+        return ""
+    scope = raw_obj.get("scope")
+    if isinstance(scope, dict) and scope.get("session_id"):
+        return str(scope["session_id"])
+    ext = raw_obj.get("ext_info")
+    if isinstance(ext, dict):
+        flow_runs = ext.get("flow_runs")
+        if isinstance(flow_runs, dict) and flow_runs.get("origin_session_id"):
+            return str(flow_runs["origin_session_id"])
+    return ""
+
+
 async def _dispatch(
     request: Request,
     disposition: str,
@@ -811,10 +827,11 @@ async def _dispatch(
         _raw_obj = json.loads(raw)
     except Exception:
         _raw_obj = None
+    _sid = _session_id_of(_raw_obj)  # session_id(主回投键)→ 入口/链路各日志关联
     # ClawMind / BCN 是事件/工作流级回投(run_id/workflow_id 不对应框架节点):只落 task_callback 审计,
     # 不推进编排核(start_run/report_result 会 NodeNotFoundError),直接 ack。
     if is_claw_mind_payload(_raw_obj):
-        logger.info("[task_callback] claw_mind callback received")
+        logger.info("[task_callback] claw_mind callback received session_id=%s", _sid)
         auth.verify(
             source="claw_mind",
             headers=request.headers,
@@ -827,7 +844,7 @@ async def _dispatch(
         await svc.callback.ingest(_tc.data)
         return envelope({"ok": True}, request)
     if is_bcn_event_payload(_raw_obj):
-        logger.info("[task_callback] bcn event received")
+        logger.info("[task_callback] bcn event received session_id=%s", _sid)
         auth.verify(
             source="bcn",
             headers=request.headers,
@@ -838,6 +855,7 @@ async def _dispatch(
         # manager_worker(任务协作群)事件:走 manager_worker 分流(parse+merge 进单 session 行 +
         # session.completed 收敛),不进 state_machine 的 translate_bcn/run_detail 路径。
         if parse_manager_worker_bcn(_raw_obj) is not None:
+            logger.info("[task_callback] manager_worker event session_id=%s", _sid)
             await svc.apply_manager_worker_event(_raw_obj)
             return envelope({"ok": True}, request)
         _tc = translate_bcn(_raw_obj)
@@ -850,7 +868,7 @@ async def _dispatch(
             if isinstance(_raw_obj, dict)
             else None
         )
-        logger.info("[task_callback] bcn event run_id=%s", _run_id)
+        logger.info("[task_callback] bcn event run_id=%s session_id=%s", _run_id, _sid)
         # 1) 先落原始回调数据(translate 后 minimal:orig=CloudEvent + main_session_id + run_id;
         #    execution_graph/extend_props 暂空)——回调到达即留底,后续解析/查 BCS 失败也不丢原始记录。
         await svc.callback.ingest(_tc.data)
@@ -902,7 +920,7 @@ async def _dispatch(
                         _session_id,
                         exc,
                     )
-        logger.info("[task_callback] finish_process_callback")
+        logger.info("[task_callback] finish_process_callback session_id=%s run_id=%s", _sid, _run_id)
         return envelope({"ok": True}, request)
     # 羽雀/框架节点级回投:先按 schema_cls(TaskCallbackRequest 富 schema)校验 → translate → report_result/start_run;
     # 不符合则兜底 TaskCallbackDataDTO(loop_task_id+result,report_callback 旧契约)→ callback_from_dto → report_result。
@@ -920,6 +938,11 @@ async def _dispatch(
             path=request.url.path,
         )
         tc = translate(req, disposition, registry)
+        logger.info(
+            "[task_callback] schema callback session_id=%s disposition=%s",
+            (tc.data.data or {}).get("workflow_instance_id") or _sid,
+            tc.disposition,
+        )
         try:
             if tc.disposition == "start":
                 await svc.callback.start_run(tc.data)
@@ -952,6 +975,11 @@ async def _dispatch(
         raw_body=raw,
         method=request.method,
         path=request.url.path,
+    )
+    logger.info(
+        "[task_callback] fallback dto callback session_id=%s loop_task_id=%s",
+        _sid,
+        dto.loop_task_id,
     )
     await svc.callback.report_result(callback_from_dto(dto))
     return envelope({"ok": True}, request)
