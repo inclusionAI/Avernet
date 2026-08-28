@@ -744,7 +744,7 @@ class TestStep3RenewalDecision:
         assert result == "failed"
 
     @pytest.mark.asyncio
-    async def test_get_device_info_raises_enters_failure(self):
+    async def test_get_device_info_raises_enters_failure(self, caplog):
         """Test 20: get_device_info raises Exception → failure handling."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
 
@@ -753,11 +753,19 @@ class TestStep3RenewalDecision:
         mock_repo.update_after_failure = MagicMock()
 
         record = _renewal_record()
-        result = await scheduler._renew_one(record)
+        with caplog.at_level(logging.WARNING, logger="core-scheduler"):
+            result = await scheduler._renew_one(record)
 
         mock_facade.extend_ttl.assert_not_called()
         mock_repo.update_after_failure.assert_called_once()
         assert result == "failed"
+
+        failure_lines = [
+            r for r in caplog.records if "get_device_info failed" in r.message
+        ]
+        assert len(failure_lines) == 1
+        assert failure_lines[0].levelno == logging.WARNING
+        assert "timeout" in failure_lines[0].message
 
     @pytest.mark.asyncio
     async def test_ttl_timestamp_none_enters_failure(self):
@@ -794,7 +802,7 @@ class TestStep3RenewalDecision:
         assert result == "failed"
 
     @pytest.mark.asyncio
-    async def test_extend_ttl_raises_enters_failure(self):
+    async def test_extend_ttl_raises_enters_failure(self, caplog):
         """Test 22: get_device_info succeeds, but extend_ttl raises → failure."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
 
@@ -805,10 +813,19 @@ class TestStep3RenewalDecision:
         mock_repo.update_after_failure = MagicMock()
 
         record = _renewal_record()
-        result = await scheduler._renew_one(record)
+        with caplog.at_level(logging.WARNING, logger="core-scheduler"):
+            result = await scheduler._renew_one(record)
 
         mock_repo.update_after_failure.assert_called_once()
         assert result == "failed"
+
+        failure_lines = [
+            r for r in caplog.records if "extend_ttl failed" in r.message
+        ]
+        assert len(failure_lines) == 1
+        assert failure_lines[0].levelno == logging.WARNING
+        assert "Arca API error" in failure_lines[0].message
+        assert "ttl_minutes=" in failure_lines[0].message
 
     @pytest.mark.asyncio
     async def test_extend_ttl_returns_false_enters_failure(self):
@@ -1601,6 +1618,18 @@ class TestStoppedTransitionMetric:
         assert "stopped_transition=1" in msg
         assert "sandbox_id=sb-1" in msg
         assert "fail_count=10" in msg
+
+        transition_records = [
+            r for r in caplog.records if "stopped_transition" in r.message
+        ]
+        assert len(transition_records) == 1
+        assert transition_records[0].levelno == logging.INFO
+
+        stopped_lines = [
+            r for r in caplog.records if "marked STOPPED" in r.message
+        ]
+        assert len(stopped_lines) == 1
+        assert stopped_lines[0].levelno == logging.WARNING
 
 
 class TestRenewalDigestLogging:
