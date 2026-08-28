@@ -23,6 +23,9 @@ from agentclaw.community.core.cron.services.cron_auto_setup_listener import (
     CronAutoSetupListener,
 )
 from agentclaw.community.core.cron.services.cron_relay import CronRelayService
+from agentclaw.community.core.cron.services.cron_sandbox_revival_listener import (
+    CronSandboxRevivalListener,
+)
 
 
 class CronModule(Module):
@@ -37,6 +40,13 @@ class CronModule(Module):
         # singlebox); community leaves it unbound (no container runtime).
         # Lifecycle participant — subscribes to DeviceActivatedEvent in startup()
         binder.bind(CronAutoSetupListener, to=CronAutoSetupListener, scope=singleton)
+        # Lifecycle participant — same event, opposite verdict: an activation
+        # revives a binding whose destroyed-sandbox verdict would otherwise
+        # keep its cron queries (and the auto_setup idempotency check) in a
+        # 60 s blind window across a sandbox rebuild.
+        binder.bind(
+            CronSandboxRevivalListener, to=CronSandboxRevivalListener, scope=singleton
+        )
 
     @singleton
     @provider

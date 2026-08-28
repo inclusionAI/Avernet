@@ -347,6 +347,21 @@ class CronRuntimeTargetMixin:
             time.monotonic() + SANDBOX_DESTROYED_TTL_SECONDS
         )
 
+    def clear_sandbox_down_verdict(self, binding_id: int) -> bool:
+        """Drop a binding's destroyed-sandbox verdict; ``True`` if it existed.
+
+        The counter-evidence to a "sandbox destroyed" verdict is a live
+        instance on that binding, which is exactly what DeviceActivatedEvent
+        announces — ``CronSandboxRevivalListener`` calls this from the event
+        handler so an auto_setup idempotency check (client-side, name-based,
+        blind to ``failed_targets``) immediately sees the rebuilt sandbox's
+        crons and never duplicates an autoInitiate task. ``dict.pop`` is
+        GIL-atomic, so an event-handler thread clearing while the event loop
+        marks a fresh verdict cannot corrupt the map; a verdict lost to that
+        interleaving simply re-arms on the next destroyed-sandbox failure.
+        """
+        return self._sandbox_down_until.pop(binding_id, None) is not None
+
     async def _fetch_runtime_target_crons(
         self,
         target: CronRuntimeTarget,
