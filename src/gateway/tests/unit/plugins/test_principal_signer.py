@@ -112,7 +112,7 @@ class _FakeResolver(SecretResolver):
 class _StrResolver(SecretResolver):
     """A BaaS-aligned resolver that returns a plain string secret.
 
-    Missing secrets raise ``RuntimeError`` (the ``env`` flavor contract)."""
+    Missing secrets raise ``RuntimeError`` (simulating a strict backend)."""
 
     def __init__(self, value: str | None) -> None:
         self._value = value
