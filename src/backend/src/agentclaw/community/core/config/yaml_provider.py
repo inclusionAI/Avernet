@@ -127,6 +127,12 @@ def _load_yaml_configs(
         Path(__file__).resolve().parents[2] / "configs",  # agentclaw/community/configs
     ]
 
+    # B11: A corp overlay (``{stem}-corp.yaml``) injects real credentials that must
+    # not live in community source.  When present alongside the config pair it is
+    # deep-merged on top, producing a three-layer stack:
+    #   application.yaml  ⊕  application-<profile>.yaml  ⊕  application-<profile>-corp.yaml
+    corp_overlay_name = overlay_name.removesuffix(".yaml") + "-corp.yaml"
+
     for config_dir in config_dirs:
         base_path = config_dir / "application.yaml"
         overlay_path = config_dir / overlay_name
@@ -138,6 +144,15 @@ def _load_yaml_configs(
             overlay_config = yaml.safe_load(file) or {}
         logger.info("YamlConfigProvider loaded overlay: %s", overlay_path)
         merged = _deep_merge(base_config, overlay_config)
+
+        # Corporation overlay (optional layer on top of base ⊕ community overlay).
+        corp_overlay_path = config_dir / corp_overlay_name
+        if corp_overlay_path.exists():
+            with open(corp_overlay_path, "r", encoding="utf-8") as file:
+                corp_config = yaml.safe_load(file) or {}
+            logger.info("YamlConfigProvider loaded corp overlay: %s", corp_overlay_path)
+            merged = _deep_merge(merged, corp_config)
+
         # Expand after the merge so an overlay can introduce a placeholder the
         # base does not carry, and before AppConfig so every consumer — typed
         # dataclass providers included — reads resolved values.
