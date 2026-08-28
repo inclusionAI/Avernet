@@ -203,6 +203,9 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
                 logger.info(f"create_group extra_headers with bot_token {req.driver_bot}={req.caller_bot_token[0:4]}")
             else:
                 logger.error(f"create_group extra_headers with wrong bot_token {req.driver_bot}={req.caller_bot_token}")
+
+        logger.info("[task][bcs_http_adapter] create_group body=%s", body)
+        logger.info("[task][bcs_http_adapter] create_group event_subscriptions=%s", body["event_subscriptions"])
         r = await self._req("POST", "/groups", json=body, idempotency_key=uuid.uuid4().hex,
                            extra_headers=extra_headers)
         data = r.json()

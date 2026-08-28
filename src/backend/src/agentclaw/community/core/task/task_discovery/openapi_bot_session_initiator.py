@@ -89,6 +89,7 @@ class OpenApiBotSessionInitiator:
         BaaS 在处理 ``POST /openapi/v1/messages`` 时内部创建 session,
         响应中返回 ``message_id`` (run_id) 和 ``session_id``。
         """
+        logger.debug("[task_discovery] → OpenApiBotSessionInitiator.initiate_session(bot_id=%s, owner_id=%s, task_count=%d)", bot_id, owner_id, len(tasks))
         first_task = tasks[0]
         task_count = len(tasks)
         title = (
@@ -202,6 +203,7 @@ class OpenApiBotSessionInitiator:
 
         失败不阻断主流程（non-fatal），仅记录 warning。
         """
+        logger.debug("[task_discovery] → OpenApiBotSessionInitiator._update_session_title(session_id=%s, bot_id=%s)", session_id, bot_id)
         full_session_key = (
             session_id
             if session_id.startswith("agent:main:")
@@ -251,6 +253,7 @@ class OpenApiBotSessionInitiator:
         1. GET /api/bots/{bot_id} → 拿 binding_id
         2. GET /api/v1/devices/{binding_id}/connection → 拿 target
         """
+        logger.debug("[task_discovery] → OpenApiBotSessionInitiator._resolve_engine_target(bot_id=%s, owner_id=%s)", bot_id, owner_id)
         try:
             backend = self._backend_url.rstrip("/")
             async with httpx.AsyncClient(timeout=10.0) as cli:

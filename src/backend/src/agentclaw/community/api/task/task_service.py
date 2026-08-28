@@ -20,6 +20,10 @@ class TaskServiceProtocol(Protocol):
     """系统唯一对外入口。facade 内部由 ExecutionEngine 编排核协调
     TaskGraphService/TaskPlanner/TaskDispatcher/TaskRunner。"""
 
+    async def run_template(self, template_id: str, inputs: dict, *, owner_user_id: str, owner_bot_id: str) -> TaskOpResult:
+        """Run a configured static template through the normal task execution path."""
+        ...
+
     async def execute(self, request: TaskInfoRequest) -> TaskOpResult:
         """提交执行任务:持久化 task_info(PENDING)→ initialize_graph(根 PENDING)→ 编排核 on_execute
         首帧推进。task_id 服务端生成(uuid4)。返回 TaskOpResult(含 task_id + run_id)。"""

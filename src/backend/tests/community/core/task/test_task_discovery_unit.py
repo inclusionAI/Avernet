@@ -37,9 +37,11 @@ from agentclaw.community.core.task.task_discovery.task_reader import (
     OrmTaskReader,
     seed_discovered_tasks,
 )
+from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
+    NotifyMessagesProvider,
+)
 from agentclaw.community.plugin_api.notify_sender import (
     NotifyMessage,
-    NotifySenderPlugin,
 )
 
 # ---------------------------------------------------------------------------
@@ -217,7 +219,7 @@ class TestDiscoveryService:
         initiator = AsyncMock()
         initiator.initiate_session = AsyncMock(return_value=session or _SESSION)
 
-        notify_sender = MagicMock(spec=NotifySenderPlugin)
+        notify_sender = MagicMock(spec=NotifyMessagesProvider)
         notify_sender.send = MagicMock(
             return_value="msg-id-123" if notify_ok else None
         )
@@ -261,7 +263,7 @@ class TestDiscoveryService:
         svc = DiscoveryService(
             reader=reader,
             session_initiator=AsyncMock(),
-            notify_sender=MagicMock(spec=NotifySenderPlugin),
+            notify_sender=MagicMock(spec=NotifyMessagesProvider),
             bot_service=bot_service,
         )
         result_a = DiscoveryResult(task=pending[0], session=_SESSION)
@@ -293,7 +295,7 @@ class TestDiscoveryService:
         initiator.initiate_session = AsyncMock(
             side_effect=RuntimeError("engine down")
         )
-        notify_sender = MagicMock(spec=NotifySenderPlugin)
+        notify_sender = MagicMock(spec=NotifyMessagesProvider)
 
         svc = DiscoveryService(
             reader=reader,
@@ -341,6 +343,7 @@ class TestCronRelaySessionInitiatorHelpers:
         inst._frontend_url = "http://localhost:8000"
         inst._backend_url = "http://localhost:8888"
         inst._wait_for_reply = False
+        inst._frontend_url_provider = None
         return inst
 
     def test_build_discovery_prompt(self):

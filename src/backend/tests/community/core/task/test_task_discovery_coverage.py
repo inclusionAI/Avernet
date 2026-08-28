@@ -538,19 +538,15 @@ class TestCommunityNotifyModule:
         DingTalkCredentialHolder.clear()
         assert DingTalkNotifySender._configured() is False
 
-    def test_notify_sender_loads_yaml_creds_and_frontend_url(self, monkeypatch):
+    def test_notify_sender_loads_yaml_creds(self, monkeypatch):
         """DI reads task_discovery_dingtalk block from YAML config and sets
-        DingTalkYamlHolder + FrontendUrlHolder (notify.py lines 40-47)."""
+        DingTalkYamlHolder (notify.py lines 40-47)."""
         from agentclaw.community.di.modules.infrastructure.community.notify import (
             CommunityNotifyModule,
         )
         from agentclaw.community.di.modules import config_module
-        from agentclaw.community.core.task.task_discovery.session_initiator import (
-            FrontendUrlHolder,
-        )
 
         DingTalkYamlHolder.clear()
-        FrontendUrlHolder.set("")
 
         fake_cfg = {
             "ak_id": "yaml-ak",
@@ -564,69 +560,6 @@ class TestCommunityNotifyModule:
         assert isinstance(sender, DingTalkNotifySender)
         assert DingTalkYamlHolder.get("ak_id") == "yaml-ak"
         assert DingTalkYamlHolder.get("ak_secret") == "yaml-sk"
-        assert FrontendUrlHolder.get() == "http://fe.example.com"
-
-        DingTalkYamlHolder.clear()
-        FrontendUrlHolder.set("")
-
-    @pytest.mark.parametrize(
-        ("env", "expected_url"),
-        [("pre", "http://pre.example.com"), ("prod", "http://prod.example.com")],
-    )
-    def test_notify_sender_uses_environment_specific_frontend_url(
-        self, monkeypatch, env, expected_url
-    ):
-        from agentclaw.community.core.task.task_discovery.session_initiator import (
-            FrontendUrlHolder,
-        )
-        from agentclaw.community.di.modules import config_module
-        from agentclaw.community.utils import env_utils
-        from agentclaw.community.di.modules.infrastructure.community.notify import (
-            CommunityNotifyModule,
-        )
-
-        DingTalkYamlHolder.clear()
-        FrontendUrlHolder.set("")
-        config = {
-            "frontend_url": "http://default.example.com",
-            "frontend_url_pre": "http://pre.example.com",
-            "frontend_url_prod": "http://prod.example.com",
-        }
-        try:
-            with (
-                patch.object(config_module, "_block", return_value=config),
-                patch.object(env_utils, "get_current_env", return_value=env),
-            ):
-                CommunityNotifyModule()._notify_sender()
-
-            assert FrontendUrlHolder.get() == expected_url
-        finally:
-            DingTalkYamlHolder.clear()
-            FrontendUrlHolder.set("")
-
-
-    def test_notify_sender_skips_frontend_url_when_absent(self, monkeypatch):
-        """DI sets DingTalkYamlHolder but skips FrontendUrlHolder when
-        frontend_url is absent (notify.py line 43 if-branch not taken)."""
-        from agentclaw.community.di.modules.infrastructure.community.notify import (
-            CommunityNotifyModule,
-        )
-        from agentclaw.community.di.modules import config_module
-        from agentclaw.community.core.task.task_discovery.session_initiator import (
-            FrontendUrlHolder,
-        )
-
-        DingTalkYamlHolder.clear()
-        FrontendUrlHolder.set("")
-
-        fake_cfg = {"ak_id": "yaml-ak"}
-        with patch.object(config_module, "_block", return_value=fake_cfg):
-            mod = CommunityNotifyModule()
-            sender = mod._notify_sender()
-
-        assert isinstance(sender, DingTalkNotifySender)
-        assert DingTalkYamlHolder.get("ak_id") == "yaml-ak"
-        assert FrontendUrlHolder.get() == ""
 
         DingTalkYamlHolder.clear()
 

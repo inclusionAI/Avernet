@@ -40,6 +40,15 @@ from agentclaw.community.adapters.http.task.translator import (
     merge_manager_worker_execution_graph,
     parse_manager_worker_bcn,
 )
+from agentclaw.community.core.task.task_runner.integration import (
+    callback_data_enricher as _enricher_mod,
+)
+from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
+    LocalBcsTokenProvider,
+)
+from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+    CallbackDataEnricher,
+)
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
@@ -132,7 +141,7 @@ def _install_fake_bcs(
     graph_detail: Any = None, graph_status: int = 200,
     raise_on_get: bool = False,
 ) -> None:
-    """替换 ``router.httpx.AsyncClient`` 为可控假客户端,断真网。"""
+    """替换 ``callback_data_enricher.httpx.AsyncClient`` 为可控假客户端(打桩 enricher 短连 BCS GET),断真网。"""
     rd = run_detail if run_detail is not None else {
         "run": {"status": "completed", "output": {"final": "ok"}}, "nodes": [],
     }
@@ -158,7 +167,7 @@ def _install_fake_bcs(
                 return _FakeResp(graph_status, gd)
             return _FakeResp(run_status, rd)
 
-    monkeypatch.setattr(router.httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(_enricher_mod.httpx, "AsyncClient", _Client)
 
 
 class _RecordingEngine:
@@ -302,9 +311,17 @@ def _req(body: dict | str | bytes) -> _FakeRequest:
     return _FakeRequest(raw)
 
 
-def _dispatch_call(req: _FakeRequest, svc, auth, registry):
+def _default_enricher():
+    """真 ``CallbackDataEnricher``(LocalBcsTokenProvider);``enrich_bcn`` 短连 httpx 由 ``_install_fake_bcs`` 打桩。"""
+    return CallbackDataEnricher(LocalBcsTokenProvider(base_url="http://bcs"))
+
+
+def _dispatch_call(req: _FakeRequest, svc, auth, registry, enricher=None):
     """直接调用被 ``@envelope_errors`` 包裹的端点函数(成功 → ``Envelope``,异常 → 上抛)。"""
-    return router.report_callback(request=req, svc=svc, auth=auth, registry=registry)
+    return router.report_callback(
+        request=req, svc=svc, auth=auth, registry=registry,
+        enricher=enricher or _default_enricher(),
+    )
 
 
 def _run(coro):
@@ -521,8 +538,8 @@ class TestBCNStateMachine:
                                      InMemoryCallbackCorrelationRegistry()))
         _ok_envelope(result)
         assert engine.reports == []  # run 仍 running,不收敛
-        assert len(repo.calls) == 1
-        rec = repo.calls[0]
+        assert len(repo.calls) == 2   # 两步落库:原始 + enrich 后更新
+        rec = repo.get("run-1", "")
         assert rec.invoker == "bcn"
         assert rec.run_id == "run-1" and rec.node_id == ""  # req4:node_id 恒空(忽略事件 data.node_id)
         assert rec.main_session_id == "s-1"
@@ -635,7 +652,7 @@ class TestBCNStateMachine:
         _run(_dispatch_call(_req(ev), svc, NoopCallbackAuthenticator(),
                             InMemoryCallbackCorrelationRegistry()))
         assert engine.reports == []
-        rec = repo.calls[0]
+        rec = repo.get("run-1", "")
         assert json.loads(rec.orig_callback_data) == ev  # 非 200 → 用原始事件
         assert rec.extend_props is None                   # run 明细非 200 → 无 extend_props
         eg = rec.execution_graph                          # fetch 兜底 → 极简 graph_to_dict
@@ -648,7 +665,7 @@ class TestBCNStateMachine:
         svc, _engine, repo, _ri = _make_svc()
         _run(_dispatch_call(_req(ev), svc, NoopCallbackAuthenticator(),
                             InMemoryCallbackCorrelationRegistry()))
-        rec = repo.calls[0]
+        rec = repo.get("run-1", "")
         assert rec.run_id == "run-1" and rec.node_id == ""  # 无 node_id(req4 恒空)
         assert rec.status == "RUNNING"                       # req2:run.started → RUNNING
         assert rec.extend_props == {"run": {"status": "running"}, "nodes": []}  # req3 run 明细

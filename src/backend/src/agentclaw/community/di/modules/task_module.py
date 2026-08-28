@@ -49,6 +49,13 @@ from agentclaw.community.core.task.task_center.recovery_lifecycle import (
 )
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
+    BcsTokenProvider,
+    LocalBcsTokenProvider,
+)
+from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+    CallbackDataEnricher,
+)
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
     InMemoryCallbackCorrelationRegistry,
@@ -83,6 +90,21 @@ class TaskModule(Module):
         binder.bind(
             NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton
         )
+
+    @singleton
+    @provider
+    @inject
+    def callback_data_enricher(self, injector: Injector) -> CallbackDataEnricher:
+        """回投数据 enricher(BCN 查 BCS run 详情 + ClawMind 构图);base_url 取自 BcsTokenProvider。
+
+        corp overlay 经 DI 绑定 BcsTokenProvider(``_RealToken``);community/singlebox 未绑 →
+        ``LocalBcsTokenProvider.from_env()``(``SINGLEBOX_BCS_URL``)。与 BcsClientPort 同款注入。
+        """
+        try:
+            token = injector.get(BcsTokenProvider)
+        except Exception:  # noqa: BLE001 community/singlebox 未绑 BcsTokenProvider → singlebox fallback
+            token = LocalBcsTokenProvider.from_env()
+        return CallbackDataEnricher(token)
 
     @singleton
     @provider

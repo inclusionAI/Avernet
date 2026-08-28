@@ -1,0 +1,53 @@
+template_id: okr-implementation
+entry_bot_id: 20260828_8azkbtgs
+task_type: static_plan
+input_schema:
+  okr:
+    type: string
+    required: true
+nodes:
+  - id: risk_assessment
+    name: 风险评估群
+    type: collaboration
+    depends_on: []
+    collaboration:
+      bot_ids: [20260828_7q4cbeze, 20260828_jbadndne]
+      mode: chat
+      completion: report
+    input:
+      okr: $.input.okr
+    output:
+      risk_result: $.report.result
+  - id: marketing_strategy
+    name: 大促营销策略分析
+    type: bot
+    bot_id: 20260828_whd6nx7x
+    depends_on: []
+    input:
+      okr: $.input.okr
+    output:
+      strategy_result: $.result
+  - id: strategy_approval
+    name: 策略审核
+    type: bot
+    bot_id: 20260828_9rgd70li
+    depends_on: [risk_assessment, marketing_strategy]
+    join:
+      type: all_predecessors_done
+    input:
+      risk_result: $.risk_assessment.output.risk_result
+      strategy_result: $.marketing_strategy.output.strategy_result
+    output:
+      approval_result: $.result
+      approved: $.result.approved
+  - id: implementation
+    name: 实施
+    type: bot
+    bot_id: 20260828_k9c2slro
+    depends_on: [strategy_approval]
+    enabled_when:
+      expression: $.strategy_approval.output.approved == true
+    input:
+      approval_result: $.strategy_approval.output.approval_result
+    output:
+      implementation_result: $.result

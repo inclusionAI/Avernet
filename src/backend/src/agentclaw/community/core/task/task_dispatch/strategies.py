@@ -112,11 +112,14 @@ class DirectDispatchStrategy:
 
     async def matches(self, node: TaskNode, graph: TaskExecutionGraph) -> bool:
         cfg = graph.extend_props.get("execution_config", {}) or {}
-        return cfg.get("bot") is not None
+        return cfg.get("bot") is not None or bool(node.run_info.extend_props.get("static_bot_id")) or bool(node.run_info.extend_props.get("pending_group_formation"))
 
     async def apply(self, node: TaskNode, graph: TaskExecutionGraph) -> SearchResult:
         cfg = graph.extend_props.get("execution_config", {}) or {}
-        return SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id=cfg.get("bot"))
+        static_group = node.run_info.extend_props.get("pending_group_formation")
+        if static_group is not None:
+            return SearchResult(outcome=SearchOutcome.HIT_MULTI_BOTS, group_formation=static_group)
+        return SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id=node.run_info.extend_props.get("static_bot_id") or cfg.get("bot"))
 
 
 class SearchBasedDispatchStrategy:
