@@ -3278,7 +3278,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
                 );
             } else {
                 predicates.push(
-                    "b.created_by IS NULL OR INSTR(b.bot_uuid, ':') = 0 OR SUBSTR(b.bot_uuid, INSTR(b.bot_uuid, ':') + 1) != b.created_by"
+                    "(b.created_by IS NULL OR INSTR(b.bot_uuid, ':') = 0 OR SUBSTR(b.bot_uuid, INSTR(b.bot_uuid, ':') + 1) != b.created_by)"
                         .to_string(),
                 );
             }

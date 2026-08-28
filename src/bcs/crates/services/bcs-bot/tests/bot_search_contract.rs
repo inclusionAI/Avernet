@@ -1,15 +1,19 @@
 //! Contract tests for `BotQueryService::search_bots` (the `/bots/search`
 //! data source), focused on the TC (TeamClaw backend) bot filter.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
+use async_trait::async_trait;
 use bcs_bot::{Bot, BotControlPlaneCore, BotCore};
 use bcs_config::resolve_env_str;
-use bcs_bot_store::{PersistentBotRepo, MemoryProviderStore};
+use bcs_domain::edge_permission::EdgeGrant;
+use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore, PersistentBotRepo};
 use bcs_cache_local::InMemoryCachePlugin;
 use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement, DbValue as Value};
 use bcs_db_local::LocalSqliteDbPlugin;
-use bcs_service_api::{BotCapabilities, BotControlPlaneCoreService, BotQueryService, BotRegistryCoreService, BotRepoPort, SearchBotsCommand};
+use bcs_service_api::{BotCapabilities, BotControlPlaneCoreService, BotQueryService, BotRegistryCoreService, BotRepoPort, BotSearchFriendshipFilter, BotUseCaseError, SearchBotsCommand, ServiceResult};
+use bcs_service_api::FriendCoreService;
+use bcs_service_api::port::repo::EdgeGrantRepoPort;
 use tempfile::TempDir;
 
 fn capabilities(name: &str, visibility: &str) -> BotCapabilities {
@@ -100,6 +104,111 @@ async fn insert_bot_row(
     ))
     .await
     .expect("insert bot row");
+}
+
+
+#[derive(Default)]
+struct RecordingEdgeGrantRepo {
+    friends: HashMap<String, Vec<String>>,
+    calls: tokio::sync::Mutex<Vec<(String, String)>>,
+}
+
+#[async_trait]
+impl EdgeGrantRepoPort for RecordingEdgeGrantRepo {
+    async fn list_active_grants(&self, _: &str, _: &str, _: &str) -> Vec<EdgeGrant> {
+        Vec::new()
+    }
+
+    async fn is_authorized(&self, _: &str, _: &str, _: &str) -> bool {
+        false
+    }
+
+    async fn has_friend_edge(&self, _: &str, _: &str, _: &str) -> bool {
+        false
+    }
+
+    async fn list_friends(&self, actor: &str, env: &str) -> Vec<String> {
+        self.calls
+            .lock()
+            .await
+            .push((actor.to_string(), env.to_string()));
+        self.friends.get(actor).cloned().unwrap_or_default()
+    }
+
+    async fn insert_grant(&self, _: EdgeGrant) -> ServiceResult<u64> {
+        Ok(1)
+    }
+
+    async fn revoke_grant(&self, _: u64, _: &str) -> ServiceResult<()> {
+        Ok(())
+    }
+
+    async fn get_default_profile_id(&self, _: &str, _: &str) -> Option<u64> {
+        None
+    }
+}
+
+#[derive(Default)]
+struct RecordingFriendCoreService {
+    friends: Vec<String>,
+    calls: tokio::sync::Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl FriendCoreService for RecordingFriendCoreService {
+    async fn list_friends(&self, bot_id: &str) -> Vec<String> {
+        self.calls.lock().await.push(bot_id.to_string());
+        self.friends.clone()
+    }
+
+    async fn are_friends(&self, _: &str, _: &str) -> bool {
+        false
+    }
+
+    async fn are_all_friends(&self, _: &str, _: &[String]) -> ServiceResult<()> {
+        Ok(())
+    }
+
+    async fn add_friendship(&self, _: &str, _: &str) -> ServiceResult<()> {
+        Ok(())
+    }
+
+    async fn remove_all_friendships(&self, _: &str) -> ServiceResult<usize> {
+        Ok(0)
+    }
+}
+
+async fn seed_search_bot<R>(
+    repo: &Arc<R>,
+    bot_id: &str,
+    name: &str,
+    visibility: &str,
+    created_by: Option<&str>,
+    active: bool,
+) where
+    R: BotRegistryCoreService + ?Sized,
+{
+    let caps = capabilities(name, visibility);
+    match created_by {
+        Some(owner) => repo
+            .register_with_owner_and_token(
+                bot_id.to_string(),
+                caps,
+                owner,
+                &format!("{bot_id}-token"),
+            )
+            .await
+            .expect("register bot with owner"),
+        None => repo
+            .register(bot_id.to_string(), caps)
+            .await
+            .expect("register bot"),
+    }
+    if active {
+        repo.register_streaming_connection(bot_id.to_string())
+            .await
+            .expect("register streaming connection");
+    }
 }
 
 #[tokio::test]
@@ -215,3 +324,125 @@ async fn search_bots_excludes_soft_deleted_persistent_rows_even_if_memory_has_bo
     assert!(result.items.is_empty());
     assert_eq!(result.total, 0);
 }
+
+#[tokio::test]
+async fn search_bots_uses_edge_grants_for_viewer_friends_and_dynamic_status() {
+    let data_dir = tempfile::tempdir().expect("temp data dir");
+    let repo = Arc::new(MemoryBotRepo::with_base_dir(data_dir.path().to_path_buf()));
+    let core = Arc::new(BotCore::with_repo(repo.clone()));
+    let providers = Arc::new(MemoryProviderStore::new());
+    let control_plane = Arc::new(BotControlPlaneCore::new(repo.clone(), providers.clone(), providers));
+    let friend = Arc::new(RecordingFriendCoreService {
+        friends: vec!["legacy-friend-bot".to_string()],
+        ..Default::default()
+    });
+    let mut edge_grants = RecordingEdgeGrantRepo::default();
+    edge_grants
+        .friends
+        .insert("viewer-bot".to_string(), vec!["friend-bot".to_string()]);
+    let edge_grants = Arc::new(edge_grants);
+    let bot = Bot::new_with_friend(
+        core.clone() as Arc<dyn BotRegistryCoreService>,
+        friend.clone() as Arc<dyn FriendCoreService>,
+    )
+    .with_control_plane(control_plane as Arc<dyn BotControlPlaneCoreService>)
+    .with_edge_grants(edge_grants.clone() as Arc<dyn EdgeGrantRepoPort>);
+
+    seed_search_bot(&core, "viewer-bot", "Viewer", "public", None, false).await;
+    seed_search_bot(&core, "friend-bot", "Friend", "protected", None, true).await;
+    seed_search_bot(&core, "requester-bot", "Requester", "public", None, false).await;
+    seed_search_bot(&core, "other-bot", "Other", "public", None, false).await;
+
+    let result = bot
+        .search_bots(SearchBotsCommand {
+            requester_actor_id: Some("requester-bot".to_string()),
+            viewer_actor_id: Some("viewer-bot".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("search with edge grants");
+
+    let ids = result.items.iter().map(|item| item.bot_uuid.as_str()).collect::<Vec<_>>();
+    assert_eq!(result.total, 3);
+    assert!(ids.contains(&"friend-bot"));
+    assert!(ids.contains(&"other-bot"));
+    assert!(ids.contains(&"viewer-bot"));
+    assert!(!ids.contains(&"requester-bot"));
+
+    let friend_item = result
+        .items
+        .iter()
+        .find(|item| item.bot_uuid == "friend-bot")
+        .expect("friend bot in search result");
+    assert_eq!(friend_item.dynamic_status.status, "active");
+    assert_eq!(friend_item.is_friend, Some(true));
+
+    let other_item = result
+        .items
+        .iter()
+        .find(|item| item.bot_uuid == "other-bot")
+        .expect("other bot in search result");
+    assert_eq!(other_item.dynamic_status.status, "offline");
+    assert_eq!(other_item.is_friend, Some(false));
+
+    let edge_calls = edge_grants.calls.lock().await.clone();
+    assert_eq!(edge_calls, vec![("viewer-bot".to_string(), resolve_env_str())]);
+    assert!(friend.calls.lock().await.is_empty(), "legacy friend service must not be used when edge_grants are wired");
+}
+
+#[tokio::test]
+async fn search_bots_falls_back_to_legacy_friend_service_when_edge_grants_are_missing() {
+    let data_dir = tempfile::tempdir().expect("temp data dir");
+    let repo = Arc::new(MemoryBotRepo::with_base_dir(data_dir.path().to_path_buf()));
+    let core = Arc::new(BotCore::with_repo(repo.clone()));
+    let providers = Arc::new(MemoryProviderStore::new());
+    let control_plane = Arc::new(BotControlPlaneCore::new(repo.clone(), providers.clone(), providers));
+    let friend = Arc::new(RecordingFriendCoreService {
+        friends: vec!["legacy-friend-bot".to_string()],
+        ..Default::default()
+    });
+    let bot = Bot::new_with_friend(
+        core.clone() as Arc<dyn BotRegistryCoreService>,
+        friend.clone() as Arc<dyn FriendCoreService>,
+    )
+    .with_control_plane(control_plane as Arc<dyn BotControlPlaneCoreService>);
+
+    seed_search_bot(&core, "viewer-bot", "Viewer", "public", None, false).await;
+    seed_search_bot(&core, "legacy-friend-bot", "Legacy Friend", "protected", None, false).await;
+    seed_search_bot(&core, "other-bot", "Other", "public", None, false).await;
+
+    let result = bot
+        .search_bots(SearchBotsCommand {
+            viewer_actor_id: Some("viewer-bot".to_string()),
+            friendship: Some(BotSearchFriendshipFilter::Friends),
+            ..Default::default()
+        })
+        .await
+        .expect("search with legacy friend service");
+
+    let ids = result.items.iter().map(|item| item.bot_uuid.as_str()).collect::<Vec<_>>();
+    assert_eq!(result.total, 1);
+    assert_eq!(ids, vec!["legacy-friend-bot"]);
+    assert_eq!(result.items[0].is_friend, Some(true));
+    assert_eq!(friend.calls.lock().await.clone(), vec!["viewer-bot".to_string()]);
+}
+
+#[tokio::test]
+async fn search_bots_rejects_friendship_filter_without_viewer_actor() {
+    let (bot, _, _data_dir) = build_bot().await;
+
+    let result = bot
+        .search_bots(SearchBotsCommand {
+            friendship: Some(BotSearchFriendshipFilter::Friends),
+            ..Default::default()
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(BotUseCaseError::Service(
+            bcs_service_api::ServiceError::InvalidOperation { message, .. }
+        )) if message == "friendship filter requires viewer_actor_id"
+    ));
+}
+
