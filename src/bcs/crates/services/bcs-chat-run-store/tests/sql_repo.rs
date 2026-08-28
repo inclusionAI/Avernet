@@ -12,7 +12,7 @@ use bcs_service_api::ChatResponseMode;
 fn repo() -> SqlChatRunRepo {
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
     let cache = Arc::new(InMemoryCachePlugin::new());
-    SqlChatRunRepo::new(db, DbSqlFlavor::Sqlite, cache, "bcs:".to_string(), 120_000)
+    SqlChatRunRepo::new(db, DbSqlFlavor::Sqlite, cache, "bcs:".to_string(), 120_000, "test".to_string())
 }
 
 fn record(run_id: &str, version: u64) -> ChatRunRecord {
@@ -169,7 +169,7 @@ fn repo_mysql() -> SqlChatRunRepo {
     // never actually queried — it just satisfies the constructor.
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
     let cache = Arc::new(InMemoryCachePlugin::new());
-    SqlChatRunRepo::new(db, DbSqlFlavor::Mysql, cache, "bcs:".to_string(), 120_000)
+    SqlChatRunRepo::new(db, DbSqlFlavor::Mysql, cache, "bcs:".to_string(), 120_000, "test".to_string())
 }
 
 #[tokio::test]
@@ -208,4 +208,45 @@ async fn mysql_flavor_deletes_are_noops_delegated_to_platform() {
     let repo = repo_mysql();
     assert!(repo.delete_expired_terminal(100, 50).await.unwrap().is_empty());
     assert!(repo.drop_detached_expired(100, 50).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn env_scoping_isolates_runs_across_environments() {
+    // Two repos over the SAME db/cache but different `env` must not see each
+    // other's runs (shared-DB multi-env isolation).
+    let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    let env_a = SqlChatRunRepo::new(
+        db.clone(),
+        DbSqlFlavor::Sqlite,
+        cache.clone(),
+        "bcs:".to_string(),
+        120_000,
+        "a".to_string(),
+    );
+    let env_b = SqlChatRunRepo::new(
+        db,
+        DbSqlFlavor::Sqlite,
+        cache,
+        "bcs:".to_string(),
+        120_000,
+        "b".to_string(),
+    );
+
+    let mut overdue = record("overdue", 1);
+    overdue.expires_at_ms = 5;
+    env_a.create(overdue).await.unwrap();
+
+    // get / list_active / metric_counts are env-scoped.
+    assert!(env_a.get("overdue").await.unwrap().is_some());
+    assert!(env_b.get("overdue").await.unwrap().is_none());
+    let active_a = env_a.list_active(10).await.unwrap();
+    let active_b = env_b.list_active(10).await.unwrap();
+    assert_eq!(active_a.iter().filter(|r| r.run_id == "overdue").count(), 1);
+    assert!(active_b.is_empty());
+    let total = |counts: Vec<bcs_service_api::ChatRunMetricCount>| {
+        counts.into_iter().map(|c| c.count).sum::<u64>()
+    };
+    assert!(total(env_b.metric_counts().await.unwrap()) == 0);
+    assert!(total(env_a.metric_counts().await.unwrap()) >= 1);
 }

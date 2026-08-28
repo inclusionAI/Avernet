@@ -41,6 +41,11 @@ pub struct SqlChatRunRepo {
     /// survive, so the timeout sweep (`force_fail`, which runs only after the
     /// deadline) can still merge the accumulated text. See spec §11 / C8.
     overlay_retention_ms: u64,
+    /// BCS environment the rows belong to. Every query carries `AND env = ?`
+    /// so a shared MySQL/Redis across environments cannot read, cancel, or
+    /// sweep another environment's runs. Mirrors the convention in
+    /// `bcs-session-store` / `bcs-bot-store`.
+    env: String,
     schema_ready: AtomicBool,
 }
 
@@ -59,6 +64,7 @@ impl SqlChatRunRepo {
         cache: Arc<dyn CachePlugin>,
         key_prefix: String,
         overlay_retention_ms: u64,
+        env: String,
     ) -> Self {
         Self {
             db,
@@ -66,6 +72,7 @@ impl SqlChatRunRepo {
             cache,
             key_prefix,
             overlay_retention_ms,
+            env,
             schema_ready: AtomicBool::new(false),
         }
     }
@@ -79,6 +86,7 @@ impl SqlChatRunRepo {
             return Ok(());
         }
         let create = "CREATE TABLE IF NOT EXISTS bcs_chat_runs (\
+            env TEXT NOT NULL,\
             run_id TEXT NOT NULL,\
             bot_uuid TEXT NOT NULL,\
             from_bot_id TEXT NOT NULL,\
@@ -96,16 +104,16 @@ impl SqlChatRunRepo {
             response_mode TEXT NOT NULL,\
             completion_policy TEXT NOT NULL,\
             delivery_ack_at_ms INTEGER,\
-            PRIMARY KEY (run_id))";
+            PRIMARY KEY (env, run_id))";
         self.db
             .execute(DbStatement::new(create))
             .await
             .map_err(backend)?;
         if self.flavor == DbSqlFlavor::Sqlite {
             for stmt in [
-                "CREATE INDEX IF NOT EXISTS idx_chat_runs_expires ON bcs_chat_runs(state, expires_at_ms)",
-                "CREATE INDEX IF NOT EXISTS idx_chat_runs_completed ON bcs_chat_runs(state, completed_at_ms)",
-                "CREATE INDEX IF NOT EXISTS idx_chat_runs_from_bot ON bcs_chat_runs(from_bot_id)",
+                "CREATE INDEX IF NOT EXISTS idx_chat_runs_env_expires ON bcs_chat_runs(env, state, expires_at_ms)",
+                "CREATE INDEX IF NOT EXISTS idx_chat_runs_env_completed ON bcs_chat_runs(env, state, completed_at_ms)",
+                "CREATE INDEX IF NOT EXISTS idx_chat_runs_env_from_bot ON bcs_chat_runs(env, from_bot_id)",
             ] {
                 let _ = self.db.execute(DbStatement::new(stmt)).await;
             }
@@ -121,8 +129,8 @@ impl SqlChatRunRepo {
                 "SELECT run_id, bot_uuid, from_bot_id, session_key, state, accumulated_content, \
                  error_message, created_at_ms, updated_at_ms, completed_at_ms, expires_at_ms, \
                  version, content_truncated, client, response_mode, completion_policy, \
-                 delivery_ack_at_ms FROM bcs_chat_runs WHERE run_id = ?",
-                vec![DbValue::from(run_id)],
+                 delivery_ack_at_ms FROM bcs_chat_runs WHERE run_id = ? AND env = ?",
+                vec![DbValue::from(run_id), DbValue::from(self.env.as_str())],
             ))
             .await
             .map_err(backend)?;
@@ -305,14 +313,15 @@ fn row_to_record(row: &bcs_db_api::DbRow) -> Result<ChatRunRecord, ChatRunRepoEr
 async fn classify_cas_failure(
     db: &dyn DbPlugin,
     run_id: &str,
+    env: &str,
 ) -> Result<CasOutcome, ChatRunRepoError> {
     let rows = db
         .query(DbStatement::with_params(
             "SELECT run_id, bot_uuid, from_bot_id, session_key, state, accumulated_content, \
              error_message, created_at_ms, updated_at_ms, completed_at_ms, expires_at_ms, \
              version, content_truncated, client, response_mode, completion_policy, \
-             delivery_ack_at_ms FROM bcs_chat_runs WHERE run_id = ?",
-            vec![DbValue::from(run_id.to_string())],
+             delivery_ack_at_ms FROM bcs_chat_runs WHERE run_id = ? AND env = ?",
+            vec![DbValue::from(run_id.to_string()), DbValue::from(env.to_string())],
         ))
         .await
         .map_err(backend)?;
@@ -337,11 +346,11 @@ const SELECT_COLS: &str = "run_id, bot_uuid, from_bot_id, session_key, state, ac
      error_message, created_at_ms, updated_at_ms, completed_at_ms, expires_at_ms, \
      version, content_truncated, client, response_mode, completion_policy, delivery_ack_at_ms";
 
-async fn read_full(db: &dyn DbPlugin, run_id: &str) -> Result<Option<ChatRunRecord>, ChatRunRepoError> {
+async fn read_full(db: &dyn DbPlugin, run_id: &str, env: &str) -> Result<Option<ChatRunRecord>, ChatRunRepoError> {
     let rows = db
         .query(DbStatement::with_params(
-            &format!("SELECT {SELECT_COLS} FROM bcs_chat_runs WHERE run_id = ?"),
-            vec![DbValue::from(run_id.to_string())],
+            &format!("SELECT {SELECT_COLS} FROM bcs_chat_runs WHERE run_id = ? AND env = ?"),
+            vec![DbValue::from(run_id.to_string()), DbValue::from(env.to_string())],
         ))
         .await
         .map_err(backend)?;
@@ -357,11 +366,12 @@ impl ChatRunRepoPort for SqlChatRunRepo {
     async fn create(&self, record: ChatRunRecord) -> Result<(), ChatRunRepoError> {
         self.ensure_schema().await?;
         let stmt = DbStatement::with_params(
-            "INSERT INTO bcs_chat_runs (run_id, bot_uuid, from_bot_id, session_key, state, \
+            "INSERT INTO bcs_chat_runs (env, run_id, bot_uuid, from_bot_id, session_key, state, \
              accumulated_content, error_message, created_at_ms, updated_at_ms, completed_at_ms, \
              expires_at_ms, version, content_truncated, client, response_mode, completion_policy, \
-             delivery_ack_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             delivery_ack_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             vec![
+                DbValue::from(self.env.clone()),
                 DbValue::from(record.run_id.clone()),
                 DbValue::from(record.bot_uuid.clone()),
                 DbValue::from(record.from_bot_id.clone()),
@@ -422,18 +432,19 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         let stmt = DbStatement::with_params(
             &format!(
                 "UPDATE bcs_chat_runs SET state = ?, updated_at_ms = ?, delivery_ack_at_ms = ?, \
-                 version = version + 1 WHERE run_id = ? AND state NOT IN ({TERMINAL_STATES})"
+                 version = version + 1 WHERE run_id = ? AND state NOT IN ({TERMINAL_STATES}) AND env = ?"
             ),
             vec![
                 DbValue::from(state_str(new.state)),
                 DbValue::from(now as i64),
                 new.delivery_ack_at_ms.map(|v| DbValue::from(v as i64)).unwrap_or(DbValue::Null),
                 DbValue::from(run_id.to_string()),
+                DbValue::from(self.env.as_str()),
             ],
         );
         let result = self.db.execute(stmt).await.map_err(backend)?;
         if result.affected_rows > 0 {
-            let updated = read_full(self.db.as_ref(), run_id).await?.unwrap_or(new.clone());
+            let updated = read_full(self.db.as_ref(), run_id, &self.env).await?.unwrap_or(new.clone());
             self.write_overlay(
                 run_id,
                 &StreamingOverlay {
@@ -447,7 +458,7 @@ impl ChatRunRepoPort for SqlChatRunRepo {
             .await;
             Ok(CasOutcome::Applied(updated))
         } else {
-            classify_cas_failure(self.db.as_ref(), run_id).await
+            classify_cas_failure(self.db.as_ref(), run_id, &self.env).await
         }
     }
 
@@ -463,7 +474,7 @@ impl ChatRunRepoPort for SqlChatRunRepo {
             &format!(
                 "UPDATE bcs_chat_runs SET state = ?, accumulated_content = ?, error_message = ?, \
                  updated_at_ms = ?, completed_at_ms = ?, content_truncated = ?, \
-                 version = version + 1 WHERE run_id = ? AND state NOT IN ({TERMINAL_STATES})"
+                 version = version + 1 WHERE run_id = ? AND state NOT IN ({TERMINAL_STATES}) AND env = ?"
             ),
             vec![
                 DbValue::from(state_str(new.state)),
@@ -473,15 +484,16 @@ impl ChatRunRepoPort for SqlChatRunRepo {
                 DbValue::from(completed_at as i64),
                 DbValue::from(new.content_truncated),
                 DbValue::from(run_id.to_string()),
+                DbValue::from(self.env.as_str()),
             ],
         );
         let result = self.db.execute(stmt).await.map_err(backend)?;
         if result.affected_rows > 0 {
             self.delete_overlay(run_id).await;
-            let updated = read_full(self.db.as_ref(), run_id).await?.unwrap_or(new);
+            let updated = read_full(self.db.as_ref(), run_id, &self.env).await?.unwrap_or(new);
             Ok(CasOutcome::Applied(updated))
         } else {
-            classify_cas_failure(self.db.as_ref(), run_id).await
+            classify_cas_failure(self.db.as_ref(), run_id, &self.env).await
         }
     }
 
@@ -539,10 +551,11 @@ impl ChatRunRepoPort for SqlChatRunRepo {
                 &format!(
                     "SELECT {SELECT_COLS} FROM bcs_chat_runs \
                      WHERE state NOT IN ({TERMINAL_STATES}) AND expires_at_ms < ? \
+                     AND env = ? \
                      AND NOT (completion_policy = 'detach_delivery_ack' \
                               AND delivery_ack_at_ms IS NOT NULL)"
                 ),
-                vec![DbValue::from(now_ms as i64)],
+                vec![DbValue::from(now_ms as i64), DbValue::from(self.env.as_str())],
             ))
             .await
             .map_err(backend)?;
@@ -574,9 +587,10 @@ impl ChatRunRepoPort for SqlChatRunRepo {
                      WHERE state = 'running' \
                        AND completion_policy = 'detach_delivery_ack' \
                        AND delivery_ack_at_ms IS NOT NULL \
-                       AND delivery_ack_at_ms < ?"
+                       AND delivery_ack_at_ms < ? \
+                       AND env = ?"
                 ),
-                vec![DbValue::from(cutoff as i64)],
+                vec![DbValue::from(cutoff as i64), DbValue::from(self.env.as_str())],
             ))
             .await
             .map_err(backend)?;
@@ -590,9 +604,10 @@ impl ChatRunRepoPort for SqlChatRunRepo {
                         "DELETE FROM bcs_chat_runs \
                          WHERE run_id = ? AND state = 'running' \
                            AND completion_policy = 'detach_delivery_ack' \
-                           AND delivery_ack_at_ms < ?"
+                           AND delivery_ack_at_ms < ? \
+                           AND env = ?"
                     ),
-                    vec![DbValue::from(record.run_id.clone()), DbValue::from(cutoff as i64)],
+                    vec![DbValue::from(record.run_id.clone()), DbValue::from(cutoff as i64), DbValue::from(self.env.as_str())],
                 ))
                 .await;
             self.delete_overlay(&record.run_id).await;
@@ -620,9 +635,9 @@ impl ChatRunRepoPort for SqlChatRunRepo {
             .query(DbStatement::with_params(
                 &format!(
                     "SELECT {SELECT_COLS} FROM bcs_chat_runs \
-                     WHERE state IN ({TERMINAL_STATES}) AND completed_at_ms < ?"
+                     WHERE state IN ({TERMINAL_STATES}) AND completed_at_ms < ? AND env = ?"
                 ),
-                vec![DbValue::from(cutoff as i64)],
+                vec![DbValue::from(cutoff as i64), DbValue::from(self.env.as_str())],
             ))
             .await
             .map_err(backend)?;
@@ -636,9 +651,10 @@ impl ChatRunRepoPort for SqlChatRunRepo {
                 .execute(DbStatement::with_params(
                     &format!(
                         "DELETE FROM bcs_chat_runs \
-                         WHERE run_id = ? AND state IN ({TERMINAL_STATES}) AND completed_at_ms < ?"
+                         WHERE run_id = ? AND state IN ({TERMINAL_STATES}) AND completed_at_ms < ? \
+                         AND env = ?"
                     ),
-                    vec![DbValue::from(record.run_id.clone()), DbValue::from(cutoff as i64)],
+                    vec![DbValue::from(record.run_id.clone()), DbValue::from(cutoff as i64), DbValue::from(self.env.as_str())],
                 ))
                 .await;
             self.delete_overlay(&record.run_id).await;
@@ -653,10 +669,13 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         // long-retention terminal rows in MySQL mode.
         let rows = self
             .db
-            .query(DbStatement::new(&format!(
-                "SELECT state, client, COUNT(*) AS c FROM bcs_chat_runs \
-                 WHERE state NOT IN ({TERMINAL_STATES}) GROUP BY state, client"
-            )))
+            .query(DbStatement::with_params(
+                &format!(
+                    "SELECT state, client, COUNT(*) AS c FROM bcs_chat_runs \
+                     WHERE state NOT IN ({TERMINAL_STATES}) AND env = ? GROUP BY state, client"
+                ),
+                vec![DbValue::from(self.env.as_str())],
+            ))
             .await
             .map_err(backend)?;
         let mut counts: Vec<ChatRunMetricCount> = Vec::new();

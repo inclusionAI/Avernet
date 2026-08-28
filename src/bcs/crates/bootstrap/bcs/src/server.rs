@@ -4279,6 +4279,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                         cache_plugin.clone(),
                         cache_key_prefix.clone(),
                         config.async_chat_run_retention_ms,
+                        crate::env::resolve_env(),
                     ));
                 Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_repo(chat_run_repo))
             } else {
