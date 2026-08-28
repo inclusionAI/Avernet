@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any, Protocol
@@ -22,6 +23,23 @@ from agentclaw.community.core.task.domain.prompt_constants import (
 )
 
 logger = logging.getLogger("task.dispatcher")
+
+# Temporary pre-authorized Bot pool for validating the multi-Bot dispatch path.
+# The rule mode intentionally samples from this fixed pool instead of using the
+# discovered candidates as assignees, because discovered Bots may not have the
+# task-claim switch enabled in the target environment.
+_RULE_TEST_BOT_POOL: tuple[str, ...] = (
+    "20260825_bohtfhe6:35983",
+    "default:35983",
+    "20260824_nwlj25w6:35983",
+    "default:146836",
+    "20260825_p8e63hms:35983",
+    "20260823_1c4am0ei:146836",
+    "20260825_aeqp3xky:440718",
+    "20260826_q3tbj2da:146836",
+    "20260826_fmszf5aq:146836",
+    "20260826_20rphqo0:146836",
+)
 
 
 class SearchOutcome(StrEnum):
@@ -512,26 +530,29 @@ async def _prefetch_candidates(
 
 
 def _rule_based_search_result(candidates: list[dict]) -> SearchResult:
-    """Deterministic temporary dispatch rule used unless search skill is enabled.
+    """Build a deterministic-shape result with random test Bot identities.
 
-    Zero candidates is MISS. One or two candidates use the first candidate as
-    the single assignee. More than two candidates form a manager-worker group,
-    preserving candidate order so the first candidate is the manager.
+    The discovered candidate count controls the dispatch shape, while the
+    final assignees come from the temporary pre-authorized test pool. One or
+    two candidates produce one single-Bot assignee. More than two candidates
+    produce a manager-worker group with the same number of sampled Bots.
     """
-    valid = [c for c in candidates if c.get("bot_id")]
-    if not valid:
+    candidate_count = sum(1 for candidate in candidates if candidate.get("bot_id"))
+    if candidate_count == 0:
         return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_candidates")
-    if len(valid) <= 2:
-        candidate = valid[0]
+
+    dispatch_count = 1 if candidate_count <= 2 else candidate_count
+    dispatch_count = min(dispatch_count, len(_RULE_TEST_BOT_POOL))
+    selected = random.sample(_RULE_TEST_BOT_POOL, dispatch_count)
+    if dispatch_count == 1:
+        bot_id = selected[0]
+        _, _, owner_id = bot_id.partition(":")
         return SearchResult(
             outcome=SearchOutcome.HIT_SINGLE,
-            bot_id=candidate.get("bot_id"),
-            bot_name=candidate.get("bot_name"),
-            owner_id=candidate.get("owner_id"),
-            owner_name=candidate.get("owner_name"),
+            bot_id=bot_id,
+            owner_id=owner_id or None,
         )
 
-    bot_ids = [str(c["bot_id"]) for c in valid]
     members_info = [
         {
             "bot_id": bot_id,
@@ -542,12 +563,12 @@ def _rule_based_search_result(candidates: list[dict]) -> SearchResult:
                 else "执行当前任务并向 manager 汇报产出"
             ),
         }
-        for index, bot_id in enumerate(bot_ids)
+        for index, bot_id in enumerate(selected)
     ]
     return SearchResult(
         outcome=SearchOutcome.HIT_MULTI_BOTS,
         group_formation=GroupFormation(
-            bot_ids=bot_ids,
+            bot_ids=selected,
             collab_mode="manager_worker",
             group_name="任务主从协作群",
             members_info=members_info,

@@ -184,7 +184,7 @@ class TestSearchBasedDispatchStrategy:
         assert strategy._bot.calls == []
 
 
-def test_search_strategy_default_rule_uses_first_candidate_without_owner_call():
+def test_search_strategy_default_rule_samples_one_test_bot_for_one_or_two_candidates(monkeypatch):
     class _Discover:
         def search_by_keyword(self, **kwargs):
             return {"items": [{"bot_id": "first"}, {"bot_id": "second"}]}
@@ -206,14 +206,20 @@ def test_search_strategy_default_rule_uses_first_candidate_without_owner_call():
         extend_props={"owner_bot_id": "owner"},
     )
     bot = _Bot()
+    sampled = ["default:146836"]
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.sample",
+        lambda population, count: sampled[:count],
+    )
     result = _run(SearchBasedDispatchStrategy(bot, _Discover()).apply(_node("c1"), graph))
 
     assert result.outcome == SearchOutcome.HIT_SINGLE
-    assert result.bot_id == "first"
+    assert result.bot_id == "default:146836"
+    assert result.owner_id == "146836"
     assert bot.calls == []
 
 
-def test_search_strategy_default_rule_forms_manager_worker_for_more_than_two_candidates():
+def test_search_strategy_default_rule_samples_all_count_as_manager_worker_for_more_than_two_candidates(monkeypatch):
     class _Discover:
         def search_by_keyword(self, **kwargs):
             return {
@@ -236,11 +242,16 @@ def test_search_strategy_default_rule_forms_manager_worker_for_more_than_two_can
         status=Status.PENDING,
         extend_props={"owner_bot_id": "owner"},
     )
+    sampled = ["bot-a:1", "bot-b:2", "bot-c:3"]
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.sample",
+        lambda population, count: sampled[:count],
+    )
     result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover()).apply(_node("c1"), graph))
 
     assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
     assert result.group_formation is not None
-    assert result.group_formation.bot_ids == ["manager", "worker-1", "worker-2"]
+    assert result.group_formation.bot_ids == sampled
     assert result.group_formation.collab_mode == "manager_worker"
     assert [m["role"] for m in result.group_formation.members_info] == [
         "manager", "worker", "worker"
