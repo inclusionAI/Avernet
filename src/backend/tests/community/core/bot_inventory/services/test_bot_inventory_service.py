@@ -333,6 +333,7 @@ def test_edit_lock_batch_reads_only_service_bots_on_current_page() -> None:
         business_space=NoopBusinessSpaceContext(),
         lifecycle_view=BotLifecycleView(lifecycle_port),
         edit_lock_view=edit_lock_view,
+        template_port=_StubTemplatePort(),
     )
 
     items, total = inventory.list_items(
@@ -696,6 +697,7 @@ def _inventory_with(bot_rows: list[dict], stub: _StubTemplatePort) -> BotInvento
         access_service=access,
         business_space=NoopBusinessSpaceContext(),
         lifecycle_view=BotLifecycleView(NoopServiceLifecyclePort()),
+        edit_lock_view=_no_edit_locks(),
         template_port=stub,
     )
 
