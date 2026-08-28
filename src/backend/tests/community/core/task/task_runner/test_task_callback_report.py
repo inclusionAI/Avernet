@@ -430,7 +430,9 @@ class TestBCNManagerWorker:
         assert rec.invoker == "bcn_manager_worker"
         assert rec.run_id == "s-1" and rec.node_id == ""
         assert rec.main_session_id == "s-1"
-        assert rec.status == "task.assigned"
+        # 回调行 status 映射到 Status 枚举:task.assigned(非终态事件)→ RUNNING;
+        # 终态事件 task.completed/session.completed → DONE。原 event_type 见 last_event_type/orig_callback_data。
+        assert rec.status == "RUNNING"
         assert rec.result is None and rec.result_success is None and rec.exec_error is None
         assert rec.extend_props == {"event_id": "evt-1"}
         assert json.loads(rec.orig_callback_data) == ev

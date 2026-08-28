@@ -508,6 +508,9 @@ class TaskService:
             parse_manager_worker_bcn,
         )
         from agentclaw.community.core.task.repository.types import TaskCallbackRecord
+        from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+            _manager_worker_status,
+        )
 
         parsed = parse_manager_worker_bcn(raw)
         if parsed is None:
@@ -528,7 +531,10 @@ class TaskService:
                     run_id=sid,
                     node_id="",
                     main_session_id=sid,
-                    status=et,
+                    # 回调行 status 按 manager_worker 事件映射到 Status 枚举(对齐 state_machine):
+                    # 终态事件 task.completed/session.completed→DONE,其余→RUNNING;
+                    # 真终态 DONE/FAILED 由 session.completed 的 converge_by_session(data.reason)收敛。
+                    status=_manager_worker_status(et).value,
                     orig_callback_data=_json.dumps(
                         raw, ensure_ascii=False, default=str
                     ),

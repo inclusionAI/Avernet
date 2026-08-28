@@ -213,6 +213,23 @@ def _bcn_state_machine_status(event_type: str) -> Status:
     return Status.DONE if event_type == "state_machine.run.completed" else Status.RUNNING
 
 
+# manager_worker(任务协作群)事件 → 回调行 status 粗粒度审计投影(对齐 _bcn_state_machine_status req2):
+# 终态事件 ``task.completed`` / ``session.completed`` → ``DONE``;其余事件(``group.created`` /
+# ``session.created`` / ``task.assigned``)→ ``RUNNING``。真终态成功/失败由 ``converge_by_session``
+# 按 ``session.completed`` 的 ``data.reason`` 收敛(对齐 state_machine 走 BCS run 明细的路径),
+# 与本审计列正交。原 ``event_type`` 仍原样保留在 ``orig_callback_data`` 与 ``execution_graph.last_event_type``。
+_BCN_MANAGER_WORKER_STATUS_DONE = frozenset({"task.completed", "session.completed"})
+
+
+def _manager_worker_status(event_type: str) -> Status:
+    """manager_worker 事件 → 回调行 status:终态事件 ``task.completed``/``session.completed``→``DONE``，其余→``RUNNING``。
+
+    对齐 ``_bcn_state_machine_status`` 的粗粒度审计投影:回调行 status 仅标该回调是否抵达终态事件;
+    真终态 ``DONE`` / ``FAILED`` 由 ``converge_by_session`` 按 ``session.completed`` 的 ``data.reason`` 收敛,
+    非直接由本映射驱动(与 state_machine 的 run_detail.run.status 收敛口径一致)。"""
+    return Status.DONE if event_type in _BCN_MANAGER_WORKER_STATUS_DONE else Status.RUNNING
+
+
 _BCN_NODE_STATUS_DONE = frozenset({"completed", "succeeded", "done", "success"})
 _BCN_NODE_STATUS_FAILED = frozenset({"failed", "error"})
 _BCN_NODE_STATUS_CANCELLED = frozenset({"cancelled", "canceled", "aborted"})
