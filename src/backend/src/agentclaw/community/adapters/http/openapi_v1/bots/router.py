@@ -108,6 +108,9 @@ from agentclaw.community.core.bot_inventory.protocols import (
 from agentclaw.community.core.bot_inventory.policies.combo_policy import (
     assert_service_upgrade,
 )
+from agentclaw.community.core.bot_management.template_public_view import (
+    project_template_config_for_public,
+)
 from agentclaw.community.core.bot_inventory.types import (
     BotInventoryItem as CoreItem,
     DeployMode as CoreDeployMode,
@@ -181,8 +184,14 @@ def _require_service_capable_engine(bot_type: str, engine: str) -> None:
         )
 
 
-def _to_bot(d: dict[str, Any]) -> Bot:
-    """Adapt an internal bot ``to_dict()`` record to the public ``Bot`` schema."""
+def _to_bot(d: dict[str, Any], *, space: dict[str, Any] | None = None) -> Bot:
+    """Adapt an internal bot ``to_dict()`` record to the public ``Bot`` schema.
+
+    ``template_config`` on the row is the stored engine snapshot (it may carry
+    secrets), so it passes through the core allowlist projection here.
+    ``space`` is the owner-view summary the listing endpoints resolve and
+    pass in; other callers leave it null.
+    """
     engine = d.get("active_engine") or ""
     return Bot(
         bot_id=d["bot_id"],
@@ -193,7 +202,43 @@ def _to_bot(d: dict[str, Any]) -> Bot:
         bot_type=d.get("bot_type") or "",
         status=d.get("status") or "",
         owner_entity_id=d.get("owner_id") or "",
+        template_type=(
+            str(d["template_type"]) if d.get("template_type") not in (None, "") else None
+        ),
+        template_config=project_template_config_for_public(d.get("template_config")),
+        space=space,
     )
+
+
+def _to_public_space(ref: Any) -> dict[str, Any] | None:
+    """Flatten a ``BusinessSpaceRef`` for pydantic coercion into ``BusinessSpace``."""
+    if ref is None:
+        return None
+    return {"space_id": ref.space_id, "name": ref.name, "kind": ref.kind}
+
+
+def _resolve_row_spaces(
+    space_context: BusinessSpaceContextProtocol,
+    rows: list[dict[str, Any]],
+    *,
+    owner_id: str,
+) -> dict[str, dict[str, Any] | None]:
+    """Owner-view space summary per distinct ``ac_bots.space_id``.
+
+    Memoized on the raw space_id column: one ``bot_space`` resolution per
+    distinct space per page. This is plain memo caching — the semantics
+    (synthetic ``personal:<user>`` fallback, member-gated None) stay in the
+    core ``BusinessSpaceContextProtocol``.
+    """
+    resolved: dict[str, dict[str, Any] | None] = {}
+    for row in rows:
+        raw = str(row.get("space_id") or "")
+        if raw in resolved:
+            continue
+        resolved[raw] = _to_public_space(
+            space_context.bot_space(bot=row, owner_id=owner_id, current_space=None)
+        )
+    return resolved
 
 
 def _to_bot_metadata(d: dict[str, Any]) -> BotMetadata:
@@ -507,6 +552,9 @@ async def list_bots(
         ),
     ] = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    space_context: BusinessSpaceContextProtocol = Injected(
+        BusinessSpaceContextProtocol
+    ),
 ) -> Envelope[Page[Bot]]:
     """List the caller's bots, narrowed to the caller's authorized scope.
 
@@ -519,8 +567,9 @@ async def list_bots(
     bots, including bots the user does not own, is the authorized-bots listing.
 
     The keyword, engine, and status filters are applied before pagination.
-    For richer inventory fields such as deployment mode and business space,
-    use GET /openapi/v1/bots/all.
+    Each row carries the owner-view space of its ``ac_bots.space_id`` and the
+    projected template snapshot. For richer inventory fields such as
+    deployment mode, use GET /openapi/v1/bots/all.
     """
     granted = caller.granted_bot_ids(owned_by_delegator=True)
     if granted is not None and not granted:
@@ -534,7 +583,12 @@ async def list_bots(
         page_size=page_params.page_size,
         bot_ids=sorted(granted) if granted is not None else None,
     )
-    items = [_to_bot(b) for b in result["items"]]
+    rows = result["items"]
+    row_spaces = _resolve_row_spaces(space_context, rows, owner_id=owner_id)
+    items = [
+        _to_bot(b, space=row_spaces.get(str(b.get("space_id") or "")))
+        for b in rows
+    ]
     return page(result["total"], items, request)
 
 
