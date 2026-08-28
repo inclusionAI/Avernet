@@ -169,3 +169,90 @@ def test_conn_info_cache_evicts_when_over_cap(monkeypatch):
     service.get_http_info(bind_id=1, port=20010, path="/api/cron")  # re-resolve
 
     assert len(http.calls_to("get")) == 4
+
+
+# ── get_ws_info_by_bot_uuid ──────────────────────────────────────────────
+
+
+def _stub_ws_info_response(http: LocalHttpClient, *, token: str = "wtok") -> None:
+    mock = MagicMock()
+    mock.raise_for_status.return_value = None
+    mock.json.return_value = {
+        "code": 0,
+        "data": {
+            "ws_url": "ws://container:20003/api/openclaw/ws",
+            "token": token,
+            "target": "TGT",
+            "expires_at": "2099-01-01T00:00:00Z",
+        },
+    }
+    http.set_response("get", mock)
+
+
+@pytest.mark.unit
+def test_get_ws_info_by_bot_uuid_reuses_cached_result_between_calls():
+    service, http = _make_service()
+    _stub_ws_info_response(http)
+
+    first = service.get_ws_info_by_bot_uuid(bot_uuid="BOT-1")
+    second = service.get_ws_info_by_bot_uuid(bot_uuid="BOT-1")
+
+    assert first is second
+    assert len(http.calls_to("get")) == 1
+
+
+@pytest.mark.unit
+def test_get_ws_info_cache_key_distinguishes_params():
+    service, http = _make_service()
+    _stub_ws_info_response(http)
+
+    service.get_ws_info_by_bot_uuid(bot_uuid="BOT-1")
+    service.get_ws_info_by_bot_uuid(bot_uuid="BOT-2")
+    service.get_ws_info_by_bot_uuid(bot_uuid="BOT-1", device_affinity="240841")
+
+    assert len(http.calls_to("get")) == 3
+
+
+@pytest.mark.unit
+def test_get_ws_info_cached_entry_expires_after_ttl(monkeypatch):
+    clock = _FakeClock()
+    monkeypatch.setattr(baas_module, "time", clock)
+    service, http = _make_service()
+    _stub_ws_info_response(http, token="wtok-1")
+
+    service.get_ws_info_by_bot_uuid(bot_uuid="BOT-1")
+    clock.now += baas_module.BAAS_CONN_INFO_TTL_SECONDS + 1
+    _stub_ws_info_response(http, token="wtok-2")
+
+    result = service.get_ws_info_by_bot_uuid(bot_uuid="BOT-1")
+
+    assert result.token == "wtok-2"
+    assert len(http.calls_to("get")) == 2
+
+
+@pytest.mark.unit
+def test_get_ws_info_by_bot_uuid_force_refresh_bypasses_cache():
+    service, http = _make_service()
+    _stub_ws_info_response(http)
+
+    service.get_ws_info_by_bot_uuid(bot_uuid="BOT-1")
+    service.get_ws_info_by_bot_uuid(bot_uuid="BOT-1", force_refresh=True)
+
+    assert len(http.calls_to("get")) == 2
+
+
+@pytest.mark.unit
+def test_get_ws_info_error_is_not_cached():
+    service, http = _make_service()
+    boom = MagicMock()
+    boom.raise_for_status.return_value = None
+    boom.json.return_value = {"code": 1, "message": "ws-info exploded"}
+    http.set_response("get", boom)
+
+    with pytest.raises(BaasServiceError):
+        service.get_ws_info_by_bot_uuid(bot_uuid="BOT-1")
+
+    _stub_ws_info_response(http)
+    service.get_ws_info_by_bot_uuid(bot_uuid="BOT-1")
+
+    assert len(http.calls_to("get")) == 2

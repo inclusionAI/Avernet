@@ -1925,6 +1925,7 @@ class BaasService:  # pragma: no cover
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
         ws_conn_mode: Optional[str] = None,
+        force_refresh: bool = False,
     ) -> BotWsConnectionInfoResponse:
         """获取 WebSocket 连接信息（通过 bot_uuid 直接查询）.
 
@@ -1939,6 +1940,8 @@ class BaasService:  # pragma: no cover
             device_affinity: 设备亲和性标识，用于指定目标设备（可选）
             device_uuid: 多实例场景锁定特定实例（可选）；不传则 BaaS 自动选活跃实例
             ws_conn_mode: WebSocket 连接模式透传（可选）；不传则不覆盖
+            force_refresh: Bypass a fresh cache entry and re-resolve, overwriting
+                it（语义同 :meth:`get_http_info`）。
 
         Returns:
             BotWsConnectionInfoResponse: WebSocket 连接信息
@@ -1947,6 +1950,27 @@ class BaasService:  # pragma: no cover
             BaasServiceError: 获取失败
         """
         effective_tenant = tenant or self._tenant
+        ws_cache_key = (
+            bot_uuid,
+            port,
+            path,
+            effective_tenant,
+            device_affinity,
+            device_uuid,
+            ws_conn_mode,
+        )
+        if not force_refresh:
+            with self._ws_info_lock:
+                cached = self._ws_info_cache.get(ws_cache_key)
+            if cached is not None and cached[0] > time.monotonic():
+                logger.info(
+                    "[BaasService.get_ws_info_by_bot_uuid] cache hit: "
+                    "bot_uuid=%s, expires_in=%.1fs",
+                    bot_uuid,
+                    cached[0] - time.monotonic(),
+                )
+                return cached[1]
+
         logger.info(
             f"[BaasService.get_ws_info_by_bot_uuid] "
             f"Getting ws info: bot_uuid={bot_uuid}, tenant={effective_tenant}, "
@@ -1999,6 +2023,9 @@ class BaasService:  # pragma: no cover
                 f"Got ws info: bot_uuid={bot_uuid}, target={result.target}"
             )
 
+            self._conn_cache_put(
+                self._ws_info_lock, self._ws_info_cache, ws_cache_key, result
+            )
             return result
 
         except httpx.HTTPStatusError as e:
