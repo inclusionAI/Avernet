@@ -93,9 +93,25 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 router = APIRouter(prefix="/api/skillsets", tags=["skillsets"])
+_LEGACY_SKILL_SET_BATCH_PARTIAL_CONFLICTS = frozenset(
+    {
+        "RESOURCE_DIRECT_ACTIVE",
+        "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
+    }
+)
 
 
 # ==================== Helper Functions ====================
+
+
+def _is_legacy_skill_set_batch_partial_failure(error: Exception) -> bool:
+    """Whether the published BFF batch records this domain error per member."""
+    return isinstance(
+        error, (LocalSkillNotFoundError, SkillSetControlPlaneNotFoundError)
+    ) or (
+        isinstance(error, SkillSetControlPlaneConflictError)
+        and str(error) in _LEGACY_SKILL_SET_BATCH_PARTIAL_CONFLICTS
+    )
 
 
 def _legacy_actor(ctx: RequestContext, requested_user_id: str | None) -> str:
@@ -792,13 +808,9 @@ async def add_skills_to_set(
         except (
             LocalSkillNotFoundError,
             SkillSetControlPlaneNotFoundError,
+            SkillSetControlPlaneConflictError,
         ) as exc:
-            results["failed"].append({"skill_id": skill_id, "error": str(exc)})
-        except SkillSetControlPlaneConflictError as exc:
-            if str(exc) not in {
-                "RESOURCE_DIRECT_ACTIVE",
-                "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
-            }:
+            if not _is_legacy_skill_set_batch_partial_failure(exc):
                 raise
             results["failed"].append({"skill_id": skill_id, "error": str(exc)})
     if resolved:
@@ -816,20 +828,7 @@ async def add_skills_to_set(
                 )
                 continue
             assert outcome.error is not None
-            if isinstance(
-                outcome.error,
-                (LocalSkillNotFoundError, SkillSetControlPlaneNotFoundError),
-            ):
-                results["failed"].append(
-                    {"skill_id": legacy_skill_id, "error": str(outcome.error)}
-                )
-                continue
-            if isinstance(outcome.error, SkillSetControlPlaneConflictError) and str(
-                outcome.error
-            ) in {
-                "RESOURCE_DIRECT_ACTIVE",
-                "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
-            }:
+            if _is_legacy_skill_set_batch_partial_failure(outcome.error):
                 results["failed"].append(
                     {"skill_id": legacy_skill_id, "error": str(outcome.error)}
                 )
