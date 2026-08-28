@@ -329,12 +329,14 @@ async def report_callback(
     workflow_start/node_start 端点各自走(disposition=start)。领域异常上抛 → ``@envelope_errors`` 映射。"""
     # 入口日志:打出回调原始 body(CloudEvent / HttpCallbackPayload / 羽雀 schema 都能见),便于排查。
     # Starlette request.body() 首次读后缓存,_dispatch 再读仍得同一份,不冲突。
+    logger.info("[task_callback] receive_one_callback")
+    logger.info("[task_callback] receive_one_callback, body=%s", request.body())
     _body = await request.body()
     _preview = _body[:4000].decode("utf-8", "replace")
     if len(_body) > 4000:
         _preview += f"...(truncated, total {len(_body)} bytes)"
     logger.info(
-        "[report_callback] entry method=%s path=%s body=%s",
+        "[task_callback] entry method=%s path=%s body=%s",
         request.method,
         request.url.path,
         _preview,
@@ -788,11 +790,16 @@ async def _dispatch(
             else None
         )
         logger.info("[task_callback] bcn event run_id=%s", _run_id)
+        # 1) 先落原始回调数据(translate 后 minimal:orig=CloudEvent + main_session_id + run_id;
+        #    execution_graph/extend_props 暂空)——回调到达即留底,后续解析/查 BCS 失败也不丢原始记录。
+        await svc.callback.ingest(_tc.data)
+        # 2) 解析/转换:经 enricher 查 BCS run 明细 + 构建 execution_graph + 落 extend_props(改写 _tc.data)。
         _run_detail = (
             await enricher.enrich_bcn(_tc.data, _raw_obj, _run_id)
             if _run_id
             else None
         )
+        # 3) 更新这条落库数据(补 execution_graph + extend_props;同 run_id/node_id upsert 覆盖)。
         await svc.callback.ingest(_tc.data)
         # 终态收敛:优先用 BCS run 明细(run_detail.run.status);fetch 失败/非 200 时,若事件本身是
         # state_machine.run.completed(BCS 已表明 run 成功完成),用事件体兜底收敛,不让 BCS 瞬时
@@ -834,6 +841,7 @@ async def _dispatch(
                         _session_id,
                         exc,
                     )
+        logger.info("[task_callback] finish_process_callback")
         return envelope({"ok": True}, request)
     # 羽雀/框架节点级回投:先按 schema_cls(TaskCallbackRequest 富 schema)校验 → translate → report_result/start_run;
     # 不符合则兜底 TaskCallbackDataDTO(loop_task_id+result,report_callback 旧契约)→ callback_from_dto → report_result。
