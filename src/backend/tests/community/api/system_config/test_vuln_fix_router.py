@@ -170,3 +170,28 @@ class TestDeleteCategoryRequiresOperator:
         data = resp.json()
         assert data["success"] is False
         assert data["error_code"] == 40401
+
+class TestSetConfigFailureResponse:
+    """POST /api/v1/config/set must surface persistence failures."""
+
+    def test_set_config_returns_failure_when_service_returns_zero(
+        self, client_with_operator_user, mock_config_service
+    ):
+        mock_config_service.set_config.return_value = 0
+
+        resp = client_with_operator_user.post(
+            "/api/v1/config/set",
+            json={
+                "category": "task",
+                "config_key": "claim_join",
+                "config_value": True,
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "success": False,
+            "message": "配置保存失败(分类创建或写入失败)",
+            "error_code": 50001,
+            "data": {"config_id": 0},
+        }

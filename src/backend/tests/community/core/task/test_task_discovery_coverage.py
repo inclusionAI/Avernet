@@ -13,7 +13,9 @@ Covers lines not exercised by test_task_discovery_unit.py:
 from __future__ import annotations
 
 import asyncio
+import sys
 from datetime import datetime
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 
@@ -162,6 +164,98 @@ class TestDingTalkNotifySender:
             assert DingTalkNotifySender._resolve("ak_id", "NOPE_AK", "NOPE_AK2") == "ak"
         finally:
             DingTalkCredentialHolder.clear()
+
+    @pytest.mark.parametrize(
+        ("api_value", "yaml_value", "expected"),
+        [("api-ak", "yaml-ak", "api"), ("", "yaml-ak", "yaml")],
+    )
+    def test_resolve_source_reports_api_and_yaml(self, api_value, yaml_value, expected):
+        DingTalkCredentialHolder.clear()
+        DingTalkYamlHolder.clear()
+        try:
+            if api_value:
+                DingTalkCredentialHolder.set(api_value, "sk", "robot", "template")
+            DingTalkYamlHolder.set({"ak_id": yaml_value})
+
+            assert DingTalkNotifySender._resolve_source("ak_id") == expected
+        finally:
+            DingTalkCredentialHolder.clear()
+            DingTalkYamlHolder.clear()
+
+    @staticmethod
+    def _install_fake_dingtalk_sdk(monkeypatch, ret_code: str):
+        """Install the lazy-imported DingTalk SDK seam without real credentials."""
+        class Config:
+            pass
+
+        class HttpHeader:
+            pass
+
+        class AccountContext:
+            def __init__(self, account_id):
+                self.account_id = account_id
+
+        class SendRobotInteractiveCardRequest:
+            pass
+
+        class Body:
+            def to_map(self):
+                return {"retCode": ret_code}
+
+        class Client:
+            def __init__(self, config):
+                self.config = config
+                self.request = None
+                self.headers = None
+
+            def send_robot_interactive_card_with_options(self, request, headers, _options):
+                self.request = request
+                self.headers = headers
+                return SimpleNamespace(body=Body())
+
+        openapi = ModuleType("alibabacloud_tea_openapi")
+        openapi.models = SimpleNamespace(Config=Config)
+        util = ModuleType("alibabacloud_tea_util")
+        util.models = SimpleNamespace(RuntimeOptions=lambda: object())
+        ant = ModuleType("alipay_antdingopensdk_client")
+        ant.models = SimpleNamespace(
+            HttpHeader=HttpHeader,
+            AccountContext=AccountContext,
+            SendRobotInteractiveCardRequest=SendRobotInteractiveCardRequest,
+        )
+        client = ModuleType("alipay_antdingopensdk_client.client")
+        client.Client = Client
+        tea = ModuleType("Tea")
+
+        monkeypatch.setitem(sys.modules, "alibabacloud_tea_openapi", openapi)
+        monkeypatch.setitem(sys.modules, "alibabacloud_tea_util", util)
+        monkeypatch.setitem(sys.modules, "alipay_antdingopensdk_client", ant)
+        monkeypatch.setitem(sys.modules, "alipay_antdingopensdk_client.client", client)
+        monkeypatch.setitem(sys.modules, "Tea", tea)
+
+    @pytest.mark.parametrize("ret_code", ["0", "123"])
+    def test_send_dingtalk_card_logs_success_and_business_failure(self, monkeypatch, ret_code):
+        for name, value in {
+            "TASK_DISCOVERY_DINGTALK_AK_ID": "ak",
+            "TASK_DISCOVERY_DINGTALK_AK_SECRET": "sk",
+            "TASK_DISCOVERY_DINGTALK_ROBOT_CODE": "robot",
+            "TASK_DISCOVERY_CARD_TEMPLATE_ID": "template",
+        }.items():
+            monkeypatch.setenv(name, value)
+        DingTalkCredentialHolder.clear()
+        DingTalkYamlHolder.clear()
+        self._install_fake_dingtalk_sdk(monkeypatch, ret_code)
+
+        sender = DingTalkNotifySender(CommunityNotifySender())
+        sender._send_dingtalk_card(
+            NotifyMessage(
+                title="Task",
+                body="Body",
+                recipient="owner-1",
+                extra={"card_data": "{\"key\":\"value\"}"},
+            )
+        )
+
 
     def test_resolve_prefers_yaml_holder_over_env(self, monkeypatch):
         """_resolve returns from DingTalkYamlHolder when API holder is empty."""
@@ -473,6 +567,42 @@ class TestCommunityNotifyModule:
 
         DingTalkYamlHolder.clear()
         FrontendUrlHolder.set("")
+
+    @pytest.mark.parametrize(
+        ("env", "expected_url"),
+        [("pre", "http://pre.example.com"), ("prod", "http://prod.example.com")],
+    )
+    def test_notify_sender_uses_environment_specific_frontend_url(
+        self, monkeypatch, env, expected_url
+    ):
+        from agentclaw.community.core.task.task_discovery.session_initiator import (
+            FrontendUrlHolder,
+        )
+        from agentclaw.community.di.modules import config_module
+        from agentclaw.community.utils import env_utils
+        from agentclaw.community.di.modules.infrastructure.community.notify import (
+            CommunityNotifyModule,
+        )
+
+        DingTalkYamlHolder.clear()
+        FrontendUrlHolder.set("")
+        config = {
+            "frontend_url": "http://default.example.com",
+            "frontend_url_pre": "http://pre.example.com",
+            "frontend_url_prod": "http://prod.example.com",
+        }
+        try:
+            with (
+                patch.object(config_module, "_block", return_value=config),
+                patch.object(env_utils, "get_current_env", return_value=env),
+            ):
+                CommunityNotifyModule()._notify_sender()
+
+            assert FrontendUrlHolder.get() == expected_url
+        finally:
+            DingTalkYamlHolder.clear()
+            FrontendUrlHolder.set("")
+
 
     def test_notify_sender_skips_frontend_url_when_absent(self, monkeypatch):
         """DI sets DingTalkYamlHolder but skips FrontendUrlHolder when

@@ -268,6 +268,20 @@ def test_set_config_serializes_and_upserts() -> None:
 
 
 @pytest.mark.unit
+def test_set_config_returns_zero_when_auto_category_creation_fails() -> None:
+    """A failed auto-create must not claim that the config write succeeded."""
+    svc, repo = _svc()
+    repo.upsert_category = lambda **_kwargs: 0
+
+    config_id = svc.set_config(
+        category="missing", config_key="k", config_value="v", env="dev"
+    )
+
+    assert config_id == 0
+    assert repo.upsert_config_calls == []
+
+
+@pytest.mark.unit
 def test_set_config_auto_creates_category_when_missing() -> None:
     """分类不存在 → 自动建分类(对齐 docstring)再落 config,不再静默 return 0。"""
     svc, repo = _svc()
