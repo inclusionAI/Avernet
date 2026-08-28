@@ -48,6 +48,9 @@ from agentclaw.community.core.spaces.errors import (
 from agentclaw.community.core.bot_inventory.adapters.noop_business_space import (
     NoopBusinessSpaceContext,
 )
+from agentclaw.community.core.bot_inventory.errors import (
+    BotInventoryPermissionError,
+)
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
 )
@@ -270,6 +273,58 @@ def test_list_bots_resolves_space_once_per_distinct_space(client):
     # All rows share the NULL space_id column value, so memoization collapses
     # the per-page resolution to a single bot_space call.
     assert client.app.state.business_space.bot_space_calls == 1
+
+
+def test_list_bots_survives_a_space_resolution_refusal(svc, startup_script):
+    # A legacy row whose space lookup the space module refuses (a personal
+    # space record exists but the membership row is gone) degrades to
+    # space=null for that row; it must not fail the whole page.
+    class _RefusingSpace:
+        def bot_space(self, **_kwargs):
+            raise BotInventoryPermissionError("business space is not available")
+
+        def resolve_current(self, **_kwargs):
+            raise AssertionError("listing never resolves the current space")
+
+    class _M(Module):
+        def configure(self, binder):
+            binder.bind(BotServiceProtocol, to=svc)
+            binder.bind(BusinessSpaceContextProtocol, to=_RefusingSpace())
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "u1"}
+    attach_injector(app, Injector([_M()]))
+    mount_public_error_handlers(app)
+    refusing_client = user_scoped_client(app, "u1")
+
+    data = _ok(refusing_client.get("/openapi/v1/bots"))
+
+    assert data["total"] == 1
+    assert data["items"][0]["bot_id"] == "b1"
+    assert data["items"][0]["space"] is None
+
+
+def test_template_config_is_gated_on_template_type(client, svc):
+    # get_bot attaches template_config whenever a template row exists —
+    # NOT gated on template_type like the listing attach. A bot whose row
+    # exists without a template_type must surface null config on every
+    # face, per the published "null without a template" contract.
+    row = {
+        **BOT,
+        "template_type": None,
+        "template_config": {"devflow_workflow": "release-notes", "token": "raw"},
+    }
+    svc.list_bots_by_conditions.return_value = {"total": 1, "items": [row]}
+    svc.get_bot.return_value = row
+
+    listing = _ok(client.get("/openapi/v1/bots"))
+    assert listing["items"][0]["template_type"] is None
+    assert listing["items"][0]["template_config"] is None
+
+    detail = _ok(client.get("/openapi/v1/bots/b1"))
+    assert detail["template_type"] is None
+    assert detail["template_config"] is None
 
 
 def test_list_bots_filters_reach_service(client, svc):
