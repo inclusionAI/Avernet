@@ -330,8 +330,8 @@ async def report_callback(
     # 入口日志:打出回调原始 body(CloudEvent / HttpCallbackPayload / 羽雀 schema 都能见),便于排查。
     # Starlette request.body() 首次读后缓存,_dispatch 再读仍得同一份,不冲突。
     logger.info("[task_callback] receive_one_callback")
-    logger.info("[task_callback] receive_one_callback, body=%s", request.body())
     _body = await request.body()
+    logger.info("[task_callback] receive_one_callback, body=%s", request.body())
     _preview = _body[:4000].decode("utf-8", "replace")
     if len(_body) > 4000:
         _preview += f"...(truncated, total {len(_body)} bytes)"
