@@ -176,15 +176,32 @@ class TaskDiscoveryModule(Module):
             try:
                 openapi_bot = injector.get(OpenApiBotPort)
                 if openapi_bot is not None:
+                    # FrontendUrlProvider 同为 corp 绑定
+                    # (CorpTaskIntegrationModule.get_frontend_url_provider —
+                    # env-aware 静态值 + 运行时 holder 优先);解析失败降级
+                    # Null (回落构造 frontend_url 参数)。
+                    try:
+                        from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
+                            FrontendUrlProvider,
+                            NullFrontendUrlProvider,
+                        )
+
+                        fe_provider: FrontendUrlProvider = (
+                            injector.get(FrontendUrlProvider)
+                        )
+                    except Exception:  # noqa: BLE101 未绑定 → Null(构造参数兜底)
+                        fe_provider = NullFrontendUrlProvider()
                     logger.info(
                         "[task_discovery] SessionInitiator → OpenApiBotSessionInitiator "
-                        "(corp path, openapi_bot=%s)",
+                        "(corp path, openapi_bot=%s, frontend_url_provider=%s)",
                         type(openapi_bot).__name__,
+                        type(fe_provider).__name__,
                     )
                     return OpenApiBotSessionInitiator(
                         openapi_bot=openapi_bot,
                         frontend_url=_resolve_frontend_url(),
                         backend_url=_resolve_backend_url(),
+                        frontend_url_provider=fe_provider,
                     )
                 logger.warning(
                     "[task_discovery] OpenApiBotPort resolved to None (fail-closed) "

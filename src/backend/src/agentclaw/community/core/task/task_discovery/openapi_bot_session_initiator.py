@@ -19,12 +19,12 @@ from urllib.parse import quote
 
 import httpx
 
+from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
+    FrontendUrlProvider,
+)
 from agentclaw.community.core.task.task_discovery.models import (
     DiscoveredTask,
     DiscoverySession,
-)
-from agentclaw.community.core.task.task_discovery.session_initiator import (
-    FrontendUrlHolder,
 )
 from agentclaw.community.core.task.task_runner.integration.ports import (
     OpenApiBotPort,
@@ -56,20 +56,24 @@ class OpenApiBotSessionInitiator:
         frontend_url: str = "http://localhost:8000",
         backend_url: str = "http://localhost:8888",
         ensure_grant: bool = False,
+        frontend_url_provider: FrontendUrlProvider | None = None,
     ):
         """
         Args:
             openapi_bot: BaaS Open API 适配器 (已内含 Bearer api_key 鉴权)。
-            frontend_url: 前端 workbench 地址 (用于构建 session_url)。
-                运行时可通过 ``FrontendUrlHolder`` (API 注入) 覆盖。
+            frontend_url: 前端 workbench 地址 (兜底,provider 未注入/返回空时使用)。
             backend_url: 当前 backend 服务地址 (用于创建 session 后更新 title)。
             ensure_grant: 是否对 bot 执行 allowed-bots 校验 + grant 流程。
                 corp 预授权模式默认 False (OOB 预授权); 测试/联调可设 True。
+            frontend_url_provider: 前端 URL 取数端口(corp 列 DI 绑
+                ``CorpFrontendUrlProvider`` — env-aware 静态值 + 运行时 holder
+                优先;未注入时仅用 ``frontend_url`` 兜底)。
         """
         self._openapi_bot = openapi_bot
         self._frontend_url = frontend_url
         self._backend_url = backend_url
         self._ensure_grant = ensure_grant
+        self._frontend_url_provider = frontend_url_provider
 
     async def initiate_session(
         self,
@@ -281,9 +285,14 @@ class OpenApiBotSessionInitiator:
         格式: ``{frontend_url}/workspace?tab=chat&bot={bot_id}:{owner_id}&session={encoded_session_key}``
         session_key = ``agent:main:{raw_session_id}`` URL-encoded。
 
-        动态解析 frontend URL — 支持运行时 API 注入 (FrontendUrlHolder)。
+        动态解析 frontend URL — 优先 ``FrontendUrlProvider`` (corp DI 绑
+        ``CorpFrontendUrlProvider``: 运行时 holder 热注入 > env-aware 静态值),
+        provider 未注入/返回空时回落构造参数 ``frontend_url``。
         """
-        base = (FrontendUrlHolder.get() or self._frontend_url).rstrip("/")
+        provided = (
+            self._frontend_url_provider.get() if self._frontend_url_provider else ""
+        )
+        base = (provided or self._frontend_url).rstrip("/")
         full_session_key = (
             session_id
             if session_id.startswith("agent:main:")
