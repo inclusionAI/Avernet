@@ -26,6 +26,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use tracing::{info, warn};
 use uuid::Uuid;
 use bcs_domain::actor::ActorKind;
 use bcs_domain::edge_permission::{
@@ -665,20 +666,73 @@ impl DbConnectService {
         actor_id: &str,
         request_auth: Option<&RequestAuthHeaders>,
     ) -> Option<String> {
-        let user_directory = self.user_directory.as_ref()?;
+        let Some(user_directory) = self.user_directory.as_ref() else {
+            info!(
+                actor_id = %actor_id,
+                env = %self.env,
+                "skip user department lookup because user directory is not configured"
+            );
+            return None;
+        };
         let staff_no = match actor_kind_of(actor_id) {
-            ActorKind::Human => actor_id.strip_prefix("human_")?.to_string(),
+            ActorKind::Human => match actor_id.strip_prefix("human_").filter(|staff_no| !staff_no.is_empty()) {
+                Some(staff_no) => staff_no.to_string(),
+                None => {
+                    warn!(
+                        actor_id = %actor_id,
+                        env = %self.env,
+                        "skip user department lookup because human actor id has no staff_no"
+                    );
+                    return None;
+                }
+            },
             ActorKind::Bot => {
-                let cfg = self.bot_config.get(actor_id, &self.env).await?;
-                cfg.created_by?
+                let Some(cfg) = self.bot_config.get(actor_id, &self.env).await else {
+                    info!(
+                        actor_id = %actor_id,
+                        env = %self.env,
+                        "skip user department lookup because bot config was not found"
+                    );
+                    return None;
+                };
+                let Some(created_by) = cfg.created_by else {
+                    info!(
+                        actor_id = %actor_id,
+                        env = %self.env,
+                        "skip user department lookup because bot owner staff_no is missing"
+                    );
+                    return None;
+                };
+                created_by
             }
         };
         let lookup_context = user_directory_lookup_context(request_auth);
-        user_directory
+        match user_directory
             .lookup_department_by_staff_no_with_context(&staff_no, &lookup_context)
             .await
-            .ok()
-            .flatten()
+        {
+            Ok(department) => {
+                info!(
+                    actor_id = %actor_id,
+                    staff_no = %staff_no,
+                    department_code = department.as_deref().unwrap_or(""),
+                    found = department.is_some(),
+                    env = %self.env,
+                    "resolved user department for friend connect allowlist check"
+                );
+                department
+            }
+            Err(error) => {
+                warn!(
+                    actor_id = %actor_id,
+                    staff_no = %staff_no,
+                    error = %error,
+                    env = %self.env,
+                    "failed to resolve user department for friend connect allowlist check"
+                );
+                None
+            }
+        }
     }
 
     async fn caller_department_matches_friend_allowlist(
@@ -1447,6 +1501,37 @@ mod tests {
     }
 
     #[derive(Clone, Default)]
+    struct FailingUserDirectoryPlugin;
+
+    #[async_trait]
+    impl UserDirectoryPlugin for FailingUserDirectoryPlugin {
+        async fn lookup_by_staff_no(
+            &self,
+            staff_no: &str,
+        ) -> Result<Option<bcs_user_directory_api::UserDirectoryProfile>, bcs_user_directory_api::UserDirectoryError> {
+            Ok(Some(bcs_user_directory_api::UserDirectoryProfile {
+                staff_no: staff_no.to_string(),
+                nick_name: None,
+            }))
+        }
+
+        async fn lookup_department_by_staff_no(
+            &self,
+            _staff_no: &str,
+        ) -> Result<Option<String>, bcs_user_directory_api::UserDirectoryError> {
+            Err(bcs_user_directory_api::UserDirectoryError::Request("boom".to_string()))
+        }
+
+        async fn lookup_department_by_staff_no_with_context(
+            &self,
+            _staff_no: &str,
+            _context: &UserDirectoryLookupContext,
+        ) -> Result<Option<String>, bcs_user_directory_api::UserDirectoryError> {
+            Err(bcs_user_directory_api::UserDirectoryError::Request("boom".to_string()))
+        }
+    }
+
+    #[derive(Clone, Default)]
     struct RecordingFriendConnectNotificationPort {
         events: Arc<tokio::sync::Mutex<Vec<FriendConnectNotificationCommand>>>,
     }
@@ -1656,6 +1741,83 @@ mod tests {
         assert_eq!(r.edge_id, Some(res.edge_ids[0]));
     }
 
+
+    #[tokio::test]
+    async fn department_lookup_logs_success_result_path() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(
+            &db,
+            "human_1",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("85020"),
+        )
+        .await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "1".to_string(),
+                "F4858".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+
+        assert_eq!(
+            svc.resolve_user_department_code("human_1", None).await.as_deref(),
+            Some("F4858")
+        );
+    }
+
+    #[tokio::test]
+    async fn department_lookup_logs_failure_result_path() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(
+            &db,
+            "human_1",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("85020"),
+        )
+        .await;
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, Arc::new(FailingUserDirectoryPlugin));
+
+        assert_eq!(svc.resolve_user_department_code("human_1", None).await, None);
+    }
+
+    #[tokio::test]
+    async fn department_lookup_logs_missing_directory_path() {
+        let (eg, pp, rq, bc, _db) = assemble().await;
+        let svc = service(&eg, &pp, &rq, &bc);
+
+        assert_eq!(svc.resolve_user_department_code("human_1", None).await, None);
+    }
+
+    #[tokio::test]
+    async fn department_lookup_logs_skip_paths() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::new()),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+
+        assert_eq!(svc.resolve_user_department_code("human_", None).await, None);
+        assert_eq!(svc.resolve_user_department_code("x:missing", None).await, None);
+
+        seed_bot(
+            &db,
+            "x:no_owner",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            None,
+        )
+        .await;
+        assert_eq!(svc.resolve_user_department_code("x:no_owner", None).await, None);
+    }
 
     #[tokio::test]
     async fn dept_free_allowlist_stays_pending_with_noop_department_port() {

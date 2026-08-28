@@ -983,6 +983,7 @@ dependencies = [
  "bcs-user-directory-api",
  "serde_json",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
