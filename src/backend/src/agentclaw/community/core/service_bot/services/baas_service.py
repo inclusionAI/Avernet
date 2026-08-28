@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import base64
 import re
+import threading
 import time
 
 import httpx
@@ -94,6 +95,19 @@ ENGINE_DIR_MOUNT_WHITELIST_BUSINESS_CODE = "nas_mount"
 #: across restarts and outlive a DELETE of the script; and an unpredictable
 #: name owned by ``admin`` cannot be pre-created by anyone else.
 STARTUP_SCRIPT_LOG = "/home/admin/logs/startup_script.log"
+
+#: Process-level TTL for BaaS connection-info lookups (ws-info / http-info).
+#: The BaaS endpoints mint (url, token) pairs whose lifetime comfortably
+#: exceeds this window — the same 30 s already validated by
+#: ``baas_invoke_transport._HTTP_INFO_TTL_SECONDS`` — and a cron-relay fan-out
+#: resolves them per binding per request (measured 130-160 ms per round trip,
+#: pre 2026-08-28). Tokens that go stale anyway are recovered by the
+#: ``force_refresh`` bypass used on retry paths.
+BAAS_CONN_INFO_TTL_SECONDS = 30.0
+
+#: Hard cap on distinct cached lookups. Treats the cache as a small working
+#: set (active bindings × param variants), not an unbounded key space.
+BAAS_CONN_INFO_CACHE_MAX_ENTRIES = 512
 
 #: Separates the platform boot chain from the per-bot user stage, and the marker
 #: log redaction splits on so the platform half stays readable.
@@ -473,6 +487,20 @@ class BaasService:  # pragma: no cover
         # feature guards against elsewhere. Required, that mistake is a
         # TypeError naming the argument at construction.
         self._startup_script_reader = startup_script_reader
+        # Connection-info caches (ws-info / http-info). Instance state on a
+        # DI singleton, so this is process-local and lost on restart. The lock
+        # guards only the dict read/update — NOT the HTTP call — so
+        # resolutions for different keys stay parallel and same-key misses at
+        # worst duplicate one call whose result the later writer overwrites.
+        # Errors are never cached, so a transient BaaS failure self-heals on
+        # the next call. Cached dataclass instances are shared: callers must
+        # treat them as read-only.
+        self._http_info_lock = threading.Lock()
+        self._http_info_cache: dict[tuple, tuple[float, HttpConnectionInfo]] = {}
+        self._ws_info_lock = threading.Lock()
+        self._ws_info_cache: dict[
+            tuple, tuple[float, BotWsConnectionInfoResponse]
+        ] = {}
 
     def post_bots_api(
         self,
@@ -3306,6 +3334,28 @@ class BaasService:  # pragma: no cover
             )
             return None
 
+    def _conn_cache_put(
+        self,
+        lock: threading.Lock,
+        cache: dict,
+        key: tuple,
+        value: Any,
+    ) -> None:
+        """Store a successful connection-info result with a TTL, bounded."""
+        now = time.monotonic()
+        with lock:
+            if len(cache) >= BAAS_CONN_INFO_CACHE_MAX_ENTRIES:
+                for stale_key in [
+                    k for k, (deadline, _) in cache.items() if deadline <= now
+                ]:
+                    del cache[stale_key]
+                if len(cache) >= BAAS_CONN_INFO_CACHE_MAX_ENTRIES:
+                    # All entries live (recently written) but the key space
+                    # still grew past the cap — the working-set assumption is
+                    # wrong, so reset rather than silently grow unbounded.
+                    cache.clear()
+            cache[key] = (now + BAAS_CONN_INFO_TTL_SECONDS, value)
+
     def get_http_info(
         self,
         *,
@@ -3317,6 +3367,7 @@ class BaasService:  # pragma: no cover
         device_uuid: Optional[str] = None,
         ws_conn_mode: Optional[str] = None,
         timeout: float = 5.0,
+        force_refresh: bool = False,
     ) -> HttpConnectionInfo:
         """获取容器 HTTP 连接信息。
 
@@ -3333,6 +3384,10 @@ class BaasService:  # pragma: no cover
                 活跃实例。与 ``get_ws_info`` 的 ``device_uuid`` 参数对称 —— 文件
                 读写等经 invoke_http 的链路用它把实例选择传达到 BaaS /http-info。
             timeout: HTTP 请求超时（秒）
+            force_refresh: Bypass a fresh cache entry and re-resolve, overwriting
+                it. The 401-retry path of ``BaasInvokeTransport`` sets this so a
+                token that went stale inside the TTL is replaced instead of
+                replayed.
 
         Returns:
             HttpConnectionInfo: HTTP 连接信息 (http_url, token)
@@ -3340,6 +3395,27 @@ class BaasService:  # pragma: no cover
         Raises:
             BaasServiceError: BaaS 不可达 / 404 / 5xx / 网络 / 超时 / 业务 code≠0
         """
+        cache_key = (
+            bind_id,
+            port,
+            path,
+            tenant or self._tenant,
+            device_affinity,
+            device_uuid,
+            ws_conn_mode,
+        )
+        if not force_refresh:
+            with self._http_info_lock:
+                cached = self._http_info_cache.get(cache_key)
+            if cached is not None and cached[0] > time.monotonic():
+                logger.info(
+                    "[BaasService.get_http_info] cache hit: bind_id=%s, "
+                    "expires_in=%.1fs",
+                    bind_id,
+                    cached[0] - time.monotonic(),
+                )
+                return cached[1]
+
         # 从 DeviceBindingRepository 获取 device_id
         device_binding_repo = self._device_binding_repo
         binding = device_binding_repo.get_by_id(bind_id)
@@ -3395,6 +3471,9 @@ class BaasService:  # pragma: no cover
                 f"http_url={result.http_url}"
             )
 
+            self._conn_cache_put(
+                self._http_info_lock, self._http_info_cache, cache_key, result
+            )
             return result
 
         except httpx.HTTPStatusError as e:
