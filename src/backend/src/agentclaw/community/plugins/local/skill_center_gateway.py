@@ -65,6 +65,12 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
     def _missing(message: str) -> NoReturn:
         raise SkillCenterGatewayError(SkillCenterGatewayErrorCode.BUSINESS, message)
 
+    @staticmethod
+    def _team_not_found(message: str) -> NoReturn:
+        raise SkillCenterGatewayError(
+            SkillCenterGatewayErrorCode.TEAM_NOT_FOUND, message
+        )
+
     def _has_team(self, team_id: str) -> bool:
         return any(team.team_id == team_id for team in self._teams_by_ref.values())
 
@@ -165,7 +171,7 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
     ) -> SkillCenterTeam:
         team = self._teams_by_ref.get((request.ref_source, request.ref_source_id))
         if team is None:
-            self._missing(
+            self._team_not_found(
                 f"Team reference {request.ref_source}/{request.ref_source_id} does not exist"
             )
         return team
@@ -199,6 +205,9 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
             and (
                 request.creator_work_no is None
                 or request.creator_work_no == skill.creator_work_no
+            )
+            and (
+                request.belong_to is None or request.belong_to is skill.belong_to
             )
         ]
         if request.sort_by is SkillCenterSortOrder.OLDEST:
@@ -315,29 +324,32 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
     def get_publish_status(
         self, request: SkillCenterPublishStatusRequest
     ) -> SkillCenterPublishStatus:
-        if not self._has_version(
-            request.team_id, request.skill_code, request.version_number
-        ):
-            self._missing(
-                f"skill {request.skill_code} version {request.version_number} "
-                f"does not exist in team {request.team_id}"
-            )
+        matching_keys = tuple(
+            key for key in self._skills if key[1] == request.skill_code
+        )
+        if len(matching_keys) != 1:
+            self._missing(f"skill {request.skill_code} does not exist")
+        team_id, skill_code = matching_keys[0]
+        versions = self._versions[(team_id, skill_code)]
+        current_version = versions[-1].version_number
         return SkillCenterPublishStatus(
             skill_code=request.skill_code,
-            version_number=request.version_number,
+            version_number=current_version,
             status=SkillCenterPublishState.PUBLISHED,
             is_completed=True,
             is_success=True,
-            skill_name=self._skills[(request.team_id, request.skill_code)].skill_name,
+            skill_name=self._skills[(team_id, skill_code)].skill_name,
             upstream_status="PUBLISHED",
             status_description="已发布",
             source="LOCAL",
             standard_check_result=SkillCenterStandardCheckResult(
-                findings=(SkillCenterCheckFinding("manifest", "PASSED"),)
+                findings=(SkillCenterCheckFinding("manifest", "PASSED"),),
+                raw={"passed": True},
             ),
             security_check_report=SkillCenterSecurityCheckReport(
                 risk_level="LOW",
                 findings=(SkillCenterCheckFinding("package", "PASSED"),),
+                raw={"risk": "LOW"},
             ),
         )
 

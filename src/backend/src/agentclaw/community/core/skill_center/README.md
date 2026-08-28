@@ -120,8 +120,12 @@ Capability activation is the highest-throughput flow in production. Changes here
 boundary. It accepts already-resolved Team requests and does not modify
 `ac_skill`, create Versions, select an Attempt result, retry publication, or
 materialize runtime content. It also preserves catalogue metadata, tag trees,
-SC publish diagnostics, non-paged versions, and exact download facts without
-turning any of them into HTTP presentation DTOs.
+SC publish diagnostics (including lossless raw standard/security reports),
+non-paged versions, and exact download facts without turning any of them into
+HTTP presentation DTOs. A status lookup uses the globally unique `skill_code`
+and returns SC's current version; the future Publication application service
+compares that response to its persisted Attempt rather than making the Gateway
+caller supply a Team or expected version.
 It rejects response identity drift across Team, Skill, page, and exact version;
 retry, Attempt, persistence, and materialization decisions remain above it.
 Public version/download reads use an explicit scope and verify public visibility

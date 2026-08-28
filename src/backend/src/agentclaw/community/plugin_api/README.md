@@ -25,7 +25,7 @@ internal_dependencies:
 
 ### Change impact
 
-Changing a Protocol signature breaks every local + prod impl + the contract-test suite (Rule 25). `SkillCenterGateway` is separate from the legacy `SkillCenterClient`: its typed request objects carry no endpoint or credential configuration, every Team catalogue/publication operation requires a request-level Team ID, and its adapters do not own publication retries or domain state. Version/download reads require an explicit `PUBLIC` or `TEAM` scope; Public Reference reads omit Team only after the consumer verifies public visibility, because Skill Center skill codes are globally unique. Adding a new Protocol requires updating BOUNDARY_SIGNIFICANT_MODULES if it joins a new module, and adding paired impls (Rule 20).
+Changing a Protocol signature breaks every local + prod impl + the contract-test suite (Rule 25). `SkillCenterGateway` is separate from the legacy `SkillCenterClient`: its typed request objects carry no endpoint or credential configuration; Team catalogue and publish-submission operations require a request-level Team ID, while publish-status lookup follows SC's globally unique `skill_code` contract. Its adapters do not own publication retries or domain state. Version/download reads require an explicit `PUBLIC` or `TEAM` consumer trust scope; the scope and Team ID are preflight context and are not invented SC wire arguments. Public Reference reads omit Team only after the consumer verifies public visibility. Adding a new Protocol requires updating BOUNDARY_SIGNIFICANT_MODULES if it joins a new module, and adding paired impls (Rule 20).
 
 The Interface belongs here because Avernet-owned consumers include Space Team
 binding today and the governed Publication/Reference flows in the Phase 2
@@ -41,13 +41,22 @@ Skill listing/detail, one-shot publish submission and status diagnostics,
 non-paged version listing, and exact download metadata. Catalogue DTOs retain
 stable SC facts needed by presentation and lazy Reference flows; presentation
 aliases and TeamClaw persistence remain above this seam.
+Public search preserves the already-published `belong_to` compatibility filter.
+An SC Team lookup miss has the stable `TEAM_NOT_FOUND` category and is distinct
+from upstream rejection or malformed data. Publish-status requests contain only
+`skill_code`; their response carries the SC-reported current version, and raw
+standard/security reports are retained losslessly in addition to normalized
+fields so presentation adapters can preserve existing response data.
 Exact-download metadata requires a 64-character hexadecimal SC SHA-256 so later
 materialization cannot silently skip package integrity verification.
 Team catalogue/detail methods return a distinct DTO with a required Team ID;
 an adapter must verify and attach that identity rather than infer it from an
 unscoped detail response. TEAM-scoped version/download reads preflight that
 Team Skill before invoking SC endpoints that identify only the globally unique
-skill code.
+skill code. Because SC exposes Team Skill detail through a paged Team list, an
+adapter implementing `get_team_skill` must exhaust that listing (or use an
+equivalent authoritative lookup) before concluding that an exact Skill is
+absent.
 
 `SkillCenterGateway` is an outbound, trusted-service integration executed in the
 Backend process. It may call only the configured Skill Center endpoint with
