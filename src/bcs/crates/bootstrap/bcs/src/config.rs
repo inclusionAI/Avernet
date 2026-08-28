@@ -750,6 +750,12 @@ pub struct BcsConfig {
 
     /// Async chat run — hard cap on stored records. New submissions are
     /// rejected with 503 when full. Default 100_000.
+    ///
+    /// Memory-mode only: bounds the in-process HashMap. In `persistent` mode
+    /// this cap is **not** enforced as a total-rows limit (that would reject
+    /// new runs once long-retained audit rows crossed the cap); persistent
+    /// growth is bounded by `expires_at_ms` (active runs, timeout sweep) and
+    /// the MySQL platform's audit-retention pruning (terminal rows, spec §11.2).
     #[serde(default = "default_async_chat_run_max_entries")]
     pub async_chat_run_max_entries: usize,
 
