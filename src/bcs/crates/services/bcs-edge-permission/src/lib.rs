@@ -227,10 +227,15 @@ impl ConnectService for DbConnectService {
         }
 
         // 5. Existing visibility/status gates.
+        // Bots collaborate under `visibility`; humans add under `user_visibility`
+        // (mirrors /bots/search viewer-kind selection). `visibility=private`
+        // blocks bot→bot collaboration; `user_visibility=private` blocks human→bot
+        // add. The bot-facing `visibility` no longer gates human callers, so a
+        // `visibility=private` + `user_visibility=public` bot stays human-addable.
         if cfg.status == "hidden" {
             return Err(ServiceError::BotHidden(to_bot.to_string()));
         }
-        if is_private_visibility(&cfg.visibility) {
+        if caller_kind == ActorKind::Bot && is_private_visibility(&cfg.visibility) {
             return Err(ServiceError::PrivateBotCannotCollaborate);
         }
         if caller_kind == ActorKind::Human && is_private_visibility(&cfg.user_visibility) {
@@ -245,7 +250,15 @@ impl ConnectService for DbConnectService {
                 .caller_department_matches_friend_allowlist(caller, &cfg, request_auth.as_ref())
                 .await;
         let needs_approval = !(friend_strategy == "open" || dept_free_auto_approved);
-        match normalize_policy_value(&cfg.visibility).as_str() {
+        // Dispatch on the caller-appropriate visibility: bots on `visibility`,
+        // humans on `user_visibility`. The matching `private` case is rejected
+        // above for that kind, so only public/protected reach here in practice.
+        let collab_visibility = if caller_kind == ActorKind::Human {
+            normalize_policy_value(&cfg.user_visibility)
+        } else {
+            normalize_policy_value(&cfg.visibility)
+        };
+        match collab_visibility.as_str() {
             "public" | "protected" => {
                 if needs_approval {
                     let request_ids = self
@@ -1384,6 +1397,7 @@ mod tests {
                 bot_uuid TEXT NOT NULL, \
                 env TEXT NOT NULL, \
                 visibility TEXT NOT NULL DEFAULT 'public', \
+                user_visibility TEXT NOT NULL DEFAULT 'protected', \
                 bot_info TEXT DEFAULT NULL, \
                 status TEXT NOT NULL DEFAULT 'online', \
                 created_by TEXT, \
@@ -1595,17 +1609,17 @@ mod tests {
         friend_ext: serde_json::Map<String, serde_json::Value>,
     ) {
         let bot_info = serde_json::json!({
-            "user_visibility": user_visibility,
             "friend_check_in_strategy": friend_check_in_strategy,
             "friend_ext": friend_ext,
         });
         db.execute(DbStatement::with_params(
             "INSERT INTO bcs_bots \
-             (bot_uuid, env, visibility, bot_info, status, created_by) \
-             VALUES (?, 'dev', ?, ?, ?, ?)",
+             (bot_uuid, env, visibility, user_visibility, bot_info, status, created_by) \
+             VALUES (?, 'dev', ?, ?, ?, ?, ?)",
             vec![
                 DbValue::from(bot_uuid),
                 DbValue::from(visibility),
+                DbValue::from(user_visibility),
                 DbValue::from(serde_json::to_string(&bot_info).expect("bot_info json")),
                 DbValue::from(status),
                 match created_by {
@@ -1696,12 +1710,16 @@ mod tests {
     #[tokio::test]
     async fn private_bot_rejected() {
         let (eg, pp, rq, bc, db) = assemble().await;
+        // visibility=private blocks bot→bot collaboration (a bot adding a
+        // private-visibility bot). Human callers are gated by `user_visibility`,
+        // not `visibility` — see user_visibility_private_for_human_caller and
+        // human_adds_visibility_private_user_visibility_public_bot_succeeds.
         seed_bot(&db, "x:priv", "private", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("human_1", "x:priv", None, None)
+            .create_connect("caller_bot:1", "x:priv", None, None)
             .await
-            .expect_err("private → PrivateBotCannotCollaborate");
+            .expect_err("bot→private visibility → PrivateBotCannotCollaborate");
         assert!(
             matches!(err, ServiceError::PrivateBotCannotCollaborate),
             "got {err:?}"
@@ -1718,6 +1736,24 @@ mod tests {
             .await
             .expect_err("user_visibility=private → Forbidden for human caller");
         assert!(matches!(err, ServiceError::Forbidden(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn human_adds_visibility_private_user_visibility_public_bot_succeeds() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        // visibility=private no longer blocks a human caller — humans are gated by
+        // `user_visibility=public`, so this bot is human-addable (mirrors the
+        // /bots/search viewer-kind selection).
+        seed_bot(&db, "x:privuvis", "private", "public", "OPEN", "online", Some("85020")).await;
+        let svc = service(&eg, &pp, &rq, &bc);
+        let res = svc
+            .create_connect("human_1", "x:privuvis", None, None)
+            .await
+            .expect("human→(visibility=private, user_visibility=public) is human-addable");
+        assert_eq!(res.status, ConnectStatus::Approved);
+        assert!(res.auto_accepted);
+        assert_eq!(res.edge_ids.len(), 1);
+        assert!(eg.has_friend_edge("human_1", "x:privuvis", "dev").await);
     }
 
     #[tokio::test]

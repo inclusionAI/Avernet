@@ -527,9 +527,51 @@ pub async fn search_bots(
         ));
     }
 
-    let effective_visibility = visibility.or_else(|| {
-        Some(vec!["public".to_string(), "protected".to_string()])
-    });
+    // Viewer kind selects WHICH visibility field gates discovery:
+    //   human viewer → judged by `user_visibility`; the bot-facing `visibility`
+    //     is neutralized (all three values match every NOT NULL row) so a
+    //     `visibility=private` bot with `user_visibility=public` stays
+    //     human-discoverable.
+    //   bot viewer / anonymous → judged by `visibility` (legacy default).
+    // Explicit `?visibility=` / `?user_visibility=` always override the default.
+    let viewer_type = q.viewer_actor_type.as_deref().map(str::trim).unwrap_or("");
+    let viewer_kind = match viewer_type {
+        "human" => Some(ActorKind::Human),
+        "bot" => Some(ActorKind::Bot),
+        _ => match caller_id.as_deref() {
+            Some(id) if id.starts_with("human_") => Some(ActorKind::Human),
+            Some(_) => Some(ActorKind::Bot),
+            None => None,
+        },
+    };
+    let default_scope = vec!["public".to_string(), "protected".to_string()];
+    let all_visibility = vec![
+        "public".to_string(),
+        "protected".to_string(),
+        "private".to_string(),
+    ];
+    let (effective_visibility, effective_user_visibility, infer_human_viewer) = match viewer_kind {
+        Some(ActorKind::Human) => (
+            Some(visibility.unwrap_or_else(|| all_visibility)),
+            Some(user_visibility.unwrap_or_else(|| default_scope.clone())),
+            viewer_actor_id.is_none(),
+        ),
+        Some(ActorKind::Bot) | None => (
+            Some(visibility.unwrap_or_else(|| default_scope.clone())),
+            user_visibility,
+            false,
+        ),
+    };
+    // Inferred human viewer: with no explicit viewer params, use the
+    // authenticated human caller as the viewer so the returned `is_friend`
+    // marker is computed against the human's friend edges. The friendship
+    // FILTER still requires explicit viewer params (guarded above), so this
+    // feeds the `is_friend` return field only — it does not change filtering.
+    let effective_viewer_actor_id = if infer_human_viewer {
+        caller_id.clone()
+    } else {
+        viewer_actor_id
+    };
 
     let result = state
         .services
@@ -537,10 +579,10 @@ pub async fn search_bots(
         .search_bots(SearchBotsCommand {
             q: q.q.clone(),
             visibility: effective_visibility,
-            user_visibility,
+            user_visibility: effective_user_visibility,
             status,
             requester_actor_id: caller_id.clone(),
-            viewer_actor_id,
+            viewer_actor_id: effective_viewer_actor_id,
             friendship: Some(match friendship {
                 FriendshipFilter::All => bcs_service_api::BotSearchFriendshipFilter::All,
                 FriendshipFilter::Friends => bcs_service_api::BotSearchFriendshipFilter::Friends,
