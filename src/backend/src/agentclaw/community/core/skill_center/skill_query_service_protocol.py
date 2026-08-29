@@ -33,6 +33,9 @@ class SkillQueryServiceProtocol(Protocol):
     def get_local_skill(self, *, skill_id: str, actor_id: str) -> dict[str, Any]: ...
 
     @abstractmethod
+    async def get_readme_by_skill(self, *, skill_id: str, actor_id: str) -> str: ...
+
+    @abstractmethod
     def get_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str
     ) -> dict[str, Any]: ...
