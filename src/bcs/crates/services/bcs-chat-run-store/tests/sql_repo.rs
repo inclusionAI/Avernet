@@ -98,6 +98,85 @@ fn repo_failing_cache() -> SqlChatRunRepo {
     )
 }
 
+/// Cache double for the P1 fail-over scenario. `set_value` and `delete` always
+/// reject (Redis can neither accept the new overlay nor evict the stale one on
+/// fail-over), while `get_value` reads an in-memory store that can be pre-seeded
+/// with a *stale* overlay — modeling Redis still holding a prior successful
+/// overlay that the rejected write cannot erase.
+struct StaleOverlayFailingCache {
+    inner: InMemoryCachePlugin,
+}
+
+impl StaleOverlayFailingCache {
+    fn new() -> Self {
+        Self {
+            inner: InMemoryCachePlugin::new(),
+        }
+    }
+
+    /// Seed a stale overlay at `key` (a prior successful write Redis still holds).
+    /// `set_value`/`delete` remain rejected.
+    async fn seed(&self, key: &str, bytes: Vec<u8>) {
+        let _ = self
+            .inner
+            .set_value(key, bytes, None, CacheSetMode::Upsert)
+            .await;
+    }
+}
+
+#[async_trait]
+impl CachePlugin for StaleOverlayFailingCache {
+    async fn get_value(&self, key: &str) -> CacheResult<Option<Vec<u8>>> {
+        self.inner.get_value(key).await
+    }
+
+    async fn set_value(
+        &self,
+        _key: &str,
+        _value: Vec<u8>,
+        _ttl: Option<Duration>,
+        _mode: CacheSetMode,
+    ) -> CacheResult<bool> {
+        Err(CacheError::Backend(
+            "injected overlay write failure".to_string(),
+        ))
+    }
+
+    async fn delete(&self, _key: &str) -> CacheResult<bool> {
+        Err(CacheError::Backend(
+            "injected overlay delete failure".to_string(),
+        ))
+    }
+
+    async fn expire(&self, key: &str, ttl: Duration) -> CacheResult<bool> {
+        self.inner.expire(key, ttl).await
+    }
+
+    async fn ttl(&self, key: &str) -> CacheResult<CacheTtl> {
+        self.inner.ttl(key).await
+    }
+
+    async fn hash_get(&self, key: &str, field: &str) -> CacheResult<Option<Vec<u8>>> {
+        self.inner.hash_get(key, field).await
+    }
+
+    async fn hash_get_all(&self, key: &str) -> CacheResult<BTreeMap<String, Vec<u8>>> {
+        self.inner.hash_get_all(key).await
+    }
+
+    async fn hash_set(&self, key: &str, field: &str, value: Vec<u8>) -> CacheResult<()> {
+        self.inner.hash_set(key, field, value).await
+    }
+
+    async fn hash_set_many(&self, key: &str, fields: BTreeMap<String, Vec<u8>>) -> CacheResult<()> {
+        self.inner.hash_set_many(key, fields).await
+    }
+
+    async fn hash_delete(&self, key: &str, field: &str) -> CacheResult<bool> {
+        self.inner.hash_delete(key, field).await
+    }
+}
+
 fn record(run_id: &str, version: u64) -> ChatRunRecord {
     let mut record = ChatRunRecord::new(
         run_id.to_string(),
@@ -258,6 +337,62 @@ async fn streaming_append_fallover_noop_when_run_already_terminal() {
     assert_eq!(stored.state, ChatRunState::Failed);
     assert_eq!(stored.accumulated_content, "final");
     assert_eq!(stored.version, 2);
+}
+
+#[tokio::test]
+async fn streaming_append_failover_ignores_stale_overlay_and_rebases_on_db() {
+    // P1: Redis still READS a stale overlay but rejects the new write, and the
+    // best-effort delete also fails. The fail-over must advance the DB to the
+    // *intended* version so the stale overlay (lower version) is never merged
+    // over it; the next append then re-bases off the DB and resumes seamlessly.
+    let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    let cache = Arc::new(StaleOverlayFailingCache::new());
+    let dyn_cache: Arc<dyn CachePlugin> = cache.clone();
+    let repo = SqlChatRunRepo::new(
+        db,
+        DbSqlFlavor::Sqlite,
+        dyn_cache,
+        "bcs:".to_string(),
+        120_000,
+        "test".to_string(),
+    );
+    repo.create(record("a", 1)).await.unwrap();
+
+    // Pretend five prior deltas streamed into the overlay while the DB stayed
+    // at the create-time version 1.
+    let stale = serde_json::to_vec(&serde_json::json!({
+        "version": 5u64,
+        "state": "running",
+        "accumulated_content": "ABCDE",
+        "content_truncated": false,
+    }))
+    .unwrap();
+    cache.seed("bcs:chat_run:a", stale).await;
+
+    // Engine read the stale overlay (v5, "ABCDE") and appended "F" → "ABCDEF",
+    // expecting v5. The overlay write is rejected → DB fail-over.
+    assert!(
+        repo.append_streaming_content("a", 5, "ABCDEF".to_string(), false)
+            .await
+            .unwrap()
+    );
+    // The fail-over wrote "ABCDEF" to the DB at the intended version 6 (NOT
+    // version+1 = v2), so the stale overlay v5 can no longer be merged over the
+    // DB row.
+    let stored = repo.get("a").await.unwrap().unwrap();
+    assert_eq!(stored.accumulated_content, "ABCDEF");
+    assert_eq!(stored.version, 6);
+
+    // The stale overlay is still readable (delete failed) but v5 < 6, so the
+    // next append bases off the DB (v6), not the stale overlay, and continues.
+    assert!(
+        repo.append_streaming_content("a", 6, "ABCDEF7".to_string(), false)
+            .await
+            .unwrap()
+    );
+    let stored = repo.get("a").await.unwrap().unwrap();
+    assert_eq!(stored.accumulated_content, "ABCDEF7");
+    assert_eq!(stored.version, 7);
 }
 
 #[tokio::test]
