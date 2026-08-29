@@ -141,18 +141,21 @@ class CallbackAdapter:
         ③ success=False + 非空 gaps → 验收不过 → acceptance_result=FAIL(→ harness 重派)。
         非法/空终态 → exec_error=terminal_result_invalid。"""
         d = data.data
-        accept = d.get("acceptance_result")
+        body = d.get("_raw_callback_body") if isinstance(d, dict) else None
+        body = body if isinstance(body, dict) else {}
+        accept = body.get("acceptance_result")
+        accept = accept if isinstance(accept, dict) else {}
         return TaskNodePatch(
-            task_id=d.get("task_id"),
-            node_id=d.get("node_id"),
-            status=Status(d.get("status")),
-            output_patch={"output" : d.get("output")},
+            task_id=body.get("task_id"),
+            node_id=d.get("node_id") or body.get("node_id"),
+            status=Status(d.get("status") or body.get("status")),
+            output_patch={"output": body.get("output")} if body.get("output") is not None else None,
             acceptance_result=AcceptanceResult(
-                verdict = AcceptanceVerdict(accept.get("verdict")),
-                acceptances_metric=accept.get("acceptances_metric"),
-                gaps=accept.get("gap")
-            ),
-            extend_props_patch = d.get("extend_props")
+                verdict=AcceptanceVerdict(accept.get("verdict")),
+                acceptances_metric=accept.get("acceptances_metric", []),
+                gaps=accept.get("gaps", []),
+            ) if accept else None,
+            extend_props_patch=body.get("extend_props"),
         )
 
     def adapt_start(self, data: TaskCallbackData) -> TaskNodePatch:

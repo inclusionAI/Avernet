@@ -306,3 +306,12 @@ class TestZeroCase:
         forbidden = ["N_overview", "N_market", "N_aggregate", "N_verify", "N_report", "N_practice", "n_root", "dim_"]
         hits = [f for f in forbidden if f in src]
         assert hits == [], f"runner 出现写死节点名: {hits}"
+
+    def test_actual(self):
+        adapter = CallbackAdapter()
+        data = {'loop_task_id': '46fa696d-1714-4294-bc36-a46c709637e2', 'node_id': 'N_dual_view', 'workflow_type': 'task_loop', 'workflow_id': 0, 'instance_id': 0, 'workflow_source': 'task_loop', 'workflow_instance_id': '', 'event_id': '', 'status': 'DONE', '_raw_callback_body': {'task_id': '46fa696d-1714-4294-bc36-a46c709637e2', 'node_id': 'N_dual_view', 'status': 'DONE', 'output': '完整分析内容...', 'acceptance_result': {'verdict': 'PASS', 'acceptances_metric': [{'ac_1': 'exec_ok'}], 'gaps': []}, 'extend_props': {}}, 'result': '完整分析内容...'}
+        task_callback_data = TaskCallbackData(data=data)
+        res = adapter.adapt(task_callback_data)
+
+        print("===" + str(res))
+
