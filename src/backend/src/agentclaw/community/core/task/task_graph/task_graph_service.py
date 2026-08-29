@@ -371,8 +371,11 @@ class TaskGraphService:
             and not self._has_child(graph, n.node_id)
             for n in graph.tasks
         )
-        if not (cond_a or cond_b or cond_c or cond_d):
-            raise GraphIntegrityError("add_task_nodes: 触发条件 a/b/c/d 均不满足")
+
+        cond_e = graph and graph.tasks and len(graph.tasks) == 1 and graph.tasks[0].status == Status.HUNG
+
+        if not (cond_a or cond_b or cond_c or cond_d or cond_e):
+            raise GraphIntegrityError("add_task_nodes: 触发条件 a/b/c/d/e 均不满足")
 
     def update_task_node_info(self, patch: TaskNodePatch) -> NodeOpResult:
         """节点级原子状态流转网关。双模式:
