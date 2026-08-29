@@ -7,11 +7,12 @@ import re
 import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any, Protocol, runtime_checkable
 
 from agentclaw.community.core.skill_center.skill_metadata import (
     SkillManifestError,
     SkillManifestErrorCode,
-    SkillMetadataParserProtocol,
+    SkillMetadata,
 )
 
 
@@ -48,10 +49,29 @@ class ValidatedSkillPackage:
     canonical_zip: bytes
 
 
+@runtime_checkable
+class SkillPackageManifestParserProtocol(Protocol):
+    """Manifest operations needed only while validating complete packages."""
+
+    @staticmethod
+    def parse_skill_markdown(
+        content: str | bytes, *, path: str = "SKILL.md"
+    ) -> SkillMetadata: ...
+
+    @staticmethod
+    def decode_content(content: bytes) -> str: ...
+
+    @staticmethod
+    def parse_config(content: str) -> list[dict[str, Any]]: ...
+
+    @staticmethod
+    def parse_legacy_upload_content(content: str) -> dict[str, Any] | None: ...
+
+
 class SkillPackageValidator:
     """Validate ZIP or directory input and return one canonical value object."""
 
-    def __init__(self, metadata_parser: SkillMetadataParserProtocol) -> None:
+    def __init__(self, metadata_parser: SkillPackageManifestParserProtocol) -> None:
         self._metadata_parser = metadata_parser
 
     def validate_zip(self, package: bytes) -> ValidatedSkillPackage:

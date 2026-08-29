@@ -17,6 +17,7 @@ provides:
   - "SkillQueryService"
   - "LocalSkillUploadService"
   - "SkillPackageValidator"
+  - "SkillPackageManifestParserProtocol"
   - "ValidatedSkillPackage"
   - "DirectActivationService"
   - "LocalSkillDeleteService"

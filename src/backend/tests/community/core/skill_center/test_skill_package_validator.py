@@ -10,6 +10,7 @@ import pytest
 from agentclaw.community.core.skill_center import skill_package as package_module
 from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageInvalidError,
+    SkillPackageManifestParserProtocol,
     SkillPackageTooLargeError,
     SkillPackageValidator,
     ValidatedSkillPackage,
@@ -48,7 +49,8 @@ def _canonical_entries(package: ValidatedSkillPackage) -> list[tuple[str, bytes]
 
 
 def test_directory_and_wrapped_zip_produce_the_same_canonical_package() -> None:
-    validator = SkillPackageValidator(SkillParser())
+    parser = SkillParser()
+    validator = SkillPackageValidator(parser)
     manifest = _skill_md(config="[{name: region, required: true}]")
     files = [
         ("weather/scripts/fetch.py", b"print('weather')"),
@@ -75,6 +77,7 @@ def test_directory_and_wrapped_zip_produce_the_same_canonical_package() -> None:
         ("scripts/fetch.py", b"print('weather')"),
     )
     assert _canonical_entries(from_zip) == list(from_zip.files)
+    assert isinstance(parser, SkillPackageManifestParserProtocol)
 
 
 def test_directory_and_zip_ignore_metadata_before_applying_file_limits(
