@@ -16,9 +16,9 @@ from agentclaw.community.core.skill_center.skill_package import (
     ValidatedSkillPackage,
 )
 from agentclaw.community.plugin_api.object_storage import (
+    ImmutableObjectStorageCapability,
     ObjectCreateResult,
     ObjectReadStatus,
-    ObjectStoragePlugin,
 )
 
 
@@ -28,7 +28,7 @@ class OssDraftContentStore:
     def __init__(
         self,
         *,
-        object_storage: ObjectStoragePlugin,
+        object_storage: ImmutableObjectStorageCapability,
         package_validator: SkillPackageValidator,
         config: DraftContentStoreConfig,
     ) -> None:

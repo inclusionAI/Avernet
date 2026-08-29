@@ -13,7 +13,10 @@ from agentclaw.community.core.skill_center.services.draft_content_store import (
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
-from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
+from agentclaw.community.plugin_api.object_storage import (
+    ImmutableObjectStorageCapability,
+    ObjectStoragePlugin,
+)
 
 
 class DraftContentStoreBindings:
@@ -27,6 +30,11 @@ class DraftContentStoreBindings:
         object_storage: ObjectStoragePlugin,
         config: DraftContentStoreConfig,
     ) -> DraftContentStore:
+        if not isinstance(object_storage, ImmutableObjectStorageCapability):
+            raise ValueError(
+                "DraftContentStore requires object storage with atomic "
+                "create-if-absent and three-state read support"
+            )
         return OssDraftContentStore(
             object_storage=object_storage,
             package_validator=SkillPackageValidator(SkillParser()),
