@@ -149,7 +149,7 @@
       "eval_template_uuid": "",
       "personal_bot_template_uuid": "",
       "teclaw_template_uuid": "",
-      "template_uuid": "",
+      "template_uuid": "${BAAS_TEMPLATE_ID:-}",
       "tenant": "community"
     },
     "bcn": {
