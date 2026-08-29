@@ -117,6 +117,13 @@ class TemplateRunRequestDTO(BaseModel):
 
     template_id: str = Field(..., min_length=1)
     input: dict[str, Any] = Field(default_factory=dict)
+    auto_advance: bool | None = Field(
+        default=None,
+        description=(
+            "演示自驱开关:true=跳过真实派发用 mock 结果推进静态 DAG,"
+            "false=强制真实派发,null=由服务端 env OCB_TASK_STATIC_AUTO_REPORT 决定。"
+        ),
+    )
 
 
 class TaskInfoRequestDTO(BaseModel):

@@ -73,7 +73,8 @@ async def run_template(
 ) -> Envelope[TaskOpResultDTO]:
     """Run a preconfigured static DAG; the skill only supplies template_id and input."""
     result = await service.run_template(body.template_id, body.input,
-                                        owner_user_id=caller_owner_id(principal), owner_bot_id="")
+                                        owner_user_id=caller_owner_id(principal), owner_bot_id="",
+                                        auto_advance=body.auto_advance)
     return envelope(op_result_to_dto(result), request)
 
 

@@ -145,6 +145,7 @@ async def run_template_internal(
         body.input,
         owner_user_id="",
         owner_bot_id="",
+        auto_advance=body.auto_advance,
     )
     return envelope(op_result_to_dto(result), request)
 

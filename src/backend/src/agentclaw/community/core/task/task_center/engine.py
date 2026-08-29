@@ -502,10 +502,16 @@ class ExecutionEngine:
         )
         await self._drain(task_id, side)
 
-    def _static_auto_report_on(self) -> bool:
+    def _static_auto_report_on(self, task_id: str) -> bool:
         """演示自驱开关:开启后静态 plan 节点不做真实派发/拉群,转为后台自回投 mock 结果,
         复用同一 on_report 通路推进图态,便于上报/skill 未就绪时也能跑通全链路。
-        env: OCB_TASK_STATIC_AUTO_REPORT in {1,true,yes,on}"""
+        优先级:按任务 execution_config.static_auto_report(bool) → 服务端 env OCB_TASK_STATIC_AUTO_REPORT。"""
+        cfg = self._graph._execution_config(task_id)
+        if cfg.get("task_type") != "static_plan":
+            return False
+        flag = cfg.get("static_auto_report")
+        if isinstance(flag, bool):
+            return flag
         return os.environ.get("OCB_TASK_STATIC_AUTO_REPORT", "").lower() in {"1", "true", "yes", "on"}
 
     async def _prepare_static(self, task_id: str, runtime, side: list[tuple]) -> None:
@@ -554,7 +560,7 @@ class ExecutionEngine:
         不进 dispatcher.dispatch / 不查 catalog / 不做 claim_join,故未 ready 的依赖节点
         (strategy_approval/implementation)不会被提前搜推成 MISS/claim_mode_off,且 YAML 绑定
         的 bot_id 永远被尊重(不会被 catalog 命中的其他 bot 替换)。依赖顺序由 runtime.ready 保证。"""
-        auto = self._static_auto_report_on()
+        auto = self._static_auto_report_on(task_id)
         to_run: list[TaskNode] = []
         auto_nodes: list[TaskNode] = []
         for node in ready_nodes:

@@ -174,7 +174,8 @@ class TaskService:
         )
 
     async def run_template(self, template_id: str, inputs: dict[str, Any], *,
-                           owner_user_id: str, owner_bot_id: str) -> TaskOpResult:
+                           owner_user_id: str, owner_bot_id: str,
+                           auto_advance: bool | None = None) -> TaskOpResult:
         """Load and validate a static template, then enter the existing execute path."""
         from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
         logger.info(
@@ -223,6 +224,7 @@ class TaskService:
                 "static_plan_id": template_id,
                 "static_plan_yaml": plan_yaml,
                 "template_input": dict(inputs),
+                "static_auto_report": auto_advance,
             },
         )
         result = await self.execute(request)

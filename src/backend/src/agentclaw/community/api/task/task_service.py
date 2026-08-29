@@ -20,7 +20,7 @@ class TaskServiceProtocol(Protocol):
     """系统唯一对外入口。facade 内部由 ExecutionEngine 编排核协调
     TaskGraphService/TaskPlanner/TaskDispatcher/TaskRunner。"""
 
-    async def run_template(self, template_id: str, inputs: dict, *, owner_user_id: str, owner_bot_id: str) -> TaskOpResult:
+    async def run_template(self, template_id: str, inputs: dict, *, owner_user_id: str, owner_bot_id: str, auto_advance: bool | None = None) -> TaskOpResult:
         """Run a configured static template through the normal task execution path."""
         ...
 
