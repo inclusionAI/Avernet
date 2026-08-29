@@ -32,6 +32,9 @@ from agentclaw.community.adapters.http.openapi_v1.authorized_apps import (
 )
 from agentclaw.community.adapters.http.openapi_v1.bots import router as bots_router
 from agentclaw.community.adapters.http.openapi_v1.local import router as local_router
+from agentclaw.community.adapters.http.openapi_v1.routines.owner_router import (
+    router as routines_owner_router,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.spaces import router as spaces_router
 from agentclaw.community.adapters.http.openapi_v1.work_orders import (
@@ -40,6 +43,9 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders import (
 from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTES
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
+from agentclaw.community.api.cron_relay_service import (
+    CronRelayServiceProtocol,
+)
 from agentclaw.community.api.local_bot_workflow_service import (
     LocalBotWorkflowServiceProtocol,
 )
@@ -218,6 +224,7 @@ def make_client(bots):
                 binder.bind(BotServiceProtocol, to=bots)
                 binder.bind(BotAppGrantServiceProtocol, to=_Grants(*grant_ids))
                 unexpected = _UnexpectedService()
+                binder.bind(CronRelayServiceProtocol, to=unexpected)
                 binder.bind(SpaceServiceProtocol, to=unexpected)
                 binder.bind(SpaceMemberServiceProtocol, to=unexpected)
                 binder.bind(SpaceSkillQueryServiceProtocol, to=unexpected)
@@ -242,6 +249,8 @@ def make_client(bots):
         # mounts them: ``/openapi/v1/bots/{bot_id}`` would otherwise claim
         # ``/openapi/v1/bots/authorized`` as "the bot named authorized".
         app.include_router(app_view_router)
+        # Same rule for the owner-routines literal: ``routines`` is not a bot id.
+        app.include_router(routines_owner_router)
         app.include_router(local_router)
         app.include_router(bots_router)
         app.include_router(spaces_router)
@@ -661,6 +670,12 @@ _UNGRANTED_APP_CASES = {
         "request": lambda client: client.get("/openapi/v1/bots/skills/repository/1"),
         "assert_starved": lambda response: response.status_code == 404,
     },
+    ("GET", "/openapi/v1/bots/skills/{skill_id}/readme"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/skills/1/readme"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
     ("POST", "/openapi/v1/bots/skills/repository/sync"): {
         "request": lambda client: client.post(
             "/openapi/v1/bots/skills/repository/sync"
@@ -705,6 +720,15 @@ _UNGRANTED_APP_CASES = {
         "request": lambda client: client.get("/openapi/v1/bots/ceiling"),
         # USER_GATED: no delegation, no relationship — masked as not-found, so
         # a stranger app cannot read a person's quota by naming them.
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/routines/all"): {
+        "request": lambda client: client.get("/openapi/v1/bots/routines/all"),
+        # USER_GATED, the ceiling's exact shape: the aggregate reads the named
+        # user's whole routine fleet, so an app with no delegation from them is
+        # answered as if the user did not exist. The cron service stays
+        # untouched — it is bound to `_UnexpectedService` in the fixture, so a
+        # regression that asks it anyway fails here rather than leaking rows.
         "assert_starved": lambda response: response.status_code == 404,
     },
     ("GET", "/openapi/v1/bots/spaces"): {

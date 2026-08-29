@@ -197,6 +197,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
             user_id=req.user_id,
             entity_type=req.entity_type,
             engine_type=req.engine_type,
+            strict_policy_context=True,
         )
         # ``collect_bot_active_mcps`` returns only the skill-set association fields
         # (server_code/name/…) — it deliberately does NOT call MCP Center. The

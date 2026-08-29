@@ -65,6 +65,22 @@ def skill_release_scope(result: DesiredStateMutation) -> ProjectionScope:
     )
 
 
+def mcp_claim_scope(result: DesiredStateMutation) -> ProjectionScope:
+    """Project only the MCP codes the committed mutation actually claimed."""
+    return ProjectionScope(
+        mcp=bool(result.mcp_codes),
+        claimed_mcp=result.mcp_codes,
+    )
+
+
+def mcp_release_scope(result: DesiredStateMutation) -> ProjectionScope:
+    """Project only the MCP codes the committed mutation actually released."""
+    return ProjectionScope(
+        mcp=bool(result.mcp_codes),
+        released_mcp=result.mcp_codes,
+    )
+
+
 class MutationProjectionFlow:
     """Apply one desired-state mutation and synchronously project the runtime.
 
@@ -94,6 +110,7 @@ class MutationProjectionFlow:
         scope_from_result: (
             Callable[[DesiredStateMutation], ProjectionScope] | None
         ) = None,
+        skip_projection_when_unchanged: bool = False,
     ) -> dict:
         """Run the command; return ``{**item, "changed": ..., **details}``.
 
@@ -110,16 +127,14 @@ class MutationProjectionFlow:
         ``ProjectionScope.everything()`` and says so out loud.
 
         ``scope_from_result`` covers the commands that cannot name their scope
-        up front: activate, deactivate, and the Skill commands learn which
-        MCPs they claimed or released only from the mutation result, which the
-        repository fills in under the row lock it already holds. Building the
-        scope from a second, unlocked query instead could disagree with what
-        was actually installed.
+        up front: activate and membership commands learn which MCPs they
+        claimed or released only from the mutation result, which the repository
+        fills in under the row lock it already holds. Building the scope from a
+        second, unlocked query instead could disagree with what was actually
+        installed.
         """
         if (scope is None) == (scope_from_result is None):
-            raise ValueError(
-                "exactly one of scope / scope_from_result is required"
-            )
+            raise ValueError("exactly one of scope / scope_from_result is required")
         if not runtime_required:
             result = mutation()
             return {**result.item, "changed": result.changed, **result.details}
@@ -131,6 +146,8 @@ class MutationProjectionFlow:
             owner_id=owner_id,
         )
         result = mutation()
+        if skip_projection_when_unchanged and not result.changed:
+            return {**result.item, "changed": False, **result.details}
         effective_scope = (
             scope_from_result(result) if scope_from_result is not None else scope
         )

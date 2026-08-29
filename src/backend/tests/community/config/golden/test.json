@@ -104,6 +104,7 @@
       "default_ttl_minutes": 10080,
       "desktop_template_uuid": "",
       "desktop_ttl_minutes": 0,
+      "eval_template_uuid": "",
       "personal_bot_template_uuid": "",
       "teclaw_template_uuid": "",
       "template_uuid": "",
@@ -218,6 +219,9 @@
       "scan_interval_hours": 1,
       "scan_interval_minutes": 0,
       "storage_dir": "./data/skills_scan"
+    },
+    "task_queue": {
+      "app": "agentclaw"
     },
     "task_queue_worker": {
       "batch_size": 10,

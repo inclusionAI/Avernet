@@ -315,11 +315,12 @@ def test_unified_space_join_approval_adds_member_in_same_transaction(db) -> None
             .filter(WorkOrderModel.id == record.id)
             .scalar()
         )
-        member_role, member_status, member_created_by = (
+        member_role, member_status, member_created_by, member_user_name = (
             session.query(
                 SpaceMemberModel.role,
                 SpaceMemberModel.status,
                 SpaceMemberModel.created_by,
+                SpaceMemberModel.user_name,
             )
             .filter(
                 SpaceMemberModel.space_id == team.id,
@@ -339,6 +340,7 @@ def test_unified_space_join_approval_adds_member_in_same_transaction(db) -> None
     assert member_role == SpaceRole.MEMBER.value
     assert member_status == "ACTIVE"
     assert member_created_by == "owner-unified"
+    assert member_user_name == "applicant-unified"
     assert notice_category == NotificationCategory.NOTICE.value
 
     _, items = spaces.list_spaces(
@@ -738,6 +740,7 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
                 title="approved",
                 content="approved content",
             ),
+            applicant_user_name="Applicant",
             env="dev",
         )
     approved_notification = _review_notification(
@@ -752,13 +755,13 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
         review_remark="ok",
         target_status=WorkOrderStatus.APPROVED,
         notification=approved_notification,
+        applicant_user_name="Applicant",
         env="dev",
     )
     assert result.status is WorkOrderStatus.APPROVED
-    assert (
-        spaces.get_member(space_id=space.id, user_id="applicant-1", env="dev")
-        is not None
-    )
+    member = spaces.get_member(space_id=space.id, user_id="applicant-1", env="dev")
+    assert member is not None
+    assert member.user_name == "Applicant"
     _, joined_spaces = spaces.list_spaces(
         user_id="applicant-1",
         env="dev",
@@ -789,6 +792,7 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
                 title="rejected",
                 content="rejected content",
             ),
+            applicant_user_name=None,
             env="dev",
         )
 
@@ -911,6 +915,7 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
             title="custom rejected title",
             content="custom rejected content",
         ),
+        applicant_user_name=None,
         env="dev",
     )
     assert result.status is WorkOrderStatus.REJECTED
@@ -975,3 +980,92 @@ def test_badge_counts_distinct_pending_work_orders(db) -> None:
     assert summary.unread_count == 2
     assert summary.pending_approval_count == 1
     assert summary.badge_count == 1
+
+
+def test_friend_approval_context_and_reviewed_event_use_original_applied_event(
+    db,
+) -> None:
+    repository = WorkOrderRepository(db)
+    created = repository.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        biz_type=WorkOrderBizType.BOT_FRIEND.value,
+        biz_id="legacy-id",
+        event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value,
+        applicant_user_id="applicant-friend",
+        approver_user_ids=["reviewer-friend"],
+        recipient_user_ids=[],
+        title="friend approval",
+        content=None,
+        apply_reason=None,
+        biz_data=json.dumps({"request_ids": ["request-88"]}),
+        env="dev",
+    )
+    assert created.work_order_id is not None
+
+    context = repository.get_approval_context(
+        work_order_id=created.work_order_id,
+        reviewer_user_id="reviewer-friend",
+        env="dev",
+    )
+
+    assert context.source_event_type == WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value
+    assert context.work_order.status is WorkOrderStatus.PENDING
+    assert context.approver.status is WorkOrderApproverStatus.PENDING
+
+    repository.process_approval(
+        work_order_id=created.work_order_id,
+        reviewer_user_id="reviewer-friend",
+        decision=WorkOrderDecision.APPROVED,
+        review_remark=None,
+        env="dev",
+    )
+
+    with db.orm_session() as session:
+        result_event_type = (
+            session.query(WorkOrderNotificationModel.event_type)
+            .filter(
+                WorkOrderNotificationModel.work_order_id == created.work_order_id,
+                WorkOrderNotificationModel.recipient_user_id == "applicant-friend",
+                WorkOrderNotificationModel.notification_category
+                == NotificationCategory.NOTICE.value,
+            )
+            .scalar()
+        )
+    assert result_event_type == WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED.value
+
+
+def test_get_approval_context_rejects_missing_order(db) -> None:
+    repository = WorkOrderRepository(db)
+
+    with pytest.raises(WorkOrderNotFoundError):
+        repository.get_approval_context(
+            work_order_id=999,
+            reviewer_user_id="reviewer-friend",
+            env="dev",
+        )
+
+
+def test_get_approval_context_rejects_non_approver(db) -> None:
+    repository = WorkOrderRepository(db)
+    created = repository.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        biz_type=WorkOrderBizType.BOT_FRIEND.value,
+        biz_id="friend-id",
+        event_type=WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value,
+        applicant_user_id="applicant-friend",
+        approver_user_ids=["reviewer-friend"],
+        recipient_user_ids=[],
+        title="friend approval",
+        content=None,
+        apply_reason=None,
+        biz_data=json.dumps({"request_ids": ["request-99"]}),
+        env="dev",
+    )
+    assert created.work_order_id is not None
+
+    with pytest.raises(WorkOrderAccessDeniedError):
+        repository.get_approval_context(
+            work_order_id=created.work_order_id,
+            reviewer_user_id="other-user",
+            env="dev",
+        )

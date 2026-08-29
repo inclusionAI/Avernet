@@ -7,6 +7,7 @@ from typing import Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.work_orders.models import (
+        WorkOrderApprovalContext,
         WorkOrderDetail,
         WorkOrderItemType,
         WorkOrderListItem,
@@ -57,6 +58,11 @@ class WorkOrderRepositoryProtocol(Protocol):
         notification_recipient_user_ids: list[str],
         env: str,
     ) -> WorkOrderRecord: ...
+
+    @abstractmethod
+    def get_approval_context(
+        self, *, work_order_id: int, reviewer_user_id: str, env: str
+    ) -> WorkOrderApprovalContext: ...
 
     @abstractmethod
     def process_approval(
@@ -122,6 +128,7 @@ class WorkOrderRepositoryProtocol(Protocol):
         review_remark: str | None,
         target_status: WorkOrderStatus,
         notification: WorkOrderNotificationDraft,
+        applicant_user_name: str | None,
         env: str,
     ) -> WorkOrderReviewResult: ...
 

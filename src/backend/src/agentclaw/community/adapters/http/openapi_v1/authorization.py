@@ -381,6 +381,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/all"): NoCheck("a collection, not one addressed bot"),
     ("GET", "/openapi/v1/bots/authorized"):
         NoCheck("a collection, not one addressed bot"),
+    ("GET", "/openapi/v1/bots/routines/all"):
+        NoCheck("a collection, not one addressed bot"),
     ("GET", "/openapi/v1/bots/catalog/discover"): NoCheck("tenant-identical catalogue"),
     ("GET", "/openapi/v1/bots/catalog/search"): NoCheck("tenant-identical catalogue"),
     ("GET", "/openapi/v1/bots/ceiling"):
@@ -435,6 +437,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("the shared skill repository, owned by no bot"),
     ("GET", "/openapi/v1/bots/skills/{skill_code}/publish/status"):
         NoCheck("Skill Center publish status, keyed by skill code not by bot"),
+    ("GET", "/openapi/v1/bots/skills/{skill_id}/readme"):
+        NoCheck("Skill README access is adjudicated by the Skill query service"),
     ("GET", "/openapi/v1/bots/spaces"):
         NoCheck("Space membership, adjudicated by the Space service"),
     ("POST", "/openapi/v1/bots/spaces/create"):
@@ -483,7 +487,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("the named user's own work orders and notifications"),
     ("POST", "/openapi/v1/bots/work-orders/{work_order_id}/reject"):
         NoCheck("the named user's own work orders and notifications"),
-    # ── Task public surface (execute/dashboard/list; mounted via the gateway
+    # ── Task public surface (execute/dashboard/list + grant/revoke stateless relay; mounted via the gateway
     # ── `collaboration-tasks` domain → backend). Tasks address no bot, so the
     # ── bot-level `Check` does not apply; the caller identity is resolved by
     # ── the gateway spanner + `_PUBLIC_AUTH`; `list` uses caller-selected
@@ -495,6 +499,10 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("a task, not a bot; read-only task graph by task_id"),
     ("GET", "/openapi/v1/collaboration/tasks/list"):
         NoCheck("a task, not a bot; filters records by the named user"),
+    ("POST", "/openapi/v1/collaboration/tasks/grant"):
+        NoCheck("a stateless relay to secbaas; the human Cookie/Referer authorizes the grant, not a bot permission"),
+    ("POST", "/openapi/v1/collaboration/tasks/revoke"):
+        NoCheck("a stateless relay to secbaas; the human Cookie/Referer authorizes the revoke, not a bot permission"),
 
     # ── Retiring addresses in ``deprecated/`` ─────────────────────────────
     ("GET", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER),

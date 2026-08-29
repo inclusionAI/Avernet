@@ -25,6 +25,7 @@ from typing import Any
 
 from injector import Module, inject, provider, singleton
 
+from agentclaw.community.core.task_queue.types import MAX_APP_LEN
 from agentclaw.community.di import config as cfg
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.plugin_api.http_client import (
@@ -61,6 +62,24 @@ def _block(name: str) -> dict[str, Any]:
     """Pull one named block out of ``user_config``; ``{}`` if missing."""
     raw = _user_config().get(name) or {}
     return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _app_name() -> str | None:
+    """The **top-level** ``app_name``, or ``None`` when there is no config.
+
+    Same defensiveness as :func:`_user_config` — local mode and ad-hoc tests
+    often have no sofa config at all — but the two outcomes are kept apart on
+    purpose: ``None`` means "nothing to read", while ``""`` means an app config
+    that names itself nothing. Only the consumer knows which of those is a
+    misconfiguration worth refusing (see :meth:`ConfigModule.task_queue`).
+    """
+    try:
+        from agentclaw.community.core.config import sofa
+
+        return str(getattr(sofa.sofa_config, "app_name", "") or "")
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning("ConfigModule: sofa app_name unavailable (%s)", exc)
+        return None
 
 
 # The closed set of HttpClient bindings an ``overrides`` entry may name. Taken
@@ -571,6 +590,9 @@ class ConfigModule(Module):
             teclaw_template_uuid=block.get(
                 "teclaw_template_uuid", defaults.teclaw_template_uuid
             ),
+            eval_template_uuid=block.get(
+                "eval_template_uuid", defaults.eval_template_uuid
+            ),
             personal_bot_template_uuid=block.get(
                 "personal_bot_template_uuid", defaults.personal_bot_template_uuid
             ),
@@ -831,6 +853,68 @@ class ConfigModule(Module):
                 "action_link_pattern", defaults.action_link_pattern
             ),
         )
+
+    @singleton
+    @provider
+    def task_queue(self) -> cfg.TaskQueueConfig:
+        """Which application owns this deployment's ``ac_task_queue`` rows.
+
+        Read from the **top-level** ``app_name`` — the name the deployment
+        already goes by — rather than from a queue-specific key. Two backends
+        share the table and each claims only its own rows, so the owner is the
+        deployment's identity; giving it a second, independently settable name
+        would only create a way for the two to disagree.
+
+        No config at all (local mode, ad-hoc tests) ⇒ ``TaskQueueConfig``'s
+        default, which is the column default on the deployed table, so a
+        deployment that never set ``app_name`` keeps owning exactly the rows it
+        already owned.
+
+        A *present* but unusable value **raises** rather than falling back, and
+        the fallback is the reason: the default is the *other* deployment's name
+        as often as not, so quietly substituting it is how one backend starts
+        claiming and failing another's tasks — the failure this column exists to
+        prevent. Three rejections, each a value the ``app`` column cannot carry
+        faithfully:
+
+        - empty or whitespace-only — names no application at all;
+        - leading or trailing whitespace — MySQL/OceanBase compare with a PAD
+          SPACE collation, so ``"claw "`` and ``"claw"`` are one app there and
+          two on SQLite, which is a divergence no test on SQLite can see;
+        - longer than the stored width — a non-strict server truncates, and the
+          rows are then filed under a name the claim filter never matches, so
+          the work is enqueued and simply never runs.
+
+        ``container.py`` resolves ``TaskQueueConfig`` eagerly at build time (as
+        it does ``HttpClientPoolConfig``) so this raise stops the boot on every
+        profile instead of being swallowed by lifecycle discovery — which would
+        leave the app running with no worker and no explanation.
+        """
+        defaults = cfg.TaskQueueConfig()
+        app = _app_name()
+        if app is None:
+            return defaults
+        if not app.strip():
+            raise ValueError(
+                "app_name must name the application; it also owns this "
+                "deployment's ac_task_queue rows, and it is empty"
+            )
+        if app != app.strip():
+            raise ValueError(
+                f"app_name must not have leading or trailing whitespace "
+                f"({app!r}); it is stored on every ac_task_queue row, and "
+                "MySQL/OceanBase compare with a PAD SPACE collation, so such a "
+                "name would be a different app on SQLite than in production"
+            )
+        if len(app) > MAX_APP_LEN:
+            raise ValueError(
+                f"app_name exceeds {MAX_APP_LEN} chars ({len(app)}); it is "
+                f"stored on every ac_task_queue row in a VARCHAR({MAX_APP_LEN}), "
+                "and a non-strict MySQL/OceanBase would truncate it — this "
+                "deployment would then enqueue rows under the truncated name and "
+                "claim under the full one, so none of its own work would ever run"
+            )
+        return cfg.TaskQueueConfig(app=app)
 
     @singleton
     @provider

@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         DeviceContextResolver,
     )
     from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
+    from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
 from agentclaw.community.core.mcp.services._defaults import (
     get_default_mcp_config,
     get_default_mcp_server_codes,
@@ -36,6 +37,10 @@ from agentclaw.community.core.skill_center.policies.default_skill_set_selection 
 )
 from agentclaw.community.core.skill_center.path_resolution import (
     canonical_pool_local_path,
+)
+from agentclaw.community.core.skill_center.runtime_resolver import (
+    RuntimeDesiredState,
+    resolve_effective_mcp_server_codes,
 )
 from agentclaw.community.core.skill_center.utils.skill_metadata_writer import SkillSetMetadataWriter
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE  # noqa: E402
@@ -509,13 +514,30 @@ class SkillSetService:
             logger.warning(f"[_sync_symlinks_to_device_if_needed] Failed to sync symlinks: {e}", exc_info=True)
             return False
 
-    def sync_runtime(self, *, desired_skills: list[dict] | None = None) -> bool:
-        """Apply one complete resolver-owned skill snapshot to the runtime."""
-        return self._sync_symlinks_to_device_if_needed(
-            self.user_id or self.entity_id, desired_skills
+    async def project_skills(
+        self, *, desired_skills: list[dict] | None = None
+    ) -> bool:
+        """Apply one complete resolver-owned skill snapshot to the runtime.
+
+        Async to match ``project_mcps``: the two halves of the capability
+        boundary are one contract and should not differ in calling convention
+        just because their internals do.
+
+        The blocking work is dispatched here rather than by callers.
+        ``_sync_symlinks_to_device_if_needed`` is synchronous and carries
+        device resolution (including a blocking ws-info HTTP call), and on a
+        whole-artifact engine a full artifact compose and the outbound apply
+        request behind it. Owning the ``to_thread`` here makes staying off the
+        event loop a property of this method, which no caller can forget —
+        the same reason ``sync_mcp_desired_state`` wraps its own device calls.
+        """
+        return await asyncio.to_thread(
+            self._sync_symlinks_to_device_if_needed,
+            self.user_id or self.entity_id,
+            desired_skills,
         )
 
-    async def sync_mcp_projection(
+    async def project_mcps(
         self,
         *,
         claimed: frozenset[str],
@@ -1588,7 +1610,7 @@ class SkillSetService:
         *,
         strict_policy_context: bool = False,
     ) -> List[dict]:
-        """Effective MCPs = default policy ∪ installed.
+        """Effective MCPs = default policy ∪ installed ∪ Skill dependencies.
 
         The Default half keeps its proven projection: static engine/template
         defaults plus Default-Set rows, minus this Bot's exclusions. Ordinary
@@ -1655,11 +1677,19 @@ class SkillSetService:
                 seen_server_codes=seen_server_codes,
             )
         )
-        active_mcps.extend(
-            self._installed_only_mcp_entries(
-                installed_codes=self._installed_mcp_codes(
+        effective_non_default_codes = resolve_effective_mcp_server_codes(
+            RuntimeDesiredState(
+                skills=self._active_skill_assets(
                     entity_id=entity_id, bot_id=bot_id, user_id=user_id
                 ),
+                installed_mcp_server_codes=self._installed_mcp_codes(
+                    entity_id=entity_id, bot_id=bot_id, user_id=user_id
+                ),
+            )
+        )
+        active_mcps.extend(
+            self._non_default_effective_mcp_entries(
+                effective_codes=effective_non_default_codes,
                 active_skill_sets=active_skill_sets,
                 seen_server_codes=seen_server_codes,
             )
@@ -1766,21 +1796,44 @@ class SkillSetService:
             )
             return frozenset()
 
-    def _installed_only_mcp_entries(
+    def _active_skill_assets(
+        self, *, entity_id: str, bot_id: str, user_id: str
+    ) -> tuple["RegisteredSkillAsset", ...]:
+        """Installed Skill assets whose declarations supply derived MCP codes."""
+        try:
+            return self._reader.active_skill_assets(
+                bot_id=bot_id, owner_id=user_id
+            )
+        except LocalSkillNotFoundError:
+            bot = self._bot_repo.get_by_id_and_entity(bot_id, entity_id)
+            owner = str(bot.get("owner_id") or "") if bot else ""
+            if bot is not None and owner and owner != user_id:
+                return self._reader.active_skill_assets(
+                    bot_id=bot_id, owner_id=owner, bot=bot
+                )
+            logger.warning(
+                "[collect_bot_active_mcps] Bot not found while reading Skill "
+                "dependencies: user_id=%s, bot_id=%s",
+                user_id,
+                bot_id,
+            )
+            return ()
+
+    def _non_default_effective_mcp_entries(
         self,
         *,
-        installed_codes,
+        effective_codes,
         active_skill_sets: List[dict],
         seen_server_codes: set,
     ) -> List[dict]:
-        """Installed codes no Default entry covered, with membership metadata.
+        """Non-default Effective codes, enriched from membership when possible.
 
         An ordinary Set's association row is the best metadata an installed
-        code can have; a direct installation has none, so its entry is
-        minimal.
+        code can have. Direct Installation and Skill dependency supply have no
+        membership row, so their entries are minimal.
         """
         missing_codes = [
-            code for code in sorted(installed_codes)
+            code for code in sorted(effective_codes)
             if code not in seen_server_codes
         ]
         if not missing_codes:

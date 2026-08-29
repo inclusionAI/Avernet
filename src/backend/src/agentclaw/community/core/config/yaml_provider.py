@@ -117,14 +117,39 @@ def _load_yaml_configs(
     *,
     strict: bool = True,
 ) -> dict[str, Any]:
-    """Merge application.yaml with the caller-selected overlay, expanding env vars."""
+    """Merge application.yaml with the caller-selected overlay, expanding env vars.
+
+    Three-layer merge: base → community overlay → corp overlay (optional).
+    The corp overlay (``{overlay_name}-corp.yaml``) injects real credentials
+    and values that should NOT live in community source (ocb-public). It is
+    absent in community-only / test builds and simply skipped.
+    """
     # B11: configs live in the community subtree (agentclaw/community/configs). In a
     # deploy the assembled runtime `configs/` (cwd) holds them; in the monorepo they
     # resolve from the subtree. Community never searches corp/configs — the test
     # suite reads only community overlays, and corp prod reads config via sofapy.
+    community_root = Path(__file__).resolve().parents[2]  # agentclaw/community
     config_dirs = [
         Path.cwd() / "configs",
-        Path(__file__).resolve().parents[2] / "configs",  # agentclaw/community/configs
+        community_root / "configs",  # agentclaw/community/configs
+    ]
+
+    # Corp overlay search dirs (deployed configs/ + the corp subtree that sits
+    # beside community in the same package).
+    # Filename: application-singlebox-corp.yaml (derived from overlay name).
+    #
+    # Anchored on the package layout rather than a fixed count of parent hops:
+    # the corp tree is always ``agentclaw/corp/configs``, whatever absolute path
+    # the package is installed at. A hardcoded ascent has to guess that depth, and
+    # guessing too high raises ``IndexError`` — unconditionally, since this list is
+    # built before any overlay is read, so a shallow install root would break every
+    # config load rather than merely skipping the optional corp layer. ``.parent``
+    # cannot walk off the top of a path, so this cannot raise.
+    stem = overlay_name.removesuffix(".yaml")
+    corp_overlay_name = f"{stem}-corp.yaml"
+    corp_config_dirs = [
+        Path.cwd() / "configs",
+        community_root.parent / "corp" / "configs",  # agentclaw/corp/configs
     ]
 
     for config_dir in config_dirs:
@@ -138,6 +163,17 @@ def _load_yaml_configs(
             overlay_config = yaml.safe_load(file) or {}
         logger.info("YamlConfigProvider loaded overlay: %s", overlay_path)
         merged = _deep_merge(base_config, overlay_config)
+
+        # Third layer: corp overlay (optional, absent in community-only builds).
+        for cdir in corp_config_dirs:
+            corp_path = cdir / corp_overlay_name
+            if corp_path.exists():
+                with open(corp_path, "r", encoding="utf-8") as f:
+                    corp_config = yaml.safe_load(f) or {}
+                logger.info("YamlConfigProvider loaded corp overlay: %s", corp_path)
+                merged = _deep_merge(merged, corp_config)
+                break
+
         # Expand after the merge so an overlay can introduce a placeholder the
         # base does not carry, and before AppConfig so every consumer — typed
         # dataclass providers included — reads resolved values.

@@ -93,9 +93,25 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 router = APIRouter(prefix="/api/skillsets", tags=["skillsets"])
+_LEGACY_SKILL_SET_BATCH_PARTIAL_CONFLICTS = frozenset(
+    {
+        "RESOURCE_DIRECT_ACTIVE",
+        "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
+    }
+)
 
 
 # ==================== Helper Functions ====================
+
+
+def _is_legacy_skill_set_batch_partial_failure(error: Exception) -> bool:
+    """Whether the published BFF batch records this domain error per member."""
+    return isinstance(
+        error, (LocalSkillNotFoundError, SkillSetControlPlaneNotFoundError)
+    ) or (
+        isinstance(error, SkillSetControlPlaneConflictError)
+        and str(error) in _LEGACY_SKILL_SET_BATCH_PARTIAL_CONFLICTS
+    )
 
 
 def _legacy_actor(ctx: RequestContext, requested_user_id: str | None) -> str:
@@ -189,7 +205,14 @@ def _get_path_params(
             e,
         )
 
-    return effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop
+    return (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        runtime_engine,
+        effective_entity_type,
+        is_desktop,
+    )
 
 
 def _get_skill_set_path_params(
@@ -499,6 +522,7 @@ async def get_skill_set(
     ),
 ) -> SkillSetDetailResponse:
     """Get a skill set by ID."""
+    owner_id_hint = user_id or entity_id
     # Get effective path parameters
     (
         effective_entity_id,
@@ -510,7 +534,7 @@ async def get_skill_set(
     ) = _get_skill_set_path_params(
         ctx,
         set_id=skill_set_id,
-        entity_id=entity_id,
+        entity_id=owner_id_hint,
         entity_type=entity_type,
         bot_id=bot_id,
         engine_type=engine_type,
@@ -550,6 +574,7 @@ async def update_skill_set(
     ),
 ) -> SkillSetDetailResponse:
     """Update a skill set."""
+    owner_id_hint = request.user_id or entity_id
     # Preserve omission so the legacy resolver can recover a non-default Bot.
     bot_id_hint = bot_id or request.bot_id
     (
@@ -562,7 +587,7 @@ async def update_skill_set(
     ) = _get_skill_set_path_params(
         ctx,
         set_id=skill_set_id,
-        entity_id=entity_id,
+        entity_id=owner_id_hint,
         entity_type=entity_type,
         bot_id=bot_id_hint,
         engine_type=engine_type,
@@ -609,6 +634,7 @@ async def delete_skill_set(
     ),
 ) -> MessageResponse:
     """Delete a skill set."""
+    owner_id_hint = user_id or entity_id
     (
         effective_entity_id,
         effective_bot_id,
@@ -619,7 +645,7 @@ async def delete_skill_set(
     ) = _get_skill_set_path_params(
         ctx,
         set_id=skill_set_id,
-        entity_id=entity_id,
+        entity_id=owner_id_hint,
         entity_type=entity_type,
         bot_id=bot_id,
         engine_type=engine_type,
@@ -658,6 +684,7 @@ async def get_skill_set_skills(
     ),
 ) -> SkillSetSkillsResponse:
     """Get all skills in a skill set."""
+    owner_id_hint = user_id or entity_id
     # Get effective path parameters
     (
         effective_entity_id,
@@ -669,7 +696,7 @@ async def get_skill_set_skills(
     ) = _get_skill_set_path_params(
         ctx,
         set_id=skill_set_id,
-        entity_id=entity_id,
+        entity_id=owner_id_hint,
         entity_type=entity_type,
         bot_id=bot_id,
         engine_type=engine_type,
@@ -725,6 +752,9 @@ async def add_skills_to_set(
     ),
 ) -> AddSkillsResponse:
     """Add skills to a skill set."""
+    # The published batch body carries the addressed Bot owner in ``user_id``;
+    # the authenticated actor still comes exclusively from ``ctx`` below.
+    owner_id_hint = request.user_id or entity_id
     # Preserve omission so the legacy resolver can recover a non-default Bot.
     bot_id_hint = request.bot_id or bot_id
     (
@@ -737,7 +767,7 @@ async def add_skills_to_set(
     ) = _get_skill_set_path_params(
         ctx,
         set_id=skill_set_id,
-        entity_id=entity_id,
+        entity_id=owner_id_hint,
         entity_type=entity_type,
         bot_id=bot_id_hint,
         engine_type=engine_type,
@@ -745,8 +775,9 @@ async def add_skills_to_set(
         control_plane=control_plane,
     )
 
-    # Historical batch wire permits partial success.  Each member remains
-    # an atomic control-plane command; the adapter only serializes results.
+    # Historical batch wire permits partial success.  Resolve its loose
+    # identifiers here, then pass every durable ID through one control-plane
+    # batch so an active Set gets one final runtime projection.
     results: dict[str, list] = {
         "success": [],
         "failed": [],
@@ -764,6 +795,7 @@ async def add_skills_to_set(
     )
     if target_set.get("is_default"):
         raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")
+    resolved: list[tuple[str, str]] = []
     for skill_id in request.skill_ids:
         try:
             stable_skill_id = control_plane.resolve_legacy_skill_id(
@@ -772,28 +804,36 @@ async def add_skills_to_set(
                 actor_id=actor_id,
                 identifier=skill_id,
             )
-            await control_plane.add_skill(
-                bot_id=effective_bot_id,
-                owner_id=effective_entity_id,
-                user_id=actor_id,
-                set_id=skill_set_id,
-                skill_id=stable_skill_id,
-            )
-            results["success"].append(
-                {"skill_id": str(stable_skill_id), "name": str(skill_id)}
-            )
+            resolved.append((str(skill_id), stable_skill_id))
         except (
             LocalSkillNotFoundError,
             SkillSetControlPlaneNotFoundError,
+            SkillSetControlPlaneConflictError,
         ) as exc:
-            results["failed"].append({"skill_id": skill_id, "error": str(exc)})
-        except SkillSetControlPlaneConflictError as exc:
-            if str(exc) not in {
-                "RESOURCE_DIRECT_ACTIVE",
-                "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
-            }:
+            if not _is_legacy_skill_set_batch_partial_failure(exc):
                 raise
             results["failed"].append({"skill_id": skill_id, "error": str(exc)})
+    if resolved:
+        outcomes = await control_plane.add_skills(
+            bot_id=effective_bot_id,
+            owner_id=effective_entity_id,
+            user_id=actor_id,
+            set_id=skill_set_id,
+            skill_ids=[stable_skill_id for _, stable_skill_id in resolved],
+        )
+        for (legacy_skill_id, stable_skill_id), outcome in zip(resolved, outcomes):
+            if outcome.succeeded:
+                results["success"].append(
+                    {"skill_id": stable_skill_id, "name": legacy_skill_id}
+                )
+                continue
+            assert outcome.error is not None
+            if _is_legacy_skill_set_batch_partial_failure(outcome.error):
+                results["failed"].append(
+                    {"skill_id": legacy_skill_id, "error": str(outcome.error)}
+                )
+                continue
+            raise outcome.error
     success_count = len(results["success"])
     failed_count = len(results["failed"])
     return AddSkillsResponse(
@@ -829,6 +869,7 @@ async def remove_skill_from_set(
     ),
 ) -> MessageResponse:
     """Remove a skill from a skill set."""
+    owner_id_hint = user_id or entity_id
     (
         effective_entity_id,
         effective_bot_id,
@@ -839,7 +880,7 @@ async def remove_skill_from_set(
     ) = _get_skill_set_path_params(
         ctx,
         set_id=skill_set_id,
-        entity_id=entity_id,
+        entity_id=owner_id_hint,
         entity_type=entity_type,
         bot_id=bot_id,
         engine_type=engine_type,
@@ -847,14 +888,16 @@ async def remove_skill_from_set(
         control_plane=control_plane,
     )
 
-    result = await control_plane.remove_skill(
+    (result,) = await control_plane.remove_skills(
         bot_id=effective_bot_id,
         owner_id=effective_entity_id,
         user_id=_legacy_actor(ctx, user_id or entity_id),
         set_id=skill_set_id,
-        skill_id=skill_id,
+        skill_ids=[skill_id],
     )
-    if not result.get("changed"):
+    if result.error is not None:
+        raise result.error
+    if not result.changed:
         raise SkillSetControlPlaneNotFoundError("Skill not found in skill set")
     return MessageResponse(success=True, message="Skill removed from skill set")
 
@@ -1764,6 +1807,7 @@ async def get_skill_set_mcps(
     ),
 ) -> SkillSetMCPsResponse:
     """Get all MCP servers in a skill set."""
+    owner_id_hint = user_id or entity_id
     # Get effective path parameters
     (
         effective_entity_id,
@@ -1775,7 +1819,7 @@ async def get_skill_set_mcps(
     ) = _get_skill_set_path_params(
         ctx,
         set_id=skill_set_id,
-        entity_id=entity_id,
+        entity_id=owner_id_hint,
         entity_type=entity_type,
         bot_id=bot_id,
         engine_type=engine_type,
@@ -1786,7 +1830,7 @@ async def get_skill_set_mcps(
     legacy_set = control_plane.get_set(
         bot_id=effective_bot_id,
         owner_id=effective_entity_id,
-        user_id=_legacy_actor(ctx, entity_id),
+        user_id=_legacy_actor(ctx, owner_id_hint),
         set_id=skill_set_id,
     )
     if legacy_set.get("is_default"):
@@ -1801,7 +1845,7 @@ async def get_skill_set_mcps(
         mcps = control_plane.list_mcps(
             bot_id=effective_bot_id,
             owner_id=effective_entity_id,
-            user_id=_legacy_actor(ctx, entity_id),
+            user_id=_legacy_actor(ctx, owner_id_hint),
             set_id=skill_set_id,
         )
     return SkillSetMCPsResponse(

@@ -33,6 +33,7 @@ from agentclaw.community.plugin_api.staff_dept import (
     StaffProfileLookupError,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.utils.work_no import normalize_work_no_for_lookup
 
 
 logger = get_logger()
@@ -58,7 +59,9 @@ class SpaceService:
 
     def _get_creator_user_name(self, *, user_id: str) -> str | None:
         try:
-            profile = self._staff_dept.get_profile_by_work_no(work_no=user_id)
+            profile = self._staff_dept.get_profile_by_work_no(
+                work_no=normalize_work_no_for_lookup(user_id)
+            )
         except StaffProfileLookupError:
             logger.warning(
                 "staff profile lookup failed; creating space without creator name",

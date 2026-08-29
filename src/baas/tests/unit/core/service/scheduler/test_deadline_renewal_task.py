@@ -14,6 +14,7 @@ the community TtlRenewalScheduleRepository Protocol.
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -27,6 +28,7 @@ from secbaas.community.core.service.scheduler import (
     RenewalRunReport,
 )
 from secbaas.community.core.utils.env_utils import get_current_env
+from secbaas.community.core.utils.time_utils import format_ttl_expiration_time
 
 
 def _acquired_lock():
@@ -1079,7 +1081,7 @@ class TestStep5ReportAndMetrics:
         # Override _renew_one to return known results
         call_count = 0
 
-        async def _mock_renew_one(record):
+        async def _mock_renew_one(record, run_uuid=None):
             nonlocal call_count
             call_count += 1
             return ["success", "skipped", "failed"][call_count - 1]
@@ -1599,3 +1601,285 @@ class TestStoppedTransitionMetric:
         assert "stopped_transition=1" in msg
         assert "sandbox_id=sb-1" in msg
         assert "fail_count=10" in msg
+
+
+class TestRenewalDigestLogging:
+    """REN-07: ttl_renew_digest CSV emission from every terminal branch.
+
+    The deadline engine shares the arca-renew-digest logger and CSV contract
+    with the legacy SandboxDeviceRouter digest, so the monitor pipeline sees
+    a homogeneous renewal digest stream across both engines during the
+    pre-gray-release window. Assertions split message by comma and check
+    the field positions of the 9-field contract line.
+    """
+
+    @staticmethod
+    def _digest_lines(caplog):
+        return [
+            r.getMessage()
+            for r in caplog.records
+            if r.name == "arca-renew-digest"
+            and r.getMessage().startswith("ttl_renew_digest,")
+        ]
+
+    @pytest.mark.asyncio
+    async def test_success_branch_emits_digest_line(self, caplog):
+        """h3 success: fields [1..9] = ttl_renew_digest, uuid, renew, 1,
+        baas, sb-1, success, formatted ttl_before, formatted ttl_after."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        ttl_before_ms = _ttl_ms(10)
+        ttl_after_ms = ttl_before_ms + 839 * 60 * 1000  # WR-03 post-extend re-read
+        mock_facade.get_device_info = AsyncMock(
+            side_effect=[
+                MagicMock(ttl_timestamp=ttl_before_ms),
+                MagicMock(ttl_timestamp=ttl_after_ms),
+            ]
+        )
+        mock_facade.extend_ttl = AsyncMock(return_value=True)
+        mock_repo.update_after_success = MagicMock()
+
+        caplog.set_level(logging.INFO, logger="arca-renew-digest")
+        result = await scheduler._renew_one(_renewal_record())
+
+        assert result == "success"
+        lines = self._digest_lines(caplog)
+        assert len(lines) == 1
+        fields = lines[0].split(",")
+        assert len(fields) == 9
+        assert fields[0] == "ttl_renew_digest"
+        assert fields[1]  # auto-generated uuid when run_uuid omitted
+        assert fields[2] == "renew"
+        assert fields[3] == "1"
+        assert fields[4] == "baas"
+        assert fields[5] == "sb-1"
+        assert fields[6] == "success"
+        # Digest contract normalizes spaces to dashes inside TTL fields.
+        assert fields[7] == format_ttl_expiration_time(ttl_before_ms).replace(" ", "-")
+        assert fields[8] == format_ttl_expiration_time(ttl_after_ms).replace(" ", "-")
+
+    @pytest.mark.asyncio
+    async def test_over_24h_skip_branch_emits_digest_line(self, caplog):
+        """f-skip: ..., skipped, ttl_before formatted, ttl_after dash."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+        ttl_ms = _ttl_ms(25)
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=ttl_ms)
+        )
+        mock_facade.extend_ttl = AsyncMock()
+
+        caplog.set_level(logging.INFO, logger="arca-renew-digest")
+        result = await scheduler._renew_one(_renewal_record())
+
+        assert result == "skipped"
+        mock_facade.extend_ttl.assert_not_awaited()
+        lines = self._digest_lines(caplog)
+        assert len(lines) == 1
+        fields = lines[0].split(",")
+        assert fields[6] == "skipped"
+        # Digest contract normalizes spaces to dashes inside TTL fields.
+        assert fields[7] == format_ttl_expiration_time(ttl_ms).replace(" ", "-")
+        assert fields[8] == "-"
+
+    @pytest.mark.asyncio
+    async def test_get_device_info_failure_branch_emits_digest_line(self, caplog):
+        """a-failure below max_fail_count: ..., failure, -, -."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+        mock_facade.get_device_info = AsyncMock(side_effect=Exception("timeout"))
+        mock_repo.update_after_failure = MagicMock()
+
+        caplog.set_level(logging.INFO, logger="arca-renew-digest")
+        result = await scheduler._renew_one(_renewal_record())
+
+        assert result == "failed"
+        lines = self._digest_lines(caplog)
+        assert len(lines) == 1
+        fields = lines[0].split(",")
+        # Strict legacy vocabulary: the "failed" outcome projects to "failure".
+        assert fields[6] == "failure"
+        assert fields[7] == "-"
+        assert fields[8] == "-"
+
+    @pytest.mark.asyncio
+    async def test_pathological_ttl_digest_format_failure_uses_placeholder(self, caplog):
+        """ME-01: a numeric-but-pathological ttl_timestamp (huge negative
+        epoch overflowing the datetime range) flows through failure
+        accounting exactly once; the digest TTL formatter's failure
+        degrades to the legacy "-" placeholders instead of raising out of
+        _renew_one."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        pathological_ms = -(10**19)
+        # Setup guard: the chosen value really does raise when formatted
+        # (the concrete exception class varies by platform).
+        with pytest.raises((OverflowError, OSError, ValueError)):
+            format_ttl_expiration_time(float(pathological_ms))
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=pathological_ms)
+        )
+        mock_facade.extend_ttl = AsyncMock()
+        mock_repo.update_after_failure = MagicMock()
+
+        caplog.set_level(logging.INFO, logger="arca-renew-digest")
+        result = await scheduler._renew_one(_renewal_record())
+
+        # (a) The pathological TTL never propagates an exception.
+        assert result == "failed"
+        # (b) No double accounting: failure handling ran exactly once — the
+        # guarded digest formatting did not re-route the record through
+        # _process_one's failure fallback.
+        mock_facade.extend_ttl.assert_not_awaited()
+        mock_repo.update_after_failure.assert_called_once()
+        # (c) The digest row exists with legacy "-" TTL placeholders.
+        lines = self._digest_lines(caplog)
+        assert len(lines) == 1
+        fields = lines[0].split(",")
+        # Strict legacy vocabulary: the "failed" outcome projects to "failure".
+        assert fields[6] == "failure"
+        assert fields[7] == "-"
+        assert fields[8] == "-"
+        # The formatter failure is warned on core-scheduler, never emitted
+        # into the digest stream.
+        assert any("digest ttl format failed" in r.message for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_stopped_outcome_maps_to_failure_digest_result(self, caplog):
+        """Threshold STOPPED maps the digest result to "failure" (not
+        "stopped") — monitor vocabulary stays two-valued success/failure."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(
+            enabled=True, config_overrides={"max_fail_count": 1}
+        )
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=None)
+        )
+        mock_repo.set_status = MagicMock()
+
+        caplog.set_level(logging.INFO, logger="arca-renew-digest")
+        result = await scheduler._renew_one(_renewal_record(renew_fail_count=0))
+
+        assert result == "stopped"
+        lines = self._digest_lines(caplog)
+        assert len(lines) == 1
+        assert lines[0].split(",")[6] == "failure"
+
+    @pytest.mark.asyncio
+    async def test_ac_binding_source_table_maps_to_ac_binding_table_type(self, caplog):
+        """ac_entity_device_binding maps digest table_type to ac_binding."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+        ttl_before_ms = _ttl_ms(10)
+        mock_facade.get_device_info = AsyncMock(
+            side_effect=[
+                MagicMock(ttl_timestamp=ttl_before_ms),
+                MagicMock(ttl_timestamp=ttl_before_ms + 839 * 60 * 1000),
+            ]
+        )
+        mock_facade.extend_ttl = AsyncMock(return_value=True)
+        mock_repo.update_after_success = MagicMock()
+
+        caplog.set_level(logging.INFO, logger="arca-renew-digest")
+        result = await scheduler._renew_one(
+            _renewal_record(source_table="ac_entity_device_binding")
+        )
+
+        assert result == "success"
+        lines = self._digest_lines(caplog)
+        assert len(lines) == 1
+        assert lines[0].split(",")[4] == "ac_binding"
+
+    @pytest.mark.asyncio
+    async def test_run_uuid_threaded_into_digest_second_field(self, caplog):
+        """An explicit run_uuid becomes the digest second field verbatim."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+        mock_facade.get_device_info = AsyncMock(side_effect=Exception("timeout"))
+        mock_repo.update_after_failure = MagicMock()
+
+        caplog.set_level(logging.INFO, logger="arca-renew-digest")
+        await scheduler._renew_one(_renewal_record(), run_uuid="u-mr")
+
+        lines = self._digest_lines(caplog)
+        assert len(lines) == 1
+        assert lines[0].split(",")[1] == "u-mr"
+
+    @pytest.mark.asyncio
+    async def test_missing_run_uuid_falls_back_to_fresh_uuid(self, caplog):
+        """Direct invocation without run_uuid falls back to a fresh uuid4
+        (byte-identical behavior to the legacy renew_ttl path)."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=None)
+        )
+        mock_repo.update_after_failure = MagicMock()
+
+        caplog.set_level(logging.INFO, logger="arca-renew-digest")
+        await scheduler._renew_one(_renewal_record())
+
+        lines = self._digest_lines(caplog)
+        assert len(lines) == 1
+        second = lines[0].split(",")[1]
+        assert second and second != "None"
+
+    @pytest.mark.asyncio
+    async def test_process_one_routes_renewal_raise_to_failed_digest(self, caplog):
+        """A _renew_one raise routed to failure accounting still emits a
+        digest line projecting the failed outcome to "failure" — no silent
+        terminal path."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 1
+        mock_repo.count_hot_arca_devices.return_value = 1
+        mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.find_unregistered.return_value = []
+        mock_repo.update_after_failure = MagicMock()
+        # update_after_success raises → _renew_one raises out of the h3 path
+        mock_repo.update_after_success = MagicMock(side_effect=Exception("DB down"))
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(10))
+        )
+        mock_facade.extend_ttl = AsyncMock(return_value=True)
+
+        mock_repo.list_due_for_renewal.side_effect = [[_renewal_record()], []]
+
+        caplog.set_level(logging.INFO, logger="arca-renew-digest")
+        scheduler._round_count = 0
+        report = await scheduler._run_once()
+
+        assert report.failure == 1
+        lines = self._digest_lines(caplog)
+        assert len(lines) == 1
+        fields = lines[0].split(",")
+        # Strict legacy vocabulary: the "failed" outcome projects to "failure".
+        assert fields[6] == "failure"
+        assert fields[7] == "-"
+        assert fields[8] == "-"
+
+    @pytest.mark.asyncio
+    async def test_process_one_failure_accounting_raise_still_emits_failed_digest(
+        self, caplog
+    ):
+        """Even failure accounting raising still emits a digest line
+        projecting the failed outcome to "failure" — the second-level
+        fallback is not silent."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 1
+        mock_repo.count_hot_arca_devices.return_value = 1
+        mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.find_unregistered.return_value = []
+        mock_repo.update_after_failure = MagicMock(side_effect=Exception("DB down"))
+
+        mock_facade.get_device_info = AsyncMock(side_effect=Exception("timeout"))
+
+        mock_repo.list_due_for_renewal.side_effect = [[_renewal_record()], []]
+
+        caplog.set_level(logging.INFO, logger="arca-renew-digest")
+        scheduler._round_count = 0
+        report = await scheduler._run_once()
+
+        assert report.failure == 1
+        lines = self._digest_lines(caplog)
+        assert len(lines) == 1
+        fields = lines[0].split(",")
+        # Strict legacy vocabulary: the "failed" outcome projects to "failure".
+        assert fields[6] == "failure"
+        assert fields[7] == "-"
+        assert fields[8] == "-"

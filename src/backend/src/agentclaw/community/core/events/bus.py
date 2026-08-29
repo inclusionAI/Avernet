@@ -55,6 +55,10 @@ class EventBus:
             len(self._handlers[event_type]),
         )
 
+    def is_subscribed(self, event_type: Type[Any], handler: EventHandler) -> bool:
+        with self._lock:
+            return handler in self._handlers.get(event_type, ())
+
     def publish(self, event: Any) -> None:
         event_type = type(event)
         with self._lock:

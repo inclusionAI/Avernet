@@ -65,6 +65,30 @@ class RuntimeNamePolicy:
         return name
 
 
+def resolve_effective_mcp_server_codes(
+    state: RuntimeDesiredState,
+) -> tuple[str, ...]:
+    """Resolve every MCP supply selected by one desired-state snapshot.
+
+    Explicit MCP Installation, system defaults, and dependencies declared by
+    installed Skills are distinct facts. They meet only in this derived
+    Effective projection; dependency supply is never materialized as an
+    explicit MCP Installation row.
+    """
+    mcp_codes = set(state.installed_mcp_server_codes)
+    mcp_codes.update(state.system_default_mcp_server_codes)
+    for asset in state.skills:
+        try:
+            mcp_codes.update(mcp_dependency_codes(asset.mcp_dependencies))
+        except ValueError as exc:
+            raise ValueError(
+                "invalid Skill MCP dependency in runtime projection"
+            ) from exc
+    if any(not isinstance(code, str) or not code for code in mcp_codes):
+        raise ValueError("invalid MCP server code in runtime projection")
+    return tuple(sorted(mcp_codes))
+
+
 class RuntimeProjectionResolver:
     """Build the deduplicated Local/Repo/Center/MCP/CLI snapshot."""
 
@@ -80,23 +104,10 @@ class RuntimeProjectionResolver:
             mappings = build_logical_skill_mappings(list(assets))
         except RuntimeMappingNameConflictError as exc:
             raise RuntimeNameConflictError() from exc
-        mcp_codes = set(state.installed_mcp_server_codes)
-        mcp_codes.update(state.system_default_mcp_server_codes)
-        for asset in assets:
-            try:
-                # Shared with the command that scopes a Skill mutation, so the
-                # set a mutation declares is the set this resolves.
-                mcp_codes.update(mcp_dependency_codes(asset.mcp_dependencies))
-            except ValueError as exc:
-                raise ValueError(
-                    "invalid Skill MCP dependency in runtime projection"
-                ) from exc
-        if any(not isinstance(code, str) or not code for code in mcp_codes):
-            raise ValueError("invalid MCP server code in runtime projection")
         return RuntimeProjection(
             skill_mappings=tuple(mappings),
             skill_assets=assets,
-            mcp_server_codes=tuple(sorted(mcp_codes)),
+            mcp_server_codes=resolve_effective_mcp_server_codes(state),
             cli_commands=tuple(dict.fromkeys(state.system_default_cli_commands)),
         )
 
@@ -107,4 +118,5 @@ __all__ = [
     "RuntimeNamePolicy",
     "RuntimeProjection",
     "RuntimeProjectionResolver",
+    "resolve_effective_mcp_server_codes",
 ]

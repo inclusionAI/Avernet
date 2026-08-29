@@ -40,6 +40,8 @@ _AICODING_RSYNC_EXCLUDES = [
     "workspace/skills/skills-center",
     "workspace/skills-pool/skills-repo",
     "workspace/skills-pool/.skills-repo*",
+    "workspace/.repos/",
+    "workspace/.prewarm_ready.json",
     "skills/*/.git/",
     "memory/",
     "logs/",
