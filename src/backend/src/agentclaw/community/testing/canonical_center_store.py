@@ -42,4 +42,3 @@ class LocalCanonicalCenterVersionStore:
 
     def verify_version(self, ref: CanonicalCenterVersionRef) -> bool:
         return ref.locator in self._versions
-

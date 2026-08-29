@@ -29,4 +29,3 @@ class CanonicalCenterStoreBindings:
             object_storage=object_storage,
             config=config,
         )
-
