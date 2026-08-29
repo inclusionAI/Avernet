@@ -51,6 +51,7 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskExecutionGraphDTO,
     TaskInfoRecordDTO,
     TaskInfoRequestDTO,
+    TaskNodeUpdateDTO,
     TemplateRunRequestDTO,
     TaskNodeCallbackRequest,
     TaskOpResultDTO,
@@ -507,6 +508,50 @@ async def bbs_result(
         exec_error=body.exec_error,
     )
     return envelope({"ok": True}, request)
+
+
+@router.post("/nodes/update", response_model=Envelope[dict[str, Any]])
+@envelope_errors
+async def update_task_node(
+    body: TaskNodeUpdateDTO,
+    request: Request,
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> Envelope[dict[str, Any]]:
+    """内部节点写口:直接更新节点 run_info(经 ``TaskServiceProtocol.update_task_node_info`` →
+    ``ExecutionEngine.on_report`` 落库并触发翻态/验收/收敛传播)。
+
+    透传 ``TaskNodePatch`` 三选一终态翻转(互斥):``acceptance_result`` 验收驱动 / ``exec_error`` 执行报错
+    (→ on_harness 重投)/ ``status`` 框架直驱;三者全空仅 fold 非状态字段。供内部调用方/功能测试直驱节点
+    状态,不经 BBS claim 校验(区别于 ``bbs/result``)。领域异常(GraphIntegrity/TaskState/NotFound)
+    直接上抛 → ``@envelope_errors`` 映射。
+    """
+    ar = (
+        acceptance_result_from_dto(body.acceptance_result)
+        if body.acceptance_result
+        else None
+    )
+    result = await service.update_task_node_info(
+        body.task_id,
+        body.node_id,
+        status=body.status,
+        run_mode=body.run_mode,
+        assignee=body.assignee,
+        output_patch=body.output_patch,
+        acceptance_result=ar,
+        exec_error=body.exec_error,
+        extend_props_patch=body.extend_props_patch,
+    )
+    return envelope(
+        {
+            "task_id": result.task_id,
+            "node_id": result.node_id,
+            "success": result.success,
+            "prev_status": result.prev_status.value if result.prev_status else None,
+            "new_status": result.new_status.value if result.new_status else None,
+            "error": result.error,
+        },
+        request,
+    )
 
 
 # ===== 任务发现阶段(任务模块的一个阶段,非独立模块)=====

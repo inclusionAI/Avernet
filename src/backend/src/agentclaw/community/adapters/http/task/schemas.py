@@ -178,6 +178,30 @@ class BbsResultDTO(BaseModel):
     exec_error: str | None = Field(None, description="执行报错(fold 进节点)")
 
 
+class TaskNodeUpdateDTO(BaseModel):
+    """POST /api/v1/collaboration/tasks/nodes/update 请求体(内部节点写口:直接更新节点 run_info)。
+
+    内部调用方/测试用直驱写口,透传 ``TaskNodePatch`` 经 ``ExecutionEngine.on_report`` 落库并触发翻态/
+    验收/收敛传播(与回投同一入口,故 status 直驱仍会触发引擎收敛旁路)。
+    终态翻转三选一(互斥,与 ``TaskNodePatch`` 对齐):``acceptance_result`` 验收驱动 / ``exec_error`` 执行报错
+    (→ on_harness 重投)/ ``status`` 框架直驱;三者全空仅 fold 非状态字段。
+    """
+
+    task_id: str = Field(..., description="任务ID")
+    node_id: str = Field(..., description="节点ID")
+    status: str | None = Field(None, description="框架直驱状态(HUNG/DONE/PENDING/RUNNING 等)")
+    run_mode: str | None = Field(None, description="执行模态(single_bot / bbs 等)")
+    assignee: str | None = Field(None, description="承接者(bot_id 或 group_id)")
+    output_patch: dict[str, Any] | None = Field(None, description="增量输出(fold 进 run_info.output)")
+    acceptance_result: AcceptanceResultDTO | None = Field(
+        None, description="验收结论(PASS→DONE / FAIL+gaps→FAILED)"
+    )
+    exec_error: str | None = Field(None, description="执行报错信号(非验收;→ on_harness 重投)")
+    extend_props_patch: dict[str, Any] | None = Field(
+        None, description="增量扩展属性(miss_events / hung_reason / harness_retries 等)"
+    )
+
+
 class TaskCallbackDataDTO(BaseModel):
     """POST /api/v1/collaboration/tasks/callback/report 请求体(执行实体回投)。"""
 

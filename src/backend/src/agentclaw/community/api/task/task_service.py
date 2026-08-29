@@ -84,6 +84,27 @@ class TaskServiceProtocol(Protocol):
         """
         ...
 
+    async def update_task_node_info(
+        self,
+        task_id: str,
+        node_id: str,
+        *,
+        status: "str | None" = None,
+        run_mode: "str | None" = None,
+        assignee: "str | None" = None,
+        output_patch: "dict | None" = None,
+        acceptance_result: AcceptanceResult | None = None,
+        exec_error: "str | None" = None,
+        extend_props_patch: "dict | None" = None,
+    ) -> NodeOpResult:
+        """内部节点写口:直接更新节点 run_info(透传 ``TaskNodePatch`` 经 ``ExecutionEngine.on_report`` 落库)。
+
+        与回投走同一入口(``on_report``):``acceptance_result`` 验收驱动翻态 / ``exec_error`` 执行报错
+        (→ on_harness 重投)/ ``status`` 框架直驱;三者全空仅 fold 非状态字段(**会触发引擎收敛旁路**,
+        如根子节点全终态收敛)。供内部调用方/功能测试直驱节点状态,不经 BBS claim 校验。
+        """
+        ...
+
     async def converge_by_session(
         self, session_id: str, *, success: bool, output: object = None,
     ) -> bool:
