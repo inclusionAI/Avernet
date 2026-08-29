@@ -3,7 +3,8 @@ from pydantic import ValidationError
 
 from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackRequest, TaskNodeCallbackRequest, _normalize_execution_config,
-    op_result_to_dto, runtime_status_to_product_status,
+    execution_graph_to_product_status, op_result_to_dto,
+    runtime_status_to_product_status,
 )
 from agentclaw.community.core.task.domain.models import TaskOpResult
 
@@ -122,3 +123,28 @@ def test_normalize_execution_config_missing_ec_defaults_empty_and_backfills():
     assert _normalize_execution_config(g) == {"main_session_id": "z", "main_session_name": "nz"}
     g4 = _graph("T4", [_node("T4", tc=None)], {"execution_config": {"task_type": FakeEnum()}})
     assert _normalize_execution_config(g4)["task_type"] == "yaml"
+
+
+def test_execution_graph_statuses_are_mapped_at_product_boundary():
+    execution_graph = {
+        "status": "PENDING",
+        "tasks": [
+            {"node_id": "n1", "status": "RUNNING"},
+            {"node_id": "n2", "status": "HUNG"},
+            {"node_id": "n3", "status": "DONE", "run_info": {"status": "completed"}},
+        ],
+        "extend_props": {"status": "completed"},
+    }
+
+    normalized = execution_graph_to_product_status(execution_graph)
+
+    assert normalized["status"] == "DEFINED"
+    assert [task["status"] for task in normalized["tasks"]] == [
+        "EXECUTING",
+        "REVIEWING",
+        "DONE",
+    ]
+    # Only the graph and direct task statuses are projected; nested metadata is untouched.
+    assert normalized["extend_props"]["status"] == "completed"
+    assert execution_graph["status"] == "PENDING"
+    assert execution_graph["tasks"][0]["status"] == "RUNNING"

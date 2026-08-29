@@ -345,6 +345,38 @@ def runtime_status_to_product_status(status: Any) -> str:
     }.get(value, "EXECUTING")
 
 
+def execution_graph_to_product_status(execution_graph: Any) -> Any:
+    """Return an execution-graph response copy with product-facing statuses.
+
+    ``execution_graph`` is a third-party execution snapshot stored as a plain
+    dictionary, so it does not pass through :func:`graph_to_dto`'s typed graph
+    conversion. Normalize only the graph-level ``status`` and each direct
+    task's ``status`` at the HTTP response boundary, leaving the stored
+    execution snapshot and nested metadata untouched.
+    """
+    if not isinstance(execution_graph, dict):
+        return execution_graph
+
+    normalized = dict(execution_graph)
+    if "status" in normalized:
+        normalized["status"] = runtime_status_to_product_status(normalized["status"])
+
+    raw_tasks = normalized.get("tasks")
+    if isinstance(raw_tasks, list):
+        normalized["tasks"] = [
+            (
+                {
+                    **task,
+                    "status": runtime_status_to_product_status(task["status"]),
+                }
+                if isinstance(task, dict) and "status" in task
+                else task
+            )
+            for task in raw_tasks
+        ]
+    return normalized
+
+
 # ===== DTO <-> domain conversion(Rule 22:adapter 唯一写/读翻译位) =====
 
 
@@ -557,7 +589,7 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
         tasks=nodes,
         relations=relations,
         extend_props=dict(graph.extend_props),
-        execution_graph=graph.execution_graph,
+        execution_graph=execution_graph_to_product_status(graph.execution_graph),
         execution_config=_normalize_execution_config(graph),
     )
 
