@@ -101,7 +101,7 @@ class ExecutionConfigDTO(BaseModel):
     """执行配置(task_type 必填;yaml/workflow_id 可选;其余键允许透传)。"""
 
     model_config = ConfigDict(extra="allow")
-    task_type: Literal["yaml", "workflow", "dynamic", "static_plan"] = Field(
+    task_type: Literal["yaml", "workflow", "dynamic", "static_plan", "bbs"] = Field(
         ..., description="任务类型"
     )
     yaml: str | dict[str, Any] | None = Field(None, description="yaml 内联或引用")
