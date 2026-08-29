@@ -262,7 +262,7 @@ def _bcn_node_task(dag_node: dict, exec_node: dict) -> dict[str, Any]:
     nid = dag_node.get("node_id") or exec_node.get("node_id") or ""
     ex_status = exec_node.get("status") or dag_node.get("status")
     title = dag_node.get("display_name") or nid
-    final_out = exec_node.get("artifact_text") or dag_node.get("final_output")
+    final_out = exec_node.get("artifact_text")
     ep: dict[str, Any] = {}
     for k in ("attempt", "outcome", "assignee_bot_id", "error", "status"):
         if exec_node.get(k) is not None:
@@ -279,9 +279,11 @@ def _bcn_node_task(dag_node: dict, exec_node: dict) -> dict[str, Any]:
         "run_info": {
             "run_mode": None,
             "assignee": dag_node.get("assignee"),
-            "start_time": None,
-            "end_time": None,
-            "output": (final_out if isinstance(final_out, dict) else {}),
+            "start_time": exec_node.get("started_at"),
+            "end_time": exec_node.get("completed_at"),
+            "output": {
+                "artifact_text": final_out
+            },
             "acceptance_result": None,
             "extend_props": ep,
         },
@@ -304,7 +306,7 @@ def _build_bcn_execution_graph(
     data = data if isinstance(data, dict) else {}
     run_detail = run_detail if isinstance(run_detail, dict) else None
     graph_detail = graph_detail if isinstance(graph_detail, dict) else None
-    rid = _bcn_run_id_as_int(run_id)
+    rid = run_id
     status = _bcn_state_machine_status(event_type)
 
     if not run_detail and not graph_detail:
@@ -324,6 +326,7 @@ def _build_bcn_execution_graph(
     run_obj = (run_detail or {}).get("run")
     run_obj = run_obj if isinstance(run_obj, dict) else {}
     run_output = run_obj.get("output")
+
     # 执行结果按 node_id 索引(来自 run_detail.nodes)
     exec_by_node: dict[str, dict] = {}
     for _n in run_detail.get("nodes") or []:
@@ -334,16 +337,18 @@ def _build_bcn_execution_graph(
     for _dn in graph_detail.get("nodes") or []:
         if isinstance(_dn, dict) and _dn.get("node_id"):
             tasks.append(_bcn_node_task(_dn, exec_by_node.get(_dn["node_id"], {})))
+
     # fallback:graph 无 nodes 但 run_detail 有执行 nodes → 直接用执行结果建 task
     if not tasks:
         for _ex in run_detail.get("nodes") or []:
             if isinstance(_ex, dict) and _ex.get("node_id"):
                 tasks.append(_bcn_node_task({"node_id": _ex["node_id"]}, _ex))
 
+    logger.info("[task_callback], edges = %s", str(graph_detail.get("edges")))
     relations: list[dict[str, Any]] = []
     for _e in graph_detail.get("edges") or []:
-        if isinstance(_e, dict) and _e.get("src") and _e.get("dst"):
-            relations.append({"src_id": _e["src"], "dst_id": _e["dst"],
+        if isinstance(_e, dict) and _e.get("source") and _e.get("target"):
+            relations.append({"src_id": _e["source"], "dst_id": _e["target"],
                               "type": "DEPENDENCY", "extend_props": {}})
 
     graph_ep: dict[str, Any] = {}
@@ -357,7 +362,10 @@ def _build_bcn_execution_graph(
         "task_id": "",
         "loop_round": 0,
         "status": status.value,
-        "output": (run_output if isinstance(run_output, dict) else {}),
+        "output": {
+            "artifact_text": run_output,
+            "input": run_obj.get("input")
+        },
         "extend_props": graph_ep,
         "tasks": tasks,
         "relations": relations,
@@ -414,7 +422,7 @@ class CallbackDataEnricher:
             # 查询出来的原始 run 明细 → extend_props(result._ext_info);
             # orig_callback_data 保持原始 CloudEvent(callback 数据由 _raw_callback_body 承载,不在此覆盖)。
             cd.data.setdefault("result", {})["_ext_info"] = run_detail
-            logger.info("[task_callback] BCN run 明细已取回 run_id=%s session_id=%s → extend_props, run_detail=%s", run_id, _sid, run_detail)
+            #logger.info("[task_callback] BCN run 明细已取回 run_id=%s session_id=%s → extend_props, run_detail=%s", run_id, _sid, run_detail)
             logger.info("[task_callback] BCN run 明细已取回 run_id=%s session_id=%s → extend_props, graph_detail=%s", run_id, _sid, graph_detail)
             eg = _build_bcn_execution_graph(
                 event_type=event_type, run_id=run_id,

@@ -180,6 +180,12 @@ def is_bcn_event_payload(raw: Any) -> bool:
             and isinstance(raw.get("scope"), dict)
             and "event_id" in raw)
 
+def is_common_task_payload(raw: Any) -> bool:
+    return (isinstance(raw, dict)
+            and "task_id" in raw
+            and "node_id" in raw
+            and "status" in raw
+            and "output" in raw)
 
 def translate_bcn(raw: dict) -> TranslatedCallback | None:
     """BCN CloudEvent → TaskCallbackData.data dict(对齐 task_callback 列);非处理事件返 ``None``。
@@ -234,6 +240,24 @@ def translate_bcn(raw: dict) -> TranslatedCallback | None:
             "status": _bcn_state_machine_status(event_type).value,
             "_raw_callback_body": raw,
             "result": result,
+        }),
+    )
+
+def translate_common_task_callback(raw: dict) -> TranslatedCallback | None:
+    disposition: Literal["start", "result"] = "result"
+    return TranslatedCallback(
+        disposition=disposition,
+        data=TaskCallbackData(data={
+            "loop_task_id": dict.get("task_id"),
+            "workflow_type": "task_loop",
+            "workflow_id": 0,
+            "instance_id": 0,
+            "workflow_source": "task_loop",
+            "workflow_instance_id": "",
+            "event_id": "",
+            "status": dict.get("status"),
+            "_raw_callback_body": raw,
+            "result": dict.get("output")
         }),
     )
 

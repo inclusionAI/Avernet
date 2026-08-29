@@ -73,10 +73,12 @@ from agentclaw.community.adapters.http.task.schemas import (
 from agentclaw.community.adapters.http.task.translator import (
     is_bcn_event_payload,
     is_claw_mind_payload,
+    is_common_task_payload,
     parse_manager_worker_bcn,
     translate,
     translate_bcn,
     translate_claw_mind,
+    translate_common_task_callback
 )
 from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
     CallbackDataEnricher,
@@ -947,6 +949,17 @@ async def _dispatch(
                     )
         logger.info("[task_callback] finish_process_callback session_id=%s run_id=%s", _sid, _run_id)
         return envelope({"ok": True}, request)
+
+    if is_common_task_payload(_raw_obj):
+        logger.info("[task_callback] common_task_callback, begin, task=%s", _raw_obj)
+
+        _tc = translate_common_task_callback(_raw_obj)
+        await svc.callback.ingest(_tc.data)
+
+        logger.info("[task_callback] common_task_callback, finish")
+        return envelope({"ok": True}, request)
+
+    logger.info("[task_callback] begin_unknow_branch")
     # 羽雀/框架节点级回投:先按 schema_cls(TaskCallbackRequest 富 schema)校验 → translate → report_result/start_run;
     # 不符合则兜底 TaskCallbackDataDTO(loop_task_id+result,report_callback 旧契约)→ callback_from_dto → report_result。
     try:
