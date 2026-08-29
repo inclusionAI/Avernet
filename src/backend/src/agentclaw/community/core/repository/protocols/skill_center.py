@@ -158,7 +158,7 @@ class SkillEditorRequestRepositoryProtocol(Protocol):
 
 @runtime_checkable
 class DraftEditLeaseRepository(Protocol):
-    """Persistence Plugin API for a permanent, fenced Team Draft Lease.
+    """Repository contract for a permanent, fenced Team Draft Lease.
 
     A future Draft-content write must add one aggregate command here that checks
     the holder/token and writes content metadata in the same transaction.  This

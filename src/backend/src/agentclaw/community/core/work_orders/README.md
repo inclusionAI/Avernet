@@ -7,7 +7,7 @@ and the atomic Space-join approval unit of work.
 ## Context Boundary
 
 ```yaml
-purpose: "Own approval work orders, notifications, business-owned approval handlers, required decision callbacks, and transactional Space-join decisions."
+purpose: "Own approval work orders, notifications, dispatch to business-owned approval handlers, required decision callbacks, and transactional Space-join decisions."
 provides:
   - WorkOrderService
   - WorkOrderNotificationService
