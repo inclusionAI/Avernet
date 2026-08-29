@@ -178,7 +178,8 @@ class TaskService:
 
     async def run_template(self, template_id: str, inputs: dict[str, Any], *,
                            owner_user_id: str, owner_bot_id: str,
-                           auto_advance: bool | None = None) -> TaskOpResult:
+                           auto_advance: bool | None = None,
+                           owner_account_id: str | None = None) -> TaskOpResult:
         """Load and validate a static template, then enter the existing execute path."""
         from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
         logger.info(
@@ -228,6 +229,9 @@ class TaskService:
                 "static_plan_yaml": plan_yaml,
                 "template_input": dict(inputs),
                 "static_auto_report": auto_advance,
+                # 触发者账号(DingTalk account_id);engine notify 终端节点取此处 recipient 发钉钉,
+                # 免去硬编码兜底。内部 /api/v1 路由由 get_current_user→user.operatorName 注入。
+                "owner_account_id": owner_account_id,
             },
         )
         result = await self.execute(request)
