@@ -618,25 +618,7 @@ class ExecutionEngine:
                     node.node_id,
                 )
                 continue
-            if auto:
-                node_type = getattr(definition, "node_type", "bot")
-                run_mode = "coop_group" if node_type == "collaboration" else "single_bot"
-                bot_id = getattr(definition, "bot_id", None) or ""
-                logger.info(
-                    "[task][static-plan] task=%s node=%s -> auto-mock skip dispatch type=%s run_mode=%s",
-                    task_id, node.node_id, node_type, run_mode,
-                )
-                self._graph.update_task_node_info(
-                    TaskNodePatch(
-                        task_id=task_id,
-                        node_id=node.node_id,
-                        run_mode=run_mode,
-                        assignee=bot_id,
-                        extend_props_patch={"dispatching": True},
-                    )
-                )
-                auto_nodes.append(node)
-                continue
+            # auto 模式仍走真实派发(group/run),不跳过;仅额外调度延迟 mock 上报(见 _static_auto_report)
             gf = node.run_info.extend_props.get("pending_group_formation")
             if gf is not None:
                 gf.extend_props.setdefault(
@@ -668,6 +650,8 @@ class ExecutionEngine:
                     )
                 )
                 side.append(("group", node, gf))
+                if auto:
+                    auto_nodes.append(node)
                 continue
             bot_id = getattr(definition, "bot_id", None)
             if bot_id:
@@ -689,6 +673,8 @@ class ExecutionEngine:
                     )
                 )
                 to_run.append(node)
+                if auto:
+                    auto_nodes.append(node)
             else:
                 logger.warning(
                     "[task][static-plan] task=%s node=%s 无 bot 绑定也无 group,跳过",
@@ -701,16 +687,29 @@ class ExecutionEngine:
             side.append(("auto", auto_nodes))
 
     async def _static_auto_report(self, task_id: str, node_id: str) -> None:
-        """演示自驱:延迟后用 mock 结果走 on_report,复用静态推进通路。"""
+        """演示自驱:真实派发后,延迟(默认 10s)用 mock 上报替代真实 bot 上报推进图态。
+
+        mock 只替代"上报信息",不替代派发——拉群/发消息仍走真实路径(_drain group/run)。
+        延迟到期后仅在节点处 RUNNING 态(真实派发成功)时才回投 PASS→DONE;
+        若派发失败留 PENDING / 已被真实上报翻 DONE,则跳过(暴露真实失败,不掩盖,不重复翻态)。"""
         runtime = self._static_runtime(task_id)
         if runtime is None:
             return
-        delay = random.uniform(0.8, 2.0)
+        delay = self._static_auto_report_delay(task_id)
         logger.info(
             "[task][static-plan] auto-report scheduled task=%s node=%s in %.2fs",
             task_id, node_id, delay,
         )
         await asyncio.sleep(delay)
+        # 仅真实派发成功(RUNNING)才 mock 上报;派发失败/已真实上报则跳过
+        graph = self._graph.query_task_dashboard(task_id)
+        node = next((n for n in graph.tasks if n.node_id == node_id), None)
+        if node is None or node.status != Status.RUNNING:
+            logger.info(
+                "[task][static-plan] auto-report skip task=%s node=%s status=%s (非 RUNNING,留给真实派发/上报)",
+                task_id, node_id, node.status.value if node is not None else None,
+            )
+            return
         definition = runtime.by_id.get(node_id)
         mock_result: Any = {
             "summary": f"[auto-mock] node={node_id}",
@@ -737,6 +736,19 @@ class ExecutionEngine:
                 extend_props_patch={"dispatching": None},
             )
         )
+
+    def _static_auto_report_delay(self, task_id: str) -> float:
+        """自驱 mock 上报延迟秒数:execution_config.static_auto_report_delay →
+        env OCB_TASK_STATIC_AUTO_REPORT_DELAY → 10.0。"""
+        cfg = self._graph._execution_config(task_id)
+        v = cfg.get("static_auto_report_delay")
+        if v in (None, ""):
+            raw = os.environ.get("OCB_TASK_STATIC_AUTO_REPORT_DELAY")
+            v = raw if raw not in (None, "") else None
+        try:
+            return float(v) if v is not None else 10.0
+        except (TypeError, ValueError):
+            return 10.0
 
     async def _on_static_report(self, task_id: str, node_id: str) -> None:
         runtime = self._static_runtime(task_id)
