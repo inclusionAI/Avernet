@@ -93,7 +93,7 @@ class CanonicalCenterVersionIdentity:
                 CanonicalCenterStoreErrorCode.INVALID_IDENTITY,
                 "skill_uuid must be a UUIDv4",
             ) from error
-        if parsed.version != 4 or str(parsed) != self.skill_uuid.lower():
+        if parsed.version != 4 or str(parsed) != self.skill_uuid:
             raise CanonicalCenterStoreError(
                 CanonicalCenterStoreErrorCode.INVALID_IDENTITY,
                 "skill_uuid must be a canonical UUIDv4",
@@ -117,6 +117,13 @@ class CanonicalCenterVersionIdentity:
 class CanonicalCenterVersionRef:
     identity: CanonicalCenterVersionIdentity
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.identity, CanonicalCenterVersionIdentity):
+            raise CanonicalCenterStoreError(
+                CanonicalCenterStoreErrorCode.INVALID_IDENTITY,
+                "canonical version ref requires a validated exact identity",
+            )
+
     @property
     def locator(self) -> str:
         return self.identity.locator
@@ -128,11 +135,57 @@ class CanonicalCenterFile:
     content: bytes
     sha256: str
 
+    def __post_init__(self) -> None:
+        path = _safe_file_path(self.path)
+        if not isinstance(self.content, bytes):
+            raise CanonicalCenterStoreError(
+                CanonicalCenterStoreErrorCode.INVALID_FILE_TREE,
+                f"canonical file content must be bytes: {path}",
+            )
+        expected = hashlib.sha256(self.content).hexdigest()
+        if self.sha256 != expected:
+            raise CanonicalCenterStoreError(
+                CanonicalCenterStoreErrorCode.INVALID_FILE_TREE,
+                f"canonical file digest does not match content: {path}",
+            )
+        object.__setattr__(self, "path", path)
+
 
 @dataclass(frozen=True, slots=True)
 class CanonicalCenterVersion:
     identity: CanonicalCenterVersionIdentity
     files: tuple[CanonicalCenterFile, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.identity, CanonicalCenterVersionIdentity):
+            raise CanonicalCenterStoreError(
+                CanonicalCenterStoreErrorCode.INVALID_IDENTITY,
+                "canonical version requires a validated exact identity",
+            )
+        if not isinstance(self.files, tuple) or any(
+            not isinstance(item, CanonicalCenterFile) for item in self.files
+        ):
+            raise CanonicalCenterStoreError(
+                CanonicalCenterStoreErrorCode.INVALID_FILE_TREE,
+                "canonical version files must be validated file values",
+            )
+        paths = [item.path for item in self.files]
+        if len(paths) != len(set(paths)):
+            raise CanonicalCenterStoreError(
+                CanonicalCenterStoreErrorCode.INVALID_FILE_TREE,
+                "canonical version contains duplicate file paths",
+            )
+        by_path = {item.path: item for item in self.files}
+        if "SKILL.md" not in by_path or not by_path["SKILL.md"].content:
+            raise CanonicalCenterStoreError(
+                CanonicalCenterStoreErrorCode.INVALID_FILE_TREE,
+                "canonical exact version requires a non-empty root SKILL.md",
+            )
+        object.__setattr__(
+            self,
+            "files",
+            tuple(sorted(self.files, key=lambda item: item.path)),
+        )
 
     @classmethod
     def from_files(

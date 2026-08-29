@@ -7,6 +7,7 @@ import inspect
 import pytest
 
 from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterFile,
     CanonicalCenterStoreConfig,
     CanonicalCenterStoreError,
     CanonicalCenterStoreErrorCode,
@@ -112,6 +113,16 @@ def test_identity_rejects_aliases_and_unsafe_version_segments(version: str) -> N
     assert error.value.code is CanonicalCenterStoreErrorCode.INVALID_IDENTITY
 
 
+def test_identity_rejects_noncanonical_uppercase_uuid() -> None:
+    with pytest.raises(CanonicalCenterStoreError) as error:
+        CanonicalCenterVersionIdentity(
+            skill_uuid="AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+            sc_version_number="1",
+        )
+
+    assert error.value.code is CanonicalCenterStoreErrorCode.INVALID_IDENTITY
+
+
 def test_version_requires_safe_unique_files_and_root_skill_md() -> None:
     for files in (
         {"scripts/run.py": b"pass\n"},
@@ -122,6 +133,25 @@ def test_version_requires_safe_unique_files_and_root_skill_md() -> None:
         with pytest.raises(CanonicalCenterStoreError) as error:
             CanonicalCenterVersion.from_files(_identity(), files)
         assert error.value.code is CanonicalCenterStoreErrorCode.INVALID_FILE_TREE
+
+
+def test_public_values_cannot_bypass_safe_file_tree_construction() -> None:
+    with pytest.raises(CanonicalCenterStoreError) as error:
+        CanonicalCenterFile(
+            path="../escape",
+            content=b"unsafe",
+            sha256="0" * 64,
+        )
+    assert error.value.code is CanonicalCenterStoreErrorCode.INVALID_FILE_TREE
+
+    skill = CanonicalCenterFile(
+        path="SKILL.md",
+        content=b"valid",
+        sha256="ec654fac9599f62e79e2706abef23dfb7c07c08185aa86db4d8695f0b718d1b3",
+    )
+    with pytest.raises(CanonicalCenterStoreError) as error:
+        CanonicalCenterVersion(identity=_identity(), files=(skill, skill))
+    assert error.value.code is CanonicalCenterStoreErrorCode.INVALID_FILE_TREE
 
 
 def test_write_uses_exact_canonical_root_and_roundtrips_verified_tree() -> None:
@@ -159,7 +189,7 @@ def test_same_exact_identity_is_idempotent_but_conflict_fails_closed() -> None:
     assert store.read_version(first) == original
 
 
-def test_partial_write_failure_compensates_owned_objects_and_never_becomes_ready() -> None:
+def test_partial_write_failure_stays_unready_and_same_content_retry_resumes() -> None:
     objects = _MemoryObjects()
     objects.fail_create_suffix = "scripts/run.py"
     store = _store(objects)
@@ -168,12 +198,15 @@ def test_partial_write_failure_compensates_owned_objects_and_never_becomes_ready
         store.write_version(_version())
 
     assert error.value.code is CanonicalCenterStoreErrorCode.WRITE_FAILED
-    assert objects.objects == {}
-    assert any(key.endswith("SKILL.md") for key in objects.deleted)
-    assert any(key.endswith(".teamclaw-write.json") for key in objects.deleted)
+    assert not any(key.endswith(".teamclaw-ready.json") for key in objects.objects)
+    assert any(key.endswith("SKILL.md") for key in objects.objects)
+
+    objects.fail_create_suffix = None
+    ref = store.write_version(_version())
+    assert store.verify_version(ref) is True
 
 
-def test_ready_publish_failure_compensates_complete_unpublished_tree() -> None:
+def test_ready_publish_failure_keeps_verified_tree_for_same_content_retry() -> None:
     objects = _MemoryObjects()
     objects.fail_create_suffix = ".teamclaw-ready.json"
     store = _store(objects)
@@ -182,7 +215,31 @@ def test_ready_publish_failure_compensates_complete_unpublished_tree() -> None:
         store.write_version(_version())
 
     assert error.value.code is CanonicalCenterStoreErrorCode.WRITE_FAILED
-    assert objects.objects == {}
+    assert not any(key.endswith(".teamclaw-ready.json") for key in objects.objects)
+    objects.fail_create_suffix = None
+    ref = store.write_version(_version())
+    assert store.verify_version(ref) is True
+
+
+def test_transient_prepublish_read_failure_never_rolls_back_partial_tree() -> None:
+    objects = _MemoryObjects()
+    store = _store(objects)
+    version = _version()
+    skill_key = (
+        "aidesktop/aidesktop_prod/bolt_shared/skills-center/"
+        f"{SKILL_UUID}/12/SKILL.md"
+    )
+    objects.fail_reads.add(skill_key)
+
+    with pytest.raises(CanonicalCenterStoreError) as error:
+        store.write_version(version)
+    assert error.value.code is CanonicalCenterStoreErrorCode.READ_FAILED
+    assert not any(key.endswith(".teamclaw-ready.json") for key in objects.objects)
+    assert skill_key in objects.objects
+
+    objects.fail_reads.clear()
+    ref = store.write_version(version)
+    assert store.read_version(ref) == version
 
 
 def test_missing_or_corrupt_ready_tree_is_unavailable() -> None:

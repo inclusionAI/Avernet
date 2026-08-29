@@ -72,17 +72,21 @@ def test_canonical_store_consumer_hits_immutable_object_capability(world) -> Non
         {"SKILL.md": b"---\nname: demo\ndescription: Demo\n---\n"},
     )
     objects = world.get(ObjectStoragePlugin)
-    objects.create_object_if_absent.return_value = ObjectCreateResult.CREATED
+    written: dict[str, bytes] = {}
+
+    def create_once(key: str, content: bytes | str) -> ObjectCreateResult:
+        raw = content.encode() if isinstance(content, str) else content
+        if key in written:
+            return ObjectCreateResult.ALREADY_EXISTS
+        written[key] = raw
+        return ObjectCreateResult.CREATED
+
+    objects.create_object_if_absent.side_effect = create_once
 
     def read_written(key: str) -> ObjectReadResult:
-        if key.endswith("/.teamclaw-ready.json"):
-            return ObjectReadResult(ObjectReadStatus.FOUND, version.manifest)
-        if key.endswith("/SKILL.md"):
-            return ObjectReadResult(
-                ObjectReadStatus.FOUND,
-                version.skill_md,
-            )
-        return ObjectReadResult(ObjectReadStatus.NOT_FOUND)
+        if key not in written:
+            return ObjectReadResult(ObjectReadStatus.NOT_FOUND)
+        return ObjectReadResult(ObjectReadStatus.FOUND, written[key])
 
     objects.read_object.side_effect = read_written
     store = OssCanonicalCenterVersionStore(

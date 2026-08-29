@@ -704,8 +704,11 @@ Latest 是发布成功后的 Best-Effort 异步刷新，不参与发布成功门
   `aidesktop/aidesktop_<env>/bolt_shared/skills-center/<skill_uuid>/`
   `<sc_version_number>/`，其下保存经过上游 Materializer 规范化的安全文件树，且必须有
   根级 `SKILL.md`。Store 用 write-once intent 占住 exact identity，逐文件原子
-  create-if-absent，完整校验后最后发布 Ready manifest；部分写失败只补偿本次写入拥有的
-  对象。Ready 缺失、文件缺失、hash/manifest 冲突或对象存储不可用时均不可读、不可向
+  create-if-absent，完整校验后最后发布 Ready manifest。Ready 前的部分写入由 intent
+  隔离，不向 Consumer 暴露；同内容重试按 manifest 幂等补齐缺失文件并继续发布，内容不同
+  则冲突失败。为避免删除并发同内容重试已依赖的 immutable file，Store 不物理回滚已完成的
+  partial；这类对象只属于该未 Ready exact identity。Ready 一旦原子发布永不回滚。
+  Ready 缺失、文件缺失、hash/manifest 冲突或对象存储不可用时均不可读、不可向
   Runtime/Artifact 暴露。重复写入同一 exact identity 仅允许同内容幂等验证，任何内容冲突
   fail closed。该 Store 不负责 SC 下载、Scanner、MCP dependency、Version 状态、Runtime
   mapping、Teclaw StoreRef 或 Artifact。

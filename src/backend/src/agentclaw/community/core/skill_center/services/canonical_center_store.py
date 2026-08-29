@@ -36,13 +36,19 @@ class OssCanonicalCenterVersionStore:
                 "Canonical Center Store requires atomic create-if-absent and "
                 "three-state reads",
             )
-        self._objects = object_storage
         self._immutable_objects = object_storage
         self._config = config
 
     def write_version(
         self, version: CanonicalCenterVersion
     ) -> CanonicalCenterVersionRef:
+        # Rebuild at the trust boundary even though the public value objects
+        # validate themselves. This keeps a forged/subclassed value from ever
+        # shaping an object key.
+        version = CanonicalCenterVersion.from_files(
+            version.identity,
+            version.file_map,
+        )
         ref = CanonicalCenterVersionRef(version.identity)
         root = self._root(version.identity)
         lock_key = f"{root}/.teamclaw-write.json"
@@ -58,72 +64,67 @@ class OssCanonicalCenterVersionStore:
                     CanonicalCenterStoreErrorCode.CONTENT_CONFLICT,
                     f"exact version identity already belongs to other content: {ref.locator}",
                 )
-            if self.verify_version(ref):
-                return ref
-            raise CanonicalCenterStoreError(
-                CanonicalCenterStoreErrorCode.NOT_READY,
-                f"exact version write is incomplete: {ref.locator}",
-            )
-        if lock_result is ObjectCreateResult.FAILED:
+        elif lock_result is ObjectCreateResult.FAILED:
             raise CanonicalCenterStoreError(
                 CanonicalCenterStoreErrorCode.WRITE_FAILED,
                 f"failed to reserve exact version identity: {ref.locator}",
             )
 
-        created = [lock_key]
-        try:
-            for item in version.files:
-                key = f"{root}/{item.path}"
-                result = self._immutable_objects.create_object_if_absent(
-                    key, item.content
-                )
-                if result is ObjectCreateResult.CREATED:
-                    created.append(key)
-                    continue
-                if result is ObjectCreateResult.FAILED:
-                    raise CanonicalCenterStoreError(
-                        CanonicalCenterStoreErrorCode.WRITE_FAILED,
-                        f"failed to write canonical file: {item.path}",
-                    )
-                if self._read_required(key) != item.content:
-                    raise CanonicalCenterStoreError(
-                        CanonicalCenterStoreErrorCode.CONTENT_CONFLICT,
-                        f"canonical file conflicts at exact identity: {item.path}",
-                    )
-
-            ready_result = self._immutable_objects.create_object_if_absent(
-                ready_key, version.manifest
-            )
-            if ready_result is ObjectCreateResult.CREATED:
-                created.append(ready_key)
-            elif ready_result is ObjectCreateResult.FAILED:
-                raise CanonicalCenterStoreError(
-                    CanonicalCenterStoreErrorCode.WRITE_FAILED,
-                    f"failed to publish Ready manifest: {ref.locator}",
-                )
-            elif self._read_required(ready_key) != version.manifest:
+        existing_ready = self._read_manifest(ref, missing_is_error=False)
+        if existing_ready is not None:
+            if existing_ready != version.manifest:
                 raise CanonicalCenterStoreError(
                     CanonicalCenterStoreErrorCode.CONTENT_CONFLICT,
                     f"Ready manifest conflicts at exact identity: {ref.locator}",
                 )
-
-            if not self.verify_version(ref):
-                raise CanonicalCenterStoreError(
-                    CanonicalCenterStoreErrorCode.CORRUPT_CONTENT,
-                    f"canonical version did not verify after write: {ref.locator}",
-                )
+            self.read_version(ref)
             return ref
-        except CanonicalCenterStoreError:
-            cleanup_failed = False
-            for key in reversed(created):
-                if not self._objects.delete_object(key):
-                    cleanup_failed = True
-            if cleanup_failed:
+
+        for item in version.files:
+            key = f"{root}/{item.path}"
+            result = self._immutable_objects.create_object_if_absent(
+                key, item.content
+            )
+            if result is ObjectCreateResult.FAILED:
                 raise CanonicalCenterStoreError(
                     CanonicalCenterStoreErrorCode.WRITE_FAILED,
-                    f"write failed and owned-object compensation was incomplete: {ref.locator}",
+                    f"failed to write canonical file: {item.path}",
                 )
-            raise
+            if (
+                result is ObjectCreateResult.ALREADY_EXISTS
+                and self._read_required(key) != item.content
+            ):
+                raise CanonicalCenterStoreError(
+                    CanonicalCenterStoreErrorCode.CONTENT_CONFLICT,
+                    f"canonical file conflicts at exact identity: {item.path}",
+                )
+
+        # Verify the complete immutable tree before the one-way Ready publish.
+        # Once Ready is visible it is never compensated or rolled back.
+        for item in version.files:
+            if self._read_required(f"{root}/{item.path}") != item.content:
+                raise CanonicalCenterStoreError(
+                    CanonicalCenterStoreErrorCode.CORRUPT_CONTENT,
+                    f"canonical file failed prepublish verification: {item.path}",
+                )
+
+        ready_result = self._immutable_objects.create_object_if_absent(
+            ready_key, version.manifest
+        )
+        if ready_result is ObjectCreateResult.FAILED:
+            raise CanonicalCenterStoreError(
+                CanonicalCenterStoreErrorCode.WRITE_FAILED,
+                f"failed to publish Ready manifest: {ref.locator}",
+            )
+        if (
+            ready_result is ObjectCreateResult.ALREADY_EXISTS
+            and self._read_required(ready_key) != version.manifest
+        ):
+            raise CanonicalCenterStoreError(
+                CanonicalCenterStoreErrorCode.CONTENT_CONFLICT,
+                f"Ready manifest conflicts at exact identity: {ref.locator}",
+            )
+        return ref
 
     def read_version(
         self, ref: CanonicalCenterVersionRef
