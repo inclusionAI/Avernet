@@ -173,25 +173,35 @@ fn notification_kind_label(kind: FriendConnectNotificationKind) -> &'static str 
 
 fn title_for(kind: FriendConnectNotificationKind) -> &'static str {
     match kind {
-        FriendConnectNotificationKind::ApprovalRequested => "好友添加申请待审批",
-        FriendConnectNotificationKind::AutoApproved => "好友添加申请已自动通过",
-        FriendConnectNotificationKind::Reviewed => "好友添加申请已处理",
+        FriendConnectNotificationKind::ApprovalRequested => "好友申请待审批",
+        FriendConnectNotificationKind::AutoApproved => "好友申请已自动通过",
+        FriendConnectNotificationKind::Reviewed => "好友申请已处理",
     }
 }
 
 fn content_for(command: &FriendConnectNotificationCommand) -> String {
+    // Prefer the resolved display names (a human nick name / a bot name); fall
+    // back to the raw actor ids when a name could not be resolved.
+    let applicant = command
+        .applicant_name
+        .as_deref()
+        .unwrap_or(&command.applicant_actor_id);
+    let target = command
+        .target_bot_name
+        .as_deref()
+        .unwrap_or(&command.target_bot_id);
     match command.kind {
         FriendConnectNotificationKind::ApprovalRequested => format!(
-            "{} 申请添加 Bot {} 为好友，请在好友申请列表中处理。",
-            command.applicant_actor_id, command.target_bot_id
+            "{}申请添加你的 Bot「{}」为好友，请及时处理。",
+            applicant, target
         ),
         FriendConnectNotificationKind::AutoApproved => format!(
-            "{} 与 Bot {} 的好友申请已自动通过。",
-            command.applicant_actor_id, command.target_bot_id
+            "{}与 Bot「{}」的好友申请已自动通过。",
+            applicant, target
         ),
         FriendConnectNotificationKind::Reviewed => format!(
-            "{} 与 Bot {} 的好友申请已处理。",
-            command.applicant_actor_id, command.target_bot_id
+            "{}与 Bot「{}」的好友申请已处理。",
+            applicant, target
         ),
     }
 }
@@ -237,7 +247,10 @@ impl FriendWorkOrderEventRequest {
         let biz_data = serde_json::to_value(biz_data).expect("friend work-order biz_data json");
         let (applicant_user_id, approver_user_ids, recipient_user_ids) = match command.kind {
             FriendConnectNotificationKind::ApprovalRequested => (
-                applicant_user_id(&command.applicant_actor_id)
+                command
+                    .applicant_user_id
+                    .clone()
+                    .or_else(|| applicant_user_id(&command.applicant_actor_id))
                     .or_else(|| Some(command.applicant_actor_id.clone())),
                 command.recipient_user_ids.clone(),
                 Vec::new(),
@@ -353,6 +366,9 @@ mod tests {
                 recipient_user_ids: Vec::new(),
                 message: Some("ignored".to_string()),
                 request_auth: None,
+                applicant_name: None,
+                target_bot_name: None,
+                applicant_user_id: None,
             })
             .await
             .expect("empty recipients should short-circuit");
@@ -381,6 +397,9 @@ mod tests {
             recipient_user_ids: vec!["user_2001".to_string()],
             message: Some("please add me".to_string()),
             request_auth: Some(request_auth.clone()),
+            applicant_name: None,
+            target_bot_name: None,
+            applicant_user_id: None,
         };
         let payload = FriendWorkOrderEventRequest::from_command(&command);
         let request = adapter
@@ -414,6 +433,9 @@ mod tests {
                 recipient_user_ids: vec!["user_2001".to_string()],
                 message: Some("please add me".to_string()),
                 request_auth: None,
+                applicant_name: None,
+                target_bot_name: None,
+                applicant_user_id: None,
             })
             .await;
         assert!(matches!(result, Err(ServiceError::InternalError(message)) if message.contains("friend work-order create request failed")));
@@ -430,6 +452,9 @@ mod tests {
             recipient_user_ids: vec!["user_2001".to_string()],
             message: Some("please add me".to_string()),
             request_auth: None,
+            applicant_name: None,
+            target_bot_name: None,
+            applicant_user_id: None,
         });
         let url = reqwest::Url::parse(
             "https://backend.example.com/api/v1/work-orders/events",
@@ -445,6 +470,9 @@ mod tests {
             recipient_user_ids: vec!["user_2001".to_string()],
             message: Some("please add me".to_string()),
             request_auth: None,
+            applicant_name: None,
+            target_bot_name: None,
+            applicant_user_id: None,
         };
         let error = friend_work_order_non_success_error(
             reqwest::StatusCode::UNPROCESSABLE_ENTITY,
@@ -462,7 +490,7 @@ mod tests {
         assert_eq!(
             logged_payload["content"],
             serde_json::json!({
-                "text": "human_1001 申请添加 Bot bot_2001 为好友，请在好友申请列表中处理。"
+                "text": "human_1001申请添加你的 Bot「bot_2001」为好友，请及时处理。"
             })
         );
         assert_eq!(logged_payload["approver_user_ids"], serde_json::json!(["user_2001"]));
@@ -479,6 +507,9 @@ mod tests {
             recipient_user_ids: vec!["user_2001".to_string()],
             message: Some("please add me".to_string()),
             request_auth: None,
+            applicant_name: None,
+            target_bot_name: None,
+            applicant_user_id: None,
         });
 
         assert_eq!(payload.event_category, "APPROVAL");
@@ -489,11 +520,11 @@ mod tests {
         assert_eq!(payload.apply_reason.as_deref(), Some("please add me"));
         assert_eq!(payload.approver_user_ids, vec!["user_2001".to_string()]);
         assert!(payload.recipient_user_ids.is_empty());
-        assert_eq!(payload.title, "好友添加申请待审批");
+        assert_eq!(payload.title, "好友申请待审批");
         assert_eq!(
             payload.content,
             Some(serde_json::json!({
-                "text": "human_1001 申请添加 Bot bot_2001 为好友，请在好友申请列表中处理。"
+                "text": "human_1001申请添加你的 Bot「bot_2001」为好友，请及时处理。"
             }))
         );
         assert_eq!(
@@ -519,6 +550,9 @@ mod tests {
             recipient_user_ids: vec!["user_2001".to_string()],
             message: Some("please add me".to_string()),
             request_auth: None,
+            applicant_name: None,
+            target_bot_name: None,
+            applicant_user_id: None,
         });
 
         let serialized = serde_json::to_value(&payload).expect("serialize payload");
@@ -526,7 +560,7 @@ mod tests {
         assert_eq!(
             serialized["content"],
             serde_json::json!({
-                "text": "human_1001 申请添加 Bot bot_2001 为好友，请在好友申请列表中处理。"
+                "text": "human_1001申请添加你的 Bot「bot_2001」为好友，请及时处理。"
             })
         );
         assert_eq!(
@@ -547,6 +581,9 @@ mod tests {
             recipient_user_ids: vec!["user_2001".to_string()],
             message: None,
             request_auth: None,
+            applicant_name: None,
+            target_bot_name: None,
+            applicant_user_id: None,
         });
 
         assert_eq!(payload.event_category, "NOTICE");
@@ -554,7 +591,7 @@ mod tests {
         assert_eq!(payload.applicant_user_id, None);
         assert!(payload.approver_user_ids.is_empty());
         assert_eq!(payload.recipient_user_ids, vec!["user_2001".to_string()]);
-        assert_eq!(payload.title, "好友添加申请已自动通过");
+        assert_eq!(payload.title, "好友申请已自动通过");
     }
 
     #[test]
@@ -568,19 +605,24 @@ mod tests {
             recipient_user_ids: vec!["user_2001".to_string()],
             message: Some("bot-to-bot".to_string()),
             request_auth: None,
+            applicant_name: None,
+            target_bot_name: None,
+            applicant_user_id: Some("152819".to_string()),
         });
 
         assert_eq!(payload.event_category, "APPROVAL");
         assert_eq!(payload.event_type, "BOT2BOT_FRIEND_APPLIED");
-        assert_eq!(payload.applicant_user_id.as_deref(), Some("bot_1001"));
+        // bot→bot: applicant_user_id is the initiating bot's OWNER (user id),
+        // not the bot id (the backend rejects a bot id as not matching the user).
+        assert_eq!(payload.applicant_user_id.as_deref(), Some("152819"));
         assert_eq!(payload.approver_user_ids, vec!["user_2001".to_string()]);
         assert!(payload.recipient_user_ids.is_empty());
-        assert_eq!(payload.title, "好友添加申请待审批");
+        assert_eq!(payload.title, "好友申请待审批");
         assert_eq!(payload.apply_reason.as_deref(), Some("bot-to-bot"));
         assert_eq!(
             payload.content,
             Some(serde_json::json!({
-                "text": "bot_1001 申请添加 Bot bot_2001 为好友，请在好友申请列表中处理。"
+                "text": "bot_1001申请添加你的 Bot「bot_2001」为好友，请及时处理。"
             }))
         );
     }
@@ -596,6 +638,9 @@ mod tests {
             recipient_user_ids: vec!["user_2001".to_string()],
             message: Some("handled".to_string()),
             request_auth: None,
+            applicant_name: None,
+            target_bot_name: None,
+            applicant_user_id: None,
         });
 
         assert_eq!(payload.event_category, "NOTICE");
@@ -603,12 +648,12 @@ mod tests {
         assert_eq!(payload.applicant_user_id, None);
         assert!(payload.approver_user_ids.is_empty());
         assert_eq!(payload.recipient_user_ids, vec!["user_2001".to_string()]);
-        assert_eq!(payload.title, "好友添加申请已处理");
+        assert_eq!(payload.title, "好友申请已处理");
         assert_eq!(payload.apply_reason.as_deref(), Some("handled"));
         assert_eq!(
             payload.content,
             Some(serde_json::json!({
-                "text": "human_1001 与 Bot bot_2001 的好友申请已处理。"
+                "text": "human_1001与 Bot「bot_2001」的好友申请已处理。"
             }))
         );
     }
@@ -628,5 +673,76 @@ mod tests {
     fn applicant_user_id_handles_non_human_actor() {
         assert_eq!(applicant_user_id("bot_1001"), None);
         assert_eq!(applicant_user_id("human_"), None);
+    }
+
+    #[test]
+    fn approval_requested_content_uses_resolved_names() {
+        let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::ApprovalRequested,
+            env: "dev".to_string(),
+            request_ids: vec!["1".to_string()],
+            applicant_actor_id: "human_447147".to_string(),
+            target_bot_id: "20260828_eeua0r54:330429".to_string(),
+            recipient_user_ids: vec!["447147".to_string()],
+            message: None,
+            request_auth: None,
+            applicant_name: Some("李四".to_string()),
+            target_bot_name: Some("本地代码专家".to_string()),
+            applicant_user_id: None,
+        });
+        assert_eq!(payload.title, "好友申请待审批");
+        assert_eq!(
+            payload.content,
+            Some(serde_json::json!({
+                "text": "李四申请添加你的 Bot「本地代码专家」为好友，请及时处理。"
+            }))
+        );
+    }
+
+    #[test]
+    fn approval_requested_content_falls_back_per_field_when_partially_resolved() {
+        let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::ApprovalRequested,
+            env: "dev".to_string(),
+            request_ids: vec!["1".to_string()],
+            applicant_actor_id: "human_447147".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["447147".to_string()],
+            message: None,
+            request_auth: None,
+            applicant_name: Some("李四".to_string()),
+            target_bot_name: None,
+            applicant_user_id: None,
+        });
+        assert_eq!(
+            payload.content,
+            Some(serde_json::json!({
+                "text": "李四申请添加你的 Bot「bot_2001」为好友，请及时处理。"
+            }))
+        );
+    }
+
+    #[test]
+    fn auto_approved_content_uses_resolved_names() {
+        let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::AutoApproved,
+            env: "dev".to_string(),
+            request_ids: vec!["2".to_string()],
+            applicant_actor_id: "human_447147".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["447147".to_string()],
+            message: None,
+            request_auth: None,
+            applicant_name: Some("李四".to_string()),
+            target_bot_name: Some("本地代码专家".to_string()),
+            applicant_user_id: None,
+        });
+        assert_eq!(payload.title, "好友申请已自动通过");
+        assert_eq!(
+            payload.content,
+            Some(serde_json::json!({
+                "text": "李四与 Bot「本地代码专家」的好友申请已自动通过。"
+            }))
+        );
     }
 }

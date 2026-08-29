@@ -995,7 +995,7 @@ impl DbBotActorConfigStore {
     /// SELECT the decision columns for `(bot_uuid, env)`. Excludes soft-deleted
     /// rows, mirroring the bot store read (`COALESCE(is_deleted, 0) = 0`).
     const SELECT_BOT_CONFIG_SQL: &'static str =
-        "SELECT bot_uuid, env, visibility, user_visibility, bot_info, status, created_by \
+        "SELECT bot_uuid, env, name, visibility, user_visibility, bot_info, status, created_by \
          FROM bcs_bots \
          WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0 LIMIT 1";
 }
@@ -1174,6 +1174,7 @@ fn row_to_bot_actor_config(row: &DbRow) -> ServiceResult<BotActorConfig> {
     Ok(BotActorConfig {
         bot_id: required_string(row, "bot_uuid")?,
         env: required_string(row, "env")?,
+        name: required_string(row, "name")?,
         visibility: required_string(row, "visibility")?,
         status: required_string(row, "status")?,
         created_by: optional_string(row, "created_by")?,
@@ -1796,6 +1797,7 @@ mod tests {
             "CREATE TABLE bcs_bots (\
                 bot_uuid TEXT NOT NULL, \
                 env TEXT NOT NULL, \
+                name TEXT NOT NULL DEFAULT '', \
                 visibility TEXT NOT NULL DEFAULT 'public', \
                 user_visibility TEXT NOT NULL DEFAULT 'protected', \
                 bot_info TEXT DEFAULT NULL, \
@@ -1854,11 +1856,12 @@ mod tests {
                 "seed_bot",
                 DbStatement::with_params(
                     "INSERT INTO bcs_bots \
-                     (bot_uuid, env, visibility, user_visibility, bot_info, status, created_by) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     (bot_uuid, env, name, visibility, user_visibility, bot_info, status, created_by) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     vec![
                         DbValue::from(bot_uuid),
                         DbValue::from(env),
+                        DbValue::from(bot_uuid),
                         DbValue::from(visibility),
                         DbValue::from(user_visibility),
                         DbValue::from(serde_json::to_string(&bot_info).expect("bot_info json")),
@@ -1895,6 +1898,7 @@ mod tests {
             .expect("bot exists");
         assert_eq!(cfg.bot_id, "20260421_x:85020");
         assert_eq!(cfg.env, "dev");
+        assert_eq!(cfg.name, "20260421_x:85020");
         assert_eq!(cfg.visibility, "public");
         assert_eq!(cfg.user_visibility, "protected");
         assert_eq!(cfg.friend_check_in_strategy, "APPROVAL");
