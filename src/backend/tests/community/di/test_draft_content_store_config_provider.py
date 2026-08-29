@@ -1,9 +1,12 @@
 """Typed configuration contract for Draft revision storage."""
 
 from injector import Binder, Injector, Module
+import pytest
 
 from agentclaw.community.core.skill_center.draft_content import (
     DraftContentStore,
+    DraftContentStoreError,
+    DraftContentStoreErrorCode,
 )
 from agentclaw.community.core.skill_center.services.draft_content_store import (
     OssDraftContentStore,
@@ -14,7 +17,8 @@ from agentclaw.community.di.modules.skill_center_module import SkillCenterModule
 from agentclaw.community.di.modules.testing_skill_center_module import (
     TestingSkillCenterModule,
 )
-from agentclaw.community.plugins.local.draft_content_store import (
+from agentclaw.community.di import DeployProfile, build_injector
+from agentclaw.community.testing.draft_content_store import (
     LocalDraftContentStore,
 )
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
@@ -53,6 +57,42 @@ def test_draft_content_store_config_reads_explicit_prefix(monkeypatch) -> None:
     assert ConfigModule().draft_content_store().base_prefix_template == (
         "sandbox/aidesktop_{env}/space-drafts"
     )
+
+
+def test_draft_content_store_config_rejects_unknown_invalid_and_non_mapping(
+    monkeypatch,
+) -> None:
+    for raw in (
+        {"unknown": True},
+        "not-a-mapping",
+    ):
+        monkeypatch.setattr(
+            config_module, "_user_config", lambda raw=raw: {"draft_content_store": raw}
+        )
+        with pytest.raises(ValueError):
+            ConfigModule().draft_content_store()
+
+    monkeypatch.setattr(
+        config_module,
+        "_user_config",
+        lambda: {"draft_content_store": {"base_prefix_template": "../{env}"}},
+    )
+    with pytest.raises(DraftContentStoreError) as error:
+        ConfigModule().draft_content_store()
+    assert error.value.code is DraftContentStoreErrorCode.INVALID_CONFIGURATION
+
+
+def test_invalid_draft_content_store_config_fails_application_boot(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        config_module,
+        "_user_config",
+        lambda: {"draft_content_store": {"unknown": True}},
+    )
+
+    with pytest.raises(ValueError):
+        build_injector(profile=DeployProfile.TEST)
 
 
 def test_skill_center_provider_builds_the_oss_adapter() -> None:

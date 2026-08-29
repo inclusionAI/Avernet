@@ -443,10 +443,22 @@ class ConfigModule(Module):
     @provider
     def draft_content_store(self) -> DraftContentStoreConfig:
         """Immutable Draft revision object-key prefix."""
-        block = _block("draft_content_store")
+        raw = _user_config().get("draft_content_store")
+        if raw is None:
+            block: dict[str, Any] = {}
+        elif isinstance(raw, dict):
+            block = dict(raw)
+        else:
+            raise ValueError("draft_content_store must be a mapping")
+        unknown = sorted(set(block) - {"base_prefix_template"})
+        if unknown:
+            raise ValueError(
+                "draft_content_store contains unknown keys: "
+                + ", ".join(unknown)
+            )
         defaults = DraftContentStoreConfig()
         value = block.get("base_prefix_template", defaults.base_prefix_template)
-        return DraftContentStoreConfig(base_prefix_template=str(value))
+        return DraftContentStoreConfig(base_prefix_template=value)
 
     # NOTE: codefuse_token provider moved to ``CorpConfigModule`` (B8).
 

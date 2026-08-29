@@ -22,7 +22,7 @@ from agentclaw.community.core.skill_center.draft_content import DraftContentStor
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
-from agentclaw.community.plugins.local.draft_content_store import (
+from agentclaw.community.testing.draft_content_store import (
     LocalDraftContentStore,
 )
 from agentclaw.community.plugins.local.oss_storage import MockObjectStoragePlugin

@@ -16,8 +16,32 @@ proactively mirror a full object-storage SDK.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import Enum
 from typing import Protocol, runtime_checkable
 from agentclaw.community.plugin_api.base import Plugin
+
+
+class ObjectCreateResult(str, Enum):
+    """Outcome of an atomic create-if-absent operation."""
+
+    CREATED = "CREATED"
+    ALREADY_EXISTS = "ALREADY_EXISTS"
+    FAILED = "FAILED"
+
+
+class ObjectReadStatus(str, Enum):
+    """Distinguish a missing object from an unavailable object store."""
+
+    FOUND = "FOUND"
+    NOT_FOUND = "NOT_FOUND"
+    FAILED = "FAILED"
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectReadResult:
+    status: ObjectReadStatus
+    content: bytes | None = None
 
 
 @runtime_checkable
@@ -30,6 +54,12 @@ class ObjectStoragePlugin(Plugin, Protocol):
         Implementations should swallow transport/SDK errors and return
         ``False`` rather than raising, so callers can decide policy.
         """
+        ...
+
+    def create_object_if_absent(
+        self, key: str, content: bytes | str
+    ) -> ObjectCreateResult:
+        """Atomically create ``key`` without replacing an existing object."""
         ...
 
     def put_file(self, key: str, local_path: str) -> bool:
@@ -48,6 +78,10 @@ class ObjectStoragePlugin(Plugin, Protocol):
         rather than raising, so callers can decide policy (mirroring the rest
         of this Protocol). Decode to text at the call site when needed.
         """
+        ...
+
+    def read_object(self, key: str) -> ObjectReadResult:
+        """Read with distinct FOUND, NOT_FOUND, and FAILED outcomes."""
         ...
 
     def delete_object(self, key: str) -> bool:
