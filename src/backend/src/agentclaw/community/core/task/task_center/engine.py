@@ -864,7 +864,7 @@ class ExecutionEngine:
         ③ ``acceptance_result`` FAIL+gaps → on_fail(补救重规划,深度闸门);
         无两者 → 仅 fold,返回。验收 100% 来自回投,engine 不主动验。"""
         logger.info(
-            "[task][on_report] task=%s node=%s exec_error=%s verdict=%s",
+            "[task_callback][on_report] task=%s node=%s exec_error=%s verdict=%s",
             patch.task_id,
             patch.node_id,
             patch.exec_error,
