@@ -394,11 +394,6 @@ class TaskGraphService:
                     if not patch.acceptance_result.gaps:
                         raise TaskStateError("FAIL 验收强制要求 gaps(验收 skill 契约)")
                     new_status = Status.FAILED
-                allowed = _ACCEPTANCE_TRANSITIONS.get(node.status, set())
-                if new_status not in allowed:
-                    raise TaskStateError(
-                        f"acceptance 翻态非法: {node.status}+{verdict} → {new_status}"
-                    )
                 node.run_info.acceptance_result = patch.acceptance_result
             elif patch.exec_error is not None:
                 # 执行报错(非验收):不翻终态,仅 fold extend_props(供 on_harness 读 harness_retries);
