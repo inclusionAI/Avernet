@@ -26,9 +26,7 @@ from typing import Any
 from injector import Module, inject, provider, singleton
 
 from agentclaw.community.core.task_queue.types import MAX_APP_LEN
-from agentclaw.community.core.skill_center.canonical_center_store import (
-    CanonicalCenterStoreConfig,
-)
+from agentclaw.community.core.skill_center.canonical_center_store import CanonicalCenterStoreConfig
 from agentclaw.community.di import config as cfg
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.plugin_api.http_client import (
@@ -68,7 +66,6 @@ def _block(name: str) -> dict[str, Any]:
 
 
 def _object_prefix_setting(name: str, default: str) -> Any:
-    """Read one strict object-store prefix block without duplicating parsing."""
     raw = _user_config().get(name)
     if raw is None:
         return default
