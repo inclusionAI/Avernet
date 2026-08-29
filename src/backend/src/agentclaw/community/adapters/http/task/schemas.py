@@ -214,11 +214,11 @@ class AcceptanceResultDTO(BaseModel):
     """验收结论(DONE/FAILED + 通过项与缺口)。"""
 
     verdict: str = Field(..., description="DONE / FAILED")
-    acceptances_metric: list[str] = Field(
-        default_factory=list, description="通过的验收项标识列表"
+    acceptances_metric: list[Any] = Field(
+        default_factory=list, description="通过的验收项明细列表(新协议为对象数组,[{项:结论}])"
     )
-    gaps: list[str] = Field(
-        default_factory=list, description="未通过的验收项标识列表(gap)"
+    gaps: list[Any] = Field(
+        default_factory=list, description="未通过的验收项明细/差距(对象数组 [{项:原因}] 或字符串数组)"
     )
 
 

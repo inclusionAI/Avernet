@@ -162,3 +162,16 @@ def test_acceptance_verdict_backward_compat_pass_fail():
 
     with pytest.raises(ValueError):
         AcceptanceVerdict("UNKNOWN")
+
+
+def test_acceptance_result_dto_accepts_object_arrays():
+    """新协议 acceptances_metric/gaps 为对象数组,DTO(list[Any]) 应接受,不再 500。"""
+    from agentclaw.community.adapters.http.task.schemas import AcceptanceResultDTO
+    dto = AcceptanceResultDTO(
+        verdict="DONE",
+        acceptances_metric=[{"ac_1": "exec_ok"}],
+        gaps=[{"sddss": "xxsdd"}],
+    )
+    assert dto.verdict == "DONE"
+    assert dto.acceptances_metric == [{"ac_1": "exec_ok"}]
+    assert dto.gaps == [{"sddss": "xxsdd"}]
