@@ -24,6 +24,7 @@ from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
+    HARNESS_POLLER,
     SEARCH_SKILL,
     SINGLE_BOT_SKILL_REPORT,
     TaskClaimJoinGate,
@@ -83,6 +84,26 @@ def _harness_enabled() -> bool:
     return os.environ.get("OCB_TASK_HARNESS_ENABLED", "").strip().lower() in {
         "1", "true", "yes", "on",
     }
+
+
+def _resolve_harness_enabled(
+    task_settings: TaskSettingsServiceProtocol | None,
+) -> bool:
+    """harness 旁路巡检开关:优先读 tasks/settings(``harness_poller``,system-config KV,跨副本热改),
+    未绑/读异常时回退 env ``OCB_TASK_HARNESS_ENABLED``;默认**关闭**。
+
+    Settings 走 KV 可运行时经 POST /tasks/settings 热改;env 仅本地/单进程兜底。
+    当 TaskSettingsServiceProtocol 未绑(纯内核/轻量测试)时直接回退 env,不影响既有本地开关语义。
+    """
+    if task_settings is not None:
+        try:
+            return task_settings.is_enabled(HARNESS_POLLER)
+        except Exception as exc:  # noqa: BLE001 设置读取失败 → 回退 env
+            logger.warning(
+                "[task][task-module] harness_poller 设置读取失败,回退 env:%s",
+                exc,
+            )
+    return _harness_enabled()
 
 
 class TaskModule(Module):
@@ -206,15 +227,25 @@ class TaskModule(Module):
             bcs_identity = BotServiceBcsBotIdentityResolver(
                 injector.get(BotServiceProtocol)
             )
+        # 任务开关服务(tasks/settings):system-config KV,跨副本共享;harness 旁路巡检开关经此热改。
+        # 未绑(纯内核/轻量测试)→ None → harness 回退 env 决策。任务派发链路也消费同一实例。
+        try:
+            task_settings = injector.get(TaskSettingsServiceProtocol)
+        except Exception as exc:  # noqa: BLE001 未绑定 → 使用静态默认值
+            logger.info(
+                "[task][task-module] TaskSettingsServiceProtocol 未绑定 → 使用静态默认值:%s",
+                exc,
+            )
+            task_settings = None
         # harness 旁路常驻巡检(SLA 超时复位 / FAILED 重派重试 / PENDING 派发超时重搜推);
-        # 可配置开关(OCB_TASK_HARNESS_ENABLED),默认关闭:facades 始终以事件驱动为主推进,
-        # harness=None 时 TaskService 不启动 daemon 巡检线程。需要旁路兜底时显式置 =1 开启。
-        if _harness_enabled():
+        # 可配置开关,默认关闭:facades 始终以事件驱动为主推进,harness=None 时不启动 daemon 巡检线程。
+        # 优先读 tasks/settings(harness_poller,KV 跨副本热改),未绑/读异常回退 env OCB_TASK_HARNESS_ENABLED。
+        if _resolve_harness_enabled(task_settings):
             harness = TaskHarness(graph)
-            logger.info("[task][task-module] TaskHarness 旁路巡检已启用(OCB_TASK_HARNESS_ENABLED=1)")
+            logger.info("[task][task-module] TaskHarness 旁路巡检已启用")
         else:
             harness = None
-            logger.info("[task][task-module] TaskHarness 旁路巡检已关闭(默认);需开启设 OCB_TASK_HARNESS_ENABLED=1")
+            logger.info("[task][task-module] TaskHarness 旁路巡检已关闭(默认)")
         # TaskPersistenceModule is optional for the pure-core and lightweight DI
         # test paths. Resolve every persistence port lazily so Injector never
         # attempts to instantiate an abstract repository protocol.
@@ -249,14 +280,6 @@ class TaskModule(Module):
             staff_dept = injector.get(StaffDeptPlugin)
         except Exception:  # noqa: BLE101 未绑定 → list 不附加 owner_user_name
             staff_dept = None
-        try:
-            task_settings = injector.get(TaskSettingsServiceProtocol)
-        except Exception as exc:  # noqa: BLE001 未绑定 → 使用静态默认值
-            logger.info(
-                "[task][task-module] TaskSettingsServiceProtocol 未绑定 → 使用静态默认值:%s",
-                exc,
-            )
-            task_settings = None
         # claim_on JOIN 灰度开关(默认关闭,HTTP 显式开启):经 task_claim_join_gate provider 解析
         # (系统配置 KV,跨副本共享);未绑(纯内核/轻量测试)→ None → gate 关 → 派发不做 claim_on 交集(不回归)。
         try:
