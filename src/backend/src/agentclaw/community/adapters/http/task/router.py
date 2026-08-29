@@ -963,8 +963,10 @@ async def _dispatch(
     if tc is not None:
         try:
             if tc.disposition == "start":
+                logger.info("[task_callback] report_callback_to_driver_engine, type=start")
                 await svc.callback.start_run(tc.data)
             else:
+                logger.info("[task_callback] report_callback_to_driver_engine, type=result")
                 await svc.callback.report_result(tc.data)
         except TaskStateError as e:
             logger.error("[task_callback] report_callback_to_driver_engine, meet exception = %s", e)
