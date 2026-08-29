@@ -10,8 +10,11 @@ from __future__ import annotations
 
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     CATEGORY,
+    HARNESS_POLLER,
+    HARNESS_POLLER_KEY,
     KEY,
     TaskClaimJoinGate,
+    TaskSettingsService,
 )
 
 
@@ -88,3 +91,41 @@ def test_get_config_raises_fail_open():
     gate = TaskClaimJoinGate(config=store)
     assert gate.is_enabled() is False
     assert gate.get_enabled(env="pre") is False
+
+
+
+def test_harness_poller_defaults_off_and_writable():
+    """harness_poller 开关默认关闭,且经 TaskSettingsService.set_enabled 写穿后 is_enabled 立即 True。
+
+    锁定:tasks/settings 接口可直接开启/关闭 harness 旁路巡检,默认 False(facade 以事件驱动为主)。
+    """
+    store = _FakeStore()
+    svc = TaskSettingsService(config=store)
+
+    # 默认关闭(store 无值 → 返回 default=False)
+    assert svc.get_enabled(setting_type=HARNESS_POLLER, env="pre") is False
+    assert svc.is_enabled(HARNESS_POLLER) is False
+
+    # 写穿:harness_poller_enabled KV 落库,is_enabled 立即 True(无需等 KV 读)
+    assert svc.set_enabled(setting_type=HARNESS_POLLER, enabled=True, env="pre", operator="146836") is True
+    assert len(store.set_calls) == 1
+    call = store.set_calls[0]
+    assert call["config_key"] == HARNESS_POLLER_KEY
+    assert call["config_value"] is True
+    assert call["operator"] == "146836"
+    assert svc.is_enabled(HARNESS_POLLER) is True
+
+    # 关闭回写:set_enabled 返回新状态(False),is_enabled 立即反映
+    assert svc.set_enabled(setting_type=HARNESS_POLLER, enabled=False, env="pre", operator="146836") is False
+    assert svc.is_enabled(HARNESS_POLLER) is False
+
+
+def test_harness_poller_unsupported_type_rejected():
+    """未知 setting_type 抛 ValueError(防止误传开关名静默 fail-open)。"""
+    svc = TaskSettingsService(config=None)
+    raised = False
+    try:
+        svc.get_enabled(setting_type="not_a_real_setting", env="pre")
+    except ValueError:
+        raised = True
+    assert raised is True

@@ -9,7 +9,12 @@ from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
 )
+from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
+    TaskSettingsServiceProtocol,
+)
 from agentclaw.community.di.modules.task_module import TaskModule
+
+from agentclaw.community.di.modules.task_module import _resolve_harness_enabled
 from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
     SingleboxKeywordBotDiscover,
 )
@@ -93,3 +98,62 @@ def test_task_module_uses_keyword_discovery_in_every_profile(monkeypatch):
         monkeypatch.setenv("DEPLOY_PROFILE", profile)
         discover = TaskModule._resolve_discover(bot_public=_BotPublic())
         assert isinstance(discover, SingleboxKeywordBotDiscover)
+
+
+
+class _FakeSettings(TaskSettingsServiceProtocol):
+    """TaskSettingsServiceProtocol fake:is_enabled 返回固定布尔,模拟 KV 开关。"""
+
+    def __init__(self, enabled: bool, exc: Exception | None = None) -> None:
+        self._enabled = enabled
+        self._exc = exc
+        self.calls: list[str] = []
+
+    def is_enabled(self, setting_type: str) -> bool:
+        self.calls.append(setting_type)
+        if self._exc is not None:
+            raise self._exc
+        return self._enabled
+
+    def get_enabled(self, *, setting_type, env):
+        return self._enabled
+
+    def set_enabled(self, *, setting_type, enabled, env, operator=None):
+        self._enabled = enabled
+        return enabled
+
+
+def test_resolve_harness_enabled_uses_settings_when_true(monkeypatch):
+    """settings 服务返回 True → 开启 harness,不查 env。"""
+    monkeypatch.delenv("OCB_TASK_HARNESS_ENABLED", raising=False)
+    fake = _FakeSettings(enabled=True)
+    assert _resolve_harness_enabled(fake) is True
+    assert fake.calls == ["harness_poller"]
+
+
+def test_resolve_harness_enabled_uses_settings_when_false(monkeypatch):
+    """settings 服务返回 False 且 env 未设 → 关闭 harness。"""
+    monkeypatch.delenv("OCB_TASK_HARNESS_ENABLED", raising=False)
+    fake = _FakeSettings(enabled=False)
+    assert _resolve_harness_enabled(fake) is False
+    assert fake.calls == ["harness_poller"]
+
+
+def test_resolve_harness_enabled_falls_back_to_env_when_settings_none(monkeypatch):
+    """settings 服务未绑(None) → 回退 env OCB_TASK_HARNESS_ENABLED。"""
+    monkeypatch.setenv("OCB_TASK_HARNESS_ENABLED", "1")
+    assert _resolve_harness_enabled(None) is True
+    monkeypatch.setenv("OCB_TASK_HARNESS_ENABLED", "0")
+    assert _resolve_harness_enabled(None) is False
+    monkeypatch.delenv("OCB_TASK_HARNESS_ENABLED", raising=False)
+    assert _resolve_harness_enabled(None) is False
+
+
+def test_resolve_harness_enabled_falls_back_to_env_on_read_error(monkeypatch):
+    """settings 服务 is_enabled 抛异常 → 回退 env,不抛出。"""
+    monkeypatch.delenv("OCB_TASK_HARNESS_ENABLED", raising=False)
+    fake = _FakeSettings(enabled=True, exc=RuntimeError("kv down"))
+    assert _resolve_harness_enabled(fake) is False  # env 关 → 关
+    monkeypatch.setenv("OCB_TASK_HARNESS_ENABLED", "true")
+    assert _resolve_harness_enabled(fake) is True  # env 开 → 开
+    monkeypatch.delenv("OCB_TASK_HARNESS_ENABLED", raising=False)
