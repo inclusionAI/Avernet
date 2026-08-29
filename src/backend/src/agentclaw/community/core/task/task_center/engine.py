@@ -537,8 +537,11 @@ class ExecutionEngine:
             return 0
         wave_ids = {d.node_id for d in wave_defs}
         all_nodes = runtime.nodes(task_id, root.task_spec)
+        # attach_dependency=False:后续波节点入图不挂 root 锚定边,真依赖边由下面 add_relations
+        # 补 deps→X(crowd/product 依赖 marketing、approval 四路合并、impl 依赖 approval 等),
+        # 避免 dashboard 把 root(okr-implementation) 误连到所有后续节点。
         wave_nodes = [n for n in all_nodes if n.node_id in wave_ids]
-        self._graph.add_task_nodes(wave_nodes, root.node_id)
+        self._graph.add_task_nodes(wave_nodes, root.node_id, attach_dependency=False)
         edges: list[tuple[str, str]] = []
         for d in wave_defs:
             edges.extend((dep, d.node_id) for dep in d.depends_on)

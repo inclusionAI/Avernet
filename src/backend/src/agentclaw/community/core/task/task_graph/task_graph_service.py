@@ -257,7 +257,9 @@ class TaskGraphService:
                 )
             return graph
 
-    def add_task_nodes(self, tasks: list[TaskNode], parent_node_id: str) -> TaskExecutionGraph:
+    def add_task_nodes(
+        self, tasks: list[TaskNode], parent_node_id: str, *, attach_dependency: bool = True
+    ) -> TaskExecutionGraph:
         """并子图(单写 relations 分解树)。触发条件 a/b/c 由编排核判后调,本方法双检:
         a. 只有一个根节点且 status=PENDING(初始规划);
         b. 存在 FAILED 节点且 acceptance_result.gaps 非空的叶子(补救);
@@ -290,9 +292,12 @@ class TaskGraphService:
             for t in tasks:
                 graph.tasks.append(t)
                 t.node_run_graph = graph
-                graph.relations.append(
-                    Relation(src_id=parent_node_id, dst_id=t.node_id, type=RelationType.DEPENDENCY)
-                )
+                if attach_dependency:
+                    # 写 parent→子的单入锚定边;attach_dependency=False 时不写(静态 plan 后续波节点
+                    # 真依赖边由 add_relations 显式补 deps→X,避免每节点冗余 root→X 锚定使 root 误连一切)。
+                    graph.relations.append(
+                        Relation(src_id=parent_node_id, dst_id=t.node_id, type=RelationType.DEPENDENCY)
+                    )
             # 父进 PLANNING(委托/编排态:等子完成 / 待重算 gap)。v4:规划出子的父永不为 RUNNING,
             # RUNNING 只给真正派发执行的叶子。
             if parent.status != Status.PLANNING:
