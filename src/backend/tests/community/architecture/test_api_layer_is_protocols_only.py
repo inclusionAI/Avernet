@@ -120,6 +120,43 @@ def test_api_layer_has_no_subdirectories() -> None:
     )
 
 
+def _reexported_protocol_names(tree: ast.AST) -> set[str]:
+    """Names a re-export-only module republishes via ``__all__``.
+
+    The cleaner Service API shape defines the Protocol in the owning
+    ``core/<module>/protocols.py`` and re-exports it here: core then
+    imports its own abstraction, so a concrete service can inherit its
+    Protocol without the ``core -> api`` waiver that Rule 6 otherwise
+    requires. Such a module has no ``class X(Protocol)`` of its own —
+    it imports the name and lists it in ``__all__``.
+
+    We accept one only when every ``Protocol``-suffixed name in
+    ``__all__`` is actually imported by the module, so a router or a
+    service class still cannot masquerade as a contract module.
+    """
+    exported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets
+        ):
+            if isinstance(node.value, (ast.List, ast.Tuple)):
+                exported |= {
+                    el.value
+                    for el in node.value.elts
+                    if isinstance(el, ast.Constant) and isinstance(el.value, str)
+                }
+    if not exported:
+        return set()
+    imported = {
+        (alias.asname or alias.name)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
+    protocols = {name for name in exported if name.endswith("Protocol")}
+    return protocols if protocols and protocols <= imported else set()
+
+
 @pytest.mark.unit
 def test_every_api_file_defines_a_protocol() -> None:
     """Each .py file under api/ (except __init__) must define a Protocol class.
@@ -141,9 +178,42 @@ def test_every_api_file_defines_a_protocol() -> None:
             offenders.append(f"{file.name}:{exc.lineno} SyntaxError: {exc.msg}")
             continue
         if not any(_bases_include_protocol(cls) for cls in _top_level_class_defs(tree)):
+            if _reexported_protocol_names(tree):
+                # Re-export-only module: the Protocol is defined in core/ and
+                # republished here. Still a contract module, no local class.
+                continue
             rel = file.relative_to(_API_ROOT)
             offenders.append(str(rel))
     assert not offenders, (
-        "Every api/<file>.py must define a Protocol. Offending files:\n  "
+        "Every api/<file>.py must define a Protocol, or re-export one from "
+        "core/<module>/protocols.py via __all__. Offending files:\n  "
         + "\n  ".join(offenders)
     )
+
+
+@pytest.mark.unit
+def test_reexport_module_counts_as_a_protocol_module() -> None:
+    """A module that re-exports its Protocol from core/ satisfies the gate."""
+    tree = ast.parse(
+        "from agentclaw.community.core.skill_center.skill_query_service_protocol import (\n"
+        "    SkillQueryServiceProtocol,\n"
+        ")\n\n"
+        '__all__ = ["SkillQueryServiceProtocol"]\n'
+    )
+    assert _reexported_protocol_names(tree) == {"SkillQueryServiceProtocol"}
+
+
+@pytest.mark.unit
+def test_reexport_escape_hatch_rejects_unimported_and_non_protocol_names() -> None:
+    """The hatch only opens for Protocol names the module actually imports."""
+    # __all__ advertises a Protocol the module never imported.
+    declared_only = ast.parse('__all__ = ["SomethingProtocol"]\n')
+    assert _reexported_protocol_names(declared_only) == set()
+
+    # A router re-exporting non-Protocol names cannot pose as a contract module.
+    router = ast.parse(
+        "from fastapi import APIRouter\n\n"
+        "router = APIRouter()\n\n"
+        '__all__ = ["router"]\n'
+    )
+    assert _reexported_protocol_names(router) == set()
