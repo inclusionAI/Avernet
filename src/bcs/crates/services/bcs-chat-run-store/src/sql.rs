@@ -191,26 +191,30 @@ impl SqlChatRunRepo {
 
     /// Fail a streaming delta over to the authoritative DB row when the Redis
     /// overlay write is unavailable (C4, #1546: never convert a backend write
-    /// failure into a lost delta). Writes `accumulated_content` directly with
-    /// `version = version + 1` under the non-terminal guard: applied →
-    /// `Ok(true)`, already-terminal (0 rows, delta not applied) → `Ok(false)`,
-    /// DB error → propagated `Backend`.
+    /// failure into a lost delta). Writes `accumulated_content` at the
+    /// *intended* version (`version = ?`, not `version + 1`) so a stale overlay
+    /// left at a lower version can never be merged over the freshly persisted
+    /// row (P1): later reads/appends re-base off the DB. The non-terminal guard
+    /// still resolves a concurrent terminal to 0 rows. applied → `Ok(true)`,
+    /// already-terminal → `Ok(false)`, DB error → propagated `Backend`.
     async fn fall_back_to_db_append(
         &self,
         run_id: &str,
         accumulated: &str,
         truncated: bool,
+        intended_version: u64,
     ) -> Result<bool, ChatRunRepoError> {
         let now = now_ms();
         let stmt = DbStatement::with_params(
             &format!(
                 "UPDATE bcs_chat_runs SET accumulated_content = ?, content_truncated = ?, \
-                 version = version + 1, updated_at_ms = ? \
+                 version = ?, updated_at_ms = ? \
                  WHERE run_id = ? AND state NOT IN ({TERMINAL_STATES}) AND env = ?"
             ),
             vec![
                 DbValue::from(accumulated.to_string()),
                 DbValue::from(truncated),
+                DbValue::from(intended_version as i64),
                 DbValue::from(now as i64),
                 DbValue::from(run_id.to_string()),
                 DbValue::from(self.env.as_str()),
@@ -560,30 +564,31 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         accumulated: String,
         truncated: bool,
     ) -> Result<bool, ChatRunRepoError> {
-        // Base the overlay on the current overlay if present, else the DB row.
-        let mut overlay = match self.read_overlay(run_id).await {
-            Some(existing) => existing,
-            None => {
-                let Some(record) = self.read_db(run_id).await? else {
-                    return Ok(false);
-                };
-                StreamingOverlay {
-                    version: record.version,
-                    state: state_str(record.state).to_string(),
-                    accumulated_content: record.accumulated_content.clone(),
-                    content_truncated: record.content_truncated,
-                }
-            }
-        };
-        if overlay.version != expected_version {
+        // Read both the overlay (streaming hot cache) and the authoritative DB
+        // row, then base off whichever is newer. P1: a stale overlay left by a
+        // rejected write must never win over a DB row the fail-over advanced, so
+        // pick `max(overlay.version, db.version)` rather than trusting the overlay.
+        let overlay_opt = self.read_overlay(run_id).await;
+        let db_record = self.read_db(run_id).await?;
+        let expires_at_ms = db_record.as_ref().map(|r| r.expires_at_ms).unwrap_or(0);
+        if expires_at_ms == 0 {
             return Ok(false);
         }
-        let expires_at_ms = self
-            .read_db(run_id)
-            .await?
-            .map(|record| record.expires_at_ms)
-            .unwrap_or(0);
-        if expires_at_ms == 0 {
+        let mut overlay = match (overlay_opt, db_record) {
+            // Overlay is ahead of the DB — normal streaming; base off the overlay.
+            (Some(existing), Some(db)) if existing.version > db.version => existing,
+            // DB is at or ahead (incl. the fail-over case), or the overlay is
+            // gone — base off the authoritative DB row.
+            (_, Some(db)) => StreamingOverlay {
+                version: db.version,
+                state: state_str(db.state).to_string(),
+                accumulated_content: db.accumulated_content.clone(),
+                content_truncated: db.content_truncated,
+            },
+            // Overlay present but the DB row is gone — treat the run as missing.
+            (Some(_), None) | (None, None) => return Ok(false),
+        };
+        if overlay.version != expected_version {
             return Ok(false);
         }
         let flipped = overlay.state == "pending";
@@ -593,13 +598,27 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         }
         overlay.accumulated_content = accumulated;
         overlay.content_truncated = truncated;
+        let intended_version = overlay.version;
         match self.write_overlay(run_id, &overlay, expires_at_ms).await {
             // Overlay (the sole delta record) confirmed the write.
             Ok(()) => Ok(true),
-            // C4: the overlay write was rejected (Redis outage / upsert no-write).
-            // Fail the delta over to the authoritative DB row instead of
-            // silently dropping it (#1546 forbids a swallowed backend write).
-            Err(_) => self.fall_back_to_db_append(run_id, &overlay.accumulated_content, truncated).await,
+            // C4/P1: overlay write rejected — fail the delta over to the DB at the
+            // *intended* version, then drop the stale overlay best-effort so
+            // recovery re-bases off the DB. (#1546 forbids swallowing the write.)
+            Err(_) => {
+                let applied = self
+                    .fall_back_to_db_append(
+                        run_id,
+                        &overlay.accumulated_content,
+                        truncated,
+                        intended_version,
+                    )
+                    .await?;
+                if applied {
+                    self.delete_overlay(run_id).await;
+                }
+                Ok(applied)
+            }
         }
     }
 
