@@ -36,12 +36,18 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     logger.info("[task][bbs_mode] bbs_runner, begin, task_id=%s, backend_url=%s, skill_name=%s", execution_graph.task_id, backend_url, skill_name)
     task_id = execution_graph.task_id
     if bcn is None or bot is None:
-        logger.info("[task][bbs_mode] skip: bcn/bot 缺失 task=%s", task_id)
+        logger.error("[task][bbs_mode] skip: bcn/bot 缺失 task=%s", task_id)
         return
     try:
-        entries = await asyncio.to_thread(
-            bcn.list_bots_by_task_modes, claim=True, dream=True, match="all",
-        )
+        logger.info("[task][bbs_mode] bbs_runner, list_bots, task_id=%s", execution_graph.task_id)
+
+        try:
+            entries = await asyncio.to_thread(
+                bcn.list_bots_by_task_modes, claim=True, dream=True, match="all",
+            )
+        except Exception as e:
+            logger.error("[task][bbs_mode] bbs_runner, list_bots, task_id=%s, meet_exception=%s", execution_graph.task_id, e)
+            return
 
         logger.info("[task][bbs_mode] bbs_runner, begin, task_id=%s, entries=%d,%s", execution_graph.task_id, len(entries), entries)
         if len(entries) > 10:
