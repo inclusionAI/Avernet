@@ -152,15 +152,6 @@ def _load_yaml_configs(
         community_root.parent / "corp" / "configs",  # agentclaw/corp/configs
     ]
 
-    # Corp overlay search dirs (local monorepo + deployed configs/).
-    # Filename: application-singlebox-corp.yaml (derived from overlay name).
-    stem = overlay_name.removesuffix(".yaml")
-    corp_overlay_name = f"{stem}-corp.yaml"
-    corp_config_dirs = [
-        Path.cwd() / "configs",
-        Path(__file__).resolve().parents[8] / "src" / "backend" / "src" / "agentclaw" / "corp" / "configs",
-    ]
-
     for config_dir in config_dirs:
         base_path = config_dir / "application.yaml"
         overlay_path = config_dir / overlay_name
