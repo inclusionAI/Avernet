@@ -61,7 +61,7 @@ _DIRECT_TRANSITIONS: dict[Status, set[Status]] = {
     Status.FAILED: {Status.PENDING, Status.HUNG},
 }
 # 可委托(add_task_nodes 时 parent 允许的态):PENDING(初始/根)/FAILED(补救)/PLANNING(前向重规划)
-_DELEGATABLE_PARENT: set[Status] = {Status.PENDING, Status.FAILED, Status.PLANNING}
+_DELEGATABLE_PARENT: set[Status] = {Status.PENDING, Status.FAILED, Status.PLANNING, Status.HUNG}
 
 _DEFAULT_MAX_DEPTH = 2
 _DEFAULT_MAX_LOOP = 10  # 图级总轮次(根 gap 不闭 + 反复升 BBS)
