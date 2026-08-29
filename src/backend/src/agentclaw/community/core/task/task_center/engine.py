@@ -1461,6 +1461,15 @@ class ExecutionEngine:
         if exc is not None:
             logger.error("[task][engine] run_bbs bg task 异常: %s", exc, exc_info=exc)
 
+    def _on_auto_report_done(self, t: "asyncio.Task") -> None:
+        """静态自驱 on_report 后台任务完成:脱离跟踪集 + 异常可见。"""
+        self._bg_tasks.discard(t)
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc is not None:
+            logger.error("[task][static-plan] auto-report bg task 异常: %s", exc, exc_info=exc)
+
     def _schedule_bbs_notify(self, task_id: str, execution_graph) -> None:
         """可恢复拦截点(spec §5):fire-and-forget ``runner.run_bbs(execution_graph)``。
 
@@ -1879,7 +1888,14 @@ class ExecutionEngine:
                 task_id, len(auto_nodes), [n.node_id for n in auto_nodes],
             )
             for n in auto_nodes:
-                asyncio.create_task(self._static_auto_report(task_id, n.node_id))
+                t = asyncio.create_task(self._static_auto_report(task_id, n.node_id))
+                # 保活:存强引用,避免 sleep 期间被 GC 回收导致 on_report 永不触发(asyncio 官方坑)
+                self._bg_tasks.add(t)
+                t.add_done_callback(self._on_auto_report_done)
+                logger.info(
+                    "[task][static-plan] auto-report scheduled task=%s node=%s task_obj=%s",
+                    task_id, n.node_id, id(t),
+                )
         # ② dispatch_fail:落 dispatch_error(留 PENDING,harness 按超时重试搜推)
         for patch in dispatch_fail_patches:
             self._graph.update_task_node_info(patch)
