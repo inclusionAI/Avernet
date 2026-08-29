@@ -19,6 +19,11 @@ provides:
   - "SkillPackageValidator"
   - "SkillPackageManifestParserProtocol"
   - "ValidatedSkillPackage"
+  - "DraftContentStore"
+  - "DraftContentStoreConfig"
+  - "DraftRevisionIdentity"
+  - "DraftRevisionRef"
+  - "OssDraftContentStore"
   - "DirectActivationService"
   - "LocalSkillDeleteService"
   - "BotCapabilityAuthorizationHookProtocol"
@@ -71,6 +76,7 @@ consumes:
   - "SpaceSkillRepository"
   - "WorkOrderRepositoryProtocol"
   - "DraftEditLeaseRepository"
+  - "ObjectStoragePlugin"
 internal_dependencies:
   - agentclaw.community.api.skill_parameter_service_factory
   - agentclaw.community.api.skill_market_service
@@ -138,6 +144,12 @@ ignored platform metadata, and deterministic canonical ZIP generation. The
 `ValidatedSkillPackage` value does not authorize a Bot, write a content store,
 mutate desired state, or project Runtime; those lifecycle effects remain in
 their owning application services.
+
+`DraftContentStore` persists one canonical ZIP per immutable Draft revision.
+Its business reference is `draft://<skill_uuid>/v<target>/<revision_id>`; only
+the OSS adapter knows the configured physical object prefix. The Store owns no
+Draft status, TTL, READY marker, database command, Publication behavior, or
+Runtime projection.
 
 Capability activation is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols. Changes to `SkillMetadataParserProtocol`, `SkillMetadata`, or stable manifest error codes affect Local folder upload immediately and the shared fixtures consumed by Git import, Draft validation and publication validation; coordinate those consumers before changing fields, limits or codes. List/detail/market readers must continue consuming parser-derived projections rather than inventing a second name or description source.
 

@@ -25,6 +25,9 @@ from typing import Any
 
 from injector import Module, inject, provider, singleton
 
+from agentclaw.community.core.skill_center.draft_content import (
+    DraftContentStoreConfig,
+)
 from agentclaw.community.core.task_queue.types import MAX_APP_LEN
 from agentclaw.community.di import config as cfg
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
@@ -435,6 +438,15 @@ class ConfigModule(Module):
                 block.get("access_key_secret", defaults.secret_name),
             ),
         )
+
+    @singleton
+    @provider
+    def draft_content_store(self) -> DraftContentStoreConfig:
+        """Immutable Draft revision object-key prefix."""
+        block = _block("draft_content_store")
+        defaults = DraftContentStoreConfig()
+        value = block.get("base_prefix_template", defaults.base_prefix_template)
+        return DraftContentStoreConfig(base_prefix_template=str(value))
 
     # NOTE: codefuse_token provider moved to ``CorpConfigModule`` (B8).
 

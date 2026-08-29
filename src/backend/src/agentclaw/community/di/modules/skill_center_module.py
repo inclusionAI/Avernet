@@ -204,6 +204,9 @@ from agentclaw.community.core.workspace.skill_layout import (
     runtime_layout_engine_for_bot,
 )
 from agentclaw.community.di import config as cfg
+from agentclaw.community.di.modules.draft_content_store_module import (
+    DraftContentStoreBindings,
+)
 from agentclaw.community.di.modules.skill_center_protocols import (
     SkillCenterProtocolBindings,
 )
@@ -250,7 +253,7 @@ logger = get_logger()
 # ── Module ─────────────────────────────────────────────────────────────────
 
 
-class SkillCenterModule(SkillCenterProtocolBindings, Module):
+class SkillCenterModule(DraftContentStoreBindings, SkillCenterProtocolBindings, Module):
     """Production singletons + factories for skill_center."""
 
     def configure(self, binder: Binder) -> None:
