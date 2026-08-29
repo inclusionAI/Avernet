@@ -679,13 +679,32 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         effective_entity_type = str(bot.get("entity_type") or "staff")
         effective_engine = ctx.active_engine or self.engine_type
 
+        skill_set_service = None
+        if skill_set_factory is not None:
+            try:
+                skill_set_service = skill_set_factory.create(
+                    user_id=effective_entity_id,
+                    entity_id=effective_entity_id,
+                    bot_id=ctx.bot_id,
+                    entity_type=effective_entity_type,
+                    engine_type=effective_engine,
+                )
+            except Exception as skill_error:
+                logger.error(
+                    "[aicoding.restart] skill set service init error: "
+                    "bot_id=%s, engine_type=%s, error=%s",
+                    ctx.bot_id, effective_engine, skill_error,
+                    exc_info=True,
+                )
+                skill_set_service = None
+
         def _run() -> None:
             import asyncio
 
             refresh_succeeded = True
             if mcp_sync is not None:
                 try:
-                    async def _do_mcp_sync() -> tuple[dict, dict | None]:
+                    async def _do_mcp_sync() -> dict | None:
                         scope_result = await mcp_sync.refresh_mcp_scope(
                             user_id=effective_entity_id,
                             entity_id=effective_entity_id,
@@ -694,56 +713,57 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                             engine_type=effective_engine,
                         )
                         if not scope_result.get("success"):
-                            return scope_result, None
+                            return scope_result
 
-                        detail_result = await mcp_sync.sync_mcp_details(
-                            user_id=effective_entity_id,
+                        if skill_set_service is None:
+                            logger.info(
+                                "[aicoding.restart] skip MCP projection: "
+                                "skill set service unavailable, bot_id=%s, engine_type=%s",
+                                ctx.bot_id, effective_engine,
+                            )
+                            return scope_result
+
+                        mcp_codes = skill_set_service.get_bot_mcp_codes(
                             entity_id=effective_entity_id,
                             bot_id=ctx.bot_id,
+                            user_id=effective_entity_id,
                             entity_type=effective_entity_type,
                             engine_type=effective_engine,
                         )
-                        return scope_result, detail_result
+                        projection_ok = await skill_set_service.sync_mcp_projection(
+                            claimed=frozenset(mcp_codes),
+                            released=frozenset(),
+                            declared=set(mcp_codes),
+                        )
+                        if not projection_ok:
+                            return {"success": False, "error": "mcp projection failed"}
+                        return scope_result
 
-                    scope_result, detail_result = asyncio.run(_do_mcp_sync())
+                    scope_result = asyncio.run(_do_mcp_sync())
                     if not scope_result.get("success"):
                         refresh_succeeded = False
                         logger.error(
-                            "[aicoding.restart] MCP scope resync failed: "
+                            "[aicoding.restart] MCP projection resync failed: "
                             "bot_id=%s, engine_type=%s, error=%s",
                             ctx.bot_id, effective_engine, scope_result.get("error"),
                         )
-                    elif detail_result and not detail_result.get("success"):
-                        refresh_succeeded = False
-                        logger.error(
-                            "[aicoding.restart] MCP detail resync failed: "
-                            "bot_id=%s, engine_type=%s, error=%s",
-                            ctx.bot_id, effective_engine, detail_result.get("error"),
-                        )
                     else:
                         logger.info(
-                            "[aicoding.restart] MCP resync succeeded: "
+                            "[aicoding.restart] MCP projection resync succeeded: "
                             "bot_id=%s, engine_type=%s",
                             ctx.bot_id, effective_engine,
                         )
                 except Exception as mcp_error:
                     refresh_succeeded = False
                     logger.error(
-                        "[aicoding.restart] MCP resync error: "
+                        "[aicoding.restart] MCP projection resync error: "
                         "bot_id=%s, engine_type=%s, error=%s",
                         ctx.bot_id, effective_engine, mcp_error,
                         exc_info=True,
                     )
 
-            if skill_set_factory is not None:
+            if skill_set_service is not None:
                 try:
-                    skill_set_service = skill_set_factory.create(
-                        user_id=effective_entity_id,
-                        entity_id=effective_entity_id,
-                        bot_id=ctx.bot_id,
-                        entity_type=effective_entity_type,
-                        engine_type=effective_engine,
-                    )
                     skill_synced = bool(skill_set_service.sync_runtime())
                     if skill_synced:
                         logger.info(
