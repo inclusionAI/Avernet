@@ -1178,7 +1178,7 @@ class ExecutionEngine:
             self._hung_and_escalate(task_id, node_id, "exec_stuck")
             return
         # 复位到 PENDING 重新派发执行:FAILED/RUNNING→PENDING;PENDING 派发卡住(搜推无响应/派发失败)清
-        # dispatch_error 让 _prepare_into 重新搜推(harness owns 重试计数+HUNG 上限,正常 cycle 跳过 dispatch_error 节点)
+        # dispatch_error 让 prepare 重新派发(harness owns 重试计数+HUNG 上限,正常 cycle 跳过 dispatch_error 节点)
         if node.status in {Status.FAILED, Status.RUNNING}:
             _prev = node.status
             self._graph.update_task_node_info(
@@ -1208,7 +1208,14 @@ class ExecutionEngine:
                     extend_props_patch={"dispatch_error": None},
                 )
             )
-        await self._prepare_into(task_id, side)
+        # static plan:harness 重派走 static prepare(只派发 readiness.ready 的绑定 bot),
+        # 不进搜推/claim_join,避免依赖未满足的节点(strategy_approval/implementation)被提前搜推
+        # 派给 catalog 命中的错误 bot(如 default:35983)。
+        _static_runtime = self._static_runtime(task_id)
+        if _static_runtime is not None:
+            await self._prepare_static(task_id, _static_runtime, side)
+        else:
+            await self._prepare_into(task_id, side)
 
     # ===== on_miss =====
     async def on_miss(self, patch: TaskNodePatch) -> None:
