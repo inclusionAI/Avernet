@@ -5,6 +5,7 @@ FS impl runs against a temp root; S3 impl runs under moto's in-process AWS mock.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import os
 from threading import Barrier
 
 import boto3
@@ -83,6 +84,28 @@ def test_fs_conditional_create_is_atomic_under_concurrency(tmp_path):
         ObjectCreateResult.CREATED,
     ]
     assert store.read_object("same-key").content in {b"first", b"second"}
+
+
+def test_fs_conditional_create_publishes_only_complete_content(
+    tmp_path, monkeypatch
+):
+    store = _fs(tmp_path)
+    target = tmp_path / "store" / "immutable"
+    original_link = os.link
+
+    def assert_complete_then_publish(source, destination):
+        assert destination == target
+        assert not target.exists()
+        assert source.read_bytes() == b"complete-payload"
+        original_link(source, destination)
+
+    monkeypatch.setattr(os, "link", assert_complete_then_publish)
+
+    assert (
+        store.create_object_if_absent("immutable", b"complete-payload")
+        is ObjectCreateResult.CREATED
+    )
+    assert target.read_bytes() == b"complete-payload"
 
 
 def test_fs_nested_key_creates_dirs(tmp_path):

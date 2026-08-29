@@ -22,6 +22,7 @@ from agentclaw.community.testing.draft_content_store import (
     LocalDraftContentStore,
 )
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
+from agentclaw.community.plugins.local.oss_storage import MockObjectStoragePlugin
 
 
 class _Objects:
@@ -29,6 +30,11 @@ class _Objects:
 
 
 class _ObjectModule(Module):
+    def configure(self, binder: Binder) -> None:
+        binder.bind(ObjectStoragePlugin, to=MockObjectStoragePlugin())
+
+
+class _LegacyObjectModule(Module):
     def configure(self, binder: Binder) -> None:
         binder.bind(ObjectStoragePlugin, to=_Objects())
 
@@ -101,6 +107,13 @@ def test_skill_center_provider_builds_the_oss_adapter() -> None:
 
     assert isinstance(store, OssDraftContentStore)
     assert isinstance(store, DraftContentStore)
+
+
+def test_skill_center_provider_rejects_store_without_immutable_capability() -> None:
+    injector = Injector([ConfigModule(), SkillCenterModule(), _LegacyObjectModule()])
+
+    with pytest.raises(ValueError, match="atomic create-if-absent"):
+        injector.get(DraftContentStore)
 
 
 def test_testing_module_overrides_store_with_the_local_fake() -> None:

@@ -24,6 +24,7 @@ from agentclaw.community.plugin_api.object_storage import (
     ObjectCreateResult,
     ObjectReadResult,
     ObjectReadStatus,
+    ImmutableObjectStorageCapability,
     ObjectStoragePlugin,
 )
 from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
@@ -44,7 +45,9 @@ def _default_sign_url(key: str, expires: int = 7200) -> str:
     flavor=Flavor.MOCK,
     rationale="MagicMock-backed responses",
 )
-class MockObjectStoragePlugin(MockSeam, ObjectStoragePlugin):
+class MockObjectStoragePlugin(
+    MockSeam, ObjectStoragePlugin, ImmutableObjectStorageCapability
+):
     """Reconfigurable mock satisfying :class:`ObjectStoragePlugin`."""
 
     def __init__(self) -> None:

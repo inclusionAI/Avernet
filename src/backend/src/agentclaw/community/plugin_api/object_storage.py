@@ -45,6 +45,28 @@ class ObjectReadResult:
 
 
 @runtime_checkable
+class ImmutableObjectStorageCapability(Protocol):
+    """Optional write-once object capability for immutable consumers.
+
+    This is deliberately separate from :class:`ObjectStoragePlugin`: corp
+    overlays that implement only the long-standing mutable surface keep
+    satisfying that contract, while immutable consumers can fail closed at
+    composition time until their concrete store supports conditional create
+    and three-state reads.
+    """
+
+    def create_object_if_absent(
+        self, key: str, content: bytes | str
+    ) -> ObjectCreateResult:
+        """Atomically publish the complete ``content`` without replacement."""
+        ...
+
+    def read_object(self, key: str) -> ObjectReadResult:
+        """Read with distinct FOUND, NOT_FOUND, and FAILED outcomes."""
+        ...
+
+
+@runtime_checkable
 class ObjectStoragePlugin(Plugin, Protocol):
     """Object storage operations the backend depends on."""
 
@@ -54,12 +76,6 @@ class ObjectStoragePlugin(Plugin, Protocol):
         Implementations should swallow transport/SDK errors and return
         ``False`` rather than raising, so callers can decide policy.
         """
-        ...
-
-    def create_object_if_absent(
-        self, key: str, content: bytes | str
-    ) -> ObjectCreateResult:
-        """Atomically create ``key`` without replacing an existing object."""
         ...
 
     def put_file(self, key: str, local_path: str) -> bool:
@@ -78,10 +94,6 @@ class ObjectStoragePlugin(Plugin, Protocol):
         rather than raising, so callers can decide policy (mirroring the rest
         of this Protocol). Decode to text at the call site when needed.
         """
-        ...
-
-    def read_object(self, key: str) -> ObjectReadResult:
-        """Read with distinct FOUND, NOT_FOUND, and FAILED outcomes."""
         ...
 
     def delete_object(self, key: str) -> bool:

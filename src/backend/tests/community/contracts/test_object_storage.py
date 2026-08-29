@@ -27,6 +27,7 @@ from agentclaw.community.core.skill_center.services.skill_parser import SkillPar
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.plugin_api.object_storage import (
     ObjectCreateResult,
+    ImmutableObjectStorageCapability,
     ObjectReadResult,
     ObjectReadStatus,
     ObjectStoragePlugin,
@@ -63,6 +64,7 @@ def test_community_column_binds_contract_shaped_object_storage(community_world) 
 
     oss = community_world.get(ObjectStoragePlugin)
     assert isinstance(oss, CommunityFsObjectStorage)
+    assert isinstance(oss, ImmutableObjectStorageCapability)
 
 
 def test_immutable_draft_consumer_uses_atomic_object_contract(world) -> None:

@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,6 +24,7 @@ from agentclaw.community.plugin_api.object_storage import (
     ObjectCreateResult,
     ObjectReadResult,
     ObjectReadStatus,
+    ImmutableObjectStorageCapability,
     ObjectStoragePlugin,
 )
 
@@ -34,7 +36,9 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 
-class CommunityFsObjectStorage(ObjectStoragePlugin):
+class CommunityFsObjectStorage(
+    ObjectStoragePlugin, ImmutableObjectStorageCapability
+):
     """Object storage backed by the local filesystem under a root directory."""
 
     def __init__(self, root: str) -> None:
@@ -75,34 +79,45 @@ class CommunityFsObjectStorage(ObjectStoragePlugin):
         path = self._safe_path(key)
         if path is None:
             return ObjectCreateResult.FAILED
-        created = False
+        temp_path: Path | None = None
         try:
             if isinstance(content, str):
                 content = content.encode("utf-8")
             path.parent.mkdir(parents=True, exist_ok=True)
-            descriptor = os.open(
-                path,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                0o644,
+            descriptor, raw_temp_path = tempfile.mkstemp(
+                dir=path.parent,
+                prefix=f".{path.name}.",
+                suffix=".tmp",
             )
-            created = True
+            temp_path = Path(raw_temp_path)
             with os.fdopen(descriptor, "wb") as stream:
                 stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temp_path.chmod(0o644)
+            # A same-filesystem hard link is an atomic create-if-absent publish:
+            # readers either see no final key or the complete staged payload.
+            os.link(temp_path, path)
             return ObjectCreateResult.CREATED
         except FileExistsError:
             return ObjectCreateResult.ALREADY_EXISTS
         except OSError as e:
-            if created:
-                try:
-                    path.unlink(missing_ok=True)
-                except OSError:
-                    pass
             logger.error(
                 "ObjectStorage create_object_if_absent failed: key=%s, error=%s",
                 key,
                 e,
             )
             return ObjectCreateResult.FAILED
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning(
+                        "ObjectStorage temporary file cleanup failed: path=%s",
+                        temp_path,
+                    )
+
     def put_file(self, key: str, local_path: str) -> bool:
         path = self._safe_path(key)
         if path is None:
@@ -208,7 +223,9 @@ class CommunityFsObjectStorage(ObjectStoragePlugin):
             return False
 
 
-class CommunityS3ObjectStorage(ObjectStoragePlugin):
+class CommunityS3ObjectStorage(
+    ObjectStoragePlugin, ImmutableObjectStorageCapability
+):
     """Object storage over an S3-compatible service (MinIO / S3 / R2 / OSS).
 
     boto3 is imported lazily so a pure-filesystem community deploy that never
