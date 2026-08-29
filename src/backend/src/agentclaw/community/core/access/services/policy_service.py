@@ -6,6 +6,7 @@ from injector import inject
 from agentclaw.community.core.repository.protocols.identity import PolicyRepository
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.access.policy_service_protocol import PolicyServiceProtocol
 
 _POLICY_ON = json.dumps({"policy": "on"})
 _POLICY_OFF = json.dumps({"policy": "off"})
@@ -18,7 +19,7 @@ USER_STATUS_REFUSE = "REFUSE"
 logger = get_logger()
 
 
-class PolicyService:
+class PolicyService(PolicyServiceProtocol):
     @inject
     def __init__(self, repository: PolicyRepository) -> None:
         self._repo = repository

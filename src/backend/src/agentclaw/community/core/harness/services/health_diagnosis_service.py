@@ -19,12 +19,13 @@ from agentclaw.community.core.repository.protocols.harness import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.harness.health_diagnosis_service_protocol import HealthDiagnosisServiceProtocol
 
 
 logger = get_logger()
 
 
-class HealthDiagnosisService:
+class HealthDiagnosisService(HealthDiagnosisServiceProtocol):
     """Run the existing health scanner and persist its lifecycle."""
 
     @inject

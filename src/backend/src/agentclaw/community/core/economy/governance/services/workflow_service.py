@@ -34,6 +34,7 @@ from agentclaw.community.core.economy.governance.services.service_protocols impo
     GovernanceWhitelistServiceProtocol,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.economy.governance_service_protocol import GovernanceWorkflowServiceProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.domain.ticket import (
@@ -46,7 +47,7 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-class GovernanceWorkflowService:
+class GovernanceWorkflowService(GovernanceWorkflowServiceProtocol):
     """工单运营服务 — list / detail / review / 关单 / 级联清理(§7.5.2)。
 
     review 三分支走 lifecycle_svc.review_ticket(状态机唯一驱动) + 审批副作用

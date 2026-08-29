@@ -17,7 +17,7 @@ from typing import Any, Callable, Protocol, TYPE_CHECKING
 
 from injector import inject
 
-from agentclaw.community.api.skill_query_service import SkillQueryServiceProtocol
+from agentclaw.community.core.skill_center.skill_query_service_protocol import SkillQueryServiceProtocol
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,

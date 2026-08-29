@@ -61,6 +61,7 @@ internal_dependencies:
   - agentclaw.community.api.publish_approval        # API Protocol for publish approval service
   - agentclaw.community.utils
   - agentclaw.community.utils.env_utils
+  - agentclaw.community.core.channel.channel_service_protocol  # Service API Protocol consumed by this module
 ```
 
 ### Change impact

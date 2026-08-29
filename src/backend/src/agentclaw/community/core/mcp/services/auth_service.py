@@ -8,6 +8,7 @@ from injector import inject
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
+from agentclaw.community.core.mcp.mcp_auth_service_protocol import MCPAuthServiceProtocol
 
 
 logger = get_logger()
@@ -22,7 +23,7 @@ def _is_local_mcp(mcp_data: dict[str, Any]) -> bool:
     )
 
 
-class MCPAuthService:
+class MCPAuthService(MCPAuthServiceProtocol):
     """Combines MCPCenter metadata with MCPAuthPlugin for permission flows."""
 
     @inject

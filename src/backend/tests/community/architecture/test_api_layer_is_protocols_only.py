@@ -130,8 +130,10 @@ def _reexported_protocol_names(tree: ast.AST) -> set[str]:
     requires. Such a module has no ``class X(Protocol)`` of its own —
     it imports the name and lists it in ``__all__``.
 
-    We accept one only when every ``Protocol``-suffixed name in
-    ``__all__`` is actually imported by the module, so a router or a
+    We accept one only when every name in ``__all__`` is actually
+    imported and the module sources them from a contract module — one
+    whose name ends in ``_protocol``/``_contract`` (or a ``protocols``
+    package) — or names them with the ``Protocol`` suffix. A router or a
     service class still cannot masquerade as a contract module.
     """
     exported: set[str] = set()
@@ -153,8 +155,22 @@ def _reexported_protocol_names(tree: ast.AST) -> set[str]:
         if isinstance(node, ast.ImportFrom)
         for alias in node.names
     }
-    protocols = {name for name in exported if name.endswith("Protocol")}
-    return protocols if protocols and protocols <= imported else set()
+    if not exported <= imported:
+        return set()
+    contract_suffixes = ("_protocol", "_protocols", "_contract", "_contracts")
+    from_contract_module = {
+        (alias.asname or alias.name)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and (node.module or "").split(".")[-1].endswith(contract_suffixes + ("protocols",))
+        for alias in node.names
+    }
+    # Some Service API contracts predate the naming convention
+    # (``CallerTokenProvider``), so the source module vouches for them.
+    vouched = {n for n in exported if n.endswith("Protocol")} | (
+        exported & from_contract_module
+    )
+    return vouched if vouched else set()
 
 
 @pytest.mark.unit

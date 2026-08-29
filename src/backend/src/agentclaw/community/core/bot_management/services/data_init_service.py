@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, TYPE_CHECKING
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.bot_management.data_init_service_protocol import DataInitServiceProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -64,7 +65,7 @@ _WS_NO_CONTENT_TIMEOUT = int(
 _GATEWAY_RESTART_MARKER = "Gateway is restarting"
 
 
-class DataInitService:
+class DataInitService(DataInitServiceProtocol):
     """Bot 冷启动数据初始化编排服务。
 
     状态机：null -> pending_init -> in_progress -> completed / failed

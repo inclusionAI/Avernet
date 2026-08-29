@@ -1,29 +1,17 @@
-"""Service API Protocol for desktop bot lifecycle."""
+"""Service API Protocol for desktop bot lifecycle.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/desktop_bot/desktop_bot_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.desktop_bot.desktop_bot_service_protocol import (
+    DesktopBotServiceProtocol,
+)
 
-
-@runtime_checkable
-class DesktopBotServiceProtocol(Protocol):
-    """Service API for desktop bot management."""
-
-    def list_user_bots(self, user_id: str) -> list[dict[str, Any]]: ...
-
-    def check_user_bots_status(self, user_id: str) -> None: ...
-
-    def verify_ownership(self, *, bot_id: str, user_id: str) -> None: ...
-
-    def list_directory(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def list_devices(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def apply_passport_before_create(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def create_after_authorization(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def restart(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def delete(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def open_folder(self, *, bot_id: str, user_id: str, folder_path: str | None = None) -> dict[str, Any]: ...
+__all__ = [
+    "DesktopBotServiceProtocol",
+]

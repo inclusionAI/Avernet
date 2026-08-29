@@ -11,9 +11,10 @@ from agentclaw.community.core.skill_center.market_contracts import (
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
+from agentclaw.community.core.skill_center.skill_market_service_protocol import SkillMarketServiceProtocol
 
 
-class SkillMarketService:
+class SkillMarketService(SkillMarketServiceProtocol):
     """Search tenant-visible ``git://`` Skills without a Bot/path context."""
 
     _CACHE_KEY = "market_skills_list_default"

@@ -16,6 +16,7 @@ from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
+from agentclaw.community.core.skill_center.skill_scan_service_protocol import SkillScanServiceProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
@@ -44,7 +45,7 @@ DEFAULT_CONFIG = {
 # skipped at startup (see ``startup``).
 
 
-class SkillScanService(LifecycleBase):
+class SkillScanService(SkillScanServiceProtocol, LifecycleBase):
     """Skill Scan Service - 提供技能扫描和定时任务管理能力."""
 
     async def startup(self) -> None:

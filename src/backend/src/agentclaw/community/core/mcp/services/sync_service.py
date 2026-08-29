@@ -36,6 +36,7 @@ from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepos
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.mcp.mcp_sync_service_protocol import MCPSyncServiceProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -80,7 +81,7 @@ class DeviceSyncResult:
         }
 
 
-class MCPSyncService:
+class MCPSyncService(MCPSyncServiceProtocol):
     """编排批量 MCP 同步到设备以及 passport 更新。"""
 
     @inject

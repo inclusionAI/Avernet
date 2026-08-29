@@ -41,6 +41,7 @@ from agentclaw.community.core.economy.governance.services.delivery_service impor
 from agentclaw.community.core.economy.governance.services.notify_render_service import (
     NotifyRenderService,
 )
+from agentclaw.community.core.economy.governance_service_protocol import GovernanceBotServiceProtocol
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +108,7 @@ class CronTickSummary:
         }
 
 
-class GovernanceBotService:
+class GovernanceBotService(GovernanceBotServiceProtocol):
     """Time-driven cron orchestrator (§7.3).
 
     Stateless and idempotent — each tick processes whatever is currently

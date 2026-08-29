@@ -1,26 +1,23 @@
-"""Application boundary for IAM-token Caller identity updates."""
+"""Application boundary for IAM-token Caller identity updates.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/caller_identity/caller_iam_token_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
-
-from agentclaw.community.core.caller_identity.contracts import (
+from agentclaw.community.core.caller_identity.caller_iam_token_service_protocol import (
+    AuthRequestContext,
     CallerIamTokenOutcome,
+    CallerIamTokenServiceProtocol,
     CallerIdentityStage,
 )
-from agentclaw.community.plugin_api.auth import AuthRequestContext
 
-
-@runtime_checkable
-class CallerIamTokenServiceProtocol(Protocol):
-    async def get_iam_token(
-        self,
-        *,
-        iam_token: str,
-        auth_request: AuthRequestContext,
-        bot_id: str | None,
-        stage: CallerIdentityStage,
-        publish_id: int | None,
-        entity_id: str | None,
-        is_test_exchange: bool,
-    ) -> CallerIamTokenOutcome: ...
+__all__ = [
+    "AuthRequestContext",
+    "CallerIamTokenOutcome",
+    "CallerIamTokenServiceProtocol",
+    "CallerIdentityStage",
+]

@@ -10,12 +10,13 @@ from agentclaw.community.core.bot_chat.schemas import (
     ConversationDetail,
     SessionListResponse,
 )
+from agentclaw.community.core.bot_chat.bot_chat_service_protocol import OpenBotChatServiceProtocol
 
 _OPEN_PAGE_SIZE = 100
 _USER_BOT_TIME_RANGE_HOURS = 72
 
 
-class OpenBotChatService:
+class OpenBotChatService(OpenBotChatServiceProtocol):
     """Serve only the independently secured Bot Logs OpenAPI contract."""
 
     @inject

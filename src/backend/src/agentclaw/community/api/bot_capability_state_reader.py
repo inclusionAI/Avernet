@@ -1,17 +1,19 @@
-"""Public Service API for reading a Bot's active capability state."""
+"""Public Service API for reading a Bot's active capability state.
 
-from typing import Protocol, runtime_checkable
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/bot_capability_state_reader_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
-from agentclaw.community.core.skill_center.capability_state_contract import (
-    BotCapabilityStateReaderProtocol as CoreBotCapabilityStateReaderProtocol,
+from __future__ import annotations
+
+from agentclaw.community.core.skill_center.bot_capability_state_reader_protocol import (
+    BotCapabilityStateReaderProtocol,
+    CoreBotCapabilityStateReaderProtocol,
 )
 
-
-@runtime_checkable
-class BotCapabilityStateReaderProtocol(
-    CoreBotCapabilityStateReaderProtocol, Protocol
-):
-    """Transport-facing contract; Core depends only on its sibling contract."""
-
-
-__all__ = ["BotCapabilityStateReaderProtocol"]
+__all__ = [
+    "BotCapabilityStateReaderProtocol",
+    "CoreBotCapabilityStateReaderProtocol",
+]

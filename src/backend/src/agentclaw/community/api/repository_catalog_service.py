@@ -1,19 +1,17 @@
-from __future__ import annotations
-from typing import Any, Protocol, runtime_checkable
+"""Service API surface for repository_catalog_service.py.
 
-@runtime_checkable
-class RepositoryCatalogServiceProtocol(Protocol):
-    def list(self, *, path: str | None = None, orderby: str | None = None) -> list[dict[str, Any]]: ...
-    def list_page(
-        self,
-        *,
-        path: str | None = None,
-        orderby: str | None = None,
-        keyword: str = "",
-        page: int,
-        page_size: int,
-    ) -> tuple[int, list[dict[str, Any]]]: ...
-    def search(self, *, keyword: str, limit: int = 100) -> list[dict[str, Any]]: ...
-    def tree(self) -> list[dict[str, Any]]: ...
-    def detail(self, skill_id: str) -> dict[str, Any] | None: ...
-    def sync(self) -> dict[str, Any]: ...
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/repository_catalog_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
+from __future__ import annotations
+
+from agentclaw.community.core.skill_center.repository_catalog_service_protocol import (
+    RepositoryCatalogServiceProtocol,
+)
+
+__all__ = [
+    "RepositoryCatalogServiceProtocol",
+]

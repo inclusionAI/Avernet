@@ -34,6 +34,7 @@ from agentclaw.community.plugin_api.staff_dept import (
 )
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.work_no import normalize_work_no_for_lookup
+from agentclaw.community.core.spaces.space_service_protocol import SpaceServiceProtocol
 
 
 logger = get_logger()
@@ -45,7 +46,7 @@ logger = get_logger()
 _SC_SPACE_REF_SOURCE = "OCB"
 
 
-class SpaceService:
+class SpaceService(SpaceServiceProtocol):
     @inject
     def __init__(
         self,

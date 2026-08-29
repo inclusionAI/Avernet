@@ -11,9 +11,10 @@ from agentclaw.community.core.spaces.errors import (
 )
 from agentclaw.community.core.spaces.models import SpaceRole, SpaceType
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.spaces.space_service_protocol import SpaceAccessServiceProtocol
 
 
-class SpaceAccessService:
+class SpaceAccessService(SpaceAccessServiceProtocol):
     @inject
     def __init__(self, repository: SpaceRepositoryProtocol) -> None:
         self._repository = repository

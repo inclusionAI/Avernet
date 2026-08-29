@@ -41,7 +41,6 @@ internal_dependencies:
   - agentclaw.community.log
   - agentclaw.community.plugin_api.skill_center_client
   - agentclaw.community.plugin_api.staff_dept
-  - agentclaw.community.api.work_order_service
   - agentclaw.community.utils.avernet_tenant_guard
   - agentclaw.community.utils.env_utils
   - agentclaw.community.utils.work_no

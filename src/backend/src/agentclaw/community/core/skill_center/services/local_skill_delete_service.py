@@ -38,6 +38,7 @@ from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditRollbackError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
+from agentclaw.community.core.skill_center.local_skill_delete_service_protocol import LocalSkillDeleteServiceProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -45,7 +46,7 @@ if TYPE_CHECKING:
     )
 
 
-class LocalSkillDeleteService:
+class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
     """Delete an inactive Local Skill after reversible package quarantine."""
 
     @inject

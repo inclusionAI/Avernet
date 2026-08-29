@@ -19,13 +19,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from injector import inject
+from agentclaw.community.core.economy.governance_service_protocol import GovernanceAuditReadServiceProtocol
 
 
 if TYPE_CHECKING:
     from agentclaw.community.core.repository.implementations.governance.audit import GovernanceAuditRepository
 
 
-class GovernanceAuditReadService:
+class GovernanceAuditReadService(GovernanceAuditReadServiceProtocol):
     """Read-only audit history query scoped by worker (owner:bot)."""
 
     @inject

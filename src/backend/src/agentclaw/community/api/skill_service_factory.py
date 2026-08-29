@@ -1,16 +1,17 @@
 """Service API Protocol for the SkillService factory.
 
-The factory mints :class:`SkillService` instances scoped to per-request
-paths. Adapters call ``factory.create(...)`` to obtain a request-scoped
-service.
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/skill_service_factory_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
 """
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.skill_center.skill_service_factory_protocol import (
+    SkillServiceFactoryProtocol,
+)
 
-
-@runtime_checkable
-class SkillServiceFactoryProtocol(Protocol):
-    """Service API for minting per-request SkillService instances."""
-
-    def create(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "SkillServiceFactoryProtocol",
+]

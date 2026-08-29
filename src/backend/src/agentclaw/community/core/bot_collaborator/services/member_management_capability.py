@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Protocol, Sequence
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.bot_collaborator.member_management_capability_protocol import MemberManagementCapabilityProtocol
 
 logger = get_logger()
 
@@ -25,7 +26,7 @@ class EngineMemberManagementCapability(Protocol):
         """Return whether this engine enables member-management semantics."""
 
 
-class MemberManagementCapabilityService:
+class MemberManagementCapabilityService(MemberManagementCapabilityProtocol):
     """Engine-agnostic coordinator for collaborator/member-management support.
 
     This coordinator deliberately does not interpret engine-owned bot fields or

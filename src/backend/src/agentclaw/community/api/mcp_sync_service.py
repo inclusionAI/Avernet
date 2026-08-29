@@ -1,35 +1,17 @@
-"""Service API Protocol for MCP detail-sync to devices."""
+"""Service API Protocol for MCP detail-sync to devices.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/mcp/mcp_sync_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.mcp.mcp_sync_service_protocol import (
+    MCPSyncServiceProtocol,
+)
 
-
-@runtime_checkable
-class MCPSyncServiceProtocol(Protocol):
-    """Service API for syncing MCP details to bot devices."""
-
-    async def sync_mcp_details(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def sync_mcp_detail(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def sync_mcp_details_for_bot(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def remove_mcp_detail(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def refresh_mcp_scope(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def sync_mcp_identity_to_agent_principal(
-        self,
-        *,
-        user_id: str,
-        entity_id: str,
-        bot_id: str,
-        entity_type: str,
-        engine_type: str,
-        active_mcps: list[dict[str, Any]],
-        identity_modes: Mapping[str, object],
-    ) -> Mapping[str, Any]: ...
-
-    async def sync_mcp_detail_to_all_bots(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "MCPSyncServiceProtocol",
+]

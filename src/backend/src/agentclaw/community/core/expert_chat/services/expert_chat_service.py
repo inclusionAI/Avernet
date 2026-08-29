@@ -52,6 +52,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
 )
+from agentclaw.community.core.expert_chat.expert_chat_service_protocol import ExpertChatServiceProtocol
 
 logger = get_logger()
 
@@ -107,7 +108,7 @@ class BotInfoProvider(Protocol):
 # ============ Service Implementation ============
 
 
-class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMixin):
+class ExpertChatService(ExpertChatServiceProtocol, ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMixin):
     """用户与专家Bot对话业务逻辑"""
 
     @inject

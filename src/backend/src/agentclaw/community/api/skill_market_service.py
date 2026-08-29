@@ -1,25 +1,18 @@
-"""Service API for the built-in Skill marketplace."""
+"""Service API for the built-in Skill marketplace.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/skill_market_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
-
-from agentclaw.community.core.skill_center.market_contracts import (
+from agentclaw.community.core.skill_center.skill_market_service_protocol import (
     SkillMarketSearchQuery,
     SkillMarketSearchResult,
+    SkillMarketServiceProtocol,
 )
-
-
-@runtime_checkable
-class SkillMarketServiceProtocol(Protocol):
-    """Read-only application service for the built-in Skill marketplace."""
-
-    def search(self, query: SkillMarketSearchQuery) -> SkillMarketSearchResult: ...
-
-    def get_repository_skill(self, skill_id: str) -> dict | None: ...
-
-    def repository_tree(self) -> list[dict]: ...
-
 
 __all__ = [
     "SkillMarketSearchQuery",

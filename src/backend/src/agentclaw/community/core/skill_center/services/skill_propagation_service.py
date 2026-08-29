@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
     from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.core.repository.protocols.skill_center import SkillPropagationLogRepository
+from agentclaw.community.core.skill_center.skill_propagation_service_protocol import SkillPropagationServiceProtocol
 
 logger = get_logger()
 
@@ -40,7 +41,7 @@ class PropagationResult:
     propagation_log_id: str | None = None
 
 
-class SkillPropagationService:
+class SkillPropagationService(SkillPropagationServiceProtocol):
     """发布态变更的运行时传播服务 —— 发布侧统一对外接口。
 
     七桃侧完成状态机变更后调用此处即可，不需要关心：

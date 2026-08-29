@@ -1,25 +1,17 @@
-"""Service API Protocol for OSS → NAS switch / rollback workflows."""
+"""Service API Protocol for OSS → NAS switch / rollback workflows.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/devices/oss_to_nas_switch_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from agentclaw.community.core.devices.oss_to_nas_switch_service_protocol import (
+    OssToNasSwitchServiceProtocol,
+)
 
-
-@runtime_checkable
-class OssToNasSwitchServiceProtocol(Protocol):
-    """Service API for switching bot storage between OSS and NAS."""
-
-    async def switch_one(
-        self, staff_no: str, bot_id: str, env: Optional[str] = None
-    ) -> Dict[str, Any]: ...
-
-    async def rollback_one(
-        self, staff_no: str, bot_id: str, env: Optional[str] = None
-    ) -> Dict[str, Any]: ...
-
-    async def batch_switch_with_concurrency(
-        self,
-        records: List[Dict[str, Any]],
-        concurrency: int,
-        *,
-        env: str,
-    ) -> Dict[str, Any]: ...
+__all__ = [
+    "OssToNasSwitchServiceProtocol",
+]

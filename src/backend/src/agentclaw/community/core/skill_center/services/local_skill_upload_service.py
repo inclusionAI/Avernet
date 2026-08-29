@@ -61,6 +61,7 @@ from agentclaw.community.core.skills_pool.edit_guard import (
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from injector import inject
+from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import LocalSkillUploadServiceProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -74,7 +75,7 @@ _MAX_FILES = 500
 _NAME = re.compile(r"^[A-Za-z0-9-]+$")
 
 
-class LocalSkillUploadService:
+class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
     """Authorize, validate, persist and associate an inactive Local Skill."""
 
     @inject

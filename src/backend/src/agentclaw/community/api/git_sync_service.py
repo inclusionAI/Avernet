@@ -1,13 +1,17 @@
-"""Service API Protocol for the skill_center git-sync service."""
+"""Service API Protocol for the skill_center git-sync service.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/git_sync_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.skill_center.git_sync_service_protocol import (
+    GitSyncServiceProtocol,
+)
 
-
-@runtime_checkable
-class GitSyncServiceProtocol(Protocol):
-    """Service API for git-based skill sync."""
-
-    async def sync(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def sync_bootstrap(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "GitSyncServiceProtocol",
+]

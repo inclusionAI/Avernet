@@ -1,19 +1,17 @@
-"""Service API for authoritative Human-to-Bot friendship reads."""
+"""Service API for authoritative Human-to-Bot friendship reads.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/bot_chat/human_bot_friendship_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Protocol, runtime_checkable
+from agentclaw.community.core.bot_chat.human_bot_friendship_service_protocol import (
+    HumanBotFriendshipServiceProtocol,
+)
 
-
-@runtime_checkable
-class HumanBotFriendshipServiceProtocol(Protocol):
-    """Read Human-to-Bot friendship from BCN without exposing BCN DTOs."""
-
-    def is_friend(
-        self,
-        *,
-        human_id: str,
-        bot_id: str,
-        owner_id: str,
-        request_headers: Mapping[str, str],
-    ) -> bool: ...
+__all__ = [
+    "HumanBotFriendshipServiceProtocol",
+]

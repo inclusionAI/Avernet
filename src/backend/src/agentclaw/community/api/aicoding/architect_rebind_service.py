@@ -1,20 +1,17 @@
 """Service API Protocol for the aicoding architect-bot rebind feature.
 
-The rebind endpoint (``PUT /api/bots/{architect_bot_id}/architect-rebind``)
-is aicoding-creation specific, so the service contract lives under the
-aicoding namespace rather than the generic bot-management one. The concrete
-implementation is
-:class:`agentclaw.community.core.aicoding.services.architect_rebind_service.ArchitectRebindService`.
+Re-export only. The Protocol is defined in its owning core module
+(``core/aicoding/architect_rebind_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
 """
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.aicoding.architect_rebind_service_protocol import (
+    ArchitectRebindServiceProtocol,
+)
 
-
-@runtime_checkable
-class ArchitectRebindServiceProtocol(Protocol):
-    """Service API for rebinding application-coding bots to a domain architect bot."""
-
-    def rebind_architect_bot(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def rebind_architect_bot_batch(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "ArchitectRebindServiceProtocol",
+]

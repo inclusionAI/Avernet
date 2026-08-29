@@ -40,6 +40,7 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.bot_collaborator.collaborator_service_protocol import CollaboratorServiceProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.plugins.passport import PassportPlugin
@@ -71,7 +72,7 @@ __all__ = [
 # ============================================================================
 # 服务实现
 # ============================================================================
-class CollaboratorService(CollaboratorQueryMixin):
+class CollaboratorService(CollaboratorServiceProtocol, CollaboratorQueryMixin):
     """Bot 协作者管理服务。
 
     提供协作者的 CRUD 操作和权限检查功能。

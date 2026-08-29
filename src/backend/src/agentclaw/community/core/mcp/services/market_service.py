@@ -8,11 +8,12 @@ from injector import inject
 from agentclaw.community.core.mcp.services.mcp_live_fetcher import fetch_tools_live
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
+from agentclaw.community.core.mcp.mcp_market_service_protocol import MCPMarketServiceProtocol
 
 logger = get_logger()
 
 
-class MCPMarketService:
+class MCPMarketService(MCPMarketServiceProtocol):
     """Wraps MCPCenterPlugin for market list, detail, and tenant queries."""
 
     @inject

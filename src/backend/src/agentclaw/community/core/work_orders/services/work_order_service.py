@@ -72,12 +72,14 @@ from agentclaw.community.plugin_api.staff_dept import (
 )
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.work_no import normalize_work_no_for_lookup
+from agentclaw.community.core.work_orders.work_order_service_protocol import WorkOrderNotificationServiceProtocol
+from agentclaw.community.core.work_orders.work_order_service_protocol import WorkOrderServiceProtocol
 
 
 logger = get_logger()
 
 
-class WorkOrderService:
+class WorkOrderService(WorkOrderServiceProtocol):
     @inject
     def __init__(
         self,
@@ -554,7 +556,7 @@ class WorkOrderService:
         return result
 
 
-class WorkOrderNotificationService:
+class WorkOrderNotificationService(WorkOrderNotificationServiceProtocol):
     @inject
     def __init__(self, repository: WorkOrderRepositoryProtocol) -> None:
         self._repository = repository

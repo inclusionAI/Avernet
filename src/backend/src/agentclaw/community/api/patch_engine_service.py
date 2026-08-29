@@ -1,17 +1,17 @@
-"""Service API Protocol for harness patch execution."""
+"""Service API Protocol for harness patch execution.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/harness/patch_engine_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.harness.patch_engine_service_protocol import (
+    PatchEngineProtocol,
+)
 
-
-@runtime_checkable
-class PatchEngineProtocol(Protocol):
-    """Service API for applying / previewing / rolling back patches."""
-
-    async def preview(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def apply(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def rollback(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def rollback_by_patch(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "PatchEngineProtocol",
+]

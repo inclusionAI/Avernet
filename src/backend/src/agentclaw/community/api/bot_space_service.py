@@ -1,18 +1,19 @@
-"""Service API contract for changing a Bot's owning Space."""
+"""Service API contract for changing a Bot's owning Space.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/bot_management/bot_space_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
-
-from agentclaw.community.core.bot_management.bot_space import (
+from agentclaw.community.core.bot_management.bot_space_service_protocol import (
     BotSpaceAssignmentResult,
+    BotSpaceServiceProtocol,
 )
 
-
-@runtime_checkable
-class BotSpaceServiceProtocol(Protocol):
-    """Move an owned Bot to a Space the acting user may use."""
-
-    def change_space(
-        self, *, bot_id: str, owner_id: str, space_id: int
-    ) -> BotSpaceAssignmentResult: ...
+__all__ = [
+    "BotSpaceAssignmentResult",
+    "BotSpaceServiceProtocol",
+]

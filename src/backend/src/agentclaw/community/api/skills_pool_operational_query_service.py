@@ -1,29 +1,21 @@
-"""Service API Protocol for Skills Pool operational evidence."""
+"""Service API Protocol for Skills Pool operational evidence.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skills_pool/skills_pool_operational_query_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
-
-from agentclaw.community.core.skills_pool.operational_query import (
+from agentclaw.community.core.skills_pool.skills_pool_operational_query_service_protocol import (
     BatchOperationalReport,
     BotOperationalView,
+    SkillsPoolOperationalQueryServiceProtocol,
 )
 
-
-@runtime_checkable
-class SkillsPoolOperationalQueryServiceProtocol(Protocol):
-    def get_bot(
-        self,
-        *,
-        env: str,
-        owner_id: str,
-        bot_id: str,
-    ) -> BotOperationalView: ...
-
-    def summarize_batch(
-        self,
-        *,
-        env: str,
-        engine: str,
-        batch_id: str,
-    ) -> BatchOperationalReport: ...
+__all__ = [
+    "BatchOperationalReport",
+    "BotOperationalView",
+    "SkillsPoolOperationalQueryServiceProtocol",
+]
