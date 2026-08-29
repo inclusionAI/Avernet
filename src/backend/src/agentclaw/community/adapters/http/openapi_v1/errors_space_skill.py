@@ -1,4 +1,4 @@
-"""Space Skill control-plane mappings owned outside the shared response table."""
+"""HTTP error mappings for the Space Skill collaboration control plane."""
 
 from agentclaw.community.adapters.http.openapi_v1.errors_space import (
     SpaceErrorCode,
