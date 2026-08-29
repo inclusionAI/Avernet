@@ -308,6 +308,7 @@ def _build_bcn_execution_graph(
     status = _bcn_state_machine_status(event_type)
 
     if not run_detail and not graph_detail:
+        logger.error("[task_callback], run_detail and graph_detail should not be none")
         out = data.get("output")
         return {
             "run_id": rid,
@@ -398,38 +399,34 @@ class CallbackDataEnricher:
             if isinstance(scope, dict) and scope.get("session_id"):
                 _sid = str(scope["session_id"])
         event_type = raw.get("event_type") if isinstance(raw, dict) else None
+
+        logger.info("[task_callback] enrich_bcn, sid=%s, event_type=%s, run_id=%s, bcs_base_url=%s", _sid, event_type, run_id, self._base)
+
         run_detail: dict | None = None
         graph_detail: dict | None = None
-        logger.info(
-            "[task_callback] BCN fetch run 明细 run_id=%s session_id=%s bcs_base_url=%s",
-            run_id,
-            _sid,
-            self._base,
-        )
+
         try:
             run_detail, graph_detail = await self._fetch_run_and_graph(run_id)
         except Exception as exc:  # noqa: BLE001 查 BCS 明细/DAG 失败不阻断(用事件体兜底建图)
-            logger.warning("[task_callback] 查 BCS run 明细/DAG 失败 run_id=%s session_id=%s: %s", run_id, _sid, exc)
+            logger.error("[task_callback] 查 BCS run 明细/DAG 失败 run_id=%s session_id=%s: %s", run_id, _sid, exc)
+
         if run_detail:
             # 查询出来的原始 run 明细 → extend_props(result._ext_info);
             # orig_callback_data 保持原始 CloudEvent(callback 数据由 _raw_callback_body 承载,不在此覆盖)。
             cd.data.setdefault("result", {})["_ext_info"] = run_detail
-            logger.info("[task_callback] BCN run 明细已取回 run_id=%s session_id=%s → extend_props, detail=%s", run_id, _sid, run_detail)
+            logger.info("[task_callback] BCN run 明细已取回 run_id=%s session_id=%s → extend_props, run_detail=%s", run_id, _sid, run_detail)
             logger.info("[task_callback] BCN run 明细已取回 run_id=%s session_id=%s → extend_props, graph_detail=%s", run_id, _sid, graph_detail)
             eg = _build_bcn_execution_graph(
                 event_type=event_type, run_id=run_id,
                 run_detail=run_detail, graph_detail=graph_detail,
             )
         else:
-            logger.warning(
-                "[task_callback] BCS run 明细非 200/未取到 run_id=%s session_id=%s → 用事件体兜底建极简图",
+            logger.error(
+                "[task_callback] BCS run 明细非 200/未取到 run_id=%s session_id=%s",
                 run_id,
                 _sid,
             )
-            eg = _build_bcn_execution_graph(
-                event_type=event_type, run_id=run_id,
-                data=(raw.get("data") if isinstance(raw, dict) else None),
-            )
+
         if eg is not None:
             cd.data["execution_graph"] = eg
         return run_detail
@@ -458,8 +455,18 @@ class CallbackDataEnricher:
             return await self._gets(cli, run_id)
 
     async def _gets(self, cli: httpx.AsyncClient, run_id: str) -> tuple[dict | None, dict | None]:
-        run_resp = await cli.get(f"/state-machine-runs/{run_id}")
-        graph_resp = await cli.get(f"/state-machine-runs/{run_id}/graph")
-        run_detail = run_resp.json() if run_resp.status_code == 200 else None
-        graph_detail = graph_resp.json() if graph_resp.status_code == 200 else None
-        return run_detail, graph_detail
+        logger.info("[task_callback], http_get_state_machine_runs_detail, begin, run_id=%s", run_id)
+
+        try:
+            run_resp = await cli.get(f"/state-machine-runs/{run_id}")
+            logger.info("[task_callback], http_get_state_machine_runs_detail, run_resp=%s", run_resp)
+
+            graph_resp = await cli.get(f"/state-machine-runs/{run_id}/graph")
+            logger.info("[task_callback], http_get_state_machine_runs_detail, graph_resp=%s", graph_resp)
+
+            run_detail = run_resp.json() if run_resp.status_code == 200 else None
+            graph_detail = graph_resp.json() if graph_resp.status_code == 200 else None
+            return run_detail, graph_detail
+        except Exception as e:
+            logger.error("[task_callback], http_get_state_machine_runs_detail, meet_exception=%s", e)
+            return None, None

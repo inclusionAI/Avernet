@@ -855,9 +855,11 @@ async def _dispatch(
         # manager_worker(任务协作群)事件:走 manager_worker 分流(parse+merge 进单 session 行 +
         # session.completed 收敛),不进 state_machine 的 translate_bcn/run_detail 路径。
         if parse_manager_worker_bcn(_raw_obj) is not None:
-            logger.info("[task_callback] manager_worker event session_id=%s", _sid)
+            logger.info("[task_callback] is_manager_worker_event, session_id=%s", _sid)
             await svc.apply_manager_worker_event(_raw_obj)
             return envelope({"ok": True}, request)
+
+        logger.info("[task_callback] is_state_machine_event, session_id=%s", _sid)
         _tc = translate_bcn(_raw_obj)
         if _tc is None:
             return envelope({"ok": True}, request, message="bcn event not handled")
@@ -868,7 +870,7 @@ async def _dispatch(
             if isinstance(_raw_obj, dict)
             else None
         )
-        logger.info("[task_callback] bcn event run_id=%s session_id=%s", _run_id, _sid)
+        logger.info("[task_callback] bcn_event_run_id=%s session_id=%s", _run_id, _sid)
         # 1) 先落原始回调数据(translate 后 minimal:orig=CloudEvent + main_session_id + run_id;
         #    execution_graph/extend_props 暂空)——回调到达即留底,后续解析/查 BCS 失败也不丢原始记录。
         await svc.callback.ingest(_tc.data)
