@@ -951,76 +951,27 @@ async def _dispatch(
         logger.info("[task_callback] finish_process_callback session_id=%s run_id=%s", _sid, _run_id)
         return envelope({"ok": True}, request)
 
+    tc = None
     if is_common_task_payload(_raw_obj):
         logger.info("[task_callback] common_task_callback, begin, task=%s", _raw_obj)
 
-        _tc = translate_common_task_callback(_raw_obj)
-        await svc.callback.ingest(_tc.data)
-
+        tc = translate_common_task_callback(_raw_obj)
+        await svc.callback.ingest(tc.data)
         logger.info("[task_callback] common_task_callback, finish")
-        return envelope({"ok": True}, request)
 
-    logger.info("[task_callback] begin_unknow_branch")
-    # 羽雀/框架节点级回投:先按 schema_cls(TaskCallbackRequest 富 schema)校验 → translate → report_result/start_run;
-    # 不符合则兜底 TaskCallbackDataDTO(loop_task_id+result,report_callback 旧契约)→ callback_from_dto → report_result。
-    try:
-        req = schema_cls.model_validate_json(raw)
-    except Exception:
-        req = None
-    if req is not None:
-        # source 来自已解析 body;HMAC 用原始字节。CallbackAuthError/CallbackCorrelationError 上抛 → @envelope_errors
-        auth.verify(
-            source=req.workflow_source,
-            headers=request.headers,
-            raw_body=raw,
-            method=request.method,
-            path=request.url.path,
-        )
-        tc = translate(req, disposition, registry)
-        logger.info(
-            "[task_callback] schema callback session_id=%s disposition=%s",
-            (tc.data.data or {}).get("workflow_instance_id") or _sid,
-            tc.disposition,
-        )
+    logger.info("[task_callback] report_callback_to_driver_engine, begin")
+    if tc is not None:
         try:
             if tc.disposition == "start":
                 await svc.callback.start_run(tc.data)
             else:
                 await svc.callback.report_result(tc.data)
-        except TaskStateError:
-            # 幂等:result 重投到已终态节点 → 200 ack;否则 TaskStateError 上抛 → @envelope_errors 409
-            if tc.disposition == "result":
-                _payload = tc.data.data
-                _loop_task_id = (
-                    _payload.get("loop_task_id") if isinstance(_payload, dict) else ""
-                )
-                cur = _find_node_status(svc, _loop_task_id)
-                if cur in _TERMINAL:
-                    return envelope({"ok": True}, request, message="idempotent")
-            raise
+        except TaskStateError as e:
+            logger.error("[task_callback] report_callback_to_driver_engine, meet exception = %s", e)
+            raise (f"[task_callback] report_callback_to_driver_engine, meet exception = {str(e)}")
         return envelope({"ok": True}, request)
-    # 兜底:TaskCallbackDataDTO(loop_task_id+result)→ callback_from_dto → report_result(落库 + 推进编排核)。
-    try:
-        dto = TaskCallbackDataDTO.model_validate(
-            _raw_obj if isinstance(_raw_obj, dict) else {}
-        )
-    except Exception:
-        raise HTTPException(status_code=422, detail="invalid callback body")
-    # TaskCallbackDataDTO 无 workflow_source;按 workflow_type 取 source(单测/内部可信 Noop/singlebox 直通;
-    # 生产侧该 source 应已登记密钥,否则 HMAC 校验会拒)。
-    auth.verify(
-        source=(dto.workflow_type or "single_bot"),
-        headers=request.headers,
-        raw_body=raw,
-        method=request.method,
-        path=request.url.path,
-    )
-    logger.info(
-        "[task_callback] fallback dto callback session_id=%s loop_task_id=%s",
-        _sid,
-        dto.loop_task_id,
-    )
-    await svc.callback.report_result(callback_from_dto(dto))
+
+    logger.info("[task_callback] report_callback_to_driver_engine, finish")
     return envelope({"ok": True}, request)
 
 
