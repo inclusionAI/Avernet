@@ -25,6 +25,7 @@ from agentclaw.community.core.skill_center.services.local_skill_upload_service i
     LocalSkillUploadService,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditBusyError,
     SkillsPoolEditGuard,
@@ -84,6 +85,7 @@ class _Repo:
     def delete(self, skill_id):
         self.created.clear()
         return True
+
 
 class _Bot:
     def __init__(
@@ -550,7 +552,7 @@ def _replacement_service(
         guard or _Guard(),
         lambda: _DeviceResolver(provider),
         runtime,
-        SkillParser(),
+        SkillPackageValidator(SkillParser()),
     )
 
 
@@ -575,7 +577,7 @@ def _service(
         guard or _Guard(),
         lambda: _DeviceResolver(provider),
         _RuntimeFactory(),
-        SkillParser(),
+        SkillPackageValidator(SkillParser()),
     )
 
 
@@ -780,198 +782,6 @@ async def test_not_ready_and_storage_failure_leave_no_public_skill():
     assert filesystem.deleted == ["/private/skills-local/upload-skill"]
 
 
-def test_zip_security_rejects_traversal_and_requires_skill_metadata():
-    service = _service(_Filesystem())
-    with pytest.raises(LocalSkillInvalidPackageError):
-        service._unpack(_zip({"../SKILL.md": b"name: bad\ndescription: nope\n"}))
-    with pytest.raises(LocalSkillInvalidPackageError):
-        service._unpack(_zip({"SKILL.md": b"name: bad\n"}))
-    with pytest.raises(LocalSkillInvalidPackageError):
-        service._unpack(_zip({"SKILL.md": b"name: bad\ndescription: \xff\n"}))
-
-
-def test_zip_accepts_root_skill_with_subdirectories_and_matching_wrapper():
-    service = _service(_Filesystem())
-    name, _, files = service._unpack(
-        _zip(
-            {
-                "SKILL.md": _skill_md("root-skill"),
-                "scripts/main.py": b"print('ok')",
-            }
-        )
-    )
-    assert name == "root-skill"
-    assert [path for path, _ in files] == ["SKILL.md", "scripts/main.py"]
-    name, _, files = service._unpack(
-        _zip(
-            {
-                "wrapped/SKILL.md": _skill_md("wrapped"),
-                "wrapped/a.txt": b"x",
-            }
-        )
-    )
-    assert name == "wrapped" and [path for path, _ in files] == ["SKILL.md", "a.txt"]
-
-
-@pytest.mark.parametrize(
-    ("metadata", "expected_description"),
-    [
-        (
-            b"---\nname: upload-skill\ndescription: |\n  first line\n  second line\n---\n",
-            "first line\nsecond line",
-        ),
-        (
-            b"---\nname: upload-skill\ndescription: >\n  first line\n  second line\n---\n",
-            "first line second line",
-        ),
-    ],
-)
-def test_zip_preserves_multiline_skill_description(metadata, expected_description):
-    name, description, _ = _service(_Filesystem())._unpack(_zip({"SKILL.md": metadata}))
-
-    assert name == "upload-skill"
-    assert description == expected_description
-
-
-@pytest.mark.parametrize(
-    "path",
-    [
-        "/SKILL.md",
-        "C:/SKILL.md",
-        "\\\\server\\SKILL.md",
-        "dir\\SKILL.md",
-        "../SKILL.md",
-    ],
-)
-def test_zip_rejects_absolute_windows_and_traversal_paths(path):
-    with pytest.raises(LocalSkillInvalidPackageError):
-        _service(_Filesystem())._unpack(_zip({path: b"name: bad\ndescription: no\n"}))
-
-
-@pytest.mark.parametrize(
-    "entries",
-    [
-        {},
-        {
-            "SKILL.md": b"name: one\ndescription: one\n",
-            "a/SKILL.md": b"name: one\ndescription: two\n",
-        },
-        {"wrapped/SKILL.md": b"name: wrapped\ndescription: yes\n", "outside.txt": b"x"},
-        {"SKILL.md": b"name: one\ndescription: yes\n", "a//b": b"x", "a/./b": b"y"},
-    ],
-)
-def test_zip_rejects_missing_multiple_outside_wrapper_and_normalized_duplicates(
-    entries,
-):
-    with pytest.raises(LocalSkillInvalidPackageError):
-        _service(_Filesystem())._unpack(_zip(entries))
-
-
-def test_zip_explains_when_multiple_skill_files_are_present():
-    with pytest.raises(LocalSkillInvalidPackageError) as error:
-        _service(_Filesystem())._unpack(
-            _zip(
-                {
-                    "SKILL.md": b"name: one\ndescription: one\n",
-                    "nested/SKILL.md": b"name: one\ndescription: two\n",
-                }
-            )
-        )
-
-    assert error.value.public_message == (
-        "Skill package must contain exactly one SKILL.md file"
-    )
-
-
-def test_zip_explains_when_an_archive_entry_cannot_be_read(monkeypatch):
-    class _UnreadableArchive:
-        def infolist(self):
-            return [zipfile.ZipInfo("SKILL.md")]
-
-        def read(self, _info):
-            raise OSError("injected archive read failure")
-
-    monkeypatch.setattr(
-        upload_module.zipfile, "ZipFile", lambda *_args: _UnreadableArchive()
-    )
-
-    with pytest.raises(LocalSkillInvalidPackageError) as error:
-        _service(_Filesystem())._unpack(b"not-read")
-
-    assert error.value.public_message == "Skill package could not be read"
-
-
-def test_zip_explains_when_wrapper_directory_does_not_match_skill_name():
-    with pytest.raises(LocalSkillInvalidPackageError) as error:
-        _service(_Filesystem())._unpack(
-            _zip(
-                {
-                    "wrong-directory/SKILL.md": (
-                        b"name: actual-skill\ndescription: valid\n"
-                    )
-                }
-            )
-        )
-
-    assert error.value.public_message == (
-        "Skill directory name must match SKILL.md name"
-    )
-
-
-def test_zip_rejects_a_file_that_conflicts_with_its_wrapper_directory():
-    with pytest.raises(LocalSkillInvalidPackageError) as error:
-        _service(_Filesystem())._unpack(
-            _zip(
-                {
-                    "wrapped/SKILL.md": b"name: wrapped\ndescription: valid\n",
-                    "wrapped": b"not a directory",
-                }
-            )
-        )
-
-    assert error.value.public_message == (
-        "Skill package files must be under one Skill directory"
-    )
-
-
-@pytest.mark.parametrize("name", ["skills-center", "skills-local", "skills-repo"])
-def test_zip_rejects_reserved_content_store_names(name):
-    with pytest.raises(LocalSkillInvalidPackageError):
-        _service(_Filesystem())._unpack(_zip({"SKILL.md": _skill_md(name, "reserved")}))
-
-
-@pytest.mark.parametrize("kind", [0o120000, 0o160000, 0o060000])
-def test_zip_rejects_links_and_devices(kind):
-    with pytest.raises(LocalSkillInvalidPackageError):
-        _service(_Filesystem())._unpack(
-            _zip(
-                {"SKILL.md": b"name: bad\ndescription: no\n"},
-                attrs={"SKILL.md": kind << 16},
-            )
-        )
-
-
-def test_zip_enforces_documented_file_count_and_path_and_size_limits(monkeypatch):
-    service = _service(_Filesystem())
-    monkeypatch.setattr(upload_module, "_MAX_FILES", 1)
-    with pytest.raises(upload_module.LocalSkillTooLargeError):
-        service._unpack(_zip({"SKILL.md": _skill_md("many", "yes"), "x": b"x"}))
-    monkeypatch.setattr(upload_module, "_MAX_FILES", 500)
-    with pytest.raises(LocalSkillInvalidPackageError):
-        service._unpack(_zip({"a" * 257: b"x", "SKILL.md": _skill_md("long", "yes")}))
-    monkeypatch.setattr(upload_module, "_MAX_FILE", 2)
-    with pytest.raises(upload_module.LocalSkillTooLargeError):
-        service._unpack(_zip({"SKILL.md": _skill_md("big", "yes")}))
-    monkeypatch.setattr(upload_module, "_MAX_FILE", 10 * 1024 * 1024)
-    monkeypatch.setattr(upload_module, "_MAX_EXPANDED", 2)
-    with pytest.raises(upload_module.LocalSkillTooLargeError):
-        service._unpack(_zip({"SKILL.md": _skill_md("expanded", "yes")}))
-    monkeypatch.setattr(upload_module, "_MAX_EXPANDED", 50 * 1024 * 1024)
-    monkeypatch.setattr(upload_module, "_MAX_COMPRESSED", 1)
-    with pytest.raises(upload_module.LocalSkillTooLargeError):
-        service._unpack(_zip({"SKILL.md": _skill_md("compressed", "yes")}))
-
-
 class _Denied:
     def check_collaborator_permission(self, *args):
         return {"has_permission": False}
@@ -1082,9 +892,7 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
     filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
     repo = _ReplacementRepo([_existing_skill(active=False)])
     runtime = _ReplacementRuntime([True])
-    result = await _replacement_service(
-        filesystem, repo, runtime
-    ).upload_local_skill(
+    result = await _replacement_service(filesystem, repo, runtime).upload_local_skill(
         bot_id="bot",
         owner_id="owner",
         actor_id="collaborator",
@@ -1667,81 +1475,6 @@ async def test_concurrent_same_name_uploads_serialize_then_converge_on_one_skill
     assert {first["operation"], second["operation"]} == {"created", "updated"}
     assert len(repo.rows) == 1
     assert first["skill"]["id"] == second["skill"]["id"] == "9"
-
-
-def test_directory_package_uses_the_same_wrapper_normalization_as_zip_upload():
-    package = LocalSkillUploadService._pack_directory(
-        [
-            ("weather/SKILL.md", _skill_md(name="weather")),
-            ("weather/scripts/fetch.py", b"print('weather')"),
-        ]
-    )
-
-    name, description, files = LocalSkillUploadService._unpack(package)
-
-    assert name == "weather"
-    assert description == "useful"
-    assert files == [
-        ("SKILL.md", _skill_md(name="weather")),
-        ("scripts/fetch.py", b"print('weather')"),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_directory_upload_reuses_the_raw_zip_upload_lifecycle():
-    class _CapturingUploadService(LocalSkillUploadService):
-        def __init__(self) -> None:
-            self.call: dict[str, object] | None = None
-
-        async def upload_local_skill(
-            self,
-            *,
-            bot_id: str,
-            owner_id: str,
-            actor_id: str,
-            package: bytes,
-        ) -> dict[str, object]:
-            self.call = {
-                "bot_id": bot_id,
-                "owner_id": owner_id,
-                "actor_id": actor_id,
-                "package": package,
-            }
-            return {"operation": "created"}
-
-    service = _CapturingUploadService()
-    result = await service.upload_local_skill_files(
-        bot_id="bot",
-        owner_id="owner",
-        actor_id="collaborator",
-        files=[
-            ("weather/SKILL.md", _skill_md(name="weather")),
-            ("weather/scripts/fetch.py", b"print('weather')"),
-        ],
-    )
-
-    assert result == {"operation": "created"}
-    assert service.call is not None
-    assert service.call.keys() == {"bot_id", "owner_id", "actor_id", "package"}
-    assert service.call["bot_id"] == "bot"
-    assert service.call["owner_id"] == "owner"
-    assert service.call["actor_id"] == "collaborator"
-    name, description, files = LocalSkillUploadService._unpack(
-        service.call["package"]  # type: ignore[arg-type]
-    )
-    assert name == "weather"
-    assert description == "useful"
-    assert files == [
-        ("SKILL.md", _skill_md(name="weather")),
-        ("scripts/fetch.py", b"print('weather')"),
-    ]
-
-
-def test_directory_package_rejects_path_traversal_before_it_can_be_archived():
-    with pytest.raises(LocalSkillInvalidPackageError):
-        LocalSkillUploadService._pack_directory(
-            [("skill/../outside/SKILL.md", _skill_md())]
-        )
 
 
 @pytest.mark.asyncio

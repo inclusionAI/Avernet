@@ -170,6 +170,7 @@ from agentclaw.community.core.skill_center.services.skill_propagation_service im
     SkillPropagationService,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.core.skill_center.services.skill_publish_service import (
     SkillPublishService,
 )
@@ -525,7 +526,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             edit_guard,
             lambda: injector.get(DeviceContextResolver),
             runtime_reconciler,
-            SkillParser(),
+            SkillPackageValidator(SkillParser()),
         )
 
     @singleton
