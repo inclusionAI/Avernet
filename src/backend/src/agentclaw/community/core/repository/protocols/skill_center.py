@@ -30,6 +30,7 @@ from .skill_center_types import (
     SpaceSkillGrantItem,
     SpaceSkillGrantSetRecord,
     DraftEditLeaseRecord,
+    SkillVersionRecord,
 )
 
 
@@ -191,6 +192,25 @@ class DraftEditLeaseRepository(Protocol):
     def takeover(
         self, *, space_id: int, skill_id: int, actor_id: str, env: str
     ) -> DraftEditLeaseRecord: ...
+
+
+@runtime_checkable
+class SkillVersionRepositoryProtocol(Protocol):
+    """Read-only persistence seam for immutable published Skill Versions."""
+
+    @abstractmethod
+    def list_latest_published(
+        self, *, env: str, skill_ids: tuple[int, ...]
+    ) -> tuple[SkillVersionRecord, ...]:
+        """Return at most one highest-ordinal PUBLISHED row per Skill."""
+        ...
+
+    @abstractmethod
+    def get_exact_published(
+        self, *, env: str, skill_id: int, skill_version_id: int
+    ) -> SkillVersionRecord | None:
+        """Return the addressed PUBLISHED row, never MATERIALIZING."""
+        ...
 
 @runtime_checkable
 class SkillRepository(Protocol):

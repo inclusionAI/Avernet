@@ -16,10 +16,11 @@ if TYPE_CHECKING:
 class BotCapabilityStateReaderProtocol(Protocol):
     """The one read model for a Bot's active capabilities.
 
-    Installation is the single source of truth; the tables are not
+    Installation is the active-identity source of truth; the tables are not
     backfilled, so every read first flushes SkillSet configuration into
-    Installation, then answers from Installation alone. The flush is
-    DB-side only — the reader never triggers a runtime projection.
+    Installation, then answers from Installation alone. Center identities are
+    resolved to an exact PUBLISHED Version before they leave this seam. The
+    reader never triggers a runtime projection.
     """
 
     def member_skill_ids(self, *, bot: Mapping[str, Any]) -> frozenset[int]:
@@ -37,7 +38,7 @@ class BotCapabilityStateReaderProtocol(Protocol):
         owner_id: str,
         bot: Mapping[str, Any] | None = None,
     ) -> tuple[RegisteredSkillAsset, ...]:
-        """Flush, then read the Installation→``ac_skill`` join."""
+        """Flush, then return Runtime-ready assets with exact Center Versions."""
         ...
 
     def active_mcp_server_codes(

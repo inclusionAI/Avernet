@@ -154,6 +154,7 @@ provides:
   - SpaceSkillRepository
   - SkillEditorRequestRepository
   - DraftEditLeaseRepository
+  - SkillVersionRepositoryProtocol
   - SkillSetRepository
   # skills_pool
   - QuarantineRepositoryProtocol
@@ -199,6 +200,7 @@ provides:
   - OrmPublishOperationRepository
   # skill_center
   - SpaceSkillRepository
+  - SkillVersionRepository
   # skills_pool
   - SkillsPoolLayoutRepository
   - SkillsPoolRolloutRepository

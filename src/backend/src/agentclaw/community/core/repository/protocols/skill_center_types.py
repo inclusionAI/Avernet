@@ -180,3 +180,19 @@ class DraftEditLeaseSummaryRecord(TypedDict):
     state: Literal["NOT_REQUIRED", "FREE", "HELD_BY_ME", "HELD_BY_OTHER"]
     holder_user_id: str | None
     holder_display_name: str | None
+
+
+class SkillVersionRecord(TypedDict):
+    """Persistence projection for one immutable Skill Version."""
+
+    id: int
+    skill_id: int
+    version_ordinal: int
+    status: Literal["MATERIALIZING", "PUBLISHED"]
+    sc_version_number: str
+    sc_skill_id: int | None
+    sc_version_id: int | None
+    name: str
+    description: str | None
+    metadata_json: str | None
+    published_at: datetime | None

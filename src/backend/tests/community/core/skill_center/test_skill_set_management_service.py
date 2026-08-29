@@ -39,6 +39,7 @@ from agentclaw.community.core.skill_center.skill_set_batch import (
 from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
     BotCapabilityStateReader,
 )
+from tests.community.skill_version_fakes import PassthroughSkillVersionResolver
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
 )
@@ -742,6 +743,7 @@ def _reader(skills, repository=None, bots=None):
         repository=repository if repository is not None else _McpInstallations(),
         bot_repo=bots if bots is not None else _RuntimeBots(),
         pool_skills=skills,
+        version_resolver=PassthroughSkillVersionResolver(),
     )
 
 

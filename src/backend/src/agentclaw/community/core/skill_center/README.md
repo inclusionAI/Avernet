@@ -27,6 +27,8 @@ provides:
   - "RuntimeProjectionResolver"
   - "resolve_effective_mcp_server_codes"
   - "BotCapabilityStateReader"
+  - "SkillVersionResolver"
+  - "SkillVersionResolverProtocol"
   - "BotRuntimeProjector"
   - "BotRuntimeProjectorProtocol"
   - "LocalSkillCleanupWorkModel"
@@ -68,6 +70,7 @@ consumes:
   - "SpaceSkillRepository"
   - "WorkOrderRepositoryProtocol"
   - "DraftEditLeaseRepository"
+  - "SkillVersionRepositoryProtocol"
 internal_dependencies:
   - agentclaw.community.api.skill_parameter_service_factory
   - agentclaw.community.api.skill_market_service

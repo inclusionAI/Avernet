@@ -67,6 +67,9 @@ from agentclaw.community.core.repository.implementations.skill_center.capability
 from agentclaw.community.core.repository.implementations.skill_center.space_skill import (
     SpaceSkillRepository as UnifiedSpaceSkillRepository,
 )
+from agentclaw.community.core.repository.implementations.skill_center.skill_version import (
+    SkillVersionRepository,
+)
 from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
     SkillEditorRequestRepository,
 )
@@ -80,6 +83,7 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillEditorRequestRepositoryProtocol,
     SkillCategoryRepository,
+    SkillVersionRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillCenterSyncLogRepository,
@@ -132,6 +136,12 @@ from agentclaw.community.core.skill_center.policies.platform_default_mcp import 
 )
 from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
     BotCapabilityStateReader,
+)
+from agentclaw.community.core.skill_center.services.skill_version_resolver import (
+    SkillVersionResolver,
+)
+from agentclaw.community.core.skill_center.version_resolution_contract import (
+    SkillVersionResolverProtocol,
 )
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
@@ -329,6 +339,16 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         binder.bind(
             CapabilityDesiredStateRepositoryProtocol,
             to=CapabilityDesiredStateRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            SkillVersionRepositoryProtocol,
+            to=SkillVersionRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            SkillVersionResolverProtocol,
+            to=SkillVersionResolver,
             scope=singleton,
         )
         binder.bind(

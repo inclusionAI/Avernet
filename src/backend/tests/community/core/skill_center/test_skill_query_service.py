@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from tests.community.skill_version_fakes import PassthroughSkillVersionResolver
 
 from agentclaw.community.core.models.mcp import (
     BotMCPInstallation,
@@ -113,7 +114,9 @@ def _listing_service(
     allowed: bool = True,
 ):
     skills, sets, bots = _Skills(), _SkillSets(bridge), _Bots(bot)
-    reader = BotCapabilityStateReader(sets, bots, object())
+    reader = BotCapabilityStateReader(
+        sets, bots, object(), PassthroughSkillVersionResolver()
+    )
     service = SkillQueryService(
         skills,
         bots,
@@ -528,7 +531,10 @@ def test_a_bridged_skill_is_active_in_detail_before_any_listing_ran(tmp_path):
         )
 
     reader = BotCapabilityStateReader(
-        CapabilityDesiredStateRepository(db), bots, skills
+        CapabilityDesiredStateRepository(db),
+        bots,
+        skills,
+        PassthroughSkillVersionResolver(),
     )
     service = SkillQueryService(
         skills, bots, object(), reader, object(), object(), lambda: object()

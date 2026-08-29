@@ -24,6 +24,7 @@ from agentclaw.community.core.skill_center.services.skill_set_service import (
     SkillSetService,
     SynlinkMappingInfo,
 )
+from tests.community.skill_version_fakes import PassthroughSkillVersionResolver
 
 pytestmark = pytest.mark.unit
 
@@ -105,6 +106,7 @@ def test_an_excluded_default_member_is_no_longer_symlinked(tmp_path):
         repository=CapabilityDesiredStateRepository(db),
         bot_repo=_Bots(),
         pool_skills=skills,
+        version_resolver=PassthroughSkillVersionResolver(),
     )
     service = SkillSetService(
         skill_repo=skills,

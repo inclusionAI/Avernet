@@ -38,6 +38,7 @@ from agentclaw.community.core.repository.protocols.skill_center import (
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+from tests.community.skill_version_fakes import PassthroughSkillVersionResolver
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
@@ -187,6 +188,7 @@ def _seed_state(world, *, runtime_success: bool) -> None:
                 repository=world.get(CapabilityDesiredStateRepositoryProtocol),
                 bot_repo=world.get(BotRepository),
                 pool_skills=world.get(SkillRepository),
+                version_resolver=PassthroughSkillVersionResolver(),
             ),
             PlatformDefaultMcpPolicy(lambda _bot_id: None),
         ),
