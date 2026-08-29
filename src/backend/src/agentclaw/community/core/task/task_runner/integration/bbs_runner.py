@@ -15,9 +15,9 @@ import json
 import logging
 import uuid
 from typing import Any
-from agentclaw.community.core.task.domain.models import TaskNodePatch, AcceptanceResult, AcceptanceVerdict, TaskNode, \
-    Goal
-from community.core.task.domain.models import Status, TaskSpec, RuntimeInfo
+from agentclaw.community.core.task.domain.models import (
+    AcceptanceResult, AcceptanceVerdict, Goal, RuntimeInfo, Status, TaskNode, TaskNodePatch, TaskSpec,
+)
 
 logger = logging.getLogger(__name__)
 

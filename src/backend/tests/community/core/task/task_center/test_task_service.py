@@ -112,6 +112,7 @@ class _StubDispatchStrategy:
 class StubRunner:
     def __init__(self):
         self.run_calls: list[list[TaskNode]] = []
+        self.bbs_calls: list = []   # engine 升 BBS 可恢复态时 run_bbs 调用的 task_id
 
     async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
         self.run_calls.append(list(toDoTaskList))
@@ -119,6 +120,10 @@ class StubRunner:
 
     async def form_coop_group(self, gf):
         return "grp_stub"
+
+    async def run_bbs(self, execution_graph) -> None:
+        """记录 BBS 升级调度(根 HUNG 升 BBS 可恢复态时 fire-and-forget 调用;对齐真实 TaskExecutor.run_bbs)。"""
+        self.bbs_calls.append(getattr(execution_graph, "task_id", None))
 
     def query_status(self, task_id): return Status.PENDING
     def query_detail(self, node): return node

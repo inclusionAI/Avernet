@@ -103,11 +103,16 @@ class StubDispatcher:
 class StubRunner:
     def __init__(self):
         self.run_calls: list[list[TaskNode]] = []
+        self.bbs_calls: list = []   # engine 升 BBS 可恢复态时 run_bbs 调用的 task_id
         self._groups = []
 
     async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
         self.run_calls.append(list(toDoTaskList))
         return [True] * len(toDoTaskList)
+
+    async def run_bbs(self, execution_graph) -> None:
+        """记录 BBS 升级调度(根 HUNG 升 BBS 可恢复态时 fire-and-forget 调用;对齐真实 TaskExecutor.run_bbs)。"""
+        self.bbs_calls.append(getattr(execution_graph, "task_id", None))
 
     async def form_coop_group(self, gf):
         self._groups.append(gf)
@@ -423,6 +428,46 @@ class TestOnHarness:
         _run(eng.on_harness(_patch("t1", "c1", status=Status.PENDING, extend_props_patch={"crash": "timeout"})))
         assert svc._get_node(graph, "c1").status == Status.RUNNING
         assert len(runner.run_calls) == 1
+
+    def test_root_hung_schedules_bbs(self, svc):
+        """调度优化:任一根 HUNG(此处 exec_stuck 冒泡到根)即调度 run_bbs(MAX_LOOP 未达即升 BBS)。"""
+        g = svc.initialize_graph(_task_info("t_bbs", max_depth=1))
+        g.extend_props["execution_config"]["MAX_LOOP"] = 10  # 确保不撞反失控兜底
+        svc.add_task_nodes([_child("c1", "t_bbs")], parent_node_id="t_bbs")
+        svc.update_task_node_info(_patch("t_bbs", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        svc.update_task_node_info(_patch("t_bbs", "c1", extend_props_patch={"harness_retries": 2}))
+        runner = StubRunner()
+        eng = _engine(svc, planner=StubPlanner(lambda g: []), runner=runner)
+
+        async def _go():
+            await eng.on_harness(_patch("t_bbs", "c1", exec_error="acceptance_fail_retry"))
+            if eng._bg_tasks:  # 排空 fire-and-forget bbs 任务,断言已调度
+                await asyncio.gather(*eng._bg_tasks, return_exceptions=True)
+
+        _run(_go())
+        assert svc._get_node(g, "t_bbs").status == Status.HUNG  # exec_stuck 冒泡到根→根 HUNG
+        assert g.extend_props.get("bbs_mode") is True
+        assert len(runner.bbs_calls) == 1  # 新行为:根 HUNG 即调度 bbs(恰好一次)
+
+    def test_loop_exhausted_does_not_schedule_bbs(self, svc):
+        """反失控兜底:loop_round 达 MAX_LOOP→图 HUNG(loop_exhausted),不再调度 run_bbs。"""
+        g = svc.initialize_graph(_task_info("t_loop", max_depth=1))
+        g.extend_props["execution_config"]["MAX_LOOP"] = 1
+        svc.add_task_nodes([_child("c1", "t_loop")], parent_node_id="t_loop")
+        svc.update_task_node_info(_patch("t_loop", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        svc.update_task_node_info(_patch("t_loop", "c1", extend_props_patch={"harness_retries": 2}))
+        runner = StubRunner()
+        eng = _engine(svc, planner=StubPlanner(lambda g: []), runner=runner)
+
+        async def _go():
+            await eng.on_harness(_patch("t_loop", "c1", exec_error="x"))
+            if eng._bg_tasks:
+                await asyncio.gather(*eng._bg_tasks, return_exceptions=True)
+
+        _run(_go())
+        assert g.status == Status.HUNG
+        assert g.extend_props.get("hung_reason") == "loop_exhausted"
+        assert runner.bbs_calls == []  # MAX_LOOP 硬停:不调度 bbs
 
 
 # ===== loop_round 仅升 BBS++ =====
