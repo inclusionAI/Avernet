@@ -26,10 +26,25 @@ class Status(StrEnum):
 
 
 class AcceptanceVerdict(StrEnum):
-    """验收结论。"""
+    """验收结论。``status`` 与 ``verdict`` 统一用 ``DONE``/``FAILED``。"""
 
     DONE = "DONE"
     FAILED = "FAILED"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "AcceptanceVerdict | None":
+        """向后兼容:历史库数据/旧上报中的 ``PASS``/``FAIL`` 自动归一到新枚举。
+
+        覆盖所有 ``AcceptanceVerdict(value)`` 构造点(repository serializers/types 反序列化、
+        callback_adapter/schemas 上报解析),使历史 ``PASS``/``FAIL`` 字面量不再抛 ValueError。
+        单向归一,不回写旧值;真正非法值仍按 Enum 默认抛错。
+        """
+        if isinstance(value, str):
+            if value == "PASS":
+                return cls.DONE
+            if value == "FAIL":
+                return cls.FAILED
+        return None
 
 
 class RelationType(StrEnum):

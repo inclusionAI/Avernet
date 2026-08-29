@@ -148,3 +148,17 @@ def test_execution_graph_statuses_are_mapped_at_product_boundary():
     assert normalized["extend_props"]["status"] == "completed"
     assert execution_graph["status"] == "PENDING"
     assert execution_graph["tasks"][0]["status"] == "RUNNING"
+
+
+def test_acceptance_verdict_backward_compat_pass_fail():
+    """历史 PASS/FAIL 库数据/旧上报归一到新 DONE/FAILED,不抛 ValueError。"""
+    from agentclaw.community.core.task.domain.models import AcceptanceVerdict
+
+    assert AcceptanceVerdict("PASS") is AcceptanceVerdict.DONE
+    assert AcceptanceVerdict("FAIL") is AcceptanceVerdict.FAILED
+    assert AcceptanceVerdict("DONE") is AcceptanceVerdict.DONE
+    assert AcceptanceVerdict("FAILED") is AcceptanceVerdict.FAILED
+    import pytest
+
+    with pytest.raises(ValueError):
+        AcceptanceVerdict("UNKNOWN")
