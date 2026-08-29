@@ -137,7 +137,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
                 node_id=bbs_task_node.node_id,
                 status=Status.DONE,
                 output_patch={
-                    "output": task_result
+                    "output": task_result.get("result") if isinstance(task_result, dict) else task_result
                 },
                 acceptance_result = AcceptanceResult(
                     verdict=AcceptanceVerdict.DONE,
@@ -145,9 +145,9 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
                     gaps=list()
                 ),
                 extend_props_patch={
-                    "output": task_result,
+                    "output": task_result.get("result") if isinstance(task_result, dict) else task_result,
                     "assignee_bot_id": winner_bot_id,
-                    "session_id": "",
+                    "session_id": task_result.get("session_id") if isinstance(task_result, dict) else "",
                 }
             )
         )
