@@ -8,13 +8,22 @@ from agentclaw.community.core.skill_center.draft_content import (
     DraftRevisionIdentity,
     DraftRevisionRef,
 )
-from agentclaw.community.core.skill_center.skill_package import ValidatedSkillPackage
+from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+from agentclaw.community.core.skill_center.skill_package import (
+    SkillPackageInvalidError,
+    SkillPackageTooLargeError,
+    SkillPackageValidator,
+    ValidatedSkillPackage,
+)
 
 
 class LocalDraftContentStore:
     """Deterministic Fake with the same exact-identity immutability semantics."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self, package_validator: SkillPackageValidator | None = None
+    ) -> None:
+        self._validator = package_validator or SkillPackageValidator(SkillParser())
         self._revisions: dict[DraftRevisionRef, ValidatedSkillPackage] = {}
 
     def write_revision(
@@ -22,14 +31,21 @@ class LocalDraftContentStore:
         identity: DraftRevisionIdentity,
         validated_package: ValidatedSkillPackage,
     ) -> DraftRevisionRef:
+        try:
+            package = self._validator.revalidate(validated_package)
+        except (SkillPackageInvalidError, SkillPackageTooLargeError) as exc:
+            raise DraftContentStoreError(
+                DraftContentStoreErrorCode.CORRUPT_CONTENT,
+                "Draft revision package is not a consistent validated value",
+            ) from exc
         ref = DraftRevisionRef.from_identity(identity)
         existing = self._revisions.get(ref)
-        if existing is not None and existing != validated_package:
+        if existing is not None and existing != package:
             raise DraftContentStoreError(
                 DraftContentStoreErrorCode.CONTENT_CONFLICT,
                 "Draft revision identity already contains different bytes",
             )
-        self._revisions[ref] = validated_package
+        self._revisions[ref] = package
         return ref
 
     def read_revision(self, ref: DraftRevisionRef) -> ValidatedSkillPackage:

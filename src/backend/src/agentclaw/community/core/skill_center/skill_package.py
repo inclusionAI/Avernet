@@ -133,6 +133,15 @@ class SkillPackageValidator:
         """Validate browser directory input through the canonical ZIP seam."""
         return self.validate_zip(self.pack_directory(files))
 
+    def revalidate(
+        self, package: ValidatedSkillPackage
+    ) -> ValidatedSkillPackage:
+        """Rebuild a value at a persistence boundary and reject forged fields."""
+        validated = self.validate_zip(package.canonical_zip)
+        if validated != package:
+            raise SkillPackageInvalidError("inconsistent_validated_package")
+        return validated
+
     def pack_directory(self, files: Sequence[tuple[str, bytes]]) -> bytes:
         """Safely encode browser directory input before lifecycle authorization.
 

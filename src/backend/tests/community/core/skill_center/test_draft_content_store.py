@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import zipfile
+from dataclasses import replace
 from uuid import UUID
 
 import pytest
@@ -180,6 +181,38 @@ def _oss_store(objects: _Objects) -> OssDraftContentStore:
         package_validator=SkillPackageValidator(SkillParser()),
         config=DraftContentStoreConfig(),
     )
+
+
+class _ImmutableOnlyObjects:
+    def create_object_if_absent(
+        self, key: str, content: bytes
+    ) -> ObjectCreateResult:
+        return ObjectCreateResult.CREATED
+
+    def read_object(self, key: str) -> ObjectReadResult:
+        return ObjectReadResult(ObjectReadStatus.NOT_FOUND)
+
+
+def test_oss_adapter_rejects_storage_without_delete_capability() -> None:
+    with pytest.raises(ValueError, match="delete"):
+        OssDraftContentStore(
+            object_storage=_ImmutableOnlyObjects(),  # type: ignore[arg-type]
+            package_validator=SkillPackageValidator(SkillParser()),
+            config=DraftContentStoreConfig(),
+        )
+
+
+def test_draft_stores_reject_forged_validated_package_before_write() -> None:
+    package = _package()
+    forged = replace(package, name="forged")
+    objects = _Objects()
+
+    for store in (LocalDraftContentStore(), _oss_store(objects)):
+        with pytest.raises(DraftContentStoreError) as error:
+            store.write_revision(_identity(), forged)
+        assert error.value.code is DraftContentStoreErrorCode.CORRUPT_CONTENT
+
+    assert objects.puts == []
 
 
 def test_oss_adapter_writes_reads_and_deletes_one_canonical_zip() -> None:

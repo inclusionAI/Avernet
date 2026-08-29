@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Protocol, runtime_checkable
+
 from agentclaw.community.core.skill_center.draft_content import (
     DraftContentStoreConfig,
     DraftContentStoreError,
@@ -22,16 +24,28 @@ from agentclaw.community.plugin_api.object_storage import (
 )
 
 
+@runtime_checkable
+class _DraftRevisionObjectStorage(ImmutableObjectStorageCapability, Protocol):
+    """Immutable object operations plus idempotent deletion for Draft ZIPs."""
+
+    def delete_object(self, key: str) -> bool: ...
+
+
 class OssDraftContentStore:
     """Store one verified canonical ZIP at each exact Draft revision key."""
 
     def __init__(
         self,
         *,
-        object_storage: ImmutableObjectStorageCapability,
+        object_storage: _DraftRevisionObjectStorage,
         package_validator: SkillPackageValidator,
         config: DraftContentStoreConfig,
     ) -> None:
+        if not isinstance(object_storage, _DraftRevisionObjectStorage):
+            raise ValueError(
+                "DraftContentStore requires atomic create, three-state read, "
+                "and idempotent delete object storage capabilities"
+            )
         self._objects = object_storage
         self._validator = package_validator
         self._base_prefix_template = config.base_prefix_template
@@ -41,11 +55,16 @@ class OssDraftContentStore:
         identity: DraftRevisionIdentity,
         validated_package: ValidatedSkillPackage,
     ) -> DraftRevisionRef:
+        try:
+            package = self._validator.revalidate(validated_package)
+        except (SkillPackageInvalidError, SkillPackageTooLargeError) as exc:
+            raise DraftContentStoreError(
+                DraftContentStoreErrorCode.CORRUPT_CONTENT,
+                "Draft revision package is not a consistent validated value",
+            ) from exc
         ref = DraftRevisionRef.from_identity(identity)
         key = self._object_key(ref)
-        created = self._objects.create_object_if_absent(
-            key, validated_package.canonical_zip
-        )
+        created = self._objects.create_object_if_absent(key, package.canonical_zip)
         if created is ObjectCreateResult.FAILED:
             raise DraftContentStoreError(
                 DraftContentStoreErrorCode.WRITE_FAILED,
@@ -66,7 +85,7 @@ class OssDraftContentStore:
                 DraftContentStoreErrorCode.WRITE_FAILED,
                 "Draft revision disappeared after conditional create",
             )
-        if verified.content != validated_package.canonical_zip:
+        if verified.content != package.canonical_zip:
             raise DraftContentStoreError(
                 DraftContentStoreErrorCode.CONTENT_CONFLICT,
                 "Draft revision identity already contains different bytes",
