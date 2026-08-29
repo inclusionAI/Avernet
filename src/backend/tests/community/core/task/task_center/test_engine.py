@@ -395,25 +395,25 @@ class TestStructuralParentGapClosedRollup:
 
 # ===== on_report FAIL =====
 class TestOnReportFail:
-    def test_fail_to_failed_no_immediate_remedy(self, svc, graph):
-        """v4:验收 FAIL→FAILED,不立即补救拆子(补救改由 harness 重新派发执行重试)。"""
+    def test_acceptance_fail_to_hung(self, svc, graph):
+        """验收 FAIL→直接 HUNG(不再"落 FAILED 交 harness 重派同一执行体"):避免重派后 RUNNING 却顶 FAILED
+        验收的不一致态。置 HUNG 后是否升 BBS 走既有 _hung_and_escalate 逻辑,本例只校验状态不再停在 FAILED/RUNNING。"""
         svc.add_task_nodes([_child("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         planner = StubPlanner(lambda g: [_child("c1_remedy")])
         eng = _engine(svc, planner=planner)
         _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]))))
-        assert svc._get_node(graph, "c1").status == Status.FAILED  # 落 FAILED,不补救
-        assert planner.plan_calls == 0  # 不调用 plan 补救
+        assert svc._get_node(graph, "c1").status == Status.HUNG  # 直接 HUNG,不再 FAILED/EXECUTING
+        assert planner.plan_calls == 0  # 不 plan 补救(HUNG 冒泡/升 BBS 交既有逻辑)
 
-    def test_fail_harness_retry_redispatch(self, svc, graph):
-        """v4:FAILED 经 harness on_harness 重新派发执行(不拆):复位 FAILED→PENDING→dispatch→RUNNING。"""
+    def test_exec_error_harness_retry_redispatch(self, svc, graph):
+        """exec_error(执行报错/传输失败)→harness 重新派发执行(不拆):RUNNING→PENDING→dispatch→RUNNING。
+        与验收 FAIL 不同:执行报错为临时性失败,重派有意义(验收不过属内容 gap,已直接 HUNG)。"""
         svc.add_task_nodes([_child("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         runner = StubRunner()
         eng = _engine(svc, dispatcher=StubDispatcher(), runner=runner)
-        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]))))
-        assert svc._get_node(graph, "c1").status == Status.FAILED
-        _run(eng.on_harness(_patch("t1", "c1", exec_error="acceptance_fail_retry")))  # harness 重新派发
+        _run(eng.on_report(_patch("t1", "c1", exec_error="transport_fail")))  # 执行报错→harness 重新派发
         assert svc._get_node(graph, "c1").status == Status.RUNNING  # 重新派发执行
         assert len(runner.run_calls) == 1
 
@@ -516,13 +516,15 @@ class TestOnHarness:
 
 # ===== loop_round 仅升 BBS++ =====
 class TestLoopRound:
-    def test_normal_remedy_no_increment(self, svc, graph):
+    def test_acceptance_fail_escalates_bumps_loop_round(self, svc, graph):
+        # 验收 FAIL→直接 HUNG→既有 _hung_and_escalate 逻辑 _bump_loop_round(loop_round++ = 升 BBS 计次)。
+        # 旧"落 FAILED 交 harness 重派不 bump"前提已废弃(验收不过属内容 gap,直 HUNG 升级,非 normal remedy)。
         svc.add_task_nodes([_child("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         before = graph.loop_round
         eng = _engine(svc, planner=StubPlanner(lambda g: [_child("c1_remedy")]))
         _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["x"]))))
-        assert graph.loop_round == before
+        assert graph.loop_round == before + 1  # HUNG 升 BBS 计次(既有逻辑)
 
 
 
@@ -571,3 +573,40 @@ class TestZeroCaseKnowledge:
         forbidden = ["N_overview", "N_market", "N_aggregate", "N_verify", "N_report", "N_practice", "n_root", "dim_"]
         hits = [f for f in forbidden if f in src]
         assert hits == [], f"engine 出现写死节点名: {hits}"
+
+
+# ===== plan() 异常韧性(plan_call_fail 重试,不 abort on_execute) =====
+class _RaisingThenOkPlanner:
+    """plan() 先抛指定次数异常,之后返回 then_kids(模拟 sofa_tracer httpx send hook 等传输异常)。"""
+
+    def __init__(self, raise_times: int, then_kids: list[TaskNode] | None = None):
+        self.calls = 0
+        self.raise_times = raise_times
+        self.then_kids = then_kids or []
+
+    async def plan(self, graph, target_node_id: str | None = None) -> PlanResult:
+        self.calls += 1
+        if self.calls <= self.raise_times:
+            raise RuntimeError("simulated httpx send hook fail")
+        return PlanResult(children=list(self.then_kids), has_gap=bool(self.then_kids))
+
+
+class TestPlanRetryOnException:
+    def test_planner_transport_exception_retried_then_ok(self, svc, graph):
+        # plan() 第一次抛异常→plan_call_fail 重试→第二次产子→正常 dispatch,不再 abort on_execute
+        planner = _RaisingThenOkPlanner(raise_times=1, then_kids=[_child("c1")])
+        eng = _engine(svc, planner=planner)
+        _run(eng.on_execute("t1"))
+        assert planner.calls == 2  # 1 抛异常(plan_call_fail 重试) + 1 产子
+        assert svc._get_node(graph, "t1").status == Status.PLANNING
+        assert svc._get_node(graph, "c1").status == Status.RUNNING
+
+    def test_planner_always_raises_exhausts_to_hung_escalate(self, svc, graph):
+        # plan() 恒抛→耗尽 MAX_HARNESS(默认 3)→pr=plan_call_fail(has_gap=T,无子)→HUNG 升 BBS,不 abort
+        planner = _RaisingThenOkPlanner(raise_times=99)
+        eng = _engine(svc, planner=planner)
+        _run(eng.on_execute("t1"))
+        assert planner.calls == 3  # MAX_HARNESS 次,全部 plan_call_fail
+        assert svc._get_node(graph, "t1").status == Status.HUNG
+        assert graph.extend_props.get("bbs_mode") is True
+        assert graph.loop_round == 1

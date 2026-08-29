@@ -73,6 +73,18 @@ from agentclaw.community.di.profile import DeployProfile
 logger = logging.getLogger("task.module")
 
 
+def _harness_enabled() -> bool:
+    """TaskHarness 旁路巡检开关(env ``OCB_TASK_HARNESS_ENABLED``,默认**关闭**)。
+
+    harness poller(SLA 超时复位 / FAILED 重派重试 / PENDING 派发超时重搜推)为旁路常驻线程;
+    默认关闭,facade 以事件驱动(on_execute/on_report/on_pass/on_miss)为主推进。需要旁路兜底
+    (bot 崩溃/SLA 超时/派发卡住)时显式置 ``OCB_TASK_HARNESS_ENABLED=1`` 启用。harness=None 时
+    TaskService 不启动 daemon 巡检线程(见 task_service 装配处 ``if self._harness is not None``)。"""
+    return os.environ.get("OCB_TASK_HARNESS_ENABLED", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
 class TaskModule(Module):
     """Production bindings for the task module(社区核心,所有 profile 装配)。"""
 
@@ -195,8 +207,14 @@ class TaskModule(Module):
                 injector.get(BotServiceProtocol)
             )
         # harness 旁路常驻巡检(SLA 超时复位 / FAILED 重派重试 / PENDING 派发超时重搜推);
-        # facade 内部 set_on_harness 回填编排核入口并启动 daemon 巡检线程。
-        harness = TaskHarness(graph)
+        # 可配置开关(OCB_TASK_HARNESS_ENABLED),默认关闭:facades 始终以事件驱动为主推进,
+        # harness=None 时 TaskService 不启动 daemon 巡检线程。需要旁路兜底时显式置 =1 开启。
+        if _harness_enabled():
+            harness = TaskHarness(graph)
+            logger.info("[task][task-module] TaskHarness 旁路巡检已启用(OCB_TASK_HARNESS_ENABLED=1)")
+        else:
+            harness = None
+            logger.info("[task][task-module] TaskHarness 旁路巡检已关闭(默认);需开启设 OCB_TASK_HARNESS_ENABLED=1")
         # TaskPersistenceModule is optional for the pure-core and lightweight DI
         # test paths. Resolve every persistence port lazily so Injector never
         # attempts to instantiate an abstract repository protocol.

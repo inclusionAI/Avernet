@@ -61,6 +61,21 @@ from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 logger = logging.getLogger("task.service")
 
 
+def _parse_status_filter(status: str | None) -> list[Status] | None:
+    """逗号分隔的运行时态 ``status`` 字符串 -> ``list[Status]``。
+
+    供 list_tasks / list_tasks_page 把 HTTP query 的多值("PLANNING,RUNNING")解析为运行时态集合，
+    交给 repository 做 SQL IN 过滤。None/空串/全空段 -> None(不过滤)。
+    非法 token 理论上由 router 校验拦截(返回 400)，此处假设已校验，不二次校验。
+    """
+    if not status or not status.strip():
+        return None
+    parts = [t.strip().upper() for t in status.split(",") if t.strip()]
+    if not parts:
+        return None
+    return [Status(p) for p in parts]
+
+
 def _resolve_coop_collab_mode(has_yaml: bool, group_kind: str | None) -> str:
     """Resolve the BCS collaboration mode from task execution metadata."""
     if has_yaml:
@@ -837,11 +852,11 @@ class TaskService:
         status: str | None = None,
         owner_user_id: str | None = None,
     ) -> list[TaskInfoRecord]:
-        """列持久化 ``task_info`` 记录,可选按状态和 owner 过滤。"""
+        """列持久化 ``task_info`` 记录,可选按状态(逗号分隔的运行时态集合)和 owner 过滤。"""
         if self._task_info_repo is None:
             return []
-        st = Status(status) if status else None
-        records = self._task_info_repo.list_records(st, owner_user_id=owner_user_id)
+        statuses = _parse_status_filter(status)
+        records = self._task_info_repo.list_records(statuses, owner_user_id=owner_user_id)
         return self._enrich_task_owner_display(records)
 
     def list_tasks_page(
@@ -851,12 +866,12 @@ class TaskService:
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[TaskInfoRecord], int]:
-        """列持久化 ``task_info`` 记录的一页(1-based),可选按状态和 owner 过滤。"""
+        """列持久化 ``task_info`` 记录的一页(1-based),可选按状态(逗号分隔的运行时态集合)和 owner 过滤。"""
         if self._task_info_repo is None:
             return [], 0
-        st = Status(status) if status else None
+        statuses = _parse_status_filter(status)
         records, total = self._task_info_repo.list_records_page(
-            st, owner_user_id=owner_user_id, page=page, page_size=page_size
+            statuses, owner_user_id=owner_user_id, page=page, page_size=page_size
         )
         return self._enrich_task_owner_display(records), total
 

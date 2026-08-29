@@ -340,7 +340,14 @@ class ExecutionEngine:
         max_h = self._max_harness(task_id)
         pr = None
         for attempt in range(max_h):
-            pr = await self._planner.plan(graph, target_node_id=target_node_id)
+            try:
+                pr = await self._planner.plan(graph, target_node_id=target_node_id)
+            except Exception as exc:  # 传输/HTTP 异常(sofa_tracer httpx send hook 等)->plan_call_fail 重试,不 abort on_execute
+                logger.warning(
+                    "[task][plan-retry] task=%s attempt=%d/%d plan() 抛异常(将重试): %r",
+                    task_id, attempt + 1, max_h, exc,
+                )
+                pr = PlanResult(children=[], has_gap=True, gap_detail="plan_call_fail")
             if pr.children or not (pr.gap_detail or "").startswith("plan_"):
                 break  # 有子 / 真 gap 闭 / 真拆不出 → 不重试
             logger.warning(
@@ -1566,8 +1573,14 @@ class ExecutionEngine:
     async def _on_fail_collect(
         self, task_id: str, node_id: str, side: list[tuple]
     ) -> None:
-        """验收不过(FAIL+gaps)→FAILED。v4:不立即补救拆子,置 FAILED 后交由 harness 周期巡检"重新派发执行"
-        重试(不拆);harness 重试达 MAX_HARNESS→HUNG→升 BBS。本方法仅落 FAILED + 记 gaps,不推进 plan。"""
+        """验收不过(FAIL+gaps)→直接 HUNG + 升 BBS(非"落 FAILED 交 harness 重派同一执行体")。
+
+        验收不过属内容 gap:重派同一执行体多为无效重试;且 harness 重派(复位 FAILED→PENDING→重新
+        dispatch→RUNNING)不会清上一轮 acceptance_result/output,会产生 dashboard "RUNNING 却顶 FAILED
+        验收"的不一致态。故验收不过直接置 HUNG(保留 FAILED 验收结论 + gaps 作为 hung 上下文),交 BBS
+        升级兜底(owner 复核/换 bot/协群)。与 exec_error(执行报错/传输失败,如 sofa_tracer httpx)的
+        harness 重派不同:后者为临时性失败,重派有意义(见 _on_harness_collect)。
+        FAILED 已由 acceptance patch 落态,此处翻 HUNG 记 hung_reason=acceptance_fail。"""
         _n = next(
             (
                 x
@@ -1577,7 +1590,7 @@ class ExecutionEngine:
             None,
         )
         logger.info(
-            "[task][on_fail] task=%s node=%s → FAILED(gaps=%s),交 harness 重试重新派发",
+            "[task][on_fail] task=%s node=%s → HUNG 升 BBS(gaps=%s)",
             task_id,
             node_id,
             (
@@ -1586,8 +1599,7 @@ class ExecutionEngine:
                 else None
             ),
         )
-        # FAILED 已由 acceptance patch 落态。重试重新派发由 harness 巡检 FAILED 触发(见 TaskHarness._poll_once)。
-        # 此处不 plan、不 add,直接返回。
+        self._hung_and_escalate(task_id, node_id, "acceptance_fail")
 
     async def _on_harness_collect(
         self, task_id: str, node_id: str, exec_error: str, side: list[tuple]

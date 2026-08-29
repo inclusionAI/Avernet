@@ -53,6 +53,16 @@ from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
+def _validate_status_filter(status: str | None) -> None:
+    """校验 status query(逗号分隔的运行时态枚举),任一 token 非法 → 400。"""
+    if status is None:
+        return
+    valid = {s.value for s in Status}
+    for tok in (t.strip().upper() for t in status.split(",") if t.strip()):
+        if tok not in valid:
+            raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
+
+
 router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"], route_class=PublicAPIRoute)
 
 # Handler-level principal dependency: ``test_public_routes_require_principal`` walks each
@@ -132,7 +142,8 @@ async def list_tasks(
     principal: PrincipalDep,
     user_id: str = Query(..., description="按归属 user_id 过滤任务记录"),
     status: Annotated[
-        str | None, Query(description="可选 status 过滤记录状态;非法值 → 400")
+        str | None,
+        Query(description="可选 status 过滤:运行时态枚举,逗号分隔多值(如 PLANNING,RUNNING);非法值 → 400"),
     ] = None,
     page: Annotated[
         int | None,
@@ -157,8 +168,7 @@ async def list_tasks(
     等同历史契约(供接力 skill 全量枚举等场景);两者同时传入时 data 为
     Page(total, items)(1-based,page_size 最大 100)。仅传其一视为入参错误(400)。"""
     del principal  # Authentication remains mandatory; user_id is only a query filter.
-    if status is not None and status not in {s.value for s in Status}:
-        raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
+    _validate_status_filter(status)
     if (page is None) != (page_size is None):
         raise HTTPException(
             status_code=400,

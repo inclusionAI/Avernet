@@ -121,6 +121,16 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
+def _validate_status_filter(status: str | None) -> None:
+    """校验 status query(逗号分隔的运行时态枚举),任一 token 非法 → 400。"""
+    if status is None:
+        return
+    valid = {s.value for s in Status}
+    for tok in (t.strip().upper() for t in status.split(",") if t.strip()):
+        if tok not in valid:
+            raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
+
+
 router = APIRouter(prefix="/api/v1/collaboration/tasks", tags=["task"])
 
 
@@ -219,8 +229,7 @@ async def list_tasks_internal(
 
     分页为可选入参(与公开面同步):page/page_size 均不传时 data 为列表(历史契约);
     两者同时传入时返回 Page(total, items);仅传其一 → 400。"""
-    if status is not None and status not in {s.value for s in Status}:
-        raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
+    _validate_status_filter(status)
     if (page is None) != (page_size is None):
         raise HTTPException(
             status_code=400,
