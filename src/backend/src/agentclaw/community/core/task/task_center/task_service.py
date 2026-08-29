@@ -322,6 +322,9 @@ class TaskService:
             self._bg_tasks.add(bg)
             bg.add_done_callback(self._on_bg_done)
             return TaskOpResult(task_id=task_id, success=True, run_id=graph.run_id)
+        if task_type == TaskType.BBS:
+            return await self._run_bbs(task_id, request, task_info, graph.run_id)
+
         # dynamic (default): fire-and-forget on_execute
         if self._harness is not None:
             self._harness.register(task_id)
@@ -450,6 +453,16 @@ class TaskService:
         extend_props = {"group_id": start.group_id}
         return TaskOpResult(
             task_id=task_id, success=True, run_id=run_id, extend_props=extend_props
+        )
+
+    async def _run_bbs(self, task_id, request, task_info, run_id) -> TaskOpResult:
+        logger.info("[task][bbs_mode], begin_run_bbs, task_id=%s", task_id)
+
+        self._engine._hung_and_escalate(task_id=task_id, node_id=task_id, hung_reason="创建BBS接力任务")
+
+        logger.info("[task][bbs_mode], finish_run_bbs, task_id=%s", task_id)
+        return TaskOpResult(
+            task_id=task_id, success=True, run_id=run_id, extend_props={}
         )
 
     def _persist_node_run(

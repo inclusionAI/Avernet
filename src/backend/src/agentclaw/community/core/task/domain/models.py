@@ -79,6 +79,7 @@ class TaskType(StrEnum):
     WORKFLOW = "workflow"
     DYNAMIC = "dynamic"
     STATIC_PLAN = "static_plan"
+    BBS = "bbs"
 
 
 # ===== 规格面(Task Specification)=====
