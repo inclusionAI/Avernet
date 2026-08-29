@@ -706,7 +706,7 @@ class TaskSettingRequestDTO(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    setting_type: Literal["claim_join_filter", "search_skill"] = Field(
+    setting_type: Literal["claim_join_filter", "search_skill", "single_bot_skill_report"] = Field(
         ..., description="任务开关类型"
     )
     enabled: bool = Field(..., description="是否启用")
@@ -715,7 +715,7 @@ class TaskSettingRequestDTO(BaseModel):
 class TaskSettingStateDTO(BaseModel):
     """任务开关当前状态。"""
 
-    setting_type: Literal["claim_join_filter", "search_skill"] = Field(
+    setting_type: Literal["claim_join_filter", "search_skill", "single_bot_skill_report"] = Field(
         ..., description="任务开关类型"
     )
     enabled: bool = Field(..., description="当前开关状态")

@@ -190,9 +190,39 @@ def test_prompt_formatter_uses_context_and_node_spec():
     s = fmt.format_execute({"mode": "execute", "node_instruction": "分析行业"}, n)
     assert "分析行业" in s
     assert "验收标准" in s
-    assert '"status": "SUCCESS"' in s
+    # skill 上报协议 status 已对齐后端 Status 枚举 DONE/FAILED(不再用 SUCCESS/FAIL)。
+    assert '"status": "DONE"' in s
     assert '"task_id"' in s
     assert '"acceptance_result"' in s
+
+
+def test_prompt_formatter_single_bot_default_uses_poller_protocol():
+    """single_bot 默认走 poller 回收链路:产 {success,data,gaps} JSON,不下发 HTTP POST /callback/report。"""
+    fmt = PromptFormatterImpl()
+    n = _node()
+    s = fmt.format_execute({
+        "mode": "execute",
+        "node_instruction": "分析行业",
+        "execution_mode": "single_bot",
+        "single_bot_skill_report": False,
+    }, n)
+    assert '"success": true' in s and '"data"' in s and '"gaps"' in s
+    assert "callback/report" not in s  # 默认不引导 HTTP 上报(避免与 poller 并存)
+
+
+def test_prompt_formatter_single_bot_skill_report_on_uses_http_post():
+    """single_bot 开启 skill 上报开关:下发 HTTP POST /callback/report,status=DONE/FAILED。"""
+    fmt = PromptFormatterImpl()
+    n = _node()
+    s = fmt.format_execute({
+        "mode": "execute",
+        "node_instruction": "分析行业",
+        "execution_mode": "single_bot",
+        "single_bot_skill_report": True,
+    }, n)
+    assert "callback/report" in s
+    assert '"status": "DONE"' in s
+    assert '"success": true' not in s  # 走 HTTP 上报,不产 poller JSON
 
 
 def test_dispatch_single_bot_persists_session_and_run_id_to_extend_props():
@@ -218,3 +248,66 @@ def test_dispatch_single_bot_persists_session_and_run_id_to_extend_props():
     assert ep.get("session_id") == "s_1"
     assert ep.get("run_id") == "r_1"
     assert "group_id" not in ep  # 单 bot 无群 id,不写 group_id 键
+
+
+class _TaskSettingsOn:
+    """Fake task settings: single_bot_skill_report 开关返回 True(skill HTTP 上报链路)。"""
+
+    def is_enabled(self, setting_type):
+        return setting_type == "single_bot_skill_report"
+
+    def get_enabled(self, *, setting_type, env):
+        return setting_type == "single_bot_skill_report"
+
+    def set_enabled(self, *, setting_type, enabled, env, operator=None):
+        return setting_type == "single_bot_skill_report" and enabled
+
+
+class _TaskSettingsOff:
+    """Fake task settings: 全部开关 False(默认 poller 回收链路)。"""
+
+    def is_enabled(self, setting_type):
+        return False
+
+    def get_enabled(self, *, setting_type, env):
+        return False
+
+    def set_enabled(self, *, setting_type, enabled, env, operator=None):
+        return False
+
+
+def test_dispatch_single_bot_skill_report_on_skips_poller_registration():
+    """开关开启时 single_bot 走 skill HTTP 上报链路,不注册 poller(与 poller 互斥,不并存)。"""
+    bot = _Bot()
+    poller = _Poller()
+    exe = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=poller,
+        task_settings=_TaskSettingsOn(),
+    )
+    ok = _run(exe.dispatch([_node()]))
+    assert ok == [True]
+    assert bot.sent  # 仍投递消息给 bot
+    assert poller.registered == []  # skill 上报模式下不注册 poller,避免双链路并存
+
+
+def test_dispatch_single_bot_skill_report_off_registers_poller():
+    """开关关闭(默认)时 single_bot 仍注册 poller 拉消息回收(现行默认行为保持)。"""
+    bot = _Bot()
+    poller = _Poller()
+    exe = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=poller,
+        task_settings=_TaskSettingsOff(),
+    )
+    ok = _run(exe.dispatch([_node()]))
+    assert ok == [True]
+    assert poller.registered and poller.registered[0].run_id == "mid_1"

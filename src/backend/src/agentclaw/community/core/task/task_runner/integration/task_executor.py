@@ -58,13 +58,16 @@ class TaskExecutor:
         api_base_url: str = "",
         bcn: BcnService | None = None,
         bot_token_provider=None,
+        task_settings=None,
     ) -> None:
         """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None;
         context: TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。
         graph: TaskGraphService|None,动态派发后把 group_id/session_id/run_id 落节点 run_info.extend_props
         (dashboard 可见);None 时跳过(单测/无图路径)。R0 骨架允许 None。
         bbs_runner 通过注入的 BcnService.list_bots_by_task_modes(复用统一 provider 身份)查询任务模式候选。
-        api_base_url: 任务后端 base url,传给 bbs_runner 拼发给胜出 bot 的任务消息。"""
+        api_base_url: 任务后端 base url,传给 bbs_runner 拼发给胜出 bot 的任务消息。
+        task_settings: TaskSettingsServiceProtocol|None,读取 single_bot_skill_report 开关决定
+        single_bot 回收链路(默认 poller 拉消息;开启后走 skill HTTP 上报,与 poller 互斥不并存)。"""
         self._bot = bot
         self._bcs = bcs
         self._bcn = bcn
@@ -76,6 +79,7 @@ class TaskExecutor:
         self._graph = graph
         self._api_base_url = api_base_url
         self._bot_token_provider = bot_token_provider
+        self._task_settings = task_settings
         self._group_meta: dict[
             str, dict[str, Any]
         ] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
@@ -122,6 +126,25 @@ class TaskExecutor:
 
         return list(await asyncio.gather(*[_one(n) for n in toDoTaskList]))
 
+    def _single_bot_skill_report_enabled(self) -> bool:
+        """single_bot 回收链路开关(默认 False=poller 拉消息回收)。
+
+        开启(True)时 single_bot 改走 skill HTTP 上报链路(predict：bot POST /callback/report),
+        与 poller 互斥:本方法返回 True 时 ``_dispatch_single_bot`` **不注册 poller**,避免双链路并存
+        导致双重收敛或 sla_timeout 噪声。开关未注入(non-prod/单测缺 task_settings)时回退 False(默认 poller)。
+        """
+        ts = self._task_settings
+        if ts is None:
+            return False
+        try:
+            return ts.is_enabled("single_bot_skill_report")
+        except Exception as exc:  # noqa: BLE001 未知 setting_type / 读取失败 → fail-open 回退 poller
+            logger.warning(
+                "[task][task-executor] single_bot_skill_report 读取失败 → 回退 poller: %s",
+                exc,
+            )
+            return False
+
     async def _dispatch_single_bot(
         self, node: TaskNode, sem: asyncio.Semaphore
     ) -> bool:
@@ -134,6 +157,7 @@ class TaskExecutor:
         assignee_owner_id = node.run_info.extend_props.get("assignee_owner_id")
         openapi_bot_id = compose_bot_identity(assignee, assignee_owner_id)
         loop_task_id = f"{node.task_id}::{node.node_id}"
+        skill_report = self._single_bot_skill_report_enabled()
         session_id: str | None = None
         async with sem:
             try:
@@ -142,6 +166,10 @@ class TaskExecutor:
                     "task_id": node.task_id,
                     "node_id": node.node_id,
                     "execution_mode": "single_bot",
+                    # single_bot 走哪条回收链路由开关决定(默认 poller):
+                    #   False → bot 在终态消息内产出 {success,data,gaps} JSON,poller 拉消息回收(formatter 不下发 HTTP POST);
+                    #   True  → bot 主动 HTTP POST /callback/report 上报,下不注册 poller(与上报互斥不并存)。
+                    "single_bot_skill_report": skill_report,
                     "backend": self._api_base_url,
                 })
                 message = self._formatter.format_execute(ctx, node)
@@ -163,15 +191,22 @@ class TaskExecutor:
                     exc,
                 )
                 return False
-            self._poller.register(
-                SingleBotHandle(
-                    loop_task_id=loop_task_id,
-                    run_id=run_id,
-                    bot_id=openapi_bot_id,
-                    registered_at=time.monotonic(),
-                    session_id=session_id,
+            if skill_report:
+                logger.info(
+                    "[task][task-executor] single_bot skill-report 开关已开 task=%s node=%s bot=%s "
+                    "→ 不注册 poller(走 skill HTTP 上报链路,与 poller 互斥)",
+                    node.task_id, node.node_id, assignee,
                 )
-            )
+            else:
+                self._poller.register(
+                    SingleBotHandle(
+                        loop_task_id=loop_task_id,
+                        run_id=run_id,
+                        bot_id=openapi_bot_id,
+                        registered_at=time.monotonic(),
+                        session_id=session_id,
+                    )
+                )
             self._persist_dispatch_ids(node, session_id=session_id, run_id=run_id)
             return True
 

@@ -657,6 +657,7 @@ class TaskDispatchConfig:
     """
 
     task_search_skill_enabled: bool = False
+    single_bot_skill_report_enabled: bool = False
 
 
 @dataclass(frozen=True)

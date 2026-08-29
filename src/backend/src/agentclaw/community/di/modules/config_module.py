@@ -939,6 +939,7 @@ class ConfigModule(Module):
 
             task_dispatch:
               task_search_skill_enabled: false
+              single_bot_skill_report_enabled: false
 
         The default keeps dispatch deterministic and avoids depending on the
         owner Bot's task-search skill. Set it to true to restore the skill
@@ -953,7 +954,14 @@ class ConfigModule(Module):
                 _as_bool,
                 defaults.task_search_skill_enabled,
                 "task_dispatch",
-            )
+            ),
+            single_bot_skill_report_enabled=_coerce(
+                block,
+                "single_bot_skill_report_enabled",
+                _as_bool,
+                defaults.single_bot_skill_report_enabled,
+                "task_dispatch",
+            ),
         )
 
     @singleton

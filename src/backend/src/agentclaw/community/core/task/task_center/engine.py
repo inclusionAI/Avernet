@@ -185,6 +185,7 @@ class ExecutionEngine:
             api_base_url=self._api_base_url,
             bcn=self._bcn,
             bot_token_provider=self._bot_token_provider,
+            task_settings=self._task_settings,
         )
         import threading as _t
 

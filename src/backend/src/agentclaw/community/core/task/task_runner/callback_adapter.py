@@ -135,13 +135,101 @@ class CallbackAdapter:
     """
 
     def adapt(self, data: TaskCallbackData) -> TaskNodePatch:
-        """组装 TaskNodePatch。三路互斥(对齐 on_report 分流):
-        ① result["exec_error"] 非空 → 执行报错(bot 没跑通)→ patch.exec_error(无 acceptance,→ on_harness 重投);
-        ② success=True → 验收 PASS → acceptance_result=PASS;
-        ③ success=False + 非空 gaps → 验收不过 → acceptance_result=FAIL(→ harness 重派)。
-        非法/空终态 → exec_error=terminal_result_invalid。"""
-        d = data.data
-        body = d.get("_raw_callback_body") if isinstance(d, dict) else None
+        """组装 TaskNodePatch。两路互斥,按 data 形态分流:
+
+        A) poller 形态(single_bot/BCN 翻译器产出的 ``result`` 是 dict 且含 ``success``):
+           result.success/data/gaps/_ext_info/exec_error 组装;三段互斥(对齐 on_report 分流):
+           ① exec_error 非空 → 执行报错(bot 没跑通)→ patch.exec_error(无 acceptance,→ on_harness 重投);
+           ② success=True → 验收 DONE → acceptance_result=DONE + output_patch={"data": ...};
+           ③ success=False + 非空 gaps → 验收不过 → acceptance_result=FAILED(→ harness 重派);
+           ④ success 非布尔/失败无 gaps → exec_error=terminal_result_invalid。
+
+        B) common_task 形态(skill HTTP 上报 ``/callback/report`` 翻译后 ``result`` 非上述 dict,
+           关键字段挂在 ``_raw_callback_body``):task_id/node_id/status/output/acceptance_result/extend_props
+           原样映射(task_id 来自 body;status 来自 body 或顶层;verdict 来自 acceptance_result)。"""
+        d = data.data if isinstance(data.data, dict) else {}
+        result = d.get("result")
+        if isinstance(result, dict) and ("success" in result or "exec_error" in result):
+            return self._adapt_poller(d, result)
+        return self._adapt_common_task(d)
+
+    @staticmethod
+    def _adapt_poller(d: dict, result: dict) -> TaskNodePatch:
+        task_id, node_id = _split_loop_task_id(d.get("loop_task_id"))
+        if d.get("node_id"):
+            node_id = d["node_id"]
+        ext = result.get("_ext_info")
+        ext = ext if isinstance(ext, dict) else {}
+        ext_patch = dict(ext) if ext else None
+        exec_error = result.get("exec_error")
+        # ① 执行报错(bot 没跑通):无验收,留 exec_error 走 harness 重投。
+        if exec_error:
+            return TaskNodePatch(
+                task_id=task_id,
+                node_id=node_id,
+                status=Status.FAILED,
+                exec_error=exec_error,
+                extend_props_patch=ext_patch,
+            )
+        success = result.get("success")
+        data_field = result.get("data")
+        # ④ success 非 boolean → 非法终态,无 acceptance。
+        if success is None or not isinstance(success, bool):
+            return TaskNodePatch(
+                task_id=task_id,
+                node_id=node_id,
+                status=Status.FAILED,
+                exec_error="terminal_result_invalid: success must be bool",
+                extend_props_patch=ext_patch,
+            )
+        # ② success=True → 验收 DONE。
+        if success:
+            return TaskNodePatch(
+                task_id=task_id,
+                node_id=node_id,
+                status=Status.DONE,
+                output_patch={"data": data_field} if data_field is not None else None,
+                acceptance_result=AcceptanceResult(
+                    verdict=AcceptanceVerdict.DONE,
+                    acceptances_metric=[],
+                    gaps=[],
+                ),
+                extend_props_patch=ext_patch,
+            )
+        # ③ success=False:必须有 gaps,否则 ④ 非法终态。
+        gaps_raw = result.get("gaps")
+        fail_detail = result.get("fail_detail")
+        if isinstance(gaps_raw, list) and gaps_raw:
+            gaps = list(gaps_raw)
+        elif isinstance(fail_detail, str) and fail_detail:
+            gaps = [fail_detail]
+        else:
+            return TaskNodePatch(
+                task_id=task_id,
+                node_id=node_id,
+                status=Status.FAILED,
+                exec_error="terminal_result_invalid: failed result requires gaps",
+                extend_props_patch=ext_patch,
+            )
+        merged_ext = dict(ext)
+        if isinstance(fail_detail, str) and fail_detail:
+            merged_ext["fail_detail"] = fail_detail
+        return TaskNodePatch(
+            task_id=task_id,
+            node_id=node_id,
+            status=Status.FAILED,
+            output_patch={"data": data_field} if data_field is not None else None,
+            acceptance_result=AcceptanceResult(
+                verdict=AcceptanceVerdict.FAILED,
+                acceptances_metric=[],
+                gaps=gaps,
+            ),
+            extend_props_patch=merged_ext if merged_ext else None,
+        )
+
+    @staticmethod
+    def _adapt_common_task(d: dict) -> TaskNodePatch:
+        body = d.get("_raw_callback_body")
         body = body if isinstance(body, dict) else {}
         accept = body.get("acceptance_result")
         accept = accept if isinstance(accept, dict) else {}
@@ -249,11 +337,24 @@ class TaskLoopCallback:
 
         logger.info("[task_callback] report_result, begin, data=%s", data)
         payload = data.data if isinstance(data.data, dict) else None
-        record = _to_callback_record(payload, event_id="", process_status="PROCESSED")
+        record = (
+            _to_callback_record(payload, event_id="", process_status="PROCESSED")
+            if payload is not None
+            else None
+        )
         logger.info("[task_callback] report_result, to_callback_record, %s", record)
 
         if record is not None:
             self._set_pending_audit(record)
+
+        # 非 dict 回调无法组装 TaskNodePatch(无 loop_task_id/result/body):仅记录审计后返回,
+        # 不推进图态(对齐 ``start_run`` 的非 dict 跳过语义;非 dict 不落库/不推进)。
+        if payload is None:
+            logger.warning(
+                "[task_callback] report_result 非 dict data, 跳过 adapt/on_report: %s", data
+            )
+            self._set_pending_audit(None)
+            return
 
         patch = self._adapter.adapt(data)
         logger.info("[task_callback] report_result, adapt patch, %s", patch)

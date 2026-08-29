@@ -21,13 +21,16 @@ logger = get_logger()
 CATEGORY = "task"
 CLAIM_JOIN_FILTER = "claim_join_filter"
 SEARCH_SKILL = "search_skill"
+SINGLE_BOT_SKILL_REPORT = "single_bot_skill_report"
 CLAIM_JOIN_FILTER_KEY = "claim_join_filter_enabled"
 # Backward-compatible names used by existing tests and callers.
 KEY = CLAIM_JOIN_FILTER_KEY
 SEARCH_SKILL_KEY = "search_skill_enabled"
+SINGLE_BOT_SKILL_REPORT_KEY = "single_bot_skill_report_enabled"
 _SETTING_KEYS = {
     CLAIM_JOIN_FILTER: CLAIM_JOIN_FILTER_KEY,
     SEARCH_SKILL: SEARCH_SKILL_KEY,
+    SINGLE_BOT_SKILL_REPORT: SINGLE_BOT_SKILL_REPORT_KEY,
 }
 _CACHE_TTL_S = 15.0
 _TRUE_LITERALS = ("true", "1", "yes", "on")
@@ -77,9 +80,12 @@ class TaskSettingsService(TaskSettingsServiceProtocol):
         defaults: dict[str, bool] | None = None,
     ) -> None:
         self._config = config
+        # single_bot_skill_report 默认 False(走 poller 回收链路);开启后 single_bot 改走
+        # skill HTTP 上报链路(predict：bot POST /callback/report),与 poller 互斥(不并存)。
         self._defaults = {
             CLAIM_JOIN_FILTER: False,
             SEARCH_SKILL: False,
+            SINGLE_BOT_SKILL_REPORT: False,
             **(defaults or {}),
         }
         self._lock = threading.Lock()

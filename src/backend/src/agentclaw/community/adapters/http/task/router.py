@@ -88,6 +88,7 @@ from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     CLAIM_JOIN_FILTER,
     SEARCH_SKILL,
+    SINGLE_BOT_SKILL_REPORT,
     TaskClaimJoinGateProtocol,
     TaskSettingsServiceProtocol,
 )
@@ -311,7 +312,7 @@ async def get_task_settings(
 ) -> Envelope[list[TaskSettingStateDTO]]:
     """读取全部已支持的任务开关状态。"""
     env = get_current_env()
-    setting_types = (CLAIM_JOIN_FILTER, SEARCH_SKILL)
+    setting_types = (CLAIM_JOIN_FILTER, SEARCH_SKILL, SINGLE_BOT_SKILL_REPORT)
     states = [
         TaskSettingStateDTO(
             setting_type=setting_type,
