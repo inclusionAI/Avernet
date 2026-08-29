@@ -55,7 +55,10 @@ def _ok_response() -> httpx.Response:
 
 def _baas_service() -> MagicMock:
     baas = MagicMock()
-    baas.get_bind_id.return_value = 42
+    # Deliberately a *different* id from the ``binding_id`` the service is
+    # constructed with: every delivery must address the container by the
+    # threaded-through context id, never by a fresh lookup.
+    baas.get_bind_id.return_value = 999
     baas.get_http_info.return_value = SimpleNamespace(
         http_url=HTTP_URL, token="tok-xyz", target=TARGET
     )
@@ -75,6 +78,7 @@ def _make_service(**overrides) -> tuple[TeclawDeviceSyncService, dict[str, Any]]
         "conn_info": _conn_info(),
         "bot_id": "bot7",
         "bot_name": "GY服务助手",
+        "binding_id": 42,
         "user_id": "u1",
         "owner_id": "u1",
         "entity_id": "staff_u1",
@@ -133,10 +137,10 @@ def test_sync_symlinks_composes_and_posts_the_whole_artifact():
     assert kwargs["json"]["operation"] == "UPDATE"
 
 
-def test_compose_scopes_by_entity_id_while_binding_lookup_uses_owner_id():
+def test_compose_scopes_by_entity_id_and_stays_distinct_from_owner_id():
     """The two identity fields are distinct and must not be conflated: the
-    composer collects by ``ac_bots.entity_id``, the binding lookup filters by
-    ``ac_bots.owner_id``."""
+    composer collects by ``ac_bots.entity_id``, while ``ac_bots.owner_id`` is
+    the identity the binding was resolved under."""
     service, m = _make_service(owner_id="u1", entity_id="staff_u1")
 
     service.sync_symlinks([])
@@ -147,9 +151,6 @@ def test_compose_scopes_by_entity_id_while_binding_lookup_uses_owner_id():
     assert req.bot_id == "bot7"
     assert req.engine_type == "teclaw"
     assert req.entity_type == "staff"
-    m["baas"].get_bind_id.assert_called_once_with(
-        bot_id="bot7", owner_id="u1", bot_type="service"
-    )
 
 
 def test_entity_id_defaults_to_owner_id_when_omitted():
@@ -186,6 +187,49 @@ def test_http_info_is_resolved_per_delivery_with_the_apply_path():
         tenant="team_claw",
         device_affinity="u1",
     )
+
+
+# ── bind_id threading ────────────────────────────────────────────────────
+
+
+def test_delivery_addresses_the_threaded_binding_id_without_a_lookup():
+    """The resolved ``DeviceContext`` already carried this binding; re-deriving
+    it cost a BaaS round trip per delivery for a value the caller was handed."""
+    service, m = _make_service(binding_id=1382508)
+
+    service.sync_symlinks([])
+
+    m["baas"].get_bind_id.assert_not_called()
+    assert m["baas"].get_http_info.call_args.kwargs["bind_id"] == 1382508
+
+
+def test_no_get_bind_id_round_trip_on_any_sync_entry_point():
+    """Every ``sync_*`` funnels through ``_compose_and_deliver``; none of them
+    may reintroduce the lookup."""
+    for method, args in (
+        ("sync_symlinks", ([],)),
+        ("sync_bot_config", ("bot7", 42, "1", "OWNER", "u1", "nick")),
+        ("sync_all_mcp_servers", ([],)),
+        ("sync_single_mcp", ({"server_code": "s1"},)),
+        ("sync_remove_mcp", ("s1",)),
+    ):
+        service, m = _make_service()
+
+        getattr(service, method)(*args)
+
+        m["baas"].get_bind_id.assert_not_called()
+
+
+def test_a_stale_get_bind_id_answer_cannot_redirect_the_delivery():
+    """Guards the container the artifact lands in: even when ``get_bind_id``
+    would answer with a different binding, delivery stays on the one the
+    context was resolved against."""
+    service, m = _make_service(binding_id=42)
+    m["baas"].get_bind_id.return_value = 777
+
+    service.sync_symlinks([])
+
+    assert m["baas"].get_http_info.call_args.kwargs["bind_id"] == 42
 
 
 def test_sync_bot_config_redelivers_the_whole_artifact():
@@ -272,14 +316,17 @@ def test_request_error_maps_to_a_failure_dict():
     assert result["message"].startswith("请求失败")
 
 
-def test_missing_bind_id_fails_without_posting():
-    service, m = _make_service()
-    m["baas"].get_bind_id.return_value = None
+@pytest.mark.parametrize("binding_id", [None, 0])
+def test_missing_bind_id_fails_without_posting(binding_id):
+    """An absent binding still fails as the same ``{"success": False}`` dict —
+    it must not reach ``get_http_info`` or the container."""
+    service, m = _make_service(binding_id=binding_id)
 
     result = service.sync_symlinks([])
 
     assert result["success"] is False
     assert "no bind_id" in result["message"]
+    m["baas"].get_http_info.assert_not_called()
     m["http_client"].post.assert_not_called()
 
 
