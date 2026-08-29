@@ -89,6 +89,30 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     logger.info("[task][bbs_mode] bid winner is=%s, task_id=%s", winner_bot_id, task_id)
 
     msg = _task_msg(skill_name, execution_graph, backend_url, winner_bot_id)
+
+    # 先增加一个bbs节点,RUNNING
+    bbs_task_node = TaskNode(
+        node_id=f"bbs-{uuid.uuid4().hex[:8]}",
+        task_id=task_id,
+        status=Status.RUNNING,
+        task_spec=TaskSpec(
+            metadata=Metadata(task_id=task_id, title="BBS 接力", instruction=""),
+            context=Context(background=""),
+            goal=Goal(objective=msg, acceptances=[]),
+        ),
+        run_info=RuntimeInfo(run_mode="bbs"),
+        node_run_graph=None
+    )
+
+    graph.add_task_nodes([bbs_task_node], task_id)
+    logger.info("[task][bbs_mode] add_node, task_id=%s, nodes=%s", task_id, bbs_task_node)
+    edges = [
+        (task_id, bbs_task_node.node_id),
+    ]
+    graph.add_relations(task_id, edges)
+    logger.info("[task][bbs_mode] add_edge, task_id=%s, edges=%s", task_id, edges)
+
+    # 执行bbs，执行完后再更新
     try:
         logger.info("[task][bbs_mode] begin_rely_task, task_id=%s", task_id)
         task_result = await bot.send_and_wait_async(
@@ -97,50 +121,39 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         )
         logger.info("[task][bbs_mode] send_and_wait, task_id=%s, result_msg=%s", task_id, task_result)
 
-        bbs_task_node = TaskNode(
-            node_id=f"bbs-{uuid.uuid4().hex[:8]}",
-            task_id=task_id,
-            status=Status.DONE,
-            task_spec=TaskSpec(
-                metadata=Metadata(task_id=task_id, title="BBS 接力", instruction=""),
-                context=Context(background=""),
-                goal=Goal(objective=msg, acceptances=[]),
-            ),
-            run_info=RuntimeInfo(run_mode="bbs"),
-            node_run_graph=None,
+        # 更新bbs节点
+        graph.update_task_node_info(
+            TaskNodePatch(
+                task_id=task_id,
+                node_id=bbs_task_node.node_id,
+                status=Status.DONE,
+                output_patch={
+                    "output": task_result
+                },
+                extend_props_patch={
+                    "output": task_result
+                }
+            )
         )
-
-        graph.add_task_nodes([bbs_task_node], task_id)
-        logger.info("[task][bbs_mode] send_and_wait, task_id=%s, add_bbs_new_node=%s", task_id, bbs_task_node)
+        logger.info("[task][bbs_mode] update_task_node, task_id=%s, node=%s", task_id)
 
         # 更新根节点
         graph.update_task_node_info(
             TaskNodePatch(
                 task_id=task_id,
                 node_id=task_id,
-                status=Status.PLANNING
+                status=Status.PLANNING,
+                output_patch={
+                    "output": task_result
+                },
+                extend_props_patch={
+                    "output": task_result
+                }
             )
         )
         logger.info("[task][bbs_mode] finish_rely_task, task_id=%s, task_result=%s", task_id, task_result)
     except Exception as exc:
         logger.error("[task][bbs_mode] rely_task_meet_exception, task_id=%s, exception=%s", task_id, exc)
-
-        bbs_task_node = TaskNode(
-            node_id=f"bbs-{uuid.uuid4().hex[:8]}",
-            task_id=task_id,
-            status=Status.FAILED,
-            task_spec=TaskSpec(
-                metadata=Metadata(task_id=task_id, title="BBS 接力", instruction=""),
-                context=Context(background=""),
-                goal=Goal(objective=msg, acceptances=[]),
-            ),
-            run_info=RuntimeInfo(run_mode="bbs"),
-            node_run_graph=None,
-        )
-
-        graph.add_task_nodes([bbs_task_node], task_id)
-        logger.warning("[task][bbs_mode] send_and_wait, task_id=%s, add_bbs_new_failed_node=%s", task_id, bbs_task_node)
-
         # send 失败 → 回收 claim
         graph.update_task_node_info(
             TaskNodePatch(

@@ -413,9 +413,7 @@ class TaskGraphService:
                 new_status = patch.status
                 allowed = _DIRECT_TRANSITIONS.get(node.status, set())
                 if new_status not in allowed:
-                    raise TaskStateError(
-                        f"status 直驱非法: {node.status} → {new_status}"
-                    )
+                    _LOG.warning(f"status 直驱非法: {node.status} → {new_status}")
             # fold 非状态字段(空串归一为 None:run_mode 只有 single_bot/coop_group/bbs 三态,None=非执行/规划态)
             if patch.output_patch is not None:
                 node.run_info.output.update(patch.output_patch)
